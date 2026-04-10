@@ -1,0 +1,2 @@
+data/ChEBI/*.json filter=lfs diff=lfs merge=lfs -text
+data/GO/*.json filter=lfs diff=lfs merge=lfs -text

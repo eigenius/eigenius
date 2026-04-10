@@ -1,0 +1,10 @@
+[package]
+name = "eigenius-storage-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+serde.workspace = true
+tokio.workspace = true

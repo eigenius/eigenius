@@ -1,0 +1,26 @@
+# Eigenius Orchestration Layer — Deno runtime
+#
+# Runs the TypeScript orchestration layer that handles DAG execution,
+# LLM adapters, and the MCP server surface.
+
+FROM denoland/deno:2.0.0
+
+WORKDIR /app
+
+# Cache dependencies
+COPY orchestration/deno.json ./
+RUN deno install
+
+# Copy application source
+COPY orchestration/src/ src/
+
+ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
+ENV EIGENIUS_HTTP_PORT=8080
+ENV EIGENIUS_MCP_PORT=3000
+
+EXPOSE 8080 3000
+
+HEALTHCHECK --interval=10s --timeout=3s \
+  CMD curl -sf http://localhost:8080/health || exit 1
+
+CMD ["deno", "run", "--allow-net", "--allow-env", "src/main.ts"]
