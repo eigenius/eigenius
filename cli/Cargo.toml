@@ -1,0 +1,20 @@
+[package]
+name = "eigenius-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "eigenius"
+path = "src/main.rs"
+
+[dependencies]
+eigenius-kernel = { path = "../kernel" }
+eigenius-storage-memory = { path = "../storage/memory" }
+eigenius-storage-sqlite = { path = "../storage/sqlite" }
+clap = { version = "4", features = ["derive"] }
+tokio.workspace = true
+serde_json.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

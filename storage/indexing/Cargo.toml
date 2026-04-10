@@ -1,0 +1,9 @@
+[package]
+name = "eigenius-storage-indexing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+serde.workspace = true

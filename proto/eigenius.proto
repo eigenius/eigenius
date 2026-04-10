@@ -1,0 +1,99 @@
+// Eigenius Kernel gRPC API
+//
+// The four kernel operations exposed as RPCs.
+// Architecture reference: §2.2 (Host Layer — Service API)
+//
+// Design document D5 (gRPC API Specification) will flesh out
+// message types, streaming vs. unary decisions, error codes,
+// and pagination for query results.
+
+syntax = "proto3";
+
+package eigenius.v1;
+
+service EigeniusKernel {
+  // Load ontology resources into the working context.
+  // Returns structural validation results.
+  rpc Load(LoadRequest) returns (LoadResponse);
+
+  // Execute an EigenQL query within the current execution context.
+  // Returns typed query results.
+  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Type-check a DAG specification against the current context.
+  // Returns a validation report including partial evaluation results.
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+
+  // Record a reasoning trace as a typed resource.
+  rpc Reflect(ReflectRequest) returns (ReflectResponse);
+}
+
+// --- Load ---
+
+message LoadRequest {
+  // Eigon resources serialized as JSON (per design doc D1).
+  repeated bytes resources = 1;
+  // Target namespace for the loaded resources.
+  string namespace = 2;
+}
+
+message LoadResponse {
+  bool success = 1;
+  repeated ValidationError errors = 2;
+  // Snapshot ID after successful load.
+  string snapshot_id = 3;
+}
+
+// --- Query ---
+
+message QueryRequest {
+  // EigenQL query string.
+  string query = 1;
+  // Execution context identifier (binds to a layer stack snapshot).
+  string context_id = 2;
+}
+
+message QueryResponse {
+  // Result resources serialized as JSON.
+  repeated bytes results = 1;
+  // Number of results returned.
+  uint64 count = 2;
+}
+
+// --- Validate ---
+
+message ValidateRequest {
+  // DAG specification serialized as JSON (per design doc D3).
+  bytes dag_spec = 1;
+  // Execution context for type resolution.
+  string context_id = 2;
+}
+
+message ValidateResponse {
+  bool valid = 1;
+  repeated ValidationError errors = 2;
+  // Partially evaluated DAG (if inputs were provided).
+  optional bytes residual = 3;
+}
+
+// --- Reflect ---
+
+message ReflectRequest {
+  // Reasoning trace serialized as JSON (per design doc D6).
+  bytes trace = 1;
+  string context_id = 2;
+}
+
+message ReflectResponse {
+  bool success = 1;
+  // URI of the committed reasoning trace resource.
+  string trace_uri = 2;
+}
+
+// --- Common ---
+
+message ValidationError {
+  string path = 1;
+  string message = 2;
+  string severity = 3; // "error", "warning"
+}

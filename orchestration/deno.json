@@ -1,0 +1,19 @@
+{
+  "name": "@eigenius/orchestration",
+  "version": "0.1.0",
+  "tasks": {
+    "dev": "deno run --watch --allow-net --allow-env src/main.ts",
+    "start": "deno run --allow-net --allow-env src/main.ts",
+    "test": "deno test --allow-net --allow-env tests/",
+    "lint": "deno lint",
+    "fmt": "deno fmt --check"
+  },
+  "imports": {
+    "@std/": "jsr:@std/",
+    "ai": "npm:ai@latest",
+    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@latest"
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}
