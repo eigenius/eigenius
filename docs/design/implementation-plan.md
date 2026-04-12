@@ -342,7 +342,7 @@ The following design documents must be written and reviewed before the phase tha
 |---|----------|----------|-----------------|-----------------|
 | D1 | **Eigon Serialization Format** | **COMPLETED** — `docs/design/d1-eigon-serialization-format.md`. Eigon-JSON format, IRI identity, three-layer type system (data types/formats/content types), validation rules, canonical form, core ontology in `ontologies/core/core-ontology.json` | Phase 0 | Done |
 | D2 | **EigenQL v1 Specification** | **COMPLETED** — `docs/design/d2-eigenql-specification.md`. Full EBNF grammar, lexer spec, type checking rules, aggregation (COUNT/SUM/AVG/MIN/MAX), GROUP BY, ORDER BY, LIMIT/OFFSET, DISTINCT, NOT EXISTS, dot-path navigation, error format | Phase 1 | Done |
-| D3 | **DAG Specification Format** | How DAGs are authored: ESL surface syntax or a JSON/YAML DSL. Component signature declaration. | Phase 2 | 8–12 pages |
+| D3 | **DAG Specification and Component Model** | **COMPLETED** — `docs/design/d3-dag-and-component-model.md`. DAGs as Eigon-JSON resources, two-tier component model (built-in + WASM), DAG ontology, WIT interface for extensions, capability levels, execution model | Phase 2 | Done |
 | D4 | **TiKV Key Encoding & Deployment** | Key encoding scheme (SPO/POS/OPS layout), TiKV region placement strategy, Azure hosting model (VMs, AKS, or TiDB Cloud) | Phase 3 | 10–15 pages |
 | D5 | **gRPC API Specification** | Protobuf message definitions, streaming vs. unary RPCs, error codes, pagination for query results | Phase 3 | 8–10 pages |
 | D6 | **Reasoning Trace Schema** | Ontology classes and properties for traces, provenance link structure, universe level assignment rules | Phase 4 | 6–8 pages |
