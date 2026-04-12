@@ -38,6 +38,7 @@ kernel/          Rust kernel crate
   src/ontology/    IRI, Resource, Value, Eigon-JSON parser, well-known constants
   src/layer/       Layer, LayerBuilder, LayerId (content-addressed)
   src/validation/  Validator with 12 validation rules
+  src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator
   src/context/     ExecutionContext (snapshot isolation, read/write control)
   src/bootstrap/   Core ontology loader and system initialization
   src/storage/     Storage interface traits (LayerStore, ResourceStore)
@@ -45,7 +46,7 @@ storage/         Storage backend implementations
   memory/          In-memory backend (BTreeMap + Arc<RwLock>)
   sqlite/          SQLite backend (placeholder)
   tikv/            TiKV backend (placeholder)
-cli/             Command-line interface (load, validate, inspect)
+cli/             Command-line interface (load, validate, query, inspect)
 ontologies/      Ontology definitions
   core/            Core ontology (core-ontology.json) — self-describing bootstrap
   examples/        Example ontologies (animals.json)
