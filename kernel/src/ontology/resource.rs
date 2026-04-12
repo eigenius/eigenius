@@ -268,7 +268,9 @@ mod tests {
         assert_eq!(Value::Integer(42).as_integer(), Some(42));
         assert_eq!(Value::Float(2.72).as_float(), Some(2.72));
         assert_eq!(Value::Boolean(true).as_boolean(), Some(true));
-        assert!(Value::ResourceRef(iri("urn:a:b")).as_resource_ref().is_some());
+        assert!(Value::ResourceRef(iri("urn:a:b"))
+            .as_resource_ref()
+            .is_some());
         assert!(Value::String("hi".into()).as_integer().is_none());
     }
 

@@ -9,13 +9,13 @@
 //! - NbE type checker (Mini-TT dependent type theory for DAGs)
 //! - Bootstrap sequence (Core Ontology + Foundation Layer)
 
-pub mod ontology;
-pub mod layer;
-pub mod validation;
-pub mod context;
-pub mod capability;
-pub mod storage;
-pub mod reflection;
-pub mod nbe;
-pub mod bootstrap;
 pub mod api;
+pub mod bootstrap;
+pub mod capability;
+pub mod context;
+pub mod layer;
+pub mod nbe;
+pub mod ontology;
+pub mod reflection;
+pub mod storage;
+pub mod validation;

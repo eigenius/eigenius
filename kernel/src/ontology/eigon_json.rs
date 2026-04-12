@@ -85,9 +85,7 @@ fn parse_top_level_resource(value: &serde_json::Value) -> Result<Resource, Parse
     };
 
     let id_value = obj.get("@id").ok_or(ParseError::InvalidDocumentRoot)?;
-    let id_str = id_value
-        .as_str()
-        .ok_or(ParseError::InvalidDocumentRoot)?;
+    let id_str = id_value.as_str().ok_or(ParseError::InvalidDocumentRoot)?;
     let id = Iri::parse(id_str).map_err(|e| ParseError::InvalidIri {
         key: "@id".to_string(),
         source: e,
@@ -209,7 +207,10 @@ pub fn serialize_resource(resource: &Resource) -> serde_json::Value {
     let mut map = serde_json::Map::new();
 
     if let Some(id) = resource.id() {
-        map.insert("@id".to_string(), serde_json::Value::String(id.as_str().to_string()));
+        map.insert(
+            "@id".to_string(),
+            serde_json::Value::String(id.as_str().to_string()),
+        );
     }
 
     for (prop_iri, value) in resource.properties() {
@@ -228,9 +229,7 @@ fn serialize_value(value: &Value) -> serde_json::Value {
         Value::Boolean(b) => serde_json::Value::Bool(*b),
         Value::ResourceRef(iri) => serde_json::Value::String(iri.as_str().to_string()),
         Value::Embedded(resource) => serialize_resource(resource),
-        Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(serialize_value).collect())
-        }
+        Value::Array(arr) => serde_json::Value::Array(arr.iter().map(serialize_value).collect()),
         Value::Json(v) => v.clone(),
     }
 }
@@ -359,19 +358,29 @@ mod tests {
         let resources = parse_document(json).unwrap();
         let r = &resources[0];
 
-        let s = r.get(&Iri::parse("urn:eigenius:example:s").unwrap()).unwrap();
+        let s = r
+            .get(&Iri::parse("urn:eigenius:example:s").unwrap())
+            .unwrap();
         assert_eq!(s.as_str(), Some("hello"));
 
-        let i = r.get(&Iri::parse("urn:eigenius:example:i").unwrap()).unwrap();
+        let i = r
+            .get(&Iri::parse("urn:eigenius:example:i").unwrap())
+            .unwrap();
         assert_eq!(i.as_integer(), Some(42));
 
-        let f = r.get(&Iri::parse("urn:eigenius:example:f").unwrap()).unwrap();
+        let f = r
+            .get(&Iri::parse("urn:eigenius:example:f").unwrap())
+            .unwrap();
         assert_eq!(f.as_float(), Some(2.72));
 
-        let b = r.get(&Iri::parse("urn:eigenius:example:b").unwrap()).unwrap();
+        let b = r
+            .get(&Iri::parse("urn:eigenius:example:b").unwrap())
+            .unwrap();
         assert_eq!(b.as_boolean(), Some(true));
 
-        let arr = r.get(&Iri::parse("urn:eigenius:example:arr").unwrap()).unwrap();
+        let arr = r
+            .get(&Iri::parse("urn:eigenius:example:arr").unwrap())
+            .unwrap();
         assert_eq!(arr.as_array().unwrap().len(), 3);
     }
 

@@ -31,10 +31,7 @@ pub enum ContextError {
     /// Validation failed on commit.
     ValidationFailed(Vec<crate::validation::ValidationError>),
     /// Head has moved since this context was created (conflict).
-    StaleHead {
-        expected: LayerId,
-        actual: LayerId,
-    },
+    StaleHead { expected: LayerId, actual: LayerId },
 }
 
 impl fmt::Display for ContextError {
@@ -208,10 +205,7 @@ mod tests {
     fn read_only_rejects_commit() {
         let core = build_core_layer();
         let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly);
-        assert!(matches!(
-            ctx.commit("test"),
-            Err(ContextError::ReadOnly)
-        ));
+        assert!(matches!(ctx.commit("test"), Err(ContextError::ReadOnly)));
     }
 
     #[test]
@@ -230,7 +224,10 @@ mod tests {
 
         let r = make_resource(
             "urn:eigenius:test:foo",
-            vec![("urn:eigenius:core:description", Value::String("hello".into()))],
+            vec![(
+                "urn:eigenius:core:description",
+                Value::String("hello".into()),
+            )],
         );
         ctx.add_resource(r).unwrap();
 
