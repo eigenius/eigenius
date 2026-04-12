@@ -6,15 +6,16 @@ Contemporary LLMs produce text that reads like knowledge but carries no epistemi
 
 The platform maintains three epistemic categories: **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-## Current Status: Phase 0 (Foundation)
+## Current Status: Phase 0 + Phase 1 Complete
 
-The core data model, layer system, validation engine, and CLI are implemented. The system can:
+The core data model, layer system, validation engine, query language, and CLI are implemented. The system can:
 
 - Parse and serialize Eigon-JSON documents
 - Load the self-describing core ontology (classes, properties, data types, formats)
 - Build immutable layers with content-addressed identifiers (SHA-256)
 - Validate resources against the full ontology constraint system (12 validation rules)
 - Resolve resources through parent-pointer layer chains
+- Query the knowledge graph with EigenQL (typed stratified Datalog with aggregation)
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
 
@@ -26,8 +27,9 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Layer System** — immutable layers with parent pointers (`Arc<Layer>`), forming a chain. The root layer holds the core ontology. Resolution walks the chain top-down.
 - **Eigon-JSON** — the canonical serialization format. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types.
 - **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties.
+- **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
 
-Future phases add: EigenQL query language, DAG pipelines with dependent type checking (Mini-TT/NbE), gRPC service with TiKV storage, LLM integration with reasoning traces, and WASM capability sandboxing.
+Future phases add: DAG pipelines with dependent type checking (Mini-TT/NbE), gRPC service with TiKV storage, LLM integration with reasoning traces, and WASM capability sandboxing.
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
@@ -88,6 +90,12 @@ cargo run -p eigenius-cli -- validate ontologies/examples/animals.json
 # Load an Eigon-JSON file (validates and commits as a new layer)
 cargo run -p eigenius-cli -- load ontologies/examples/animals.json
 
+# Query the knowledge graph with EigenQL
+cargo run -p eigenius-cli -- query 'USING "urn:eigenius:core:Class" MATCH Class(?c) { short_name: ?name } RETURN [] { short_name: ?name }'
+
+# Query with a loaded file
+cargo run -p eigenius-cli -- query --file ontologies/examples/animals.json 'MATCH "urn:eigenius:example:Dog"(?d) { "urn:eigenius:example:name": ?name } RETURN [] { "urn:eigenius:example:name": ?name }'
+
 # Inspect a core ontology resource
 cargo run -p eigenius-cli -- inspect "urn:eigenius:core:Class"
 
@@ -100,6 +108,7 @@ cargo run -p eigenius-cli -- version
 | Document | Description |
 |----------|-------------|
 | [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON spec: IRI identity, three-layer type system, validation rules, canonical form |
+| [D2: EigenQL Specification](docs/design/d2-eigenql-specification.md) | EigenQL spec: typed stratified Datalog, DEFINE, aggregation, full grammar |
 | [Implementation Plan](docs/design/implementation-plan.md) | High-level 6-phase plan from foundation to extensibility |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 

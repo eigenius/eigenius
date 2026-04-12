@@ -524,7 +524,7 @@ Commands:
 
 The following capabilities are described in the architecture but are deliberately excluded from the initial six-phase plan. They become relevant once the platform is stable and has real domain ontology usage.
 
-**EigenQL recursive Datalog extension (§5.6).** The v1 conjunctive query language is sufficient for the initial platform. Extending to recursive rules requires stratification checking, termination proofs, and query planner changes. This is a major effort with its own design document and Lean 4 proof obligations.
+**EigenQL recursive Datalog extension (§5.6).** ✓ Implemented in Phase 1. DEFINE rules with union semantics, seminaive fixpoint evaluation, and stratified negation.
 
 **Constructive type theories as capabilities (§9.7).** Registering Lean 4, Coq/Rocq, or Agda proof kernels as capabilities — enabling the system to dispatch proof obligations to external theorem provers. This requires the WASM sandbox (Phase 5) plus a well-defined proof term interchange format.
 
