@@ -35,7 +35,7 @@ The progression from observed → derived → verified maps to the universe stra
 | **Eigenius** | The platform |
 | **Eigon** | The canonical typed data format |
 | **ESL** (Eigenius Schema Language) | Human-friendly surface syntax over Eigon |
-| **EigenQL** | Typed semantic query language (conjunctive query model with extension path to recursive Datalog) |
+| **EigenQL** | Typed semantic query language (stratified Datalog with aggregation). See design doc D2 for full specification. |
 | **Rust + Verus** | Kernel implementation language with embedded formal proofs |
 | **Lean 4** | Formal metatheory specification track |
 
@@ -703,7 +703,7 @@ This boundary is clean because the concerns are genuinely different: the type th
 
 EigenQL is a typed semantic query language for pattern matching and retrieval over the Eigon knowledge graph. It provides a declarative way to query resources based on their classes, properties, and relationships, while maintaining type safety with respect to the ontology schema.
 
-EigenQL v1 is a **typed conjunctive query language** — each query is a conjunction of typed pattern atoms joined by shared variables, with boolean filter conditions and typed result shaping. This places it in a well-studied computational class: non-recursive Datalog with built-in predicates, also known as unions of conjunctive queries with selection conditions. The v1 language is designed with a well-defined extension path to recursive Datalog (§5.6).
+EigenQL is a **typed stratified Datalog** with aggregation — it supports conjunctive queries, recursive rule definitions (DEFINE), stratified negation, GROUP BY, aggregation (COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, and DISTINCT. Non-recursive queries evaluate in a single pass; recursive rules use bottom-up seminaive fixpoint evaluation. Negation in MATCH patterns is subject to stratification checking. See design doc D2 (`docs/design/d2-eigenql-specification.md`) for the full specification.
 
 ### 5.2 Query Structure
 
@@ -784,9 +784,9 @@ Additional properties may be made accessible via their shortnames through the Se
 
 ### 5.6 Extension Path to Recursive Datalog
 
-EigenQL v1 is deliberately scoped as a conjunctive query language. Each query is a standalone pattern match — there is no mechanism to define derived relations or compose queries recursively. Termination is trivially guaranteed, and the Lean 4 formal track proves type soundness and binding correctness rather than termination properties.
+EigenQL supports both standalone queries and recursive rule definitions. Non-recursive queries terminate trivially. Recursive rules terminate via seminaive fixpoint evaluation (bounded by the finite set of derivable facts). Stratified negation prevents paradoxes. The Lean 4 formal track proves type soundness, binding correctness, and stratification safety.
 
-The architecture is designed to support extending EigenQL to full recursive Datalog in a future version. This extension would add the following constructs, none of which conflict with v1 semantics:
+The following constructs are implemented:
 
 **Rule definitions.** A `DEFINE` construct that names a query result as a derived relation, referenceable in MATCH patterns of other rules (including itself, for recursion).
 
