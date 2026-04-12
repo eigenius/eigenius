@@ -32,29 +32,17 @@ impl TripleIndex {
     }
 
     /// Query the SPO index for triples matching the given subject and predicate.
-    pub fn query_spo(
-        &self,
-        _subject: &str,
-        _predicate: &str,
-    ) -> Result<Vec<String>, String> {
+    pub fn query_spo(&self, _subject: &str, _predicate: &str) -> Result<Vec<String>, String> {
         todo!()
     }
 
     /// Query the POS index for triples matching the given predicate and object.
-    pub fn query_pos(
-        &self,
-        _predicate: &str,
-        _object: &str,
-    ) -> Result<Vec<String>, String> {
+    pub fn query_pos(&self, _predicate: &str, _object: &str) -> Result<Vec<String>, String> {
         todo!()
     }
 
     /// Query the OPS index for triples matching the given object and predicate.
-    pub fn query_ops(
-        &self,
-        _object: &str,
-        _predicate: &str,
-    ) -> Result<Vec<String>, String> {
+    pub fn query_ops(&self, _object: &str, _predicate: &str) -> Result<Vec<String>, String> {
         todo!()
     }
 

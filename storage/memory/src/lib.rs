@@ -122,7 +122,10 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:core:test",
-                vec![("urn:eigenius:core:description", Value::String("hello".into()))],
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("hello".into()),
+                )],
             ))
             .unwrap();
         let layer = builder.build();
@@ -182,11 +185,13 @@ mod tests {
         let store = InMemoryStore::new();
 
         let mut b1 = LayerBuilder::new("a", None);
-        b1.add_resource(make_resource("urn:eigenius:core:x", vec![])).unwrap();
+        b1.add_resource(make_resource("urn:eigenius:core:x", vec![]))
+            .unwrap();
         let l1 = b1.build();
 
         let mut b2 = LayerBuilder::new("b", None);
-        b2.add_resource(make_resource("urn:eigenius:core:y", vec![])).unwrap();
+        b2.add_resource(make_resource("urn:eigenius:core:y", vec![]))
+            .unwrap();
         let l2 = b2.build();
 
         store.store_layer(&l1).await.unwrap();

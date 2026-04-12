@@ -253,7 +253,9 @@ mod tests {
             .unwrap();
         let layer = builder.build();
         assert!(layer.is_root());
-        assert!(layer.get_resource(&iri("urn:eigenius:core:Class")).is_some());
+        assert!(layer
+            .get_resource(&iri("urn:eigenius:core:Class"))
+            .is_some());
     }
 
     #[test]
@@ -261,7 +263,10 @@ mod tests {
         let root = Arc::new(LayerBuilder::new("core", None).build());
         let mut builder = LayerBuilder::new("domain", Some(root));
         let result = builder.add_resource(make_resource("urn:eigenius:core:Foo", vec![]));
-        assert!(matches!(result, Err(LayerError::CoreNamespaceViolation { .. })));
+        assert!(matches!(
+            result,
+            Err(LayerError::CoreNamespaceViolation { .. })
+        ));
     }
 
     #[test]
@@ -288,7 +293,10 @@ mod tests {
         root_builder
             .add_resource(make_resource(
                 "urn:eigenius:core:A",
-                vec![("urn:eigenius:core:description", Value::String("from root".into()))],
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("from root".into()),
+                )],
             ))
             .unwrap();
         let root = Arc::new(root_builder.build());
@@ -298,7 +306,10 @@ mod tests {
         child_builder
             .add_resource(make_resource(
                 "urn:eigenius:example:B",
-                vec![("urn:eigenius:core:description", Value::String("from child".into()))],
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("from child".into()),
+                )],
             ))
             .unwrap();
         let child = child_builder.build();
@@ -342,7 +353,10 @@ mod tests {
             builder
                 .add_resource(make_resource(
                     "urn:eigenius:core:A",
-                    vec![("urn:eigenius:core:description", Value::String("hello".into()))],
+                    vec![(
+                        "urn:eigenius:core:description",
+                        Value::String("hello".into()),
+                    )],
                 ))
                 .unwrap();
             builder.build()

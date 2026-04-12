@@ -76,8 +76,7 @@ impl<'a> Validator<'a> {
         let class_refs: Vec<&Iri> = class_iris.iter().collect();
 
         // Collect effective requires/recommends from all classes + ancestors
-        let (required_props, _recommended_props) =
-            self.collect_effective_properties(&class_refs);
+        let (required_props, _recommended_props) = self.collect_effective_properties(&class_refs);
 
         // Also collect conditional requirements
         let (conditional_required, _conditional_recommended) =
@@ -137,15 +136,17 @@ impl<'a> Validator<'a> {
     }
 
     /// Collect effective `requires` and `recommends` from all classes and ancestors.
-    fn collect_effective_properties(
-        &self,
-        class_iris: &[&Iri],
-    ) -> (BTreeSet<Iri>, BTreeSet<Iri>) {
+    fn collect_effective_properties(&self, class_iris: &[&Iri]) -> (BTreeSet<Iri>, BTreeSet<Iri>) {
         let mut required = BTreeSet::new();
         let mut recommended = BTreeSet::new();
 
         for class_iri in class_iris {
-            self.collect_from_class(class_iri, &mut required, &mut recommended, &mut BTreeSet::new());
+            self.collect_from_class(
+                class_iri,
+                &mut required,
+                &mut recommended,
+                &mut BTreeSet::new(),
+            );
         }
 
         (required, recommended)
@@ -584,10 +585,7 @@ impl<'a> Validator<'a> {
 
         let refs_to_check: Vec<&str> = match value {
             Value::String(s) => vec![s.as_str()],
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect(),
+            Value::Array(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
             _ => return vec![],
         };
 
@@ -711,16 +709,13 @@ fn is_valid_date(s: &str) -> bool {
 
 fn is_valid_datetime(s: &str) -> bool {
     // Accept ISO 8601 with timezone: YYYY-MM-DDTHH:MM:SSZ or +HH:MM
-    let re = regex::Regex::new(
-        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$",
-    )
-    .unwrap();
+    let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+        .unwrap();
     re.is_match(s)
 }
 
 fn is_valid_time(s: &str) -> bool {
-    let re =
-        regex::Regex::new(r"^\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$").unwrap();
+    let re = regex::Regex::new(r"^\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$").unwrap();
     re.is_match(s)
 }
 
@@ -774,7 +769,10 @@ mod tests {
         for e in &errors {
             eprintln!("  {e}");
         }
-        assert!(errors.is_empty(), "core ontology should validate against itself");
+        assert!(
+            errors.is_empty(),
+            "core ontology should validate against itself"
+        );
     }
 
     #[test]
@@ -802,7 +800,9 @@ mod tests {
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
-        assert!(errors.iter().any(|e| e.rule == ValidationRule::MissingRequired));
+        assert!(errors
+            .iter()
+            .any(|e| e.rule == ValidationRule::MissingRequired));
     }
 
     #[test]
@@ -827,7 +827,9 @@ mod tests {
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
-        assert!(errors.iter().any(|e| e.rule == ValidationRule::TypeMismatch));
+        assert!(errors
+            .iter()
+            .any(|e| e.rule == ValidationRule::TypeMismatch));
     }
 
     #[test]
@@ -856,11 +858,9 @@ mod tests {
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.rule == ValidationRule::AllowedValueViolation)
-        );
+        assert!(errors
+            .iter()
+            .any(|e| e.rule == ValidationRule::AllowedValueViolation));
     }
 
     #[test]
@@ -891,7 +891,9 @@ mod tests {
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
-        assert!(errors.iter().any(|e| e.rule == ValidationRule::DomainViolation));
+        assert!(errors
+            .iter()
+            .any(|e| e.rule == ValidationRule::DomainViolation));
     }
 
     #[test]
@@ -912,9 +914,7 @@ mod tests {
                     (wk::SHORT_NAME, Value::String("Animal".into())),
                     (
                         wk::REQUIRES,
-                        Value::Array(vec![Value::String(
-                            "urn:eigenius:test:name".to_string(),
-                        )]),
+                        Value::Array(vec![Value::String("urn:eigenius:test:name".to_string())]),
                     ),
                 ],
             ))
@@ -933,15 +933,11 @@ mod tests {
                     (wk::SHORT_NAME, Value::String("Dog".into())),
                     (
                         wk::PARENT_CLASSES,
-                        Value::Array(vec![Value::String(
-                            "urn:eigenius:test:Animal".to_string(),
-                        )]),
+                        Value::Array(vec![Value::String("urn:eigenius:test:Animal".to_string())]),
                     ),
                     (
                         wk::REQUIRES,
-                        Value::Array(vec![Value::String(
-                            "urn:eigenius:test:breed".to_string(),
-                        )]),
+                        Value::Array(vec![Value::String("urn:eigenius:test:breed".to_string())]),
                     ),
                 ],
             ))
@@ -985,9 +981,7 @@ mod tests {
                 vec![
                     (
                         wk::IS_A,
-                        Value::Array(vec![Value::String(
-                            "urn:eigenius:test:Dog".to_string(),
-                        )]),
+                        Value::Array(vec![Value::String("urn:eigenius:test:Dog".to_string())]),
                     ),
                     (
                         "urn:eigenius:test:breed",
