@@ -36,6 +36,17 @@ enum Commands {
         file: String,
     },
 
+    /// Execute an EigenQL query
+    Query {
+        /// EigenQL query string
+        #[arg(value_name = "QUERY")]
+        query: String,
+
+        /// Optional Eigon-JSON file to load before querying
+        #[arg(long, value_name = "FILE")]
+        file: Option<String>,
+    },
+
     /// Print a resource by IRI
     Inspect {
         /// IRI of the resource to inspect
@@ -53,6 +64,7 @@ fn main() {
     match cli.command {
         Commands::Load { file } => cmd_load(&file, cli.json),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
+        Commands::Query { query, file } => cmd_query(&query, file.as_deref(), cli.json),
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
@@ -115,6 +127,76 @@ fn cmd_load(file: &str, json_output: bool) {
                 eprintln!("{{\"status\":\"error\",\"message\":\"{e}\"}}");
             } else {
                 eprintln!("Load failed: {e}");
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_query(query_str: &str, file: Option<&str>, json_output: bool) {
+    // Bootstrap
+    let mut ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Optionally load a file first
+    if let Some(file_path) = file {
+        let content = match std::fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to read '{file_path}': {e}");
+                std::process::exit(1);
+            }
+        };
+        let resources = match eigon_json::parse_document(&content) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Parse error: {e}");
+                std::process::exit(1);
+            }
+        };
+        for resource in resources {
+            if let Err(e) = ctx.add_resource(resource) {
+                eprintln!("Error adding resource: {e}");
+                std::process::exit(1);
+            }
+        }
+        if let Err(e) = ctx.commit("loaded") {
+            eprintln!("Load failed: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    // Execute query
+    match eigenius_kernel::query::execute(query_str, ctx.head()) {
+        Ok(result) => {
+            if json_output {
+                let json_results: Vec<serde_json::Value> = result
+                    .resources
+                    .iter()
+                    .map(eigon_json::serialize_resource)
+                    .collect();
+                println!("{}", serde_json::to_string(&json_results).unwrap());
+            } else {
+                println!("{} result(s):", result.resources.len());
+                for resource in &result.resources {
+                    let json = eigon_json::serialize_resource(resource);
+                    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                }
+            }
+        }
+        Err(errors) => {
+            if json_output {
+                eprintln!("{{\"status\":\"error\",\"error_count\":{}}}", errors.len());
+            } else {
+                eprintln!("Query failed with {} error(s):", errors.len());
+                for e in &errors {
+                    eprintln!("  {e}");
+                }
             }
             std::process::exit(1);
         }

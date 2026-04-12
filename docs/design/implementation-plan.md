@@ -81,11 +81,11 @@ The build is organized into six phases. Each phase produces a working system tha
 
 ---
 
-## 3. Phase 0 — Foundation
+## 3. Phase 0 — Foundation ✓
 
 **Goal:** The core data model exists, layers stack, resources resolve, and everything round-trips through storage. This is the skeleton that every subsequent phase builds on.
 
-**Duration estimate:** 4–6 weeks.
+**Duration estimate:** 4–6 weeks. **Completed:** April 11, 2026 (1 day, with Claude Code).
 
 ### 3.1 Deliverables
 
@@ -124,33 +124,59 @@ The following decisions have been made and documented in **design doc D1** (`doc
 
 ## 4. Phase 1 — Query
 
-**Goal:** EigenQL v1 parses, type-checks, and evaluates against a populated layer stack. The system can answer questions about its own ontology.
+**Goal:** EigenQL parses, type-checks, and evaluates against a populated layer chain. The system can answer questions about its own ontology, including recursive queries and aggregation.
 
 **Duration estimate:** 4–6 weeks.
 
 ### 4.1 Deliverables
 
-- EigenQL v1 parser: MATCH/WHERE/RETURN grammar per architecture §5.2, producing a typed AST. Built with a Rust parser combinator library (nom, winnow, or chumsky).
-- EigenQL v1 evaluator: conjunctive pattern matching against the layer stack (§5.1–5.4). Variable binding, type inference from class constraints (§5.3), guard expression evaluation (§5.5). No recursion, no negation — pure conjunctive queries.
-- Query capability registration: EigenQL evaluator registered as a Foundation Layer capability (§9.1–9.3). The bootstrap sequence (§2.5) wires it into the capability dispatch table.
-- Capability dispatch: the minimal dispatch loop — given a class identifier, look up the registered capability, invoke it. Foundation capabilities run in-process as native Rust (§9.5).
-- Triple index construction on layer commit (§10.8): SPO/POS/OPS indexes built as in-memory data structures, used by the query evaluator for efficient pattern matching.
-- CLI `query` command: takes an EigenQL query string, evaluates it against the current layer stack, prints typed results.
-- CLI `inspect` command: prints the contents of a resource by IRI, resolved from the layer chain.
+- EigenQL lexer and parser: full grammar per design doc D2 (`docs/design/d2-eigenql-specification.md`), producing a typed AST. Built with a Rust parser combinator library (nom, winnow, or chumsky). Supports:
+  - USING (shortname imports), MATCH (typed/untyped/negated patterns), WHERE (expression filtering with NOT EXISTS), GROUP BY, RETURN (result shaping with aggregates), ORDER BY, LIMIT/OFFSET, DISTINCT
+  - DEFINE (named derived relations with union semantics and recursive self-reference)
+  - Dot-path navigation for embedded resources (`?person.address.city`)
+  - Full IRI references without USING (`"urn:eigenius:example:Dog"(?d)`)
+- EigenQL type checker: variable type inference from class constraints, expression type checking, aggregate/GROUP BY validation, stratification checking for negated DEFINE rules. Queries that fail type checking are rejected before evaluation.
+- EigenQL evaluator:
+  - Single-pass evaluation for non-recursive queries (conjunctive pattern matching against the layer chain, variable binding, WHERE filtering, aggregation, result shaping, result modifiers)
+  - Bottom-up seminaive fixpoint evaluation for recursive DEFINE rules
+  - Stratified evaluation ordering for negated patterns
+- Built-in functions: DATE, TIMESTAMP, REGEX, LENGTH, CONTAINS, CONCAT
+- Aggregate functions: COUNT, SUM, AVG, MIN, MAX
+- Triple index construction on layer commit: SPO/POS/OPS indexes built as in-memory BTreeMap structures, used by the query evaluator for efficient pattern matching
+- CLI `query` command: takes an EigenQL program string, evaluates it against the current layer chain, prints typed results
+- Structured query error reporting with position, phase (lexer/parser/type_check/stratification/evaluation), rule, and message
 
-### 4.2 Key decisions required before coding
+### 4.2 Key decisions (resolved)
 
-- EigenQL concrete syntax: the architecture references the Semantic Query Language spec but doesn't finalize surface syntax. A design document (see §8.1 of this plan) must lock down the syntax before parser implementation.
-- Query planner complexity: for v1, a simple left-to-right pattern matching strategy is sufficient (no cost-based optimization). Document this as an explicit scope decision.
+The following decisions have been made and documented in **design doc D2** (`docs/design/d2-eigenql-specification.md`):
+
+- **Concrete syntax:** USING/MATCH/WHERE/GROUP BY/RETURN/ORDER BY/LIMIT/OFFSET/DISTINCT clause structure. DEFINE for derived relations. Keywords are case-sensitive uppercase.
+- **Name resolution:** USING imports enable shortname references; full IRI as quoted string always available without USING. Property shortnames resolve against the matched class's property set.
+- **Absence testing:** `NOT EXISTS(?var)` instead of `undefined` literal. Eigon-JSON has no null; absence is tested explicitly.
+- **Dot-path navigation:** Shortname-only sugar over multi-pattern joins. Full IRI paths use decomposed multi-pattern queries.
+- **Recursion:** DEFINE with self-reference, seminaive fixpoint evaluation. Multiple DEFINEs with the same name provide union semantics.
+- **Negation:** Negated patterns (`NOT ClassName(...)`) in MATCH, with stratification checking to prevent negation cycles.
+- **Aggregation:** COUNT, SUM, AVG, MIN, MAX with GROUP BY. Non-aggregated RETURN expressions must appear in GROUP BY.
+- **Result modifiers:** DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET.
+- **Monotonicity:** Queries without negation are monotonic. Queries with negation are flagged as non-monotonic for cache invalidation.
+- **Query planner:** Simple left-to-right pattern matching strategy for v1 (no cost-based optimization).
 
 ### 4.3 Test plan
 
 - **Parse round-trip:** Parse a query, serialize the AST, re-parse, verify equality.
-- **Self-query:** Load Core Ontology, query "find all classes" — should return `Class`, `Property`, `Datatype` and their derivatives.
-- **Pattern matching:** Load a domain ontology (e.g., a simple "Person has name, age" schema), create instances, query by class, by property value, by variable join across two patterns.
-- **Guard expressions:** Query with WHERE clauses involving comparison, string matching, existential subqueries.
-- **Layer-aware resolution:** Same query against two different layer stacks returns different results based on which resources are visible.
-- **Type checking:** A query referencing a non-existent class or property produces a typed error, not a runtime crash.
+- **Self-query:** Load Core Ontology, query "find all classes" — should return `Class`, `Property`, `DataType`, `Format`, `Encoding`, `ConditionalRequirement`.
+- **Pattern matching:** Load the animals example ontology, query by class, by property value, by variable join across two patterns.
+- **Full IRI references:** Query using only quoted IRI strings, no USING clause.
+- **Dot-path navigation:** Query with `?person.address.city` and verify equivalent to decomposed multi-pattern form.
+- **Guard expressions:** Query with WHERE clauses involving comparison, string matching, NOT EXISTS, IN.
+- **NOT EXISTS:** Query for resources where an optional property is absent.
+- **Aggregation:** COUNT dogs per breed with GROUP BY. SUM/AVG/MIN/MAX over numeric properties.
+- **Result modifiers:** DISTINCT, ORDER BY ASC/DESC, LIMIT, OFFSET — verify correct ordering and pagination.
+- **Recursive rules:** DEFINE a transitive Ancestor relation, query for all ancestors of a resource, verify fixpoint terminates and produces correct results.
+- **Negated patterns:** DEFINE using NOT, verify stratification checking accepts valid programs and rejects negation cycles.
+- **Layer-aware resolution:** Same query against two different layer chains returns different results based on which resources are visible.
+- **Type checking:** A query referencing a non-existent class or property produces a structured error with position information.
+- **Stratification errors:** A program with a negation cycle produces a stratification error before evaluation.
 - **Performance baseline:** Query 10,000 resources with a 2-pattern join. Establish a baseline latency number for regression tracking.
 
 ---
@@ -315,7 +341,7 @@ The following design documents must be written and reviewed before the phase tha
 | # | Document | Resolves | Required before | Estimated length |
 |---|----------|----------|-----------------|-----------------|
 | D1 | **Eigon Serialization Format** | **COMPLETED** — `docs/design/d1-eigon-serialization-format.md`. Eigon-JSON format, IRI identity, three-layer type system (data types/formats/content types), validation rules, canonical form, core ontology in `ontologies/core/core-ontology.json` | Phase 0 | Done |
-| D2 | **EigenQL v1 Concrete Syntax** | Final EBNF grammar, keyword choices, escaping rules, error message format. Derived from the Semantic Query Language spec. | Phase 1 | 8–12 pages |
+| D2 | **EigenQL v1 Specification** | **COMPLETED** — `docs/design/d2-eigenql-specification.md`. Full EBNF grammar, lexer spec, type checking rules, aggregation (COUNT/SUM/AVG/MIN/MAX), GROUP BY, ORDER BY, LIMIT/OFFSET, DISTINCT, NOT EXISTS, dot-path navigation, error format | Phase 1 | Done |
 | D3 | **DAG Specification Format** | How DAGs are authored: ESL surface syntax or a JSON/YAML DSL. Component signature declaration. | Phase 2 | 8–12 pages |
 | D4 | **TiKV Key Encoding & Deployment** | Key encoding scheme (SPO/POS/OPS layout), TiKV region placement strategy, Azure hosting model (VMs, AKS, or TiDB Cloud) | Phase 3 | 10–15 pages |
 | D5 | **gRPC API Specification** | Protobuf message definitions, streaming vs. unary RPCs, error codes, pagination for query results | Phase 3 | 8–10 pages |
