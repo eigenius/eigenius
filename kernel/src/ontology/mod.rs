@@ -7,6 +7,7 @@
 //! The core ontology is loaded from `ontologies/core/core-ontology.json`
 //! and forms the root layer of the layer chain.
 
+pub mod eigon_cbor;
 pub mod eigon_json;
 pub mod iri;
 pub mod resource;

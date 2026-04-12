@@ -215,10 +215,11 @@ impl LayerBuilder {
     fn compute_layer_id(&self) -> LayerId {
         let mut hasher = Sha256::new();
 
-        // Hash each resource's canonical form in IRI order (BTreeMap guarantees this)
+        // Hash each resource's CBOR deterministic encoding in IRI order
+        // (BTreeMap guarantees sorted iteration)
         for (iri, resource) in &self.resources {
             hasher.update(iri.as_str().as_bytes());
-            hasher.update(crate::ontology::eigon_json::canonicalize(resource));
+            hasher.update(crate::ontology::eigon_cbor::canonicalize(resource));
         }
 
         let hash = hasher.finalize();

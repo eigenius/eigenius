@@ -3,24 +3,17 @@
 # Runs the TypeScript orchestration layer that handles program execution,
 # LLM adapters, and the MCP server surface.
 
-FROM denoland/deno:2.0.0
+FROM denoland/deno:latest
 
 WORKDIR /app
 
-# Cache dependencies
+# Copy config and cache dependencies
 COPY orchestration/deno.json ./
-RUN deno install
-
-# Copy application source
 COPY orchestration/src/ src/
+RUN deno cache src/main.ts
 
 ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
-ENV EIGENIUS_HTTP_PORT=8080
-ENV EIGENIUS_MCP_PORT=3000
 
-EXPOSE 8080 3000
-
-HEALTHCHECK --interval=10s --timeout=3s \
-  CMD curl -sf http://localhost:8080/health || exit 1
+EXPOSE 8080
 
 CMD ["deno", "run", "--allow-net", "--allow-env", "src/main.ts"]

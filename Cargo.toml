@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "kernel",
     "storage/tikv",
-    "storage/sqlite",
+    "storage/rocksdb",
     "storage/memory",
     "storage/indexing",
     "cli",

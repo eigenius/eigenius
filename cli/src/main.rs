@@ -16,6 +16,10 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Connect to a remote gRPC endpoint instead of using the local kernel
+    #[arg(long, global = true)]
+    endpoint: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -80,13 +84,70 @@ enum Commands {
         iri: String,
     },
 
+    /// Start the gRPC server
+    Serve {
+        /// gRPC port
+        #[arg(long, default_value = "50051")]
+        port: u16,
+    },
+
+    /// Database administration
+    Db {
+        #[command(subcommand)]
+        command: DbCommands,
+    },
+
     /// Show version and build info
     Version,
 }
 
-fn main() {
+#[derive(Subcommand)]
+enum DbCommands {
+    /// Print storage statistics
+    Stats {
+        /// RocksDB path
+        #[arg(value_name = "PATH")]
+        path: String,
+    },
+    /// Trigger manual compaction
+    Compact {
+        /// RocksDB path
+        #[arg(value_name = "PATH")]
+        path: String,
+    },
+    /// Export all resources as Eigon-JSON
+    Export {
+        /// RocksDB path
+        #[arg(value_name = "DB_PATH")]
+        db_path: String,
+        /// Output directory
+        #[arg(value_name = "OUTPUT_PATH")]
+        output_path: String,
+    },
+}
+
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
+    // Remote mode: delegate to gRPC client
+    if let Some(ref endpoint) = cli.endpoint {
+        match cli.command {
+            Commands::Inspect { iri } => remote_inspect(endpoint, &iri, cli.json).await,
+            Commands::Query { query, file: _ } => remote_query(endpoint, &query, cli.json).await,
+            Commands::Serve { .. } => {
+                eprintln!("Cannot use --endpoint with serve");
+                std::process::exit(1);
+            }
+            _ => {
+                eprintln!("Remote mode not yet supported for this command");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Local mode: embedded kernel
     match cli.command {
         Commands::Load { file } => cmd_load(&file, cli.json),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
@@ -101,6 +162,8 @@ fn main() {
             ontology,
         } => cmd_run(&program_file, &input_file, ontology.as_deref(), cli.json),
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
+        Commands::Serve { port } => cmd_serve(port).await,
+        Commands::Db { command } => cmd_db(command),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
         }
@@ -482,6 +545,187 @@ fn cmd_inspect(iri_str: &str, json_output: bool) {
         }
         None => {
             eprintln!("Resource not found: {iri_str}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_db(command: DbCommands) {
+    use eigenius_kernel::storage::{LayerStore, ResourceStore};
+
+    match command {
+        DbCommands::Stats { path } => {
+            let store = eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(&path))
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to open database: {e}");
+                    std::process::exit(1);
+                });
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let layers = rt.block_on(store.list_layers()).unwrap_or_default();
+
+            println!("Database: {path}");
+            println!("Layers: {}", layers.len());
+
+            let mut total_resources = 0;
+            for layer_id in &layers {
+                let resources = rt
+                    .block_on(store.list_resources(layer_id))
+                    .unwrap_or_default();
+                total_resources += resources.len();
+                println!("  Layer {}: {} resources", layer_id, resources.len());
+            }
+            println!("Total resources: {total_resources}");
+
+            match store.get_head() {
+                Ok(Some(head)) => println!("Head: {head}"),
+                Ok(None) => println!("Head: (none)"),
+                Err(e) => println!("Head: error ({e})"),
+            }
+        }
+        DbCommands::Compact { path } => {
+            let store = eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(&path))
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to open database: {e}");
+                    std::process::exit(1);
+                });
+            store.compact();
+            println!("Compaction complete.");
+        }
+        DbCommands::Export {
+            db_path,
+            output_path,
+        } => {
+            let store = eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(&db_path))
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to open database: {e}");
+                    std::process::exit(1);
+                });
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let layers = rt.block_on(store.list_layers()).unwrap_or_default();
+
+            std::fs::create_dir_all(&output_path).unwrap_or_else(|e| {
+                eprintln!("Failed to create output directory: {e}");
+                std::process::exit(1);
+            });
+
+            for layer_id in &layers {
+                let layer = rt.block_on(store.load_layer(layer_id)).unwrap();
+                let resources: Vec<serde_json::Value> = layer
+                    .resources()
+                    .values()
+                    .map(eigon_json::serialize_resource)
+                    .collect();
+
+                let json = serde_json::to_string_pretty(&resources).unwrap();
+                let file_path =
+                    std::path::Path::new(&output_path).join(format!("{}.json", layer_id));
+                std::fs::write(&file_path, json).unwrap_or_else(|e| {
+                    eprintln!("Failed to write {}: {e}", file_path.display());
+                    std::process::exit(1);
+                });
+                println!(
+                    "Exported layer {} ({} resources) → {}",
+                    layer_id,
+                    layer.resources().len(),
+                    file_path.display()
+                );
+            }
+        }
+    }
+}
+
+async fn cmd_serve(port: u16) {
+    if let Err(e) = eigenius_kernel::server::start_server(port).await {
+        eprintln!("Server error: {e}");
+        std::process::exit(1);
+    }
+}
+
+// --- Remote mode (gRPC client) ---
+
+use eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient;
+
+async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport::Channel> {
+    EigeniusKernelClient::connect(endpoint.to_string())
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to connect to {endpoint}: {e}");
+            std::process::exit(1);
+        })
+}
+
+async fn remote_inspect(endpoint: &str, iri_str: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    let request = eigenius_kernel::server::proto::InspectRequest {
+        iri: iri_str.to_string(),
+    };
+
+    match client.inspect(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if resp.found {
+                let resource =
+                    eigenius_kernel::ontology::eigon_cbor::parse_resource(&resp.resource)
+                        .unwrap_or_else(|e| {
+                            eprintln!("Failed to parse response: {e}");
+                            std::process::exit(1);
+                        });
+                let json = eigon_json::serialize_resource(&resource);
+                if json_output {
+                    println!("{}", serde_json::to_string(&json).unwrap());
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                }
+            } else {
+                eprintln!("Resource not found: {iri_str}");
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    let request = eigenius_kernel::server::proto::QueryRequest {
+        eigenql: eigenql.to_string(),
+    };
+
+    match client.query(request).await {
+        Ok(response) => {
+            let mut stream = response.into_inner();
+            let mut count = 0u64;
+            while let Ok(Some(result)) = stream.message().await {
+                let resource =
+                    eigenius_kernel::ontology::eigon_cbor::parse_resource(&result.resource)
+                        .unwrap_or_else(|e| {
+                            eprintln!("Failed to parse result: {e}");
+                            std::process::exit(1);
+                        });
+                let json = eigon_json::serialize_resource(&resource);
+                if json_output {
+                    println!("{}", serde_json::to_string(&json).unwrap());
+                } else {
+                    if count == 0 {
+                        println!("Results:");
+                    }
+                    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                }
+                count += 1;
+            }
+            if !json_output {
+                println!("{count} result(s).");
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
             std::process::exit(1);
         }
     }
