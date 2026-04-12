@@ -99,7 +99,6 @@ cargo run -p eigenius-cli -- version
 | Document | Description |
 |----------|-------------|
 | [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON spec: IRI identity, three-layer type system, validation rules, canonical form |
-| [Phase 0 Plan](docs/design/phase0-implementation-plan.md) | Detailed implementation steps for the foundation |
 | [Implementation Plan](docs/design/implementation-plan.md) | High-level 6-phase plan from foundation to extensibility |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 
