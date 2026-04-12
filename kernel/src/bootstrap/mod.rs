@@ -5,7 +5,7 @@
 //! a working execution context.
 
 use crate::context::{ExecutionContext, ExecutionMode};
-use crate::layer::LayerBuilder;
+use crate::layer::{Layer, LayerBuilder};
 use crate::ontology::eigon_json;
 use crate::validation::Validator;
 use std::fmt;
@@ -41,37 +41,54 @@ impl fmt::Display for BootstrapError {
 
 impl std::error::Error for BootstrapError {}
 
-/// Bootstrap the Eigenius kernel.
-///
-/// 1. Parse the core ontology from the embedded JSON
-/// 2. Build the root layer (no parent)
-/// 3. Validate the core ontology against itself
-/// 4. Return an `ExecutionContext` with the core layer as head
-pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
-    // 1. Parse core ontology from embedded JSON
-    let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-    let resources = eigon_json::parse_document(core_json).map_err(BootstrapError::Parse)?;
+/// Load, build, and validate a layer from embedded JSON.
+fn load_layer(
+    name: &str,
+    json: &str,
+    parent: Option<Arc<Layer>>,
+) -> Result<Arc<Layer>, BootstrapError> {
+    let resources = eigon_json::parse_document(json).map_err(BootstrapError::Parse)?;
 
-    // 2. Build the core layer (root — no parent)
-    let mut builder = LayerBuilder::new("core", None);
+    let mut builder = LayerBuilder::new(name, parent);
     for resource in resources {
         builder
             .add_resource(resource)
             .map_err(BootstrapError::Layer)?;
     }
-    let core_layer = Arc::new(builder.build());
+    let layer = Arc::new(builder.build());
 
-    // 3. Validate the core layer against itself
-    let validator = Validator::new(&core_layer);
+    let validator = Validator::new(&layer);
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(BootstrapError::CoreOntologyInvalid(errors));
     }
 
-    // 4. Create a working context with the core layer as head
-    let ctx = ExecutionContext::new(core_layer, "working", ExecutionMode::ReadWrite);
+    Ok(layer)
+}
 
-    Ok(ctx)
+/// Bootstrap the Eigenius kernel.
+///
+/// Loads the core ontology as the root layer, then the program ontology
+/// on top. Both are validated. Returns an `ExecutionContext` with the
+/// program layer as head.
+pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
+    let core = load_layer(
+        "core",
+        include_str!("../../../ontologies/core/core-ontology.json"),
+        None,
+    )?;
+
+    let program = load_layer(
+        "program",
+        include_str!("../../../ontologies/program/program-ontology.json"),
+        Some(core),
+    )?;
+
+    Ok(ExecutionContext::new(
+        program,
+        "working",
+        ExecutionMode::ReadWrite,
+    ))
 }
 
 #[cfg(test)]
@@ -82,8 +99,10 @@ mod tests {
     #[test]
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
-        // Core layer should be root
-        assert!(ctx.head().is_root());
+        // Head is the program layer (on top of core)
+        assert!(!ctx.head().is_root());
+        // Core layer (parent) should be root
+        assert!(ctx.head().parent().unwrap().is_root());
     }
 
     #[test]
@@ -159,6 +178,54 @@ mod tests {
         for fmt in ["date", "datetime", "time", "iri", "uuid", "regex"] {
             let iri = Iri::parse(&format!("urn:eigenius:core:formats:{fmt}")).unwrap();
             assert!(ctx.resolve(&iri).is_some(), "should resolve format {fmt}");
+        }
+    }
+
+    #[test]
+    fn can_resolve_program_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in [
+            "Program",
+            "Let",
+            "Apply",
+            "Var",
+            "Lambda",
+            "Case",
+            "Branch",
+            "Pair",
+            "Construct",
+            "Project",
+            "Map",
+            "Reduce",
+            "Literal",
+            "Component",
+            "CapabilityLevel",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:program:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve program class {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_builtin_components() {
+        let ctx = bootstrap().unwrap();
+        for comp in [
+            "Identity",
+            "CompleteText",
+            "CompleteJson",
+            "Combine",
+            "Extract",
+            "Transform",
+            "HttpRequest",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:program:components:{comp}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve component {comp}"
+            );
         }
     }
 }

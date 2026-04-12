@@ -20,7 +20,7 @@ service EigeniusKernel {
   // Returns typed query results.
   rpc Query(QueryRequest) returns (QueryResponse);
 
-  // Type-check a DAG specification against the current context.
+  // Type-check a program specification against the current context.
   // Returns a validation report including partial evaluation results.
   rpc Validate(ValidateRequest) returns (ValidateResponse);
 
@@ -63,8 +63,8 @@ message QueryResponse {
 // --- Validate ---
 
 message ValidateRequest {
-  // DAG specification serialized as JSON (per design doc D3).
-  bytes dag_spec = 1;
+  // Program specification serialized as JSON (per design doc D3).
+  bytes program_spec = 1;
   // Execution context for type resolution.
   string context_id = 2;
 }
@@ -72,7 +72,7 @@ message ValidateRequest {
 message ValidateResponse {
   bool valid = 1;
   repeated ValidationError errors = 2;
-  // Partially evaluated DAG (if inputs were provided).
+  // Partially evaluated program (if inputs were provided).
   optional bytes residual = 3;
 }
 

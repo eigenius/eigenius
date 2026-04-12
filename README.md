@@ -6,16 +6,18 @@ Contemporary LLMs produce text that reads like knowledge but carries no epistemi
 
 The platform maintains three epistemic categories: **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-## Current Status: Phase 0 + Phase 1 Complete
+## Current Status: Phases 0, 1, and 2 Complete
 
-The core data model, layer system, validation engine, query language, and CLI are implemented. The system can:
+The core data model, layer system, validation engine, query language, program model with dependent type checking, and CLI are implemented. The system can:
 
 - Parse and serialize Eigon-JSON documents
-- Load the self-describing core ontology (classes, properties, data types, formats)
+- Load the self-describing core ontology and program ontology (86 resources across 2 layers)
 - Build immutable layers with content-addressed identifiers (SHA-256)
 - Validate resources against the full ontology constraint system (12 validation rules)
 - Resolve resources through parent-pointer layer chains
 - Query the knowledge graph with EigenQL (typed stratified Datalog with aggregation)
+- Type-check programs using Mini-TT dependent type theory (NbE evaluator)
+- Execute programs with built-in components
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
 
@@ -28,8 +30,9 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Eigon-JSON** — the canonical serialization format. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types.
 - **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties.
 - **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
+- **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to Mini-TT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. Executed with a component registry (built-in + future WASM extensions).
 
-Future phases add: DAG pipelines with dependent type checking (Mini-TT/NbE), gRPC service with TiKV storage, LLM integration with reasoning traces, and WASM capability sandboxing.
+Future phases add: gRPC service with TiKV storage, LLM integration with reasoning traces, and WASM capability sandboxing.
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
@@ -41,17 +44,20 @@ kernel/          Rust kernel crate
   src/layer/       Layer, LayerBuilder, LayerId (content-addressed)
   src/validation/  Validator with 12 validation rules
   src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator
+  src/nbe/         Mini-TT type theory: terms, values, eval, readback, type checker
+  src/program/     Program model: expression parser, ground type resolution, executor
   src/context/     ExecutionContext (snapshot isolation, read/write control)
-  src/bootstrap/   Core ontology loader and system initialization
+  src/bootstrap/   Core + program ontology loader and system initialization
   src/storage/     Storage interface traits (LayerStore, ResourceStore)
 storage/         Storage backend implementations
   memory/          In-memory backend (BTreeMap + Arc<RwLock>)
   sqlite/          SQLite backend (placeholder)
   tikv/            TiKV backend (placeholder)
-cli/             Command-line interface (load, validate, query, inspect)
+cli/             Command-line interface (load, validate, query, program-validate, run, inspect)
 ontologies/      Ontology definitions
   core/            Core ontology (core-ontology.json) — self-describing bootstrap
-  examples/        Example ontologies (animals.json)
+  program/         Program ontology (program-ontology.json) — expression classes, components
+  examples/        Example ontologies and programs
 docs/design/     Design documents
   d1-eigon-serialization-format.md   Eigon-JSON format specification
   implementation-plan.md             High-level 6-phase plan
@@ -96,6 +102,12 @@ cargo run -p eigenius-cli -- query 'USING "urn:eigenius:core:Class" MATCH Class(
 # Query with a loaded file
 cargo run -p eigenius-cli -- query --file ontologies/examples/animals.json 'MATCH "urn:eigenius:example:Dog"(?d) { "urn:eigenius:example:name": ?name } RETURN [] { "urn:eigenius:example:name": ?name }'
 
+# Type-check a program
+cargo run -p eigenius-cli -- program-validate ontologies/examples/simple-program.json --ontology ontologies/examples/animals.json
+
+# Execute a program with input data
+cargo run -p eigenius-cli -- run ontologies/examples/simple-program.json ontologies/examples/animals.json --ontology ontologies/examples/animals.json
+
 # Inspect a core ontology resource
 cargo run -p eigenius-cli -- inspect "urn:eigenius:core:Class"
 
@@ -109,6 +121,7 @@ cargo run -p eigenius-cli -- version
 |----------|-------------|
 | [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON spec: IRI identity, three-layer type system, validation rules, canonical form |
 | [D2: EigenQL Specification](docs/design/d2-eigenql-specification.md) | EigenQL spec: typed stratified Datalog, DEFINE, aggregation, full grammar |
+| [D3: Program Model](docs/design/d3-program-model.md) | Program expression language, component model, scheduling, ESL surface syntax |
 | [Implementation Plan](docs/design/implementation-plan.md) | High-level 6-phase plan from foundation to extensibility |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 

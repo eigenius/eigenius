@@ -1,0 +1,15 @@
+{
+  "@id": "urn:eigenius:example:identity-program",
+  "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+  "urn:eigenius:core:description": "A simple program that passes input through unchanged",
+  "urn:eigenius:program:input_type": "urn:eigenius:example:Dog",
+  "urn:eigenius:program:output_type": "urn:eigenius:example:Dog",
+  "urn:eigenius:program:body": {
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+    "urn:eigenius:program:function": "urn:eigenius:program:components:Identity",
+    "urn:eigenius:program:argument": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+      "urn:eigenius:program:name": "input"
+    }
+  }
+}

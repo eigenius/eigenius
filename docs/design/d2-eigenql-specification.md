@@ -38,7 +38,7 @@ Multiple DEFINE clauses for the same relation name provide **union semantics** �
 Query ::= [USING] MATCH [WHERE] [GROUP BY] [RETURN] [ORDER BY] [LIMIT] [OFFSET] [DISTINCT]
 ```
 
-A query without a RETURN clause is a **match query** — it evaluates to a boolean (does any matching assignment exist?). This form is used as guard conditions in DAG Select constructs.
+A query without a RETURN clause is a **match query** — it evaluates to a boolean (does any matching assignment exist?). This form is used as guard conditions in program Select constructs.
 
 A query with a RETURN clause is a **result query** — it produces typed resources shaped by the RETURN clause.
 
