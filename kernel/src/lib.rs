@@ -16,6 +16,7 @@ pub mod context;
 pub mod layer;
 pub mod nbe;
 pub mod ontology;
+pub mod query;
 pub mod reflection;
 pub mod storage;
 pub mod validation;
