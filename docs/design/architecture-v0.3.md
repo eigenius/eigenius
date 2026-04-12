@@ -80,7 +80,7 @@ The kernel is implemented in Rust with Verus proof annotations on correctness-cr
 
 ### 2.2 Host Layer
 
-The kernel exposes a **service API** consumed by an **orchestration layer**. In the primary server deployment, the kernel runs as a native Rust service, talks directly to TiKV for storage, and exposes its operations over gRPC (or equivalent). The orchestration layer — implemented in TypeScript targeting **Deno** as the preferred runtime — sits above the API boundary and handles program execution coordination, LLM adapter management, the MCP server surface, and developer tooling. The orchestration layer is an API client of the kernel service, not a WASM host.
+The kernel exposes a **service API** consumed by an **orchestration layer**. In the primary server deployment, the kernel runs as a native Rust service with RocksDB for persistent storage (TiKV for distributed deployments), and exposes its operations over gRPC. The orchestration layer — implemented in TypeScript targeting **Deno** as the preferred runtime — sits above the API boundary and handles program execution coordination, LLM adapter management, the MCP server surface, and developer tooling. The orchestration layer is an API client of the kernel service, not a WASM host.
 
 Deno is chosen for native TypeScript execution (no build step), an explicit permission model that mirrors the capability protocol's design philosophy, and a direct path from server deployment to edge deployment (Deno Deploy) from the same codebase. Node.js is supported as a fallback runtime — the orchestration layer's TypeScript code is runtime-agnostic.
 
@@ -100,7 +100,7 @@ Deno is chosen for native TypeScript execution (no build step), an explicit perm
 
 **Kernel-internal services (native Rust, no API boundary):**
 
-- **Storage** — the kernel calls the TiKV client (or other storage backend) directly via native Rust. No callback indirection, no serialization overhead.
+- **Storage** — the kernel calls the storage backend (RocksDB for single-node, TiKV for distributed) directly via native Rust. Resources are stored as CBOR (RFC 8949) for compact, fast serialization. No callback indirection.
 - **Materialization** — lazy resource handles (§8.2) resolve content from storage on demand, within the kernel process.
 - **Clock** — HLC timestamp management, including synchronization with other kernel nodes in distributed deployments.
 - **Capability sandbox** — the kernel instantiates untrusted capability code as WASM modules via Wasmtime (see §2.1), managing their lifecycle, memory limits, and interface surface.
@@ -164,9 +164,9 @@ After Phase 2 completes, the standard capability dispatch protocol is fully oper
 
 The Rust kernel compiles to native code for the primary server deployment and to WASM for browser and edge targets. The orchestration layer provides program execution, LLM integration, and developer tooling. This architecture enables several deployment models from the same kernel codebase.
 
-**Server (native Rust kernel + Deno orchestration).** The primary deployment model. The kernel runs as a native Rust service, connecting directly to TiKV for distributed storage. The Deno orchestration layer connects to the kernel's gRPC API and handles program execution coordination, LLM adapter calls, and the MCP server surface. The full capability set is available: program execution, concurrent Map evaluation, distributed storage, real-time reasoning trace streaming, WASM-sandboxed capability execution. Untrusted capability code runs in WASM sandboxes managed by the kernel via Wasmtime. Node.js is supported as a fallback orchestration runtime.
+**Server (native Rust kernel + Deno orchestration).** The primary deployment model. The kernel runs as a native Rust service with RocksDB for persistent storage (or TiKV for distributed deployments). The Deno orchestration layer connects to the kernel's gRPC API and handles program execution coordination, LLM adapter calls, and the MCP server surface. The full capability set is available: program execution, concurrent Map evaluation, distributed storage, real-time reasoning trace streaming, WASM-sandboxed capability execution. Untrusted capability code runs in WASM sandboxes managed by the kernel via Wasmtime. Node.js is supported as a fallback orchestration runtime.
 
-**Edge / Serverless (WASM kernel).** For edge deployment, the kernel compiles to WASM and runs in edge runtimes (Deno Deploy, Cloudflare Workers, Vercel Edge Functions). Deno Deploy is the natural edge target given Deno as the orchestration runtime — the same TypeScript orchestration code runs in both environments. Storage is backed by platform-specific services (Deno KV, Cloudflare D1/KV/Durable Objects, or remote TiKV connections). Suitable for read-heavy workloads: ontology queries, program validation, serving pre-computed results. Write-heavy workloads (program execution with many reasoning traces) may be constrained by edge platform limits. In this deployment, the kernel runs as a WASM module instantiated by the edge runtime, with storage and clock provided via callbacks — the same interface as the browser deployment.
+**Edge / Serverless (WASM kernel).** For edge deployment, the kernel compiles to WASM and runs in edge runtimes (Deno Deploy, Cloudflare Workers, Vercel Edge Functions). Deno Deploy is the natural edge target given Deno as the orchestration runtime — the same TypeScript orchestration code runs in both environments. Storage is backed by platform-specific services (Deno KV, Cloudflare D1/KV/Durable Objects, or remote RocksDB/TiKV connections). Suitable for read-heavy workloads: ontology queries, program validation, serving pre-computed results. Write-heavy workloads (program execution with many reasoning traces) may be constrained by edge platform limits. In this deployment, the kernel runs as a WASM module instantiated by the edge runtime, with storage and clock provided via callbacks — the same interface as the browser deployment.
 
 **Browser (WASM kernel).** The kernel compiles to WASM and runs in a web browser. Storage is backed by IndexedDB (for local-first scenarios) or the kernel service's API (for thin-client scenarios). LLM adapters route through a backend proxy or use client-side API keys. Suitable for developer tooling (ontology browsers, program editors, query explorers) and local-first applications where the knowledge graph is small enough to fit in browser storage.
 
@@ -1130,9 +1130,9 @@ All interfaces are asynchronous from the kernel's perspective — the kernel iss
 
 The abstract storage interface (§10.6) admits multiple backend implementations, each suited to different deployment models (§2.6):
 
-**TiKV backend (server, distributed).** TiKV is a distributed, transactional, ordered key-value store — originally extracted from TiDB (PingCAP) and now a CNCF graduated project. It provides the exact primitive the storage interface requires: ordered byte-string keys, range scans, and distributed transactions (MVCC via the Percolator protocol), with Raft-based replication per key region. Crucially, TiKV is a pure storage engine — it carries no query planner, no schema system, and no opinions about data semantics. Eigenius builds its own indexes (SPO/POS/OPS triple indexes as key ranges), its own layer resolution logic (scanning key prefixes in layer-stack order), and its own query evaluation (EigenQL evaluator planning index scans and joins). TiKV's region-based sharding maps naturally to layer-based partitioning — each layer's data occupies a key range that corresponds to a Raft region, and the immutable-layer model means committed regions receive only read traffic after commit. TiKV is written in Rust with a Rust client library, aligning with the kernel's language ecosystem.
+**RocksDB backend (server, single-node).** RocksDB is an embedded, persistent, ordered key-value store (LSM tree). It provides the exact primitive the storage interface requires: ordered byte-string keys, prefix scans, and write batches. Resources are stored as CBOR (RFC 8949) for compact serialization. The key scheme (see design doc D4) uses layer-prefixed keys for efficient range scans. RocksDB is the primary production backend for single-node deployments — zero administration, automatic compaction, concurrent read/write access. Same key encoding as TiKV (which uses RocksDB internally), so migration to distributed storage is a data copy.
 
-**SQLite / LibSQL backend (server, single-node, edge).** SQLite provides an embedded relational database with ACID transactions. Layers map to tables or partitions. Suitable for single-node deployments, development environments, and edge platforms that support SQLite (Cloudflare D1, Turso/LibSQL). The immutable layer model maps naturally to SQLite's write-ahead log — committed layers are append-only, and snapshot isolation is provided by SQLite's built-in transaction model.
+**TiKV backend (server, distributed, future).** TiKV is a distributed, transactional, ordered key-value store built on RocksDB — originally extracted from TiDB (PingCAP) and now a CNCF graduated project. It adds Raft-based replication, multi-region sharding, and distributed transactions (MVCC via the Percolator protocol) on top of the same ordered key-value model. The same key encoding used by the RocksDB backend works directly with TiKV. TiKV becomes relevant when horizontal scalability and replication are needed — for single-node deployments, RocksDB is simpler and has no operational overhead.
 
 **IndexedDB backend (browser).** For browser deployments, layers and resources are stored in IndexedDB object stores. Transactions use IndexedDB's built-in transaction model. Suitable for small-to-medium knowledge graphs (tens of thousands of resources). The immutable layer model fits naturally — committed layers are written once and never modified.
 
@@ -1142,7 +1142,7 @@ The abstract storage interface (§10.6) admits multiple backend implementations,
 
 ### 10.8 Indexing Strategy
 
-The storage engine (TiKV or equivalent) provides ordered keys and range scans. All semantic indexing is built and maintained by the Eigenius host layer, stored as key-value entries in the storage engine.
+The storage engine (RocksDB or TiKV) provides ordered keys and range scans. All semantic indexing is built and maintained by the Eigenius host layer, stored as key-value entries in the storage engine.
 
 **Triple indexes.** Each resource property is stored as a triple: (subject IRI, property IRI, value). Three index orderings are maintained as separate key ranges — SPO (subject → property → object), POS (property → object → subject), and OPS (object → property → subject). SPO supports forward traversal ("given resource X, find all its properties"). POS supports class-based scans and type lookups ("find all resources with property P having value V"). OPS supports reverse traversal ("find all resources that reference resource X"). Each index entry is prefixed by layer identifier, making indexes layer-local.
 
@@ -1156,8 +1156,9 @@ The storage and runtime architecture draws from several mature open-source syste
 
 | Component | Candidates | Role in Eigenius |
 |---|---|---|
-| Distributed KV store | TiKV (CNCF, Rust) | Distributed storage engine — ordered keys, range scans, Raft replication, Percolator transactions |
-| Embedded database | SQLite, LibSQL (Turso) | Single-node and edge storage |
+| Embedded KV store | RocksDB (Meta, C++) | Single-node persistent storage — ordered keys, prefix scans, LSM tree, zero administration |
+| Distributed KV store | TiKV (CNCF, Rust) | Distributed storage (future) — built on RocksDB, adds Raft replication and distributed transactions |
+| Binary serialization | CBOR (RFC 8949) | Storage and wire format for resources — compact, fast parsing, deterministic encoding |
 | Embedded KV (Rust) | redb, RocksDB (via rust-rocksdb), sled | Native Rust embedded storage for non-WASM deployments |
 | Raft consensus (Rust) | openraft | Custom distribution layer option — commit ordering for immutable layers |
 | Orchestration runtime | Deno (primary), Node.js (fallback) | TypeScript orchestration layer — program execution, LLM adapters, MCP server |
@@ -1170,7 +1171,7 @@ The storage and runtime architecture draws from several mature open-source syste
 
 The architecture does not mandate specific third-party dependencies. The storage interface (§10.6) and host interface (§2.2) are the abstraction boundaries — concrete implementations are swappable. The table above identifies the candidates that best match the design constraints as of this writing.
 
-**Long-term engine option.** The immutable-layer model has a write profile simpler than what a general-purpose distributed transaction engine provides. Layer construction is single-writer; only commit is a coordination point; committed data is read-only. This profile could be served by a lighter-weight custom engine: an embedded ordered KV per node (redb or RocksDB), Raft consensus for commit ordering (openraft), and content-addressed object replication for layer distribution. This avoids the overhead of TiKV's full MVCC transaction protocol for a workload that doesn't need it. TiKV is the pragmatic v1 choice; the custom engine is a future optimization once access patterns are empirically understood.
+**Long-term engine option.** The immutable-layer model has a write profile simpler than what a general-purpose distributed transaction engine provides. Layer construction is single-writer; only commit is a coordination point; committed data is read-only. RocksDB handles this profile well for single-node deployments. For distributed deployments, TiKV provides the standard path. A lighter-weight custom engine — RocksDB per node with Raft consensus for commit ordering (openraft) and content-addressed layer replication — could avoid TiKV's full MVCC overhead for this workload. RocksDB is the pragmatic choice; TiKV or a custom engine are future options once access patterns are empirically understood.
 
 ---
 
@@ -1293,7 +1294,7 @@ The v1 security model relies on three mechanisms: namespace governance (§6), ca
 
 The following design questions require resolution before implementation begins:
 
-**Storage layer internal architecture.** The abstract storage interface (§10.6), backend candidates (§10.7), and triple indexing strategy (§10.8) are specified. Distribution strategy details (TiKV region placement policies, replication factor tuning, cross-region deployment), compaction approach (how layer stacks are periodically flattened for read performance), and the index cost model for the EigenQL query planner are not yet specified.
+**Storage layer internal architecture.** The abstract storage interface (§10.6), backend implementations (RocksDB for single-node, TiKV for distributed), and key encoding (see design doc D4) are specified. Distribution strategy details (TiKV region placement policies, replication factor tuning, cross-region deployment), compaction approach (how layer stacks are periodically flattened for read performance), and the index cost model for the EigenQL query planner are not yet specified.
 
 **Capability protocol wire format.** How capabilities communicate with the kernel — in-process, IPC, or network — and what serialization format is used for resource handles and results.
 

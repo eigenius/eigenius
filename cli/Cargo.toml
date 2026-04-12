@@ -10,5 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 eigenius-kernel = { path = "../kernel" }
+eigenius-storage-rocksdb = { path = "../storage/rocksdb" }
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
+tokio.workspace = true
+tonic.workspace = true

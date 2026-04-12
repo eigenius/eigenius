@@ -1,99 +1,128 @@
 // Eigenius Kernel gRPC API
 //
-// The four kernel operations exposed as RPCs.
-// Architecture reference: §2.2 (Host Layer — Service API)
-//
-// Design document D5 (gRPC API Specification) will flesh out
-// message types, streaming vs. unary decisions, error codes,
-// and pagination for query results.
+// See design doc D5 (docs/design/d5-grpc-api-specification.md)
+// for the full specification.
 
 syntax = "proto3";
 
 package eigenius.v1;
 
 service EigeniusKernel {
-  // Load ontology resources into the working context.
-  // Returns structural validation results.
+  // Load resources into a context's working layer, validate, optionally commit.
   rpc Load(LoadRequest) returns (LoadResponse);
 
-  // Execute an EigenQL query within the current execution context.
-  // Returns typed query results.
-  rpc Query(QueryRequest) returns (QueryResponse);
+  // Resolve a resource by IRI from the context's layer chain.
+  rpc Inspect(InspectRequest) returns (InspectResponse);
 
-  // Type-check a program specification against the current context.
-  // Returns a validation report including partial evaluation results.
-  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  // Execute an EigenQL query. Results are streamed.
+  rpc Query(QueryRequest) returns (stream QueryResult);
 
-  // Record a reasoning trace as a typed resource.
+  // Type-check a program against the context's layer chain.
+  rpc ValidateProgram(ValidateProgramRequest) returns (ValidateProgramResponse);
+
+  // Execute a program with input data.
+  rpc RunProgram(RunProgramRequest) returns (RunProgramResponse);
+
+  // Record a reasoning trace.
   rpc Reflect(ReflectRequest) returns (ReflectResponse);
+
+  // Health check.
+  rpc Health(HealthRequest) returns (HealthResponse);
 }
 
 // --- Load ---
 
 message LoadRequest {
-  // Eigon resources serialized as JSON (per design doc D1).
-  repeated bytes resources = 1;
-  // Target namespace for the loaded resources.
-  string namespace = 2;
+  bytes resources = 1;          // Resources as CBOR or Eigon-JSON
+  string content_type = 2;      // "application/cbor" or "application/eigon+json"
+  bool auto_commit = 3;         // Commit after successful validation
 }
 
 message LoadResponse {
   bool success = 1;
   repeated ValidationError errors = 2;
-  // Snapshot ID after successful load.
-  string snapshot_id = 3;
+  string layer_id = 3;          // Set if auto_commit succeeded
+  uint32 resource_count = 4;
+}
+
+// --- Inspect ---
+
+message InspectRequest {
+  string iri = 1;
+}
+
+message InspectResponse {
+  bool found = 1;
+  bytes resource = 2;           // Resource as CBOR
 }
 
 // --- Query ---
 
 message QueryRequest {
-  // EigenQL query string.
-  string query = 1;
-  // Execution context identifier (binds to a layer stack snapshot).
-  string context_id = 2;
+  string eigenql = 1;           // EigenQL program string
 }
 
-message QueryResponse {
-  // Result resources serialized as JSON.
-  repeated bytes results = 1;
-  // Number of results returned.
-  uint64 count = 2;
+message QueryResult {
+  bytes resource = 1;           // One result resource as CBOR
+  uint64 index = 2;
 }
 
-// --- Validate ---
+// --- ValidateProgram ---
 
-message ValidateRequest {
-  // Program specification serialized as JSON (per design doc D3).
-  bytes program_spec = 1;
-  // Execution context for type resolution.
-  string context_id = 2;
+message ValidateProgramRequest {
+  bytes program = 1;            // Program resource as CBOR or Eigon-JSON
+  string content_type = 2;
 }
 
-message ValidateResponse {
+message ValidateProgramResponse {
   bool valid = 1;
   repeated ValidationError errors = 2;
-  // Partially evaluated program (if inputs were provided).
-  optional bytes residual = 3;
+  string program_type = 3;      // Human-readable type
+}
+
+// --- RunProgram ---
+
+message RunProgramRequest {
+  bytes program = 1;            // Program as CBOR or Eigon-JSON
+  bytes input = 2;              // Input as CBOR or Eigon-JSON
+  string content_type = 3;
+}
+
+message RunProgramResponse {
+  bool success = 1;
+  bytes output = 2;             // Output resource as CBOR
+  repeated ValidationError errors = 3;
 }
 
 // --- Reflect ---
 
 message ReflectRequest {
-  // Reasoning trace serialized as JSON (per design doc D6).
   bytes trace = 1;
-  string context_id = 2;
+  string content_type = 2;
 }
 
 message ReflectResponse {
   bool success = 1;
-  // URI of the committed reasoning trace resource.
-  string trace_uri = 2;
+  string trace_iri = 2;
+}
+
+// --- Health ---
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  string version = 2;
+  uint64 layer_count = 3;
+  uint64 resource_count = 4;
 }
 
 // --- Common ---
 
 message ValidationError {
-  string path = 1;
-  string message = 2;
-  string severity = 3; // "error", "warning"
+  string resource_iri = 1;
+  string property_iri = 2;
+  string rule = 3;
+  string message = 4;
+  string severity = 5;
 }

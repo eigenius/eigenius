@@ -1,10 +1,12 @@
 # Eigenius Kernel Service — multi-stage build
 #
-# Produces a minimal container image running the native Rust kernel
-# with gRPC service on port 50051 and health check on port 8081.
+# Produces a minimal container image running the Eigenius CLI
+# with gRPC service on port 50051.
 
 # --- Build stage ---
 FROM rust:1.82-bookworm AS builder
+
+RUN apt-get update && apt-get install -y protobuf-compiler libclang-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
@@ -12,28 +14,19 @@ COPY kernel/ kernel/
 COPY storage/ storage/
 COPY cli/ cli/
 COPY proto/ proto/
+COPY ontologies/ ontologies/
 
-# Build the kernel service binary
-RUN cargo build --release --bin eigenius-kernel
+# Build the CLI binary (includes serve command)
+RUN cargo build --release -p eigenius-cli
 
 # --- Runtime stage ---
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/eigenius-kernel /usr/local/bin/eigenius-kernel
+COPY --from=builder /build/target/release/eigenius /usr/local/bin/eigenius
 
-# Load the Core Ontology and Foundation Layer definitions
-COPY ontologies/ /etc/eigenius/ontologies/
+EXPOSE 50051
 
-ENV EIGENIUS_GRPC_PORT=50051
-ENV EIGENIUS_HEALTH_PORT=8081
-ENV EIGENIUS_STORAGE_BACKEND=memory
-# For TiKV: EIGENIUS_STORAGE_BACKEND=tikv EIGENIUS_TIKV_PD_ENDPOINTS=pd0:2379,pd1:2379,pd2:2379
-
-EXPOSE 50051 8081
-
-HEALTHCHECK --interval=10s --timeout=3s \
-  CMD curl -sf http://localhost:8081/health || exit 1
-
-ENTRYPOINT ["eigenius-kernel"]
+ENTRYPOINT ["eigenius"]
+CMD ["serve", "--port", "50051"]

@@ -27,7 +27,7 @@ eigenius/
 │   └── Cargo.toml
 ├── storage/                   # Storage backend implementations
 │   ├── tikv/                  # TiKV backend crate (§10.7)
-│   ├── sqlite/                # SQLite/LibSQL backend crate
+│   ├── rocksdb/               # RocksDB embedded storage backend
 │   ├── memory/                # In-memory backend (testing)
 │   └── indexing/              # SPO/POS/OPS triple index construction (§10.8)
 ├── orchestration/             # Deno/TypeScript orchestration layer (§2.2)
@@ -218,24 +218,26 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 ---
 
-## 6. Phase 3 — Service
+## 6. Phase 3 — Service ✓
 
-**Goal:** The kernel runs as a standalone gRPC service. TiKV is the storage backend. The CLI talks to the service over the network. Deployed to Azure ContainerApps.
+**Goal:** The kernel runs as a standalone gRPC service with persistent storage. The CLI talks to the service over the network.
 
-**Duration estimate:** 4–6 weeks.
+**Duration estimate:** 4–6 weeks. **Completed:** April 12, 2026 (1 day, with Claude Code). CBOR serialization, RocksDB storage, gRPC server (tonic), CLI dual mode (local/remote), DB admin commands, server integration tests.
 
 ### 6.1 Deliverables
 
-- gRPC API definition (protobuf): `Load`, `Query`, `Validate`, `Reflect` RPCs with typed request/response messages derived from Eigon classes. Defined in `proto/`.
-- Kernel gRPC server: Rust binary using `tonic` that starts the kernel, runs the bootstrap sequence, connects to TiKV, and serves the four RPCs.
-- TiKV storage backend: implements `LayerStore`, `CapabilityStore`, `BlobStore` against TiKV's Rust client. Key encoding scheme for SPO/POS/OPS indexes. Layer-prefixed key ranges.
-- SQLite storage backend: for local development without TiKV.
-- CLI refactored to gRPC client mode: `eigenius --endpoint <url> load|query|validate|inspect`. Retains a `--local` mode using the in-memory or SQLite backend for offline use.
+- gRPC API definition (protobuf): `Load`, `Query`, `Validate`, `Reflect`, `Inspect`, `RunProgram` RPCs. Defined in `proto/eigenius.proto`.
+- Kernel gRPC server: Rust binary using `tonic` that starts the kernel, runs the bootstrap sequence, opens RocksDB storage, and serves RPCs.
+- RocksDB storage backend: implements `LayerStore` and `ResourceStore` traits. Ordered key-value model with prefix scans for efficient layer/resource retrieval. Same key encoding translates directly to TiKV when multi-node is needed.
+- CLI refactored to dual mode: `eigenius --local` (embedded kernel + RocksDB) and `eigenius --endpoint <url>` (gRPC client to remote kernel).
+- Orchestration layer gRPC client: interface defined (Connect RPC for Deno).
 - Dockerfile for kernel service: multi-stage Rust build, minimal runtime image.
 - Dockerfile for orchestration layer: Deno-based image.
-- Azure Bicep templates: ContainerApps Environment, kernel service container app, orchestration container app, Azure Container Registry, managed identity, TiKV connectivity (either self-hosted in Azure VMs or via a managed compatible service).
-- GitHub Actions CI/CD: PR checks (cargo test, cargo clippy, deno test, deno lint), release workflow (build containers, push to ACR, deploy to ContainerApps).
-- Health check and readiness probes on the kernel service.
+- DB admin commands: `db stats`, `db compact`, `db export`.
+- CBOR serialization (`eigon_cbor.rs`): compact binary format for storage and wire, deterministic encoding for content-addressed hashing.
+- Server integration tests: gRPC round-trip for Load, Inspect, Query, Health.
+
+Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the orchestration layer has real functionality to deploy.
 
 ### 6.2 Azure ContainerApps Architecture
 
@@ -265,7 +267,7 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 - TiKV hosting on Azure: self-managed on VMs, AKS-hosted with the TiKV Operator, or use a compatible managed service (PingCAP TiDB Cloud has a serverless tier). Design document needed (see §8.4).
 - gRPC vs. Connect Protocol: tonic supports standard gRPC; `connect-go`/`connect-web` offers HTTP/1.1 compatibility. Recommendation: standard gRPC via tonic for kernel↔orchestration; consider Connect for the public-facing API gateway if browser clients need direct access.
-- Authentication/authorization model for the service API: API keys, mTLS, Azure AD tokens? Scoped to Phase 3 as infrastructure, not the ontology-level security model (§13.2).
+- Authentication/authorization model for the service API: API keys, mTLS, Azure AD tokens? Deferred to Phase 4 alongside Azure deployment. Not the ontology-level security model (§13.2).
 
 ### 6.4 Test plan
 
@@ -287,10 +289,12 @@ The following decisions have been made and documented in **design doc D2** (`doc
 ### 7.1 Deliverables
 
 - LLM adapter Components in the orchestration layer: Anthropic Claude, OpenAI, configurable via provider resource in the ontology (§2.3). Using Vercel AI SDK or direct provider SDKs.
+- Orchestration layer gRPC client: Connect RPC connecting Deno to kernel service.
 - MCP server in the orchestration layer: exposes Load, Query, Validate, Reflect as MCP tools (§2.3). An LLM agent can query the knowledge graph, validate pipelines, and record reasoning traces via tool-use.
 - Reflection layer in the kernel: `ReasoningTrace` as a typed Eigon resource class (§11.2). Traces capture LLM invocations (prompt, completion, token usage, latency), program step results, and provenance links.
 - Universe stratification enforcement in the reflection layer (§11.3): reasoning traces about resources at level N are recorded at level N+1.
 - CLI `reflect` command: record a reasoning trace manually, query reasoning traces with EigenQL.
+- Azure deployment: Bicep templates for ContainerApps, GitHub Actions CI/CD (build containers, push to ACR, deploy to staging).
 - End-to-end demo: a program that takes a document resource, invokes an LLM to summarize it, records the reasoning trace, and stores the summary as a typed resource — all queryable after execution.
 
 ### 7.2 Key decisions required before coding
@@ -343,8 +347,8 @@ The following design documents must be written and reviewed before the phase tha
 | D1 | **Eigon Serialization Format** | **COMPLETED** — `docs/design/d1-eigon-serialization-format.md`. Eigon-JSON format, IRI identity, three-layer type system (data types/formats/content types), validation rules, canonical form, core ontology in `ontologies/core/core-ontology.json` | Phase 0 | Done |
 | D2 | **EigenQL v1 Specification** | **COMPLETED** — `docs/design/d2-eigenql-specification.md`. Full EBNF grammar, lexer spec, type checking rules, aggregation (COUNT/SUM/AVG/MIN/MAX), GROUP BY, ORDER BY, LIMIT/OFFSET, DISTINCT, NOT EXISTS, dot-path navigation, error format | Phase 1 | Done |
 | D3 | **Program Model and Component Interface** | **COMPLETED** — `docs/design/d3-program-model.md`. Programs as typed expressions (not programs), 12 expression forms mapping 1:1 to Mini-TT, Map/Reduce as language primitives, automatic parallelism from data dependencies, two-tier component model (built-in + WASM), ESL surface syntax (future) | Phase 2 | Done |
-| D4 | **TiKV Key Encoding & Deployment** | Key encoding scheme (SPO/POS/OPS layout), TiKV region placement strategy, Azure hosting model (VMs, AKS, or TiDB Cloud) | Phase 3 | 10–15 pages |
-| D5 | **gRPC API Specification** | Protobuf message definitions, streaming vs. unary RPCs, error codes, pagination for query results | Phase 3 | 8–10 pages |
+| D4 | **Storage Key Encoding** | **COMPLETED** — `docs/design/d4-storage-key-encoding.md`. Key encoding for RocksDB/TiKV, column families, layer chain persistence, index layout, TiKV compatibility | Phase 3 | Done |
+| D5 | **gRPC API Specification** | **COMPLETED** — `docs/design/d5-grpc-api-specification.md`. RPC definitions, streaming query, context management, error codes, authentication, CLI/orchestration integration | Phase 3 | Done |
 | D6 | **Reasoning Trace Schema** | Ontology classes and properties for traces, provenance link structure, universe level assignment rules | Phase 4 | 6–8 pages |
 | D7 | **Capability SDK & WASM Interface** | Import/export functions for WASM capabilities, resource serialization across the WASM boundary, fuel budget policy | Phase 5 | 10–12 pages |
 | D8 | **Capability Protocol Wire Format** | How native and WASM capabilities communicate with the kernel, serialization format for resource handles and results (resolves §14 open question) | Phase 5 | 6–8 pages |
@@ -364,9 +368,9 @@ The following design documents must be written and reviewed before the phase tha
 
 **Integration tests** (cross-crate): cover the interactions between kernel subsystems — layer commit triggers index construction, capability dispatch invokes the correct evaluator, query evaluation respects layer resolution order. Run with the in-memory storage backend for speed.
 
-**Service tests** (end-to-end): start the kernel gRPC service (with in-memory or SQLite backend), run the CLI against it, verify correct behavior. These are the primary regression tests from Phase 3 onward.
+**Service tests** (end-to-end): start the kernel gRPC service (with in-memory or RocksDB backend), run the CLI against it, verify correct behavior. These are the primary regression tests from Phase 3 onward.
 
-**Contract tests** (storage backends): a single test suite that runs against every storage backend implementation (in-memory, SQLite, TiKV), verifying that they all satisfy the `LayerStore`/`CapabilityStore`/`BlobStore` trait contracts identically.
+**Contract tests** (storage backends): a single test suite that runs against every storage backend implementation (in-memory, RocksDB, TiKV), verifying that they all satisfy the `LayerStore`/`CapabilityStore`/`BlobStore` trait contracts identically.
 
 **Property-based tests** (proptest/quickcheck): for the type system (random well-typed terms type-check, random ill-typed terms are rejected), layer resolution (random layer stacks produce deterministic resolution), and serialization (round-trip property for all Eigon types).
 
@@ -386,7 +390,7 @@ PR opened/updated
 Merge to main
   ├── All PR checks
   ├── cargo test --workspace --release  (optimized build correctness)
-  ├── Contract tests against SQLite
+  ├── Contract tests against RocksDB
   ├── Build container images
   ├── Push to Azure Container Registry
   └── Deploy to staging ContainerApps environment
@@ -474,7 +478,7 @@ Commands:
   version                  Print version and build info
 ```
 
-**Modes:** `--endpoint <url>` connects to a remote kernel service (gRPC). `--local` runs an embedded kernel with SQLite storage. Default: `--local` if no endpoint is configured.
+**Modes:** `--endpoint <url>` connects to a remote kernel service (gRPC). `--local` runs an embedded kernel with RocksDB storage. Default: `--local` if no endpoint is configured.
 
 **Output formats:** human-readable (default), `--json` for machine consumption, `--table` for tabular query results.
 
@@ -488,7 +492,7 @@ Commands:
 |-------|---------|
 | `tonic` + `prost` | gRPC server and protobuf codegen |
 | `tikv-client` | TiKV Rust client |
-| `rusqlite` | SQLite backend |
+| `rocksdb` | RocksDB embedded storage backend |
 | `wasmtime` | WASM capability sandbox |
 | `clap` | CLI argument parsing |
 | `serde` + `serde_json` | Eigon JSON serialization |
@@ -514,7 +518,7 @@ Commands:
 | TiKV Rust client maturity gaps | Blocks Phase 3 storage integration | Spike TiKV client early (before Phase 3). Fallback: use TiKV's gRPC API directly. |
 | Mini-TT → Rust port complexity | Delays Phase 2 type system | Port incrementally, test against Haskell reference. Start with a minimal subset (Pi, Sigma, sums). |
 | Deno FFI to Rust kernel friction | Complicates Phase 2 orchestration↔kernel communication | Use gRPC even for local development (Phase 2 can start the kernel as a subprocess). |
-| TiKV on Azure operational complexity | Delays Phase 3 deployment | Start with SQLite in ContainerApps for staging. Defer TiKV to production deployment. |
+| TiKV on Azure operational complexity | Delays Phase 3 deployment | Start with RocksDB in ContainerApps for staging. Defer TiKV to production deployment. |
 | WASM capability interface design | Blocks Phase 5 extensibility | Write design doc D7 early (during Phase 3 or 4) to derisk. |
 | Solo developer burnout on 6-phase plan | Stalls project | Each phase is independently valuable. The project is useful after Phase 1 (queryable knowledge graph). |
 
