@@ -122,11 +122,11 @@ The following decisions have been made and documented in **design doc D1** (`doc
 
 ---
 
-## 4. Phase 1 — Query
+## 4. Phase 1 — Query ✓
 
 **Goal:** EigenQL parses, type-checks, and evaluates against a populated layer chain. The system can answer questions about its own ontology, including recursive queries and aggregation.
 
-**Duration estimate:** 4–6 weeks.
+**Duration estimate:** 4–6 weeks. **Completed:** April 11, 2026 (1 day, with Claude Code).
 
 ### 4.1 Deliverables
 
