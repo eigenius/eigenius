@@ -1,21 +1,16 @@
-//! Core Ontology — Eigon structural type system
+//! Core Ontology — Eigon data model
 //!
-//! Implements the three primitive kinds (Class, Property, Datatype),
-//! resource representation, URI identity, and structural validation.
-//! The Core Ontology is self-describing: Class is an instance of Class.
+//! Everything in Eigenius is a Resource. Classes, properties, data types,
+//! formats, and instance data are all represented as Resources with IRI
+//! identity and typed property values.
 //!
-//! Architecture reference: §3 (Core Ontology)
+//! The core ontology is loaded from `ontologies/core/core-ontology.json`
+//! and forms the root layer of the layer chain.
 
-mod class;
-mod property;
-mod datatype;
-mod resource;
-mod uri;
-mod core_ontology;
+pub mod eigon_json;
+pub mod iri;
+pub mod resource;
+pub mod well_known;
 
-pub use class::Class;
-pub use property::Property;
-pub use datatype::Datatype;
-pub use resource::Resource;
-pub use uri::Uri;
-pub use core_ontology::CoreOntology;
+pub use iri::Iri;
+pub use resource::{Resource, Value};

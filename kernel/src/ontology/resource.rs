@@ -1,45 +1,285 @@
-//! Resource entity representing concrete instances in the ontology.
+//! Resource and Value types for Eigenius.
 //!
-//! Part of the Eigenius Ontology Layer (§6). Resources are concrete instances
-//! of Classes, with a URI identity, class membership, and property values
-//! stored in a flexible map structure.
+//! Everything in Eigenius is a Resource — classes, properties, data types,
+//! formats, and instance data are all represented uniformly. A Resource
+//! has an optional IRI identity and a set of property values.
 
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use crate::ontology::iri::Iri;
+use std::collections::BTreeMap;
 
-/// A Resource represents a concrete instance of a Class.
+/// A property value in the Eigon data model.
 ///
-/// Resources embody the actual data objects in the system, each belonging
-/// to a Class and carrying property values conforming to that Class's schema.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Resource {
-    /// Unique identifier for this resource in URI format
-    pub uri: String,
-
-    /// URI of the Class that this resource instantiates
-    pub class_uri: String,
-
-    /// Property values indexed by property URI
-    pub properties: HashMap<String, serde_json::Value>,
+/// Values are typed according to the property definition's `data_type`.
+/// The JSON-level representation determines which variant is used.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    /// UTF-8 string value.
+    String(String),
+    /// Signed integer in the 53-bit safe range.
+    Integer(i64),
+    /// 64-bit IEEE 754 floating-point number.
+    Float(f64),
+    /// Boolean true/false.
+    Boolean(bool),
+    /// Reference to another resource by IRI.
+    ResourceRef(Iri),
+    /// Embedded resource (no `@id`).
+    Embedded(Box<Resource>),
+    /// Ordered array of values (resource_array or value_array).
+    Array(Vec<Value>),
+    /// Opaque JSON value, not validated by the ontology.
+    Json(serde_json::Value),
 }
 
-impl Resource {
-    /// Creates a new Resource instance.
-    pub fn new(uri: String, class_uri: String) -> Self {
-        Self {
-            uri,
-            class_uri,
-            properties: HashMap::new(),
+impl Value {
+    /// Returns the value as a string, if it is one.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s),
+            _ => None,
         }
     }
 
-    /// Sets a property value on this resource.
-    pub fn set_property(&mut self, property_uri: String, value: serde_json::Value) {
-        self.properties.insert(property_uri, value);
+    /// Returns the value as an integer, if it is one.
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            Value::Integer(n) => Some(*n),
+            _ => None,
+        }
     }
 
-    /// Retrieves a property value from this resource.
-    pub fn get_property(&self, property_uri: &str) -> Option<&serde_json::Value> {
-        self.properties.get(property_uri)
+    /// Returns the value as a float, if it is one.
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Value::Float(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Returns the value as a boolean, if it is one.
+    pub fn as_boolean(&self) -> Option<bool> {
+        match self {
+            Value::Boolean(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Returns the value as a resource reference IRI, if it is one.
+    pub fn as_resource_ref(&self) -> Option<&Iri> {
+        match self {
+            Value::ResourceRef(iri) => Some(iri),
+            _ => None,
+        }
+    }
+
+    /// Returns the value as an embedded resource, if it is one.
+    pub fn as_embedded(&self) -> Option<&Resource> {
+        match self {
+            Value::Embedded(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Returns the value as an array, if it is one.
+    pub fn as_array(&self) -> Option<&[Value]> {
+        match self {
+            Value::Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    /// Extracts resource reference IRIs from an array value.
+    /// Handles both `ResourceRef` and `String` variants (since the JSON
+    /// parser stores all strings as `Value::String` — the distinction
+    /// between string literals and resource references is made by the
+    /// property's data_type, not at parse time).
+    /// Non-reference/non-string elements are silently skipped.
+    pub fn as_iri_array(&self) -> Vec<Iri> {
+        match self {
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| match v {
+                    Value::ResourceRef(iri) => Some(iri.clone()),
+                    Value::String(s) => Iri::parse(s).ok(),
+                    _ => None,
+                })
+                .collect(),
+            _ => vec![],
+        }
+    }
+}
+
+/// A resource in the Eigon data model.
+///
+/// Resources are the universal data unit. Everything — classes, properties,
+/// data types, formats, and instance data — is a Resource. Top-level resources
+/// have an `@id` (IRI identity). Embedded resources have no `@id` and exist
+/// only as property values of their parent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Resource {
+    /// IRI identity. `None` for embedded resources.
+    id: Option<Iri>,
+    /// Property values indexed by property IRI.
+    /// BTreeMap for deterministic ordering (required for canonical hashing)
+    /// and cache-friendly sequential access.
+    properties: BTreeMap<Iri, Value>,
+}
+
+impl Resource {
+    /// Create a new top-level resource with the given IRI.
+    pub fn new(id: Iri) -> Self {
+        Self {
+            id: Some(id),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// Create a new embedded resource (no `@id`).
+    pub fn new_embedded() -> Self {
+        Self {
+            id: None,
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// Returns the resource's IRI identity, or `None` for embedded resources.
+    pub fn id(&self) -> Option<&Iri> {
+        self.id.as_ref()
+    }
+
+    /// Returns true if this is a top-level resource (has an `@id`).
+    pub fn is_top_level(&self) -> bool {
+        self.id.is_some()
+    }
+
+    /// Get a property value by property IRI.
+    pub fn get(&self, property: &Iri) -> Option<&Value> {
+        self.properties.get(property)
+    }
+
+    /// Set a property value.
+    pub fn set(&mut self, property: Iri, value: Value) {
+        self.properties.insert(property, value);
+    }
+
+    /// Remove a property value, returning it if present.
+    pub fn remove(&mut self, property: &Iri) -> Option<Value> {
+        self.properties.remove(property)
+    }
+
+    /// Returns true if the resource has the given property.
+    pub fn has(&self, property: &Iri) -> bool {
+        self.properties.contains_key(property)
+    }
+
+    /// Returns all properties as a reference to the underlying BTreeMap.
+    pub fn properties(&self) -> &BTreeMap<Iri, Value> {
+        &self.properties
+    }
+
+    /// Returns the `is_a` class IRIs for this resource.
+    ///
+    /// Reads the `urn:eigenius:core:is_a` property and extracts
+    /// all resource reference IRIs from the array value.
+    pub fn is_a(&self) -> Vec<Iri> {
+        let is_a_iri = match Iri::parse(crate::ontology::well_known::IS_A) {
+            Ok(iri) => iri,
+            Err(_) => return vec![],
+        };
+        match self.properties.get(&is_a_iri) {
+            Some(value) => value.as_iri_array(),
+            None => vec![],
+        }
+    }
+
+    /// Returns true if this resource is an instance of the given class.
+    pub fn is_instance_of(&self, class_iri: &Iri) -> bool {
+        self.is_a().iter().any(|c| c == class_iri)
+    }
+
+    /// Returns an iterator over all property IRIs on this resource.
+    pub fn property_iris(&self) -> impl Iterator<Item = &Iri> {
+        self.properties.keys()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    #[test]
+    fn top_level_resource() {
+        let r = Resource::new(iri("urn:eigenius:example:alice"));
+        assert!(r.is_top_level());
+        assert_eq!(r.id().unwrap().as_str(), "urn:eigenius:example:alice");
+    }
+
+    #[test]
+    fn embedded_resource() {
+        let r = Resource::new_embedded();
+        assert!(!r.is_top_level());
+        assert!(r.id().is_none());
+    }
+
+    #[test]
+    fn set_and_get_property() {
+        let mut r = Resource::new(iri("urn:eigenius:example:alice"));
+        let prop = iri("urn:eigenius:example:name");
+        r.set(prop.clone(), Value::String("Alice".to_string()));
+        assert_eq!(r.get(&prop).unwrap().as_str(), Some("Alice"));
+    }
+
+    #[test]
+    fn is_a_returns_class_iris() {
+        let mut r = Resource::new(iri("urn:eigenius:example:rex"));
+        let is_a = iri("urn:eigenius:core:is_a");
+        r.set(
+            is_a,
+            Value::Array(vec![
+                Value::String("urn:eigenius:example:Dog".to_string()),
+                Value::String("urn:eigenius:example:Pet".to_string()),
+            ]),
+        );
+        let classes = r.is_a();
+        assert_eq!(classes.len(), 2);
+        assert_eq!(classes[0].as_str(), "urn:eigenius:example:Dog");
+        assert_eq!(classes[1].as_str(), "urn:eigenius:example:Pet");
+    }
+
+    #[test]
+    fn is_instance_of() {
+        let mut r = Resource::new(iri("urn:eigenius:example:rex"));
+        let is_a = iri("urn:eigenius:core:is_a");
+        r.set(
+            is_a,
+            Value::Array(vec![Value::String("urn:eigenius:example:Dog".to_string())]),
+        );
+        assert!(r.is_instance_of(&iri("urn:eigenius:example:Dog")));
+        assert!(!r.is_instance_of(&iri("urn:eigenius:example:Cat")));
+    }
+
+    #[test]
+    fn value_accessors() {
+        assert_eq!(Value::String("hi".into()).as_str(), Some("hi"));
+        assert_eq!(Value::Integer(42).as_integer(), Some(42));
+        assert_eq!(Value::Float(2.72).as_float(), Some(2.72));
+        assert_eq!(Value::Boolean(true).as_boolean(), Some(true));
+        assert!(Value::ResourceRef(iri("urn:a:b")).as_resource_ref().is_some());
+        assert!(Value::String("hi".into()).as_integer().is_none());
+    }
+
+    #[test]
+    fn properties_are_ordered() {
+        let mut r = Resource::new(iri("urn:eigenius:example:test"));
+        r.set(iri("urn:z:prop"), Value::String("z".into()));
+        r.set(iri("urn:a:prop"), Value::String("a".into()));
+        r.set(iri("urn:m:prop"), Value::String("m".into()));
+
+        let keys: Vec<&str> = r.property_iris().map(|i| i.as_str()).collect();
+        assert_eq!(keys, vec!["urn:a:prop", "urn:m:prop", "urn:z:prop"]);
     }
 }

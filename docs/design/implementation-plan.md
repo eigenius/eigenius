@@ -89,27 +89,32 @@ The build is organized into six phases. Each phase produces a working system tha
 
 ### 3.1 Deliverables
 
-- Eigon type representations in Rust: `Class`, `Property`, `Datatype`, `Resource` structs with URI identity, typed property maps, and class membership (architecture §3.2–3.5)
-- Core Ontology as a hardcoded Rust data structure — the self-describing bootstrap (§3.1, §3.6)
-- Layer system: `Layer` struct with parent pointer, namespace, immutability flag; `LayerStack` with top-down resolution; `commit_layer` with conflict detection (§7.1–7.5)
+- All data represented uniformly as `Resource` instances (no separate `Class`/`Property`/`DataType` Rust structs) — classes, properties, data types, formats, and instances are all `Resource` values distinguished by their `is_a` property (design doc D1)
+- Core Ontology loaded from `ontologies/core/core-ontology.json` as the root layer — the self-describing bootstrap in Eigon-JSON format (§3.1, §3.6, design doc D1)
+- Layer system: immutable `Layer` with parent pointers (`Arc<Layer>`), forming a chain. `LayerBuilder` accumulates resources and `build()` produces an immutable layer with a content-addressed `LayerId` (SHA-256). Resolution walks the parent chain (§7.1–7.5)
 - Execution context: `ExecutionContext` with snapshot binding, layer stack reference, read/read-write modes (§8.1–8.2)
 - Storage interface traits: `LayerStore`, `CapabilityStore`, `BlobStore` as Rust traits (§10.6)
 - In-memory storage backend implementing all three traits (§10.7)
-- Namespace validation: URI parsing, namespace ownership checks, `urn:eigenius:core:` protection (§6.1, §6.3)
+- Namespace validation: IRI parsing, namespace ownership checks, `urn:eigenius:core:` protection (§6.1, §6.3). Identifiers are IRIs (RFC 3987) using the `urn:` scheme. Max IRI length 512 characters.
 - Bootstrap sequence: hardcoded Core Ontology load + minimal Foundation Layer (§2.5) — no capabilities yet, just the structural scaffolding
 - CLI skeleton: `eigenius` binary with `load` subcommand (loads an Eigon resource file, validates against Core Ontology, prints validation result)
 
-### 3.2 Key decisions required before coding
+### 3.2 Key decisions (resolved)
 
-- Eigon serialization format: JSON-LD, custom JSON schema, or a binary format? This determines the on-disk and on-wire representation of resources. Recommendation: start with a well-defined JSON schema (Eigon-JSON) for human readability; add binary later.
-- Resource handle design: eager (full content in memory) vs. lazy (URI + materialization callback per §8.2). Recommendation: eager for Phase 0, refactor to lazy in Phase 3 when storage is remote.
-- Layer identifier scheme: content-addressed hash vs. sequential ID vs. UUID. Recommendation: content-addressed hash from the start — it's harder to retrofit than to start with.
+The following decisions have been made and documented in **design doc D1** (`docs/design/d1-eigon-serialization-format.md`):
+
+- **Eigon serialization format:** Eigon-JSON — a custom JSON format inspired by Atomic Data. `@id` is the only reserved key; property keys are full IRIs. No `@context`, no JSON-LD. Class membership via `urn:eigenius:core:is_a` property (always an array). Three-layer type system: primitive data types, format constraints, and content types.
+- **Identifier scheme:** IRIs (RFC 3987) using the registered `urn:` scheme (`urn:eigenius:<namespace>:<local-name>`). Not required to be fetchable — type resolution comes from the loaded ontology, not HTTP dereferencing.
+- **Validation model:** Open-world (extra properties allowed). Classes declare `requires`/`recommends`. Subclasses inherit from ancestors. Conditional requirements via `conditional_requires`. Domain constraints restrict which classes a property may be used on. `class_types` and `allows_only` constrain resource-typed property values. `format`, `pattern`, `min_value`/`max_value`, `min_length`/`max_length` constrain primitive values.
+- **Canonical form:** RFC 8785 (JSON Canonicalization Scheme) for content-addressed hashing.
+- **Resource handle design:** Eager for Phase 0, refactor to lazy in Phase 3 when storage is remote.
+- **Layer identifier scheme:** Content-addressed hash (SHA-256 of canonical form).
 
 ### 3.3 Test plan
 
-- **Ontology self-description:** Load the Core Ontology, verify that `Class` is an instance of `Class`, `Property` is an instance of `Property`, all core properties validate against their declared types.
-- **Layer resolution:** Create a 3-layer stack, place resources at different layers, verify top-down resolution returns the correct (topmost) resource for each URI.
-- **Shadowing:** Verify that a resource in layer 3 shadows the same URI in layer 1.
+- **Ontology self-description:** Load the Core Ontology from `ontologies/core/core-ontology.json`, verify that `Class` is an instance of `Class`, `Property` is an instance of `Class`, `is_a` is an instance of `Property`, all core properties validate against their declared data types, formats, domains, and conditional requirements.
+- **Layer resolution:** Create a 3-layer chain (root → layer 2 → layer 3), place resources at different layers, verify resolution walks the parent chain and returns the correct (topmost) resource for each IRI.
+- **Shadowing:** Verify that a resource in layer 3 shadows the same IRI in the root layer.
 - **Immutability:** Commit a layer, attempt to modify it, verify rejection.
 - **Namespace protection:** Attempt to create a resource under `urn:eigenius:core:` in a non-core layer, verify rejection.
 - **Round-trip:** Create resources, commit a layer, read back from in-memory storage, verify byte-exact equality.
@@ -131,7 +136,7 @@ The build is organized into six phases. Each phase produces a working system tha
 - Capability dispatch: the minimal dispatch loop — given a class identifier, look up the registered capability, invoke it. Foundation capabilities run in-process as native Rust (§9.5).
 - Triple index construction on layer commit (§10.8): SPO/POS/OPS indexes built as in-memory data structures, used by the query evaluator for efficient pattern matching.
 - CLI `query` command: takes an EigenQL query string, evaluates it against the current layer stack, prints typed results.
-- CLI `inspect` command: prints the contents of a layer or resource by URI.
+- CLI `inspect` command: prints the contents of a resource by IRI, resolved from the layer chain.
 
 ### 4.2 Key decisions required before coding
 
@@ -309,7 +314,7 @@ The following design documents must be written and reviewed before the phase tha
 
 | # | Document | Resolves | Required before | Estimated length |
 |---|----------|----------|-----------------|-----------------|
-| D1 | **Eigon Serialization Format** | JSON schema for Eigon resources, property value encoding, URI representation, blob references | Phase 0 | 10–15 pages |
+| D1 | **Eigon Serialization Format** | **COMPLETED** — `docs/design/d1-eigon-serialization-format.md`. Eigon-JSON format, IRI identity, three-layer type system (data types/formats/content types), validation rules, canonical form, core ontology in `ontologies/core/core-ontology.json` | Phase 0 | Done |
 | D2 | **EigenQL v1 Concrete Syntax** | Final EBNF grammar, keyword choices, escaping rules, error message format. Derived from the Semantic Query Language spec. | Phase 1 | 8–12 pages |
 | D3 | **DAG Specification Format** | How DAGs are authored: ESL surface syntax or a JSON/YAML DSL. Component signature declaration. | Phase 2 | 8–12 pages |
 | D4 | **TiKV Key Encoding & Deployment** | Key encoding scheme (SPO/POS/OPS layout), TiKV region placement strategy, Azure hosting model (VMs, AKS, or TiDB Cloud) | Phase 3 | 10–15 pages |
@@ -434,7 +439,7 @@ Commands:
   validate <dag-file>      Type-check a DAG specification
   run <dag-file> [inputs]  Execute a validated DAG
   reflect <trace-file>     Record a reasoning trace
-  inspect <uri>            Print a resource by URI
+  inspect <iri>            Print a resource by IRI
   layer list               List layers in the current stack
   layer commit             Commit the working layer
   capability list          List registered capabilities

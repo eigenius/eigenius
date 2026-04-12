@@ -11,6 +11,7 @@
 
 pub mod ontology;
 pub mod layer;
+pub mod validation;
 pub mod context;
 pub mod capability;
 pub mod storage;
