@@ -22,7 +22,7 @@ The architecture maintains a separation between three epistemic categories:
 
 **Observed knowledge** — facts recorded in the knowledge graph as typed Eigon resources with tracked provenance. An LLM may have surfaced them, but they are persisted as structured, auditable records: a measured binding affinity, a published experimental result, a dataset. The reflection layer (§11) records where each fact came from.
 
-**Derived knowledge** — conclusions that follow from observed knowledge through typed processing pipelines (DAGs). The type system guarantees the pipeline is well-formed. Reasoning traces record exactly which inputs produced which outputs through which steps. The derivation is replayable, queryable, and auditable. You can ask "what assumptions does this conclusion depend on?" and receive a typed, complete answer.
+**Derived knowledge** — conclusions that follow from observed knowledge through typed processing programs. The type system guarantees the program is well-formed. Reasoning traces record exactly which inputs produced which outputs through which steps. The derivation is replayable, queryable, and auditable. You can ask "what assumptions does this conclusion depend on?" and receive a typed, complete answer.
 
 **Verified knowledge** — derivations that carry formal proofs, checked by constructive type theories registered as capabilities (§9.7). A proof term attached to a resource is not a confidence score or a citation — it is a machine-checked certificate that the conclusion follows from the premises by the rules of the type theory. If the proof checks, the derivation is correct in the mathematical sense, not the probabilistic sense.
 
@@ -43,7 +43,7 @@ The progression from observed → derived → verified maps to the universe stra
 
 **Self-description.** The Core Ontology that defines all other ontology concepts is itself expressed using those same concepts. The system bootstraps from a small fixed set of primitives, and everything else — including processing pipelines, capabilities, and reasoning traces — is expressed within the same knowledge graph.
 
-**Type-first.** DAGs are functional programs. Validation is type-checking. A processing pipeline that passes validation carries a formal guarantee that its bindings are type-compatible and its required inputs are provably available. This is not a runtime check — it is static verification before execution begins.
+**Type-first.** Programs are typed expressions. Validation is type-checking. A processing pipeline that passes validation carries a formal guarantee that its bindings are type-compatible and its required inputs are provably available. This is not a runtime check — it is static verification before execution begins.
 
 **Self-reflection as load-bearing architecture.** The same graph that models a domain also captures the LLM's reasoning about that domain. Reasoning traces are first-class typed resources, not opaque logs. The system can query across domain and reasoning data uniformly using EigenQL.
 
@@ -55,7 +55,7 @@ The progression from observed → derived → verified maps to the universe stra
 
 ### 2.1 Rust Kernel
 
-The kernel is implemented in Rust with Verus proof annotations on correctness-critical components. It compiles to a **native Rust binary** for the primary service deployment and optionally to **WebAssembly** for browser and edge targets. The kernel is responsible for structural semantic concerns: Eigon type-checking, layer management, capability dispatch, and the reflection layer. It is deliberately *not* responsible for the semantics of any particular hosted language — including EigenQL and the DAG calculus — which are registered capabilities.
+The kernel is implemented in Rust with Verus proof annotations on correctness-critical components. It compiles to a **native Rust binary** for the primary service deployment and optionally to **WebAssembly** for browser and edge targets. The kernel is responsible for structural semantic concerns: Eigon type-checking, layer management, capability dispatch, and the reflection layer. It is deliberately *not* responsible for the semantics of any particular hosted language — including EigenQL and the program expression language — which are registered capabilities.
 
 **WASM as a capability sandbox.** The kernel's primary use of WebAssembly is not as its own compilation target but as an **isolation mechanism for untrusted capability code**. The capability protocol (§9) allows domain ontologies to register custom evaluators, validators, and parsers. When these are provided by third parties or untrusted domain authors, the kernel instantiates them as WASM modules via Wasmtime, providing memory isolation, bounded execution time, and a controlled interface surface. The kernel runs native; untrusted capabilities run sandboxed. This is the same pattern used by Envoy (proxy filters), Fastly (edge compute), and Figma (plugin isolation) — a trusted native host executing untrusted portable code within well-defined resource bounds.
 
@@ -80,7 +80,7 @@ The kernel is implemented in Rust with Verus proof annotations on correctness-cr
 
 ### 2.2 Host Layer
 
-The kernel exposes a **service API** consumed by an **orchestration layer**. In the primary server deployment, the kernel runs as a native Rust service, talks directly to TiKV for storage, and exposes its operations over gRPC (or equivalent). The orchestration layer — implemented in TypeScript targeting **Deno** as the preferred runtime — sits above the API boundary and handles DAG execution coordination, LLM adapter management, the MCP server surface, and developer tooling. The orchestration layer is an API client of the kernel service, not a WASM host.
+The kernel exposes a **service API** consumed by an **orchestration layer**. In the primary server deployment, the kernel runs as a native Rust service, talks directly to TiKV for storage, and exposes its operations over gRPC (or equivalent). The orchestration layer — implemented in TypeScript targeting **Deno** as the preferred runtime — sits above the API boundary and handles program execution coordination, LLM adapter management, the MCP server surface, and developer tooling. The orchestration layer is an API client of the kernel service, not a WASM host.
 
 Deno is chosen for native TypeScript execution (no build step), an explicit permission model that mirrors the capability protocol's design philosophy, and a direct path from server deployment to edge deployment (Deno Deploy) from the same codebase. Node.js is supported as a fallback runtime — the orchestration layer's TypeScript code is runtime-agnostic.
 
@@ -88,12 +88,12 @@ Deno is chosen for native TypeScript execution (no build step), an explicit perm
 
 - **Load** — add ontology resources to the working context, receive structural validation results
 - **Query** — dispatch an EigenQL query to the registered query capability within the current context, receive typed results
-- **Validate** — dispatch a DAG specification to the registered DAG validation capability, receive a typed validation report (including partial evaluation results)
+- **Validate** — dispatch a program specification to the registered program validation capability, receive a typed validation report (including partial evaluation results)
 - **Reflect** — record a reasoning trace as a typed resource, query across reasoning and domain uniformly
 
 **Orchestration layer responsibilities:**
 
-- DAG execution and orchestration — async runtime, component lifecycle, pipeline coordination
+- Program execution and orchestration — async runtime, component lifecycle, execution coordination
 - Component implementations — LLM adapters, document processors, external services (see §2.3)
 - MCP server — exposes the kernel's four operations as tools for LLM agents (see §2.3)
 - Developer tooling — editors, visualizers, ontology browsers, language servers
@@ -111,7 +111,7 @@ This architecture means the kernel has direct access to storage, native threadin
 
 The system interacts with LLMs and reasoning models in two directions, both mediated by the capability protocol and the host layer.
 
-**Core → LLM (DAG-driven invocation).** When a DAG step references a Component whose implementation is an LLM adapter, the execution engine (in the host layer) invokes the adapter with the step's typed inputs. The adapter translates the Eigon-typed request into a provider-specific API call (Anthropic Messages API, OpenAI Chat Completions, etc.), receives the response, and wraps it as a typed Eigon resource conforming to the Component's declared output type. The kernel sees only typed resources flowing through the pipeline; the host handles the network call, authentication, retries (per §12.2), and response parsing.
+**Core → LLM (program-driven invocation).** When a program expression applies a Component whose implementation is an LLM adapter, the execution engine invokes the adapter with the expression's typed inputs. The adapter translates the Eigon-typed request into a provider-specific API call (Anthropic Messages API, OpenAI Chat Completions, etc.), receives the response, and wraps it as a typed Eigon resource conforming to the Component's declared output type. The kernel sees only typed resources flowing through the program; the host handles the network call, authentication, retries, and response parsing.
 
 LLM adapter Components are registered in the ontology like any other Component. Their type signatures declare input classes (e.g., a prompt resource with system message, user message, and configuration properties) and output classes (e.g., a completion resource with content, token usage, and model metadata). The `NonDeterministic` marker (§4.1) and `Result` type (§4.5) are part of the signature — every LLM adapter is non-deterministic by nature and fallible due to network/API conditions.
 
@@ -119,19 +119,19 @@ LLM adapter Components are registered in the ontology like any other Component. 
 
 The natural integration point is the **Model Context Protocol (MCP)** or equivalent tool-use protocols. An Eigenius MCP server exposes the kernel's four operations (Load, Query, Validate, Reflect) as tools that an LLM can invoke through its tool-use mechanism. The typed nature of Eigon resources maps naturally to tool parameter schemas — an EigenQL query is a structured input, and the query result is a structured output, both with schemas derivable from the ontology.
 
-This bidirectional integration means an LLM can both *be orchestrated by* a DAG (as a Component step) and *orchestrate* DAGs (as an agent using tools). The reflection layer (§11) captures both interaction patterns as typed reasoning traces, creating a unified provenance record regardless of whether the LLM was the caller or the callee.
+This bidirectional integration means an LLM can both *be orchestrated by* a program (as a Component invocation) and *orchestrate* programs (as an agent using tools). The reflection layer (§11) captures both interaction patterns as typed reasoning traces, creating a unified provenance record regardless of whether the LLM was the caller or the callee.
 
 **Provider abstraction.** LLM adapter Components should be parameterized by a provider configuration resource rather than hardcoded to a specific API. The Vercel AI SDK provides a practical model for this: a unified interface across providers (Anthropic, OpenAI, Google, open-source models) with provider-specific configuration. The architecture does not mandate a specific SDK, but the Component registration model naturally supports swappable adapters — replacing an Anthropic adapter with an OpenAI adapter is a capability registration change, not a pipeline change, provided both conform to the same input/output class contract.
 
 ### 2.4 Lean 4 Formal Track
 
-Lean 4 is developed in parallel with the Rust kernel as a formal specification and proof environment. It is not a build dependency — Eigenius compiles and runs without it. Its role is to provide machine-checked proofs of metatheoretic properties: both for the kernel's structural guarantees and for the hosted languages (EigenQL, the DAG calculus) that run as registered capabilities.
+Lean 4 is developed in parallel with the Rust kernel as a formal specification and proof environment. It is not a build dependency — Eigenius compiles and runs without it. Its role is to provide machine-checked proofs of metatheoretic properties: both for the kernel's structural guarantees and for the hosted languages (EigenQL, the program expression language) that run as registered capabilities.
 
 **Lean 4 covers:**
 
 - Eigon structural type system soundness — well-typed resources satisfy their class constraints
-- EigenQL query semantics — pattern matching is sound with respect to the Eigon type system; variable bindings are type-consistent; evaluation terminates (trivially guaranteed for the v1 conjunctive query fragment; see §5 for the extension path to recursive Datalog, where termination becomes non-trivial and the Lean 4 proofs become load-bearing)
-- DAG calculus type safety — well-typed pipelines preserve types through execution
+- EigenQL query semantics — pattern matching is sound with respect to the Eigon type system; variable bindings are type-consistent; evaluation terminates (guaranteed for non-recursive queries trivially, and for recursive rules via seminaive fixpoint over finite fact sets; stratified negation prevents paradoxes)
+- Program type safety — well-typed programs preserve types through execution; termination guaranteed by strong normalization of the Mini-TT type theory
 - Stratification consistency — the universe level system prevents self-reference paradoxes
 
 **Connection to the Rust kernel:**
@@ -140,7 +140,7 @@ The Lean 4 development serves two distinct roles depending on whether the subjec
 
 For kernel-resident algorithms (Eigon structural type-checking, layer resolution, capability dispatch), the Lean 4 specification directly informs the Rust implementation. Type system rules in Lean become match arms in the Rust type checker. Verus annotations on the Rust kernel enforce that the implementation satisfies the contracts established by the Lean proofs.
 
-For capability-hosted languages (EigenQL, the DAG calculus), the Lean 4 proofs establish that the language semantics are sound — that well-typed queries terminate, that well-typed DAGs produce values of the declared type. The DAG type system is founded on a dependent type theory (Mini-TT) that is a direct fragment of CIC — Lean 4's own core theory — making the formal specification a scaled-up version of the same computational model rather than a translation into a different formalism. The Lean 4 specification serves as the authoritative reference against which capability implementations are verified, but Verus is not the enforcement mechanism — the capability implementations carry their own correctness discipline informed by the Lean proofs.
+For capability-hosted languages (EigenQL, the program expression language), the Lean 4 proofs establish that the language semantics are sound — that well-typed queries terminate, that well-typed programs produce values of the declared type. The program type system is founded on a dependent type theory (Mini-TT) that is a direct fragment of CIC — Lean 4's own core theory — making the formal specification a scaled-up version of the same computational model rather than a translation into a different formalism. The Lean 4 specification serves as the authoritative reference against which capability implementations are verified, but Verus is not the enforcement mechanism — the capability implementations carry their own correctness discipline informed by the Lean proofs.
 
 As the ecosystem matures, proved decision procedures in Lean 4 — type unification, and (once EigenQL is extended with recursive rules) stratification checking — may be reimplemented in Rust with the Lean proof as a machine-checked specification, whether those implementations live in the kernel or in capability code.
 
@@ -148,11 +148,11 @@ As the ecosystem matures, proved decision procedures in Lean 4 — type unificat
 
 ### 2.5 Bootstrap Sequence
 
-If EigenQL and the DAG validator are registered capabilities, and capability registration is expressed in the ontology, the system cannot use the standard capability dispatch protocol to load the capabilities it needs to perform capability dispatch. This circularity is resolved by a two-phase bootstrap sequence.
+If EigenQL and the program validator are registered capabilities, and capability registration is expressed in the ontology, the system cannot use the standard capability dispatch protocol to load the capabilities it needs to perform capability dispatch. This circularity is resolved by a two-phase bootstrap sequence.
 
-**Phase 1: Core Ontology.** The kernel loads the Core Ontology from its embedded static representation using a hardcoded structural validator. This does not go through the capability protocol — it is the one place where the kernel processes ontology resources without dispatching to external capabilities. After Phase 1, the kernel can structurally validate Eigon resources but cannot evaluate EigenQL queries or validate DAGs.
+**Phase 1: Core Ontology.** The kernel loads the Core Ontology from its embedded static representation using a hardcoded structural validator. This does not go through the capability protocol — it is the one place where the kernel processes ontology resources without dispatching to external capabilities. After Phase 1, the kernel can structurally validate Eigon resources but cannot evaluate EigenQL queries or validate programs.
 
-**Phase 2: Foundation Layer.** The kernel loads the Foundation Layer (`urn:eigenius:foundation:`) using a minimal hardcoded capability loader. The Foundation Layer defines the ontology classes for EigenQL queries, DAG specifications, ESL syntax, and their associated capability registrations. The hardcoded loader understands just enough of the capability registration schema to bootstrap these registrations into the capability dispatch table. It does not implement EigenQL or DAG validation — it only reads capability registration resources and wires them into the dispatch mechanism.
+**Phase 2: Foundation Layer.** The kernel loads the Foundation Layer (`urn:eigenius:foundation:`) using a minimal hardcoded capability loader. The Foundation Layer defines the ontology classes for EigenQL queries, program expressions, ESL syntax, and their associated capability registrations. The hardcoded loader understands just enough of the capability registration schema to bootstrap these registrations into the capability dispatch table. It does not implement EigenQL or program validation — it only reads capability registration resources and wires them into the dispatch mechanism.
 
 After Phase 2 completes, the standard capability dispatch protocol is fully operational. All subsequent ontology loading, querying, and validation proceeds through registered capabilities. The Foundation Layer is the only layer (other than the Core Ontology) that receives special treatment from the kernel.
 
@@ -162,13 +162,13 @@ After Phase 2 completes, the standard capability dispatch protocol is fully oper
 
 ### 2.6 Deployment Model
 
-The Rust kernel compiles to native code for the primary server deployment and to WASM for browser and edge targets. The orchestration layer provides DAG execution, LLM integration, and developer tooling. This architecture enables several deployment models from the same kernel codebase.
+The Rust kernel compiles to native code for the primary server deployment and to WASM for browser and edge targets. The orchestration layer provides program execution, LLM integration, and developer tooling. This architecture enables several deployment models from the same kernel codebase.
 
-**Server (native Rust kernel + Deno orchestration).** The primary deployment model. The kernel runs as a native Rust service, connecting directly to TiKV for distributed storage. The Deno orchestration layer connects to the kernel's gRPC API and handles DAG execution coordination, LLM adapter calls, and the MCP server surface. The full capability set is available: DAG execution, concurrent Map evaluation, distributed storage, real-time reasoning trace streaming, WASM-sandboxed capability execution. Untrusted capability code runs in WASM sandboxes managed by the kernel via Wasmtime. Node.js is supported as a fallback orchestration runtime.
+**Server (native Rust kernel + Deno orchestration).** The primary deployment model. The kernel runs as a native Rust service, connecting directly to TiKV for distributed storage. The Deno orchestration layer connects to the kernel's gRPC API and handles program execution coordination, LLM adapter calls, and the MCP server surface. The full capability set is available: program execution, concurrent Map evaluation, distributed storage, real-time reasoning trace streaming, WASM-sandboxed capability execution. Untrusted capability code runs in WASM sandboxes managed by the kernel via Wasmtime. Node.js is supported as a fallback orchestration runtime.
 
-**Edge / Serverless (WASM kernel).** For edge deployment, the kernel compiles to WASM and runs in edge runtimes (Deno Deploy, Cloudflare Workers, Vercel Edge Functions). Deno Deploy is the natural edge target given Deno as the orchestration runtime — the same TypeScript orchestration code runs in both environments. Storage is backed by platform-specific services (Deno KV, Cloudflare D1/KV/Durable Objects, or remote TiKV connections). Suitable for read-heavy workloads: ontology queries, DAG validation, serving pre-computed results. Write-heavy workloads (DAG execution with many reasoning traces) may be constrained by edge platform limits. In this deployment, the kernel runs as a WASM module instantiated by the edge runtime, with storage and clock provided via callbacks — the same interface as the browser deployment.
+**Edge / Serverless (WASM kernel).** For edge deployment, the kernel compiles to WASM and runs in edge runtimes (Deno Deploy, Cloudflare Workers, Vercel Edge Functions). Deno Deploy is the natural edge target given Deno as the orchestration runtime — the same TypeScript orchestration code runs in both environments. Storage is backed by platform-specific services (Deno KV, Cloudflare D1/KV/Durable Objects, or remote TiKV connections). Suitable for read-heavy workloads: ontology queries, program validation, serving pre-computed results. Write-heavy workloads (program execution with many reasoning traces) may be constrained by edge platform limits. In this deployment, the kernel runs as a WASM module instantiated by the edge runtime, with storage and clock provided via callbacks — the same interface as the browser deployment.
 
-**Browser (WASM kernel).** The kernel compiles to WASM and runs in a web browser. Storage is backed by IndexedDB (for local-first scenarios) or the kernel service's API (for thin-client scenarios). LLM adapters route through a backend proxy or use client-side API keys. Suitable for developer tooling (ontology browsers, DAG editors, query explorers) and local-first applications where the knowledge graph is small enough to fit in browser storage.
+**Browser (WASM kernel).** The kernel compiles to WASM and runs in a web browser. Storage is backed by IndexedDB (for local-first scenarios) or the kernel service's API (for thin-client scenarios). LLM adapters route through a backend proxy or use client-side API keys. Suitable for developer tooling (ontology browsers, program editors, query explorers) and local-first applications where the knowledge graph is small enough to fit in browser storage.
 
 **The kernel is the constant; the deployment target determines the compilation and integration model.** In the primary server deployment, the kernel runs native with direct storage access. In edge and browser deployments, the kernel compiles to WASM with storage mediated by callbacks. The kernel's four operations (Load, Query, Validate, Reflect) and the capability sandbox are available in all deployment models. The Deno orchestration layer's TypeScript code is shared across server and edge targets.
 
@@ -396,7 +396,7 @@ The Verus annotations on the kernel's layer management code formally enforce the
 
 ### 3.8 Extension through Domain Ontologies
 
-The Core Ontology intentionally provides only the primitives needed for self-description. It does not define concepts specific to any domain, processing model, or application. Everything else — including the ontology classes for DAGs, Components, capability registrations, and reasoning traces — is defined in domain ontologies that extend the Core Ontology through the layer system.
+The Core Ontology intentionally provides only the primitives needed for self-description. It does not define concepts specific to any domain, processing model, or application. Everything else — including the ontology classes for programs, Components, capability registrations, and reasoning traces — is defined in domain ontologies that extend the Core Ontology through the layer system.
 
 The Core Ontology makes no assumptions about what will be built on top of it. Its role is to provide a stable, formally grounded foundation that can carry any domain that can be expressed in terms of classes, properties, and typed values.
 
@@ -420,69 +420,69 @@ The following constructs from OWL and related formalisms are **excluded from the
 
 ---
 
-## 4. Processing DAGs
+## 4. Processing Programs
 
-### 4.1 DAGs as Total Functional Programs
+### 4.1 Programs as Total Functional Expressions
 
-Processing DAGs are not workflow descriptions, configuration files, or execution graphs in the DevOps sense. They are **functional programs** — and specifically, programs in a total functional programming language whose type system is grounded in the Eigon Core Ontology.
+Processing programs in Eigenius are typed expressions in a total functional programming language whose type system is grounded in the Eigon Core Ontology. Programs are represented as Eigon-JSON resources — the same format as everything else in the system — using expression forms (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map directly to Mini-TT terms. See design doc D3 (`docs/design/d3-program-model.md`) for the full specification.
 
-The distinction matters precisely. In a conventional workflow engine, a pipeline is a description that an interpreter executes, with type errors and failures discovered at runtime. In Eigenius, a DAG is a program in a typed language. A DAG that passes validation carries a formal guarantee: it terminates, it is type-safe, and it produces output of the declared type. Validation is not a heuristic check — it is a proof of these properties, performed statically before the first step executes.
+The distinction from conventional workflow engines matters precisely. In a conventional engine, a pipeline is a description that an interpreter executes, with type errors and failures discovered at runtime. In Eigenius, a program that passes validation carries a formal guarantee: it terminates, it is type-safe, and it produces output of the declared type. Validation is not a heuristic check — it is a proof of these properties, performed statically before the first expression evaluates.
 
-This makes the DAG validator a type inference and type checking algorithm, and the execution engine a runtime for a known-correct program. The two concerns are cleanly separated: correctness is established at validation time; execution is a mechanical process that cannot violate the established type guarantees.
+This makes the program validator a type inference and type checking algorithm, and the execution engine a runtime for a known-correct program. The two concerns are cleanly separated: correctness is established at validation time; execution is a mechanical process that cannot violate the established type guarantees.
 
-**Formal vs. operational properties.** The formal guarantees established by validation — termination, type safety, exhaustive error handling — are properties of the DAG *language*. They ensure that the pipeline's structure is correct. They do not guarantee properties of DAG *execution* that depend on external systems. Specifically:
+**Formal vs. operational properties.** The formal guarantees established by validation — termination, type safety, exhaustive error handling — are properties of the program *language*. They ensure that the pipeline's structure is correct. They do not guarantee properties of program *execution* that depend on external systems. Specifically:
 
-- **Non-determinism.** Steps that invoke LLMs or external services are non-deterministic: two executions of the same well-typed DAG with the same inputs may produce structurally different outputs. The type system guarantees that the output is of the declared type, but not that it is the same value. The reflection layer tracks this distinction — reasoning traces record which steps are deterministic and which are not, enabling downstream analysis of result reproducibility.
+- **Non-determinism.** Steps that invoke LLMs or external services are non-deterministic: two executions of the same well-typed program with the same inputs may produce structurally different outputs. The type system guarantees that the output is of the declared type, but not that it is the same value. The reflection layer tracks this distinction — reasoning traces record which steps are deterministic and which are not, enabling downstream analysis of result reproducibility.
 
-- **Bounded time.** The formal termination guarantee means the DAG program's *control flow* terminates — there are no infinite loops. It does not guarantee bounded wall-clock execution time, since external calls (LLM APIs, network services) may block indefinitely. The `ExecutionConstraints` on the execution context (§8.2) enforce wall-clock bounds as a runtime safety net, separate from the formal termination property.
+- **Bounded time.** The formal termination guarantee means the program program's *control flow* terminates — there are no infinite loops. It does not guarantee bounded wall-clock execution time, since external calls (LLM APIs, network services) may block indefinitely. The `ExecutionConstraints` on the execution context (§8.2) enforce wall-clock bounds as a runtime safety net, separate from the formal termination property.
 
-Components declare their determinism and fallibility characteristics in their type signatures. A Component whose implementation is both deterministic and total declares a plain output type. A Component that is non-deterministic but infallible (e.g., an LLM call that always returns *something*) declares its output type with a `NonDeterministic` marker. A Component that may fail declares `Result<A, E>`. These markers propagate through the DAG type system, and the reflection layer records them in reasoning traces.
+Components declare their determinism and fallibility characteristics in their type signatures. A Component whose implementation is both deterministic and total declares a plain output type. A Component that is non-deterministic but infallible (e.g., an LLM call that always returns *something*) declares its output type with a `NonDeterministic` marker. A Component that may fail declares `Result<A, E>`. These markers propagate through the program type system, and the reflection layer records them in reasoning traces.
 
 ### 4.2 Theoretical Foundation: Dependent Type Theory with Normalization by Evaluation
 
-The DAG language is founded on **total functional programming** — a discipline in which every well-typed program is guaranteed to terminate and produce a value of its declared type. Partial functions — functions that may diverge or fail on some inputs — cannot be expressed in the core language. Failure is represented in types, not as exceptions.
+The program language is founded on **total functional programming** — a discipline in which every well-typed program is guaranteed to terminate and produce a value of its declared type. Partial functions — functions that may diverge or fail on some inputs — cannot be expressed in the core language. Failure is represented in types, not as exceptions.
 
 The specific theoretical foundation is a **dependent type theory** based on Mini-TT — a minimal dependent type system with dependent functions (Pi types), dependent pairs (Sigma types), labeled sum types, and a universe of types — extended with Eigon ontology types as ground types. The evaluator uses **normalization by evaluation (NbE)**, which serves double duty as the core of both type checking and partial evaluation.
 
 This foundation is chosen over System Fω (the polymorphic lambda calculus with type-level functions) for three reasons that are specific to Eigenius's requirements:
 
-**Dependent types are native, not encoded.** In Eigenius, a DAG step that extracts a property from a resource produces an output whose type depends on the resource's class — a runtime value. In System Fω, this dependency must be encoded through type-level functions, which is indirect and limited. In dependent type theory, it is expressed directly as a Pi type: `Π (c : Class). PropType c → ResultType c`. The type of the output depends on the value of the class, and the type checker verifies this dependency through evaluation. This is the natural type-theoretic expression of ontology-driven typing.
+**Dependent types are native, not encoded.** In Eigenius, a program step that extracts a property from a resource produces an output whose type depends on the resource's class — a runtime value. In System Fω, this dependency must be encoded through type-level functions, which is indirect and limited. In dependent type theory, it is expressed directly as a Pi type: `Π (c : Class). PropType c → ResultType c`. The type of the output depends on the value of the class, and the type checker verifies this dependency through evaluation. This is the natural type-theoretic expression of ontology-driven typing.
 
-**Partial evaluation is a consequence, not a feature.** The NbE approach evaluates terms as far as possible, producing *normal forms* — fully reduced terms. When a term contains free variables (unknown values), evaluation does not fail; it produces a normal form containing *neutral terms* that represent computations waiting on the unknown values. This is precisely partial evaluation: a DAG with some inputs bound and some abstract evaluates to a residual pipeline containing only the dynamic parts. This has direct practical value (see §4.9) and requires no additional machinery beyond the type checker's own evaluation strategy.
+**Partial evaluation is a consequence, not a feature.** The NbE approach evaluates terms as far as possible, producing *normal forms* — fully reduced terms. When a term contains free variables (unknown values), evaluation does not fail; it produces a normal form containing *neutral terms* that represent computations waiting on the unknown values. This is precisely partial evaluation: a program with some inputs bound and some abstract evaluates to a residual pipeline containing only the dynamic parts. This has direct practical value (see §4.9) and requires no additional machinery beyond the type checker's own evaluation strategy.
 
-**The bridge to formal verification is structural, not an encoding.** Mini-TT is a fragment of the Calculus of Inductive Constructions (CIC), which is Lean 4's core type theory. Both use the same NbE approach for type checking, the same notion of definitional equality via normalization, and the same bidirectional type-checking discipline. The Lean 4 formal specification of the DAG type system is therefore a direct embedding of the same computational model at a larger scale — not a translation from one type theory into another. Proof terms produced by Lean 4 can be interpreted directly by the DAG type system's evaluator (with appropriate embedding), creating a seamless path from pipeline validation to formal verification.
+**The bridge to formal verification is structural, not an encoding.** Mini-TT is a fragment of the Calculus of Inductive Constructions (CIC), which is Lean 4's core type theory. Both use the same NbE approach for type checking, the same notion of definitional equality via normalization, and the same bidirectional type-checking discipline. The Lean 4 formal specification of the program type system is therefore a direct embedding of the same computational model at a larger scale — not a translation from one type theory into another. Proof terms produced by Lean 4 can be interpreted directly by the program type system's evaluator (with appropriate embedding), creating a seamless path from pipeline validation to formal verification.
 
 **The core type theory provides:**
 
-**Strong normalization.** Every well-typed DAG reduces to a normal form in a finite number of steps. The proof follows from the standard strong normalization argument for Mini-TT's type theory: all types are strictly positive, and the only recursion available is structural recursion over finite data (via `letrec` restricted to structurally decreasing arguments). There is no possibility of infinite loops in a validated pipeline.
+**Strong normalization.** Every well-typed program reduces to a normal form in a finite number of steps. The proof follows from the standard strong normalization argument for Mini-TT's type theory: all types are strictly positive, and the only recursion available is structural recursion over finite data (via `letrec` restricted to structurally decreasing arguments). There is no possibility of infinite loops in a validated pipeline.
 
 **Dependent function types (Pi).** A step from input type A to an output type that depends on the input value has type `Π (x : A). B(x)`. This subsumes both simple function types (`A → B`, when B does not depend on x) and polymorphic types (`Π (α : Class). α → α`, when the type variable ranges over ontology classes). There is no separate polymorphism mechanism — dependent functions provide it natively.
 
-**Dependent pair types (Sigma).** An execution context carrying a resource along with evidence about its type is expressed as `Σ (x : A). B(x)`. This subsumes both simple product types (when B does not depend on x) and existential types ("there exists a resource of some class satisfying a constraint"). The DAG execution context at any point is a nested Sigma type accumulating all step outputs computed so far.
+**Dependent pair types (Sigma).** An execution context carrying a resource along with evidence about its type is expressed as `Σ (x : A). B(x)`. This subsumes both simple product types (when B does not depend on x) and existential types ("there exists a resource of some class satisfying a constraint"). The program execution context at any point is a nested Sigma type accumulating all step outputs computed so far.
 
 **Labeled sum types.** The `Result<A, E>` type and domain-specific variant types are expressed as labeled sums: `Sum(ok : A | err : E)`. Pattern matching over sums is checked for exhaustiveness at the type level — every constructor must be handled.
 
-**Decidable type checking with bidirectional discipline.** Type *checking* (verifying that a term has a given type) is decidable for the restricted theory. Full type *inference* (inferring a type without any annotations) is not — this is an inherent property of dependent type theories. The practical impact is managed through bidirectional type checking: DAG boundaries (declared input and output classes), Component signatures, and step bindings carry explicit type annotations; the type checker infers types internally and checks them against the annotations. This is the same discipline used by Lean 4, Agda, and Idris. In practice, the annotations required are exactly those the architecture already mandates for readability and documentation — Component input/output types and DAG boundary types.
+**Decidable type checking with bidirectional discipline.** Type *checking* (verifying that a term has a given type) is decidable for the restricted theory. Full type *inference* (inferring a type without any annotations) is not — this is an inherent property of dependent type theories. The practical impact is managed through bidirectional type checking: program boundaries (declared input and output classes), Component signatures, and step bindings carry explicit type annotations; the type checker infers types internally and checks them against the annotations. This is the same discipline used by Lean 4, Agda, and Idris. In practice, the annotations required are exactly those the architecture already mandates for readability and documentation — Component input/output types and program boundary types.
 
-### 4.3 The DAG Type System
+### 4.3 The Program Type System
 
-The DAG type system extends the Eigon Core Ontology's type system with the constructs of the dependent type theory. Eigon types — classes, properties, and datatypes — are the **ground types**: they are values in the type theory that the evaluator resolves against the ontology layer stack. The dependent type theory's Pi, Sigma, and Sum types compose these ground types into the types of DAG steps, bindings, and pipelines.
+The program type system extends the Eigon Core Ontology's type system with the constructs of the dependent type theory. Eigon types — classes, properties, and datatypes — are the **ground types**: they are values in the type theory that the evaluator resolves against the ontology layer stack. The dependent type theory's Pi, Sigma, and Sum types compose these ground types into the types of program expressions, bindings, and pipelines.
 
 **Eigon ground types.** Ontology classes, properties, and datatypes are first-class values in the type theory. The evaluator resolves a class reference like `urn:ford:vehicles:Vehicle` against the current execution context's layer stack, producing a ground type value that carries the class's full property structure (required properties, recommended properties, subclass relationships). Type checking a property access on a resource of class C proceeds by evaluating the property's declared type from C's schema — this is dependent typing in action, since the result type depends on the class value.
 
 **Dependent function types (Pi).** A step from resource class A to resource class B has type `Π (_ : A). B` (written `A → B` when B does not depend on the input). When the output type depends on the input value — such as a step that extracts a named property and returns a value whose type is the property's declared datatype — the full dependent function type `Π (x : A). B(x)` is used. Composition of steps is function composition, and the type checker verifies compatibility by evaluating output and input types to normal forms and checking definitional equality.
 
-**Dependent pair types (Sigma) as execution context.** A DAG execution context at any point is a Sigma type accumulating all step outputs computed so far: `Σ (s1 : T1). Σ (s2 : T2(s1)). ... Σ (sn : Tn(s1,...,sn-1)). Unit`. Each step has access to any earlier step's output via its bindings, and the type of each step may depend on the values of earlier steps. The context type grows monotonically as steps execute.
+**Dependent pair types (Sigma) as execution context.** A program execution context at any point is a Sigma type accumulating all step outputs computed so far: `Σ (s1 : T1). Σ (s2 : T2(s1)). ... Σ (sn : Tn(s1,...,sn-1)). Unit`. Each step has access to any earlier step's output via its bindings, and the type of each step may depend on the values of earlier steps. The context type grows monotonically as steps execute.
 
 **Bounded polymorphism via dependent functions.** Steps may be polymorphic over ontology classes. A step that processes any resource satisfying a class constraint has type `Π (α : Class). (α <: C) → α → α`, where the subclass witness `α <: C` is a value that the type checker resolves from the ontology's subclass hierarchy. This replaces the System Fω-style bounded quantification `∀ α <: C. α → α` with a dependent formulation where the bound is a value-level witness rather than a syntactic constraint.
 
-**Sum types and Result.** Fallible steps return a labeled sum type: `Sum(ok : A | err : E)` where A is the success resource class and E is the error resource class. Both are Eigon resource classes. Pattern matching over the sum is checked for exhaustiveness at the type level — both constructors must be handled. A DAG that ignores the error case does not type-check. This replaces the previous `Result<A, E>` notation with the type theory's native labeled sums, making Result a defined type rather than a primitive.
+**Sum types and Result.** Fallible steps return a labeled sum type: `Sum(ok : A | err : E)` where A is the success resource class and E is the error resource class. Both are Eigon resource classes. Pattern matching over the sum is checked for exhaustiveness at the type level — both constructors must be handled. A program that ignores the error case does not type-check. This replaces the previous `Result<A, E>` notation with the type theory's native labeled sums, making Result a defined type rather than a primitive.
 
 **Collection types.** The `resource_array` datatype from Eigon is lifted to a typed collection `List(A)` where A is an Eigon class. The Map combinator is typed as `Π (A B : Class). (A → B) → List(A) → List(B)`. The element type is tracked through the type system via dependent function application.
 
 ### 4.4 Primitive Constructs
 
-The following constructs are primitive in the DAG language — they are not defined in terms of other constructs but are understood natively by the type checker and execution engine. All are total by construction.
+The following constructs are primitive in the program language — they are not defined in terms of other constructs but are understood natively by the type checker and execution engine. All are total by construction.
 
 **Step.** The atomic unit of computation. A Step references a Component — a named, typed function registered in the ontology — and provides bindings that route data from the current execution context into the Component's inputs. The type of a Step is determined by the Component's declared input and output types.
 
@@ -492,7 +492,7 @@ step "extract-entities" ExtractEntities {
 }
 ```
 
-**Sequence.** Ordered composition of steps sharing an execution context. The context type after a Sequence is the product of the context type before it and the output types of all steps within it. A Sequence is a reusable, named sub-pipeline that can be embedded within a DAG or within another Sequence.
+**Sequence.** Ordered composition of steps sharing an execution context. The context type after a Sequence is the product of the context type before it and the output types of all steps within it. A Sequence is a reusable, named sub-pipeline that can be embedded within a program or within another Sequence.
 
 **Binding.** The mechanism by which data is routed between steps. A Binding selects a value from the current execution context — identified by step label and optionally by property path — and routes it to a named input of the receiving step. The type checker verifies that the selected value's type is compatible with the receiving input's declared type, accounting for subclass relationships.
 
@@ -518,27 +518,27 @@ Reduce(sequence: Summarize, initial: EmptySummary, input: ctx.chunks) → Summar
 
 ### 4.5 Result Types and Fallibility
 
-Total functional programming requires that failure be represented in types rather than as exceptions. In the DAG language, any step that may fail due to external conditions — LLM calls, document processing, external service invocations — has an output type of `Result<A, E>` where A is the success class and E is the error class, both Eigon resources.
+Total functional programming requires that failure be represented in types rather than as exceptions. In the program language, any step that may fail due to external conditions — LLM calls, document processing, external service invocations — has an output type of `Result<A, E>` where A is the success class and E is the error class, both Eigon resources.
 
 This has several important consequences:
 
-**Error handling is mandatory.** A DAG that consumes a fallible step's output without handling the `Result` does not type-check. Error handling is not optional or easily overlooked — it is a type-level requirement.
+**Error handling is mandatory.** A program that consumes a fallible step's output without handling the `Result` does not type-check. Error handling is not optional or easily overlooked — it is a type-level requirement.
 
 **Error types are domain resources.** The error class E is a full Eigon resource with typed properties. Error information is structured and queryable, not an opaque string message. This means reasoning traces can include structured error context, and EigenQL can query across success and failure outcomes uniformly.
 
 **Fallibility propagates explicitly.** If a step producing `Result<A, E>` feeds into a subsequent step expecting A, the pipeline must include an explicit unwrapping step — either a Select that handles the error branch, or a combinator that propagates the error outward. The type system makes propagation visible and deliberate.
 
-**Components declare fallibility in their type.** A Component whose implementation may fail declares this in its output type. The DAG type checker sees the `Result` type at the Component boundary and propagates it through the pipeline accordingly. Components that are total — guaranteed to succeed — declare plain output types without Result.
+**Components declare fallibility in their type.** A Component whose implementation may fail declares this in its output type. The program type checker sees the `Result` type at the Component boundary and propagates it through the pipeline accordingly. Components that are total — guaranteed to succeed — declare plain output types without Result.
 
-### 4.6 DAG Validation as Type Checking
+### 4.6 Program Validation as Type Checking
 
-DAG validation is **bidirectional type checking** in the dependent type theory, using NbE for type equality. The validator operates in two modes — **checking** (verifying that a term has a given type) and **inference** (synthesizing a type from a term) — following the standard bidirectional discipline of Mini-TT.
+program validation is **bidirectional type checking** in the dependent type theory, using NbE for type equality. The validator operates in two modes — **checking** (verifying that a term has a given type) and **inference** (synthesizing a type from a term) — following the standard bidirectional discipline of Mini-TT.
 
 The validation process proceeds in the following phases:
 
 **Name resolution.** Component references and class references are resolved from shortnames to fully qualified IRIs using the current execution context's layer stack and capability registry. Resolved class references become ground type values in the evaluator.
 
-**Bidirectional type propagation.** Starting from the DAG's declared input type, the type checker propagates types forward through the step sequence. Steps, Bindings, and combinators (Map, Reduce, Select) are in *checking* mode — they are checked against the type expected by the context. Component references and variable lookups are in *inference* mode — their types are synthesized from the ontology schema and type environment. The context type is extended with each step's output type as it is processed.
+**Bidirectional type propagation.** Starting from the program's declared input type, the type checker propagates types forward through the step sequence. Steps, Bindings, and combinators (Map, Reduce, Select) are in *checking* mode — they are checked against the type expected by the context. Component references and variable lookups are in *inference* mode — their types are synthesized from the ontology schema and type environment. The context type is extended with each step's output type as it is processed.
 
 **Type equality by normalization.** When the type checker needs to verify that two types are compatible — e.g., that a step's output type matches the next step's expected input type — it evaluates both types to normal forms using the NbE evaluator and compares the results structurally. Two types are definitionally equal if and only if they have the same normal form. This is the `eqNf` operation in the type-checking algorithm. For Eigon ground types, normalization resolves class references against the layer stack, computes subclass relationships, and expands property inheritance, so that type equality accounts for the full ontology structure.
 
@@ -546,63 +546,63 @@ The validation process proceeds in the following phases:
 
 **Default branch checking.** For each Select, the type checker verifies that a default (catch-all) branch is present and that all branches — including the default — produce compatible output types (by normalizing and comparing).
 
-**Output type verification.** The type inferred for the final step's output is normalized and compared against the DAG's declared output type. If they are definitionally equal (accounting for subclass coercions), the DAG is well-typed.
+**Output type verification.** The type inferred for the final step's output is normalized and compared against the program's declared output type. If they are definitionally equal (accounting for subclass coercions), the program is well-typed.
 
 **Totality verification.** The type checker verifies that all recursive structures — Map, Reduce — are applied to finite collections and that all Sequences terminate. General recursion (`letrec`) is restricted to structural recursion over finite data — the same discipline enforced by Lean 4's termination checker. Since all primitives are total and recursion is bounded, strong normalization is guaranteed.
 
-A DAG that passes all validation phases carries the following formal guarantees:
+A program that passes all validation phases carries the following formal guarantees:
 - Its control flow terminates on every well-typed input (this is a structural guarantee about the program; wall-clock execution time depends on external systems and is bounded by `ExecutionConstraints`, not by the type system)
 - Every step receives inputs of the types it declared, verified by normalization-based type equality
 - The final output is of the declared output type
 - All failure cases are explicitly handled (sum type exhaustiveness)
 - Every Select has a default branch, so no input state is unhandled
-- The DAG can be partially evaluated with respect to any subset of its inputs, producing a well-typed residual (see §4.9)
+- The program can be partially evaluated with respect to any subset of its inputs, producing a well-typed residual (see §4.9)
 
 ### 4.7 Relationship to the Eigon Type System
 
-The DAG type system is not separate from the Eigon Core Ontology — it is built on top of it. DAG specifications are themselves Eigon resources. The classes `Dag`, `Step`, `Binding`, `Sequence`, `Map`, `Select`, and `Reduce` are defined in the Foundation Layer (under `urn:eigenius:foundation:dag:`) using the Core Ontology primitives.
+The program type system is not separate from the Eigon Core Ontology — it is built on top of it. Program specifications are themselves Eigon resources. The expression classes (`Program`, `Let`, `Apply`, `Lambda`, `Case`, `Map`, `Reduce`, etc.) are defined in the program ontology (under `urn:eigenius:program:`) using the Core Ontology primitives. See design doc D3 for the full specification.
 
 This means:
-- DAG specifications are stored, versioned, and queried like any other ontology resource
-- EigenQL can query across DAG structure and domain data uniformly — finding all DAGs that reference a specific Component, or all steps that consume a specific resource class
-- The reflection layer captures reasoning traces that reference the DAG steps that produced them, creating a typed provenance graph linking outputs back to the pipeline that computed them
-- The DAG type checker is a registered capability, not a kernel primitive — the kernel knows how to dispatch to it, but the type checking algorithm lives outside the kernel and can be evolved independently
+- program specifications are stored, versioned, and queried like any other ontology resource
+- EigenQL can query across program structure and domain data uniformly — finding all programs that reference a specific Component, or all steps that consume a specific resource class
+- The reflection layer captures reasoning traces that reference the program steps that produced them, creating a typed provenance graph linking outputs back to the pipeline that computed them
+- The program type checker is a registered capability, not a kernel primitive — the kernel knows how to dispatch to it, but the type checking algorithm lives outside the kernel and can be evolved independently
 
 ### 4.8 Connection to the Lean 4 Formal Track
 
-The DAG type system has a precise formal account in Lean 4. The dependent type theory underlying the DAG language is a fragment of the Calculus of Inductive Constructions (CIC) — Lean 4's core type theory. Both use the same computational model: terms, values, neutral terms, normalization by evaluation, and definitional equality via readback to normal forms. The DAG type system embeds into CIC directly and without encoding — it is a subsystem, not a translation target.
+The program type system has a precise formal account in Lean 4. The dependent type theory underlying the program language is a fragment of the Calculus of Inductive Constructions (CIC) — Lean 4's core type theory. Both use the same computational model: terms, values, neutral terms, normalization by evaluation, and definitional equality via readback to normal forms. The program type system embeds into CIC directly and without encoding — it is a subsystem, not a translation target.
 
-This structural correspondence is significantly tighter than the previous System Fω-based design, where embedding into CIC required encoding System Fω's type-level functions as CIC's dependent functions (a lossy step that obscured the relationship between the two systems). With the Mini-TT foundation, the DAG type checker's `eval`, `readback`, and `eqNf` operations correspond directly to the same operations in Lean 4's kernel, making the formal specification a scaled-up version of the implementation rather than a different formalism.
+This structural correspondence is significantly tighter than the previous System Fω-based design, where embedding into CIC required encoding System Fω's type-level functions as CIC's dependent functions (a lossy step that obscured the relationship between the two systems). With the Mini-TT foundation, the program type checker's `eval`, `readback`, and `eqNf` operations correspond directly to the same operations in Lean 4's kernel, making the formal specification a scaled-up version of the implementation rather than a different formalism.
 
-The Lean 4 formal development for DAGs covers:
+The Lean 4 formal development for programs covers:
 
-**Type system soundness.** A well-typed DAG does not go wrong — every step receives values of the types it declared, and the final output is of the declared type. Formally: if `Γ ⊢ dag : Π (x : A). B(x)` and the input has type A, then execution produces a value of type B(input). The dependent formulation means soundness covers value-dependent output types, not just fixed output types.
+**Type system soundness.** A well-typed program does not go wrong — every step receives values of the types it declared, and the final output is of the declared type. Formally: if `Γ ⊢ program : Π (x : A). B(x)` and the input has type A, then execution produces a value of type B(input). The dependent formulation means soundness covers value-dependent output types, not just fixed output types.
 
-**Termination.** Every well-typed DAG normalizes to a value (or a normal form containing neutral terms, for partial evaluation). The proof proceeds by showing that the type theory's recursion is restricted to structural recursion over finite data, and that all primitive DAG constructs (Map, Reduce, Select) are definable in the total fragment.
+**Termination.** Every well-typed program normalizes to a value (or a normal form containing neutral terms, for partial evaluation). The proof proceeds by showing that the type theory's recursion is restricted to structural recursion over finite data, and that all primitive program constructs (Map, Reduce, Select) are definable in the total fragment.
 
 **NbE correctness.** The normalization-by-evaluation algorithm is correct: two terms that are definitionally equal produce the same normal form, and two terms with different normal forms are not equal. This is the central proof obligation, since type equality in the dependent type system is decided by normalization. The proof follows the standard NbE correctness argument for Mini-TT, extended with the Eigon ground type resolution layer.
 
-**Partial evaluation soundness.** A partially evaluated DAG (one where some inputs are bound and others are abstract) is a well-typed normal form: it type-checks under an extended context where the abstract inputs are free variables. Executing the residual with the remaining inputs produces the same result as executing the original DAG with all inputs. This is a consequence of NbE correctness — partial evaluation is just normalization under an open context — but it warrants a separate formal statement because of its practical significance.
+**Partial evaluation soundness.** A partially evaluated program (one where some inputs are bound and others are abstract) is a well-typed normal form: it type-checks under an extended context where the abstract inputs are free variables. Executing the residual with the remaining inputs produces the same result as executing the original program with all inputs. This is a consequence of NbE correctness — partial evaluation is just normalization under an open context — but it warrants a separate formal statement because of its practical significance.
 
-**Correspondence with the capability implementation.** The implementation of DAG validation is a direct computational realization of the Lean 4 specification. The Lean 4 `eval`, `readback`, and type-checking functions correspond one-to-one with the capability implementation's functions. Because the DAG validator is a registered capability rather than a kernel primitive, Verus is not the enforcement mechanism — correctness is maintained through the structural correspondence, property-based test suites extracted from the Lean 4 development, and periodic formal audits.
+**Correspondence with the capability implementation.** The implementation of program validation is a direct computational realization of the Lean 4 specification. The Lean 4 `eval`, `readback`, and type-checking functions correspond one-to-one with the capability implementation's functions. Because the program validator is a registered capability rather than a kernel primitive, Verus is not the enforcement mechanism — correctness is maintained through the structural correspondence, property-based test suites extracted from the Lean 4 development, and periodic formal audits.
 
 ### 4.9 Partial Evaluation
 
 The NbE approach used for type checking provides partial evaluation as a direct consequence, requiring no additional machinery.
 
-**Mechanism.** The NbE evaluator processes a DAG term by evaluating it in an environment where some bindings are concrete values and others are *generators* — abstract placeholders representing unknown inputs. Evaluation proceeds as far as possible: concrete computations are reduced, and computations that depend on abstract inputs produce *neutral terms* — a structured representation of the stuck computation. The readback function converts the result to a normal form: a residual DAG term containing only the computations that depend on the remaining unknowns.
+**Mechanism.** The NbE evaluator processes a program term by evaluating it in an environment where some bindings are concrete values and others are *generators* — abstract placeholders representing unknown inputs. Evaluation proceeds as far as possible: concrete computations are reduced, and computations that depend on abstract inputs produce *neutral terms* — a structured representation of the stuck computation. The readback function converts the result to a normal form: a residual program term containing only the computations that depend on the remaining unknowns.
 
-In Mini-TT's implementation, this is the exact mechanism used for type checking under binders: when checking `Π (x : A). B(x)`, the type checker evaluates `B` with `x` bound to a generator (`Gen i`), producing a normal form of the body where `x` appears as a neutral term wherever the result depends on it. The same mechanism, applied to DAG terms, produces partially evaluated pipelines.
+In Mini-TT's implementation, this is the exact mechanism used for type checking under binders: when checking `Π (x : A). B(x)`, the type checker evaluates `B` with `x` bound to a generator (`Gen i`), producing a normal form of the body where `x` appears as a neutral term wherever the result depends on it. The same mechanism, applied to program terms, produces partially evaluated pipelines.
 
 **Practical applications:**
 
 **Pipeline specialization.** A generic pipeline parameterized by an ontology class can be partially evaluated with a specific class bound, producing a specialized pipeline where all type-dependent computations are resolved and only the data-dependent steps remain. This is analogous to template instantiation, but it is semantically grounded in the type theory rather than being a separate mechanism.
 
-**Static configuration resolution.** DAG steps that depend only on ontology schema information (class structure, property types, capability registrations) can be fully evaluated at validation time, since this information is available in the execution context's layer stack. The residual pipeline contains only steps that require runtime data (document contents, LLM responses, external API results).
+**Static configuration resolution.** program expressions that depend only on ontology schema information (class structure, property types, capability registrations) can be fully evaluated at validation time, since this information is available in the execution context's layer stack. The residual pipeline contains only steps that require runtime data (document contents, LLM responses, external API results).
 
-**Incremental revalidation.** When a layer is added to the stack (e.g., a new domain ontology), DAGs that were partially evaluated against the previous stack can be re-evaluated with the new layer. The NbE evaluator reduces the terms that are affected by the new layer and leaves the rest unchanged. This is more efficient than full revalidation when the change is small relative to the pipeline.
+**Incremental revalidation.** When a layer is added to the stack (e.g., a new domain ontology), programs that were partially evaluated against the previous stack can be re-evaluated with the new layer. The NbE evaluator reduces the terms that are affected by the new layer and leaves the rest unchanged. This is more efficient than full revalidation when the change is small relative to the pipeline.
 
-**Formal status.** Partial evaluation soundness — the guarantee that executing a partially evaluated residual with the remaining inputs produces the same result as executing the original DAG with all inputs — is a formal consequence of NbE correctness and is a proof target in the Lean 4 development (§4.8). It is not an optimization heuristic; it is a theorem about the type system.
+**Formal status.** Partial evaluation soundness — the guarantee that executing a partially evaluated residual with the remaining inputs produces the same result as executing the original program with all inputs — is a formal consequence of NbE correctness and is a proof target in the Lean 4 development (§4.8). It is not an optimization heuristic; it is a theorem about the type system.
 
 ### 4.10 Connecting the Eigon Ontology to the Type Theory
 
@@ -612,7 +612,7 @@ The dependent type theory (§4.2) uses Eigon classes, properties, and datatypes 
 
 The Core Ontology is self-describing: Class is an instance of Class, Property is an instance of Property. In CIC terms, `Class : Class` — a type inhabiting itself — is precisely what causes Girard's paradox and what CIC's universe hierarchy (`Type 0 : Type 1 : Type 2 : ...`) exists to prevent. Mini-TT's single universe `U` similarly excludes `U : U`.
 
-This paradox dissolves at the right architectural boundary. The Core Ontology's self-description is *assertional* — it is a metadata statement recorded in the knowledge graph (`Class` has `is_a: [Class]`). The type theory does not need to internalize this as `Class : Class`. Instead, Eigon ground types sit at a fixed level in the type theory's universe: they are opaque base types with known structure that the evaluator resolves from the layer stack. The type theory *uses* ontology types to type DAG terms; it does not *validate the ontology's self-description*. The kernel's hardcoded bootstrap (§2.5) validates the Core Ontology outside the normal type-checking pipeline — this boundary between ontology self-description and type-theoretic typing already exists architecturally.
+This paradox dissolves at the right architectural boundary. The Core Ontology's self-description is *assertional* — it is a metadata statement recorded in the knowledge graph (`Class` has `is_a: [Class]`). The type theory does not need to internalize this as `Class : Class`. Instead, Eigon ground types sit at a fixed level in the type theory's universe: they are opaque base types with known structure that the evaluator resolves from the layer stack. The type theory *uses* ontology types to type program terms; it does not *validate the ontology's self-description*. The kernel's hardcoded bootstrap (§2.5) validates the Core Ontology outside the normal type-checking pipeline — this boundary between ontology self-description and type-theoretic typing already exists architecturally.
 
 Consequently, the universe stratification in §11.4 and the type-theoretic universe hierarchy are separate mechanisms with different concerns. The ontology stratification prevents self-referential paradox in the knowledge graph (authorship levels). The type-theoretic universe prevents paradox in the type system (typing levels). They align — ontology level 0 maps to a fixed ground type level in the theory — but they are enforced independently.
 
@@ -665,7 +665,7 @@ The type theory's ground types are resolved from the execution context's layer s
 
 This has specific implications:
 
-**DAG validity is snapshot-relative.** A DAG validated under layer stack S is guaranteed well-typed only under S. If the layer stack changes (a new layer adds or modifies class definitions), DAGs that reference affected classes must be revalidated. The partial evaluation mechanism (§4.9) mitigates this cost — a partially evaluated DAG can be incrementally re-evaluated against the new layer, and only the terms affected by the change need reprocessing.
+**Program validity is snapshot-relative.** A program validated under layer stack S is guaranteed well-typed only under S. If the layer stack changes (a new layer adds or modifies class definitions), programs that reference affected classes must be revalidated. The partial evaluation mechanism (§4.9) mitigates this cost — a partially evaluated program can be incrementally re-evaluated against the new layer, and only the terms affected by the change need reprocessing.
 
 **Type equality includes layer resolution.** When the type checker compares two types for definitional equality, both sides are first evaluated (which includes resolving class references from the layer stack). Two class references that resolve to the same record type (same properties, same types, same canonical order) are definitionally equal, even if they have different IRIs. Two references to the same IRI that resolve differently under different layer stacks produce different types. This is handled naturally by the NbE evaluator — ground type resolution is part of evaluation, and equality checking compares normal forms.
 
@@ -673,9 +673,9 @@ This has specific implications:
 
 Not all ontology constraints belong in the type theory. The division is:
 
-**The type theory handles** (at DAG validation time):
+**The type theory handles** (at program validation time):
 
-- Types of DAG terms — every step, binding, and combinator is type-checked
+- Types of program terms — every step, binding, and combinator is type-checked
 - Property-dependent function types — output types that depend on input class structure
 - Pipeline composition — binding compatibility verified by normalization-based type equality
 - Subclass coercions — implicit record projections inserted by the type checker
@@ -693,7 +693,7 @@ Not all ontology constraints belong in the type theory. The division is:
 
 The two systems meet at the **ground type resolution interface**: the type theory's evaluator calls into the kernel to resolve a class reference into its record type (properties, datatypes, subclass relationships). The kernel ensures the ontology is structurally consistent *before* the type theory sees it. If the kernel accepts a class definition, the type theory can trust that the resulting record type is well-formed. If the kernel rejects a class definition (e.g., a circular subclass chain, a property with an undefined datatype), the type theory never encounters it.
 
-This boundary is clean because the concerns are genuinely different: the type theory reasons about individual DAG terms and their compositions; the kernel validates the consistency of the knowledge graph as a whole. Neither subsumes the other, and neither needs to duplicate the other's work.
+This boundary is clean because the concerns are genuinely different: the type theory reasons about individual program terms and their compositions; the kernel validates the consistency of the knowledge graph as a whole. Neither subsumes the other, and neither needs to duplicate the other's work.
 
 ---
 
@@ -716,20 +716,20 @@ Query ::= [USING clause] MATCH clause [WHERE clause] RETURN clause
 **USING.** Imports ontology classes for shortname reference within the query. Each IRI must resolve to a valid Class resource in the current execution context's layer stack. Class shortnames must be unique within the query scope.
 
 ```
-USING "urn:eigenius:foundation:dag:Dag",
-      "urn:eigenius:foundation:dag:Step"
+USING "urn:eigenius:program:Program",
+      "urn:eigenius:program:Component"
 ```
 
 **MATCH.** Specifies typed patterns to match against resources in the knowledge graph. Patterns bind variables to resources and their property values. Multiple patterns are joined by shared variables, forming a conjunction (implicit AND).
 
 ```
-MATCH Dag(?dag) {
+MATCH Program(?prog) {
     description: ?desc,
-    input_class: ?inputClass
+    input_type: ?inputType
 },
-Step(?step) {
-    parent_dag: ?dag,
-    component: ?comp
+Component(?comp) {
+    short_name: ?compName,
+    input_class: ?inputClass
 }
 ```
 
@@ -748,7 +748,7 @@ Type constraints on expressions: comparison operands must have the same datatype
 ```
 RETURN Step {
     component: ?comp,
-    dagDescription: ?desc
+    programDescription: ?desc
 }
 ```
 
@@ -768,7 +768,7 @@ Queries are monotonic with respect to the layer stack in v1: adding resources to
 
 ### 5.5 Guard Expression Semantics
 
-EigenQL queries are used as guard conditions in DAG Select constructs. When used as a guard, a query evaluates to true if there exists at least one assignment of values to query variables that satisfies all constraints — the MATCH patterns bind successfully and the WHERE conditions hold.
+EigenQL queries are used as guard conditions in program Select constructs. When used as a guard, a query evaluates to true if there exists at least one assignment of values to query variables that satisfies all constraints — the MATCH patterns bind successfully and the WHERE conditions hold.
 
 Guard queries omit the RETURN clause (since the purpose is boolean evaluation, not result shaping). A predefined class with shortname `Input` is available for pattern matching, bound to the current execution context's available properties at the point where the Select is evaluated.
 
@@ -873,9 +873,9 @@ The ontology within any single execution context is organized as a linear stack 
 └─────────────────────┘
 ```
 
-A linear stack is chosen over a DAG of layers deliberately. A DAG introduces resolution ambiguity when the same resource is defined in multiple parent layers, complicates snapshot semantics, and makes provenance reasoning difficult. The linear model eliminates these problems: within any single execution context, the visibility order is unambiguous, and there are no merge conflicts by construction.
+A linear stack is chosen over a program of layers deliberately. A program introduces resolution ambiguity when the same resource is defined in multiple parent layers, complicates snapshot semantics, and makes provenance reasoning difficult. The linear model eliminates these problems: within any single execution context, the visibility order is unambiguous, and there are no merge conflicts by construction.
 
-**The global layer structure is a tree, not a single stack.** Different execution contexts may have different top layers. Two contexts that share a common ancestor diverge above that ancestor — each sees its own linear stack, but the stacks share a common prefix. The set of all stacks across all contexts forms a tree (a singly-rooted structure where each layer has exactly one parent but may have multiple children). This is analogous to Git: each checkout sees a linear history, but the repository's branch structure is a DAG. The linearity guarantee is per-context, not global.
+**The global layer structure is a tree, not a single stack.** Different execution contexts may have different top layers. Two contexts that share a common ancestor diverge above that ancestor — each sees its own linear stack, but the stacks share a common prefix. The set of all stacks across all contexts forms a tree (a singly-rooted structure where each layer has exactly one parent but may have multiple children). This is analogous to Git: each checkout sees a linear history, but the repository's branch structure is a program. The linearity guarantee is per-context, not global.
 
 **Ontology combination is orthogonal to layers.** Combining two independent ontologies is an explicit operation that produces a new layer — it is not a structural property of the layer graph. The result is a normal Eigon layer that can be versioned, queried, and stacked like any other.
 
@@ -951,7 +951,7 @@ HLC is chosen over pure logical clocks because it maintains causality across dis
 
 **transaction.** Present only for ReadWrite contexts. Manages the write set, conflict detection at commit, and rollback on failure. Optimistic concurrency: writes are buffered, conflicts detected at commit time.
 
-**constraints.** Hard limits enforced by the context: maximum resources materialized, maximum wall-clock duration, maximum resources written, maximum sub-context nesting depth. These are safety constraints. In v1, EigenQL is a conjunctive query language whose evaluation terminates trivially — but DAG execution involves external calls (LLM APIs, document processors) with unbounded latency. Constraints bound the operational cost of execution where the type system cannot. When EigenQL is extended with recursive rules (see §5.6), these constraints also serve as termination backstops for fixpoint evaluation. They are not quality-of-service parameters.
+**constraints.** Hard limits enforced by the context: maximum resources materialized, maximum wall-clock duration, maximum resources written, maximum sub-context nesting depth. These are safety constraints. In v1, EigenQL is a conjunctive query language whose evaluation terminates trivially — but program execution involves external calls (LLM APIs, document processors) with unbounded latency. Constraints bound the operational cost of execution where the type system cannot. When EigenQL is extended with recursive rules (see §5.6), these constraints also serve as termination backstops for fixpoint evaluation. They are not quality-of-service parameters.
 
 **provenance.** Metadata linking this context to its initiator: the requesting principal, the wall-clock creation time, the initiating request identifier. Combined with the parent chain, this provides a complete audit trail for any computation.
 
@@ -989,9 +989,9 @@ The capability protocol and storage layer are not independently designed systems
 
 ### 9.1 Design Principle
 
-The kernel provides a small, fixed set of foundational primitives. Everything else — DAGs, Components, EigenQL itself, ESL, and constructive type theories — is a registered capability expressed within the ontology and associated with specific classes. New computational capabilities and sublanguages are introduced by extending the ontology, not by modifying the kernel.
+The kernel provides a small, fixed set of foundational primitives. Everything else — programs, Components, EigenQL itself, ESL, and constructive type theories — is a registered capability expressed within the ontology and associated with specific classes. New computational capabilities and sublanguages are introduced by extending the ontology, not by modifying the kernel.
 
-This means the kernel is not a system that knows about DAGs and Components. It is a system that knows how to host things that describe themselves as DAGs and Components.
+This means the kernel is not a system that knows about programs and Components. It is a system that knows how to host things that describe themselves as programs and Components.
 
 **Bootstrap exception.** The kernel contains a minimal hardcoded loader for the Foundation Layer and a fixed capability lookup primitive, as described in §2.5. These are the only places where the kernel has hardcoded knowledge of specific capability semantics. They exist solely to resolve the bootstrap circularity — once the Foundation Layer is loaded, all subsequent capability registration and dispatch proceeds through the standard protocol.
 
@@ -1007,7 +1007,7 @@ Examples:
 
 | Class | Evaluator | Validator | Parser |
 |---|---|---|---|
-| Dag | DAG execution engine | DAG type-checker | ESL dag/step keywords |
+| Program | program execution engine | program type-checker | ESL program/expression keywords |
 | EigenQL query | Query engine | Query well-formedness checker | EigenQL grammar |
 | Lean4Proof | Lean 4 kernel | Proof term checker | Lean surface syntax |
 | Component | Component dispatcher | Component type-checker | ESL component keyword |
@@ -1035,9 +1035,9 @@ A missing capability registration is a hard failure. The system does not silentl
 
 ### 9.5 Capability Trust and Foundation Capabilities
 
-The capability protocol allows higher layers to shadow capabilities registered in lower layers (§9.3). This creates a trust concern: a domain ontology could replace the DAG type checker or EigenQL evaluator with an implementation that violates the formal guarantees established by the Lean 4 proofs.
+The capability protocol allows higher layers to shadow capabilities registered in lower layers (§9.3). This creates a trust concern: a domain ontology could replace the program type checker or EigenQL evaluator with an implementation that violates the formal guarantees established by the Lean 4 proofs.
 
-To prevent this, the Foundation Layer capabilities — EigenQL evaluation, DAG validation, ESL parsing — are designated as **foundation capabilities**. The kernel enforces the following invariant: capability registrations under the `urn:eigenius:foundation:` namespace cannot be shadowed by registrations in non-foundation layers. This parallels the immutability protection on the Core Ontology (§3.7) but applies at the capability level rather than the resource level. A domain layer may register new capabilities for new classes, but it may not replace the foundation capabilities that provide the system's core formal guarantees.
+To prevent this, the Foundation Layer capabilities — EigenQL evaluation, program validation, ESL parsing — are designated as **foundation capabilities**. The kernel enforces the following invariant: capability registrations under the `urn:eigenius:foundation:` namespace cannot be shadowed by registrations in non-foundation layers. This parallels the immutability protection on the Core Ontology (§3.7) but applies at the capability level rather than the resource level. A domain layer may register new capabilities for new classes, but it may not replace the foundation capabilities that provide the system's core formal guarantees.
 
 Custom capability registrations for domain-specific classes are unrestricted. The trust boundary applies only to foundation capabilities whose correctness is load-bearing for the entire system.
 
@@ -1047,7 +1047,7 @@ Non-foundation capabilities registered by domain ontologies — custom validator
 
 **Memory isolation.** Each capability instance runs in its own WASM linear memory. A buggy or malicious capability cannot read or corrupt the kernel's memory, other capabilities' state, or the storage layer. The kernel passes data to the capability through the WASM module's import/export interface and receives results the same way — there is no shared mutable state.
 
-**Bounded execution.** The kernel enforces wall-clock and instruction-count limits on capability invocations via Wasmtime's fuel mechanism. A capability that enters an infinite loop or consumes excessive resources is terminated, and the dispatch returns an error through the standard `Result` type (§4.5). This complements the DAG-level `ExecutionConstraints` (§8.2) with per-capability-invocation bounds.
+**Bounded execution.** The kernel enforces wall-clock and instruction-count limits on capability invocations via Wasmtime's fuel mechanism. A capability that enters an infinite loop or consumes excessive resources is terminated, and the dispatch returns an error through the standard `Result` type (§4.5). This complements the program-level `ExecutionConstraints` (§8.2) with per-capability-invocation bounds.
 
 **Interface control.** A WASM capability module imports only the functions the kernel explicitly provides — a narrow interface for reading resources from the current execution context, emitting typed results, and logging. It cannot make network calls, access the file system, or interact with storage directly. If a capability needs external access (e.g., an LLM adapter calling a provider API), it declares this in its capability registration, and the kernel provides a controlled callback that the orchestration layer fulfills.
 
@@ -1069,7 +1069,7 @@ This means formal verification is not a special privileged operation in the kern
 
 The knowledge graph and ontology definitions are expected to exceed available RAM. The storage architecture is modeled after a distributed database system, not a heap-resident graph library. This is an architectural commitment, not a future scaling concern — shortcuts appropriate for in-memory systems would become lies at scale and are excluded from the design from the outset.
 
-**Storage/compute separation.** The architecture separates distributed data storage from reasoning and query evaluation. Storage — replication, consensus, partitioning, durability — is delegated to a dedicated distributed storage engine. Reasoning — type checking, NbE evaluation, EigenQL query planning and execution, DAG validation — runs in stateless Eigenius computation nodes that talk to the storage cluster. This separation has several consequences: storage and computation scale independently; computation nodes are stateless and horizontally scalable; the storage engine carries no semantic opinions about Eigenius's data model, query language, or type system; and the operational complexity of distributed storage (Raft groups, rebalancing, compaction) is isolated from the complexity of semantic evaluation (type inference, partial evaluation, layer-aware resolution). The storage engine provides ordered keys, range scans, and transactions. Eigenius builds everything else.
+**Storage/compute separation.** The architecture separates distributed data storage from reasoning and query evaluation. Storage — replication, consensus, partitioning, durability — is delegated to a dedicated distributed storage engine. Reasoning — type checking, NbE evaluation, EigenQL query planning and execution, program validation — runs in stateless Eigenius computation nodes that talk to the storage cluster. This separation has several consequences: storage and computation scale independently; computation nodes are stateless and horizontally scalable; the storage engine carries no semantic opinions about Eigenius's data model, query language, or type system; and the operational complexity of distributed storage (Raft groups, rebalancing, compaction) is isolated from the complexity of semantic evaluation (type inference, partial evaluation, layer-aware resolution). The storage engine provides ordered keys, range scans, and transactions. Eigenius builds everything else.
 
 ### 10.2 Write Profile
 
@@ -1100,9 +1100,9 @@ The snapshot identifier is an HLC timestamp, providing causality tracking across
 
 Committed layers are immutable (§7.3), but reasoning traces are "frequent, small, append-oriented" writes (§10.2). These two facts require an explicit reconciliation.
 
-Reasoning traces accumulate in the mutable top layer of a ReadWrite execution context during DAG execution. They are not individually committed as separate layers — that would be prohibitively expensive for the expected write frequency. Instead, when a DAG execution completes and its context commits, all reasoning traces generated during execution are committed atomically as part of the new immutable layer.
+Reasoning traces accumulate in the mutable top layer of a ReadWrite execution context during program execution. They are not individually committed as separate layers — that would be prohibitively expensive for the expected write frequency. Instead, when a program execution completes and its context commits, all reasoning traces generated during execution are committed atomically as part of the new immutable layer.
 
-This means reasoning traces generated during execution are invisible to concurrent read-only contexts until the executing context commits. For long-running DAG executions, this creates a visibility window: traces exist but are not queryable from outside the executing context. This is an acceptable trade-off — reasoning traces are provenance records, not coordination mechanisms. If real-time trace visibility is needed (e.g., for live monitoring of a running pipeline), a dedicated streaming interface outside the layer system should be provided. The layer system captures the authoritative, committed record.
+This means reasoning traces generated during execution are invisible to concurrent read-only contexts until the executing context commits. For long-running program executions, this creates a visibility window: traces exist but are not queryable from outside the executing context. This is an acceptable trade-off — reasoning traces are provenance records, not coordination mechanisms. If real-time trace visibility is needed (e.g., for live monitoring of a running pipeline), a dedicated streaming interface outside the layer system should be provided. The layer system captures the authoritative, committed record.
 
 ### 10.6 Storage Interface
 
@@ -1160,7 +1160,7 @@ The storage and runtime architecture draws from several mature open-source syste
 | Embedded database | SQLite, LibSQL (Turso) | Single-node and edge storage |
 | Embedded KV (Rust) | redb, RocksDB (via rust-rocksdb), sled | Native Rust embedded storage for non-WASM deployments |
 | Raft consensus (Rust) | openraft | Custom distribution layer option — commit ordering for immutable layers |
-| Orchestration runtime | Deno (primary), Node.js (fallback) | TypeScript orchestration layer — DAG execution, LLM adapters, MCP server |
+| Orchestration runtime | Deno (primary), Node.js (fallback) | TypeScript orchestration layer — program execution, LLM adapters, MCP server |
 | Capability sandbox | Wasmtime | WASM isolation for untrusted capability code in the native kernel (§9.6) |
 | WASM compilation | wasm-bindgen, wasm-pack | Kernel compilation to WASM for browser and edge deployment targets |
 | LLM provider abstraction | Vercel AI SDK | Unified interface across Anthropic, OpenAI, Google, open-source models |
@@ -1197,15 +1197,15 @@ Every resource in the knowledge graph falls into one of three epistemic categori
 
 **Observed** — a resource that represents a recorded fact with external provenance: a measurement, an experimental result, a published claim, a dataset entry. Its reasoning trace records the source (a paper DOI, a database identifier, a sensor reading) and the ingestion path (who loaded it, when, from where). The system does not vouch for its truth — it vouches for its provenance. An observed resource answers: "this is what was recorded, and here is where it came from."
 
-**Derived** — a resource that was produced by a typed processing pipeline (DAG) from other resources. Its reasoning trace records the complete derivation: which inputs, which pipeline steps, which Component invocations, what intermediate results. The type system guarantees the pipeline was well-formed; the reasoning trace guarantees the derivation is replayable. A derived resource answers: "this follows from those inputs through this process." The derivation can be audited, replayed, and challenged — but it is not formally proved.
+**Derived** — a resource that was produced by a typed processing pipeline (program) from other resources. Its reasoning trace records the complete derivation: which inputs, which pipeline steps, which Component invocations, what intermediate results. The type system guarantees the pipeline was well-formed; the reasoning trace guarantees the derivation is replayable. A derived resource answers: "this follows from those inputs through this process." The derivation can be audited, replayed, and challenged — but it is not formally proved.
 
 **Verified** — a derived resource that additionally carries a formal proof term, checked by a constructive type theory capability (§9.7). The proof term is a machine-checked certificate that the conclusion follows from the premises by the rules of the type theory. A verified resource answers: "this is mathematically certain given those axioms." The proof term itself is a typed Eigon resource (§11.5), queryable and auditable.
 
-The epistemic category is not a static label — it is computed from the resource's provenance graph. A resource is verified if and only if it has a checked proof term. It is derived if it was produced by a DAG but lacks a proof term. It is observed if it was ingested from an external source. A resource's category can be promoted (from derived to verified, by attaching a proof) but never demoted. The reflection layer enforces that epistemic category transitions are monotonic and auditable.
+The epistemic category is not a static label — it is computed from the resource's provenance graph. A resource is verified if and only if it has a checked proof term. It is derived if it was produced by a program but lacks a proof term. It is observed if it was ingested from an external source. A resource's category can be promoted (from derived to verified, by attaching a proof) but never demoted. The reflection layer enforces that epistemic category transitions are monotonic and auditable.
 
 ### 11.4 Universe Stratification
 
-The ontology describes itself, DAGs are programs, and programs operate on the ontology. This creates potential for self-referential paradox. The reflection layer enforces universe stratification to prevent inconsistency.
+The ontology describes itself, programs are typed expressions, and programs operate on the ontology. This creates potential for self-referential paradox. The reflection layer enforces universe stratification to prevent inconsistency.
 
 Ontology resources exist at levels. A resource at level N may describe and reference resources at levels 0 through N-1. It may not describe resources at its own level or higher.
 
@@ -1227,29 +1227,29 @@ This is a Phase 3 capability — not v1 scope — but the architecture is design
 
 ---
 
-## 12. DAG Execution Model
+## 12. Program Execution Model
 
 ### 12.1 Concurrency
 
-The DAG execution model is sequential by default. Steps in a Sequence execute in order, each seeing the results of all prior steps in the execution context.
+The program execution model is sequential by default. Steps in a Sequence execute in order, each seeing the results of all prior steps in the execution context.
 
 **Map parallelism.** The Map combinator applies a Sequence to each element of a collection "independently" — there are no data dependencies between iterations. The execution engine *may* execute Map iterations concurrently at its discretion. Each iteration runs in an independent sub-context that inherits the parent context's snapshot but has its own resource cache. Iterations do not share mutable state. The Map combinator collects results in input order regardless of execution order.
 
 **No inter-step parallelism.** Steps within a Sequence are not executed concurrently. The type system depends on the execution context growing monotonically as steps execute — concurrent steps would create ambiguity about context state. If a use case requires parallel execution of independent steps, it should be expressed as a Map over a collection of tasks, making the parallelism boundary explicit and type-safe.
 
-**Capability concurrency.** When the execution engine invokes a Component, the Component may internally use concurrency (e.g., parallel HTTP requests within an LLM adapter). This internal concurrency is invisible to the DAG type system — it is the Component's implementation concern, bounded by the sub-context's `ExecutionConstraints`.
+**Capability concurrency.** When the execution engine invokes a Component, the Component may internally use concurrency (e.g., parallel HTTP requests within an LLM adapter). This internal concurrency is invisible to the program type system — it is the Component's implementation concern, bounded by the sub-context's `ExecutionConstraints`.
 
 ### 12.2 Error Recovery and Retry
 
-The DAG type system requires explicit error handling via `Result<A, E>` types (§4.5). This addresses error *representation* but not error *recovery*. The following mechanisms complement the type system:
+The program type system requires explicit error handling via `Result<A, E>` types (§4.5). This addresses error *representation* but not error *recovery*. The following mechanisms complement the type system:
 
-**Retry policy as Component metadata.** Components that interact with external services (LLM APIs, network services) may declare a retry policy as part of their ontology registration. The retry policy specifies: maximum retry count, backoff strategy (fixed, exponential), retryable error classes (e.g., rate limiting, transient network failure), and a timeout per attempt. The execution engine applies the retry policy transparently — from the DAG's perspective, the Component either succeeds or returns an error `Result`. Retries are recorded in the reasoning trace for provenance.
+**Retry policy as Component metadata.** Components that interact with external services (LLM APIs, network services) may declare a retry policy as part of their ontology registration. The retry policy specifies: maximum retry count, backoff strategy (fixed, exponential), retryable error classes (e.g., rate limiting, transient network failure), and a timeout per attempt. The execution engine applies the retry policy transparently — from the program's perspective, the Component either succeeds or returns an error `Result`. Retries are recorded in the reasoning trace for provenance.
 
-**No DAG-level checkpointing in v1.** A failed DAG execution does not automatically resume from the last successful step. Full checkpointing requires serializing the execution context (including all intermediate step outputs) and restoring it, which is a significant engineering effort that can be deferred. For v1, a failed DAG is re-executed from the beginning. The reasoning trace from the failed execution is retained for diagnosis.
+**No program-level checkpointing in v1.** A failed program execution does not automatically resume from the last successful step. Full checkpointing requires serializing the execution context (including all intermediate step outputs) and restoring it, which is a significant engineering effort that can be deferred. For v1, a failed program is re-executed from the beginning. The reasoning trace from the failed execution is retained for diagnosis.
 
 **Idempotency annotation.** Components that have external side effects (writing to a document store, sending an API call) may declare `idempotent: true` or `idempotent: false` in their registration. The execution engine uses this annotation to determine whether retries are safe. A non-idempotent Component that fails is not retried — its error is propagated immediately.
 
-**Compensation is out of scope for v1.** Compensating transactions (undoing the effects of partially executed DAGs) require a saga pattern or equivalent, which is a substantial addition to the execution model. For v1, DAGs that require transactional atomicity across external side effects should encapsulate that logic within their Component implementations.
+**Compensation is out of scope for v1.** Compensating transactions (undoing the effects of partially executed programs) require a saga pattern or equivalent, which is a substantial addition to the execution model. For v1, programs that require transactional atomicity across external side effects should encapsulate that logic within their Component implementations.
 
 ---
 
@@ -1265,7 +1265,7 @@ The layer stack is the version history of the ontology (§7.3), but this is stru
 
 **Breaking changes require a new namespace version.** A breaking change to `urn:ford:vehicles:Vehicle` produces a new class at `urn:ford:vehicles:v2:Vehicle` (or an equivalent versioning scheme chosen by the namespace owner). The old class remains valid and queryable. A bridge layer may declare `equivalent_to` or migration relationships between versions.
 
-**Migration is explicit, not automatic.** The system does not automatically upgrade resources from one schema version to another. Migration is performed by a DAG that reads resources of the old class and writes resources of the new class — using the same typed pipeline infrastructure as any other processing task. This keeps the kernel simple and makes migrations auditable through reasoning traces.
+**Migration is explicit, not automatic.** The system does not automatically upgrade resources from one schema version to another. Migration is performed by a program that reads resources of the old class and writes resources of the new class — using the same typed pipeline infrastructure as any other processing task. This keeps the kernel simple and makes migrations auditable through reasoning traces.
 
 ### 13.2 Security Model
 
@@ -1273,7 +1273,7 @@ The v1 security model relies on three mechanisms: namespace governance (§6), ca
 
 **Namespace governance provides write isolation.** A layer can only write resources within its declared namespace. Cross-namespace writes are structurally impossible. This prevents a malicious or buggy layer from corrupting another namespace's resources.
 
-**Foundation capability protection provides execution integrity.** Foundation capabilities cannot be shadowed (§9.5). A domain layer cannot replace the EigenQL evaluator or DAG validator with a compromised implementation.
+**Foundation capability protection provides execution integrity.** Foundation capabilities cannot be shadowed (§9.5). A domain layer cannot replace the EigenQL evaluator or program validator with a compromised implementation.
 
 **Execution context isolation provides read boundaries.** A capability invoked within a sub-context can only access resources visible in that context's snapshot. It cannot reach outside its context boundary to access resources in other contexts or at other snapshots.
 
@@ -1281,11 +1281,11 @@ The v1 security model relies on three mechanisms: namespace governance (§6), ca
 
 ### 13.3 Observability
 
-**Reasoning traces as observability primitives.** The reflection layer (§11) provides structured, queryable records of every significant computation. Since reasoning traces are typed Eigon resources, they can be queried with EigenQL to answer operational questions: which steps in a DAG execution were slowest? Which Components failed most frequently? What was the token usage of a particular LLM call?
+**Reasoning traces as observability primitives.** The reflection layer (§11) provides structured, queryable records of every significant computation. Since reasoning traces are typed Eigon resources, they can be queried with EigenQL to answer operational questions: which steps in a program execution were slowest? Which Components failed most frequently? What was the token usage of a particular LLM call?
 
 **Execution constraints as monitoring hooks.** When an execution context approaches its constraint limits (e.g., 80% of maximum wall-clock duration), the kernel emits a structured warning as a reasoning trace resource. This provides a query-able record of near-limit executions.
 
-**Developer tooling specification is deferred.** The TypeScript layer includes "developer tooling — editors, visualizers, ontology browsers, language servers" (§2.2). The specific design of debugging tools (step-through DAG execution, intermediate context inspection, capability failure diagnosis) is a separate design effort that builds on the reasoning trace infrastructure defined here.
+**Developer tooling specification is deferred.** The TypeScript layer includes "developer tooling — editors, visualizers, ontology browsers, language servers" (§2.2). The specific design of debugging tools (step-through program execution, intermediate context inspection, capability failure diagnosis) is a separate design effort that builds on the reasoning trace infrastructure defined here.
 
 ---
 

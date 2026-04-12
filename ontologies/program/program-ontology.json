@@ -1,0 +1,519 @@
+[
+  {
+    "@id": "urn:eigenius:program:Program",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A top-level program: a typed function from input to output, represented as an expression tree.",
+    "urn:eigenius:core:short_name": "Program",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:input_type",
+      "urn:eigenius:program:output_type",
+      "urn:eigenius:program:body"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Let",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Let binding: let name : type = value; body.",
+    "urn:eigenius:core:short_name": "Let",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:name",
+      "urn:eigenius:program:type",
+      "urn:eigenius:program:value",
+      "urn:eigenius:program:body"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Apply",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Function application: f(argument).",
+    "urn:eigenius:core:short_name": "Apply",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:function"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:program:argument"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Var",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Variable reference.",
+    "urn:eigenius:core:short_name": "Var",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Lambda",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Anonymous function: λ parameter : parameter_type. body.",
+    "urn:eigenius:core:short_name": "Lambda",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:parameter",
+      "urn:eigenius:program:body"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:program:parameter_type"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Case",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Case expression: pattern match on a Sum type with exhaustive branches.",
+    "urn:eigenius:core:short_name": "Case",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:scrutinee",
+      "urn:eigenius:program:branches"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Branch",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A branch of a Case expression: constructor name with body.",
+    "urn:eigenius:core:short_name": "Branch",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:constructor",
+      "urn:eigenius:program:body"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Pair",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Pair construction: (first, second).",
+    "urn:eigenius:core:short_name": "Pair",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:first",
+      "urn:eigenius:program:second"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Construct",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Build a typed resource from computed values.",
+    "urn:eigenius:core:short_name": "Construct",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:class",
+      "urn:eigenius:program:fields"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Project",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Property access on a resource expression: e.property.",
+    "urn:eigenius:core:short_name": "Project",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:expression",
+      "urn:eigenius:program:property"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Map",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Parallel map: apply a function to each element of a collection. Elements are independent and can be executed concurrently.",
+    "urn:eigenius:core:short_name": "Map",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:function",
+      "urn:eigenius:program:collection"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Reduce",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Fold over a collection with an accumulator. Sequential by nature.",
+    "urn:eigenius:core:short_name": "Reduce",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:function",
+      "urn:eigenius:program:initial",
+      "urn:eigenius:program:collection"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:Literal",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A concrete literal value: string, integer, float, boolean, or resource reference.",
+    "urn:eigenius:core:short_name": "Literal",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:value"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:program:Component",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A registered computation unit. Components are typed functions with declared input/output types and implementation strategy.",
+    "urn:eigenius:core:short_name": "Component",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:component:input_type",
+      "urn:eigenius:program:component:output_type",
+      "urn:eigenius:program:component:implementation"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:program:component:wasm_binary",
+      "urn:eigenius:program:component:capability_level",
+      "urn:eigenius:program:component:deterministic",
+      "urn:eigenius:program:component:fallible",
+      "urn:eigenius:program:component:error_type"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:CapabilityLevel",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Declares what a component can access. Determines the WASM world for extension components.",
+    "urn:eigenius:core:short_name": "CapabilityLevel"
+  },
+
+  {
+    "@id": "urn:eigenius:program:input_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Input type for a Program.",
+    "urn:eigenius:core:short_name": "input_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Program"]
+  },
+  {
+    "@id": "urn:eigenius:program:output_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Output type for a Program.",
+    "urn:eigenius:core:short_name": "output_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Program"]
+  },
+  {
+    "@id": "urn:eigenius:program:body",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Body expression of a Program, Let, Lambda, or Branch.",
+    "urn:eigenius:core:short_name": "body",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Program", "urn:eigenius:program:Let", "urn:eigenius:program:Lambda", "urn:eigenius:program:Branch"]
+  },
+  {
+    "@id": "urn:eigenius:program:name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Variable name in a Let binding or Var reference.",
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Let", "urn:eigenius:program:Var"]
+  },
+  {
+    "@id": "urn:eigenius:program:type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Declared type annotation in a Let binding.",
+    "urn:eigenius:core:short_name": "type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Let"]
+  },
+  {
+    "@id": "urn:eigenius:program:value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Value expression in a Let binding, or concrete value in a Literal.",
+    "urn:eigenius:core:short_name": "value",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Let", "urn:eigenius:program:Literal"]
+  },
+  {
+    "@id": "urn:eigenius:program:function",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Function to apply (component IRI or expression) in Apply, Map, or Reduce.",
+    "urn:eigenius:core:short_name": "function",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Apply", "urn:eigenius:program:Map", "urn:eigenius:program:Reduce"]
+  },
+  {
+    "@id": "urn:eigenius:program:argument",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Argument expression in an Apply.",
+    "urn:eigenius:core:short_name": "argument",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Apply"]
+  },
+  {
+    "@id": "urn:eigenius:program:parameter",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Parameter name in a Lambda.",
+    "urn:eigenius:core:short_name": "parameter",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Lambda"]
+  },
+  {
+    "@id": "urn:eigenius:program:parameter_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional type annotation for a Lambda parameter.",
+    "urn:eigenius:core:short_name": "parameter_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Lambda"]
+  },
+  {
+    "@id": "urn:eigenius:program:scrutinee",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Expression being matched in a Case.",
+    "urn:eigenius:core:short_name": "scrutinee",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Case"]
+  },
+  {
+    "@id": "urn:eigenius:program:branches",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Array of Branch resources in a Case expression.",
+    "urn:eigenius:core:short_name": "branches",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:program:Branch"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Case"]
+  },
+  {
+    "@id": "urn:eigenius:program:constructor",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Constructor name in a Branch (e.g., 'ok' or 'err').",
+    "urn:eigenius:core:short_name": "constructor",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Branch"]
+  },
+  {
+    "@id": "urn:eigenius:program:first",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "First element of a Pair.",
+    "urn:eigenius:core:short_name": "first",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Pair"]
+  },
+  {
+    "@id": "urn:eigenius:program:second",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Second element of a Pair.",
+    "urn:eigenius:core:short_name": "second",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Pair"]
+  },
+  {
+    "@id": "urn:eigenius:program:class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Target class in a Construct expression.",
+    "urn:eigenius:core:short_name": "class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Construct"]
+  },
+  {
+    "@id": "urn:eigenius:program:fields",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Field expressions in a Construct. An embedded resource mapping property IRIs to expressions.",
+    "urn:eigenius:core:short_name": "fields",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Construct"]
+  },
+  {
+    "@id": "urn:eigenius:program:expression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Inner expression in a Project.",
+    "urn:eigenius:core:short_name": "expression",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Project"]
+  },
+  {
+    "@id": "urn:eigenius:program:property",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Property IRI to access in a Project expression.",
+    "urn:eigenius:core:short_name": "property",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Project"]
+  },
+  {
+    "@id": "urn:eigenius:program:collection",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Collection expression in Map or Reduce.",
+    "urn:eigenius:core:short_name": "collection",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Map", "urn:eigenius:program:Reduce"]
+  },
+  {
+    "@id": "urn:eigenius:program:initial",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Initial accumulator value in Reduce.",
+    "urn:eigenius:core:short_name": "initial",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Reduce"]
+  },
+
+  {
+    "@id": "urn:eigenius:program:component:input_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Expected input type for the component.",
+    "urn:eigenius:core:short_name": "input_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:output_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Produced output type from the component.",
+    "urn:eigenius:core:short_name": "output_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:implementation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Implementation type: 'builtin' for native components, 'wasm' for WASM extension components.",
+    "urn:eigenius:core:short_name": "implementation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:wasm_binary",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the WASM binary in blob storage. Required for wasm components.",
+    "urn:eigenius:core:short_name": "wasm_binary",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:capability_level",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "What the component can access. Determines the WASM world for extension components.",
+    "urn:eigenius:core:short_name": "capability_level",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:program:CapabilityLevel"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:program:capability_levels:pure",
+      "urn:eigenius:program:capability_levels:read",
+      "urn:eigenius:program:capability_levels:io"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:deterministic",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Whether the component produces the same output for the same input.",
+    "urn:eigenius:core:short_name": "deterministic",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:fallible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Whether the component may fail. If true, output type is Result (Sum of ok/err).",
+    "urn:eigenius:core:short_name": "fallible",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:error_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Error type if the component is fallible.",
+    "urn:eigenius:core:short_name": "error_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+
+  {
+    "@id": "urn:eigenius:program:capability_levels:pure",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:CapabilityLevel"],
+    "urn:eigenius:core:description": "Pure computation: no side effects, no imports. Data transformation only.",
+    "urn:eigenius:core:short_name": "pure"
+  },
+  {
+    "@id": "urn:eigenius:program:capability_levels:read",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:CapabilityLevel"],
+    "urn:eigenius:core:description": "Read-only access to the layer chain. Can resolve resources but not write.",
+    "urn:eigenius:core:short_name": "read"
+  },
+  {
+    "@id": "urn:eigenius:program:capability_levels:io",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:CapabilityLevel"],
+    "urn:eigenius:core:description": "Can read from layer chain and make network requests (LLM APIs, HTTP).",
+    "urn:eigenius:core:short_name": "io"
+  },
+
+  {
+    "@id": "urn:eigenius:program:components:Identity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "Pass-through component: returns input unchanged.",
+    "urn:eigenius:core:short_name": "Identity",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
+    "urn:eigenius:program:component:deterministic": true,
+    "urn:eigenius:program:component:fallible": false
+  },
+  {
+    "@id": "urn:eigenius:program:components:CompleteText",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "LLM text completion. Takes a prompt and request parameters, returns a text string.",
+    "urn:eigenius:core:short_name": "CompleteText",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
+    "urn:eigenius:program:component:deterministic": false,
+    "urn:eigenius:program:component:fallible": true
+  },
+  {
+    "@id": "urn:eigenius:program:components:CompleteJson",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "LLM structured output. Returns a typed resource matching a declared output schema.",
+    "urn:eigenius:core:short_name": "CompleteJson",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
+    "urn:eigenius:program:component:deterministic": false,
+    "urn:eigenius:program:component:fallible": true
+  },
+  {
+    "@id": "urn:eigenius:program:components:Combine",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "Merge properties from multiple inputs into one resource.",
+    "urn:eigenius:core:short_name": "Combine",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
+    "urn:eigenius:program:component:deterministic": true,
+    "urn:eigenius:program:component:fallible": false
+  },
+  {
+    "@id": "urn:eigenius:program:components:Extract",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "Extract specific properties from a resource.",
+    "urn:eigenius:core:short_name": "Extract",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
+    "urn:eigenius:program:component:deterministic": true,
+    "urn:eigenius:program:component:fallible": false
+  },
+  {
+    "@id": "urn:eigenius:program:components:Transform",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "Apply property mappings and renames to a resource.",
+    "urn:eigenius:core:short_name": "Transform",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
+    "urn:eigenius:program:component:deterministic": true,
+    "urn:eigenius:program:component:fallible": false
+  },
+  {
+    "@id": "urn:eigenius:program:components:HttpRequest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "HTTP request to an external service.",
+    "urn:eigenius:core:short_name": "HttpRequest",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
+    "urn:eigenius:program:component:deterministic": false,
+    "urn:eigenius:program:component:fallible": true
+  }
+]

@@ -1,6 +1,6 @@
 # Eigenius Orchestration Layer — Deno runtime
 #
-# Runs the TypeScript orchestration layer that handles DAG execution,
+# Runs the TypeScript orchestration layer that handles program execution,
 # LLM adapters, and the MCP server surface.
 
 FROM denoland/deno:2.0.0

@@ -16,7 +16,7 @@ Per the implementation plan, the following design documents are required:
 |---|----------|-----------------|
 | D1 | Eigon Serialization Format | Phase 0 |
 | D2 | EigenQL v1 Concrete Syntax | Phase 1 |
-| D3 | DAG Specification Format | Phase 2 |
+| D3 | Program Model | Phase 2 |
 | D4 | TiKV Key Encoding & Deployment | Phase 3 |
 | D5 | gRPC API Specification | Phase 3 |
 | D6 | Reasoning Trace Schema | Phase 4 |

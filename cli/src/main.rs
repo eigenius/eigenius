@@ -47,6 +47,32 @@ enum Commands {
         file: Option<String>,
     },
 
+    /// Type-check a program
+    ProgramValidate {
+        /// Path to program Eigon-JSON file
+        #[arg(value_name = "PROGRAM_FILE")]
+        program_file: String,
+
+        /// Optional ontology file to load first
+        #[arg(long, value_name = "FILE")]
+        ontology: Option<String>,
+    },
+
+    /// Execute a program
+    Run {
+        /// Path to program Eigon-JSON file
+        #[arg(value_name = "PROGRAM_FILE")]
+        program_file: String,
+
+        /// Path to input Eigon-JSON file
+        #[arg(value_name = "INPUT_FILE")]
+        input_file: String,
+
+        /// Optional ontology file to load first
+        #[arg(long, value_name = "FILE")]
+        ontology: Option<String>,
+    },
+
     /// Print a resource by IRI
     Inspect {
         /// IRI of the resource to inspect
@@ -65,6 +91,15 @@ fn main() {
         Commands::Load { file } => cmd_load(&file, cli.json),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
         Commands::Query { query, file } => cmd_query(&query, file.as_deref(), cli.json),
+        Commands::ProgramValidate {
+            program_file,
+            ontology,
+        } => cmd_program_validate(&program_file, ontology.as_deref(), cli.json),
+        Commands::Run {
+            program_file,
+            input_file,
+            ontology,
+        } => cmd_run(&program_file, &input_file, ontology.as_deref(), cli.json),
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
@@ -200,6 +235,159 @@ fn cmd_query(query_str: &str, file: Option<&str>, json_output: bool) {
             }
             std::process::exit(1);
         }
+    }
+}
+
+fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output: bool) {
+    let mut ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Load ontology if provided
+    if let Some(ont_file) = ontology {
+        load_file_into_context(&mut ctx, ont_file);
+    }
+
+    // Read and parse program
+    let content = match std::fs::read_to_string(program_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read '{program_file}': {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let resources = match eigon_json::parse_document(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Parse error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let program = match resources.into_iter().next() {
+        Some(r) => r,
+        None => {
+            eprintln!("No resources in program file");
+            std::process::exit(1);
+        }
+    };
+
+    // Parse and type-check
+    match eigenius_kernel::program::expr::parse_program(&program, ctx.head()) {
+        Ok((_term, typ)) => {
+            if json_output {
+                println!("{{\"status\":\"ok\",\"type\":\"{typ:?}\"}}");
+            } else {
+                println!("Program type-checks successfully.");
+                println!("Type: {typ:?}");
+            }
+        }
+        Err(e) => {
+            eprintln!("Program validation failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_run(program_file: &str, input_file: &str, ontology: Option<&str>, json_output: bool) {
+    let mut ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Load ontology if provided
+    if let Some(ont_file) = ontology {
+        load_file_into_context(&mut ctx, ont_file);
+    }
+
+    // Read program
+    let program_content = match std::fs::read_to_string(program_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read program '{program_file}': {e}");
+            std::process::exit(1);
+        }
+    };
+    let program = match eigon_json::parse_document(&program_content) {
+        Ok(mut r) => r.remove(0),
+        Err(e) => {
+            eprintln!("program parse error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Read input
+    let input_content = match std::fs::read_to_string(input_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read input '{input_file}': {e}");
+            std::process::exit(1);
+        }
+    };
+    let input = match eigon_json::parse_document(&input_content) {
+        Ok(mut r) => r.remove(0),
+        Err(e) => {
+            eprintln!("Input parse error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Execute
+    let registry = eigenius_kernel::program::execute::ComponentRegistry::default();
+    match eigenius_kernel::program::execute::execute_program(
+        &program,
+        &input,
+        ctx.head(),
+        &registry,
+    ) {
+        Ok(output) => {
+            let json = eigon_json::serialize_resource(&output);
+            if json_output {
+                println!("{}", serde_json::to_string(&json).unwrap());
+            } else {
+                println!("program execution succeeded.");
+                println!("{}", serde_json::to_string_pretty(&json).unwrap());
+            }
+        }
+        Err(e) => {
+            eprintln!("program execution failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn load_file_into_context(ctx: &mut eigenius_kernel::context::ExecutionContext, file: &str) {
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read '{file}': {e}");
+            std::process::exit(1);
+        }
+    };
+    let resources = match eigon_json::parse_document(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Parse error in '{file}': {e}");
+            std::process::exit(1);
+        }
+    };
+    for resource in resources {
+        if let Err(e) = ctx.add_resource(resource) {
+            eprintln!("Error loading '{file}': {e}");
+            std::process::exit(1);
+        }
+    }
+    if let Err(e) = ctx.commit("loaded") {
+        eprintln!("Commit failed for '{file}': {e}");
+        std::process::exit(1);
     }
 }
 

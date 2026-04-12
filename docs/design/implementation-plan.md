@@ -32,7 +32,7 @@ eigenius/
 │   └── indexing/              # SPO/POS/OPS triple index construction (§10.8)
 ├── orchestration/             # Deno/TypeScript orchestration layer (§2.2)
 │   ├── src/
-│   │   ├── dag/               # DAG execution engine (§12)
+│   │   ├── program/            # Program execution engine (§12)
 │   │   ├── llm/               # LLM adapters, provider abstraction (§2.3)
 │   │   ├── mcp/               # MCP server — LLM→Core tool surface (§2.3)
 │   │   └── client/            # gRPC client for kernel service
@@ -74,7 +74,7 @@ The build is organized into six phases. Each phase produces a working system tha
 |-------|------|----------------|-------------- |
 | 0 | Foundation | Eigon types exist, layers work, storage round-trips | Kernel with in-memory storage, unit tests |
 | 1 | Query | EigenQL v1 evaluates against a layer stack | EigenQL parser + evaluator, CLI `query` command |
-| 2 | Pipelines | DAGs type-check and execute | NbE type checker, DAG execution in orchestration layer |
+| 2 | Pipelines | Programs type-check and execute | NbE type checker, program execution in orchestration layer |
 | 3 | Service | Kernel runs as a gRPC service with TiKV | Containerized kernel, Azure deployment, CLI talks to service |
 | 4 | Intelligence | LLM integration works bidirectionally | LLM adapter Components, MCP server, reflection traces |
 | 5 | Extensibility | Untrusted capabilities run sandboxed | WASM capability sandbox via Wasmtime, domain ontology loading |
@@ -181,38 +181,38 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 ---
 
-## 5. Phase 2 — Pipelines
+## 5. Phase 2 — Pipelines ✓
 
-**Goal:** DAGs type-check against the Mini-TT dependent type system and execute through the orchestration layer. Partial evaluation works.
+**Goal:** programs type-check against the Mini-TT dependent type system and execute through the orchestration layer. Partial evaluation works.
 
-**Duration estimate:** 6–8 weeks.
+**Duration estimate:** 6–8 weeks. **Completed:** April 12, 2026 (1 day, with Claude Code). Programs represented as typed expressions (not workflow graphs), Mini-TT core ported from Haskell reference, program ontology with 54 resources, end-to-end pipeline: parse → type-check → execute.
 
 ### 5.1 Deliverables
 
 - Mini-TT implementation in Rust: Pi types, Sigma types, labeled sums, closures, environments, the `Val`/`Neut` value representation (§4.2). Ported from the Haskell reference implementation.
 - NbE evaluator: `eval`, `readback`, `check`/`checkI` (bidirectional type checking), `eqNf` (equality by normalization) (§4.6).
-- DAG type system: Components, Pipe, Parallel, Select, Map, Retry as typed constructs (§4.3–4.4). Type signatures with `Result<A, E>` for fallibility (§4.5). `NonDeterministic` marker.
-- DAG validator: takes a DAG specification and a typing context (derived from the layer stack's class definitions), runs the NbE type checker, reports type errors with source locations.
-- DAG validator registered as a Foundation Layer capability alongside EigenQL.
-- Partial evaluation: given a DAG and a subset of its inputs, produce a typed residual DAG (§4.9). Neutral terms (`Nt Neut`) represent unknown inputs.
-- Ground type resolution interface: the bridge between Eigon ontology types and Mini-TT ground types (§4.10). Class references in DAG type signatures resolve against the layer stack.
-- Orchestration layer (Deno/TypeScript): DAG execution engine that walks the validated DAG, executes Components (initially stub implementations), handles Pipe sequencing, Parallel fan-out, Select branching, Map iteration, Retry logic (§12.1–12.2).
-- CLI `validate` command: takes a DAG specification file, validates it, prints type checking results.
-- CLI `run` command: takes a validated DAG and input resources, executes it through the orchestration layer, prints output resources.
+- program type system: Components, Pipe, Parallel, Select, Map, Retry as typed constructs (§4.3–4.4). Type signatures with `Result<A, E>` for fallibility (§4.5). `NonDeterministic` marker.
+- program validator: takes a program specification and a typing context (derived from the layer stack's class definitions), runs the NbE type checker, reports type errors with source locations.
+- program validator registered as a Foundation Layer capability alongside EigenQL.
+- Partial evaluation: given a program and a subset of its inputs, produce a typed residual program (§4.9). Neutral terms (`Nt Neut`) represent unknown inputs.
+- Ground type resolution interface: the bridge between Eigon ontology types and Mini-TT ground types (§4.10). Class references in program type signatures resolve against the layer stack.
+- Orchestration layer (Deno/TypeScript): program execution engine that walks the validated program, executes Components (initially stub implementations), handles Pipe sequencing, Parallel fan-out, Select branching, Map iteration, Retry logic (§12.1–12.2).
+- CLI `validate` command: takes a program specification file, validates it, prints type checking results.
+- CLI `run` command: takes a validated program and input resources, executes it through the orchestration layer, prints output resources.
 
 ### 5.2 Key decisions required before coding
 
-- DAG specification format: how are DAGs authored? ESL surface syntax? A YAML/JSON DSL? This needs a design document (see §8.2 of this plan).
+- program specification format: how are programs authored? ESL surface syntax? A YAML/JSON DSL? This needs a design document (see §8.2 of this plan).
 - Component interface: what does a Component implementation look like from the orchestration layer's perspective? Input/output types, error handling, timeout contract.
 - Orchestration ↔ kernel communication for Phase 2: before the gRPC service exists (Phase 3), the orchestration layer can embed the kernel as a Rust library via FFI or WASM. Recommendation: use the in-memory storage backend and call kernel functions directly via Deno FFI (`Deno.dlopen`) for Phase 2, then switch to gRPC in Phase 3.
 
 ### 5.3 Test plan
 
 - **Mini-TT core:** Port the Mini-TT test suite from the Haskell implementation. Verify that well-typed terms check, ill-typed terms are rejected, and NbE produces expected normal forms.
-- **DAG type checking:** A well-typed pipeline (Component → Pipe → Component) type-checks. A pipeline with a type mismatch (output type of step 1 ≠ input type of step 2) is rejected with a clear error.
-- **Partial evaluation:** Provide 2 of 3 inputs to a DAG, verify the residual is a valid DAG with one remaining input. Execute the residual with the final input, verify the result matches full execution.
+- **program type checking:** A well-typed pipeline (Component → Pipe → Component) type-checks. A pipeline with a type mismatch (output type of step 1 ≠ input type of step 2) is rejected with a clear error.
+- **Partial evaluation:** Provide 2 of 3 inputs to a program, verify the residual is a valid program with one remaining input. Execute the residual with the final input, verify the result matches full execution.
 - **Select exhaustiveness:** A Select without a default branch is rejected. A Select with a default branch type-checks.
-- **DAG execution:** A 3-step pipeline with stub Components executes end-to-end, producing typed output resources.
+- **program execution:** A 3-step pipeline with stub Components executes end-to-end, producing typed output resources.
 - **Error propagation:** A Component that returns `Err` triggers the Retry logic (if configured) or propagates the error.
 - **Parallel execution:** A Parallel construct with 3 branches executes concurrently (verify via timing — parallel should be faster than sequential).
 
@@ -280,7 +280,7 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 ## 7. Phase 4 — Intelligence
 
-**Goal:** LLMs can be invoked from DAGs and can invoke Eigenius as a tool. Reasoning traces are recorded and queryable.
+**Goal:** LLMs can be invoked from programs and can invoke Eigenius as a tool. Reasoning traces are recorded and queryable.
 
 **Duration estimate:** 4–6 weeks.
 
@@ -288,10 +288,10 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 - LLM adapter Components in the orchestration layer: Anthropic Claude, OpenAI, configurable via provider resource in the ontology (§2.3). Using Vercel AI SDK or direct provider SDKs.
 - MCP server in the orchestration layer: exposes Load, Query, Validate, Reflect as MCP tools (§2.3). An LLM agent can query the knowledge graph, validate pipelines, and record reasoning traces via tool-use.
-- Reflection layer in the kernel: `ReasoningTrace` as a typed Eigon resource class (§11.2). Traces capture LLM invocations (prompt, completion, token usage, latency), DAG step results, and provenance links.
+- Reflection layer in the kernel: `ReasoningTrace` as a typed Eigon resource class (§11.2). Traces capture LLM invocations (prompt, completion, token usage, latency), program step results, and provenance links.
 - Universe stratification enforcement in the reflection layer (§11.3): reasoning traces about resources at level N are recorded at level N+1.
 - CLI `reflect` command: record a reasoning trace manually, query reasoning traces with EigenQL.
-- End-to-end demo: a DAG that takes a document resource, invokes an LLM to summarize it, records the reasoning trace, and stores the summary as a typed resource — all queryable after execution.
+- End-to-end demo: a program that takes a document resource, invokes an LLM to summarize it, records the reasoning trace, and stores the summary as a typed resource — all queryable after execution.
 
 ### 7.2 Key decisions required before coding
 
@@ -301,9 +301,9 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 ### 7.3 Test plan
 
-- **LLM adapter:** Mock LLM provider, execute a DAG with an LLM step, verify typed output resource matches the mock response.
+- **LLM adapter:** Mock LLM provider, execute a program with an LLM step, verify typed output resource matches the mock response.
 - **MCP round-trip:** Start MCP server, connect an MCP client, invoke Query tool, verify correct typed response.
-- **Reasoning trace persistence:** Execute a DAG, verify reasoning traces are committed as part of the layer, queryable via EigenQL.
+- **Reasoning trace persistence:** Execute a program, verify reasoning traces are committed as part of the layer, queryable via EigenQL.
 - **Universe stratification:** A reasoning trace about a level-0 resource is at level 1. Attempt to create a level-0 trace about a level-0 resource — verify rejection.
 - **Provenance query:** "Which LLM calls contributed to resource X?" — answered by querying reasoning traces.
 
@@ -342,7 +342,7 @@ The following design documents must be written and reviewed before the phase tha
 |---|----------|----------|-----------------|-----------------|
 | D1 | **Eigon Serialization Format** | **COMPLETED** — `docs/design/d1-eigon-serialization-format.md`. Eigon-JSON format, IRI identity, three-layer type system (data types/formats/content types), validation rules, canonical form, core ontology in `ontologies/core/core-ontology.json` | Phase 0 | Done |
 | D2 | **EigenQL v1 Specification** | **COMPLETED** — `docs/design/d2-eigenql-specification.md`. Full EBNF grammar, lexer spec, type checking rules, aggregation (COUNT/SUM/AVG/MIN/MAX), GROUP BY, ORDER BY, LIMIT/OFFSET, DISTINCT, NOT EXISTS, dot-path navigation, error format | Phase 1 | Done |
-| D3 | **DAG Specification and Component Model** | **COMPLETED** — `docs/design/d3-dag-and-component-model.md`. DAGs as Eigon-JSON resources, two-tier component model (built-in + WASM), DAG ontology, WIT interface for extensions, capability levels, execution model | Phase 2 | Done |
+| D3 | **Program Model and Component Interface** | **COMPLETED** — `docs/design/d3-program-model.md`. Programs as typed expressions (not programs), 12 expression forms mapping 1:1 to Mini-TT, Map/Reduce as language primitives, automatic parallelism from data dependencies, two-tier component model (built-in + WASM), ESL surface syntax (future) | Phase 2 | Done |
 | D4 | **TiKV Key Encoding & Deployment** | Key encoding scheme (SPO/POS/OPS layout), TiKV region placement strategy, Azure hosting model (VMs, AKS, or TiDB Cloud) | Phase 3 | 10–15 pages |
 | D5 | **gRPC API Specification** | Protobuf message definitions, streaming vs. unary RPCs, error codes, pagination for query results | Phase 3 | 8–10 pages |
 | D6 | **Reasoning Trace Schema** | Ontology classes and properties for traces, provenance link structure, universe level assignment rules | Phase 4 | 6–8 pages |
@@ -351,7 +351,7 @@ The following design documents must be written and reviewed before the phase tha
 | D9 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 3+ | 10–15 pages |
 | D10 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 3+ | 8–10 pages |
 | D11 | **Execution Context Internals** | Snapshot advancement policy, HLC clock synchronization bounds and violation behavior, capability sub-context isolation boundaries, inline resource semantics in EigenQL (resolves §8.4 and §14 open questions) | Phase 2 | 8–10 pages |
-| D12 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, DAG execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 4 | 6–8 pages |
+| D12 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 4 | 6–8 pages |
 | D13 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 5 | 6–8 pages |
 
 ---
@@ -370,7 +370,7 @@ The following design documents must be written and reviewed before the phase tha
 
 **Property-based tests** (proptest/quickcheck): for the type system (random well-typed terms type-check, random ill-typed terms are rejected), layer resolution (random layer stacks produce deterministic resolution), and serialization (round-trip property for all Eigon types).
 
-**Performance benchmarks** (criterion): query latency at various resource counts (100, 1K, 10K, 100K), DAG type-checking time vs. DAG size, index construction time per layer. Run on every release; regressions block the release.
+**Performance benchmarks** (criterion): query latency at various resource counts (100, 1K, 10K, 100K), program type-checking time vs. program size, index construction time per layer. Run on every release; regressions block the release.
 
 ### 10.2 CI/CD Pipeline
 
@@ -462,8 +462,8 @@ eigenius [--endpoint <url>] [--local] <command>
 Commands:
   load <file>              Load an Eigon resource file into the working context
   query <eigenql>          Execute an EigenQL query
-  validate <dag-file>      Type-check a DAG specification
-  run <dag-file> [inputs]  Execute a validated DAG
+  program-validate <file>  Type-check a program
+  run <file> [inputs]      Execute a validated program
   reflect <trace-file>     Record a reasoning trace
   inspect <iri>            Print a resource by IRI
   layer list               List layers in the current stack
@@ -528,7 +528,7 @@ The following capabilities are described in the architecture but are deliberatel
 
 **Constructive type theories as capabilities (§9.7).** Registering Lean 4, Coq/Rocq, or Agda proof kernels as capabilities — enabling the system to dispatch proof obligations to external theorem provers. This requires the WASM sandbox (Phase 5) plus a well-defined proof term interchange format.
 
-**Browser and edge deployment (§2.6).** Compiling the kernel to WASM for browser-based developer tooling (ontology browsers, DAG editors) and edge deployment (Deno Deploy, Cloudflare Workers). Requires adapting the storage interface to IndexedDB/Deno KV and replacing gRPC with a browser-compatible transport.
+**Browser and edge deployment (§2.6).** Compiling the kernel to WASM for browser-based developer tooling (ontology browsers, program editors) and edge deployment (Deno Deploy, Cloudflare Workers). Requires adapting the storage interface to IndexedDB/Deno KV and replacing gRPC with a browser-compatible transport.
 
 **Distributed TiKV multi-region deployment.** The initial Azure deployment uses a single-region TiKV cluster. Cross-region replication, geo-aware layer placement, and consistency under partition require significant operational engineering.
 

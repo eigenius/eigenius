@@ -6,7 +6,7 @@
 //! - Capability dispatch (class-anchored extensibility)
 //! - Execution context management (snapshot isolation)
 //! - Reflection layer (reasoning traces, universe stratification)
-//! - NbE type checker (Mini-TT dependent type theory for DAGs)
+//! - NbE type checker (Mini-TT dependent type theory for programs)
 //! - Bootstrap sequence (Core Ontology + Foundation Layer)
 
 pub mod api;
@@ -16,6 +16,7 @@ pub mod context;
 pub mod layer;
 pub mod nbe;
 pub mod ontology;
+pub mod program;
 pub mod query;
 pub mod reflection;
 pub mod storage;
