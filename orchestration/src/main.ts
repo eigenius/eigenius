@@ -10,9 +10,10 @@
 import { KernelClient } from "./client/kernel_client.ts";
 import { DagExecutor } from "./dag/executor.ts";
 
-const KERNEL_ENDPOINT = Deno.env.get("EIGENIUS_KERNEL_ENDPOINT") ?? "http://localhost:50051";
+const KERNEL_ENDPOINT = Deno.env.get("EIGENIUS_KERNEL_ENDPOINT") ??
+  "http://localhost:50051";
 
-async function main() {
+function main() {
   console.log(`Eigenius Orchestration Layer starting...`);
   console.log(`Kernel endpoint: ${KERNEL_ENDPOINT}`);
 
@@ -26,4 +27,4 @@ async function main() {
   console.log("Orchestration layer ready.");
 }
 
-main().catch(console.error);
+main();

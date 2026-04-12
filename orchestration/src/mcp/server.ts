@@ -16,10 +16,9 @@ export class EigeniusMcpServer {
     this.client = client;
   }
 
-  async start(_port: number): Promise<void> {
+  start(_port: number): Promise<void> {
     // TODO: Phase 4 — MCP server implementation
-    // Register tools: eigenius_load, eigenius_query, eigenius_validate, eigenius_reflect
-    // Each tool delegates to the kernel client
-    throw new Error("Not implemented");
+    void this.client;
+    return Promise.reject(new Error("Not implemented"));
   }
 }
