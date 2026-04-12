@@ -26,8 +26,11 @@ Key design docs:
 source "$HOME/.cargo/env"
 cargo build                    # build workspace
 cargo test --workspace         # run all tests
+cargo fmt --all -- --check     # formatting (must pass cleanly)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets  # lint
 ```
+
+Always run `cargo fmt --all` before committing. CI enforces formatting and will fail on unformatted code.
 
 ## Architecture
 
