@@ -1,0 +1,460 @@
+[
+  {
+    "@id": "urn:eigenius:core:Class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A class represents an ontological type. Classes declare which properties their instances must or should provide. Class is an instance of itself.",
+    "urn:eigenius:core:short_name": "Class",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:subclass_of",
+      "urn:eigenius:core:requires",
+      "urn:eigenius:core:recommends",
+      "urn:eigenius:core:conditional_requires",
+      "urn:eigenius:core:source_irl"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:Property",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A property defines a named attribute that resources may carry. Properties declare their data_type and optional constraints (format, pattern, content type, class types).",
+    "urn:eigenius:core:short_name": "Property",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:core:data_type"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:domain",
+      "urn:eigenius:core:source_irl"
+    ],
+    "urn:eigenius:core:conditional_requires": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:ConditionalRequirement"],
+        "urn:eigenius:core:when_property": "urn:eigenius:core:data_type",
+        "urn:eigenius:core:has_value": ["urn:eigenius:core:value_array"],
+        "urn:eigenius:core:then_requires": ["urn:eigenius:core:element_type"]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:ConditionalRequirement"],
+        "urn:eigenius:core:when_property": "urn:eigenius:core:data_type",
+        "urn:eigenius:core:has_value": ["urn:eigenius:core:resource", "urn:eigenius:core:resource_array"],
+        "urn:eigenius:core:then_recommends": ["urn:eigenius:core:class_types", "urn:eigenius:core:allows_only"]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:ConditionalRequirement"],
+        "urn:eigenius:core:when_property": "urn:eigenius:core:data_type",
+        "urn:eigenius:core:has_value": ["urn:eigenius:core:string"],
+        "urn:eigenius:core:then_recommends": [
+          "urn:eigenius:core:format",
+          "urn:eigenius:core:pattern",
+          "urn:eigenius:core:content_type",
+          "urn:eigenius:core:content_encoding",
+          "urn:eigenius:core:min_length",
+          "urn:eigenius:core:max_length"
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:ConditionalRequirement"],
+        "urn:eigenius:core:when_property": "urn:eigenius:core:data_type",
+        "urn:eigenius:core:has_value": ["urn:eigenius:core:integer", "urn:eigenius:core:float"],
+        "urn:eigenius:core:then_recommends": ["urn:eigenius:core:min_value", "urn:eigenius:core:max_value"]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:ConditionalRequirement"],
+        "urn:eigenius:core:when_property": "urn:eigenius:core:data_type",
+        "urn:eigenius:core:has_value": ["urn:eigenius:core:value_array", "urn:eigenius:core:resource_array"],
+        "urn:eigenius:core:then_recommends": ["urn:eigenius:core:min_length", "urn:eigenius:core:max_length"]
+      }
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:DataType",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A data type defines a primitive value type that determines the JSON-level representation of property values.",
+    "urn:eigenius:core:short_name": "DataType",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:Format",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A format defines a validation constraint on string values. Formats are checked by the kernel during validation.",
+    "urn:eigenius:core:short_name": "Format",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:Encoding",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An encoding declares how binary content is represented within a string value.",
+    "urn:eigenius:core:short_name": "Encoding",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:core:ConditionalRequirement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A conditional requirement that makes properties required or recommended based on the value of another property.",
+    "urn:eigenius:core:short_name": "ConditionalRequirement",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:when_property",
+      "urn:eigenius:core:has_value"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:then_requires",
+      "urn:eigenius:core:then_recommends"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:core:is_a",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Declares class membership. A resource's is_a is an array of classes it is an instance of.",
+    "urn:eigenius:core:short_name": "is_a",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"]
+  },
+  {
+    "@id": "urn:eigenius:core:description",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Human-readable description of a resource.",
+    "urn:eigenius:core:short_name": "description",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:core:short_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Short identifier for a resource, used by external integrations. Must be unique within a class's effective property set.",
+    "urn:eigenius:core:short_name": "short_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:core:subclass_of",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Parent classes in the inheritance hierarchy. A subclass inherits requires and recommends from all ancestors.",
+    "urn:eigenius:core:short_name": "subclass_of",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Class"]
+  },
+  {
+    "@id": "urn:eigenius:core:requires",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Properties that instances of this class must provide.",
+    "urn:eigenius:core:short_name": "requires",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Class"]
+  },
+  {
+    "@id": "urn:eigenius:core:recommends",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Properties that instances of this class should provide.",
+    "urn:eigenius:core:short_name": "recommends",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Class"]
+  },
+  {
+    "@id": "urn:eigenius:core:data_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The primitive data_type constraining a property's values. Determines the JSON-level representation.",
+    "urn:eigenius:core:short_name": "data_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:string",
+      "urn:eigenius:core:integer",
+      "urn:eigenius:core:float",
+      "urn:eigenius:core:boolean",
+      "urn:eigenius:core:resource",
+      "urn:eigenius:core:resource_array",
+      "urn:eigenius:core:value_array",
+      "urn:eigenius:core:json"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:format",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "A named format constraint for string values. The kernel validates string values against the declared format.",
+    "urn:eigenius:core:short_name": "format",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:formats:date",
+      "urn:eigenius:core:formats:datetime",
+      "urn:eigenius:core:formats:time",
+      "urn:eigenius:core:formats:iri",
+      "urn:eigenius:core:formats:uuid",
+      "urn:eigenius:core:formats:regex"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:pattern",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "A regular expression constraint for string values. The value must fully match the pattern (ECMA 262 syntax).",
+    "urn:eigenius:core:short_name": "pattern",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:regex",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:content_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "MIME type declaring the format of content embedded in a string value (e.g., text/markdown, text/html, image/png).",
+    "urn:eigenius:core:short_name": "content_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:content_encoding",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Encoding used for binary content embedded in a string value.",
+    "urn:eigenius:core:short_name": "content_encoding",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Encoding"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:encodings:base64"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:element_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The data_type of elements in a value_array property.",
+    "urn:eigenius:core:short_name": "element_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:string",
+      "urn:eigenius:core:integer",
+      "urn:eigenius:core:float",
+      "urn:eigenius:core:boolean",
+      "urn:eigenius:core:json"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:class_types",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Allowed classes for resource or resource_array property values. Values must be instances of at least one listed class (including subclasses).",
+    "urn:eigenius:core:short_name": "class_types",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:domain",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Restricts which class types this property may be used on. If omitted, the property may be used on any resource.",
+    "urn:eigenius:core:short_name": "domain",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:allows_only",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Restricts resource or resource_array property values to a specific set of resources (by IRI identity).",
+    "urn:eigenius:core:short_name": "allows_only",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:min_value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Minimum value (inclusive) for integer or float property values.",
+    "urn:eigenius:core:short_name": "min_value",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:max_value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum value (inclusive) for integer or float property values.",
+    "urn:eigenius:core:short_name": "max_value",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:min_length",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Minimum length for string values (in characters) or array properties (in elements).",
+    "urn:eigenius:core:short_name": "min_length",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:max_length",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum length for string values (in characters) or array properties (in elements).",
+    "urn:eigenius:core:short_name": "max_length",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:core:conditional_requires",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Conditional requirements on a class. An array of ConditionalRequirement resources that make properties required or recommended based on the value of another property.",
+    "urn:eigenius:core:short_name": "conditional_requires",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:ConditionalRequirement"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Class"]
+  },
+  {
+    "@id": "urn:eigenius:core:when_property",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The property whose value triggers the conditional requirement.",
+    "urn:eigenius:core:short_name": "when_property",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:ConditionalRequirement"]
+  },
+  {
+    "@id": "urn:eigenius:core:has_value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The condition matches if the property's value is any of the listed values.",
+    "urn:eigenius:core:short_name": "has_value",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:ConditionalRequirement"]
+  },
+  {
+    "@id": "urn:eigenius:core:then_requires",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Properties that become required when the condition matches.",
+    "urn:eigenius:core:short_name": "then_requires",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:ConditionalRequirement"]
+  },
+  {
+    "@id": "urn:eigenius:core:then_recommends",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Properties that become recommended when the condition matches.",
+    "urn:eigenius:core:short_name": "then_recommends",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:ConditionalRequirement"]
+  },
+  {
+    "@id": "urn:eigenius:core:source_irl",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional fetchable IRL where the resource can be found or was sourced from.",
+    "urn:eigenius:core:short_name": "source_irl",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri"
+  },
+
+  {
+    "@id": "urn:eigenius:core:string",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "UTF-8 string. May carry format, content_type, and/or content_encoding constraints via the property definition.",
+    "urn:eigenius:core:short_name": "string"
+  },
+  {
+    "@id": "urn:eigenius:core:integer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "Signed integer in the 53-bit safe range (-(2^53-1) to 2^53-1). Represented as a JSON number with no decimal point.",
+    "urn:eigenius:core:short_name": "integer"
+  },
+  {
+    "@id": "urn:eigenius:core:float",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "64-bit IEEE 754 floating-point number. Represented as a JSON number.",
+    "urn:eigenius:core:short_name": "float"
+  },
+  {
+    "@id": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "Boolean true/false value.",
+    "urn:eigenius:core:short_name": "boolean"
+  },
+  {
+    "@id": "urn:eigenius:core:resource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "A reference to another resource (IRI string) or an embedded resource (nested object without @id).",
+    "urn:eigenius:core:short_name": "resource"
+  },
+  {
+    "@id": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "An ordered array of resource references (IRI strings) and/or embedded resources (nested objects).",
+    "urn:eigenius:core:short_name": "resource_array"
+  },
+  {
+    "@id": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "An ordered array of homogeneous primitive values. The element type is declared via the element_type property.",
+    "urn:eigenius:core:short_name": "value_array"
+  },
+  {
+    "@id": "urn:eigenius:core:json",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "An opaque JSON value. Not validated by the ontology.",
+    "urn:eigenius:core:short_name": "json"
+  },
+
+  {
+    "@id": "urn:eigenius:core:encodings:base64",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Encoding"],
+    "urn:eigenius:core:description": "Base64 encoding for binary data embedded in a string value.",
+    "urn:eigenius:core:short_name": "base64"
+  },
+
+  {
+    "@id": "urn:eigenius:core:formats:date",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:description": "ISO 8601 date (YYYY-MM-DD).",
+    "urn:eigenius:core:short_name": "date"
+  },
+  {
+    "@id": "urn:eigenius:core:formats:datetime",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:description": "ISO 8601 date-time with timezone (e.g., 2026-04-11T14:30:00Z).",
+    "urn:eigenius:core:short_name": "datetime"
+  },
+  {
+    "@id": "urn:eigenius:core:formats:time",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:description": "ISO 8601 time (e.g., 14:30:00Z).",
+    "urn:eigenius:core:short_name": "time"
+  },
+  {
+    "@id": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:description": "A valid IRI (Internationalized Resource Identifier, RFC 3987).",
+    "urn:eigenius:core:short_name": "iri"
+  },
+  {
+    "@id": "urn:eigenius:core:formats:uuid",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:description": "A UUID (RFC 4122).",
+    "urn:eigenius:core:short_name": "uuid"
+  },
+  {
+    "@id": "urn:eigenius:core:formats:regex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
+    "urn:eigenius:core:description": "A valid regular expression (ECMA 262 syntax).",
+    "urn:eigenius:core:short_name": "regex"
+  }
+]

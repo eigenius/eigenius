@@ -1,19 +1,20 @@
 //! Eigenius CLI — primary developer interface for the Eigenius platform.
 
 use clap::{Parser, Subcommand};
+use eigenius_kernel::bootstrap;
+use eigenius_kernel::layer::LayerBuilder;
+use eigenius_kernel::ontology::{eigon_json, Iri};
+use eigenius_kernel::validation::Validator;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "eigenius")]
-#[command(about = "Eigenius CLI — Knowledge Platform for Semantic Web Applications", long_about = None)]
+#[command(about = "Eigenius — Typed Knowledge Graph Platform", long_about = None)]
 #[command(version)]
 struct Cli {
-    /// gRPC endpoint for remote Eigenius server
+    /// Output as JSON
     #[arg(long, global = true)]
-    endpoint: Option<String>,
-
-    /// Use local in-memory store (no server)
-    #[arg(long, global = true)]
-    local: bool,
+    json: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -21,144 +22,197 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Load RDF data into the knowledge base
+    /// Load an Eigon-JSON file as a new layer, validate against the stack
     Load {
-        /// Path to RDF file
+        /// Path to Eigon-JSON file
         #[arg(value_name = "FILE")]
         file: String,
     },
 
-    /// Query the knowledge base with SPARQL
-    Query {
-        /// SPARQL query string
-        #[arg(value_name = "QUERY")]
-        query: String,
-    },
-
-    /// Validate RDF data against schema
+    /// Validate an Eigon-JSON file without loading
     Validate {
-        /// Path to RDF file
+        /// Path to Eigon-JSON file
         #[arg(value_name = "FILE")]
         file: String,
     },
 
-    /// Run a capability or workflow
-    Run {
-        /// Capability or workflow name
-        #[arg(value_name = "NAME")]
-        name: String,
+    /// Print a resource by IRI
+    Inspect {
+        /// IRI of the resource to inspect
+        #[arg(value_name = "IRI")]
+        iri: String,
     },
 
-    /// Reflect on schema and capabilities
-    Reflect,
-
-    /// Inspect triples and indexes
-    Inspect,
-
-    /// Manage layers and commits
-    Layer {
-        #[command(subcommand)]
-        command: LayerCommands,
-    },
-
-    /// Manage capabilities
-    Capability {
-        #[command(subcommand)]
-        command: CapabilityCommands,
-    },
-
-    /// Manage configuration
-    Config,
-
-    /// Show version
+    /// Show version and build info
     Version,
 }
 
-#[derive(Subcommand)]
-enum LayerCommands {
-    /// List all layers
-    List,
-
-    /// Commit a new layer
-    Commit {
-        /// Layer message
-        #[arg(value_name = "MESSAGE")]
-        message: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum CapabilityCommands {
-    /// List all capabilities
-    List,
-
-    /// Test a capability
-    Test {
-        /// Capability name
-        #[arg(value_name = "NAME")]
-        name: String,
-    },
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
-
+fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Load { file } => {
-            println!("Load: {}", file);
-            println!("Not yet implemented");
-        }
-        Commands::Query { query } => {
-            println!("Query: {}", query);
-            println!("Not yet implemented");
-        }
-        Commands::Validate { file } => {
-            println!("Validate: {}", file);
-            println!("Not yet implemented");
-        }
-        Commands::Run { name } => {
-            println!("Run: {}", name);
-            println!("Not yet implemented");
-        }
-        Commands::Reflect => {
-            println!("Reflect");
-            println!("Not yet implemented");
-        }
-        Commands::Inspect => {
-            println!("Inspect");
-            println!("Not yet implemented");
-        }
-        Commands::Layer { command } => match command {
-            LayerCommands::List => {
-                println!("Layer: List");
-                println!("Not yet implemented");
-            }
-            LayerCommands::Commit { message } => {
-                println!("Layer: Commit '{}'", message);
-                println!("Not yet implemented");
-            }
-        },
-        Commands::Capability { command } => match command {
-            CapabilityCommands::List => {
-                println!("Capability: List");
-                println!("Not yet implemented");
-            }
-            CapabilityCommands::Test { name } => {
-                println!("Capability: Test '{}'", name);
-                println!("Not yet implemented");
-            }
-        },
-        Commands::Config => {
-            println!("Config");
-            println!("Not yet implemented");
-        }
+        Commands::Load { file } => cmd_load(&file, cli.json),
+        Commands::Validate { file } => cmd_validate(&file, cli.json),
+        Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
         Commands::Version => {
-            println!("eigenius version {}", env!("CARGO_PKG_VERSION"));
+            println!("eigenius {}", env!("CARGO_PKG_VERSION"));
+        }
+    }
+}
+
+fn cmd_load(file: &str, json_output: bool) {
+    // Bootstrap
+    let mut ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Read and parse file
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read '{file}': {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let resources = match eigon_json::parse_document(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Parse error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let count = resources.len();
+
+    // Add resources to context
+    for resource in resources {
+        if let Err(e) = ctx.add_resource(resource) {
+            eprintln!("Error adding resource: {e}");
+            std::process::exit(1);
         }
     }
 
-    Ok(())
+    // Commit (validates and builds layer)
+    match ctx.commit("loaded") {
+        Ok(layer) => {
+            if json_output {
+                println!(
+                    "{{\"status\":\"ok\",\"resources\":{count},\"layer_id\":\"{}\"}}",
+                    layer.id()
+                );
+            } else {
+                println!("Loaded {count} resource(s) into layer {}", layer.id());
+                println!("Validation passed.");
+            }
+        }
+        Err(e) => {
+            if json_output {
+                eprintln!("{{\"status\":\"error\",\"message\":\"{e}\"}}");
+            } else {
+                eprintln!("Load failed: {e}");
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_validate(file: &str, json_output: bool) {
+    // Bootstrap
+    let ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Read and parse file
+    let content = match std::fs::read_to_string(file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read '{file}': {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let resources = match eigon_json::parse_document(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Parse error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let count = resources.len();
+
+    // Build a temporary layer for validation
+    let mut builder = LayerBuilder::new("validate", Some(Arc::clone(ctx.head())));
+    for resource in resources {
+        if let Err(e) = builder.add_resource(resource) {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+    let layer = builder.build();
+
+    // Validate
+    let validator = Validator::new(&layer);
+    let errors = validator.validate();
+
+    if errors.is_empty() {
+        if json_output {
+            println!("{{\"status\":\"ok\",\"resources\":{count}}}");
+        } else {
+            println!("Validated {count} resource(s). No errors.");
+        }
+    } else {
+        if json_output {
+            eprintln!("{{\"status\":\"error\",\"error_count\":{}}}", errors.len());
+        } else {
+            eprintln!("Validation found {} error(s):", errors.len());
+            for e in &errors {
+                eprintln!("  {e}");
+            }
+        }
+        std::process::exit(1);
+    }
+}
+
+fn cmd_inspect(iri_str: &str, json_output: bool) {
+    // Bootstrap
+    let ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let iri = match Iri::parse(iri_str) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("Invalid IRI '{iri_str}': {e}");
+            std::process::exit(1);
+        }
+    };
+
+    match ctx.resolve(&iri) {
+        Some(resource) => {
+            let json = eigon_json::serialize_resource(resource);
+            if json_output {
+                println!("{}", serde_json::to_string(&json).unwrap());
+            } else {
+                println!("{}", serde_json::to_string_pretty(&json).unwrap());
+            }
+        }
+        None => {
+            eprintln!("Resource not found: {iri_str}");
+            std::process::exit(1);
+        }
+    }
 }

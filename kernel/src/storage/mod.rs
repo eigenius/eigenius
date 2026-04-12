@@ -1,70 +1,62 @@
-//! Storage layer abstractions for persistent ontology and capability data.
+//! Storage interface traits for persisting layers and resources.
 //!
-//! Storage traits (§10.6) define async interfaces for persisting layers,
-//! capabilities, and binary blobs. Implementations may target databases,
-//! filesystems, or cloud storage backends.
+//! Storage backends implement these traits. Phase 0 uses the in-memory
+//! backend; SQLite and TiKV come in later phases.
 
+use crate::layer::{Layer, LayerId};
+use crate::ontology::iri::Iri;
+use crate::ontology::resource::Resource;
 use async_trait::async_trait;
-use crate::layer::Layer;
-use crate::ontology::Resource;
+use std::fmt;
 
-/// Trait for storing and retrieving ontological layers.
+/// Errors from storage operations.
+#[derive(Debug)]
+pub enum StorageError {
+    NotFound(String),
+    Internal(String),
+}
+
+impl fmt::Display for StorageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StorageError::NotFound(msg) => write!(f, "not found: {msg}"),
+            StorageError::Internal(msg) => write!(f, "storage error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for StorageError {}
+
+/// Trait for storing and retrieving committed layers.
 #[async_trait]
 pub trait LayerStore: Send + Sync {
-    /// Loads a layer by identifier.
-    async fn load_layer(&self, id: &str) -> Result<Layer, String>;
+    /// Store a committed layer.
+    async fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError>;
 
-    /// Stores or updates a layer.
-    async fn store_layer(&self, layer: Layer) -> Result<(), String>;
+    /// Load a layer by its content-addressed ID.
+    async fn load_layer(&self, id: &LayerId) -> Result<Layer, StorageError>;
 
-    /// Deletes a layer by identifier.
-    async fn delete_layer(&self, id: &str) -> Result<(), String>;
-
-    /// Lists all available layer identifiers.
-    async fn list_layers(&self) -> Result<Vec<String>, String>;
+    /// List all stored layer IDs.
+    async fn list_layers(&self) -> Result<Vec<LayerId>, StorageError>;
 }
 
-/// Trait for storing and retrieving capability metadata and code.
-#[async_trait]
-pub trait CapabilityStore: Send + Sync {
-    /// Loads capability metadata and code by ID.
-    async fn load_capability(&self, id: &str) -> Result<Vec<u8>, String>;
-
-    /// Stores capability code.
-    async fn store_capability(&self, id: String, code: Vec<u8>) -> Result<(), String>;
-
-    /// Deletes a capability by ID.
-    async fn delete_capability(&self, id: &str) -> Result<(), String>;
-
-    /// Lists all registered capability IDs.
-    async fn list_capabilities(&self) -> Result<Vec<String>, String>;
-}
-
-/// Trait for storing and retrieving opaque binary blobs.
-#[async_trait]
-pub trait BlobStore: Send + Sync {
-    /// Loads a blob by URI.
-    async fn load_blob(&self, uri: &str) -> Result<Vec<u8>, String>;
-
-    /// Stores a blob and returns its URI.
-    async fn store_blob(&self, data: Vec<u8>) -> Result<String, String>;
-
-    /// Deletes a blob by URI.
-    async fn delete_blob(&self, uri: &str) -> Result<(), String>;
-
-    /// Checks if a blob exists.
-    async fn blob_exists(&self, uri: &str) -> Result<bool, String>;
-}
-
-/// Trait for querying and storing ontological resources.
+/// Trait for storing and retrieving individual resources within a layer.
 #[async_trait]
 pub trait ResourceStore: Send + Sync {
-    /// Loads a resource by URI.
-    async fn load_resource(&self, uri: &str) -> Result<Resource, String>;
+    /// Store a resource associated with a layer.
+    async fn store_resource(
+        &self,
+        layer_id: &LayerId,
+        resource: &Resource,
+    ) -> Result<(), StorageError>;
 
-    /// Stores or updates a resource.
-    async fn store_resource(&self, resource: Resource) -> Result<(), String>;
+    /// Load a resource by IRI within a layer.
+    async fn load_resource(
+        &self,
+        layer_id: &LayerId,
+        iri: &Iri,
+    ) -> Result<Option<Resource>, StorageError>;
 
-    /// Queries resources by class.
-    async fn query_by_class(&self, class_uri: &str) -> Result<Vec<Resource>, String>;
+    /// List all resource IRIs in a layer.
+    async fn list_resources(&self, layer_id: &LayerId) -> Result<Vec<Iri>, StorageError>;
 }

@@ -63,7 +63,7 @@ The kernel is implemented in Rust with Verus proof annotations on correctness-cr
 
 - Core Ontology bootstrap — hand-initialized loading of the self-describing Core Ontology and Foundation Layer (see §2.5)
 - Eigon structural type system — runtime representation of classes, properties, datatypes, and their relationships; validation of resource structure against class constraints
-- Resolver system — URI scheme dispatch, namespace validation, working context management
+- Resolver system — IRI scheme dispatch, namespace validation, working context management
 - Layer management — layer creation, commit, immutability enforcement, stack resolution
 - Capability dispatch — registration, class-anchored lookup, lifecycle management, sub-context instantiation
 - Distributed storage interface — the kernel's abstraction over the storage layer
@@ -189,7 +189,7 @@ The Core Ontology lives permanently at the root of every layer stack, under the 
 Three classes form the foundation. Each is an instance of itself.
 
 **Class**
-A Class describes an abstract concept — the type and meaning of a category of resources. Classes are the mechanism by which resources are typed. A resource may have one or more classes, and the union of their required and recommended properties defines the resource's expected shape. It is convention to use uppercase in a Class URI shortname.
+A Class describes an abstract concept — the type and meaning of a category of resources. Classes are the mechanism by which resources are typed. A resource may have one or more classes, and the union of their required and recommended properties defines the resource's expected shape. It is convention to use uppercase in a Class IRI shortname.
 
 ```
 urn:eigenius:core:Class
@@ -215,42 +215,42 @@ The following properties are defined by the Core Ontology. Each is itself an ins
 
 **Identity and classification:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
-| `is_a` | `resource_array` | The classes of which this resource is an instance. Determines which properties are required and recommended. Classtypes: `Class`. |
+| `is_a` | `resource_array` | The classes of which this resource is an instance. Determines which properties are required and recommended. Class types: `Class`. |
 | `description` | `markdown` | A human-readable description of the resource. By convention, the first sentence should be self-contained. |
-| `shortname` | `identifier` | A short, unambiguous local name. Used in EigenQL queries and ESL surface syntax. Case-sensitive, lowercase only, letters, digits, and hyphens. |
+| `short_name` | `identifier` | A short, unambiguous local name. Used in EigenQL queries and ESL surface syntax. Case-sensitive, lowercase only, letters, digits, and hyphens. |
 
 **Class structure:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
-| `requires` | `resource_array` | The properties that must be present on any resource of this class. Inherited transitively from superclasses. Classtypes: `Property`. |
-| `recommends` | `resource_array` | The properties that are optional but expected on resources of this class. Inherited transitively from superclasses. Classtypes: `Property`. |
-| `subclass_of` | `resource_array` | The classes of which this class is a direct subclass. Property inheritance and constraint inheritance are transitive across the full subclass chain. Classtypes: `Class`. |
-| `disjoint_with` | `resource_array` | Classes that cannot share instances with this class. A resource that is an instance of this class may not simultaneously be an instance of any listed class. Enforced at validation time. Classtypes: `Class`. |
+| `requires` | `resource_array` | The properties that must be present on any resource of this class. Inherited transitively from superclasses. Class types: `Property`. |
+| `recommends` | `resource_array` | The properties that are optional but expected on resources of this class. Inherited transitively from superclasses. Class types: `Property`. |
+| `subclass_of` | `resource_array` | The classes of which this class is a direct subclass. Property inheritance and constraint inheritance are transitive across the full subclass chain. Class types: `Class`. |
+| `disjoint_with` | `resource_array` | Classes that cannot share instances with this class. A resource that is an instance of this class may not simultaneously be an instance of any listed class. Enforced at validation time. Class types: `Class`. |
 | `equivalent_to` | `resource` | Declares this class or property semantically equivalent to another. Used primarily in bridge layers for cross-namespace alignment. No automatic inference is performed — the declaration is asserted and queryable, not reasoned from. |
 
 **Property typing:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
-| `datatype` | `resource` | The datatype of a property's value. Classtypes: `Datatype`. |
-| `classtypes` | `resource_array` | For properties with a `resource` or `resource_array` datatype, specifies the classes that values must instantiate. A value satisfies this constraint if it is an instance of any listed class or any subclass thereof. Classtypes: `Class`. |
+| `data_type` | `resource` | The datatype of a property's value. Class types: `Datatype`. |
+| `class_types` | `resource_array` | For properties with a `resource` or `resource_array` datatype, specifies the classes that values must instantiate. A value satisfies this constraint if it is an instance of any listed class or any subclass thereof. Class types: `Class`. |
 | `allows_only` | `resource_array` | Restricts a property to a fixed enumeration of permissible values. Values must have unique shortnames. |
-| `domain` | `resource_array` | Restricts this property to resources that are instances of one of the specified classes. Classtypes: `Class`. |
-| `elementtype` | `resource` | For properties with a `value_array` datatype, specifies the primitive element type. One of: `boolean`, `float`, `integer`, `string`. |
+| `domain` | `resource_array` | Restricts this property to resources that are instances of one of the specified classes. Class types: `Class`. |
+| `element_type` | `resource` | For properties with a `value_array` datatype, specifies the primitive element type. One of: `boolean`, `float`, `integer`, `string`. |
 
 **Property relationships:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
-| `subproperty_of` | `resource` | Declares this property a specialization of another. Any value valid for this property is also valid for the superproperty. Enables cross-namespace property alignment in bridge layers. Classtypes: `Property`. |
-| `inverse_of` | `resource` | Declares that this property is the inverse of another. If resource X has this property pointing to Y, then Y has the referenced property pointing to X. Declaration only — no automatic inference is performed. Classtypes: `Property`. |
+| `subproperty_of` | `resource` | Declares this property a specialization of another. Any value valid for this property is also valid for the superproperty. Enables cross-namespace property alignment in bridge layers. Class types: `Property`. |
+| `inverse_of` | `resource` | Declares that this property is the inverse of another. If resource X has this property pointing to Y, then Y has the referenced property pointing to X. Declaration only — no automatic inference is performed. Class types: `Property`. |
 
 **Property characteristics:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
 | `functional` | `boolean` | If true, a subject resource may have at most one value for this property. Enforced at validation time. Equivalent to `owl:FunctionalProperty`. |
 | `inverse_functional` | `boolean` | If true, at most one subject resource may have any given value for this property. Declares a natural key. Equivalent to `owl:InverseFunctionalProperty`. |
@@ -258,14 +258,14 @@ The following properties are defined by the Core Ontology. Each is itself an ins
 
 **Cardinality:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
 | `min_count` | `integer` | The minimum number of values a resource must have for this property within this class context. A value of 1 is equivalent to inclusion in `requires`. Must be ≥ 0. |
 | `max_count` | `integer` | The maximum number of values a resource may have for this property within this class context. Must be ≥ 1. |
 
 **Navigation:**
 
-| Shortname | Datatype | Description |
+| Short name | Data type | Description |
 |---|---|---|
 | `property_path` | `identifier_path` | A relative path specifying how to locate a nested resource by traversing properties from a root resource. |
 
@@ -282,8 +282,8 @@ A resource of class C inherits the `requires` and `recommends` of all classes in
 **Multiple classes accumulate independently.**
 A resource may have multiple classes via `is_a`. The effective required and recommended properties are the set-union across all listed classes and their full transitive superclass chains. A property required by any class in the set is required for the resource.
 
-**`classtypes` constraints are subclass-aware.**
-A property value satisfies a `classtypes` constraint if the value resource is an instance of any listed class or any subclass of any listed class. Subclass resolution uses the transitive chain.
+**`class_types` constraints are subclass-aware.**
+A property value satisfies a `class_types` constraint if the value resource is an instance of any listed class or any subclass of any listed class. Subclass resolution uses the transitive chain.
 
 **Cardinality refines presence constraints.**
 `min_count: 1` is semantically equivalent to inclusion in `requires`. `min_count: 0` makes a property fully optional regardless of its presence in `recommends`. When both `requires` and `min_count` are present for the same property in the same class, the stricter constraint applies: `requires` implies `min_count ≥ 1`.
@@ -305,40 +305,56 @@ Declaring two classes or properties equivalent does not cause the kernel to trea
 
 ### 3.5 Core Datatypes
 
-Datatypes are natively understood by the kernel. They are not extensible — new datatypes cannot be introduced by domain ontologies. The following datatypes are defined by the Core Ontology.
+The type system uses three layers (see design doc D1 for full specification):
+
+- **Primitive data types** determine the JSON-level representation
+- **Formats** are validation constraints on string values (e.g., date, IRI, UUID)
+- **Content types** declare the MIME type of content embedded in strings (e.g., text/markdown, text/html)
+
+Data types are natively understood by the kernel. The following data types are defined by the Core Ontology.
 
 **Primitive value types:**
 
-| Shortname | Description |
+| Short name | Description |
 |---|---|
 | `boolean` | True or false. Represented as a native JSON boolean in Eigon. |
-| `integer` | Signed 64-bit integer. Range: −9,223,372,036,854,775,808 to 9,223,372,036,854,775,807. Represented as a JSON number. |
-| `float` | Double-precision floating-point. Serialized as a JSON number. |
-| `string` | UTF-8 string. Allows newlines. The generic string type — use `markdown` for formatted text. |
-| `date` | ISO 8601 date without time component. Format: `YYYY-MM-DD`. |
-| `timestamp` | Milliseconds since Unix epoch (UTC), signed 64-bit integer. |
-
-**Identifier types:**
-
-| Shortname | Description |
-|---|---|
-| `uri` | A Uniform Resource Identifier. The type of all resource identifiers in the system. |
-| `identifier` | A simple local name: letters (upper and lower case), digits, and underscores. Used for shortnames and local identifiers. |
-| `identifier_path` | A sequence of identifiers separated by `.`. Used for property paths into nested resources. |
-| `markdown` | A UTF-8 string with CommonMark syntax. Used for human-readable descriptions. |
+| `integer` | Signed integer in the 53-bit safe range (-(2^53-1) to 2^53-1). Represented as a JSON number with no decimal point. |
+| `float` | 64-bit IEEE 754 floating-point. Serialized as a JSON number. |
+| `string` | UTF-8 string. May carry `format`, `content_type`, and/or `content_encoding` constraints via the property definition. |
 
 **Resource types:**
 
-| Shortname | Description |
+| Short name | Description |
 |---|---|
-| `resource` | A reference to a resource. In Eigon JSON, either a URI string (link to a top-level resource) or a nested object (an inline resource without its own URI). |
-| `resource_array` | An ordered array of resource references. Each element is either a URI string or a nested object. |
+| `resource` | A reference to a resource. In Eigon JSON, either an IRI string (link to a top-level resource) or a nested object (an inline resource without its own IRI). |
+| `resource_array` | An ordered array of resource references. Each element is either an IRI string or a nested object. |
 
 **Array type:**
 
-| Shortname | Description |
+| Short name | Description |
 |---|---|
-| `value_array` | An array of primitive values. The element type is specified by the `elementtype` property on the enclosing property definition. Elements must be homogeneous: all boolean, all float, all integer, or all string. |
+| `value_array` | An array of primitive values. The element type is specified by the `element_type` property on the enclosing property definition. Elements must be homogeneous: all boolean, all float, all integer, or all string. |
+
+**Opaque type:**
+
+| Short name | Description |
+|---|---|
+| `json` | An opaque JSON value. Not validated by the ontology. |
+
+**Formats** (validation constraints on `string` values):
+
+| Short name | Description |
+|---|---|
+| `date` | ISO 8601 date without time component. Format: `YYYY-MM-DD`. |
+| `datetime` | ISO 8601 date-time with timezone. |
+| `time` | ISO 8601 time. |
+| `iri` | A valid IRI (Internationalized Resource Identifier, RFC 3987). |
+| `uuid` | A UUID (RFC 4122). |
+| `regex` | A valid regular expression (ECMA 262 syntax). |
+
+Formats are extensible — domain ontologies may define additional formats in their own namespaces.
+
+**Content types** use standard MIME types (e.g., `text/markdown`, `text/html`, `application/xml`, `image/png`). They are declared on property definitions via the `content_type` property. Binary content embedded in strings uses `content_encoding` (e.g., `base64`).
 
 ### 3.6 The Self-Describing Property
 
@@ -352,17 +368,17 @@ class "urn:eigenius:core:Property" {
                   It specifies the relationship between a subject resource and a value,
                   including the value's datatype and the meaning of the relationship.",
     requires: [
-        "urn:eigenius:core:props:datatype",
-        "urn:eigenius:core:props:description",
-        "urn:eigenius:core:props:shortname"
+        "urn:eigenius:core:data_type",
+        "urn:eigenius:core:description",
+        "urn:eigenius:core:short_name"
     ],
-    shortname: "Property"
+    short_name: "Property"
 }
 
-property "urn:eigenius:core:props:datatype" "urn:eigenius:core:datatypes:resource" {
-    description: "The datatype of a property's value.",
-    classtypes: ["urn:eigenius:core:Datatype"],
-    shortname: "datatype"
+property "urn:eigenius:core:data_type" "urn:eigenius:core:resource" {
+    description: "The data type of a property's value.",
+    class_types: ["urn:eigenius:core:DataType"],
+    short_name: "data_type"
 }
 ```
 
@@ -376,7 +392,7 @@ The Core Ontology is the only layer in the system that is:
 - Guaranteed to be present in every execution context's layer stack
 - Incapable of being shadowed, overridden, or modified by any other layer
 
-The Verus annotations on the kernel's layer management code formally enforce these properties. Any attempt to define a resource whose URI falls within `urn:eigenius:core:` in any layer other than the Core Ontology is rejected at ingestion time as a hard error.
+The Verus annotations on the kernel's layer management code formally enforce these properties. Any attempt to define a resource whose IRI falls within `urn:eigenius:core:` in any layer other than the Core Ontology is rejected at ingestion time as a hard error.
 
 ### 3.8 Extension through Domain Ontologies
 
@@ -398,7 +414,7 @@ The following constructs from OWL and related formalisms are **excluded from the
 
 **Property chains** (`owl:propertyChainAxiom`): Composing properties into chains introduces transitivity-like complexity. Excluded for the same reason as transitive properties.
 
-**Anonymous class expressions**: Complex class descriptions formed from constructors without explicit URIs make validation and query planning substantially harder. All classes in the Core Ontology and domain ontologies must have explicit URIs.
+**Anonymous class expressions**: Complex class descriptions formed from constructors without explicit IRIs make validation and query planning substantially harder. All classes in the Core Ontology and domain ontologies must have explicit IRIs.
 
 **The guiding principle:** the Core Ontology validates. Registered capabilities reason. Any construct that requires the kernel to derive new facts from existing ones — rather than check stated facts against stated constraints — belongs in the capability layer, where its computational cost and termination properties are the responsibility of the capability implementation.
 
@@ -520,7 +536,7 @@ DAG validation is **bidirectional type checking** in the dependent type theory, 
 
 The validation process proceeds in the following phases:
 
-**Name resolution.** Component references and class references are resolved from shortnames to fully qualified URIs using the current execution context's layer stack and capability registry. Resolved class references become ground type values in the evaluator.
+**Name resolution.** Component references and class references are resolved from shortnames to fully qualified IRIs using the current execution context's layer stack and capability registry. Resolved class references become ground type values in the evaluator.
 
 **Bidirectional type propagation.** Starting from the DAG's declared input type, the type checker propagates types forward through the step sequence. Steps, Bindings, and combinators (Map, Reduce, Select) are in *checking* mode — they are checked against the type expected by the context. Component references and variable lookups are in *inference* mode — their types are synthesized from the ontology schema and type environment. The context type is extended with each step's output type as it is processed.
 
@@ -611,7 +627,7 @@ Truck   ≡ Σ (make : String). Σ (model : String). Σ (year : Integer). Σ (pa
 
 The NbE evaluator constructs these record types by resolving a class reference against the current execution context's layer stack: it retrieves the class's required and recommended properties (including those inherited through the transitive subclass chain), retrieves each property's declared datatype, and builds the corresponding Sigma type.
 
-**Canonical property ordering.** The order of fields in a Sigma chain affects definitional equality — two Sigma types with the same fields in different order are distinct. To ensure that the same class always produces the same type regardless of the order in which properties were defined in the ontology, properties are ordered canonically by their fully qualified URI (lexicographic). This is a fixed convention, not a user-facing concern — the evaluator produces canonically ordered types from any ontology input.
+**Canonical property ordering.** The order of fields in a Sigma chain affects definitional equality — two Sigma types with the same fields in different order are distinct. To ensure that the same class always produces the same type regardless of the order in which properties were defined in the ontology, properties are ordered canonically by their fully qualified IRI (lexicographic). This is a fixed convention, not a user-facing concern — the evaluator produces canonically ordered types from any ontology input.
 
 **Required vs. recommended properties.** Required properties are plain fields in the Sigma type. Recommended (optional) properties are wrapped: `Σ (nickname : Maybe String). ...`, where `Maybe A ≡ Sum(some : A | none : Unit)`. A resource that omits a recommended property is well-typed (the field is `none`); a resource that omits a required property is not. The type checker enforces this distinction at validation time.
 
@@ -621,27 +637,23 @@ The NbE evaluator constructs these record types by resolving a class reference a
 
 The primitive Eigon datatypes map directly to base types in the theory:
 
-| Eigon Datatype | Type Theory Representation |
+| Eigon Data Type | Type Theory Representation |
 |---|---|
 | `boolean` | Base type, two values |
-| `integer` | Base type, 64-bit signed |
+| `integer` | Base type, 53-bit signed |
 | `float` | Base type, double-precision |
-| `string` | Base type, UTF-8 |
-| `date` | Base type, ISO 8601 |
-| `timestamp` | Base type, milliseconds since epoch |
-| `uri` | Base type, resource identifier |
-| `identifier` | Base type, local name |
-| `markdown` | Base type, formatted text |
+| `string` | Base type, UTF-8 (formats and content types are constraints, not separate base types) |
+| `json` | Base type, opaque |
 
 These are opaque to the type theory — it does not reason about their internal structure. Arithmetic, string operations, and date functions are external operations available in EigenQL expressions and Component implementations, not in the type theory itself.
 
-**The `resource` datatype requires dependent typing.** A property with datatype `resource` can hold either a URI reference to a top-level resource or an inline nested object. An inline resource has structure that depends on its class. The type of a `resource`-typed property with `classtypes: [C]` is:
+**The `resource` datatype requires dependent typing.** A property with datatype `resource` can hold either a IRI reference to a top-level resource or an inline nested object. An inline resource has structure that depends on its class. The type of a `resource`-typed property with `classtypes: [C]` is:
 
 ```
-ResourceOf(C) ≡ Sum(ref : URI | inline : Σ (c : SubclassOf C). RecordType(c))
+ResourceOf(C) ≡ Sum(ref : IRI | inline : Σ (c : SubclassOf C). RecordType(c))
 ```
 
-Where `SubclassOf C` is the type of classes in the transitive subclass set of C (resolved from the layer stack at validation time), and `RecordType(c)` is the dependent record type for class `c`. This is a genuine use of dependent typing — the inline variant's structure depends on a value (the class). The type checker verifies that inline resources match the `classtypes` constraint by checking that the inline resource's class is in the subclass set.
+Where `SubclassOf C` is the type of classes in the transitive subclass set of C (resolved from the layer stack at validation time), and `RecordType(c)` is the dependent record type for class `c`. This is a genuine use of dependent typing — the inline variant's structure depends on a value (the class). The type checker verifies that inline resources match the `class_types` constraint by checking that the inline resource's class is in the subclass set.
 
 **The `resource_array` datatype is a typed heterogeneous list.** With `classtypes: [C]`, it is `List(ResourceOf(C))` — each element independently satisfies the class constraint but may be an instance of a different subclass of C.
 
@@ -655,7 +667,7 @@ This has specific implications:
 
 **DAG validity is snapshot-relative.** A DAG validated under layer stack S is guaranteed well-typed only under S. If the layer stack changes (a new layer adds or modifies class definitions), DAGs that reference affected classes must be revalidated. The partial evaluation mechanism (§4.9) mitigates this cost — a partially evaluated DAG can be incrementally re-evaluated against the new layer, and only the terms affected by the change need reprocessing.
 
-**Type equality includes layer resolution.** When the type checker compares two types for definitional equality, both sides are first evaluated (which includes resolving class references from the layer stack). Two class references that resolve to the same record type (same properties, same types, same canonical order) are definitionally equal, even if they have different URIs. Two references to the same URI that resolve differently under different layer stacks produce different types. This is handled naturally by the NbE evaluator — ground type resolution is part of evaluation, and equality checking compares normal forms.
+**Type equality includes layer resolution.** When the type checker compares two types for definitional equality, both sides are first evaluated (which includes resolving class references from the layer stack). Two class references that resolve to the same record type (same properties, same types, same canonical order) are definitionally equal, even if they have different IRIs. Two references to the same IRI that resolve differently under different layer stacks produce different types. This is handled naturally by the NbE evaluator — ground type resolution is part of evaluation, and equality checking compares normal forms.
 
 #### 4.10.5 Boundary Between Type Theory and Kernel Validation
 
@@ -701,7 +713,7 @@ A query consists of four clauses:
 Query ::= [USING clause] MATCH clause [WHERE clause] RETURN clause
 ```
 
-**USING.** Imports ontology classes for shortname reference within the query. Each URI must resolve to a valid Class resource in the current execution context's layer stack. Class shortnames must be unique within the query scope.
+**USING.** Imports ontology classes for shortname reference within the query. Each IRI must resolve to a valid Class resource in the current execution context's layer stack. Class shortnames must be unique within the query scope.
 
 ```
 USING "urn:eigenius:foundation:dag:Dag",
@@ -768,7 +780,7 @@ MATCH Input(?input) {
 WHERE ?status = "failed" AND ?priority > 3
 ```
 
-Additional properties may be made accessible via their shortnames through the Select step's configuration, allowing guards to reference domain-specific properties without full URI qualification.
+Additional properties may be made accessible via their shortnames through the Select step's configuration, allowing guards to reference domain-specific properties without full IRI qualification.
 
 ### 5.6 Extension Path to Recursive Datalog
 
@@ -831,7 +843,7 @@ The kernel enforces namespace boundaries structurally, not as policy:
 
 **Namespace declaration.** When a layer is created, it declares its claimed namespace prefix and optionally its sub-namespace delegations.
 
-**Resource ingestion validation.** Every resource added to a layer must have a URI within the layer's declared namespace. This is a hard constraint enforced at ingestion time.
+**Resource ingestion validation.** Every resource added to a layer must have a IRI within the layer's declared namespace. This is a hard constraint enforced at ingestion time.
 
 **Namespace conflict detection.** When a new layer is added to a stack, the kernel verifies that its claimed namespace does not overlap with any other layer in the stack.
 
@@ -1132,7 +1144,7 @@ The abstract storage interface (§10.6) admits multiple backend implementations,
 
 The storage engine (TiKV or equivalent) provides ordered keys and range scans. All semantic indexing is built and maintained by the Eigenius host layer, stored as key-value entries in the storage engine.
 
-**Triple indexes.** Each resource property is stored as a triple: (subject URI, property URI, value). Three index orderings are maintained as separate key ranges — SPO (subject → property → object), POS (property → object → subject), and OPS (object → property → subject). SPO supports forward traversal ("given resource X, find all its properties"). POS supports class-based scans and type lookups ("find all resources with property P having value V"). OPS supports reverse traversal ("find all resources that reference resource X"). Each index entry is prefixed by layer identifier, making indexes layer-local.
+**Triple indexes.** Each resource property is stored as a triple: (subject IRI, property IRI, value). Three index orderings are maintained as separate key ranges — SPO (subject → property → object), POS (property → object → subject), and OPS (object → property → subject). SPO supports forward traversal ("given resource X, find all its properties"). POS supports class-based scans and type lookups ("find all resources with property P having value V"). OPS supports reverse traversal ("find all resources that reference resource X"). Each index entry is prefixed by layer identifier, making indexes layer-local.
 
 **Layer-local indexes, query-time composition.** Each committed layer maintains its own triple indexes. The EigenQL evaluator composes results across layers at query time, scanning indexes in layer-stack order (top to bottom) and applying the first-definition-wins resolution rule. This avoids rebuilding global indexes on every layer commit. Since committed layers are immutable, their indexes are written once and never updated.
 
@@ -1295,7 +1307,7 @@ The following design questions require resolution before implementation begins:
 
 **HLC clock synchronization.** The HLC timestamp model (§8.2) assumes bounded clock skew between distributed nodes. The specific skew bounds, the behavior when bounds are violated, and the synchronization protocol are not yet specified.
 
-**Inline resource semantics.** The `resource` datatype permits both URI references (top-level resources) and nested objects (inline resources without URIs). The precise semantics of inline resources in EigenQL queries — whether they can be independently matched, how they participate in variable binding, and how they interact with the resource cache — need specification.
+**Inline resource semantics.** The `resource` datatype permits both IRI references (top-level resources) and nested objects (inline resources without IRIs). The precise semantics of inline resources in EigenQL queries — whether they can be independently matched, how they participate in variable binding, and how they interact with the resource cache — need specification.
 
 **Capability sub-context isolation boundaries.** Sub-contexts inherit the parent's snapshot but have independent resource caches (§8.3). Whether a sub-context can spawn further sub-contexts (and the depth limit), whether concurrent sub-contexts share materialized resources, and the rollback semantics for nested sub-contexts need detailed specification.
 

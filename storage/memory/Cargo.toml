@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait = "0.1"
 eigenius-kernel = { path = "../../kernel" }
 serde.workspace = true
 tokio.workspace = true
