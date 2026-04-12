@@ -12,23 +12,25 @@ export class KernelClient {
     this.endpoint = endpoint;
   }
 
-  async load(_resources: unknown): Promise<unknown> {
+  load(_resources: unknown): Promise<unknown> {
     // TODO: gRPC call to kernel Load RPC
-    throw new Error("Not implemented");
+    return Promise.reject(
+      new Error(`Not implemented (endpoint: ${this.endpoint})`),
+    );
   }
 
-  async query(_eigenql: string): Promise<unknown> {
+  query(_eigenql: string): Promise<unknown> {
     // TODO: gRPC call to kernel Query RPC
-    throw new Error("Not implemented");
+    return Promise.reject(new Error("Not implemented"));
   }
 
-  async validate(_dagSpec: unknown): Promise<unknown> {
+  validate(_dagSpec: unknown): Promise<unknown> {
     // TODO: gRPC call to kernel Validate RPC
-    throw new Error("Not implemented");
+    return Promise.reject(new Error("Not implemented"));
   }
 
-  async reflect(_trace: unknown): Promise<unknown> {
+  reflect(_trace: unknown): Promise<unknown> {
     // TODO: gRPC call to kernel Reflect RPC
-    throw new Error("Not implemented");
+    return Promise.reject(new Error("Not implemented"));
   }
 }

@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 
 Deno.test("KernelClient placeholder", () => {
   // TODO: Integration tests against kernel service

@@ -9,7 +9,7 @@
     "fmt": "deno fmt --check"
   },
   "imports": {
-    "@std/": "jsr:@std/",
+    "@std/assert": "jsr:@std/assert@^1",
     "ai": "npm:ai@latest",
     "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@latest"
   },
