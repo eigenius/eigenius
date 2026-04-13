@@ -313,6 +313,45 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
+## 7.5. Phase 4.5 — ESL (Eigenius Schema Language)
+
+**Goal:** A human-friendly surface syntax for authoring programs, ontologies, and queries. ESL compiles to Eigon-JSON.
+
+**Duration estimate:** 2–3 weeks.
+
+### 7.5.1 Deliverables
+
+- ESL parser: hand-written recursive descent (same pattern as EigenQL), producing Eigon-JSON resources
+- Program syntax: `let`, `λ`, function application, `case`, `map`, `reduce`, `construct`, property access
+- Ontology syntax: `class`, `property`, shorthand for `requires`/`recommends`
+- CLI `compile` command: `eigenius compile program.esl` → outputs Eigon-JSON
+- Integration with existing commands: `eigenius run program.esl input.json` (compiles inline before execution)
+
+### 7.5.2 Example
+
+```esl
+program extract_and_summarize
+  : Document → Analysis
+  = λ input .
+    let entities : Entities = CompleteJson(input.text, extract_prompt) in
+    let summary : String = CompleteText(input.text, summarize_prompt) in
+    Construct Analysis {
+      entities = entities,
+      summary = summary,
+      source = input
+    }
+```
+
+Compiles to the Eigon-JSON expression tree from D3 §3.
+
+### 7.5.3 Key decisions required
+
+- ESL concrete syntax: keywords, indentation sensitivity, type annotation syntax
+- Whether ESL also covers EigenQL (unified syntax) or remains separate
+- Error message quality: source locations in ESL map back through compilation
+
+---
+
 ## 8. Phase 5 — Extensibility
 
 **Goal:** Third-party capability code runs in WASM sandboxes. Domain ontologies can register custom validators and evaluators safely.
@@ -349,7 +388,8 @@ The following design documents must be written and reviewed before the phase tha
 | D3 | **Program Model and Component Interface** | **COMPLETED** — `docs/design/d3-program-model.md`. Programs as typed expressions (not programs), 12 expression forms mapping 1:1 to Mini-TT, Map/Reduce as language primitives, automatic parallelism from data dependencies, two-tier component model (built-in + WASM), ESL surface syntax (future) | Phase 2 | Done |
 | D4 | **Storage Key Encoding** | **COMPLETED** — `docs/design/d4-storage-key-encoding.md`. Key encoding for RocksDB/TiKV, column families, layer chain persistence, index layout, TiKV compatibility | Phase 3 | Done |
 | D5 | **gRPC API Specification** | **COMPLETED** — `docs/design/d5-grpc-api-specification.md`. RPC definitions, streaming query, context management, error codes, authentication, CLI/orchestration integration | Phase 3 | Done |
-| D6 | **Reasoning Trace Schema** | Ontology classes and properties for traces, provenance link structure, universe level assignment rules | Phase 4 | 6–8 pages |
+| D6 | **Execution Architecture and Durability** | **COMPLETED** — `docs/design/d6-execution-architecture.md`. Kernel↔orchestrator boundary, DAPR integration, durable workflows, activity dispatch, reasoning trace ownership, MCP server placement | Phase 4 | Done |
+| D6b | **Reasoning Trace Schema** | **COMPLETED** — `docs/design/d6b-reasoning-trace-schema.md`. ComponentTrace, ProgramTrace, ObservationTrace, VerificationTrace classes. Provenance chain, epistemic status (observed→derived→verified), universe stratification, trace-based memoization | Phase 4 | Done |
 | D7 | **Capability SDK & WASM Interface** | Import/export functions for WASM capabilities, resource serialization across the WASM boundary, fuel budget policy | Phase 5 | 10–12 pages |
 | D8 | **Capability Protocol Wire Format** | How native and WASM capabilities communicate with the kernel, serialization format for resource handles and results (resolves §14 open question) | Phase 5 | 6–8 pages |
 | D9 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 3+ | 10–15 pages |

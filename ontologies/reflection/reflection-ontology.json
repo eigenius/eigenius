@@ -1,0 +1,593 @@
+[
+  {
+    "@id": "urn:eigenius:reflection:DeclaredResource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A resource asserted by a human as an axiom, definition, or design decision. The epistemic foundation — anchored in human thought and intent.",
+    "urn:eigenius:core:short_name": "DeclaredResource",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:declared_by"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:rationale",
+      "urn:eigenius:reflection:timestamp"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ObservedResource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A resource recorded from external reality with tracked provenance.",
+    "urn:eigenius:core:short_name": "ObservedResource",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:source"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:source_irl",
+      "urn:eigenius:reflection:observed_at",
+      "urn:eigenius:reflection:timestamp"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A resource produced by a typed program from other resources. Its derivation trace records the complete computation.",
+    "urn:eigenius:core:short_name": "DerivedResource",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:derivation"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:VerifiedResource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A resource that carries a machine-checked formal proof.",
+    "urn:eigenius:core:short_name": "VerifiedResource",
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:DerivedResource"],
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:derivation",
+      "urn:eigenius:reflection:verification"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:reflection:EpistemicStatus",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An epistemic status value: declared, observed, derived, or verified.",
+    "urn:eigenius:core:short_name": "EpistemicStatus"
+  },
+  {
+    "@id": "urn:eigenius:reflection:epistemic:declared",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
+    "urn:eigenius:core:description": "Asserted by a human as axiom or definition.",
+    "urn:eigenius:core:short_name": "declared"
+  },
+  {
+    "@id": "urn:eigenius:reflection:epistemic:observed",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
+    "urn:eigenius:core:description": "Recorded from external reality with provenance.",
+    "urn:eigenius:core:short_name": "observed"
+  },
+  {
+    "@id": "urn:eigenius:reflection:epistemic:derived",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
+    "urn:eigenius:core:description": "Produced by a typed program from other resources.",
+    "urn:eigenius:core:short_name": "derived"
+  },
+  {
+    "@id": "urn:eigenius:reflection:epistemic:verified",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
+    "urn:eigenius:core:description": "Carries a machine-checked formal proof.",
+    "urn:eigenius:core:short_name": "verified"
+  },
+
+  {
+    "@id": "urn:eigenius:reflection:ComponentTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a single IO component invocation. The memoization cache unit.",
+    "urn:eigenius:core:short_name": "ComponentTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:component",
+      "urn:eigenius:reflection:input_hash",
+      "urn:eigenius:reflection:output",
+      "urn:eigenius:reflection:timestamp"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:argument_hash",
+      "urn:eigenius:reflection:provider",
+      "urn:eigenius:reflection:model",
+      "urn:eigenius:reflection:prompt_tokens",
+      "urn:eigenius:reflection:completion_tokens",
+      "urn:eigenius:reflection:latency_ms",
+      "urn:eigenius:reflection:deterministic",
+      "urn:eigenius:reflection:cached"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:PureTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a pure (non-IO) component invocation.",
+    "urn:eigenius:core:short_name": "PureTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:component",
+      "urn:eigenius:reflection:output"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:LetTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a Let binding evaluation.",
+    "urn:eigenius:core:short_name": "LetTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:name",
+      "urn:eigenius:reflection:value_trace",
+      "urn:eigenius:reflection:body_trace"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:MapTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a Map evaluation over a collection.",
+    "urn:eigenius:core:short_name": "MapTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:element_traces"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ReduceTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a Reduce (fold) evaluation.",
+    "urn:eigenius:core:short_name": "ReduceTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:step_traces"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:CaseTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a Case expression evaluation.",
+    "urn:eigenius:core:short_name": "CaseTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:branch_taken",
+      "urn:eigenius:reflection:branch_trace"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:scrutinee_trace"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ConstructTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a Construct expression (building a typed resource).",
+    "urn:eigenius:core:short_name": "ConstructTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:field_traces"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ProjectTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a property projection.",
+    "urn:eigenius:core:short_name": "ProjectTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:source_trace",
+      "urn:eigenius:reflection:property"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ProgramTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a complete program execution. Wraps the trace tree.",
+    "urn:eigenius:core:short_name": "ProgramTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:program",
+      "urn:eigenius:reflection:trace_tree",
+      "urn:eigenius:reflection:started_at",
+      "urn:eigenius:reflection:completed_at"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:input",
+      "urn:eigenius:reflection:output",
+      "urn:eigenius:reflection:total_tokens",
+      "urn:eigenius:reflection:total_latency_ms",
+      "urn:eigenius:reflection:cached_steps",
+      "urn:eigenius:reflection:executed_steps",
+      "urn:eigenius:reflection:epistemic_status",
+      "urn:eigenius:reflection:universe_level"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:DeclarationTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace recording that a resource was declared by a human.",
+    "urn:eigenius:core:short_name": "DeclarationTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:resource",
+      "urn:eigenius:reflection:declared_by",
+      "urn:eigenius:reflection:timestamp"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:rationale"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ObservationTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace recording that a resource was observed from external reality.",
+    "urn:eigenius:core:short_name": "ObservationTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:resource",
+      "urn:eigenius:reflection:source",
+      "urn:eigenius:reflection:timestamp"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:source_irl",
+      "urn:eigenius:reflection:observed_at"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:VerificationTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace recording that a formal proof was attached to a resource.",
+    "urn:eigenius:core:short_name": "VerificationTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:resource",
+      "urn:eigenius:reflection:proof_system",
+      "urn:eigenius:reflection:proof_term",
+      "urn:eigenius:reflection:derivation_trace",
+      "urn:eigenius:reflection:timestamp"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:reflection:declared_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Who declared this resource.",
+    "urn:eigenius:core:short_name": "declared_by",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:rationale",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Why this resource was declared.",
+    "urn:eigenius:core:short_name": "rationale",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Description of the external source.",
+    "urn:eigenius:core:short_name": "source",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:observed_at",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "When the observation was made.",
+    "urn:eigenius:core:short_name": "observed_at",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
+  },
+  {
+    "@id": "urn:eigenius:reflection:derivation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Link to the ProgramTrace that produced this resource.",
+    "urn:eigenius:core:short_name": "derivation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:verification",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Link to the VerificationTrace that proved this resource.",
+    "urn:eigenius:core:short_name": "verification",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:VerificationTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:timestamp",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "When the trace was recorded.",
+    "urn:eigenius:core:short_name": "timestamp",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
+  },
+  {
+    "@id": "urn:eigenius:reflection:component",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The component that was invoked.",
+    "urn:eigenius:core:short_name": "component",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:input_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Content hash of the component input (CBOR deterministic encoding).",
+    "urn:eigenius:core:short_name": "input_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:argument_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Content hash of the component argument.",
+    "urn:eigenius:core:short_name": "argument_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:output",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The output resource produced.",
+    "urn:eigenius:core:short_name": "output",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:reflection:provider",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "LLM provider (anthropic, openai, etc.).",
+    "urn:eigenius:core:short_name": "provider",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:model",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Model identifier.",
+    "urn:eigenius:core:short_name": "model",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:prompt_tokens",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Number of tokens in the prompt.",
+    "urn:eigenius:core:short_name": "prompt_tokens",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0
+  },
+  {
+    "@id": "urn:eigenius:reflection:completion_tokens",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Number of tokens in the completion.",
+    "urn:eigenius:core:short_name": "completion_tokens",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0
+  },
+  {
+    "@id": "urn:eigenius:reflection:latency_ms",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Wall-clock latency in milliseconds.",
+    "urn:eigenius:core:short_name": "latency_ms",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0
+  },
+  {
+    "@id": "urn:eigenius:reflection:deterministic",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Whether the result is reproducible.",
+    "urn:eigenius:core:short_name": "deterministic",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean"
+  },
+  {
+    "@id": "urn:eigenius:reflection:cached",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Whether this result was served from the trace cache.",
+    "urn:eigenius:core:short_name": "cached",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean"
+  },
+  {
+    "@id": "urn:eigenius:reflection:name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Variable name in a LetTrace.",
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:value_trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Trace of the value expression in a Let binding.",
+    "urn:eigenius:core:short_name": "value_trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:body_trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Trace of the body expression in a Let binding.",
+    "urn:eigenius:core:short_name": "body_trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:element_traces",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Per-element traces in a MapTrace.",
+    "urn:eigenius:core:short_name": "element_traces",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:MapTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:step_traces",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Per-step accumulator traces in a ReduceTrace.",
+    "urn:eigenius:core:short_name": "step_traces",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ReduceTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:branch_taken",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Which branch was taken in a CaseTrace.",
+    "urn:eigenius:core:short_name": "branch_taken",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:branch_trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Trace of the taken branch body.",
+    "urn:eigenius:core:short_name": "branch_trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:scrutinee_trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Trace of the scrutinee expression in a CaseTrace.",
+    "urn:eigenius:core:short_name": "scrutinee_trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:field_traces",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Per-field traces in a ConstructTrace.",
+    "urn:eigenius:core:short_name": "field_traces",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ConstructTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:source_trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Trace of the source resource in a ProjectTrace.",
+    "urn:eigenius:core:short_name": "source_trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:property",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The property accessed in a ProjectTrace.",
+    "urn:eigenius:core:short_name": "property",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:program",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The program that was executed.",
+    "urn:eigenius:core:short_name": "program",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:trace_tree",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The root of the tree-structured trace, mirroring the program's expression tree.",
+    "urn:eigenius:core:short_name": "trace_tree",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The input resource for a program execution.",
+    "urn:eigenius:core:short_name": "input",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:total_tokens",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Total tokens across all LLM calls.",
+    "urn:eigenius:core:short_name": "total_tokens",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:total_latency_ms",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Total wall-clock time for program execution.",
+    "urn:eigenius:core:short_name": "total_latency_ms",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:cached_steps",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Number of steps served from trace cache.",
+    "urn:eigenius:core:short_name": "cached_steps",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:executed_steps",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Number of steps that were actually executed.",
+    "urn:eigenius:core:short_name": "executed_steps",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:started_at",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "When execution started.",
+    "urn:eigenius:core:short_name": "started_at",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
+  },
+  {
+    "@id": "urn:eigenius:reflection:completed_at",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "When execution completed.",
+    "urn:eigenius:core:short_name": "completed_at",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
+  },
+  {
+    "@id": "urn:eigenius:reflection:epistemic_status",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Epistemic status of the traced output.",
+    "urn:eigenius:core:short_name": "epistemic_status",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:EpistemicStatus"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:reflection:epistemic:declared",
+      "urn:eigenius:reflection:epistemic:observed",
+      "urn:eigenius:reflection:epistemic:derived",
+      "urn:eigenius:reflection:epistemic:verified"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:universe_level",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Universe stratification level. Level N traces reference level N-1 resources.",
+    "urn:eigenius:core:short_name": "universe_level",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0
+  },
+  {
+    "@id": "urn:eigenius:reflection:resource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The resource this trace is about.",
+    "urn:eigenius:core:short_name": "resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:reflection:proof_system",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The proof system used (lean4, coq, agda).",
+    "urn:eigenius:core:short_name": "proof_system",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:proof_term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the proof term in blob storage.",
+    "urn:eigenius:core:short_name": "proof_term",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:derivation_trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The ProgramTrace being verified.",
+    "urn:eigenius:core:short_name": "derivation_trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"],
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
+  }
+]

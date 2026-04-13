@@ -68,9 +68,9 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads the core ontology as the root layer, then the program ontology
-/// on top. Both are validated. Returns an `ExecutionContext` with the
-/// program layer as head.
+/// Loads three ontology layers: core → program → reflection.
+/// All are validated. Returns an `ExecutionContext` with the
+/// reflection layer as head.
 pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
     let core = load_layer(
         "core",
@@ -84,8 +84,14 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
         Some(core),
     )?;
 
+    let reflection = load_layer(
+        "reflection",
+        include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        Some(program),
+    )?;
+
     Ok(ExecutionContext::new(
-        program,
+        reflection,
         "working",
         ExecutionMode::ReadWrite,
     ))
@@ -99,10 +105,13 @@ mod tests {
     #[test]
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
-        // Head is the program layer (on top of core)
+        // Head is the reflection layer (on top of program, on top of core)
         assert!(!ctx.head().is_root());
-        // Core layer (parent) should be root
-        assert!(ctx.head().parent().unwrap().is_root());
+        // Program layer (parent of reflection)
+        let program = ctx.head().parent().unwrap();
+        assert!(!program.is_root());
+        // Core layer (parent of program) should be root
+        assert!(program.parent().unwrap().is_root());
     }
 
     #[test]
@@ -225,6 +234,44 @@ mod tests {
             assert!(
                 ctx.resolve(&iri).is_some(),
                 "should resolve component {comp}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_reflection_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in [
+            "DeclaredResource",
+            "ObservedResource",
+            "DerivedResource",
+            "VerifiedResource",
+            "ComponentTrace",
+            "ProgramTrace",
+            "DeclarationTrace",
+            "ObservationTrace",
+            "VerificationTrace",
+            "LetTrace",
+            "MapTrace",
+            "CaseTrace",
+            "ConstructTrace",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:reflection:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve reflection class {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_epistemic_statuses() {
+        let ctx = bootstrap().unwrap();
+        for status in ["declared", "observed", "derived", "verified"] {
+            let iri = Iri::parse(&format!("urn:eigenius:reflection:epistemic:{status}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve epistemic status {status}"
             );
         }
     }

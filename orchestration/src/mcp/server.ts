@@ -1,24 +1,173 @@
 /**
- * MCP Server — LLM → Core tool-use surface
+ * MCP Server — LLM tool-use surface for the Eigenius kernel.
  *
- * Exposes the kernel's four operations (Load, Query, Validate, Reflect)
- * as MCP tools that an LLM agent can invoke via tool-use.
+ * Exposes kernel operations as MCP tools that an LLM agent can invoke:
+ * - eigenius_query: Execute an EigenQL query
+ * - eigenius_inspect: Resolve a resource by IRI
+ * - eigenius_load: Load resources into the kernel
+ * - eigenius_validate: Validate a program
  *
- * Architecture reference: §2.3 (AI Integration Model)
+ * Transport: SSE/HTTP for remote agents. Stdio also available.
+ *
+ * Architecture reference: §2.3 (AI Integration Model), Phase 4 plan §5
  */
 
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { KernelClient } from "../client/kernel_client.ts";
 
-export class EigeniusMcpServer {
-  private client: KernelClient;
+/**
+ * Create and configure the Eigenius MCP server.
+ */
+export function createMcpServer(client: KernelClient): McpServer {
+  const server = new McpServer({
+    name: "eigenius",
+    version: "0.1.0",
+  });
 
-  constructor(client: KernelClient) {
-    this.client = client;
-  }
+  // --- eigenius_query ---
+  server.tool(
+    "eigenius_query",
+    "Execute an EigenQL query against the Eigenius knowledge graph. Returns matching resources as JSON.",
+    { eigenql: z.string().describe("The EigenQL query string") },
+    async (args: { eigenql: string }) => {
+      try {
+        const results = await client.query(args.eigenql);
+        const decoder = new TextDecoder();
+        const decoded = results.map((r: Uint8Array) => decoder.decode(r));
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(decoded, null, 2),
+          }],
+        };
+      } catch (e) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Query failed: ${(e as Error).message}`,
+          }],
+          isError: true,
+        };
+      }
+    },
+  );
 
-  start(_port: number): Promise<void> {
-    // TODO: Phase 4 — MCP server implementation
-    void this.client;
-    return Promise.reject(new Error("Not implemented"));
-  }
+  // --- eigenius_inspect ---
+  server.tool(
+    "eigenius_inspect",
+    "Resolve a resource by its IRI from the Eigenius knowledge graph. Returns the resource as JSON.",
+    { iri: z.string().describe("The IRI of the resource to inspect") },
+    async (args: { iri: string }) => {
+      try {
+        const response = await client.inspect(args.iri);
+        if (!response.found) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Resource not found: ${args.iri}`,
+            }],
+          };
+        }
+        const decoder = new TextDecoder();
+        return {
+          content: [{
+            type: "text" as const,
+            text: decoder.decode(response.resource),
+          }],
+        };
+      } catch (e) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Inspect failed: ${(e as Error).message}`,
+          }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // --- eigenius_load ---
+  server.tool(
+    "eigenius_load",
+    "Load resources into the Eigenius knowledge graph. Resources are provided as Eigon-JSON.",
+    {
+      json: z.string().describe("Eigon-JSON array of resources to load"),
+      auto_commit: z.boolean().optional().describe(
+        "Whether to commit after loading (default: true)",
+      ),
+    },
+    async (args: { json: string; auto_commit?: boolean }) => {
+      try {
+        const response = await client.load(
+          args.json,
+          args.auto_commit ?? true,
+        );
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: response.success,
+              resourceCount: response.resourceCount,
+              layerId: response.layerId,
+              errors: response.errors,
+            }, null, 2),
+          }],
+        };
+      } catch (e) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Load failed: ${(e as Error).message}`,
+          }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // --- eigenius_validate ---
+  server.tool(
+    "eigenius_validate",
+    "Type-check and validate an Eigenius program. Returns validation results.",
+    {
+      program: z.string().describe("Program resource as Eigon-JSON"),
+    },
+    async (args: { program: string }) => {
+      try {
+        const response = await client.validateProgram(args.program);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              valid: response.valid,
+              programType: response.programType,
+              errors: response.errors,
+            }, null, 2),
+          }],
+        };
+      } catch (e) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Validate failed: ${(e as Error).message}`,
+          }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  return server;
+}
+
+/**
+ * Start the MCP server with stdio transport (for local integration).
+ */
+export async function startStdioServer(server: McpServer): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("MCP server (stdio) connected");
 }

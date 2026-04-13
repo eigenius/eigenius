@@ -89,6 +89,10 @@ enum Commands {
         /// gRPC port
         #[arg(long, default_value = "50051")]
         port: u16,
+
+        /// Orchestrator endpoint for IO component dispatch
+        #[arg(long, env = "EIGENIUS_ORCHESTRATOR_ENDPOINT")]
+        orchestrator: Option<String>,
     },
 
     /// Database administration
@@ -135,6 +139,12 @@ async fn main() {
         match cli.command {
             Commands::Inspect { iri } => remote_inspect(endpoint, &iri, cli.json).await,
             Commands::Query { query, file: _ } => remote_query(endpoint, &query, cli.json).await,
+            Commands::Run {
+                program_file,
+                input_file,
+                ..
+            } => remote_run(endpoint, &program_file, &input_file, cli.json).await,
+            Commands::Load { file } => remote_load(endpoint, &file, cli.json).await,
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -162,7 +172,7 @@ async fn main() {
             ontology,
         } => cmd_run(&program_file, &input_file, ontology.as_deref(), cli.json),
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
-        Commands::Serve { port } => cmd_serve(port).await,
+        Commands::Serve { port, orchestrator } => cmd_serve(port, orchestrator.as_deref()).await,
         Commands::Db { command } => cmd_db(command),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
@@ -636,8 +646,8 @@ fn cmd_db(command: DbCommands) {
     }
 }
 
-async fn cmd_serve(port: u16) {
-    if let Err(e) = eigenius_kernel::server::start_server(port).await {
+async fn cmd_serve(port: u16, orchestrator: Option<&str>) {
+    if let Err(e) = eigenius_kernel::server::start_server(port, orchestrator).await {
         eprintln!("Server error: {e}");
         std::process::exit(1);
     }
@@ -722,6 +732,98 @@ async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
             }
             if !json_output {
                 println!("{count} result(s).");
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    let program_data = std::fs::read(program_file).unwrap_or_else(|e| {
+        eprintln!("Failed to read program file: {e}");
+        std::process::exit(1);
+    });
+    let input_data = std::fs::read(input_file).unwrap_or_else(|e| {
+        eprintln!("Failed to read input file: {e}");
+        std::process::exit(1);
+    });
+
+    let request = eigenius_kernel::server::proto::RunProgramRequest {
+        program: program_data,
+        input: input_data,
+        content_type: "application/eigon+json".to_string(),
+    };
+
+    match client.run_program(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if resp.success {
+                let resource = eigenius_kernel::ontology::eigon_cbor::parse_resource(&resp.output)
+                    .unwrap_or_else(|e| {
+                        eprintln!("Failed to parse output: {e}");
+                        std::process::exit(1);
+                    });
+                let json = eigon_json::serialize_resource(&resource);
+                if json_output {
+                    println!("{}", serde_json::to_string(&json).unwrap());
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                }
+            } else {
+                eprintln!("Program execution failed:");
+                for err in &resp.errors {
+                    eprintln!("  {}: {}", err.rule, err.message);
+                }
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    let data = std::fs::read(file).unwrap_or_else(|e| {
+        eprintln!("Failed to read file: {e}");
+        std::process::exit(1);
+    });
+
+    let request = eigenius_kernel::server::proto::LoadRequest {
+        resources: data,
+        content_type: "application/eigon+json".to_string(),
+        auto_commit: true,
+    };
+
+    match client.load(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if resp.success {
+                if json_output {
+                    println!(
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\"}}",
+                        resp.resource_count, resp.layer_id
+                    );
+                } else {
+                    println!(
+                        "Loaded {} resource(s). Layer: {}",
+                        resp.resource_count, resp.layer_id
+                    );
+                }
+            } else {
+                eprintln!("Load failed:");
+                for err in &resp.errors {
+                    eprintln!("  {}: {}", err.rule, err.message);
+                }
+                std::process::exit(1);
             }
         }
         Err(e) => {

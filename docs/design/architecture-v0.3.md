@@ -18,15 +18,17 @@ Large language models produce text that reads like knowledge but carries no epis
 
 For frontier science and engineering — quantum physics, genomics, drug discovery, materials science, climate modeling — this ambiguity is not an acceptable trade-off. When a researcher asks "does this molecule bind to this receptor?" or "does this quantum error correction code achieve the threshold theorem?", the answer might originate from an LLM-driven literature analysis, a computational simulation, or a formal derivation from first principles. These are epistemically different answers. Eigenius makes the difference visible, queryable, and enforceable rather than flattening everything into text that sounds equally confident.
 
-The architecture maintains a separation between three epistemic categories:
+The architecture maintains a separation between four epistemic categories:
 
-**Observed knowledge** — facts recorded in the knowledge graph as typed Eigon resources with tracked provenance. An LLM may have surfaced them, but they are persisted as structured, auditable records: a measured binding affinity, a published experimental result, a dataset. The reflection layer (§11) records where each fact came from.
+**Declared knowledge** — axioms, definitions, and design decisions asserted by humans. The core ontology, domain ontologies, program specifications, and prompt templates are all declarations. A declaration is an assertion anchored in human thought and intent — "I define this to be so." It carries no claim about external reality and no computational derivation. Every system must start from declarations; they are the epistemic foundation.
 
-**Derived knowledge** — conclusions that follow from observed knowledge through typed processing programs. The type system guarantees the program is well-formed. Reasoning traces record exactly which inputs produced which outputs through which steps. The derivation is replayable, queryable, and auditable. You can ask "what assumptions does this conclusion depend on?" and receive a typed, complete answer.
+**Observed knowledge** — facts recorded in the knowledge graph from external reality with tracked provenance. A measured binding affinity, a published experimental result, an uploaded document, a sensor reading. The system vouches for the provenance ("this is what was recorded, and here is where it came from"), not for the truth of the observation.
+
+**Derived knowledge** — conclusions that follow from declared and observed knowledge through typed processing programs. The type system guarantees the program is well-formed. Reasoning traces record exactly which inputs produced which outputs through which steps. The derivation is replayable, queryable, and auditable. You can ask "what assumptions does this conclusion depend on?" and receive a typed, complete answer.
 
 **Verified knowledge** — derivations that carry formal proofs, checked by constructive type theories registered as capabilities (§9.7). A proof term attached to a resource is not a confidence score or a citation — it is a machine-checked certificate that the conclusion follows from the premises by the rules of the type theory. If the proof checks, the derivation is correct in the mathematical sense, not the probabilistic sense.
 
-The progression from observed → derived → verified maps to the universe stratification in the reflection layer (§11.3). The type theory enforces level separation: a reasoning trace about a protein structure is not itself a protein structure, and the system prevents confusion between levels. This is the architectural mechanism that keeps the knowledge graph epistemically honest as it scales.
+The progression from declared → observed → derived → verified maps to increasing epistemic strength and the universe stratification in the reflection layer (§11.3). Resources declare their epistemic status via base classes (`DeclaredResource`, `ObservedResource`, `DerivedResource`, `VerifiedResource`) — see design doc D6b for the full schema.
 
 ### 1.2 Named Components
 
@@ -1194,7 +1196,7 @@ Because reasoning traces are typed resources, they are queryable via EigenQL alo
 
 ### 11.3 Epistemic Categories
 
-Every resource in the knowledge graph falls into one of three epistemic categories, determined by its provenance chain and the presence or absence of formal proof terms. These categories are queryable — an EigenQL query can filter by epistemic status, and the system can produce an epistemic audit of any conclusion.
+Every resource in the knowledge graph falls into one of four epistemic categories — declared, observed, derived, or verified — determined by its provenance chain and the presence or absence of formal proof terms. Resources declare their status via epistemic base classes (see design doc D6b). These categories are queryable — an EigenQL query can filter by epistemic status, and the system can produce an epistemic audit of any conclusion.
 
 **Observed** — a resource that represents a recorded fact with external provenance: a measurement, an experimental result, a published claim, a dataset entry. Its reasoning trace records the source (a paper DOI, a database identifier, a sensor reading) and the ingestion path (who loaded it, when, from where). The system does not vouch for its truth — it vouches for its provenance. An observed resource answers: "this is what was recorded, and here is where it came from."
 
@@ -1202,7 +1204,7 @@ Every resource in the knowledge graph falls into one of three epistemic categori
 
 **Verified** — a derived resource that additionally carries a formal proof term, checked by a constructive type theory capability (§9.7). The proof term is a machine-checked certificate that the conclusion follows from the premises by the rules of the type theory. A verified resource answers: "this is mathematically certain given those axioms." The proof term itself is a typed Eigon resource (§11.5), queryable and auditable.
 
-The epistemic category is not a static label — it is computed from the resource's provenance graph. A resource is verified if and only if it has a checked proof term. It is derived if it was produced by a program but lacks a proof term. It is observed if it was ingested from an external source. A resource's category can be promoted (from derived to verified, by attaching a proof) but never demoted. The reflection layer enforces that epistemic category transitions are monotonic and auditable.
+The epistemic category is not a static label — it is determined by the resource's base class membership and provenance. A resource is verified if it carries a `VerifiedResource` class with a checked proof term. It is derived if it was produced by a program (`DerivedResource`). It is observed if it was ingested from an external source (`ObservedResource`). It is declared if it was asserted by a human (`DeclaredResource`). A resource's category can be promoted (from derived to verified, by attaching a proof) but never demoted. The reflection layer enforces that epistemic category transitions are monotonic and auditable.
 
 ### 11.4 Universe Stratification
 
