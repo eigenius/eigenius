@@ -1,106 +1,154 @@
 /**
- * gRPC client for the Eigenius kernel service.
+ * Connect RPC client for the Eigenius kernel service.
  *
- * Connects to the kernel's gRPC API and provides typed methods
- * for all kernel operations. See design doc D5 for the API spec.
+ * Uses @connectrpc/connect with buf-generated types from proto/eigenius.proto.
+ * Provides typed methods for all kernel operations.
  *
- * Architecture reference: §2.2
+ * See design doc D5 for the API spec.
  */
 
-export interface LoadResponse {
-  success: boolean;
-  errors: ValidationError[];
-  layerId: string;
-  resourceCount: number;
-}
+import { createClient } from "@connectrpc/connect";
+import { createGrpcTransport } from "@connectrpc/connect-node";
+import { create } from "@bufbuild/protobuf";
+import {
+  EigeniusKernel,
+  type HealthResponse,
+  type InspectResponse,
+  type LoadResponse,
+  type RunProgramResponse,
+  type ReflectResponse,
+  type ValidateProgramResponse,
+  type ValidationError,
+  LoadRequestSchema,
+  InspectRequestSchema,
+  QueryRequestSchema,
+  ValidateProgramRequestSchema,
+  RunProgramRequestSchema,
+  ReflectRequestSchema,
+  HealthRequestSchema,
+} from "../gen/eigenius_pb.ts";
 
-export interface InspectResponse {
-  found: boolean;
-  resourceJson: string;
-}
+export type {
+  HealthResponse,
+  InspectResponse,
+  LoadResponse,
+  RunProgramResponse,
+  ReflectResponse,
+  ValidateProgramResponse,
+  ValidationError,
+};
 
-export interface ValidateResponse {
-  valid: boolean;
-  errors: ValidationError[];
-  programType: string;
-}
+const TEXT_ENCODER = new TextEncoder();
 
-export interface RunResponse {
-  success: boolean;
-  outputJson: string;
-  errors: ValidationError[];
-}
-
-export interface HealthResponse {
-  healthy: boolean;
-  version: string;
-  layerCount: number;
-  resourceCount: number;
-}
-
-export interface ValidationError {
-  resourceIri: string;
-  propertyIri: string;
-  rule: string;
-  message: string;
-  severity: string;
-}
-
+/**
+ * Client for the Eigenius kernel gRPC service.
+ *
+ * Uses Connect RPC transport to communicate with the kernel's tonic
+ * gRPC server over HTTP/2.
+ */
 export class KernelClient {
+  private client: ReturnType<typeof createClient<typeof EigeniusKernel>>;
   private endpoint: string;
 
   constructor(endpoint: string) {
     this.endpoint = endpoint;
+    const transport = createGrpcTransport({
+      baseUrl: endpoint,
+    });
+    this.client = createClient(EigeniusKernel, transport);
+  }
+
+  /** Get the configured endpoint. */
+  getEndpoint(): string {
+    return this.endpoint;
   }
 
   /**
    * Load resources into the kernel's working layer.
-   * Resources are sent as Eigon-JSON.
    */
-  load(_resourcesJson: string): Promise<LoadResponse> {
-    // TODO: Implement gRPC call to kernel Load RPC
-    // Requires: npm:@grpc/grpc-js or equivalent Deno gRPC library
-    return Promise.reject(
-      new Error(`Not implemented (endpoint: ${this.endpoint})`),
+  async load(
+    resourcesJson: string,
+    autoCommit = true,
+  ): Promise<LoadResponse> {
+    return await this.client.load(
+      create(LoadRequestSchema, {
+        resources: TEXT_ENCODER.encode(resourcesJson),
+        contentType: "application/eigon+json",
+        autoCommit,
+      }),
     );
   }
 
   /**
    * Resolve a resource by IRI.
    */
-  inspect(_iri: string): Promise<InspectResponse> {
-    return Promise.reject(new Error("Not implemented"));
+  async inspect(iri: string): Promise<InspectResponse> {
+    return await this.client.inspect(
+      create(InspectRequestSchema, { iri }),
+    );
   }
 
   /**
-   * Execute an EigenQL query. Returns results as an async iterable.
+   * Execute an EigenQL query. Collects all streamed results.
    */
-  async *query(_eigenql: string): AsyncGenerator<string> {
-    void this.endpoint;
-    throw new Error("Not implemented");
+  async query(eigenql: string): Promise<Uint8Array[]> {
+    const results: Uint8Array[] = [];
+    for await (const result of this.client.query(
+      create(QueryRequestSchema, { eigenql }),
+    )) {
+      results.push(result.resource);
+    }
+    return results;
   }
 
   /**
    * Type-check a program against the kernel's layer chain.
    */
-  validateProgram(_programJson: string): Promise<ValidateResponse> {
-    return Promise.reject(new Error("Not implemented"));
+  async validateProgram(
+    programJson: string,
+  ): Promise<ValidateProgramResponse> {
+    return await this.client.validateProgram(
+      create(ValidateProgramRequestSchema, {
+        program: TEXT_ENCODER.encode(programJson),
+        contentType: "application/eigon+json",
+      }),
+    );
   }
 
   /**
    * Execute a program with input data.
    */
-  runProgram(
-    _programJson: string,
-    _inputJson: string,
-  ): Promise<RunResponse> {
-    return Promise.reject(new Error("Not implemented"));
+  async runProgram(
+    programJson: string,
+    inputJson: string,
+  ): Promise<RunProgramResponse> {
+    return await this.client.runProgram(
+      create(RunProgramRequestSchema, {
+        program: TEXT_ENCODER.encode(programJson),
+        input: TEXT_ENCODER.encode(inputJson),
+        contentType: "application/eigon+json",
+      }),
+    );
+  }
+
+  /**
+   * Record a reasoning trace.
+   */
+  async reflect(traceJson: string): Promise<ReflectResponse> {
+    return await this.client.reflect(
+      create(ReflectRequestSchema, {
+        trace: TEXT_ENCODER.encode(traceJson),
+        contentType: "application/eigon+json",
+      }),
+    );
   }
 
   /**
    * Check kernel health.
    */
-  health(): Promise<HealthResponse> {
-    return Promise.reject(new Error("Not implemented"));
+  async health(): Promise<HealthResponse> {
+    return await this.client.health(
+      create(HealthRequestSchema, {}),
+    );
   }
 }

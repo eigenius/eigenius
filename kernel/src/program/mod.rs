@@ -7,6 +7,8 @@
 pub mod execute;
 pub mod expr;
 pub mod ground;
+pub mod remote;
+pub mod trace;
 
 #[cfg(test)]
 mod tests {

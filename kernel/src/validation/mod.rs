@@ -1061,4 +1061,185 @@ mod tests {
         assert!(is_valid_uuid("550e8400-e29b-41d4-a716-446655440000"));
         assert!(!is_valid_uuid("not-a-uuid"));
     }
+
+    // --- Epistemic base class validation (Step 6) ---
+
+    fn build_full_bootstrap_layer() -> Arc<Layer> {
+        let ctx = crate::bootstrap::bootstrap().unwrap();
+        // Return the head layer (reflection, on top of program, on top of core)
+        ctx.head().clone()
+    }
+
+    #[test]
+    fn derived_resource_without_derivation_fails() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // A resource claiming to be DerivedResource but missing 'derivation'
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_derived",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:reflection:DerivedResource".to_string(),
+                    )]),
+                )],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let derived_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_derived")
+                    && e.rule == ValidationRule::MissingRequired
+            })
+            .collect();
+        assert!(
+            !derived_errors.is_empty(),
+            "DerivedResource without 'derivation' property should fail"
+        );
+    }
+
+    #[test]
+    fn declared_resource_with_declared_by_passes() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:good_declared",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:reflection:DeclaredResource".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:reflection:declared_by",
+                        Value::String("test user".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let declared_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str())
+                    == Some("urn:eigenius:test:good_declared")
+            })
+            .collect();
+        assert!(
+            declared_errors.is_empty(),
+            "DeclaredResource with 'declared_by' should pass: {declared_errors:?}"
+        );
+    }
+
+    #[test]
+    fn declared_resource_without_declared_by_fails() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_declared",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:reflection:DeclaredResource".to_string(),
+                    )]),
+                )],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        assert!(
+            errors.iter().any(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_declared")
+                    && e.rule == ValidationRule::MissingRequired
+            }),
+            "DeclaredResource without 'declared_by' should fail"
+        );
+    }
+
+    #[test]
+    fn observed_resource_without_source_fails() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_observed",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:reflection:ObservedResource".to_string(),
+                    )]),
+                )],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        assert!(
+            errors.iter().any(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_observed")
+                    && e.rule == ValidationRule::MissingRequired
+            }),
+            "ObservedResource without 'source' should fail"
+        );
+    }
+
+    #[test]
+    fn verified_resource_requires_both_derivation_and_verification() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // VerifiedResource subclasses DerivedResource, so needs both
+        // 'derivation' (from DerivedResource) and 'verification' (its own)
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_verified",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:reflection:VerifiedResource".to_string(),
+                    )]),
+                )],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let verified_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_verified")
+                    && e.rule == ValidationRule::MissingRequired
+            })
+            .collect();
+        // Should require both 'derivation' and 'verification'
+        assert!(
+            verified_errors.len() >= 2,
+            "VerifiedResource should require both 'derivation' and 'verification', got {} errors: {verified_errors:?}",
+            verified_errors.len()
+        );
+    }
 }

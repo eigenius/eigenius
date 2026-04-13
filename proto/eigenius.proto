@@ -117,6 +117,36 @@ message HealthResponse {
   uint64 resource_count = 4;
 }
 
+// --- Component Execution (kernel → orchestrator) ---
+
+service ComponentExecutor {
+  // Execute an IO component. Called by the kernel when evaluating a
+  // program that references a remote component (e.g. CompleteText).
+  rpc Execute(ComponentRequest) returns (ComponentResponse);
+}
+
+message ComponentRequest {
+  string component_iri = 1;    // Which component to execute
+  bytes input = 2;             // Input resource as CBOR or Eigon-JSON
+  bytes argument = 3;          // Argument/config resource
+  string content_type = 4;     // "application/cbor" or "application/eigon+json"
+}
+
+message ComponentResponse {
+  bool success = 1;
+  bytes output = 2;            // Output resource as CBOR or Eigon-JSON
+  string error = 3;            // Error message if !success
+  ComponentMetrics metrics = 4;
+}
+
+message ComponentMetrics {
+  string provider = 1;         // e.g. "anthropic"
+  string model = 2;            // e.g. "claude-sonnet-4-20250514"
+  int64 prompt_tokens = 3;
+  int64 completion_tokens = 4;
+  int64 latency_ms = 5;
+}
+
 // --- Common ---
 
 message ValidationError {

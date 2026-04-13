@@ -1,0 +1,16 @@
+[
+  {
+    "@id": "urn:eigenius:demo:summarize",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+    "urn:eigenius:program:input_type": "urn:eigenius:demo:Document",
+    "urn:eigenius:program:output_type": "urn:eigenius:demo:Document",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:CompleteText",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+        "urn:eigenius:program:name": "input"
+      }
+    }
+  }
+]

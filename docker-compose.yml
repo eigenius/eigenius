@@ -1,0 +1,57 @@
+# Eigenius Local Development Stack
+#
+# Runs the kernel and orchestrator together for local integration testing.
+#
+# Usage:
+#   docker compose build
+#   docker compose up
+#
+# With real LLM calls (requires ANTHROPIC_API_KEY):
+#   ANTHROPIC_API_KEY=sk-... docker compose up
+#
+# With mock LLM (no API key needed):
+#   EIGENIUS_MOCK_LLM=true docker compose up
+#
+# Test health:
+#   curl http://localhost:8080/health
+#
+# Test kernel (via CLI):
+#   eigenius --endpoint http://localhost:50051 inspect "urn:eigenius:core:Class"
+
+services:
+  kernel:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.kernel
+    ports:
+      - "50051:50051"
+    environment:
+      - EIGENIUS_ORCHESTRATOR_ENDPOINT=http://orchestrator:8080
+    command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080"]
+    depends_on:
+      orchestrator:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "eigenius", "--endpoint", "http://localhost:50051", "inspect", "urn:eigenius:core:Class"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.orchestration
+    ports:
+      - "8080:8080"
+    environment:
+      - EIGENIUS_KERNEL_ENDPOINT=http://kernel:50051
+      - EIGENIUS_ORCHESTRATOR_PORT=8080
+      - EIGENIUS_MOCK_LLM=${EIGENIUS_MOCK_LLM:-false}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "deno eval \"const r = await fetch('http://localhost:8080/health'); if (!r.ok) Deno.exit(1);\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s

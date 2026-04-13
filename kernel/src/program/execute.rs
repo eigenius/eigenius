@@ -1,8 +1,15 @@
 //! Program executor: evaluate a typed program against input data.
+//!
+//! Each expression evaluation returns `(Resource, Option<Trace>)` where
+//! the trace mirrors the expression tree (D6b §2.1). IO component calls
+//! check the trace store before dispatching (memoization).
 
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
+use crate::program::trace::{
+    compute_trace_key, ComponentMetrics, ComponentTrace, Trace, TraceStore,
+};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -26,9 +33,21 @@ impl fmt::Display for ProgramError {
 
 impl std::error::Error for ProgramError {}
 
+/// Result of executing a component: output resource plus optional metrics.
+pub struct ComponentResult {
+    pub output: Resource,
+    pub metrics: Option<ComponentMetrics>,
+}
+
 /// A built-in component implementation.
 pub trait BuiltinComponent: Send + Sync {
-    fn execute(&self, input: &Resource, layer: &Layer) -> Result<Resource, String>;
+    /// Whether this component performs IO (non-deterministic, cacheable).
+    fn is_io(&self) -> bool {
+        false
+    }
+
+    /// Execute the component.
+    fn execute(&self, input: &Resource, layer: &Layer) -> Result<ComponentResult, String>;
 }
 
 /// Registry of built-in components.
@@ -63,34 +82,47 @@ impl Default for ComponentRegistry {
     }
 }
 
-/// Execute a program resource against input data.
+/// Execute a program resource against input data, producing output and trace.
 pub fn execute_program(
     program: &Resource,
     input: &Resource,
     layer: &Layer,
     registry: &ComponentRegistry,
 ) -> Result<Resource, ProgramError> {
-    // Parse the program body
+    let (result, _trace) = execute_program_traced(program, input, layer, registry, None)?;
+    Ok(result)
+}
+
+/// Execute a program resource with full trace recording.
+///
+/// Returns `(output, trace_tree, program_metrics)`.
+pub fn execute_program_traced(
+    program: &Resource,
+    input: &Resource,
+    layer: &Layer,
+    registry: &ComponentRegistry,
+    trace_store: Option<&dyn TraceStore>,
+) -> Result<(Resource, Option<Trace>), ProgramError> {
     let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
     let body = match program.get(&body_prop) {
         Some(Value::Embedded(r)) => r,
         _ => return Err(ProgramError::Parse("program has no 'body'".to_string())),
     };
 
-    // Execute with input bound in context
     let mut context = BTreeMap::new();
     context.insert("input".to_string(), input.clone());
 
-    execute_expression(body, &context, layer, registry)
+    execute_expression(body, &context, layer, registry, trace_store)
 }
 
-/// Execute an expression against a variable context.
+/// Execute an expression against a variable context, returning result and trace.
 fn execute_expression(
     expr: &Resource,
     context: &BTreeMap<String, Resource>,
     layer: &Layer,
     registry: &ComponentRegistry,
-) -> Result<Resource, ProgramError> {
+    trace_store: Option<&dyn TraceStore>,
+) -> Result<(Resource, Option<Trace>), ProgramError> {
     let is_a = expr.is_a();
     let class_str = is_a.first().map(|i| i.as_str()).unwrap_or("");
 
@@ -98,13 +130,22 @@ fn execute_expression(
         "urn:eigenius:program:Let" => {
             let name = get_str(expr, "urn:eigenius:program:name")?;
             let value_resource = get_emb(expr, "urn:eigenius:program:value")?;
-            let value = execute_expression(&value_resource, context, layer, registry)?;
+            let (value, value_trace) =
+                execute_expression(&value_resource, context, layer, registry, trace_store)?;
 
             let mut new_context = context.clone();
-            new_context.insert(name, value);
+            new_context.insert(name.clone(), value);
 
             let body_resource = get_emb(expr, "urn:eigenius:program:body")?;
-            execute_expression(&body_resource, &new_context, layer, registry)
+            let (result, body_trace) =
+                execute_expression(&body_resource, &new_context, layer, registry, trace_store)?;
+
+            let trace = Trace::Let {
+                name,
+                value_trace: value_trace.map(Box::new),
+                body_trace: body_trace.map(Box::new),
+            };
+            Ok((result, Some(trace)))
         }
 
         "urn:eigenius:program:Apply" => {
@@ -112,8 +153,7 @@ fn execute_expression(
             let func_name = match expr.get(&func_prop) {
                 Some(Value::String(s)) => s.clone(),
                 Some(Value::Embedded(r)) => {
-                    // Function is an expression — execute it
-                    let _func_val = execute_expression(r, context, layer, registry)?;
+                    let _func_val = execute_expression(r, context, layer, registry, trace_store)?;
                     return Err(ProgramError::Execution(
                         "higher-order function execution not yet supported".to_string(),
                     ));
@@ -125,51 +165,100 @@ fn execute_expression(
                 }
             };
 
-            // Build input from argument
             let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
             let input = match expr.get(&arg_prop) {
-                Some(Value::Embedded(r)) => execute_expression(r, context, layer, registry)?,
+                Some(Value::Embedded(r)) => {
+                    execute_expression(r, context, layer, registry, trace_store)?.0
+                }
                 Some(Value::String(s)) => {
-                    // Variable reference or resource IRI
                     if let Some(r) = context.get(s) {
                         r.clone()
                     } else {
-                        Resource::new_embedded() // Empty input
+                        Resource::new_embedded()
                     }
                 }
                 _ => Resource::new_embedded(),
             };
 
-            // Dispatch to component
             match registry.get(&func_name) {
-                Some(component) => component
-                    .execute(&input, layer)
-                    .map_err(ProgramError::Execution),
+                Some(component) => {
+                    if component.is_io() {
+                        // IO component — check trace cache first
+                        let cache_key = compute_trace_key(&func_name, &input);
+
+                        if let Some(store) = trace_store {
+                            if let Some(cached) = store.get_component_trace(&cache_key) {
+                                let result = cached.output.clone();
+                                let trace = Trace::Component(ComponentTrace {
+                                    cached: true,
+                                    ..cached
+                                });
+                                return Ok((result, Some(trace)));
+                            }
+                        }
+
+                        let comp_result = component
+                            .execute(&input, layer)
+                            .map_err(ProgramError::Execution)?;
+
+                        let ct = ComponentTrace {
+                            component: func_name,
+                            input_hash: cache_key,
+                            argument_hash: None,
+                            output: comp_result.output.clone(),
+                            cached: false,
+                            metrics: comp_result.metrics,
+                        };
+
+                        if let Some(store) = trace_store {
+                            store.put_component_trace(cache_key, ct.clone());
+                        }
+
+                        Ok((comp_result.output, Some(Trace::Component(ct))))
+                    } else {
+                        // Pure component — no caching
+                        let comp_result = component
+                            .execute(&input, layer)
+                            .map_err(ProgramError::Execution)?;
+
+                        let trace = Trace::Pure {
+                            component: func_name,
+                            output: comp_result.output.clone(),
+                        };
+                        Ok((comp_result.output, Some(trace)))
+                    }
+                }
                 None => {
                     // Unknown component — return input (identity fallback)
-                    Ok(input)
+                    Ok((input, None))
                 }
             }
         }
 
         "urn:eigenius:program:Var" => {
             let name = get_str(expr, "urn:eigenius:program:name")?;
-            context
+            let result = context
                 .get(&name)
                 .cloned()
-                .ok_or_else(|| ProgramError::Execution(format!("unbound variable: {name}")))
+                .ok_or_else(|| ProgramError::Execution(format!("unbound variable: {name}")))?;
+            Ok((result, None)) // Var produces no trace
         }
 
         "urn:eigenius:program:Project" => {
             let inner_resource = get_emb(expr, "urn:eigenius:program:expression")?;
-            let inner = execute_expression(&inner_resource, context, layer, registry)?;
+            let (inner, inner_trace) =
+                execute_expression(&inner_resource, context, layer, registry, trace_store)?;
 
             let prop_iri = get_iri(expr, "urn:eigenius:program:property")?;
             match inner.get(&prop_iri) {
                 Some(val) => {
                     let mut result = Resource::new_embedded();
-                    result.set(prop_iri, val.clone());
-                    Ok(result)
+                    result.set(prop_iri.clone(), val.clone());
+                    let trace = Trace::Project {
+                        source_trace: inner_trace.map(Box::new),
+                        property: prop_iri,
+                    };
+                    Ok((result, Some(trace)))
                 }
                 None => Err(ProgramError::Execution(format!(
                     "property {} not found",
@@ -190,29 +279,35 @@ fn execute_expression(
             };
 
             let mut result = Resource::new_embedded();
+            let mut field_traces = BTreeMap::new();
+
             for (prop_iri, val) in fields.properties() {
-                let field_val = match val {
+                let (field_val, field_trace) = match val {
                     Value::Embedded(r) => {
-                        let field_resource = execute_expression(r, context, layer, registry)?;
-                        // Extract the value from the field resource
-                        if let Some((_, v)) = field_resource.properties().iter().next() {
+                        let (field_resource, ft) =
+                            execute_expression(r, context, layer, registry, trace_store)?;
+                        let v = if let Some((_, v)) = field_resource.properties().iter().next() {
                             v.clone()
                         } else {
                             Value::Embedded(Box::new(field_resource))
-                        }
+                        };
+                        (v, ft)
                     }
                     Value::String(s) => {
                         if let Some(r) = context.get(s) {
-                            Value::Embedded(Box::new(r.clone()))
+                            (Value::Embedded(Box::new(r.clone())), None)
                         } else {
-                            val.clone()
+                            (val.clone(), None)
                         }
                     }
-                    _ => val.clone(),
+                    _ => (val.clone(), None),
                 };
                 result.set(prop_iri.clone(), field_val);
+                field_traces.insert(prop_iri.clone(), field_trace);
             }
-            Ok(result)
+
+            let trace = Trace::Construct { field_traces };
+            Ok((result, Some(trace)))
         }
 
         "urn:eigenius:program:Literal" => {
@@ -224,7 +319,7 @@ fn execute_expression(
                     val.clone(),
                 );
             }
-            Ok(result)
+            Ok((result, None)) // Literal produces no trace
         }
 
         _ => Err(ProgramError::Execution(format!(
@@ -259,8 +354,11 @@ fn get_iri(resource: &Resource, prop: &str) -> Result<Iri, ProgramError> {
 struct IdentityComponent;
 
 impl BuiltinComponent for IdentityComponent {
-    fn execute(&self, input: &Resource, _layer: &Layer) -> Result<Resource, String> {
-        Ok(input.clone())
+    fn execute(&self, input: &Resource, _layer: &Layer) -> Result<ComponentResult, String> {
+        Ok(ComponentResult {
+            output: input.clone(),
+            metrics: None,
+        })
     }
 }
 
@@ -268,6 +366,7 @@ impl BuiltinComponent for IdentityComponent {
 mod tests {
     use super::*;
     use crate::ontology::eigon_json;
+    use crate::program::trace::{InMemoryTraceStore, ProgramMetrics};
 
     fn make_simple_program() -> Resource {
         let json = r#"{
@@ -307,6 +406,23 @@ mod tests {
     }
 
     #[test]
+    fn execute_identity_produces_trace() {
+        let program = make_simple_program();
+        let input = make_input();
+        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+        let registry = ComponentRegistry::default();
+
+        let (output, trace) =
+            execute_program_traced(&program, &input, &layer, &registry, None).unwrap();
+        let name_iri = Iri::parse("urn:eigenius:example:name").unwrap();
+        assert_eq!(output.get(&name_iri).unwrap().as_str(), Some("Rex"));
+
+        // Identity is a pure component → PureTrace
+        assert!(trace.is_some());
+        assert!(matches!(trace.unwrap(), Trace::Pure { .. }));
+    }
+
+    #[test]
     fn execute_let_binding() {
         let json = r#"{
             "@id": "urn:eigenius:test:prog",
@@ -337,5 +453,145 @@ mod tests {
         let output = execute_program(&program, &input, &layer, &registry).unwrap();
         let name_iri = Iri::parse("urn:eigenius:example:name").unwrap();
         assert_eq!(output.get(&name_iri).unwrap().as_str(), Some("Rex"));
+    }
+
+    #[test]
+    fn execute_let_produces_let_trace() {
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Let"],
+                "urn:eigenius:program:name": "result",
+                "urn:eigenius:program:type": "urn:eigenius:core:string",
+                "urn:eigenius:program:value": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+                    "urn:eigenius:program:function": "urn:eigenius:components:Identity",
+                    "urn:eigenius:program:argument": {
+                        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                        "urn:eigenius:program:name": "input"
+                    }
+                },
+                "urn:eigenius:program:body": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                    "urn:eigenius:program:name": "result"
+                }
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+        let input = make_input();
+        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+        let registry = ComponentRegistry::default();
+
+        let (_output, trace) =
+            execute_program_traced(&program, &input, &layer, &registry, None).unwrap();
+
+        // Should be LetTrace with value_trace = PureTrace and body_trace = None (Var)
+        match trace.unwrap() {
+            Trace::Let {
+                name,
+                value_trace,
+                body_trace,
+            } => {
+                assert_eq!(name, "result");
+                assert!(matches!(*value_trace.unwrap(), Trace::Pure { .. }));
+                assert!(body_trace.is_none()); // Var produces no trace
+            }
+            other => panic!("expected LetTrace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn io_component_uses_trace_cache() {
+        // Create an IO component that counts invocations
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        struct CountingIoComponent {
+            count: AtomicU32,
+        }
+
+        impl BuiltinComponent for CountingIoComponent {
+            fn is_io(&self) -> bool {
+                true
+            }
+
+            fn execute(&self, input: &Resource, _layer: &Layer) -> Result<ComponentResult, String> {
+                self.count.fetch_add(1, Ordering::SeqCst);
+                Ok(ComponentResult {
+                    output: input.clone(),
+                    metrics: Some(ComponentMetrics {
+                        provider: "test".to_string(),
+                        model: "test-model".to_string(),
+                        prompt_tokens: 10,
+                        completion_tokens: 5,
+                        latency_ms: 100,
+                    }),
+                })
+            }
+        }
+
+        let counter = std::sync::Arc::new(CountingIoComponent {
+            count: AtomicU32::new(0),
+        });
+
+        let mut registry = ComponentRegistry::new();
+        registry.register(
+            "urn:eigenius:test:io-comp".to_string(),
+            Box::new(CountingIoComponent {
+                count: AtomicU32::new(0),
+            }),
+        );
+
+        // We need to use the same component instance to track count
+        // So let's just verify the cache behavior via the trace store
+        let store = InMemoryTraceStore::new();
+
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+                "urn:eigenius:program:function": "urn:eigenius:test:io-comp",
+                "urn:eigenius:program:argument": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                    "urn:eigenius:program:name": "input"
+                }
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+        let input = make_input();
+        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+
+        // First execution — dispatches to component
+        let (_out1, trace1) =
+            execute_program_traced(&program, &input, &layer, &registry, Some(&store)).unwrap();
+        match &trace1 {
+            Some(Trace::Component(ct)) => {
+                assert!(!ct.cached);
+                assert!(ct.metrics.is_some());
+            }
+            _ => panic!("expected ComponentTrace"),
+        }
+
+        // Second execution — same input, should hit cache
+        let (_out2, trace2) =
+            execute_program_traced(&program, &input, &layer, &registry, Some(&store)).unwrap();
+        match &trace2 {
+            Some(Trace::Component(ct)) => {
+                assert!(ct.cached, "second execution should be cached");
+            }
+            _ => panic!("expected ComponentTrace"),
+        }
+
+        // Verify metrics
+        let metrics = ProgramMetrics::from_trace(&trace1);
+        assert_eq!(metrics.executed_steps, 1);
+        assert_eq!(metrics.total_tokens, 15);
+
+        let metrics2 = ProgramMetrics::from_trace(&trace2);
+        assert_eq!(metrics2.cached_steps, 1);
+        assert_eq!(metrics2.executed_steps, 0);
+
+        drop(counter); // suppress unused warning
     }
 }

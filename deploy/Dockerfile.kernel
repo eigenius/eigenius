@@ -28,5 +28,7 @@ COPY --from=builder /build/target/release/eigenius /usr/local/bin/eigenius
 
 EXPOSE 50051
 
+ENV EIGENIUS_ORCHESTRATOR_ENDPOINT=""
+
 ENTRYPOINT ["eigenius"]
 CMD ["serve", "--port", "50051"]

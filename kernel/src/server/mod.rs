@@ -29,10 +29,15 @@ pub struct EigeniusService {
 impl EigeniusService {
     /// Create a new service by bootstrapping the kernel.
     pub fn new() -> Result<Self, String> {
+        Self::with_components(ComponentRegistry::default())
+    }
+
+    /// Create a new service with a custom component registry.
+    pub fn with_components(components: ComponentRegistry) -> Result<Self, String> {
         let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
         Ok(Self {
             context: Arc::new(RwLock::new(ctx)),
-            components: Arc::new(ComponentRegistry::default()),
+            components: Arc::new(components),
         })
     }
 
@@ -257,10 +262,42 @@ impl EigeniusKernel for EigeniusService {
     }
 }
 
+/// Known remote component IRIs that should be dispatched to the orchestrator.
+const REMOTE_COMPONENTS: &[&str] = &[
+    "urn:eigenius:program:components:CompleteText",
+    "urn:eigenius:program:components:CompleteJson",
+    "urn:eigenius:program:components:HttpRequest",
+];
+
 /// Start the gRPC server on the given port.
-pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+///
+/// If `orchestrator_endpoint` is provided, remote components are registered
+/// that dispatch IO calls to the orchestrator via ComponentExecutor gRPC.
+pub async fn start_server(
+    port: u16,
+    orchestrator_endpoint: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
-    let service = EigeniusService::new()?;
+
+    let mut registry = ComponentRegistry::default();
+
+    if let Some(endpoint) = orchestrator_endpoint {
+        println!("Connecting to orchestrator at {endpoint}...");
+        match crate::program::remote::connect_orchestrator(endpoint, REMOTE_COMPONENTS).await {
+            Ok(components) => {
+                for (iri, component) in components {
+                    println!("  Registered remote component: {iri}");
+                    registry.register(iri, component);
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to connect to orchestrator: {e}");
+                eprintln!("  IO components will not be available");
+            }
+        }
+    }
+
+    let service = EigeniusService::with_components(registry)?;
 
     println!("Eigenius gRPC server listening on {addr}");
 
