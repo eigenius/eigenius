@@ -22,6 +22,9 @@
   "lint": {
     "exclude": ["src/gen/"]
   },
+  "fmt": {
+    "exclude": ["src/gen/"]
+  },
   "compilerOptions": {
     "strict": true
   }

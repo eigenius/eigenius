@@ -108,12 +108,16 @@ export function createMcpServer(client: KernelClient): McpServer {
         return {
           content: [{
             type: "text" as const,
-            text: JSON.stringify({
-              success: response.success,
-              resourceCount: response.resourceCount,
-              layerId: response.layerId,
-              errors: response.errors,
-            }, null, 2),
+            text: JSON.stringify(
+              {
+                success: response.success,
+                resourceCount: response.resourceCount,
+                layerId: response.layerId,
+                errors: response.errors,
+              },
+              null,
+              2,
+            ),
           }],
         };
       } catch (e) {
@@ -141,11 +145,15 @@ export function createMcpServer(client: KernelClient): McpServer {
         return {
           content: [{
             type: "text" as const,
-            text: JSON.stringify({
-              valid: response.valid,
-              programType: response.programType,
-              errors: response.errors,
-            }, null, 2),
+            text: JSON.stringify(
+              {
+                valid: response.valid,
+                programType: response.programType,
+                errors: response.errors,
+              },
+              null,
+              2,
+            ),
           }],
         };
       } catch (e) {
