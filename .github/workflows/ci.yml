@@ -17,6 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -31,7 +34,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -75,5 +78,4 @@ jobs:
         uses: bufbuild/buf-setup-action@v1
 
       - name: Lint protos
-        run: buf lint proto/
-        continue-on-error: true  # Until buf.yaml is configured
+        run: buf lint

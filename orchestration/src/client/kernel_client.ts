@@ -12,28 +12,28 @@ import { createGrpcTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
 import {
   EigeniusKernel,
+  HealthRequestSchema,
   type HealthResponse,
+  InspectRequestSchema,
   type InspectResponse,
+  LoadRequestSchema,
   type LoadResponse,
-  type RunProgramResponse,
+  QueryRequestSchema,
+  ReflectRequestSchema,
   type ReflectResponse,
+  RunProgramRequestSchema,
+  type RunProgramResponse,
+  ValidateProgramRequestSchema,
   type ValidateProgramResponse,
   type ValidationError,
-  LoadRequestSchema,
-  InspectRequestSchema,
-  QueryRequestSchema,
-  ValidateProgramRequestSchema,
-  RunProgramRequestSchema,
-  ReflectRequestSchema,
-  HealthRequestSchema,
 } from "../gen/eigenius_pb.ts";
 
 export type {
   HealthResponse,
   InspectResponse,
   LoadResponse,
-  RunProgramResponse,
   ReflectResponse,
+  RunProgramResponse,
   ValidateProgramResponse,
   ValidationError,
 };
@@ -93,9 +93,11 @@ export class KernelClient {
    */
   async query(eigenql: string): Promise<Uint8Array[]> {
     const results: Uint8Array[] = [];
-    for await (const result of this.client.query(
-      create(QueryRequestSchema, { eigenql }),
-    )) {
+    for await (
+      const result of this.client.query(
+        create(QueryRequestSchema, { eigenql }),
+      )
+    ) {
       results.push(result.resource);
     }
     return results;

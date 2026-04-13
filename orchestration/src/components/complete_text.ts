@@ -52,20 +52,18 @@ function parseArgument(argument: Record<string, any>): {
     argument["urn:eigenius:program:components:completion:user_prompt"] ?? "";
   const systemPrompt =
     argument["urn:eigenius:program:components:completion:system_prompt"];
-  const params =
-    argument[
-      "urn:eigenius:program:components:completion:request_parameters"
-    ] ?? {};
+  const params = argument[
+    "urn:eigenius:program:components:completion:request_parameters"
+  ] ?? {};
 
   return {
     userPrompt,
     systemPrompt,
     model: params["urn:eigenius:program:request:model"] ?? DEFAULTS.model,
-    temperature:
-      params["urn:eigenius:program:request:temperature"] ??
-        DEFAULTS.temperature,
-    maxTokens:
-      params["urn:eigenius:program:request:max_tokens"] ?? DEFAULTS.maxTokens,
+    temperature: params["urn:eigenius:program:request:temperature"] ??
+      DEFAULTS.temperature,
+    maxTokens: params["urn:eigenius:program:request:max_tokens"] ??
+      DEFAULTS.maxTokens,
   };
 }
 
@@ -155,5 +153,4 @@ export function createMockCompleteTextHandler(
 }
 
 /** The component IRI for CompleteText. */
-export const COMPLETE_TEXT_IRI =
-  "urn:eigenius:program:components:CompleteText";
+export const COMPLETE_TEXT_IRI = "urn:eigenius:program:components:CompleteText";
