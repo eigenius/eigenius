@@ -36,6 +36,26 @@ Future phases add: gRPC service with TiKV storage, LLM integration with reasonin
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
+### Docker Compose
+
+The demo can also run via Docker Compose without installing Rust or Deno locally.
+
+```bash
+# Build and start both services (mock LLM, no API key needed):
+EIGENIUS_MOCK_LLM=true docker compose up --build -d
+
+# Run the demo:
+./demo/run.sh
+
+# With a real LLM:
+docker compose down
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+./demo/run.sh
+
+# Stop:
+docker compose down
+```
+
 ## Repository Structure
 
 ```

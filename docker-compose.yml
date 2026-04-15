@@ -30,7 +30,7 @@ services:
     command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080"]
     depends_on:
       orchestrator:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "eigenius", "--endpoint", "http://localhost:50051", "inspect", "urn:eigenius:core:Class"]
       interval: 10s
@@ -51,7 +51,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     healthcheck:
       test: ["CMD", "sh", "-c", "deno eval \"const r = await fetch('http://localhost:8080/health'); if (!r.ok) Deno.exit(1);\""]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 3s
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
