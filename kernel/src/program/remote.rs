@@ -39,14 +39,22 @@ impl BuiltinComponent for RemoteComponent {
         true
     }
 
-    fn execute(&self, input: &Resource, _layer: &Layer) -> Result<ComponentResult, String> {
-        // Serialize input to Eigon-JSON
+    fn execute(
+        &self,
+        input: &Resource,
+        argument: Option<&Resource>,
+        _layer: &Layer,
+    ) -> Result<ComponentResult, String> {
+        // Serialize input and argument to Eigon-JSON
         let input_json = eigon_json::serialize_resource(input).to_string();
+        let argument_json = argument
+            .map(|a| eigon_json::serialize_resource(a).to_string())
+            .unwrap_or_default();
 
         let request = ComponentRequest {
             component_iri: self.component_iri.clone(),
             input: input_json.into_bytes(),
-            argument: Vec::new(), // TODO: pass argument from Apply expression
+            argument: argument_json.into_bytes(),
             content_type: "application/eigon+json".to_string(),
         };
 
@@ -69,13 +77,17 @@ impl BuiltinComponent for RemoteComponent {
         }
 
         // Deserialize output from Eigon-JSON
+        // The orchestrator returns a single resource object (may lack @id)
         let output_json =
             String::from_utf8(resp.output).map_err(|e| format!("invalid UTF-8 output: {e}"))?;
-        let output = eigon_json::parse_document(&output_json)
-            .map_err(|e| format!("parse output: {e}"))?
-            .into_iter()
-            .next()
-            .unwrap_or_else(Resource::new_embedded);
+        let output = match eigon_json::parse_document(&output_json) {
+            Ok(mut resources) => resources.pop().unwrap_or_else(Resource::new_embedded),
+            Err(_) => {
+                // Try parsing as embedded resource (no @id)
+                eigon_json::parse_embedded(&output_json)
+                    .map_err(|e| format!("parse output: {e}"))?
+            }
+        };
 
         // Extract metrics if present
         let metrics = resp.metrics.map(|m| ComponentMetrics {

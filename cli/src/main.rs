@@ -714,7 +714,7 @@ async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
             let mut count = 0u64;
             while let Ok(Some(result)) = stream.message().await {
                 let resource =
-                    eigenius_kernel::ontology::eigon_cbor::parse_resource(&result.resource)
+                    eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(&result.resource)
                         .unwrap_or_else(|e| {
                             eprintln!("Failed to parse result: {e}");
                             std::process::exit(1);
@@ -763,11 +763,12 @@ async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_o
         Ok(response) => {
             let resp = response.into_inner();
             if resp.success {
-                let resource = eigenius_kernel::ontology::eigon_cbor::parse_resource(&resp.output)
-                    .unwrap_or_else(|e| {
-                        eprintln!("Failed to parse output: {e}");
-                        std::process::exit(1);
-                    });
+                let resource =
+                    eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(&resp.output)
+                        .unwrap_or_else(|e| {
+                            eprintln!("Failed to parse output: {e}");
+                            std::process::exit(1);
+                        });
                 let json = eigon_json::serialize_resource(&resource);
                 if json_output {
                     println!("{}", serde_json::to_string(&json).unwrap());

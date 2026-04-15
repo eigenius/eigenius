@@ -56,6 +56,13 @@ pub fn parse_resource(cbor: &[u8]) -> Result<Resource, CborError> {
     cbor_to_resource(&value, true)
 }
 
+/// Parse a single resource from CBOR bytes, allowing embedded (no @id).
+pub fn parse_resource_lenient(cbor: &[u8]) -> Result<Resource, CborError> {
+    let value: ciborium::Value =
+        ciborium::from_reader(Cursor::new(cbor)).map_err(|e| CborError::Decode(e.to_string()))?;
+    cbor_to_resource(&value, false)
+}
+
 /// Serialize a document (array of resources) to CBOR bytes.
 pub fn serialize_document(resources: &[Resource]) -> Vec<u8> {
     if resources.len() == 1 {

@@ -47,7 +47,17 @@ pub trait BuiltinComponent: Send + Sync {
     }
 
     /// Execute the component.
-    fn execute(&self, input: &Resource, layer: &Layer) -> Result<ComponentResult, String>;
+    ///
+    /// - `input`: the evaluated argument expression (data flowing through the program)
+    /// - `argument`: static component configuration (e.g., prompt template, model params).
+    ///   Comes from `component_argument` on the Apply node. `None` if not provided.
+    /// - `layer`: the current layer chain for resolution
+    fn execute(
+        &self,
+        input: &Resource,
+        argument: Option<&Resource>,
+        layer: &Layer,
+    ) -> Result<ComponentResult, String>;
 }
 
 /// Registry of built-in components.
@@ -165,6 +175,7 @@ fn execute_expression(
                 }
             };
 
+            // Evaluate the argument expression (data input to the component)
             let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
             let input = match expr.get(&arg_prop) {
                 Some(Value::Embedded(r)) => {
@@ -178,6 +189,13 @@ fn execute_expression(
                     }
                 }
                 _ => Resource::new_embedded(),
+            };
+
+            // Extract static component_argument (not evaluated — passed directly)
+            let comp_arg_prop = Iri::parse("urn:eigenius:program:component_argument").unwrap();
+            let component_argument = match expr.get(&comp_arg_prop) {
+                Some(Value::Embedded(r)) => Some(r.as_ref().clone()),
+                _ => None,
             };
 
             match registry.get(&func_name) {
@@ -198,7 +216,7 @@ fn execute_expression(
                         }
 
                         let comp_result = component
-                            .execute(&input, layer)
+                            .execute(&input, component_argument.as_ref(), layer)
                             .map_err(ProgramError::Execution)?;
 
                         let ct = ComponentTrace {
@@ -218,7 +236,7 @@ fn execute_expression(
                     } else {
                         // Pure component — no caching
                         let comp_result = component
-                            .execute(&input, layer)
+                            .execute(&input, component_argument.as_ref(), layer)
                             .map_err(ProgramError::Execution)?;
 
                         let trace = Trace::Pure {
@@ -279,6 +297,16 @@ fn execute_expression(
             };
 
             let mut result = Resource::new_embedded();
+
+            // Set is_a from the class property
+            let class_prop = Iri::parse("urn:eigenius:program:class").unwrap();
+            if let Some(Value::String(class_iri)) = expr.get(&class_prop) {
+                result.set(
+                    Iri::parse("urn:eigenius:core:is_a").unwrap(),
+                    Value::Array(vec![Value::String(class_iri.clone())]),
+                );
+            }
+
             let mut field_traces = BTreeMap::new();
 
             for (prop_iri, val) in fields.properties() {
@@ -286,8 +314,17 @@ fn execute_expression(
                     Value::Embedded(r) => {
                         let (field_resource, ft) =
                             execute_expression(r, context, layer, registry, trace_store)?;
-                        let v = if let Some((_, v)) = field_resource.properties().iter().next() {
-                            v.clone()
+                        // If the expression produced a single-property resource
+                        // (e.g. from Project), extract the value. Otherwise
+                        // look for a urn:eigenius:program:value wrapper, or
+                        // embed the whole resource.
+                        let props: Vec<_> = field_resource
+                            .properties()
+                            .iter()
+                            .filter(|(k, _)| k.as_str() != "urn:eigenius:core:is_a")
+                            .collect();
+                        let v = if props.len() == 1 {
+                            props[0].1.clone()
                         } else {
                             Value::Embedded(Box::new(field_resource))
                         };
@@ -354,7 +391,12 @@ fn get_iri(resource: &Resource, prop: &str) -> Result<Iri, ProgramError> {
 struct IdentityComponent;
 
 impl BuiltinComponent for IdentityComponent {
-    fn execute(&self, input: &Resource, _layer: &Layer) -> Result<ComponentResult, String> {
+    fn execute(
+        &self,
+        input: &Resource,
+        _argument: Option<&Resource>,
+        _layer: &Layer,
+    ) -> Result<ComponentResult, String> {
         Ok(ComponentResult {
             output: input.clone(),
             metrics: None,
@@ -515,7 +557,12 @@ mod tests {
                 true
             }
 
-            fn execute(&self, input: &Resource, _layer: &Layer) -> Result<ComponentResult, String> {
+            fn execute(
+                &self,
+                input: &Resource,
+                _argument: Option<&Resource>,
+                _layer: &Layer,
+            ) -> Result<ComponentResult, String> {
                 self.count.fetch_add(1, Ordering::SeqCst);
                 Ok(ComponentResult {
                     output: input.clone(),

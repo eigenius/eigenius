@@ -31,7 +31,8 @@
       "urn:eigenius:program:function"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:program:argument"
+      "urn:eigenius:program:argument",
+      "urn:eigenius:program:component_argument"
     ]
   },
   {
@@ -226,6 +227,14 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Argument expression in an Apply.",
     "urn:eigenius:core:short_name": "argument",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Apply"]
+  },
+  {
+    "@id": "urn:eigenius:program:component_argument",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Static configuration for a component call (e.g., prompt template, model parameters). Not evaluated as an expression — passed directly to the component.",
+    "urn:eigenius:core:short_name": "component_argument",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:domain": ["urn:eigenius:program:Apply"]
   },
