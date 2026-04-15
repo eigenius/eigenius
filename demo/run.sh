@@ -20,6 +20,14 @@ set -euo pipefail
 ENDPOINT="${1:-http://localhost:50051}"
 ORCHESTRATOR="${2:-http://localhost:8080}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Use installed eigenius if available, otherwise cargo run
+if command -v eigenius &>/dev/null; then
+  EIGENIUS="eigenius"
+else
+  EIGENIUS="cargo run -q -p eigenius-cli --"
+fi
 
 echo "=== Eigenius End-to-End Demo ==="
 echo "Kernel:       $ENDPOINT"
@@ -40,22 +48,22 @@ echo
 
 # Step 1: Load document
 echo "--- Step 1: Load document ---"
-eigenius --endpoint "$ENDPOINT" load "$SCRIPT_DIR/document.json"
+$EIGENIUS --endpoint "$ENDPOINT" load "$SCRIPT_DIR/document.json"
 echo
 
 # Step 2: Inspect a core class
 echo "--- Step 2: Inspect core:Class ---"
-eigenius --endpoint "$ENDPOINT" inspect "urn:eigenius:core:Class"
+$EIGENIUS --endpoint "$ENDPOINT" inspect "urn:eigenius:core:Class"
 echo
 
 # Step 3: Query all loaded classes
 echo "--- Step 3: Query all classes ---"
-eigenius --endpoint "$ENDPOINT" query 'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?name } RETURN [] { class: ?c, name: ?name }'
+$EIGENIUS --endpoint "$ENDPOINT" query 'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?name } RETURN [] { class: ?c, name: ?name }'
 echo
 
 # Step 4: Run the summarization program
 echo "--- Step 4: Run summarize program ---"
-eigenius --endpoint "$ENDPOINT" run "$SCRIPT_DIR/summarize-program.json" "$SCRIPT_DIR/document.json"
+$EIGENIUS --endpoint "$ENDPOINT" run "$SCRIPT_DIR/summarize-program.json" "$SCRIPT_DIR/input.json"
 echo
 
 echo "=== Demo complete ==="

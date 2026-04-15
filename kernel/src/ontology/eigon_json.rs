@@ -77,6 +77,16 @@ pub fn parse_document(json: &str) -> Result<Vec<Resource>, ParseError> {
     }
 }
 
+/// Parse a JSON string as an embedded resource (no `@id` required).
+///
+/// Useful for parsing component outputs and query results that are
+/// not top-level resources.
+pub fn parse_embedded(json: &str) -> Result<Resource, ParseError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ParseError::JsonSyntax(e.to_string()))?;
+    parse_embedded_resource(&value, "<root>")
+}
+
 /// Parse a JSON object as a top-level resource (must have `@id`).
 fn parse_top_level_resource(value: &serde_json::Value) -> Result<Resource, ParseError> {
     let obj = match value.as_object() {

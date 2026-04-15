@@ -4,7 +4,7 @@ An open-source platform for **AI-driven science and engineering**.
 
 Contemporary LLMs produce text that reads like knowledge but carries no epistemic warranty — there is no structural way to distinguish a correct derivation from a convincing hallucination. Eigenius addresses this by anchoring knowledge in a typed, queryable knowledge graph where every fact has tracked provenance, every derivation is replayable, and formal proofs provide machine-checked certainty.
 
-The platform maintains three epistemic categories: **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
+The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
 ## Current Status: Phases 0, 1, and 2 Complete
 
@@ -113,6 +113,72 @@ cargo run -p eigenius-cli -- inspect "urn:eigenius:core:Class"
 
 # Version
 cargo run -p eigenius-cli -- version
+```
+
+## Running the End-to-End Demo
+
+The demo loads a document, runs a program that dispatches to an LLM via the orchestrator, and returns a typed result. Requires three terminals.
+
+### Prerequisites
+
+```bash
+# Rust kernel
+cargo build -p eigenius-cli
+
+# Deno orchestrator
+cd orchestration && deno cache src/main.ts && cd ..
+
+# API key (or use mock mode)
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### Terminal 1: Start the orchestrator
+
+```bash
+cd orchestration
+ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY deno run --allow-net --allow-env src/main.ts
+```
+
+For testing without an API key, use mock mode:
+
+```bash
+cd orchestration
+EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env src/main.ts
+```
+
+### Terminal 2: Start the kernel
+
+```bash
+cargo run -p eigenius-cli -- serve --orchestrator http://localhost:8080
+```
+
+### Terminal 3: Run the demo
+
+```bash
+./demo/run.sh
+```
+
+This will:
+1. Health-check the orchestrator
+2. Load a document into the kernel
+3. Inspect the core `Class` resource
+4. Query all classes across core, program, and reflection ontologies
+5. Run a summarization program that dispatches `CompleteText` to the orchestrator
+
+You can also run individual commands against the kernel:
+
+```bash
+# Load resources
+cargo run -p eigenius-cli -- --endpoint http://localhost:50051 load demo/document.json
+
+# Run a program
+cargo run -p eigenius-cli -- --endpoint http://localhost:50051 run demo/summarize-program.json demo/input.json
+
+# Query
+cargo run -p eigenius-cli -- --endpoint http://localhost:50051 query 'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?name } RETURN [] { class: ?c, name: ?name }'
+
+# Inspect
+cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eigenius:core:Class"
 ```
 
 ## Design Documents
