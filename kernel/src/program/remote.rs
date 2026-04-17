@@ -7,7 +7,7 @@
 use crate::layer::Layer;
 use crate::ontology::eigon_json;
 use crate::ontology::resource::Resource;
-use crate::program::execute::{BuiltinComponent, ComponentResult};
+use crate::program::component::{BuiltinComponent, ComponentResult};
 use crate::program::trace::ComponentMetrics;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use crate::server::proto::ComponentRequest;

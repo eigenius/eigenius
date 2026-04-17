@@ -11,7 +11,7 @@ use crate::nbe::term::Patt;
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
-use crate::program::execute::{ComponentRegistry, ProgramError};
+use crate::program::component::{ComponentRegistry, ProgramError};
 use crate::program::trace::TraceStore;
 use std::sync::Arc;
 
@@ -81,7 +81,7 @@ fn val_to_resource(val: &Val) -> Result<Resource, ProgramError> {
 mod tests {
     use super::*;
     use crate::ontology::eigon_json;
-    use crate::program::execute::ComponentRegistry;
+    use crate::program::component::ComponentRegistry;
     use crate::program::trace::InMemoryTraceStore;
 
     #[test]
@@ -123,7 +123,7 @@ mod tests {
             "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
             "urn:eigenius:program:body": {
                 "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
-                "urn:eigenius:program:function": "urn:eigenius:components:Identity",
+                "urn:eigenius:program:function": "urn:eigenius:program:components:Identity",
                 "urn:eigenius:program:argument": {
                     "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
                     "urn:eigenius:program:name": "input"

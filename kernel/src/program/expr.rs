@@ -87,7 +87,7 @@ fn parse_let(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     Ok(Exp::Dec(decl, Box::new(body_exp)))
 }
 
-/// f(arg)
+/// f(arg) with optional component_argument
 fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     // Function can be a string (component IRI) or embedded expression
     let func_prop = Iri::parse("urn:eigenius:program:function").unwrap();
@@ -110,7 +110,20 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         _ => Exp::Unit, // No argument
     };
 
-    Ok(Exp::App(Box::new(func_exp), Box::new(arg_exp)))
+    // Check for component_argument (static config for IO components)
+    let comp_arg_prop = Iri::parse("urn:eigenius:program:component_argument").unwrap();
+    let effective_arg = match resource.get(&comp_arg_prop) {
+        Some(Value::Embedded(comp_arg)) => {
+            // Pack as Pair(arg, EigonResource(comp_arg)) so the dispatcher can extract it
+            Exp::Pair(
+                Box::new(arg_exp),
+                Box::new(Exp::EigonResource(comp_arg.clone())),
+            )
+        }
+        _ => arg_exp,
+    };
+
+    Ok(Exp::App(Box::new(func_exp), Box::new(effective_arg)))
 }
 
 /// x

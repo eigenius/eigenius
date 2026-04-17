@@ -8,7 +8,7 @@ use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Clos, Neut, Val};
 use crate::ontology::iri::Iri;
-use crate::program::execute::ComponentRegistry;
+use crate::program::component::ComponentRegistry;
 use crate::program::trace::TraceStore;
 use std::sync::Arc;
 
@@ -51,7 +51,32 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
         Exp::One => Val::One,
         Exp::Unit => Val::Unit,
 
-        Exp::Dec(d, e) => eval_ctx(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx),
+        Exp::Dec(d, e) => {
+            match ctx {
+                EvalCtx::Pure => {
+                    // Pure mode: lazy evaluation via UpDec (standard Mini-TT)
+                    eval_ctx(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
+                }
+                _ => {
+                    // IO/Read mode: eagerly evaluate the declaration value
+                    // so that IO dispatch happens in the correct context
+                    match d {
+                        crate::nbe::term::Decl::Def(patt, _typ, body) => {
+                            let val = eval_ctx(body, rho, ctx);
+                            let rho2 = rho.clone().extend(patt.clone(), val);
+                            eval_ctx(e, &rho2, ctx)
+                        }
+                        crate::nbe::term::Decl::Drec(patt, _typ, body) => {
+                            // Recursive: evaluate in extended env
+                            let rho_ext = Rho::UpDec(Box::new(rho.clone()), d.clone());
+                            let val = eval_ctx(body, &rho_ext, ctx);
+                            let rho2 = rho.clone().extend(patt.clone(), val);
+                            eval_ctx(e, &rho2, ctx)
+                        }
+                    }
+                }
+            }
+        }
 
         Exp::Lam(p, e) => Val::Lam(Clos::new(p.clone(), *e.clone(), rho.clone())),
 
@@ -74,7 +99,14 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                 if let Exp::Var(name) = e1.as_ref() {
                     if registry.get(name).is_some() {
                         let arg_val = ev(e2);
-                        return dispatch_component(name, &arg_val, None, ctx);
+                        // Unpack Pair(input, comp_arg) if present
+                        let (input_val, comp_arg) = match &arg_val {
+                            Val::Pair(input, comp_arg) => {
+                                (input.as_ref().clone(), Some(comp_arg.as_ref()))
+                            }
+                            other => (other.clone(), None),
+                        };
+                        return dispatch_component(name, &input_val, comp_arg, ctx);
                     }
                 }
             }
@@ -83,12 +115,16 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
 
         Exp::Var(x) => rho.get(x).unwrap_or_else(|e| {
             match ctx {
-                // In IO/Read mode, unbound variables may be component IRIs
-                // or external references — produce a neutral term
-                EvalCtx::IO { .. } | EvalCtx::Read { .. } => {
+                EvalCtx::Pure => {
+                    // Pure mode: unbound variables are a bug — type checker
+                    // should have caught them. Panic to surface the error.
+                    panic!("eval (pure): {e}")
+                }
+                _ => {
+                    // IO/Read mode: unbound variables may be component IRIs
+                    // that will be intercepted at the App level.
                     Val::Nt(Neut::Gen(usize::MAX, x.clone()))
                 }
-                EvalCtx::Pure => panic!("eval: {e}"),
             }
         }),
 
@@ -186,7 +222,7 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
 fn dispatch_component(
     component_iri: &str,
     input_val: &Val,
-    _component_arg: Option<&Val>,
+    component_arg: Option<&Val>,
     ctx: &EvalCtx,
 ) -> Val {
     let (registry, layer, trace_store) = match ctx {
@@ -208,6 +244,7 @@ fn dispatch_component(
 
     // Convert Val to Resource for the component interface
     let input_resource = val_to_resource(input_val);
+    let arg_resource = component_arg.map(val_to_resource);
 
     // Check trace cache for IO components
     if component.is_io() {
@@ -219,7 +256,7 @@ fn dispatch_component(
         }
 
         // Dispatch
-        match component.execute(&input_resource, None, layer) {
+        match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => {
                 // Cache the result
                 if let Some(store) = trace_store {
@@ -239,7 +276,7 @@ fn dispatch_component(
         }
     } else {
         // Pure component — no caching
-        match component.execute(&input_resource, None, layer) {
+        match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => Val::ResourceVal(Box::new(result.output)),
             Err(e) => panic!("component dispatch failed: {e}"),
         }
