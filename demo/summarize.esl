@@ -1,0 +1,17 @@
+namespace core = "urn:eigenius:core";
+namespace demo = "urn:eigenius:demo";
+namespace completion = "urn:eigenius:program:components:completion";
+namespace request = "urn:eigenius:program:request";
+
+program demo:summarize : demo:Document -> demo:Document {
+    let summary : core:string = CompleteText(input) {
+        completion:user_prompt = "Summarize the following document in 2-3 sentences:\n\n{{urn:eigenius:demo:text}}";
+        completion:system_prompt = "You are a concise technical summarizer.";
+        completion:request_parameters = {
+            request:model = "claude-sonnet-4-20250514";
+            request:temperature = 0.3;
+            request:max_tokens = 200;
+        };
+    };
+    Construct demo:Document { demo:text = summary }
+}
