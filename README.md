@@ -146,6 +146,50 @@ cargo run -p eigenius-cli -- inspect "urn:eigenius:core:Class"
 cargo run -p eigenius-cli -- version
 ```
 
+## ESL — Eigenius Surface Language
+
+ESL is a human-friendly surface syntax that compiles to Eigon-JSON. It uses a two-layer design: HCL-style blocks for structural declarations (classes, properties, resources) and ML-style expressions for program bodies.
+
+```esl
+namespace core = "urn:eigenius:core";
+namespace demo = "urn:eigenius:demo";
+
+class demo:Document {
+    description = "A text document for analysis.";
+    requires demo:text;
+}
+
+property demo:text : core:string {
+    description = "The text content of a document.";
+}
+
+resource demo:doc_001 : demo:Document {
+    demo:text = "Eigenius is a typed knowledge graph platform.";
+}
+
+program demo:summarize : demo:Document -> demo:Document {
+    let summary : core:string = CompleteText(input);
+    Construct demo:Document { demo:text = summary }
+}
+```
+
+This compiles to the equivalent of 80+ lines of Eigon-JSON. All CLI commands accept `.esl` files directly — the format is auto-detected by file extension.
+
+```bash
+# Compile ESL to Eigon-JSON (output to stdout)
+cargo run -p eigenius-cli -- compile demo/document.esl
+
+# Load and validate an ESL file
+cargo run -p eigenius-cli -- load demo/document.esl
+
+# Validate without loading
+cargo run -p eigenius-cli -- validate demo/document.esl
+```
+
+The kernel's gRPC service also accepts ESL via `content_type: "application/esl"`.
+
+See [docs/design/d7-esl-surface-syntax.md](docs/design/d7-esl-surface-syntax.md) for the full specification.
+
 ## Running the End-to-End Demo
 
 The demo loads a document, runs a program that dispatches to an LLM via the orchestrator, and returns a typed result. Requires three terminals.
@@ -191,19 +235,23 @@ cargo run -p eigenius-cli -- serve --orchestrator http://localhost:8080
 
 This will:
 1. Health-check the orchestrator
-2. Load a document into the kernel
+2. Load a document (Eigon-JSON) into the kernel
 3. Inspect the core `Class` resource
 4. Query all classes across core, program, and reflection ontologies
-5. Run a summarization program that dispatches `CompleteText` to the orchestrator
+5. Run a summarization program (JSON) that dispatches `CompleteText` to the orchestrator
+6. Load an ESL ontology directly into the kernel
+7. Run an ESL program against the kernel
 
 You can also run individual commands against the kernel:
 
 ```bash
-# Load resources
+# Load resources (JSON or ESL)
 cargo run -p eigenius-cli -- --endpoint http://localhost:50051 load demo/document.json
+cargo run -p eigenius-cli -- --endpoint http://localhost:50051 load demo/document.esl
 
-# Run a program
+# Run a program (JSON or ESL)
 cargo run -p eigenius-cli -- --endpoint http://localhost:50051 run demo/summarize-program.json demo/input.json
+cargo run -p eigenius-cli -- --endpoint http://localhost:50051 run demo/summarize.esl demo/input.json
 
 # Query
 cargo run -p eigenius-cli -- --endpoint http://localhost:50051 query 'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?name } RETURN [] { class: ?c, name: ?name }'
@@ -219,6 +267,8 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON spec: IRI identity, three-layer type system, validation rules, canonical form |
 | [D2: EigenQL Specification](docs/design/d2-eigenql-specification.md) | EigenQL spec: typed stratified Datalog, DEFINE, aggregation, full grammar |
 | [D3: Program Model](docs/design/d3-program-model.md) | Program expression language, component model, scheduling, ESL surface syntax |
+| [D7: ESL Surface Syntax](docs/design/d7-esl-surface-syntax.md) | Two-layer design: HCL-style structural + ML-style expressions |
+| [D8: CompleteJson Component](docs/design/d8-complete-json-component.md) | Structured LLM output via JSON Schema from ontology classes |
 | [Implementation Plan](docs/design/implementation-plan.md) | High-level 6-phase plan from foundation to extensibility |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 

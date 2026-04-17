@@ -66,4 +66,14 @@ echo "--- Step 4: Run summarize program ---"
 $EIGENIUS --endpoint "$ENDPOINT" run "$SCRIPT_DIR/summarize-program.json" "$SCRIPT_DIR/input.json"
 echo
 
+# Step 5: Load ESL directly into the remote kernel
+echo "--- Step 5: Load ESL into kernel ---"
+$EIGENIUS --endpoint "$ENDPOINT" load "$SCRIPT_DIR/document.esl"
+echo
+
+# Step 6: Run ESL program against the remote kernel
+echo "--- Step 6: Run ESL program ---"
+$EIGENIUS --endpoint "$ENDPOINT" run "$SCRIPT_DIR/summarize.esl" "$SCRIPT_DIR/input.json"
+echo
+
 echo "=== Demo complete ==="

@@ -1,0 +1,21 @@
+namespace core = "urn:eigenius:core";
+namespace demo = "urn:eigenius:demo";
+
+class demo:Document {
+    description = "A text document for analysis.";
+    requires demo:text;
+}
+
+property demo:text : core:string {
+    description = "The text content of a document.";
+}
+
+resource demo:doc_001 : demo:Document {
+    demo:text = "Eigenius is a typed knowledge graph platform designed for AI-driven science and engineering.";
+}
+
+program demo:summarize : demo:Document -> demo:Document {
+    description = "Summarize a document using an LLM";
+    let summary : core:string = CompleteText(input);
+    Construct demo:Document { demo:text = summary }
+}

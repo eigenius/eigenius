@@ -101,6 +101,13 @@ enum Commands {
         command: DbCommands,
     },
 
+    /// Compile an ESL file to Eigon-JSON
+    Compile {
+        /// Path to ESL (.esl) file
+        #[arg(value_name = "FILE")]
+        file: String,
+    },
+
     /// Show version and build info
     Version,
 }
@@ -173,6 +180,7 @@ async fn main() {
         } => cmd_run(&program_file, &input_file, ontology.as_deref(), cli.json),
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
         Commands::Serve { port, orchestrator } => cmd_serve(port, orchestrator.as_deref()).await,
+        Commands::Compile { file } => cmd_compile(&file, cli.json),
         Commands::Db { command } => cmd_db(command),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
@@ -190,23 +198,8 @@ fn cmd_load(file: &str, json_output: bool) {
         }
     };
 
-    // Read and parse file
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read '{file}': {e}");
-            std::process::exit(1);
-        }
-    };
-
-    let resources = match eigon_json::parse_document(&content) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Parse error: {e}");
-            std::process::exit(1);
-        }
-    };
-
+    // Read and parse file (auto-detects ESL vs JSON)
+    let resources = load_resources_from_file(file);
     let count = resources.len();
 
     // Add resources to context
@@ -438,20 +431,7 @@ fn cmd_run(program_file: &str, input_file: &str, ontology: Option<&str>, json_ou
 }
 
 fn load_file_into_context(ctx: &mut eigenius_kernel::context::ExecutionContext, file: &str) {
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read '{file}': {e}");
-            std::process::exit(1);
-        }
-    };
-    let resources = match eigon_json::parse_document(&content) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Parse error in '{file}': {e}");
-            std::process::exit(1);
-        }
-    };
+    let resources = load_resources_from_file(file);
     for resource in resources {
         if let Err(e) = ctx.add_resource(resource) {
             eprintln!("Error loading '{file}': {e}");
@@ -474,23 +454,8 @@ fn cmd_validate(file: &str, json_output: bool) {
         }
     };
 
-    // Read and parse file
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read '{file}': {e}");
-            std::process::exit(1);
-        }
-    };
-
-    let resources = match eigon_json::parse_document(&content) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Parse error: {e}");
-            std::process::exit(1);
-        }
-    };
-
+    // Read and parse file (auto-detects ESL vs JSON)
+    let resources = load_resources_from_file(file);
     let count = resources.len();
 
     // Build a temporary layer for validation
@@ -557,6 +522,55 @@ fn cmd_inspect(iri_str: &str, json_output: bool) {
             eprintln!("Resource not found: {iri_str}");
             std::process::exit(1);
         }
+    }
+}
+
+fn cmd_compile(file: &str, json_output: bool) {
+    let source = std::fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("Failed to read file: {e}");
+        std::process::exit(1);
+    });
+
+    let resources = eigenius_kernel::esl::compile(&source).unwrap_or_else(|errors| {
+        for e in &errors {
+            eprintln!("{file}: {e}");
+        }
+        std::process::exit(1);
+    });
+
+    // Output as Eigon-JSON array
+    let json_values: Vec<serde_json::Value> = resources
+        .iter()
+        .map(eigon_json::serialize_resource)
+        .collect();
+    let output = serde_json::Value::Array(json_values);
+
+    if json_output {
+        println!("{}", serde_json::to_string(&output).unwrap());
+    } else {
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    }
+}
+
+/// Load resources from a file, auto-detecting ESL (.esl) vs Eigon-JSON.
+fn load_resources_from_file(file: &str) -> Vec<eigenius_kernel::ontology::resource::Resource> {
+    let data = std::fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("Failed to read file: {e}");
+        std::process::exit(1);
+    });
+
+    if file.ends_with(".esl") {
+        eigenius_kernel::esl::compile(&data).unwrap_or_else(|errors| {
+            for e in &errors {
+                eprintln!("{file}: {e}");
+            }
+            std::process::exit(1);
+        })
+    } else {
+        eigon_json::parse_document(&data).unwrap_or_else(|e| {
+            eprintln!("Failed to parse {file}: {e}");
+            std::process::exit(1);
+        })
     }
 }
 
@@ -655,6 +669,42 @@ async fn cmd_serve(port: u16, orchestrator: Option<&str>) {
 
 // --- Remote mode (gRPC client) ---
 
+/// Read a file, compiling ESL to Eigon-JSON if needed. Returns JSON bytes.
+fn read_as_json(file: &str) -> Vec<u8> {
+    if file.ends_with(".esl") {
+        let source = std::fs::read_to_string(file).unwrap_or_else(|e| {
+            eprintln!("Failed to read {file}: {e}");
+            std::process::exit(1);
+        });
+        let resources = eigenius_kernel::esl::compile(&source).unwrap_or_else(|errors| {
+            for e in &errors {
+                eprintln!("{file}: {e}");
+            }
+            std::process::exit(1);
+        });
+        let json_values: Vec<serde_json::Value> = resources
+            .iter()
+            .map(eigon_json::serialize_resource)
+            .collect();
+        serde_json::to_vec(&json_values).unwrap()
+    } else {
+        std::fs::read(file).unwrap_or_else(|e| {
+            eprintln!("Failed to read {file}: {e}");
+            std::process::exit(1);
+        })
+    }
+}
+
+fn content_type_for_file(file: &str) -> String {
+    if file.ends_with(".esl") {
+        "application/esl".to_string()
+    } else if file.ends_with(".cbor") {
+        "application/cbor".to_string()
+    } else {
+        "application/eigon+json".to_string()
+    }
+}
+
 use eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient;
 
 async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport::Channel> {
@@ -744,14 +794,9 @@ async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
 async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
-    let program_data = std::fs::read(program_file).unwrap_or_else(|e| {
-        eprintln!("Failed to read program file: {e}");
-        std::process::exit(1);
-    });
-    let input_data = std::fs::read(input_file).unwrap_or_else(|e| {
-        eprintln!("Failed to read input file: {e}");
-        std::process::exit(1);
-    });
+    // Compile ESL files client-side since program and input may have different formats
+    let program_data = read_as_json(program_file);
+    let input_data = read_as_json(input_file);
 
     let request = eigenius_kernel::server::proto::RunProgramRequest {
         program: program_data,
@@ -798,9 +843,10 @@ async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
         std::process::exit(1);
     });
 
+    let content_type = content_type_for_file(file);
     let request = eigenius_kernel::server::proto::LoadRequest {
         resources: data,
-        content_type: "application/eigon+json".to_string(),
+        content_type,
         auto_commit: true,
     };
 

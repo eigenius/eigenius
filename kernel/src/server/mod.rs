@@ -46,12 +46,19 @@ impl EigeniusService {
         EigeniusKernelServer::new(self)
     }
 
-    /// Parse resources from either CBOR or JSON based on content_type.
+    /// Parse resources from CBOR, JSON, or ESL based on content_type.
     #[allow(clippy::result_large_err)]
     fn parse_resources(data: &[u8], content_type: &str) -> Result<Vec<Resource>, Status> {
         if content_type.contains("cbor") {
             eigon_cbor::parse_document(data)
                 .map_err(|e| Status::invalid_argument(format!("CBOR parse error: {e}")))
+        } else if content_type.contains("esl") {
+            let source = std::str::from_utf8(data)
+                .map_err(|e| Status::invalid_argument(format!("invalid UTF-8: {e}")))?;
+            crate::esl::compile(source).map_err(|errors| {
+                let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
+                Status::invalid_argument(format!("ESL compile error: {}", msgs.join("; ")))
+            })
         } else {
             let json_str = std::str::from_utf8(data)
                 .map_err(|e| Status::invalid_argument(format!("invalid UTF-8: {e}")))?;
