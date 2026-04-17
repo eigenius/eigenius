@@ -6,18 +6,27 @@ Contemporary LLMs produce text that reads like knowledge but carries no epistemi
 
 The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-## Current Status: Phases 0, 1, and 2 Complete
+## Current Status: Phases 0-4 Complete
 
-The core data model, layer system, validation engine, query language, program model with dependent type checking, and CLI are implemented. The system can:
+The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
 
-- Parse and serialize Eigon-JSON documents
-- Load the self-describing core ontology and program ontology (86 resources across 2 layers)
-- Build immutable layers with content-addressed identifiers (SHA-256)
+- Parse and serialize Eigon-JSON and CBOR documents
+- Load the self-describing core, program, and reflection ontologies (130+ resources across 3 layers)
+- Build immutable layers with content-addressed identifiers (SHA-256 of CBOR)
 - Validate resources against the full ontology constraint system (12 validation rules)
 - Resolve resources through parent-pointer layer chains
 - Query the knowledge graph with EigenQL (typed stratified Datalog with aggregation)
 - Type-check programs using Mini-TT dependent type theory (NbE evaluator)
-- Execute programs with built-in components
+- Execute programs with local and remote IO components (LLM calls via orchestrator)
+- Dispatch IO components to the Deno orchestrator via gRPC (ComponentExecutor service)
+- Call LLMs via Vercel AI SDK (Anthropic) with prompt templating and metrics
+- Expose kernel operations as MCP tools for LLM agents
+- Track four epistemic categories: declared, observed, derived, verified
+- Record tree-structured reasoning traces with memoization
+- Validate epistemic base class requirements (DeclaredResource, DerivedResource, etc.)
+- Persist layers in RocksDB with CBOR serialization
+- Serve the kernel as a gRPC service (tonic) with streaming query results
+- Run locally via three terminals or Docker Compose
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
 
@@ -25,14 +34,16 @@ See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for
 
 Everything in Eigenius is a **Resource** — classes, properties, data types, formats, and instance data are all represented uniformly with IRI identity and typed property values. The core ontology is self-describing: `Class` is an instance of `Class`.
 
-- **Rust Kernel** — ontology validation, layer management, resource resolution. Uses `BTreeMap` for deterministic ordering and cache-friendly access.
-- **Layer System** — immutable layers with parent pointers (`Arc<Layer>`), forming a chain. The root layer holds the core ontology. Resolution walks the chain top-down.
-- **Eigon-JSON** — the canonical serialization format. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types.
-- **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties.
+- **Rust Kernel** — ontology validation, layer management, resource resolution, program execution, gRPC server. Uses `BTreeMap` for deterministic ordering and cache-friendly access.
+- **Deno Orchestrator** — IO component dispatch, LLM integration (Vercel AI SDK), MCP server. Communicates with the kernel via Connect RPC/gRPC.
+- **Layer System** — immutable layers with parent pointers (`Arc<Layer>`), forming a chain. Three bootstrap layers: core → program → reflection. Resolution walks the chain top-down.
+- **Eigon-JSON / CBOR** — the canonical serialization formats. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types. CBOR for storage and gRPC wire format.
+- **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties. Epistemic base classes enforce provenance requirements.
 - **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
-- **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to Mini-TT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. Executed with a component registry (built-in + future WASM extensions).
+- **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to Mini-TT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
+- **Epistemic Model** — four categories (declared, observed, derived, verified) enforced via base classes in the reflection ontology. Reasoning traces mirror the expression tree and serve as memoization cache.
 
-Future phases add: gRPC service with TiKV storage, LLM integration with reasoning traces, and WASM capability sandboxing.
+Future phases add: ESL surface syntax (Phase 4.5) and WASM capability sandboxing (Phase 5).
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 

@@ -280,11 +280,15 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
-## 7. Phase 4 — Intelligence
+## 7. Phase 4 — Intelligence ✓
 
 **Goal:** LLMs can be invoked from programs and can invoke Eigenius as a tool. Reasoning traces are recorded and queryable.
 
 **Duration estimate:** 4–6 weeks.
+
+**Status:** Core implementation complete. Reflection ontology, trace recording, orchestrator with Connect RPC, CompleteText LLM adapter (Vercel AI SDK / Anthropic), MCP server, epistemic base class validation, remote component dispatch, Docker Compose integration — all operational. End-to-end demo working (CLI → kernel gRPC → orchestrator → LLM → typed output). See `docs/design/phase4-implementation-plan.md` for step-by-step details.
+
+**Deferred to follow-up:** Reflect RPC (trace persistence), universe stratification enforcement, Azure deployment, CompleteJson component.
 
 ### 7.1 Deliverables
 
@@ -390,13 +394,15 @@ The following design documents must be written and reviewed before the phase tha
 | D5 | **gRPC API Specification** | **COMPLETED** — `docs/design/d5-grpc-api-specification.md`. RPC definitions, streaming query, context management, error codes, authentication, CLI/orchestration integration | Phase 3 | Done |
 | D6 | **Execution Architecture and Durability** | **COMPLETED** — `docs/design/d6-execution-architecture.md`. Kernel↔orchestrator boundary, DAPR integration, durable workflows, activity dispatch, reasoning trace ownership, MCP server placement | Phase 4 | Done |
 | D6b | **Reasoning Trace Schema** | **COMPLETED** — `docs/design/d6b-reasoning-trace-schema.md`. ComponentTrace, ProgramTrace, ObservationTrace, VerificationTrace classes. Provenance chain, epistemic status (observed→derived→verified), universe stratification, trace-based memoization | Phase 4 | Done |
-| D7 | **Capability SDK & WASM Interface** | Import/export functions for WASM capabilities, resource serialization across the WASM boundary, fuel budget policy | Phase 5 | 10–12 pages |
-| D8 | **Capability Protocol Wire Format** | How native and WASM capabilities communicate with the kernel, serialization format for resource handles and results (resolves §14 open question) | Phase 5 | 6–8 pages |
-| D9 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 3+ | 10–15 pages |
-| D10 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 3+ | 8–10 pages |
-| D11 | **Execution Context Internals** | Snapshot advancement policy, HLC clock synchronization bounds and violation behavior, capability sub-context isolation boundaries, inline resource semantics in EigenQL (resolves §8.4 and §14 open questions) | Phase 2 | 8–10 pages |
-| D12 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 4 | 6–8 pages |
-| D13 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 5 | 6–8 pages |
+| D7 | **ESL Surface Syntax** | **COMPLETED** — `docs/design/d7-esl-surface-syntax.md`. Two-layer design (HCL-style structural + ML-style expressions), namespace aliases, program/class/property/resource syntax, EBNF grammar | Phase 4.5 | Done |
+| D8 | **CompleteJson Component** | **COMPLETED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping, type-level guarantees via CIC, kernel-side schema generation and conversion | Phase 4 | Done |
+| D9 | **Capability SDK & WASM Interface** | Import/export functions for WASM capabilities, resource serialization across the WASM boundary, fuel budget policy | Phase 5 | 10–12 pages |
+| D10 | **Capability Protocol Wire Format** | How native and WASM capabilities communicate with the kernel, serialization format for resource handles and results (resolves §14 open question) | Phase 5 | 6–8 pages |
+| D11 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 3+ | 10–15 pages |
+| D12 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 3+ | 8–10 pages |
+| D13 | **Execution Context Internals** | Snapshot advancement policy, HLC clock synchronization bounds and violation behavior, capability sub-context isolation boundaries, inline resource semantics in EigenQL (resolves §8.4 and §14 open questions) | Phase 2 | 8–10 pages |
+| D14 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 4 | 6–8 pages |
+| D15 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 5 | 6–8 pages |
 
 ---
 
