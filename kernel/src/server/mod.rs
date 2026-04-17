@@ -6,7 +6,7 @@
 use crate::bootstrap;
 use crate::context::ExecutionContext;
 use crate::ontology::{eigon_cbor, eigon_json, Iri, Resource};
-use crate::program::execute::ComponentRegistry;
+use crate::program::component::ComponentRegistry;
 use crate::program::expr;
 use crate::program::trace::{InMemoryTraceStore, TraceStore};
 use crate::query;
