@@ -317,67 +317,168 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
-## 7.5. Phase 4.5 — ESL (Eigenius Schema Language)
+## 7.5. Phase 4.5 — ESL (Eigenius Schema Language) ✓
 
 **Goal:** A human-friendly surface syntax for authoring programs, ontologies, and queries. ESL compiles to Eigon-JSON.
 
 **Duration estimate:** 2–3 weeks.
 
-### 7.5.1 Deliverables
-
-- ESL parser: hand-written recursive descent (same pattern as EigenQL), producing Eigon-JSON resources
-- Program syntax: `let`, `λ`, function application, `case`, `map`, `reduce`, `construct`, property access
-- Ontology syntax: `class`, `property`, shorthand for `requires`/`recommends`
-- CLI `compile` command: `eigenius compile program.esl` → outputs Eigon-JSON
-- Integration with existing commands: `eigenius run program.esl input.json` (compiles inline before execution)
-
-### 7.5.2 Example
-
-```esl
-program extract_and_summarize
-  : Document → Analysis
-  = λ input .
-    let entities : Entities = CompleteJson(input.text, extract_prompt) in
-    let summary : String = CompleteText(input.text, summarize_prompt) in
-    Construct Analysis {
-      entities = entities,
-      summary = summary,
-      source = input
-    }
-```
-
-Compiles to the Eigon-JSON expression tree from D3 §3.
-
-### 7.5.3 Key decisions required
-
-- ESL concrete syntax: keywords, indentation sensitivity, type annotation syntax
-- Whether ESL also covers EigenQL (unified syntax) or remains separate
-- Error message quality: source locations in ESL map back through compilation
+**Status:** Complete. Two-layer design (HCL-style structural + ML-style expressions), hand-written recursive descent lexer/parser/compiler, all CLI commands accept `.esl` files, kernel gRPC accepts `application/esl` content type. Component argument blocks with `f(arg) { config }` syntax. See `docs/design/d7-esl-surface-syntax.md`.
 
 ---
 
-## 8. Phase 5 — Extensibility
+## 8. Phase 5 — Traces and Incremental Execution
 
-**Goal:** Third-party capability code runs in WASM sandboxes. Domain ontologies can register custom validators and evaluators safely.
+**Goal:** Reasoning traces are persisted as resources in the knowledge graph and drive incremental execution. The executor unifies with NbE so that trace-driven evaluation is normalization — existing traces short-circuit, only untraced subexpressions dispatch.
 
 **Duration estimate:** 4–6 weeks.
 
 ### 8.1 Deliverables
 
+- Reflect RPC implementation: accept serialized traces, store as resources in a layer, return trace IRI. ProgramTrace wraps the complete trace tree with metadata (tokens, latency, epistemic status).
+- Trace persistence in RocksDB: ComponentTraces stored with content-addressed keys for memoization across executions.
+- RunProgram returns trace IRI: after execution, the kernel automatically creates a ProgramTrace and returns its IRI alongside the output.
+- Incremental execution: re-evaluating a program checks the trace store first. Traced IO components return instantly. Only untraced subexpressions dispatch to the orchestrator.
+- NbE/executor unification: the program executor uses NbE's eval with a trace-aware environment. `Val::Resource` extends the value domain. Ground type resolution and execution share the same evaluator.
+- Universe stratification enforcement: traces at level N can only reference resources at level N-1 or below.
+- CLI `reflect` command: record a reasoning trace manually, query traces via EigenQL.
+- Provenance queries: "Which LLM calls contributed to this output?" answered by walking the trace tree via EigenQL.
+
+### 8.2 Key decisions required
+
+- Whether NbE unification replaces the current executor entirely or wraps it
+- Trace garbage collection policy (keep all? TTL? layer-scoped?)
+- Whether RunProgram auto-commits the trace layer or returns it uncommitted
+
+### 8.3 Test plan
+
+- Execute a program, verify ProgramTrace is stored and queryable
+- Re-execute the same program with same input — verify cached (zero LLM calls)
+- Change the input — verify partial re-execution (only changed subexpressions dispatch)
+- Crash recovery: kill mid-execution, restart, verify resume from last ComponentTrace
+- Universe stratification: attempt to create a level-0 trace about a level-0 resource — verify rejection
+- Provenance query end-to-end
+
+### 8.4 References
+
+- eigenius/eigenius#5 — Implement Reflect RPC
+- `docs/design/d6b-reasoning-trace-schema.md` — trace classes and epistemic model
+
+---
+
+## 9. Phase 6 — Grothendieck Institutions
+
+**Goal:** Domain-specific reasoning systems (institutions) contribute structured fibers to the knowledge graph. Each institution provides its own sentences, models, satisfaction relation, and internal morphisms — not just flat data points.
+
+**Duration estimate:** 6–8 weeks.
+
+### 9.1 Deliverables
+
+- `FiberReasoner` trait: the kernel interface for institution-specific reasoning. Methods: `query`, `validate_morphism`, `discover_morphisms`, `fiber_declaration`.
+- Fiber declaration protocol: institutions advertise their morphism types, query types, and structural properties as ordinary ontology resources at registration time.
+- Morphism types as ontology classes: `MeshRefinement`, `ConformationalProximity`, `ParetoDominance` are typed resources in the knowledge graph, stored and validated by the kernel like any other resource.
+- Institution comorphisms: typed translations between institutions. Ground type resolution (class → Sigma type) is the existing comorphism from Eigon to Mini-TT; new comorphisms connect domain institutions.
+- Cross-institution queries: EigenQL navigates fiber morphisms using existing query syntax (morphisms are resources).
+- Fiber reasoner dispatch: the kernel recognizes `FiberQuery` subclasses and dispatches to the appropriate institution's reasoner.
+- Two worked examples from the institutions paper: (1) mechanical engineering (CAD + FEA + GenAI), (2) biopharmaceutical R&D (docking + ADMET + assays + PK modeling).
+
+### 9.2 Key decisions required
+
+- Whether fiber reasoners are in-process (Rust trait objects) or dispatched (gRPC/WASM)
+- Whether structural properties (e.g., "MeshRefinement is a preorder") are advisory or enforced
+- How institution registration interacts with the layer system
+
+### 9.3 References
+
+- `docs/papers/eigenius-institutions.tex` — theoretical foundation
+- Appendix A of the paper — FiberReasoner protocol sketch
+
+---
+
+## 10. Phase 7 — CompleteJson (Structured LLM Output)
+
+**Goal:** The CompleteJson component calls an LLM with a JSON Schema derived from an ontology class, receives structured JSON, and converts it back to a typed Eigon resource with full type-level guarantees.
+
+**Duration estimate:** 3–4 weeks.
+
+### 10.1 Deliverables
+
+- `schema_for_class` in the kernel: generate JSON Schema + `ShortNameTable` from a class definition. Walk class hierarchy, map data types, constraints, `allows_only` → enums, `class_types` → nested objects / `oneOf` unions.
+- `convert_json_to_resource`: convert LLM JSON response back to typed Eigon resource using the `ShortNameTable`. Bijective mapping guaranteed by construction.
+- Type-level bijectivity check: the Mini-TT type checker verifies that the output class admits a bijective short-name mapping when validating programs that use CompleteJson. Ill-typed programs rejected before execution.
+- `GetSchema` RPC: expose schema generation for tooling and debugging.
+- `complete_json.ts` orchestrator handler: receives JSON Schema, calls `generateObject()`, returns raw JSON.
+- End-to-end test with enums, nested objects, and union types.
+
+### 10.2 Key decisions required
+
+- Recursion depth limit for nested class schemas (proposed: 4 levels)
+- Whether `_type` discriminator field name is configurable
+
+### 10.3 References
+
+- eigenius/eigenius#6 — Implement CompleteJson
+- `docs/design/d8-complete-json-component.md` — full specification
+
+---
+
+## 11. Phase 8 — WASM Extensibility
+
+**Goal:** Third-party capability code runs in WASM sandboxes. Domain ontologies can register custom validators and evaluators safely. Institution fiber reasoners (Phase 6) can be implemented as WASM modules.
+
+**Duration estimate:** 4–6 weeks.
+
+### 11.1 Deliverables
+
 - Wasmtime integration in the kernel: instantiate a WASM module, provide the capability import interface, enforce memory and fuel limits (§9.6).
 - Capability SDK: a Rust crate that capability authors compile to WASM. Provides typed bindings for reading resources from the execution context, emitting results, and declaring required external access.
 - Capability registration via ontology: a domain layer can register a WASM module as a capability for a custom class.
 - Domain ontology loading: load a third-party ontology layer that defines custom classes, properties, and WASM-sandboxed capabilities. Verify that it cannot shadow Foundation Layer capabilities (§9.5).
+- WASM fiber reasoners: institution `FiberReasoner` implementations as WASM modules, using the same import/export interface as other capabilities.
 - CLI `capability` subcommand: list registered capabilities, inspect a capability's type signature, test-invoke a capability.
 - Example domain ontology: a "Legal Document" ontology with a custom validator that checks document structure — delivered as a worked example and integration test.
 
-### 8.2 Test plan
+### 11.2 Test plan
 
 - **Sandbox isolation:** A WASM capability that attempts to access memory outside its linear memory — verify trap, no kernel corruption.
 - **Fuel exhaustion:** A WASM capability with an infinite loop — verify termination within the fuel limit, error returned.
 - **Interface control:** A WASM capability that attempts to make a network call — verify rejection (no network import provided).
 - **Foundation protection:** Attempt to register a capability under `urn:eigenius:foundation:` from a domain layer — verify rejection.
 - **End-to-end:** Load domain ontology with WASM capability, create a resource of the domain class, dispatch to the WASM capability, verify correct result.
+- **WASM fiber reasoner:** Load a domain institution as WASM, query its morphisms, verify correct fiber reasoning through the sandbox.
+
+---
+
+## 12. Phase 9 — Azure Deployment and Operations
+
+**Goal:** Production-ready deployment to Azure Container Apps with CI/CD, observability, and operational tooling. Optional TiKV backend for horizontally scalable storage.
+
+**Duration estimate:** 3–4 weeks.
+
+### 12.1 Deliverables
+
+- Azure deployment: update Bicep templates for Container Apps, wire `ANTHROPIC_API_KEY` through Key Vault, configure DAPR sidecars for mTLS and service discovery.
+- CI/CD: GitHub Actions release workflow — build containers, push to ACR, deploy to staging, health check validation, production promotion.
+- Structured logging: kernel and orchestrator emit structured JSON logs with trace IDs, compatible with Azure Monitor / Application Insights.
+- Metrics: Prometheus-compatible metrics endpoint on the kernel — request counts, latency histograms, trace cache hit rate, LLM token usage.
+- Health probes: HTTP health endpoints on both services, compatible with Container Apps readiness/liveness probes.
+- TiKV storage backend: optional alternative to RocksDB for horizontally scalable deployments. Same key encoding (D4), same API (`LayerStore`/`ResourceStore` traits). Configurable via environment variable.
+- Operational runbook: deployment procedures, scaling guidelines, backup/restore, incident response.
+
+### 12.2 Test plan
+
+- Docker build succeeds for both images
+- Containers start and pass health checks
+- CI/CD pipeline: push tag → build → ACR → staging → health check → promotion
+- TiKV backend: all existing storage tests pass against TiKV
+- Structured logs: verify log entries contain trace IDs and are parseable
+- Metrics: verify Prometheus scrape returns expected metrics
+
+### 12.3 References
+
+- eigenius/eigenius#4 — Azure deployment ticket
+- `deploy/bicep/` — existing Bicep templates
+- `docs/design/d4-storage-key-encoding.md` — TiKV-compatible key scheme
 
 ---
 
@@ -396,13 +497,14 @@ The following design documents must be written and reviewed before the phase tha
 | D6b | **Reasoning Trace Schema** | **COMPLETED** — `docs/design/d6b-reasoning-trace-schema.md`. ComponentTrace, ProgramTrace, ObservationTrace, VerificationTrace classes. Provenance chain, epistemic status (observed→derived→verified), universe stratification, trace-based memoization | Phase 4 | Done |
 | D7 | **ESL Surface Syntax** | **COMPLETED** — `docs/design/d7-esl-surface-syntax.md`. Two-layer design (HCL-style structural + ML-style expressions), namespace aliases, program/class/property/resource syntax, EBNF grammar | Phase 4.5 | Done |
 | D8 | **CompleteJson Component** | **COMPLETED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping, type-level guarantees via CIC, kernel-side schema generation and conversion | Phase 4 | Done |
-| D9 | **Capability SDK & WASM Interface** | Import/export functions for WASM capabilities, resource serialization across the WASM boundary, fuel budget policy | Phase 5 | 10–12 pages |
-| D10 | **Capability Protocol Wire Format** | How native and WASM capabilities communicate with the kernel, serialization format for resource handles and results (resolves §14 open question) | Phase 5 | 6–8 pages |
-| D11 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 3+ | 10–15 pages |
-| D12 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 3+ | 8–10 pages |
-| D13 | **Execution Context Internals** | Snapshot advancement policy, HLC clock synchronization bounds and violation behavior, capability sub-context isolation boundaries, inline resource semantics in EigenQL (resolves §8.4 and §14 open questions) | Phase 2 | 8–10 pages |
-| D14 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 4 | 6–8 pages |
-| D15 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 5 | 6–8 pages |
+| D9 | **NbE/Executor Unification** | How NbE eval replaces the current executor, trace-aware environment, Val::Resource extension, incremental evaluation semantics | Phase 5 | 8–10 pages |
+| D10 | **Grothendieck Institution Protocol** | FiberReasoner trait, morphism type registration, fiber declaration, cross-institution comorphisms, dispatch model | Phase 6 | 12–15 pages |
+| D11 | **Capability SDK & WASM Interface** | Import/export functions for WASM capabilities, resource serialization across the WASM boundary, fuel budget policy | Phase 8 | 10–12 pages |
+| D12 | **Capability Protocol Wire Format** | How native and WASM capabilities communicate with the kernel, serialization format for resource handles and results (resolves §14 open question) | Phase 8 | 6–8 pages |
+| D13 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 9 | 10–15 pages |
+| D14 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 6+ | 8–10 pages |
+| D15 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 9 | 6–8 pages |
+| D16 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 8 | 6–8 pages |
 
 ---
 
