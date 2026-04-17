@@ -102,20 +102,22 @@ orchestration/   Deno/TypeScript orchestration layer (future)
 
 ### Prerequisites
 
-- Rust (stable, 1.82+)
+- Rust (stable, 1.86+)
 - `pkg-config` and `libssl-dev` (for TiKV client dependency)
+- [`just`](https://github.com/casey/just) (task runner, optional)
 
 ```bash
 # Ubuntu/WSL
-sudo apt-get install -y build-essential pkg-config libssl-dev protobuf-compiler
+sudo apt-get install -y build-essential pkg-config libssl-dev protobuf-compiler libclang-dev
+cargo install just
 ```
 
 ### Build and Test
 
 ```bash
-cargo build --workspace
-cargo test --workspace
-RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets
+just build        # or: cargo build --workspace
+just test         # or: cargo test --workspace + deno test
+just check        # fmt + clippy + deno lint
 ```
 
 ### CLI
