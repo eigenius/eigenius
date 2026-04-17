@@ -20,8 +20,10 @@ pub enum Val {
     Con(Name, Box<Val>),
     /// Unit value
     Unit,
-    /// Universe of types
+    /// Universe of types (level 0)
     Set,
+    /// Universe at a specific level
+    Type(usize),
     /// Dependent function type: Π(A, x.B)
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
@@ -36,6 +38,11 @@ pub enum Val {
     Nt(Neut),
 
     // --- Eigenius extensions ---
+    /// Identity type: Id(A, x, y)
+    Id(Box<Val>, Box<Val>, Box<Val>),
+    /// Reflexivity proof: refl(a) inhabits Id(A, a, a)
+    Refl(Box<Val>),
+
     /// Eigon class ground type (resolved from layer chain)
     EigonClass(Iri),
     /// Eigon primitive type
@@ -76,9 +83,18 @@ impl Clos {
         Self { patt, body, env }
     }
 
-    /// Instantiate the closure with a value: (Cl p e ρ) * v = eval e (ρ, p = v)
+    /// Instantiate the closure with a value (Pure mode).
     pub fn apply(&self, v: Val) -> Val {
         crate::nbe::eval::eval(&self.body, &self.env.clone().extend(self.patt.clone(), v))
+    }
+
+    /// Instantiate the closure with a value and capability context.
+    pub fn apply_ctx(&self, v: Val, ctx: &crate::nbe::eval::EvalCtx) -> Val {
+        crate::nbe::eval::eval_ctx(
+            &self.body,
+            &self.env.clone().extend(self.patt.clone(), v),
+            ctx,
+        )
     }
 }
 
@@ -105,6 +121,29 @@ impl Val {
             }
             Val::Nt(k) => Val::Nt(Neut::App(Box::new(k), Box::new(v))),
             other => panic!("app: not a function: {:?}", other),
+        }
+    }
+
+    /// Function application with capability context.
+    pub fn app_ctx(self, v: Val, ctx: &crate::nbe::eval::EvalCtx) -> Val {
+        match self {
+            Val::Lam(f) => f.apply_ctx(v, ctx),
+            Val::Fun(cases, rho) => {
+                if let Val::Con(c, cv) = v {
+                    for (name, exp) in &cases {
+                        if *name == c {
+                            return crate::nbe::eval::eval_ctx(exp, &rho, ctx).app_ctx(*cv, ctx);
+                        }
+                    }
+                    panic!("app_ctx: constructor {} not found in case", c);
+                } else if let Val::Nt(k) = v {
+                    Val::Nt(Neut::NtFun(cases, rho, Box::new(k)))
+                } else {
+                    panic!("app_ctx Fun to non-constructor non-neutral");
+                }
+            }
+            Val::Nt(k) => Val::Nt(Neut::App(Box::new(k), Box::new(v))),
+            other => panic!("app_ctx: not a function: {:?}", other),
         }
     }
 

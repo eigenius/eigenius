@@ -1,45 +1,100 @@
 //! Mini-TT evaluator: terms → values.
 //!
 //! Ported from `Main.hs` lines 198-217 in the Mini-TT reference.
+//! Extended with capability modes (Pure/Read/IO) per D9.
 
+use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Clos, Neut, Val};
 use crate::ontology::iri::Iri;
+use crate::program::execute::ComponentRegistry;
+use crate::program::trace::TraceStore;
+use std::sync::Arc;
+
+/// Evaluation context controlling what effects are available.
+#[derive(Clone)]
+pub enum EvalCtx {
+    /// Standard NbE: normalize terms, check types. No side effects.
+    Pure,
+    /// Pure + read access to the layer chain.
+    Read { layer: Arc<Layer> },
+    /// Read + IO component dispatch + trace production.
+    IO {
+        layer: Arc<Layer>,
+        registry: Arc<ComponentRegistry>,
+        trace_store: Option<Arc<dyn TraceStore>>,
+    },
+}
+
+impl EvalCtx {
+    /// A static Pure context for convenience.
+    pub fn pure() -> Self {
+        EvalCtx::Pure
+    }
+}
 
 /// Evaluate an expression in an environment to produce a semantic value.
-///
-/// Port of `eval` from the reference.
+/// Pure mode — no IO, no layer access. Used by the type checker.
 pub fn eval(exp: &Exp, rho: &Rho) -> Val {
+    eval_ctx(exp, rho, &EvalCtx::Pure)
+}
+
+/// Evaluate an expression with a capability mode.
+pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
+    // Shorthand for recursive calls
+    let ev = |e: &Exp| eval_ctx(e, rho, ctx);
+
     match exp {
         Exp::Set => Val::Set,
+        Exp::Type(n) => Val::Type(*n),
         Exp::One => Val::One,
         Exp::Unit => Val::Unit,
 
-        Exp::Dec(d, e) => eval(e, &Rho::UpDec(Box::new(rho.clone()), d.clone())),
+        Exp::Dec(d, e) => eval_ctx(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx),
 
         Exp::Lam(p, e) => Val::Lam(Clos::new(p.clone(), *e.clone(), rho.clone())),
 
         Exp::Pi(p, a, b) => Val::Pi(
-            Box::new(eval(a, rho)),
+            Box::new(ev(a)),
             Clos::new(p.clone(), *b.clone(), rho.clone()),
         ),
 
         Exp::Sig(p, a, b) => Val::Sig(
-            Box::new(eval(a, rho)),
+            Box::new(ev(a)),
             Clos::new(p.clone(), *b.clone(), rho.clone()),
         ),
 
-        Exp::Fst(e) => eval(e, rho).vfst(),
-        Exp::Snd(e) => eval(e, rho).vsnd(),
+        Exp::Fst(e) => ev(e).vfst(),
+        Exp::Snd(e) => ev(e).vsnd(),
 
-        Exp::App(e1, e2) => eval(e1, rho).app(eval(e2, rho)),
+        Exp::App(e1, e2) => {
+            // In IO mode, check if the function is a component dispatch
+            if let EvalCtx::IO { registry, .. } = ctx {
+                if let Exp::Var(name) = e1.as_ref() {
+                    if registry.get(name).is_some() {
+                        let arg_val = ev(e2);
+                        return dispatch_component(name, &arg_val, None, ctx);
+                    }
+                }
+            }
+            ev(e1).app_ctx(ev(e2), ctx)
+        }
 
-        Exp::Var(x) => rho.get(x).unwrap_or_else(|e| panic!("eval: {e}")),
+        Exp::Var(x) => rho.get(x).unwrap_or_else(|e| {
+            match ctx {
+                // In IO/Read mode, unbound variables may be component IRIs
+                // or external references — produce a neutral term
+                EvalCtx::IO { .. } | EvalCtx::Read { .. } => {
+                    Val::Nt(Neut::Gen(usize::MAX, x.clone()))
+                }
+                EvalCtx::Pure => panic!("eval: {e}"),
+            }
+        }),
 
-        Exp::Pair(e1, e2) => Val::Pair(Box::new(eval(e1, rho)), Box::new(eval(e2, rho))),
+        Exp::Pair(e1, e2) => Val::Pair(Box::new(ev(e1)), Box::new(ev(e2))),
 
-        Exp::Con(c, e) => Val::Con(c.clone(), Box::new(eval(e, rho))),
+        Exp::Con(c, e) => Val::Con(c.clone(), Box::new(ev(e))),
 
         Exp::Data(summands) => Val::Data(
             summands
@@ -58,9 +113,49 @@ pub fn eval(exp: &Exp, rho: &Rho) -> Val {
         ),
 
         // Sugar: A → B = Π _ : A. B
-        Exp::Arrow(a, b) => eval(&Exp::Pi(Patt::Unit, a.clone(), b.clone()), rho),
+        Exp::Arrow(a, b) => eval_ctx(&Exp::Pi(Patt::Unit, a.clone(), b.clone()), rho, ctx),
         // Sugar: A × B = Σ _ : A. B
-        Exp::Times(a, b) => eval(&Exp::Sig(Patt::Unit, a.clone(), b.clone()), rho),
+        Exp::Times(a, b) => eval_ctx(&Exp::Sig(Patt::Unit, a.clone(), b.clone()), rho, ctx),
+
+        // Identity type
+        Exp::Id(a, x, y) => Val::Id(Box::new(ev(a)), Box::new(ev(x)), Box::new(ev(y))),
+        Exp::Refl(a) => Val::Refl(Box::new(ev(a))),
+        Exp::IdJ(args) => {
+            let [_a, _c, d, _x, _y, p] = args.as_ref();
+            let p_val = ev(p);
+            match p_val {
+                Val::Refl(a_val) => {
+                    let d_val = ev(d);
+                    d_val.app_ctx(*a_val, ctx)
+                }
+                Val::Nt(n) => {
+                    // Blocked — all args become neutral
+                    Val::Nt(Neut::App(Box::new(n), Box::new(Val::Unit)))
+                }
+                _ => panic!("J: proof argument is not refl or neutral"),
+            }
+        }
+
+        // Native constraint checking
+        Exp::NativeDecide(constraint, val) => {
+            let v = ev(val);
+            if check_native_constraint(constraint, &v) {
+                Val::Refl(Box::new(v))
+            } else {
+                Val::Nt(Neut::Gen(usize::MAX, "__constraint_failed".to_string()))
+            }
+        }
+
+        // Decidable equality on ground types
+        Exp::DecEq(_a, x, y) => {
+            let x_val = ev(x);
+            let y_val = ev(y);
+            if ground_values_equal(&x_val, &y_val) {
+                Val::Refl(Box::new(x_val))
+            } else {
+                Val::Nt(Neut::Gen(usize::MAX, "__deceq_false".to_string()))
+            }
+        }
 
         // Eigenius extensions
         Exp::EigonClass(iri) => Val::EigonClass(iri.clone()),
@@ -68,7 +163,7 @@ pub fn eval(exp: &Exp, rho: &Rho) -> Val {
         Exp::EigonResource(r) => Val::ResourceVal(r.clone()),
 
         Exp::PropAccess(e, prop) => {
-            let v = eval(e, rho);
+            let v = ev(e);
             match v {
                 Val::ResourceVal(r) => {
                     // Direct property access on a known resource
@@ -81,6 +176,175 @@ pub fn eval(exp: &Exp, rho: &Rho) -> Val {
                 other => panic!("property access on non-resource: {:?}", other),
             }
         }
+    }
+}
+
+/// Dispatch an IO component call.
+///
+/// Converts the Val argument to a Resource, calls the component via the
+/// registry, and converts the result back to a Val.
+fn dispatch_component(
+    component_iri: &str,
+    input_val: &Val,
+    _component_arg: Option<&Val>,
+    ctx: &EvalCtx,
+) -> Val {
+    let (registry, layer, trace_store) = match ctx {
+        EvalCtx::IO {
+            registry,
+            layer,
+            trace_store,
+        } => (registry, layer, trace_store),
+        _ => panic!("dispatch_component called outside IO mode"),
+    };
+
+    let component = match registry.get(component_iri) {
+        Some(c) => c,
+        None => {
+            // Unknown component — return input unchanged (identity fallback)
+            return input_val.clone();
+        }
+    };
+
+    // Convert Val to Resource for the component interface
+    let input_resource = val_to_resource(input_val);
+
+    // Check trace cache for IO components
+    if component.is_io() {
+        let cache_key = crate::program::trace::compute_trace_key(component_iri, &input_resource);
+        if let Some(store) = trace_store {
+            if let Some(cached) = store.get_component_trace(&cache_key) {
+                return Val::ResourceVal(Box::new(cached.output));
+            }
+        }
+
+        // Dispatch
+        match component.execute(&input_resource, None, layer) {
+            Ok(result) => {
+                // Cache the result
+                if let Some(store) = trace_store {
+                    let ct = crate::program::trace::ComponentTrace {
+                        component: component_iri.to_string(),
+                        input_hash: cache_key,
+                        argument_hash: None,
+                        output: result.output.clone(),
+                        cached: false,
+                        metrics: result.metrics,
+                    };
+                    store.put_component_trace(cache_key, ct);
+                }
+                Val::ResourceVal(Box::new(result.output))
+            }
+            Err(e) => panic!("component dispatch failed: {e}"),
+        }
+    } else {
+        // Pure component — no caching
+        match component.execute(&input_resource, None, layer) {
+            Ok(result) => Val::ResourceVal(Box::new(result.output)),
+            Err(e) => panic!("component dispatch failed: {e}"),
+        }
+    }
+}
+
+/// Convert a Val to a Resource for component dispatch.
+fn val_to_resource(val: &Val) -> crate::ontology::resource::Resource {
+    match val {
+        Val::ResourceVal(r) => r.as_ref().clone(),
+        Val::Unit => crate::ontology::resource::Resource::new_embedded(),
+        _ => {
+            // For other Val types, create an embedded resource
+            // This is a lossy conversion — not all Vals map to Resources
+            crate::ontology::resource::Resource::new_embedded()
+        }
+    }
+}
+
+/// Check a native constraint against a value.
+fn check_native_constraint(constraint: &crate::nbe::term::Constraint, val: &Val) -> bool {
+    use crate::nbe::term::Constraint;
+    match constraint {
+        Constraint::MinValue(min) => match val {
+            Val::ResourceVal(r) => r
+                .properties()
+                .values()
+                .next()
+                .and_then(|v| v.as_integer())
+                .is_some_and(|n| n >= *min),
+            _ => false,
+        },
+        Constraint::MaxValue(max) => match val {
+            Val::ResourceVal(r) => r
+                .properties()
+                .values()
+                .next()
+                .and_then(|v| v.as_integer())
+                .is_some_and(|n| n <= *max),
+            _ => false,
+        },
+        Constraint::MinLength(min) => match val {
+            Val::ResourceVal(r) => r
+                .properties()
+                .values()
+                .next()
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.len() as i64 >= *min),
+            _ => false,
+        },
+        Constraint::MaxLength(max) => match val {
+            Val::ResourceVal(r) => r
+                .properties()
+                .values()
+                .next()
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.len() as i64 <= *max),
+            _ => false,
+        },
+        Constraint::Pattern(pattern) => match val {
+            Val::ResourceVal(r) => r
+                .properties()
+                .values()
+                .next()
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| {
+                    let full = format!("^(?:{pattern})$");
+                    regex::Regex::new(&full).is_ok_and(|re| re.is_match(s))
+                }),
+            _ => false,
+        },
+        Constraint::Format(fmt) => match val {
+            Val::ResourceVal(r) => r
+                .properties()
+                .values()
+                .next()
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| match fmt.as_str() {
+                    "date" => s.len() == 10 && s.chars().nth(4) == Some('-'),
+                    "uuid" => s.len() == 36 && s.chars().filter(|c| *c == '-').count() == 4,
+                    _ => true,
+                }),
+            _ => false,
+        },
+    }
+}
+
+/// Check equality of ground-type values.
+/// Returns true for equal concrete values, false otherwise.
+/// Handles: EigonPrimitive-wrapped resources, EigonClass IRIs, Unit.
+fn ground_values_equal(x: &Val, y: &Val) -> bool {
+    match (x, y) {
+        (Val::Unit, Val::Unit) => true,
+        (Val::EigonClass(a), Val::EigonClass(b)) => a == b,
+        (Val::EigonPrimitive(a), Val::EigonPrimitive(b)) => a == b,
+        (Val::ResourceVal(a), Val::ResourceVal(b)) => {
+            // Compare resource contents for equality
+            a.properties() == b.properties() && a.id() == b.id()
+        }
+        (Val::Con(c1, v1), Val::Con(c2, v2)) => c1 == c2 && ground_values_equal(v1, v2),
+        (Val::Pair(a1, b1), Val::Pair(a2, b2)) => {
+            ground_values_equal(a1, a2) && ground_values_equal(b1, b2)
+        }
+        (Val::Refl(a), Val::Refl(b)) => ground_values_equal(a, b),
+        _ => false,
     }
 }
 

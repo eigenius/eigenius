@@ -205,6 +205,134 @@ impl RocksStore {
     }
 }
 
+// --- Trace Store ---
+
+use eigenius_kernel::program::trace::{ComponentMetrics, ComponentTrace, TraceStore};
+
+impl TraceStore for RocksStore {
+    fn get_component_trace(&self, key: &[u8; 32]) -> Option<ComponentTrace> {
+        let db_key = format!("trace:{}", hex::encode(key));
+        match self.db.get(db_key.as_bytes()) {
+            Ok(Some(bytes)) => deserialize_component_trace(&bytes).ok(),
+            _ => None,
+        }
+    }
+
+    fn put_component_trace(&self, key: [u8; 32], trace: ComponentTrace) {
+        let db_key = format!("trace:{}", hex::encode(key));
+        if let Ok(bytes) = serialize_component_trace(&trace) {
+            let _ = self.db.put(db_key.as_bytes(), bytes);
+        }
+    }
+}
+
+/// Serialize a ComponentTrace to JSON bytes for storage.
+fn serialize_component_trace(trace: &ComponentTrace) -> Result<Vec<u8>, StorageError> {
+    let output_json = eigenius_kernel::ontology::eigon_json::serialize_resource(&trace.output);
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "component".into(),
+        serde_json::Value::String(trace.component.clone()),
+    );
+    obj.insert(
+        "input_hash".into(),
+        serde_json::Value::String(hex::encode(trace.input_hash)),
+    );
+    if let Some(ah) = &trace.argument_hash {
+        obj.insert(
+            "argument_hash".into(),
+            serde_json::Value::String(hex::encode(ah)),
+        );
+    }
+    obj.insert("output".into(), output_json);
+    obj.insert("cached".into(), serde_json::Value::Bool(trace.cached));
+    if let Some(m) = &trace.metrics {
+        let mut metrics = serde_json::Map::new();
+        metrics.insert(
+            "provider".into(),
+            serde_json::Value::String(m.provider.clone()),
+        );
+        metrics.insert("model".into(), serde_json::Value::String(m.model.clone()));
+        metrics.insert(
+            "prompt_tokens".into(),
+            serde_json::Value::Number(m.prompt_tokens.into()),
+        );
+        metrics.insert(
+            "completion_tokens".into(),
+            serde_json::Value::Number(m.completion_tokens.into()),
+        );
+        metrics.insert(
+            "latency_ms".into(),
+            serde_json::Value::Number(m.latency_ms.into()),
+        );
+        obj.insert("metrics".into(), serde_json::Value::Object(metrics));
+    }
+    serde_json::to_vec(&serde_json::Value::Object(obj))
+        .map_err(|e| StorageError::Internal(format!("serialize trace: {e}")))
+}
+
+/// Deserialize a ComponentTrace from JSON bytes.
+fn deserialize_component_trace(bytes: &[u8]) -> Result<ComponentTrace, StorageError> {
+    let obj: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| StorageError::Internal(format!("deserialize trace: {e}")))?;
+
+    let component = obj["component"]
+        .as_str()
+        .ok_or_else(|| StorageError::Internal("missing component".into()))?
+        .to_string();
+
+    let input_hash_hex = obj["input_hash"]
+        .as_str()
+        .ok_or_else(|| StorageError::Internal("missing input_hash".into()))?;
+    let input_hash_bytes = hex::decode(input_hash_hex)
+        .map_err(|e| StorageError::Internal(format!("invalid input_hash: {e}")))?;
+    let mut input_hash = [0u8; 32];
+    if input_hash_bytes.len() == 32 {
+        input_hash.copy_from_slice(&input_hash_bytes);
+    }
+
+    let argument_hash = obj
+        .get("argument_hash")
+        .and_then(|v| v.as_str())
+        .and_then(|s| hex::decode(s).ok())
+        .and_then(|b| {
+            if b.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&b);
+                Some(arr)
+            } else {
+                None
+            }
+        });
+
+    let output_json = obj["output"].to_string();
+    let output = eigenius_kernel::ontology::eigon_json::parse_embedded(&output_json)
+        .or_else(|_| {
+            eigenius_kernel::ontology::eigon_json::parse_document(&output_json)
+                .map(|mut v| v.pop().unwrap_or_else(Resource::new_embedded))
+        })
+        .map_err(|e| StorageError::Internal(format!("parse trace output: {e}")))?;
+
+    let metrics = obj.get("metrics").and_then(|m| {
+        Some(ComponentMetrics {
+            provider: m["provider"].as_str()?.to_string(),
+            model: m["model"].as_str()?.to_string(),
+            prompt_tokens: m["prompt_tokens"].as_i64()?,
+            completion_tokens: m["completion_tokens"].as_i64()?,
+            latency_ms: m["latency_ms"].as_i64()?,
+        })
+    });
+
+    Ok(ComponentTrace {
+        component,
+        input_hash,
+        argument_hash,
+        output,
+        cached: false, // When loaded from storage, it will be marked cached by the caller
+        metrics,
+    })
+}
+
 fn hex_to_layer_id(hex_str: &str) -> Result<LayerId, StorageError> {
     let bytes =
         hex::decode(hex_str).map_err(|e| StorageError::Internal(format!("invalid hex: {e}")))?;
@@ -583,5 +711,85 @@ mod tests {
         let loaded = store.load_layer(&id).await.unwrap();
 
         assert_eq!(loaded.resources().len(), count);
+    }
+
+    #[tokio::test]
+    async fn trace_store_round_trip() {
+        let (store, _dir) = open_temp_store();
+
+        let key = [42u8; 32];
+        assert!(store.get_component_trace(&key).is_none());
+
+        let trace = ComponentTrace {
+            component: "urn:eigenius:program:components:CompleteText".to_string(),
+            input_hash: key,
+            argument_hash: None,
+            output: make_resource(
+                "urn:eigenius:test:output",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("LLM output".into()),
+                )],
+            ),
+            cached: false,
+            metrics: Some(ComponentMetrics {
+                provider: "anthropic".to_string(),
+                model: "claude-sonnet".to_string(),
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                latency_ms: 500,
+            }),
+        };
+
+        store.put_component_trace(key, trace);
+        let loaded = store.get_component_trace(&key).unwrap();
+
+        assert_eq!(
+            loaded.component,
+            "urn:eigenius:program:components:CompleteText"
+        );
+        assert_eq!(loaded.input_hash, key);
+        assert!(loaded.metrics.is_some());
+        let m = loaded.metrics.unwrap();
+        assert_eq!(m.provider, "anthropic");
+        assert_eq!(m.prompt_tokens, 100);
+        assert_eq!(m.completion_tokens, 50);
+        assert_eq!(m.latency_ms, 500);
+        assert_eq!(
+            loaded
+                .output
+                .get(&iri("urn:eigenius:core:description"))
+                .unwrap()
+                .as_str(),
+            Some("LLM output")
+        );
+    }
+
+    #[tokio::test]
+    async fn trace_store_persists_across_reopen() {
+        let dir = TempDir::new().unwrap();
+        let key = [99u8; 32];
+
+        // Write trace
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let trace = ComponentTrace {
+                component: "urn:test:comp".to_string(),
+                input_hash: key,
+                argument_hash: None,
+                output: Resource::new(iri("urn:test:out")),
+                cached: false,
+                metrics: None,
+            };
+            store.put_component_trace(key, trace);
+        }
+
+        // Reopen and verify
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let loaded = store.get_component_trace(&key);
+            assert!(loaded.is_some());
+            assert_eq!(loaded.unwrap().component, "urn:test:comp");
+        }
     }
 }

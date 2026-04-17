@@ -92,6 +92,7 @@ message RunProgramResponse {
   bool success = 1;
   bytes output = 2;             // Output resource as CBOR
   repeated ValidationError errors = 3;
+  string trace_iri = 4;         // IRI of the ProgramTrace (if execution succeeded)
 }
 
 // --- Reflect ---
