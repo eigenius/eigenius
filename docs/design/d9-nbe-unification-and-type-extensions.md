@@ -279,47 +279,70 @@ After a program completes, the trace tree is pruned. Only non-deterministic IO C
 
 ### 5.7 Trace Storage Architecture
 
-Traces are stored in two locations with different characteristics:
+Traces live in two places serving different purposes:
 
-**ComponentTrace cache (RocksDB column family):**
-- Written individually during execution, not bundled into atomic layer commits
+**ComponentTrace cache (RocksDB key-value store):**
+- Written individually during execution for memoization and crash recovery
 - Content-addressed by `SHA-256(component_iri || canonicalize(input))`
 - Survives kernel crashes (RocksDB WAL guarantees)
-- Enables incremental recovery — completed IO steps persist across restarts
-- Not queryable via EigenQL — pure key-value memoization cache
+- Fast key-value lookup for memoization during evaluation
+- **Not** the authoritative record — it's a performance cache
 
-**ProgramTrace summary (layer system):**
-- Committed as a resource in a new layer after execution completes
-- Contains metadata: program IRI, input IRI, output, total_tokens, latency, timestamps
-- Queryable via EigenQL
-- Atomic — either fully committed or absent
+**Trace layer (layer system — the authoritative record):**
+- After execution completes, a **trace layer** is committed extending the layer chain
+- Contains both the ProgramTrace summary *and* all IO ComponentTraces as resources with `@id`
+- The ProgramTrace references the ComponentTrace IRIs — forming a proof chain
+- Queryable via EigenQL — "which LLM calls contributed to this result?"
+- Immutable and content-addressed — the trace layer is a proof artifact
 
-The ComponentTrace cache uses a separate RocksDB column family, not the layer system, because:
-- Memoization entries must be writable individually during execution (the layer system commits atomically)
-- Key-value lookup by content hash is the primary access pattern (EigenQL queries are secondary)
-- Crash recovery depends on partial writes surviving — incompatible with atomic layer commits
+The dual-write design:
+1. **During execution:** ComponentTraces are written to the side cache as they complete (for memoization and crash recovery)
+2. **After execution:** the surviving IO ComponentTraces are committed as resources in a new trace layer, alongside the ProgramTrace summary
+3. The side cache enables fast re-execution; the trace layer enables provenance queries and proof verification
 
-### 5.8 Crash Recovery
+**Why both?** The side cache handles the write-during-execution requirement that atomic layer commits can't serve. The trace layer puts ComponentTraces in the graph where they can be queried, validated, and used as proof artifacts. They contain the same data — the side cache is the fast path, the layer is the truth.
 
-The storage split guarantees correct crash recovery without explicit checkpointing:
+### 5.8 Trace Layers as Proof Artifacts
+
+A trace layer extends the chain:
+
+```
+core → program → reflection → user_data → trace_layer₁ → trace_layer₂ → ...
+```
+
+Each program execution appends a trace layer containing:
+- `ProgramTrace` — summary with program IRI, input IRI, metrics
+- `ComponentTrace₁, ComponentTrace₂, ...` — the IO axioms (LLM calls, HTTP requests)
+
+**Proof verification:**
+1. Look up ProgramTrace `T` in the trace layer
+2. `T` references program `Π` and input `I`
+3. `T` references ComponentTraces `C₁, C₂, ...`
+4. Re-evaluate `Π(I)` in IO mode — each `Cᵢ` hits the cache
+5. Output matches the recorded output ✓
+
+The ComponentTraces are the **axioms** (non-deterministic IO results). The program is the **theorem**. Re-evaluation is the **proof** — it reconstructs the derivation from axioms. The trace layer is the **proof certificate** — it records the axioms in the graph so the proof can be checked without re-dispatching IO.
+
+### 5.9 Crash Recovery
+
+The dual-write design guarantees correct crash recovery:
 
 **Crash during execution:**
-1. ComponentTraces written before the crash survive in RocksDB
-2. ProgramTrace does not exist (execution didn't complete)
-3. Client receives a gRPC transport error and retries `RunProgram`
-4. Kernel re-evaluates the program in IO mode
-5. Completed IO components hit the ComponentTrace cache — instant return
-6. Evaluation resumes from the first untraced IO component
-7. After completion, ProgramTrace is committed to a new layer
+1. ComponentTraces written to the side cache before the crash survive (RocksDB WAL)
+2. No trace layer exists (execution didn't complete)
+3. Client retries `RunProgram`
+4. Kernel re-evaluates — completed IO steps hit the cache instantly
+5. Evaluation resumes from the first untraced IO component
+6. After completion, trace layer is committed with all ComponentTraces + ProgramTrace
 
 **Crash after execution, before response:**
-1. ComponentTraces survive in RocksDB
-2. ProgramTrace may or may not be committed (depends on crash timing)
+1. ComponentTraces survive in the side cache
+2. Trace layer may or may not be committed
 3. Client retries `RunProgram`
-4. All IO components hit the cache — entire re-execution is instant
-5. ProgramTrace is committed (idempotent — same content, same layer ID)
+4. All IO steps hit the cache — re-execution is instant
+5. Trace layer is committed (idempotent — same content produces same layer ID)
 
-**Auto-commit policy:** `RunProgram` automatically commits the ProgramTrace to a new layer after successful execution. The trace IRI is returned in `RunProgramResponse`. This matches `Load`'s auto-commit behavior and ensures traces are always persisted for completed executions.
+**Auto-commit policy:** `RunProgram` commits the trace layer after successful execution and returns the ProgramTrace IRI in `RunProgramResponse`.
 
 ---
 
@@ -520,8 +543,9 @@ The key risk mitigation: Steps 1-4 can be tested against the existing type check
 | Trace representation in types? | Traces are not types; `eval` produces `(Val, Option<Trace>)`, readback strips traces | Traces are computational bookkeeping, not logical content |
 | Validation vs type checking? | Complementary: validation checks data surface (open world), type checking checks program surface (closed world) | Each is sound for its domain; neither subsumes the other |
 | Lean 4 borrowings? | Design patterns (Decidable, native_decide, structure inheritance), not implementation | Right scale for our system; avoids importing Lean's complexity |
-| ComponentTrace storage? | Separate RocksDB column family, not layer system | Must survive partial writes during execution for crash recovery; key-value access pattern for memoization |
-| ProgramTrace storage? | Layer system resource, auto-committed after execution | Queryable via EigenQL; atomic commit matches layer semantics |
+| ComponentTrace storage? | Dual-write: side cache during execution, trace layer after completion | Side cache for crash recovery + memoization; trace layer for queryability + proof verification |
+| ProgramTrace storage? | Trace layer, committed with ComponentTraces after execution | All trace artifacts in one immutable layer — the proof certificate |
+| Trace layers? | Append-only extension of the layer chain | Each execution adds a trace layer; layers are immutable; proofs are content-addressed |
 | RunProgram auto-commit? | Yes — auto-commit ProgramTrace, return trace IRI in response | Consistent with Load auto-commit; ensures traces always persisted for completed executions |
 | Trace pruning? | Keep IO ComponentTraces only; discard deterministic trace tree | Proofs-as-programs: deterministic structure is reconstructible from program + input + IO cache |
 | Crash recovery? | No explicit checkpointing — ComponentTrace cache in RocksDB is the checkpoint | Re-evaluation hits cache for completed IO steps; resumes from first untraced step |

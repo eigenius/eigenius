@@ -4,6 +4,7 @@
 //! Case, Pair, Construct, Project, Map, Reduce, Literal) that map 1:1
 //! to Mini-TT terms. See design doc D3 for the full specification.
 
+pub mod eval_io;
 pub mod execute;
 pub mod expr;
 pub mod ground;

@@ -29,6 +29,7 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         Val::Con(c, v) => Exp::Con(c.clone(), Box::new(readback_val(level, v))),
         Val::Unit => Exp::Unit,
         Val::Set => Exp::Set,
+        Val::Type(n) => Exp::Type(*n),
         Val::Pi(t, g) => {
             let gen = gen_val(level);
             Exp::Pi(
@@ -49,6 +50,14 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         Val::Fun(cases, rho) => readback_closure_like(level, cases, rho, true),
         Val::Data(summands, rho) => readback_closure_like(level, summands, rho, false),
         Val::Nt(k) => readback_neut(level, k),
+
+        // Identity type
+        Val::Id(a, x, y) => Exp::Id(
+            Box::new(readback_val(level, a)),
+            Box::new(readback_val(level, x)),
+            Box::new(readback_val(level, y)),
+        ),
+        Val::Refl(a) => Exp::Refl(Box::new(readback_val(level, a))),
 
         // Eigenius extensions
         Val::EigonClass(iri) => Exp::EigonClass(iri.clone()),

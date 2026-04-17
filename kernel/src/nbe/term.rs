@@ -13,8 +13,11 @@ pub type Name = String;
 pub enum Exp {
     /// Lambda: λ p. e
     Lam(Patt, Box<Exp>),
-    /// Universe: U (the type of types)
+    /// Universe: U (the type of types). Level 0 by default.
     Set,
+    /// Universe at a specific level: Type(n). Type(0) = Set.
+    /// Type(0) : Type(1) : Type(2)
+    Type(usize),
     /// Dependent function type: Π p : A. B
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
@@ -43,6 +46,23 @@ pub enum Exp {
     Dec(Decl, Box<Exp>),
 
     // --- Eigenius extensions ---
+    /// Identity type: Id(A, x, y) — propositional equality
+    Id(Box<Exp>, Box<Exp>, Box<Exp>),
+    /// Reflexivity proof: refl(a) : Id(A, a, a)
+    Refl(Box<Exp>),
+    /// J eliminator: J(A, C, d, x, y, p) where p : Id(A, x, y)
+    IdJ(Box<[Exp; 6]>),
+
+    /// Native constraint check: NativeDecide(constraint, value) reduces to
+    /// Refl if the constraint is satisfied, or a neutral if not.
+    /// Used for min_value, max_value, pattern, format, etc.
+    NativeDecide(Constraint, Box<Exp>),
+
+    /// Decidable equality: DecEq(A, x, y) reduces to Refl if x = y,
+    /// or a neutral term if undecidable. Works on ground types (String,
+    /// Integer, Float, Boolean, IRI).
+    DecEq(Box<Exp>, Box<Exp>, Box<Exp>),
+
     /// Non-dependent function type: A → B (sugar for Π _ : A. B)
     Arrow(Box<Exp>, Box<Exp>),
     /// Non-dependent pair type: A × B (sugar for Σ _ : A. B)
@@ -89,6 +109,23 @@ pub struct Summand {
 pub struct Branch {
     pub name: Name,
     pub body: Exp,
+}
+
+/// A native constraint that can be checked at type-check time.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Constraint {
+    /// Value >= minimum
+    MinValue(i64),
+    /// Value <= maximum
+    MaxValue(i64),
+    /// String length >= minimum
+    MinLength(i64),
+    /// String length <= maximum
+    MaxLength(i64),
+    /// String matches regex pattern
+    Pattern(String),
+    /// String matches a format (date, datetime, uuid, etc.)
+    Format(String),
 }
 
 /// Eigon primitive types.

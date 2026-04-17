@@ -52,7 +52,14 @@ pub fn check_type(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<(), String> {
             let rho1 = rho.clone().extend(p.clone(), gen);
             check_type(&rho1, &gamma1, b)
         }
-        Exp::Set | Exp::One => Ok(()),
+        Exp::Set | Exp::One | Exp::Type(_) => Ok(()),
+        // Id(A, x, y) is a type if A is a type and x, y : A
+        Exp::Id(a, x, y) => {
+            check_type(rho, gamma, a)?;
+            let a_val = eval(a, rho);
+            check(rho, gamma, x, &a_val)?;
+            check(rho, gamma, y, &a_val)
+        }
         // Eigenius ground types are always valid types
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(()),
         a => check(rho, gamma, a, &Val::Set),
@@ -149,8 +156,33 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
             check(&Rho::UpDec(Box::new(rho.clone()), d.clone()), &gamma1, e, t)
         }
 
+        // refl(a) : Id(A, a, a) — check that x and y are both a
+        (Exp::Refl(a), Val::Id(typ, x, y)) => {
+            check(rho, gamma, a, typ)?;
+            let a_val = eval(a, rho);
+            eq_nf(rho.len(), x, &a_val)?;
+            eq_nf(rho.len(), y, &a_val)
+        }
+
+        // Id(A, x, y) : Set
+        (Exp::Id(a, x, y), Val::Set) => {
+            check(rho, gamma, a, &Val::Set)?;
+            let a_val = eval(a, rho);
+            check(rho, gamma, x, &a_val)?;
+            check(rho, gamma, y, &a_val)
+        }
+
+        // Type(n) : Type(n+1)
+        (Exp::Type(n), Val::Type(m)) if *n + 1 == *m => Ok(()),
+        // Type(n) : Set (Set is the top universe for backward compatibility)
+        (Exp::Type(_), Val::Set) => Ok(()),
+        // Set : Type(1)
+        (Exp::Set, Val::Type(1)) => Ok(()),
+
         // Eigenius ground types against Set
         (Exp::EigonClass(_), Val::Set) | (Exp::EigonPrimitive(_), Val::Set) => Ok(()),
+        // Eigenius ground types against any Type level
+        (Exp::EigonClass(_), Val::Type(_)) | (Exp::EigonPrimitive(_), Val::Type(_)) => Ok(()),
 
         // Fallthrough: infer type and compare
         (e, t) => {
@@ -187,11 +219,17 @@ pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
         }
 
         // Eigenius: property access type inference
-        Exp::PropAccess(e, _prop) => {
-            let _t = check_infer(rho, gamma, e)?;
-            // For now, property access types are inferred as Set
-            // Full implementation would resolve the property's data type from the ontology
-            Ok(Val::Set)
+        // Walk the Sigma chain to find the field matching the property's local name.
+        Exp::PropAccess(e, prop) => {
+            let t = check_infer(rho, gamma, e)?;
+            let prop_name = prop.local_name();
+            find_sigma_field(&t, prop_name).ok_or_else(|| {
+                format!(
+                    "property '{}' not found in type {:?}",
+                    prop,
+                    readback_val(rho.len(), &t)
+                )
+            })
         }
 
         e => Err(format!("cannot infer type of: {e:?}")),
@@ -209,6 +247,29 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("type mismatch: {e1:?} ≠ {e2:?}"))
+    }
+}
+
+/// Find a field by name in a Sigma chain.
+/// Walks Σ name₁ : T₁. Σ name₂ : T₂. ... looking for a matching name.
+fn find_sigma_field(typ: &Val, field_name: &str) -> Option<Val> {
+    match typ {
+        Val::Sig(t, g) => {
+            if g.patt == Patt::Var(field_name.to_string()) {
+                // Found — return the field's type
+                Some(*t.clone())
+            } else {
+                // Not this field — apply the closure with a dummy value
+                // and search the rest of the chain
+                let gen = gen_val(&g.env);
+                let rest = g.apply(gen);
+                find_sigma_field(&rest, field_name)
+            }
+        }
+        // Also check EigonClass — could resolve to a Sigma if we had layer access.
+        // For now, return Set as a fallback for unresolved class types.
+        Val::EigonClass(_) => Some(Val::Set),
+        _ => None,
     }
 }
 
@@ -232,6 +293,7 @@ fn ext_sig(val: &Val) -> Result<(Val, Clos), String> {
 mod tests {
     use super::*;
     use crate::nbe::term::PrimitiveType;
+    use crate::ontology::iri::Iri;
 
     #[test]
     fn check_unit_has_type_one() {
@@ -381,6 +443,98 @@ mod tests {
         let data_val = Val::Data(vec![("a".to_string(), Exp::One)], Rho::Nil);
         let con = Exp::Con("b".to_string(), Box::new(Exp::Unit));
         assert!(check(&Rho::Nil, &vec![], &con, &data_val).is_err());
+    }
+
+    #[test]
+    fn check_id_is_type() {
+        // Id(1, (), ()) : Set
+        let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        check(&Rho::Nil, &vec![], &id, &Val::Set).unwrap();
+    }
+
+    #[test]
+    fn check_id_type_well_formed() {
+        let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        check_type(&Rho::Nil, &vec![], &id).unwrap();
+    }
+
+    #[test]
+    fn check_refl_against_id() {
+        // refl(()) : Id(1, (), ())
+        let refl = Exp::Refl(Box::new(Exp::Unit));
+        let id_type = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(Val::Unit));
+        check(&Rho::Nil, &vec![], &refl, &id_type).unwrap();
+    }
+
+    #[test]
+    fn check_refl_wrong_endpoints_fails() {
+        // refl(()) : Id(1, (), x) should fail when x ≠ ()
+        let refl = Exp::Refl(Box::new(Exp::Unit));
+        let gen = Val::Nt(crate::nbe::val::Neut::Gen(0, "x".to_string()));
+        let id_type = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(gen));
+        assert!(check(&Rho::Nil, &vec![], &refl, &id_type).is_err());
+    }
+
+    #[test]
+    fn eval_j_with_refl_reduces() {
+        // J(1, C, d, (), (), refl(())) should reduce to d(())
+        use crate::nbe::eval::eval;
+        let j = Exp::IdJ(Box::new([
+            Exp::One,                                                        // A
+            Exp::Set,                                                        // C (placeholder)
+            Exp::Lam(Patt::Var("a".into()), Box::new(Exp::Var("a".into()))), // d = λa. a
+            Exp::Unit,                                                       // x
+            Exp::Unit,                                                       // y
+            Exp::Refl(Box::new(Exp::Unit)),                                  // p = refl(())
+        ]));
+        let result = eval(&j, &Rho::Nil);
+        // d(()) = (λa.a)(()) = ()
+        assert!(matches!(result, Val::Unit));
+    }
+
+    #[test]
+    fn deceq_equal_reduces_to_refl() {
+        use crate::nbe::eval::eval;
+        // DecEq(1, (), ()) → refl(())
+        let deceq = Exp::DecEq(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let result = eval(&deceq, &Rho::Nil);
+        assert!(matches!(result, Val::Refl(_)));
+    }
+
+    #[test]
+    fn deceq_unequal_produces_neutral() {
+        use crate::nbe::eval::eval;
+        // DecEq(Set, 1, Set) — One ≠ Set, produces neutral
+        let deceq = Exp::DecEq(Box::new(Exp::Set), Box::new(Exp::One), Box::new(Exp::Set));
+        let result = eval(&deceq, &Rho::Nil);
+        assert!(matches!(result, Val::Nt(_)));
+    }
+
+    #[test]
+    fn deceq_iri_equal() {
+        use crate::nbe::eval::eval;
+        let iri = Iri::parse("urn:eigenius:core:string").unwrap();
+        let deceq = Exp::DecEq(
+            Box::new(Exp::Set),
+            Box::new(Exp::EigonClass(iri.clone())),
+            Box::new(Exp::EigonClass(iri)),
+        );
+        let result = eval(&deceq, &Rho::Nil);
+        assert!(matches!(result, Val::Refl(_)));
+    }
+
+    #[test]
+    fn deceq_iri_unequal() {
+        use crate::nbe::eval::eval;
+        let iri1 = Iri::parse("urn:eigenius:core:string").unwrap();
+        let iri2 = Iri::parse("urn:eigenius:core:integer").unwrap();
+        let deceq = Exp::DecEq(
+            Box::new(Exp::Set),
+            Box::new(Exp::EigonClass(iri1)),
+            Box::new(Exp::EigonClass(iri2)),
+        );
+        let result = eval(&deceq, &Rho::Nil);
+        assert!(matches!(result, Val::Nt(_)));
     }
 
     #[test]

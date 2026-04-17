@@ -6,8 +6,9 @@
 use crate::bootstrap;
 use crate::context::ExecutionContext;
 use crate::ontology::{eigon_cbor, eigon_json, Iri, Resource};
-use crate::program::execute::{self, ComponentRegistry};
+use crate::program::execute::ComponentRegistry;
 use crate::program::expr;
+use crate::program::trace::{InMemoryTraceStore, TraceStore};
 use crate::query;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,6 +25,7 @@ use proto::*;
 pub struct EigeniusService {
     context: Arc<RwLock<ExecutionContext>>,
     components: Arc<ComponentRegistry>,
+    trace_store: Arc<dyn TraceStore>,
 }
 
 impl EigeniusService {
@@ -38,6 +40,20 @@ impl EigeniusService {
         Ok(Self {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(components),
+            trace_store: Arc::new(InMemoryTraceStore::new()),
+        })
+    }
+
+    /// Create a new service with a custom component registry and trace store.
+    pub fn with_trace_store(
+        components: ComponentRegistry,
+        trace_store: Arc<dyn TraceStore>,
+    ) -> Result<Self, String> {
+        let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
+        Ok(Self {
+            context: Arc::new(RwLock::new(ctx)),
+            components: Arc::new(components),
+            trace_store,
         })
     }
 
@@ -220,36 +236,112 @@ impl EigeniusKernel for EigeniusService {
             .next()
             .ok_or_else(|| Status::invalid_argument("no input resource"))?;
 
-        let ctx = self.context.read().await;
+        // Execute via NbE in IO mode
+        let output = {
+            let ctx = self.context.read().await;
+            match crate::program::eval_io::execute_program_nbe(
+                &program,
+                &input,
+                Arc::clone(ctx.head()),
+                Arc::clone(&self.components),
+                Some(Arc::clone(&self.trace_store)),
+            ) {
+                Ok(output) => output,
+                Err(e) => {
+                    return Ok(Response::new(RunProgramResponse {
+                        success: false,
+                        output: Vec::new(),
+                        errors: vec![ValidationError {
+                            resource_iri: String::new(),
+                            property_iri: String::new(),
+                            rule: "execution".to_string(),
+                            message: format!("{e}"),
+                            severity: "error".to_string(),
+                        }],
+                        trace_iri: String::new(),
+                    }));
+                }
+            }
+        };
 
-        match execute::execute_program(&program, &input, ctx.head(), &self.components) {
-            Ok(output) => Ok(Response::new(RunProgramResponse {
-                success: true,
-                output: Self::serialize_resource(&output),
-                errors: Vec::new(),
-            })),
-            Err(e) => Ok(Response::new(RunProgramResponse {
-                success: false,
-                output: Vec::new(),
-                errors: vec![ValidationError {
-                    resource_iri: String::new(),
-                    property_iri: String::new(),
-                    rule: "execution".to_string(),
-                    message: format!("{e}"),
-                    severity: "error".to_string(),
-                }],
-            })),
+        // Build ProgramTrace and auto-commit
+        // TODO: compute metrics from trace store ComponentTraces
+        let trace_iri_str = format!("urn:eigenius:trace:exec-{}", uuid::Uuid::new_v4());
+
+        let mut trace_resource = Resource::new(Iri::parse(&trace_iri_str).unwrap());
+        trace_resource.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(
+                    "urn:eigenius:reflection:ProgramTrace".to_string(),
+                ),
+            ]),
+        );
+        if let Some(prog_id) = program.id() {
+            trace_resource.set(
+                Iri::parse("urn:eigenius:reflection:program").unwrap(),
+                crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
+            );
         }
+        // Metrics will be computed from trace store ComponentTraces
+        // when we implement trace layer commits
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:total_tokens").unwrap(),
+            crate::ontology::resource::Value::Integer(0),
+        );
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:executed_steps").unwrap(),
+            crate::ontology::resource::Value::Integer(0),
+        );
+
+        // Auto-commit trace to a layer (best-effort)
+        {
+            let mut ctx = self.context.write().await;
+            let _ = ctx.add_resource(trace_resource);
+            let _ = ctx.commit("trace");
+        }
+
+        Ok(Response::new(RunProgramResponse {
+            success: true,
+            output: Self::serialize_resource(&output),
+            errors: Vec::new(),
+            trace_iri: trace_iri_str,
+        }))
     }
 
     async fn reflect(
         &self,
-        _request: Request<ReflectRequest>,
+        request: Request<ReflectRequest>,
     ) -> Result<Response<ReflectResponse>, Status> {
-        // Placeholder — reasoning traces come in Phase 4
+        let req = request.into_inner();
+        let resources = Self::parse_resources(&req.trace, &req.content_type)?;
+
+        if resources.is_empty() {
+            return Ok(Response::new(ReflectResponse {
+                success: false,
+                trace_iri: String::new(),
+            }));
+        }
+
+        // The first resource should be a trace (ProgramTrace, DeclarationTrace, etc.)
+        let trace_resource = &resources[0];
+        let trace_iri = trace_resource
+            .id()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_default();
+
+        // Commit all trace resources to a new layer
+        let mut ctx = self.context.write().await;
+        for resource in resources {
+            ctx.add_resource(resource)
+                .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
+        }
+        ctx.commit("reflect")
+            .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
+
         Ok(Response::new(ReflectResponse {
-            success: false,
-            trace_iri: String::new(),
+            success: true,
+            trace_iri,
         }))
     }
 

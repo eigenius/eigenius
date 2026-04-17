@@ -63,18 +63,15 @@ enum Commands {
     },
 
     /// Execute a program
+    /// Execute a program (requires --endpoint)
     Run {
-        /// Path to program Eigon-JSON file
+        /// Path to program file (Eigon-JSON or ESL)
         #[arg(value_name = "PROGRAM_FILE")]
         program_file: String,
 
-        /// Path to input Eigon-JSON file
+        /// Path to input file (Eigon-JSON or ESL)
         #[arg(value_name = "INPUT_FILE")]
         input_file: String,
-
-        /// Optional ontology file to load first
-        #[arg(long, value_name = "FILE")]
-        ontology: Option<String>,
     },
 
     /// Print a resource by IRI
@@ -104,6 +101,13 @@ enum Commands {
     /// Compile an ESL file to Eigon-JSON
     Compile {
         /// Path to ESL (.esl) file
+        #[arg(value_name = "FILE")]
+        file: String,
+    },
+
+    /// Record a reasoning trace
+    Reflect {
+        /// Path to trace file (Eigon-JSON or ESL)
         #[arg(value_name = "FILE")]
         file: String,
     },
@@ -152,6 +156,7 @@ async fn main() {
                 ..
             } => remote_run(endpoint, &program_file, &input_file, cli.json).await,
             Commands::Load { file } => remote_load(endpoint, &file, cli.json).await,
+            Commands::Reflect { file } => remote_reflect(endpoint, &file, cli.json).await,
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -173,14 +178,15 @@ async fn main() {
             program_file,
             ontology,
         } => cmd_program_validate(&program_file, ontology.as_deref(), cli.json),
-        Commands::Run {
-            program_file,
-            input_file,
-            ontology,
-        } => cmd_run(&program_file, &input_file, ontology.as_deref(), cli.json),
+        Commands::Run { .. } => {
+            eprintln!("'run' requires --endpoint (connect to a running kernel+orchestrator)");
+            eprintln!("  eigenius --endpoint http://localhost:50051 run program.json input.json");
+            std::process::exit(1);
+        }
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
         Commands::Serve { port, orchestrator } => cmd_serve(port, orchestrator.as_deref()).await,
         Commands::Compile { file } => cmd_compile(&file, cli.json),
+        Commands::Reflect { file } => cmd_reflect(&file, cli.json),
         Commands::Db { command } => cmd_db(command),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
@@ -360,76 +366,6 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
     }
 }
 
-fn cmd_run(program_file: &str, input_file: &str, ontology: Option<&str>, json_output: bool) {
-    let mut ctx = match bootstrap::bootstrap() {
-        Ok(ctx) => ctx,
-        Err(e) => {
-            eprintln!("Bootstrap failed: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Load ontology if provided
-    if let Some(ont_file) = ontology {
-        load_file_into_context(&mut ctx, ont_file);
-    }
-
-    // Read program
-    let program_content = match std::fs::read_to_string(program_file) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read program '{program_file}': {e}");
-            std::process::exit(1);
-        }
-    };
-    let program = match eigon_json::parse_document(&program_content) {
-        Ok(mut r) => r.remove(0),
-        Err(e) => {
-            eprintln!("program parse error: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Read input
-    let input_content = match std::fs::read_to_string(input_file) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to read input '{input_file}': {e}");
-            std::process::exit(1);
-        }
-    };
-    let input = match eigon_json::parse_document(&input_content) {
-        Ok(mut r) => r.remove(0),
-        Err(e) => {
-            eprintln!("Input parse error: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    // Execute
-    let registry = eigenius_kernel::program::execute::ComponentRegistry::default();
-    match eigenius_kernel::program::execute::execute_program(
-        &program,
-        &input,
-        ctx.head(),
-        &registry,
-    ) {
-        Ok(output) => {
-            let json = eigon_json::serialize_resource(&output);
-            if json_output {
-                println!("{}", serde_json::to_string(&json).unwrap());
-            } else {
-                println!("program execution succeeded.");
-                println!("{}", serde_json::to_string_pretty(&json).unwrap());
-            }
-        }
-        Err(e) => {
-            eprintln!("program execution failed: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
 fn load_file_into_context(ctx: &mut eigenius_kernel::context::ExecutionContext, file: &str) {
     let resources = load_resources_from_file(file);
     for resource in resources {
@@ -571,6 +507,47 @@ fn load_resources_from_file(file: &str) -> Vec<eigenius_kernel::ontology::resour
             eprintln!("Failed to parse {file}: {e}");
             std::process::exit(1);
         })
+    }
+}
+
+fn cmd_reflect(file: &str, json_output: bool) {
+    let mut ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let resources = load_resources_from_file(file);
+    let count = resources.len();
+
+    if resources.is_empty() {
+        eprintln!("No trace resources found in file");
+        std::process::exit(1);
+    }
+
+    let trace_iri = resources[0]
+        .id()
+        .map(|i| i.as_str().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    for resource in resources {
+        if let Err(e) = ctx.add_resource(resource) {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    if let Err(e) = ctx.commit("reflect") {
+        eprintln!("Commit failed: {e}");
+        std::process::exit(1);
+    }
+
+    if json_output {
+        println!("{{\"success\":true,\"trace_iri\":\"{trace_iri}\",\"resource_count\":{count}}}");
+    } else {
+        println!("Recorded {count} trace resource(s). Trace IRI: {trace_iri}");
     }
 }
 
@@ -870,6 +847,37 @@ async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
                 for err in &resp.errors {
                     eprintln!("  {}: {}", err.rule, err.message);
                 }
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    let data = read_as_json(file);
+
+    let request = eigenius_kernel::server::proto::ReflectRequest {
+        trace: data,
+        content_type: "application/eigon+json".to_string(),
+    };
+
+    match client.reflect(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if resp.success {
+                if json_output {
+                    println!("{{\"success\":true,\"trace_iri\":\"{}\"}}", resp.trace_iri);
+                } else {
+                    println!("Recorded trace: {}", resp.trace_iri);
+                }
+            } else {
+                eprintln!("Reflect failed");
                 std::process::exit(1);
             }
         }
