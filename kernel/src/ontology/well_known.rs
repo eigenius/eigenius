@@ -50,6 +50,7 @@ pub const RESOURCE: &str = "urn:eigenius:core:resource";
 pub const RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
 pub const VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
 pub const JSON: &str = "urn:eigenius:core:json";
+pub const TEMPLATE: &str = "urn:eigenius:core:template";
 
 // --- Format IRIs ---
 

@@ -76,17 +76,28 @@ impl BuiltinComponent for RemoteComponent {
             return Err(format!("remote component failed: {}", resp.error));
         }
 
-        // Deserialize output from Eigon-JSON
-        // The orchestrator returns a single resource object (may lack @id)
+        // Deserialize output from the orchestrator.
+        // Try Eigon-JSON first (full IRIs). If that fails, the response likely
+        // uses short-name keys (e.g. CompleteJson LLM output) — store as raw JSON
+        // so dispatch_component can convert it via ShortNameTable.
         let output_json =
             String::from_utf8(resp.output).map_err(|e| format!("invalid UTF-8 output: {e}"))?;
         let output = match eigon_json::parse_document(&output_json) {
             Ok(mut resources) => resources.pop().unwrap_or_else(Resource::new_embedded),
-            Err(_) => {
-                // Try parsing as embedded resource (no @id)
-                eigon_json::parse_embedded(&output_json)
-                    .map_err(|e| format!("parse output: {e}"))?
-            }
+            Err(_) => match eigon_json::parse_embedded(&output_json) {
+                Ok(r) => r,
+                Err(_) => {
+                    // Short-name keys from LLM — store as raw JSON on a resource
+                    let json_val: serde_json::Value = serde_json::from_str(&output_json)
+                        .map_err(|e| format!("invalid JSON output: {e}"))?;
+                    let mut r = Resource::new_embedded();
+                    r.set(
+                        crate::ontology::iri::Iri::parse("urn:eigenius:core:raw_json").unwrap(),
+                        crate::ontology::resource::Value::Json(json_val),
+                    );
+                    r
+                }
+            },
         };
 
         // Extract metrics if present

@@ -359,6 +359,19 @@ impl<'a> Parser<'a> {
                 self.expect_semicolon()?;
                 Ok(PropertyItem::Domain(names))
             }
+            "class_types" => {
+                self.advance();
+                let names = self.parse_qualified_name_list()?;
+                self.expect_semicolon()?;
+                Ok(PropertyItem::ClassTypes(names))
+            }
+            "element_type" => {
+                self.advance();
+                self.expect(&TokenKind::Eq)?;
+                let t = self.parse_qualified_name()?;
+                self.expect_semicolon()?;
+                Ok(PropertyItem::ElementType(t))
+            }
             _ => Err(EslError::parser(
                 Some(self.current_pos()),
                 format!("unknown property item: '{name}'"),

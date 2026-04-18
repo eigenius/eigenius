@@ -149,6 +149,7 @@
       "urn:eigenius:program:component:implementation"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:program:component:argument_type",
       "urn:eigenius:program:component:wasm_binary",
       "urn:eigenius:program:component:capability_level",
       "urn:eigenius:program:component:deterministic",
@@ -350,19 +351,19 @@
   {
     "@id": "urn:eigenius:program:component:input_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Expected input type for the component.",
+    "urn:eigenius:core:description": "Expected input type for the component. Can be a Class (structured) or DataType (primitive).",
     "urn:eigenius:core:short_name": "input_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:DataType"],
     "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
   },
   {
     "@id": "urn:eigenius:program:component:output_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Produced output type from the component.",
+    "urn:eigenius:core:description": "Produced output type from the component. Can be a Class (structured) or DataType (primitive).",
     "urn:eigenius:core:short_name": "output_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:DataType"],
     "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
   },
   {
@@ -371,6 +372,15 @@
     "urn:eigenius:core:description": "Implementation type: 'builtin' for native components, 'wasm' for WASM extension components.",
     "urn:eigenius:core:short_name": "implementation",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:argument_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Class defining the structure of this component's argument. Properties on the class determine template validation, schema generation, and argument validation.",
+    "urn:eigenius:core:short_name": "argument_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
   },
   {
@@ -454,12 +464,27 @@
     "urn:eigenius:program:component:fallible": false
   },
   {
+    "@id": "urn:eigenius:program:components:completion:Arguments",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Arguments for LLM completion components (CompleteText and CompleteJson). Properties with data_type template are validated against input references. Properties referencing a Class trigger JSON Schema generation.",
+    "urn:eigenius:core:short_name": "CompletionArguments",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:components:completion:user_prompt"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:program:components:completion:system_prompt",
+      "urn:eigenius:program:components:completion:output_schema",
+      "urn:eigenius:program:components:completion:request_parameters"
+    ]
+  },
+  {
     "@id": "urn:eigenius:program:components:CompleteText",
     "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
     "urn:eigenius:core:description": "LLM text completion. Takes a prompt and request parameters, returns a text string.",
     "urn:eigenius:core:short_name": "CompleteText",
     "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:string",
+    "urn:eigenius:program:component:argument_type": "urn:eigenius:program:components:completion:Arguments",
     "urn:eigenius:program:component:implementation": "builtin",
     "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
     "urn:eigenius:program:component:deterministic": false,
@@ -468,10 +493,11 @@
   {
     "@id": "urn:eigenius:program:components:CompleteJson",
     "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
-    "urn:eigenius:core:description": "LLM structured output. Returns a typed resource matching a declared output schema.",
+    "urn:eigenius:core:description": "LLM structured output. Returns a typed resource matching the output_schema class.",
     "urn:eigenius:core:short_name": "CompleteJson",
     "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
     "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:argument_type": "urn:eigenius:program:components:completion:Arguments",
     "urn:eigenius:program:component:implementation": "builtin",
     "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
     "urn:eigenius:program:component:deterministic": false,
@@ -524,5 +550,59 @@
     "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
     "urn:eigenius:program:component:deterministic": false,
     "urn:eigenius:program:component:fallible": true
+  },
+
+  {
+    "@id": "urn:eigenius:program:components:completion:user_prompt",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "User prompt template with {{property_iri}} substitution patterns.",
+    "urn:eigenius:core:short_name": "user_prompt",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:template"
+  },
+  {
+    "@id": "urn:eigenius:program:components:completion:system_prompt",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "System prompt template with optional {{property_iri}} substitution patterns.",
+    "urn:eigenius:core:short_name": "system_prompt",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:template"
+  },
+  {
+    "@id": "urn:eigenius:program:components:completion:output_schema",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Target class IRI for CompleteJson structured output. The class must admit a bijective short-name mapping.",
+    "urn:eigenius:core:short_name": "output_schema",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"]
+  },
+  {
+    "@id": "urn:eigenius:program:components:completion:request_parameters",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "LLM request parameters (model, temperature, max_tokens).",
+    "urn:eigenius:core:short_name": "request_parameters",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:program:request:model",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "LLM model identifier.",
+    "urn:eigenius:core:short_name": "model",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:program:request:temperature",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "LLM sampling temperature.",
+    "urn:eigenius:core:short_name": "temperature",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0.0,
+    "urn:eigenius:core:max_value": 2.0
+  },
+  {
+    "@id": "urn:eigenius:program:request:max_tokens",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum number of tokens in the LLM response.",
+    "urn:eigenius:core:short_name": "max_tokens",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1
   }
 ]

@@ -49,6 +49,9 @@ pub enum Val {
     EigonPrimitive(PrimitiveType),
     /// Concrete Eigon resource value
     ResourceVal(Box<Resource>),
+    /// Template value with resolved property type requirements.
+    /// Template("literal", [(iri, resolved_type)])
+    TemplateVal(String, Vec<(Iri, Val)>),
 }
 
 /// Neutral terms — computations that cannot reduce further.

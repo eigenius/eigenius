@@ -1,0 +1,82 @@
+namespace core = "urn:eigenius:core";
+namespace patent = "urn:eigenius:demo:patent";
+
+// --- Input type ---
+
+class patent:PatentClaim {
+    description = "A patent claim or abstract to be analyzed.";
+    requires patent:title, patent:patent_number, patent:abstract_text;
+    recommends patent:assignee, patent:filing_date;
+}
+
+property patent:title : core:string {
+    description = "Title of the patent.";
+}
+
+property patent:patent_number : core:string {
+    description = "Patent number (e.g., US6285999B1).";
+}
+
+property patent:abstract_text : core:string {
+    description = "The abstract or claim text of the patent.";
+}
+
+property patent:assignee : core:string {
+    description = "The assignee or applicant of the patent.";
+}
+
+property patent:filing_date : core:string {
+    description = "Filing date of the patent.";
+}
+
+// --- Structured analysis (CompleteJson output) ---
+
+class patent:PatentAnalysis {
+    description = "Structured analysis extracted from a patent claim.";
+    requires patent:invention_category, patent:technical_domain, patent:key_innovations, patent:practical_applications;
+    recommends patent:prior_art_references, patent:limitations;
+}
+
+property patent:invention_category : core:string {
+    description = "Category of the invention (e.g., method, system, apparatus, composition).";
+}
+
+property patent:technical_domain : core:string {
+    description = "The technical domain or field of the invention.";
+}
+
+property patent:key_innovations : core:value_array {
+    description = "List of key innovations or novel aspects claimed.";
+    element_type = core:string;
+}
+
+property patent:practical_applications : core:value_array {
+    description = "Practical applications or use cases of the invention.";
+    element_type = core:string;
+}
+
+property patent:prior_art_references : core:value_array {
+    description = "References to prior art or related technologies mentioned.";
+    element_type = core:string;
+}
+
+property patent:limitations : core:value_array {
+    description = "Noted limitations or constraints of the invention.";
+    element_type = core:string;
+}
+
+// --- Final output (CompleteText narrative + structured analysis) ---
+
+class patent:PatentBrief {
+    description = "A patent brief combining structured analysis with a plain-language summary.";
+    requires patent:summary, patent:analysis;
+}
+
+property patent:summary : core:string {
+    description = "A plain-language technical summary suitable for a non-specialist audience.";
+}
+
+property patent:analysis : core:resource {
+    description = "The structured patent analysis.";
+    class_types patent:PatentAnalysis;
+}

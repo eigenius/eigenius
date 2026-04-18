@@ -6,7 +6,7 @@
 //! readbacks at the same level are syntactically equal.
 
 use crate::nbe::env::Rho;
-use crate::nbe::term::{Exp, Name, Patt};
+use crate::nbe::term::{Exp, Name, Patt, Summand};
 use crate::nbe::val::{Neut, Val};
 
 /// Readback a value to a normal-form expression.
@@ -47,8 +47,8 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             )
         }
         Val::One => Exp::One,
-        Val::Fun(cases, rho) => readback_closure_like(level, cases, rho, true),
-        Val::Data(summands, rho) => readback_closure_like(level, summands, rho, false),
+        Val::Fun(cases, rho) => readback_fun(level, cases, rho),
+        Val::Data(summands, rho) => readback_data(level, summands, rho),
         Val::Nt(k) => readback_neut(level, k),
 
         // Identity type
@@ -58,6 +58,14 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             Box::new(readback_val(level, y)),
         ),
         Val::Refl(a) => Exp::Refl(Box::new(readback_val(level, a))),
+
+        // Template
+        Val::TemplateVal(s, refs) => Exp::Template(
+            s.clone(),
+            refs.iter()
+                .map(|(iri, val)| (iri.clone(), Box::new(readback_val(level, val))))
+                .collect(),
+        ),
 
         // Eigenius extensions
         Val::EigonClass(iri) => Exp::EigonClass(iri.clone()),
@@ -79,7 +87,7 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
         Neut::Fst(k) => Exp::Fst(Box::new(readback_neut(level, k))),
         Neut::Snd(k) => Exp::Snd(Box::new(readback_neut(level, k))),
         Neut::NtFun(cases, rho, k) => {
-            let fun_exp = readback_closure_like(level, cases, rho, true);
+            let fun_exp = readback_fun(level, cases, rho);
             Exp::App(Box::new(fun_exp), Box::new(readback_neut(level, k)))
         }
         // Eigenius extension
@@ -89,29 +97,50 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
     }
 }
 
-/// Readback a Fun or Data closure.
-fn readback_closure_like(level: usize, _cases: &[(Name, Exp)], rho: &Rho, is_fun: bool) -> Exp {
-    // Read back the environment
-    let rho_exps = readback_rho(level, rho);
-    let tag = format!("__{}_{}", if is_fun { "fun" } else { "data" }, level);
-    let mut result = Exp::Var(tag);
-    for exp in rho_exps {
-        result = Exp::App(Box::new(result), Box::new(exp));
-    }
-    result
+/// Readback a Data (Sum type) value.
+///
+/// Evaluates each summand's type expression in the captured environment,
+/// then reads back the resulting value. This avoids the old placeholder
+/// approach that produced `__data_N` variable references.
+fn readback_data(level: usize, summands: &[(Name, Exp)], rho: &Rho) -> Exp {
+    let read_summands: Vec<Summand> = summands
+        .iter()
+        .map(|(name, exp)| {
+            let val = crate::nbe::eval::eval(exp, rho);
+            Summand {
+                name: name.clone(),
+                typ: readback_val(level, &val),
+            }
+        })
+        .collect();
+    Exp::Data(read_summands)
 }
 
-/// Read back the values in an environment.
-fn readback_rho(level: usize, rho: &Rho) -> Vec<Exp> {
-    match rho {
-        Rho::Nil => vec![],
-        Rho::UpVar(rho, _, v) => {
-            let mut exps = vec![readback_val(level, v)];
-            exps.extend(readback_rho(level, rho));
-            exps
-        }
-        Rho::UpDec(rho, _) => readback_rho(level, rho),
-    }
+/// Readback a Fun (case function) value.
+///
+/// Evaluates each branch body in the captured environment to produce
+/// a proper case expression.
+fn readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Exp {
+    // A Fun is a case function: fun(c₁ → e₁ | c₂ → e₂ | ...)
+    // Each branch is a closure over the constructor's payload.
+    // We evaluate each branch with a fresh variable and read back.
+    let gen = gen_val(level);
+    let branches: Vec<(Name, Exp)> = cases
+        .iter()
+        .map(|(name, body)| {
+            let branch_val = crate::nbe::eval::eval(body, rho).app(gen.clone());
+            (name.clone(), readback_val(level + 1, &branch_val))
+        })
+        .collect();
+    Exp::Case(
+        branches
+            .into_iter()
+            .map(|(name, body)| crate::nbe::term::Branch {
+                name,
+                body: Exp::Lam(gen_patt(level), Box::new(body)),
+            })
+            .collect(),
+    )
 }
 
 /// Generate a fresh variable value at a given level.

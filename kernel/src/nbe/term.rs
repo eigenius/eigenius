@@ -75,6 +75,9 @@ pub enum Exp {
     EigonResource(Box<Resource>),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),
+    /// Template literal with extracted property references.
+    /// Template("..{{iri1}}..{{iri2}}..", [(iri1, type1), (iri2, type2)])
+    Template(String, Vec<(Iri, Box<Exp>)>),
 }
 
 /// Declarations.

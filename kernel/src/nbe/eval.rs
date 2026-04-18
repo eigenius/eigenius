@@ -209,6 +209,14 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
             }
         }
 
+        // Template literal — evaluate type expressions for each reference
+        Exp::Template(s, refs) => Val::TemplateVal(
+            s.clone(),
+            refs.iter()
+                .map(|(iri, typ)| (iri.clone(), ev(typ)))
+                .collect(),
+        ),
+
         // Eigenius extensions
         Exp::EigonClass(iri) => Val::EigonClass(iri.clone()),
         Exp::EigonPrimitive(p) => Val::EigonPrimitive(*p),
@@ -262,7 +270,13 @@ fn dispatch_component(
 
     // Convert Val to Resource for the component interface
     let input_resource = val_to_resource(input_val);
-    let arg_resource = component_arg.map(val_to_resource);
+    let mut arg_resource = component_arg.map(val_to_resource);
+
+    // Ontology-driven schema generation:
+    // Look up the component definition, find its argument_type class,
+    // scan argument properties for Class-valued references that need
+    // JSON Schema generation.
+    let schema_table = resolve_component_schemas(component_iri, &mut arg_resource, layer);
 
     // Check trace cache for IO components
     if component.is_io() {
@@ -276,11 +290,36 @@ fn dispatch_component(
         // Dispatch
         match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => {
+                // For CompleteJson: convert the short-name JSON response back to a typed Resource
+                let output = if let Some((ref table, ref class_iri)) = schema_table {
+                    // Check if the output has raw JSON (short-name keys from LLM)
+                    let raw_json_iri = Iri::parse("urn:eigenius:core:raw_json").unwrap();
+                    let json_val = if let Some(crate::ontology::resource::Value::Json(j)) =
+                        result.output.get(&raw_json_iri)
+                    {
+                        j.clone()
+                    } else {
+                        // Already an Eigon resource — serialize for conversion
+                        crate::ontology::eigon_json::serialize_resource(&result.output)
+                    };
+                    match crate::program::schema::convert_json_to_resource(
+                        &json_val, table, class_iri,
+                    ) {
+                        Ok(converted) => converted,
+                        Err(e) => {
+                            eprintln!("convert_json_to_resource failed: {e}");
+                            result.output.clone()
+                        }
+                    }
+                } else {
+                    result.output.clone()
+                };
+
                 let ct = ComponentTrace {
                     component: component_iri.to_string(),
                     input_hash: cache_key,
                     argument_hash: None,
-                    output: result.output.clone(),
+                    output: output.clone(),
                     cached: false,
                     metrics: result.metrics,
                 };
@@ -292,15 +331,22 @@ fn dispatch_component(
                 if let Ok(mut traces) = dispatched_traces.lock() {
                     traces.push(ct);
                 }
-                Val::ResourceVal(Box::new(result.output))
+                Val::ResourceVal(Box::new(output))
             }
-            Err(e) => panic!("component dispatch failed: {e}"),
+            Err(e) => {
+                eprintln!("component dispatch failed: {e}");
+                // Return empty resource instead of panicking
+                Val::ResourceVal(Box::new(crate::ontology::resource::Resource::new_embedded()))
+            }
         }
     } else {
         // Pure component — no caching
         match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => Val::ResourceVal(Box::new(result.output)),
-            Err(e) => panic!("component dispatch failed: {e}"),
+            Err(e) => {
+                eprintln!("pure component dispatch failed: {e}");
+                Val::ResourceVal(Box::new(crate::ontology::resource::Resource::new_embedded()))
+            }
         }
     }
 }
@@ -316,6 +362,92 @@ fn val_to_resource(val: &Val) -> crate::ontology::resource::Resource {
             crate::ontology::resource::Resource::new_embedded()
         }
     }
+}
+
+/// Ontology-driven schema resolution for component arguments.
+///
+/// Looks up the component's `argument_type` class in the layer chain.
+/// For each property on that class whose value in the actual argument
+/// resolves to a Class IRI, generates a JSON Schema and packs it into
+/// the argument. Returns the ShortNameTable and class IRI if schema was generated.
+fn resolve_component_schemas(
+    component_iri: &str,
+    arg_resource: &mut Option<crate::ontology::resource::Resource>,
+    layer: &crate::layer::Layer,
+) -> Option<(crate::program::schema::ShortNameTable, Iri)> {
+    let arg = arg_resource.as_mut()?;
+
+    // Look up the component definition
+    let comp_iri = Iri::parse(component_iri).ok()?;
+    let comp_def = layer.resolve(&comp_iri)?;
+
+    // Get the argument_type class
+    let arg_type_prop = Iri::parse("urn:eigenius:program:component:argument_type").ok()?;
+    let arg_type_str = comp_def.get(&arg_type_prop)?.as_str()?;
+    let arg_type_iri = Iri::parse(arg_type_str).ok()?;
+    let arg_type_def = layer.resolve(&arg_type_iri)?;
+
+    // Collect all property IRIs from requires + recommends on the argument class
+    let requires_iri = Iri::parse("urn:eigenius:core:requires").ok()?;
+    let recommends_iri = Iri::parse("urn:eigenius:core:recommends").ok()?;
+    let mut prop_iris = Vec::new();
+    if let Some(req) = arg_type_def.get(&requires_iri) {
+        prop_iris.extend(req.as_iri_array());
+    }
+    if let Some(rec) = arg_type_def.get(&recommends_iri) {
+        prop_iris.extend(rec.as_iri_array());
+    }
+
+    // For each property, check if its value in the actual argument references a Class
+    let class_types_iri = Iri::parse("urn:eigenius:core:class_types").ok()?;
+    let class_iri = Iri::parse("urn:eigenius:core:Class").ok()?;
+    let data_type_iri = Iri::parse("urn:eigenius:core:data_type").ok()?;
+
+    for prop_iri in &prop_iris {
+        // Look up the property definition
+        let prop_def = match layer.resolve(prop_iri) {
+            Some(d) => d,
+            None => continue,
+        };
+
+        // Check if this property has class_types: [Class] (meaning it references a class)
+        let is_class_ref = if let Some(ct) = prop_def.get(&class_types_iri) {
+            ct.as_iri_array().contains(&class_iri)
+        } else {
+            false
+        };
+
+        // Check if the data_type is 'resource' (not 'template' or 'string')
+        let is_resource = prop_def
+            .get(&data_type_iri)
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s == "urn:eigenius:core:resource");
+
+        if is_class_ref && is_resource {
+            // This property references a Class — check if the actual argument has a value
+            if let Some(crate::ontology::resource::Value::String(class_iri_str)) = arg.get(prop_iri)
+            {
+                if let Ok(schema_class_iri) = Iri::parse(class_iri_str) {
+                    // Generate JSON Schema from this class
+                    match crate::program::schema::schema_for_class(&schema_class_iri, layer) {
+                        Ok((json_schema, table)) => {
+                            // Replace the class IRI with the actual JSON Schema
+                            arg.set(
+                                prop_iri.clone(),
+                                crate::ontology::resource::Value::Json(json_schema),
+                            );
+                            return Some((table, schema_class_iri));
+                        }
+                        Err(e) => {
+                            eprintln!("schema generation failed for {class_iri_str}: {e}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Dispatch a fiber query to an institution.

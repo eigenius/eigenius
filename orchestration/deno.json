@@ -2,8 +2,8 @@
   "name": "@eigenius/orchestration",
   "version": "0.1.0",
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-env src/main.ts",
-    "start": "deno run --allow-net --allow-env src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-env --allow-sys=hostname src/main.ts",
+    "start": "deno run --allow-net --allow-env --allow-sys=hostname src/main.ts",
     "test": "deno test --allow-net --allow-env tests/",
     "generate": "cd .. && PATH=$PWD/node_modules/.bin:$PATH buf generate",
     "lint": "deno lint",

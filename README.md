@@ -244,6 +244,30 @@ This will:
 6. Load an ESL ontology directly into the kernel
 7. Run an ESL program against the kernel
 
+### Patent Analysis Demo
+
+A two-step LLM pipeline that demonstrates CompleteJson (structured extraction) and CompleteText (narrative generation) working together:
+
+1. Load a patent ontology (ESL) defining `PatentClaim`, `PatentAnalysis`, and `PatentBrief` classes
+2. Load a patent document (the "Attention Is All You Need" transformer patent)
+3. Run a pipeline that extracts structured analysis via CompleteJson, generates a plain-language summary via CompleteText, and combines them into a `PatentBrief`
+
+```bash
+./demo/patent/run.sh
+```
+
+The patent ontology (`demo/patent/patent-ontology.esl`) defines:
+- **PatentClaim** — input: title, patent number, abstract text (+ optional assignee, filing date)
+- **PatentAnalysis** — structured output: invention category, technical domain, key innovations, practical applications, prior art, limitations
+- **PatentBrief** — final output: plain-language summary + structured analysis
+
+The program (`demo/patent/analyze-patent.esl`) chains two LLM calls:
+```
+PatentClaim → CompleteJson → PatentAnalysis → CompleteText → string → Construct → PatentBrief
+```
+
+### Individual commands
+
 You can also run individual commands against the kernel:
 
 ```bash

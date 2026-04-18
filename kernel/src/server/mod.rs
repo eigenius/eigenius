@@ -203,11 +203,68 @@ impl EigeniusKernel for EigeniusService {
         let ctx = self.context.read().await;
 
         match expr::parse_program(&program, ctx.head()) {
-            Ok((_term, typ)) => Ok(Response::new(ValidateProgramResponse {
-                valid: true,
-                errors: Vec::new(),
-                program_type: format!("{typ:?}"),
-            })),
+            Ok((_term, typ)) => {
+                // Validate template references against input type
+                let mut template_errors = Vec::new();
+                let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
+                let input_type_prop = Iri::parse("urn:eigenius:program:input_type").unwrap();
+                if let (
+                    Some(crate::ontology::resource::Value::String(input_type_str)),
+                    Some(crate::ontology::resource::Value::Embedded(body)),
+                ) = (program.get(&input_type_prop), program.get(&body_prop))
+                {
+                    if let Ok(input_type_iri) = Iri::parse(input_type_str) {
+                        let comp_arg_prop =
+                            Iri::parse("urn:eigenius:program:component_argument").unwrap();
+                        // Walk expression tree looking for component arguments
+                        fn find_comp_args(resource: &Resource, prop: &Iri) -> Vec<Resource> {
+                            let mut args = Vec::new();
+                            if let Some(crate::ontology::resource::Value::Embedded(arg)) =
+                                resource.get(prop)
+                            {
+                                args.push(arg.as_ref().clone());
+                            }
+                            // Recurse into embedded resources
+                            for val in resource.properties().values() {
+                                if let crate::ontology::resource::Value::Embedded(child) = val {
+                                    args.extend(find_comp_args(child, prop));
+                                }
+                            }
+                            args
+                        }
+                        for comp_arg in find_comp_args(body, &comp_arg_prop) {
+                            let errs = crate::program::schema::validate_component_templates(
+                                &comp_arg,
+                                &input_type_iri,
+                                ctx.head(),
+                            );
+                            for e in errs {
+                                template_errors.push(ValidationError {
+                                    resource_iri: String::new(),
+                                    property_iri: String::new(),
+                                    rule: "template".to_string(),
+                                    message: format!("{e}"),
+                                    severity: "error".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                if template_errors.is_empty() {
+                    Ok(Response::new(ValidateProgramResponse {
+                        valid: true,
+                        errors: Vec::new(),
+                        program_type: format!("{typ:?}"),
+                    }))
+                } else {
+                    Ok(Response::new(ValidateProgramResponse {
+                        valid: false,
+                        errors: template_errors,
+                        program_type: format!("{typ:?}"),
+                    }))
+                }
+            }
             Err(e) => Ok(Response::new(ValidateProgramResponse {
                 valid: false,
                 errors: vec![ValidationError {

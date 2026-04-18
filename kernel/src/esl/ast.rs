@@ -75,6 +75,8 @@ pub enum PropertyItem {
     Format(QualifiedName),
     AllowsOnly(Vec<QualifiedName>),
     Domain(Vec<QualifiedName>),
+    ClassTypes(Vec<QualifiedName>),
+    ElementType(QualifiedName),
 }
 
 /// `resource ex:rex : ex:Dog { ... }`
