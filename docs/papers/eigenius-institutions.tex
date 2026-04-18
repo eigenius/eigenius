@@ -95,7 +95,7 @@
   \texttt{hwill@acm.org}
 }
 
-\date{}
+\date{DRAFT --- \today}
 
 \maketitle
 \thispagestyle{empty}
@@ -217,6 +217,32 @@ A single design principle governs the kernel's role: \emph{the core ontology val
 The kernel enforces structural well-formedness (required properties present, types correct, namespace integrity) but has no knowledge of domain-specific logics.
 Each domain logic is a registered capability---an institution that provides its own sentences, models, satisfaction relation, and (in the structured-fiber extension) its own internal morphisms.
 
+\subsection{Eigon as Shared Signature Category}
+
+Eigon is not an institution---it is the \textbf{shared signature category} over which the Grothendieck construction is performed.
+The category of Eigon signatures has ontology snapshots as objects and layer extensions as morphisms.
+The base satisfaction condition is the kernel's structural validation: 12 rules that define well-formedness of resources against class definitions.
+Every institution builds over this base, adding domain-specific sentences and models to the shared Eigon foundation.
+
+This is a mathematical necessity, not a design choice.
+Making Eigon an institution would require a meta-language for institutions to register with, leading to infinite regress.
+Instead, Eigon is the fixed ground---the shared language in which institutions declare their types, morphisms, and queries.
+
+\subsection{Kernel Services vs.\ Institutions}
+
+Two kernel services operate on the Eigon base and are \emph{not} institutions:
+
+\textbf{Structural validation} checks resources against class definitions---required properties, type matches, format and range constraints.
+This is the base satisfaction condition of the shared signature category.
+
+\textbf{Mini-TT type checking} via NbE~\cite{minitt,nbe} validates program composition---function types, dependent pairs, pattern matching.
+It is necessary for the kernel to function; programs must type-check before execution.
+
+A formal verification system such as Lean~4~\cite{lean4}, by contrast, \emph{is} an institution.
+It provides the ``verified'' epistemic level by checking domain-specific mathematical propositions---proofs that a safety factor bound holds, that a binding affinity prediction satisfies a confidence interval, that a PK model is well-posed.
+Mini-TT checks that a program \emph{composes}; Lean~4 checks that a result is \emph{correct}.
+The distinction is operational: the kernel cannot function without Mini-TT; it functions without Lean~4.
+
 \subsection{Capabilities as Institution Registrations}
 
 Each ontology class may be associated with an evaluator, validator, and parser---collectively, a \emph{capability}.
@@ -224,18 +250,29 @@ A capability registration is an institution declaration: for a given signature, 
 
 \subsection{Ground Type Resolution as Comorphism}
 
-The kernel's ground type resolution interface---where Mini-TT~\cite{minitt} type checking resolves class references against the layer stack---is an institution comorphism from the Eigon structural institution to the Mini-TT institution.
-Signatures translate forward (classes become dependent record types via NbE~\cite{nbe}); models translate backward (well-typed programs reduce to valid resource instances).
+The kernel's ground type resolution interface---where Mini-TT type checking resolves class references against the layer stack---is a kernel-internal comorphism from the Eigon structural base to the Mini-TT type system.
+Signatures translate forward (classes become dependent record types via NbE); models translate backward (well-typed programs reduce to valid resource instances).
+This comorphism is not registered via the institution protocol---it is fixed infrastructure that all institutions depend on.
 
-\subsection{Fiber Advertisement}
+\subsection{Fiber Advertisement and Reasoning}
 
-In the minimal implementation, institutions advertise their internal morphism types as ordinary ontology classes.
+At registration, each institution provides a \emph{fiber declaration}: a structured description of its morphism types, query types, and advisory structural properties.
+These are committed to the knowledge graph as ordinary ontology resources.
 A \code{MeshRefinement} relating two \code{StressResult} resources, or a \code{ConformationalProximity} relating two \code{DockingPose} resources, is a typed resource in the knowledge graph, stored and validated by the kernel like any other resource.
 The kernel knows nothing about what mesh refinement or conformational proximity \emph{means}---that is the institution's concept, governed by the institution's logic.
 
-A richer extension---where the kernel exploits structural properties of fiber morphisms (e.g., ``mesh refinement is a preorder'')---would require the kernel to reason within notions defined by external institutions, violating the architectural boundary.
-Instead, institutions may optionally expose a \emph{fiber reasoner}: a capability that answers structural queries about its own morphisms, dispatched by the kernel the same way it dispatches to the EigenQL evaluator or Mini-TT type checker.
-The institution reasons about its own internal structure; the kernel remains the switchboard.
+Each institution exposes a \emph{fiber reasoner} with four operations:
+
+\begin{description}[style=unboxed,leftmargin=0em]
+\item[\code{fiber\_declaration}] Called once at registration. Returns morphism classes, query types, and structural properties as ontology resources.
+\item[\code{validate\_morphism}] Called at load time when a morphism resource enters the graph. The kernel performs structural validation (required properties, types); the institution checks domain-specific validity (e.g., that a claimed mesh refinement actually exhibits convergence).
+\item[\code{query}] Called at evaluation time when a program needs fiber reasoning. The query is a typed resource (a \code{FiberQuery} subclass); the result is a typed resource.
+\item[\code{discover\_morphisms}] Called on explicit request. Given resources in the institution's fiber, infer morphisms not yet in the knowledge graph. Returns candidate resources; the program decides whether to commit them.
+\end{description}
+
+Structural properties (e.g., ``\code{MeshRefinement} is a partial order'') are advisory: the kernel stores them as documentation but does not enforce them.
+The institution enforces its own invariants through \code{validate\_morphism}.
+This preserves the architectural boundary: the kernel validates structurally, the institution reasons within its domain.
 
 
 % ============================================================
@@ -335,18 +372,60 @@ A two-compartment PK model, parameterized from ADMET predictions and experimenta
 \section{Implementation}
 \label{sec:impl}
 
-Four phases of Eigenius are implemented in Rust (kernel) and TypeScript (orchestration).
+Five phases of Eigenius are implemented in Rust (kernel) and TypeScript (orchestration).
 The Eigon data model~\cite{atomicdata} provides the shared signature category.
-EigenQL (stratified Datalog with aggregation~\cite{alice}) serves as the query institution.
-Mini-TT~\cite{minitt} dependent type checking via NbE~\cite{nbe} provides the program validation institution.
-Persistent storage uses RocksDB with CBOR~\cite{rfc8949} serialization.
+EigenQL (stratified Datalog with aggregation~\cite{alice}) serves as the query language.
+Mini-TT~\cite{minitt} dependent type checking via NbE~\cite{nbe} provides program validation as a kernel service.
+IO components (LLM calls, HTTP requests) are dispatched to an orchestration layer via gRPC.
+Persistent storage uses RocksDB with CBOR~\cite{rfc8949} serialization; the same key encoding supports TiKV for horizontally scalable deployments.
+
+\subsection{NbE with Capability Modes}
+
+A single NbE evaluator handles both type checking and program execution.
+The evaluator accepts a \emph{capability mode} parameter that controls which effects are available:
+
+\begin{description}[style=unboxed,leftmargin=0em]
+\item[Pure] Standard NbE normalization. No side effects. Used by the type checker.
+\item[Read] Pure plus read access to the layer chain. Used for ground type resolution.
+\item[IO] Read plus component dispatch and trace production. Used for program execution.
+\end{description}
+
+In Pure mode, an IO component application produces a neutral term---it cannot reduce further without dispatch.
+In IO mode, the evaluator intercepts the application, checks the trace cache for memoization, and dispatches to the orchestration layer if needed.
+The result is a value paired with a reasoning trace.
+
+This design avoids maintaining two separate evaluators (one for type checking, one for execution) while preserving the type-theoretic invariants of NbE: in Pure mode, the evaluator is total and its normal forms are canonical.
+The capability mode is threaded through closures via explicit context passing, ensuring that IO dispatch occurs at the correct evaluation depth even within recursive let-bindings.
+
+\subsection{Reasoning Traces as Proof Artifacts}
+
+Each program execution produces a tree-structured reasoning trace that mirrors the expression tree.
+After completion, the trace is pruned: only non-deterministic IO component traces are retained.
+Deterministic computation (let-bindings, projections, constructions) is reconstructible from the program and the IO traces.
+This follows the proofs-as-programs principle: the IO traces are axioms, the program is the theorem, and re-evaluation is the proof.
+
+IO component traces are committed as typed resources in a \emph{trace layer}---an immutable extension of the layer chain.
+The trace layer contains the program trace summary (metrics, timestamps) and all IO component traces as resources with content-addressed identifiers.
+This makes reasoning traces queryable via EigenQL: ``which LLM calls contributed to this output?''
+
+\subsection{Type Theory Extensions}
+
+Mini-TT has been extended with features inspired by Lean~4~\cite{lean4}:
+propositional equality (identity type with reflexivity and J~eliminator),
+decidable equality on ground types,
+native constraint checking (range bounds, string patterns, format validation reduce at type-check time),
+and a three-level universe stratification matching the epistemic levels.
+Ground type resolution maps the full ontology---required properties as dependent pair fields, recommended properties as option types, \code{allows\_only} constraints as enumeration types, and multiple \code{class\_types} as union types.
+Property access type inference walks the dependent pair chain to resolve field types.
+
+These extensions close the gap between the Eigon ontology constraints and the Mini-TT type system without introducing refinement types or subtyping.
+The design follows Lean~4's approach: decidable propositions as types with native decision procedures, closed record types with explicit optional access for undeclared properties.
+
+\subsection{Fiber Extension Path}
 
 The current implementation uses flat fibers---resources are stored as typed Eigon values without intra-institutional morphisms.
-Reasoning traces~\cite{lean4} capture \emph{vertical} provenance (how outputs relate to inputs through computation steps) but not \emph{horizontal} fiber structure (how results within an institution relate to each other).
-Epistemic status is computed correctly from trace provenance; the fiber-theoretic account explains \emph{why} the four categories are the right ones but does not yet change the implementation.
-
 The minimal extension to structured fibers requires no kernel changes: institutions advertise morphism types as ordinary ontology classes, and the kernel stores them like any other resource.
-The richer extension---fiber reasoners as dispatched capabilities---follows the existing capability protocol pattern.
+The richer extension---fiber reasoners as dispatched capabilities---follows the existing capability protocol pattern, with the \code{FiberReasoner} trait providing query, morphism validation, and morphism discovery methods.
 Both extensions preserve the architectural boundary: the kernel validates, capabilities reason.
 
 
@@ -395,6 +474,34 @@ Not every query requires structured fibers.
 Structured fibers become necessary when queries navigate \emph{within} an institution: convergence analysis, ensemble robustness, model agreement, parameter sensitivity.
 The architecture supports both: flat fibers are the discrete special case of structured fibers.
 
+\subsection{Why Not a Join Table?}
+
+A natural objection: fiber morphisms could be represented as relational links---a join table connecting pairs of resources with a relationship type.
+This is what RDF triples and property graph edges provide.
+The Grothendieck construction adds four things that relational links cannot express.
+
+First, \emph{morphism validation requires domain reasoning}.
+A join table records that two stress results are related by ``mesh refinement.''
+But whether the relationship is \emph{valid}---whether the fine mesh actually refines the coarse mesh, whether boundary conditions match, whether the convergence delta is positive---is a domain-specific judgment that the FEA institution makes through \code{validate\_morphism}.
+A relational link carries no satisfaction condition.
+
+Second, \emph{morphisms compose with domain semantics}.
+Three mesh refinements in sequence form a convergence chain with a computable convergence \emph{rate}.
+A join table records three pairs; the institution knows they compose and can compute the rate, detect convergence, or flag divergence.
+Composition is a categorical operation, not a relational one.
+
+Third, \emph{fiber queries navigate with domain knowledge}.
+``Find the finest-mesh result whose convergence delta is below 5\%'' requires interpreting convergence within the FEA fiber.
+EigenQL can match the resources structurally, but the institution provides the semantic evaluation.
+
+Fourth, \emph{morphism discovery is an institution capability}.
+Given five stress results, the FEA institution can \emph{infer} which ones are refinements of which, based on mesh topology and boundary conditions, without anyone manually populating the links.
+A join table requires external population; a fiber reasoner generates its own morphisms.
+
+In short: a relational link records \emph{that} two results are related.
+A fiber morphism captures \emph{how} they are related, \emph{whether} the relationship is valid, and \emph{what} can be derived from it.
+The morphism is not a link---it is a typed, validated, queryable object with domain semantics, governed by the institution that produced it.
+
 \subsection{Epistemic Status Across the Dispatch Boundary}
 
 If institutions are black boxes behind a dispatch interface, how does the kernel determine the epistemic status of their results?
@@ -440,14 +547,18 @@ In both cases, the system maintains epistemic distinctions that current toolchai
 The guiding architectural principle---the core ontology validates, registered capabilities reason---is an institution-theoretic statement: the kernel provides the shared signature category and enforces satisfaction structurally; each capability provides its own logic.
 The Grothendieck construction is what this principle produces when taken to its mathematical conclusion.
 
+\section*{Acknowledgments}
+
+The author thanks Allen Brown for calling out the importance and possibility of structured fibrations beyond the flat $\Set$ category---an insight he attributes to a conversation with David Spivak~\cite{spivak2012}---that results from domain-specific reasoning systems carry internal mathematical structure that $\Set$-valued storage discards, and that the Grothendieck construction over $\Cat$ provides the precise generalization needed to preserve it.
 
 % ============================================================
 \appendix
 \section{Fiber Reasoner Protocol Sketch}
 \label{app:fiber}
 
-This appendix presents a sketch of the \code{FiberReasoner} trait---the interface by which an institution exposes reasoning about its internal fiber structure to the kernel.
+This appendix presents the \code{FiberReasoner} trait---the interface by which an institution exposes reasoning about its internal fiber structure to the kernel.
 The design follows the existing capability protocol: the kernel dispatches, the institution reasons.
+The full specification is in design document D10 (Grothendieck Institution Protocol).
 
 \subsection{Trait Definition}
 
@@ -500,6 +611,11 @@ During registration, the institution declares its fiber structure as ordinary on
 {\scriptsize
 \begin{verbatim}
 struct FiberDeclaration {
+  /// The institution's IRI
+  institution_iri: Iri,
+  /// Human-readable name
+  name: String,
+
   /// Morphism classes (e.g., MeshRefinement,
   /// ConformationalProximity), each with
   /// source type, target type, properties.

@@ -6,6 +6,9 @@
 /node_modules/
 /package-lock.json
 
+# LaTeX output
+/docs/pdf
+
 # Deno
 orchestration/node_modules/
 
