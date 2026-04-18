@@ -78,6 +78,8 @@ pub enum Exp {
     /// Template literal with extracted property references.
     /// Template("..{{iri1}}..{{iri2}}..", [(iri1, type1), (iri2, type2)])
     Template(String, Vec<(Iri, Box<Exp>)>),
+    /// Construct a typed resource: Construct(class_iri, [(prop_iri, expr), ...])
+    Construct(Iri, Vec<(Iri, Box<Exp>)>),
 }
 
 /// Declarations.

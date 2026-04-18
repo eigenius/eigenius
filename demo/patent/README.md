@@ -158,35 +158,43 @@ Running the demo against the Transformer patent produces output like this
 
 ```json
 {
-  "urn:eigenius:core:is_a": ["urn:eigenius:demo:patent:PatentAnalysis"],
-  "urn:eigenius:demo:patent:invention_category": "system",
-  "urn:eigenius:demo:patent:technical_domain": "artificial intelligence and machine learning",
-  "urn:eigenius:demo:patent:key_innovations": [
-    "Attention-based sequence transduction without recurrent or convolutional layers",
-    "Encoder neural network with sequence of encoder subnetworks",
-    "Encoder self-attention sub-layer mechanism",
-    "Query-based attention mechanism over encoder subnetwork inputs",
-    "Transformer architecture for sequence-to-sequence tasks",
-    "Parallelizable attention mechanism replacing sequential processing"
+  "urn:eigenius:core:is_a": [
+    "urn:eigenius:demo:patent:PatentBrief"
   ],
-  "urn:eigenius:demo:patent:practical_applications": [
-    "Natural language processing and translation",
-    "Large language model architectures (GPT, BERT, PaLM, Claude)",
-    "Sequence-to-sequence learning tasks",
-    "Text generation and understanding",
-    "Machine translation systems",
-    "Language modeling applications"
-  ],
-  "urn:eigenius:demo:patent:prior_art_references": [
-    "Recurrent neural networks for sequence processing",
-    "Convolutional neural networks for sequence tasks",
-    "Traditional attention mechanisms in neural networks"
-  ],
-  "urn:eigenius:demo:patent:limitations": [
-    "Computational complexity scales quadratically with sequence length",
-    "Memory requirements increase significantly for long sequences",
-    "Requires large amounts of training data for optimal performance"
-  ]
+  "urn:eigenius:demo:patent:analysis": {
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:demo:patent:PatentAnalysis"
+    ],
+    "urn:eigenius:demo:patent:invention_category": "system",
+    "urn:eigenius:demo:patent:key_innovations": [
+      "Attention-based sequence transduction without recurrent or convolutional layers",
+      "Encoder neural network with sequence of encoder subnetworks",
+      "Encoder self-attention sub-layer mechanism",
+      "Query-based attention mechanism over encoder subnetwork inputs",
+      "Transformer architecture for sequence-to-sequence tasks",
+      "Parallelizable attention mechanism replacing sequential processing"
+    ],
+    "urn:eigenius:demo:patent:limitations": [
+      "Computational complexity scales quadratically with sequence length",
+      "Memory requirements increase significantly for long sequences",
+      "Requires large amounts of training data for optimal performance"
+    ],
+    "urn:eigenius:demo:patent:practical_applications": [
+      "Natural language processing and translation",
+      "Large language model architectures (GPT, BERT, PaLM, Claude)",
+      "Sequence-to-sequence learning tasks",
+      "Text generation and understanding",
+      "Machine translation systems",
+      "Language modeling applications"
+    ],
+    "urn:eigenius:demo:patent:prior_art_references": [
+      "Recurrent neural networks for sequence processing",
+      "Convolutional neural networks for sequence tasks",
+      "Traditional attention mechanisms in neural networks"
+    ],
+    "urn:eigenius:demo:patent:technical_domain": "artificial intelligence and machine learning"
+  },
+  "urn:eigenius:demo:patent:summary": "This patent describes a breakthrough..."
 }
 ```
 
