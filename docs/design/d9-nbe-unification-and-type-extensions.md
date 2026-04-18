@@ -344,6 +344,17 @@ The dual-write design guarantees correct crash recovery:
 
 **Auto-commit policy:** `RunProgram` commits the trace layer after successful execution and returns the ProgramTrace IRI in `RunProgramResponse`.
 
+### 5.10 Known Gap: Persistent Trace Store Wiring
+
+**Current state (Phase 5):** The server uses `InMemoryTraceStore`. Within a server session, ComponentTrace memoization works — re-running the same program with the same input hits the cache. Incremental execution works within a session.
+
+**What's missing:** The server does not use the `RocksTraceStore` implementation. After a crash and restart, the in-memory trace store is lost, and all IO components re-dispatch. The `RocksTraceStore` exists and is tested (including persistence across reopen), but wiring it into the server requires:
+- A `--db` flag on `serve` (storage path)
+- `start_server` passing a `RocksTraceStore` via `with_trace_store`
+- Data directory conventions for production deployment
+
+**Resolution:** Phase 9 (Azure deployment & operations). The `RocksTraceStore` is a drop-in replacement — once a DB path is configured, crash recovery and cross-session memoization work automatically. No architectural changes needed; this is a deployment configuration concern.
+
 ---
 
 ## 6. Validation and Type Checking: Division of Responsibilities
