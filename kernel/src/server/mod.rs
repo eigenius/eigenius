@@ -237,7 +237,7 @@ impl EigeniusKernel for EigeniusService {
             .ok_or_else(|| Status::invalid_argument("no input resource"))?;
 
         // Execute via NbE in IO mode
-        let output = {
+        let exec_result = {
             let ctx = self.context.read().await;
             match crate::program::eval_io::execute_program_nbe(
                 &program,
@@ -246,7 +246,7 @@ impl EigeniusKernel for EigeniusService {
                 Arc::clone(&self.components),
                 Some(Arc::clone(&self.trace_store)),
             ) {
-                Ok(output) => output,
+                Ok(result) => result,
                 Err(e) => {
                     return Ok(Response::new(RunProgramResponse {
                         success: false,
@@ -264,8 +264,18 @@ impl EigeniusKernel for EigeniusService {
             }
         };
 
-        // Build ProgramTrace and auto-commit
-        // TODO: compute metrics from trace store ComponentTraces
+        let output = exec_result.output;
+        let dispatched_traces = exec_result.dispatched_traces;
+
+        // Compute metrics from dispatched ComponentTraces
+        let total_tokens: i64 = dispatched_traces
+            .iter()
+            .filter_map(|ct| ct.metrics.as_ref())
+            .map(|m| m.prompt_tokens + m.completion_tokens)
+            .sum();
+        let executed_steps = dispatched_traces.len() as i64;
+
+        // Build ProgramTrace
         let trace_iri_str = format!("urn:eigenius:trace:exec-{}", uuid::Uuid::new_v4());
 
         let mut trace_resource = Resource::new(Iri::parse(&trace_iri_str).unwrap());
@@ -283,21 +293,27 @@ impl EigeniusKernel for EigeniusService {
                 crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
             );
         }
-        // Metrics will be computed from trace store ComponentTraces
-        // when we implement trace layer commits
         trace_resource.set(
             Iri::parse("urn:eigenius:reflection:total_tokens").unwrap(),
-            crate::ontology::resource::Value::Integer(0),
+            crate::ontology::resource::Value::Integer(total_tokens),
         );
         trace_resource.set(
             Iri::parse("urn:eigenius:reflection:executed_steps").unwrap(),
-            crate::ontology::resource::Value::Integer(0),
+            crate::ontology::resource::Value::Integer(executed_steps),
         );
 
-        // Auto-commit trace to a layer (best-effort)
+        // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
         {
             let mut ctx = self.context.write().await;
+            // Add ProgramTrace
             let _ = ctx.add_resource(trace_resource);
+            // Add each IO ComponentTrace as a resource
+            for ct in &dispatched_traces {
+                let ct_resource = crate::program::trace::trace_to_resource(
+                    &crate::program::trace::Trace::Component(ct.clone()),
+                );
+                let _ = ctx.add_resource(ct_resource);
+            }
             let _ = ctx.commit("trace");
         }
 

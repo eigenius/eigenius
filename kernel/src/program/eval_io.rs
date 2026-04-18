@@ -12,17 +12,25 @@ use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::program::component::{ComponentRegistry, ProgramError};
-use crate::program::trace::TraceStore;
-use std::sync::Arc;
+use crate::program::trace::{ComponentTrace, TraceStore};
+use std::sync::{Arc, Mutex};
+
+/// Result of NbE program execution: output resource + dispatched IO traces.
+pub struct NbeExecutionResult {
+    pub output: Resource,
+    /// ComponentTraces produced during execution (for trace layer commits).
+    pub dispatched_traces: Vec<ComponentTrace>,
+}
 
 /// Execute a program resource via NbE in IO mode.
+/// Returns the output resource and all IO ComponentTraces dispatched.
 pub fn execute_program_nbe(
     program: &Resource,
     input: &Resource,
     layer: Arc<Layer>,
     registry: Arc<ComponentRegistry>,
     trace_store: Option<Arc<dyn TraceStore>>,
-) -> Result<Resource, ProgramError> {
+) -> Result<NbeExecutionResult, ProgramError> {
     // Extract the program body expression
     let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
     let body = match program.get(&body_prop) {
@@ -34,11 +42,13 @@ pub fn execute_program_nbe(
     let body_exp =
         crate::program::expr::parse_expression(body, &layer).map_err(ProgramError::Parse)?;
 
-    // Build the IO evaluation context
+    // Build the IO evaluation context with trace collection
+    let dispatched_traces = Arc::new(Mutex::new(Vec::new()));
     let ctx = EvalCtx::IO {
         layer,
         registry,
         trace_store,
+        dispatched_traces: Arc::clone(&dispatched_traces),
     };
 
     // Bind input as a Val::ResourceVal in the environment
@@ -51,7 +61,18 @@ pub fn execute_program_nbe(
     let result = eval_ctx(&body_exp, &rho, &ctx);
 
     // Convert the result Val back to a Resource
-    val_to_resource(&result)
+    let output = val_to_resource(&result)?;
+
+    // Extract collected traces
+    let traces = match Arc::try_unwrap(dispatched_traces) {
+        Ok(mutex) => mutex.into_inner().unwrap_or_default(),
+        Err(arc) => arc.lock().unwrap().clone(),
+    };
+
+    Ok(NbeExecutionResult {
+        output,
+        dispatched_traces: traces,
+    })
 }
 
 /// Convert a Val result to a Resource.
@@ -105,10 +126,11 @@ mod tests {
         let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
         let registry = Arc::new(ComponentRegistry::default());
 
-        let output = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
 
         assert_eq!(
-            output
+            result
+                .output
                 .get(&Iri::parse("urn:eigenius:example:name").unwrap())
                 .unwrap()
                 .as_str(),
@@ -142,11 +164,12 @@ mod tests {
         let registry = Arc::new(ComponentRegistry::default());
         let trace_store: Arc<dyn TraceStore> = Arc::new(InMemoryTraceStore::new());
 
-        let output =
+        let result =
             execute_program_nbe(&program, &input, layer, registry, Some(trace_store)).unwrap();
 
         assert_eq!(
-            output
+            result
+                .output
                 .get(&Iri::parse("urn:eigenius:example:name").unwrap())
                 .unwrap()
                 .as_str(),

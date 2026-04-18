@@ -9,8 +9,8 @@ use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Clos, Neut, Val};
 use crate::ontology::iri::Iri;
 use crate::program::component::ComponentRegistry;
-use crate::program::trace::TraceStore;
-use std::sync::Arc;
+use crate::program::trace::{ComponentTrace, TraceStore};
+use std::sync::{Arc, Mutex};
 
 /// Evaluation context controlling what effects are available.
 #[derive(Clone)]
@@ -24,6 +24,8 @@ pub enum EvalCtx {
         layer: Arc<Layer>,
         registry: Arc<ComponentRegistry>,
         trace_store: Option<Arc<dyn TraceStore>>,
+        /// ComponentTraces produced during this evaluation (for trace layer commits).
+        dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
     },
 }
 
@@ -225,12 +227,13 @@ fn dispatch_component(
     component_arg: Option<&Val>,
     ctx: &EvalCtx,
 ) -> Val {
-    let (registry, layer, trace_store) = match ctx {
+    let (registry, layer, trace_store, dispatched_traces) = match ctx {
         EvalCtx::IO {
             registry,
             layer,
             trace_store,
-        } => (registry, layer, trace_store),
+            dispatched_traces,
+        } => (registry, layer, trace_store, dispatched_traces),
         _ => panic!("dispatch_component called outside IO mode"),
     };
 
@@ -258,17 +261,21 @@ fn dispatch_component(
         // Dispatch
         match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => {
+                let ct = ComponentTrace {
+                    component: component_iri.to_string(),
+                    input_hash: cache_key,
+                    argument_hash: None,
+                    output: result.output.clone(),
+                    cached: false,
+                    metrics: result.metrics,
+                };
                 // Cache the result
                 if let Some(store) = trace_store {
-                    let ct = crate::program::trace::ComponentTrace {
-                        component: component_iri.to_string(),
-                        input_hash: cache_key,
-                        argument_hash: None,
-                        output: result.output.clone(),
-                        cached: false,
-                        metrics: result.metrics,
-                    };
-                    store.put_component_trace(cache_key, ct);
+                    store.put_component_trace(cache_key, ct.clone());
+                }
+                // Record for trace layer commit
+                if let Ok(mut traces) = dispatched_traces.lock() {
+                    traces.push(ct);
                 }
                 Val::ResourceVal(Box::new(result.output))
             }

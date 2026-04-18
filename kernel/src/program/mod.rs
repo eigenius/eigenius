@@ -66,14 +66,14 @@ mod tests {
 
         let layer = Arc::clone(ctx.head());
         let registry = Arc::new(ComponentRegistry::default());
-        let output = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
 
         let name_iri = Iri::parse("urn:eigenius:example:name").unwrap();
-        assert_eq!(output.get(&name_iri).unwrap().as_str(), Some("Rex"));
+        assert_eq!(result.output.get(&name_iri).unwrap().as_str(), Some("Rex"));
 
         let breed_iri = Iri::parse("urn:eigenius:example:breed").unwrap();
         assert_eq!(
-            output.get(&breed_iri).unwrap().as_str(),
+            result.output.get(&breed_iri).unwrap().as_str(),
             Some("German Shepherd")
         );
     }
@@ -110,10 +110,10 @@ mod tests {
 
         let layer = Arc::clone(ctx.head());
         let registry = Arc::new(ComponentRegistry::default());
-        let output = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
 
         let name_iri = Iri::parse("urn:eigenius:example:name").unwrap();
-        assert_eq!(output.get(&name_iri).unwrap().as_str(), Some("Rex"));
+        assert_eq!(result.output.get(&name_iri).unwrap().as_str(), Some("Rex"));
     }
 
     /// End-to-end: validate program parsing.
