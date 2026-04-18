@@ -43,11 +43,11 @@ demo:
 
 # Start orchestrator locally (mock LLM)
 orchestrator-mock:
-    cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env src/main.ts
+    cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env --allow-sys=hostname src/main.ts
 
 # Start orchestrator locally (real LLM)
 orchestrator:
-    cd orchestration && deno run --allow-net --allow-env src/main.ts
+    cd orchestration && deno run --allow-net --allow-env --allow-sys=hostname src/main.ts
 
 # Start kernel locally with orchestrator
 serve:

@@ -11,6 +11,7 @@ pub mod eval_io;
 pub mod expr;
 pub mod ground;
 pub mod remote;
+pub mod schema;
 pub mod trace;
 
 #[cfg(test)]

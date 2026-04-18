@@ -214,6 +214,17 @@ impl Compiler {
                         .collect();
                     r.set(iri("urn:eigenius:core:domain"), Value::Array(iris?));
                 }
+                ast::PropertyItem::ClassTypes(names) => {
+                    let iris: Result<Vec<Value>, _> = names
+                        .iter()
+                        .map(|n| self.resolve(n).map(Value::String))
+                        .collect();
+                    r.set(iri("urn:eigenius:core:class_types"), Value::Array(iris?));
+                }
+                ast::PropertyItem::ElementType(t) => {
+                    let et = self.resolve(t)?;
+                    r.set(iri("urn:eigenius:core:element_type"), Value::String(et));
+                }
             }
         }
 
@@ -445,15 +456,14 @@ impl Compiler {
 
             ast::Expr::ConstructExpr { class, fields, .. } => {
                 // Anonymous block (empty class name) — used for component arguments.
-                // Emit a plain embedded resource with resolved keys and compiled values.
+                // Emit a plain embedded resource with resolved keys and data values.
+                // Unlike expression compilation, qualified names here resolve to
+                // IRI strings (data references), not variable references.
                 if class.name.is_empty() {
                     let mut r = Resource::new_embedded();
                     for (prop, expr) in fields {
                         let prop_iri = self.resolve_iri(prop)?;
-                        let expr_r = self.compile_expr(expr)?;
-                        // For literal values, extract the value directly
-                        // instead of wrapping in an expression resource
-                        let val = extract_literal_value(&expr_r);
+                        let val = self.compile_block_value(expr)?;
                         r.set(prop_iri, val);
                     }
                     return Ok(r);
@@ -575,6 +585,56 @@ impl Compiler {
                 };
                 r.set(iri("urn:eigenius:program:value"), v);
                 Ok(r)
+            }
+        }
+    }
+
+    /// Compile a block value expression to a resource Value.
+    ///
+    /// Unlike `compile_expr`, this treats qualified names as IRI string
+    /// references (data), not as variable references (code). Used for
+    /// component argument blocks where `patent:PatentAnalysis` means
+    /// the IRI string, not a program variable.
+    fn compile_block_value(&self, expr: &ast::Expr) -> Result<Value, EslError> {
+        match expr {
+            ast::Expr::Literal { value, .. } => match value {
+                ast::LiteralValue::String(s) => Ok(Value::String(s.clone())),
+                ast::LiteralValue::Int(n) => Ok(Value::Integer(*n)),
+                ast::LiteralValue::Float(f) => Ok(Value::Float(*f)),
+                ast::LiteralValue::Bool(b) => Ok(Value::Boolean(*b)),
+            },
+            ast::Expr::Var { name, pos } => {
+                // Resolve qualified name to IRI string
+                let qn = ast::QualifiedName {
+                    namespace: if name.contains(':') {
+                        Some(name.split(':').next().unwrap().to_string())
+                    } else {
+                        None
+                    },
+                    name: if name.contains(':') {
+                        name.split(':').nth(1).unwrap().to_string()
+                    } else {
+                        name.clone()
+                    },
+                    pos: pos.clone(),
+                };
+                let iri_str = self.resolve(&qn)?;
+                Ok(Value::String(iri_str))
+            }
+            ast::Expr::ConstructExpr { class, fields, .. } if class.name.is_empty() => {
+                // Nested block — recurse
+                let mut r = Resource::new_embedded();
+                for (prop, inner_expr) in fields {
+                    let prop_iri = self.resolve_iri(prop)?;
+                    let val = self.compile_block_value(inner_expr)?;
+                    r.set(prop_iri, val);
+                }
+                Ok(Value::Embedded(Box::new(r)))
+            }
+            _ => {
+                // Fall back to expression compilation for complex cases
+                let expr_r = self.compile_expr(expr)?;
+                Ok(extract_literal_value(&expr_r))
             }
         }
     }

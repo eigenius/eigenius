@@ -187,7 +187,8 @@
       "urn:eigenius:core:resource",
       "urn:eigenius:core:resource_array",
       "urn:eigenius:core:value_array",
-      "urn:eigenius:core:json"
+      "urn:eigenius:core:json",
+      "urn:eigenius:core:template"
     ]
   },
   {
@@ -412,6 +413,12 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
     "urn:eigenius:core:description": "An opaque JSON value. Not validated by the ontology.",
     "urn:eigenius:core:short_name": "json"
+  },
+  {
+    "@id": "urn:eigenius:core:template",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "A prompt template string with {{property_iri}} substitution patterns. The template's property references form a dependent type that determines input requirements.",
+    "urn:eigenius:core:short_name": "template"
   },
 
   {

@@ -214,13 +214,17 @@ fn resolve_array_element_type(
 
 /// Make an Option type: Sum(some T | none 1)
 fn make_option_type(inner: Val) -> Val {
-    let inner_exp = crate::nbe::readback::readback_val(0, &inner);
+    // Store the inner type as a value in the environment rather than
+    // round-tripping through readback, which can introduce generated
+    // variable names (e.g. __data_0) that fail to resolve in Rho::Nil.
+    let var_name = "__option_inner".to_string();
+    let rho = Rho::Nil.extend(Patt::Var(var_name.clone()), inner);
     Val::Data(
         vec![
-            ("some".to_string(), inner_exp),
+            ("some".to_string(), Exp::Var(var_name)),
             ("none".to_string(), Exp::One),
         ],
-        Rho::Nil,
+        rho,
     )
 }
 
@@ -249,11 +253,15 @@ fn build_sigma_chain(props: &[(Iri, Val)]) -> Result<Val, String> {
     }
     let (prop_iri, prop_type) = &props[0];
     let rest_type = build_sigma_chain(&props[1..])?;
-    let rest_exp = crate::nbe::readback::readback_val(0, &rest_type);
+    // Store the rest type in the closure's environment rather than
+    // round-tripping through readback. The rest type doesn't depend on
+    // the current property's value, but we still need a well-formed closure.
+    let rest_var = "__sigma_rest".to_string();
+    let rho = Rho::Nil.extend(Patt::Var(rest_var.clone()), rest_type);
     let closure = Clos::new(
         Patt::Var(prop_iri.local_name().to_string()),
-        rest_exp,
-        Rho::Nil,
+        Exp::Var(rest_var),
+        rho,
     );
     Ok(Val::Sig(Box::new(prop_type.clone()), closure))
 }
@@ -344,5 +352,28 @@ mod tests {
             }
             _ => panic!("expected Sum type for Option"),
         }
+    }
+
+    #[test]
+    fn readback_class_with_recommends_roundtrips() {
+        // This tests the exact path that caused the __data_0 crash:
+        // resolve a class with recommends → readback → re-evaluate
+        let layer = build_test_layer();
+        // core:Class has recommends, so it will have Option types
+        let iri = Iri::parse(wk::CLASS).unwrap();
+        let typ = resolve_class_type(&iri, &layer).unwrap();
+
+        // Readback to expression
+        let exp = crate::nbe::readback::readback_val(0, &typ);
+
+        // Re-evaluate — this is what parse_program does, and it used to crash
+        let val = crate::nbe::eval::eval(&exp, &Rho::Nil);
+
+        // Should still be a Sigma type
+        assert!(
+            matches!(val, Val::Sig(_, _)),
+            "re-evaluated class type should be Sig, got {:?}",
+            val
+        );
     }
 }

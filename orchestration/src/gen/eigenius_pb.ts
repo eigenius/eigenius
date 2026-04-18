@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file eigenius.proto.
  */
 export const file_eigenius: GenFile = /*@__PURE__*/
-  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iHQoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIfCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCSIuCgtRdWVyeVJlc3VsdBIQCghyZXNvdXJjZRgBIAEoDBINCgVpbmRleBgCIAEoBCI/ChZWYWxpZGF0ZVByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSFAoMY29udGVudF90eXBlGAIgASgJImwKF1ZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEg0KBXZhbGlkGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIUCgxwcm9ncmFtX3R5cGUYAyABKAkiSQoRUnVuUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBINCgVpbnB1dBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiYwoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvciI1Cg5SZWZsZWN0UmVxdWVzdBINCgV0cmFjZRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkiNQoPUmVmbGVjdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJdHJhY2VfaXJpGAIgASgJIg8KDUhlYWx0aFJlcXVlc3QiXwoOSGVhbHRoUmVzcG9uc2USDwoHaGVhbHRoeRgBIAEoCBIPCgd2ZXJzaW9uGAIgASgJEhMKC2xheWVyX2NvdW50GAMgASgEEhYKDnJlc291cmNlX2NvdW50GAQgASgEImAKEENvbXBvbmVudFJlcXVlc3QSFQoNY29tcG9uZW50X2lyaRgBIAEoCRINCgVpbnB1dBgCIAEoDBIQCghhcmd1bWVudBgDIAEoDBIUCgxjb250ZW50X3R5cGUYBCABKAkicwoRQ29tcG9uZW50UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIOCgZvdXRwdXQYAiABKAwSDQoFZXJyb3IYAyABKAkSLgoHbWV0cmljcxgEIAEoCzIdLmVpZ2VuaXVzLnYxLkNvbXBvbmVudE1ldHJpY3MieQoQQ29tcG9uZW50TWV0cmljcxIQCghwcm92aWRlchgBIAEoCRINCgVtb2RlbBgCIAEoCRIVCg1wcm9tcHRfdG9rZW5zGAMgASgDEhkKEWNvbXBsZXRpb25fdG9rZW5zGAQgASgDEhIKCmxhdGVuY3lfbXMYBSABKAMibgoPVmFsaWRhdGlvbkVycm9yEhQKDHJlc291cmNlX2lyaRgBIAEoCRIUCgxwcm9wZXJ0eV9pcmkYAiABKAkSDAoEcnVsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJEhAKCHNldmVyaXR5GAUgASgJMokECg5FaWdlbml1c0tlcm5lbBI7CgRMb2FkEhguZWlnZW5pdXMudjEuTG9hZFJlcXVlc3QaGS5laWdlbml1cy52MS5Mb2FkUmVzcG9uc2USRAoHSW5zcGVjdBIbLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuSW5zcGVjdFJlc3BvbnNlEj4KBVF1ZXJ5EhkuZWlnZW5pdXMudjEuUXVlcnlSZXF1ZXN0GhguZWlnZW5pdXMudjEuUXVlcnlSZXN1bHQwARJcCg9WYWxpZGF0ZVByb2dyYW0SIy5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXF1ZXN0GiQuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USTQoKUnVuUHJvZ3JhbRIeLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXF1ZXN0Gh8uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlc3BvbnNlEkQKB1JlZmxlY3QSGy5laWdlbml1cy52MS5SZWZsZWN0UmVxdWVzdBocLmVpZ2VuaXVzLnYxLlJlZmxlY3RSZXNwb25zZRJBCgZIZWFsdGgSGi5laWdlbml1cy52MS5IZWFsdGhSZXF1ZXN0GhsuZWlnZW5pdXMudjEuSGVhbHRoUmVzcG9uc2UyXQoRQ29tcG9uZW50RXhlY3V0b3ISSAoHRXhlY3V0ZRIdLmVpZ2VuaXVzLnYxLkNvbXBvbmVudFJlcXVlc3QaHi5laWdlbml1cy52MS5Db21wb25lbnRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iHQoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIfCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCSIuCgtRdWVyeVJlc3VsdBIQCghyZXNvdXJjZRgBIAEoDBINCgVpbmRleBgCIAEoBCI/ChZWYWxpZGF0ZVByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSFAoMY29udGVudF90eXBlGAIgASgJImwKF1ZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEg0KBXZhbGlkGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIUCgxwcm9ncmFtX3R5cGUYAyABKAkiSQoRUnVuUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBINCgVpbnB1dBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkidgoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkiNQoOUmVmbGVjdFJlcXVlc3QSDQoFdHJhY2UYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJIjUKD1JlZmxlY3RSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhEKCXRyYWNlX2lyaRgCIAEoCSIPCg1IZWFsdGhSZXF1ZXN0Il8KDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBCJgChBDb21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSDQoFaW5wdXQYAiABKAwSEAoIYXJndW1lbnQYAyABKAwSFAoMY29udGVudF90eXBlGAQgASgJInMKEUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEg0KBWVycm9yGAMgASgJEi4KB21ldHJpY3MYBCABKAsyHS5laWdlbml1cy52MS5Db21wb25lbnRNZXRyaWNzInkKEENvbXBvbmVudE1ldHJpY3MSEAoIcHJvdmlkZXIYASABKAkSDQoFbW9kZWwYAiABKAkSFQoNcHJvbXB0X3Rva2VucxgDIAEoAxIZChFjb21wbGV0aW9uX3Rva2VucxgEIAEoAxISCgpsYXRlbmN5X21zGAUgASgDIlEKEUZpYmVyUXVlcnlSZXF1ZXN0EhcKD2luc3RpdHV0aW9uX2lyaRgBIAEoCRINCgVxdWVyeRgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiRAoSRmliZXJRdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGcmVzdWx0GAIgASgMEg0KBWVycm9yGAMgASgJIlwKGERpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBIXCg9pbnN0aXR1dGlvbl9pcmkYASABKAkSEQoJcmVzb3VyY2VzGAIgAygMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSJOChlEaXNjb3Zlck1vcnBoaXNtc1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJbW9ycGhpc21zGAIgAygMEg0KBWVycm9yGAMgASgJIhkKF0xpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0Ik4KGExpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRIyCgxpbnN0aXR1dGlvbnMYASADKAsyHC5laWdlbml1cy52MS5JbnN0aXR1dGlvbkluZm8iWQoPSW5zdGl0dXRpb25JbmZvEgsKA2lyaRgBIAEoCRIMCgRuYW1lGAIgASgJEhYKDm1vcnBoaXNtX3R5cGVzGAMgAygJEhMKC3F1ZXJ5X3R5cGVzGAQgAygJIm4KD1ZhbGlkYXRpb25FcnJvchIUCgxyZXNvdXJjZV9pcmkYASABKAkSFAoMcHJvcGVydHlfaXJpGAIgASgJEgwKBHJ1bGUYAyABKAkSDwoHbWVzc2FnZRgEIAEoCRIQCghzZXZlcml0eRgFIAEoCTKdBgoORWlnZW5pdXNLZXJuZWwSOwoETG9hZBIYLmVpZ2VuaXVzLnYxLkxvYWRSZXF1ZXN0GhkuZWlnZW5pdXMudjEuTG9hZFJlc3BvbnNlEkQKB0luc3BlY3QSGy5laWdlbml1cy52MS5JbnNwZWN0UmVxdWVzdBocLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXNwb25zZRI+CgVRdWVyeRIZLmVpZ2VuaXVzLnYxLlF1ZXJ5UmVxdWVzdBoYLmVpZ2VuaXVzLnYxLlF1ZXJ5UmVzdWx0MAESXAoPVmFsaWRhdGVQcm9ncmFtEiMuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVxdWVzdBokLmVpZ2VuaXVzLnYxLlZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEk0KClJ1blByb2dyYW0SHi5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVxdWVzdBofLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXNwb25zZRJECgdSZWZsZWN0EhsuZWlnZW5pdXMudjEuUmVmbGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5SZWZsZWN0UmVzcG9uc2USQQoGSGVhbHRoEhouZWlnZW5pdXMudjEuSGVhbHRoUmVxdWVzdBobLmVpZ2VuaXVzLnYxLkhlYWx0aFJlc3BvbnNlEk0KCkZpYmVyUXVlcnkSHi5laWdlbml1cy52MS5GaWJlclF1ZXJ5UmVxdWVzdBofLmVpZ2VuaXVzLnYxLkZpYmVyUXVlcnlSZXNwb25zZRJiChFEaXNjb3Zlck1vcnBoaXNtcxIlLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBomLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVzcG9uc2USXwoQTGlzdEluc3RpdHV0aW9ucxIkLmVpZ2VuaXVzLnYxLkxpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0GiUuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1Jlc3BvbnNlMl0KEUNvbXBvbmVudEV4ZWN1dG9yEkgKB0V4ZWN1dGUSHS5laWdlbml1cy52MS5Db21wb25lbnRSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message eigenius.v1.LoadRequest
@@ -272,6 +272,13 @@ export type RunProgramResponse = Message<"eigenius.v1.RunProgramResponse"> & {
    * @generated from field: repeated eigenius.v1.ValidationError errors = 3;
    */
   errors: ValidationError[];
+
+  /**
+   * IRI of the ProgramTrace (if execution succeeded)
+   *
+   * @generated from field: string trace_iri = 4;
+   */
+  traceIri: string;
 };
 
 /**
@@ -488,6 +495,192 @@ export const ComponentMetricsSchema: GenMessage<ComponentMetrics> = /*@__PURE__*
   messageDesc(file_eigenius, 16);
 
 /**
+ * @generated from message eigenius.v1.FiberQueryRequest
+ */
+export type FiberQueryRequest = Message<"eigenius.v1.FiberQueryRequest"> & {
+  /**
+   * Which institution to dispatch to
+   *
+   * @generated from field: string institution_iri = 1;
+   */
+  institutionIri: string;
+
+  /**
+   * Query resource as CBOR or Eigon-JSON
+   *
+   * @generated from field: bytes query = 2;
+   */
+  query: Uint8Array;
+
+  /**
+   * @generated from field: string content_type = 3;
+   */
+  contentType: string;
+};
+
+/**
+ * Describes the message eigenius.v1.FiberQueryRequest.
+ * Use `create(FiberQueryRequestSchema)` to create a new message.
+ */
+export const FiberQueryRequestSchema: GenMessage<FiberQueryRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 17);
+
+/**
+ * @generated from message eigenius.v1.FiberQueryResponse
+ */
+export type FiberQueryResponse = Message<"eigenius.v1.FiberQueryResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Result resource as CBOR
+   *
+   * @generated from field: bytes result = 2;
+   */
+  result: Uint8Array;
+
+  /**
+   * @generated from field: string error = 3;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message eigenius.v1.FiberQueryResponse.
+ * Use `create(FiberQueryResponseSchema)` to create a new message.
+ */
+export const FiberQueryResponseSchema: GenMessage<FiberQueryResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 18);
+
+/**
+ * @generated from message eigenius.v1.DiscoverMorphismsRequest
+ */
+export type DiscoverMorphismsRequest = Message<"eigenius.v1.DiscoverMorphismsRequest"> & {
+  /**
+   * Which institution to dispatch to
+   *
+   * @generated from field: string institution_iri = 1;
+   */
+  institutionIri: string;
+
+  /**
+   * Resources to analyze, as CBOR
+   *
+   * @generated from field: repeated bytes resources = 2;
+   */
+  resources: Uint8Array[];
+
+  /**
+   * @generated from field: string content_type = 3;
+   */
+  contentType: string;
+};
+
+/**
+ * Describes the message eigenius.v1.DiscoverMorphismsRequest.
+ * Use `create(DiscoverMorphismsRequestSchema)` to create a new message.
+ */
+export const DiscoverMorphismsRequestSchema: GenMessage<DiscoverMorphismsRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 19);
+
+/**
+ * @generated from message eigenius.v1.DiscoverMorphismsResponse
+ */
+export type DiscoverMorphismsResponse = Message<"eigenius.v1.DiscoverMorphismsResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Discovered morphism resources as CBOR
+   *
+   * @generated from field: repeated bytes morphisms = 2;
+   */
+  morphisms: Uint8Array[];
+
+  /**
+   * @generated from field: string error = 3;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message eigenius.v1.DiscoverMorphismsResponse.
+ * Use `create(DiscoverMorphismsResponseSchema)` to create a new message.
+ */
+export const DiscoverMorphismsResponseSchema: GenMessage<DiscoverMorphismsResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 20);
+
+/**
+ * @generated from message eigenius.v1.ListInstitutionsRequest
+ */
+export type ListInstitutionsRequest = Message<"eigenius.v1.ListInstitutionsRequest"> & {
+};
+
+/**
+ * Describes the message eigenius.v1.ListInstitutionsRequest.
+ * Use `create(ListInstitutionsRequestSchema)` to create a new message.
+ */
+export const ListInstitutionsRequestSchema: GenMessage<ListInstitutionsRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 21);
+
+/**
+ * @generated from message eigenius.v1.ListInstitutionsResponse
+ */
+export type ListInstitutionsResponse = Message<"eigenius.v1.ListInstitutionsResponse"> & {
+  /**
+   * @generated from field: repeated eigenius.v1.InstitutionInfo institutions = 1;
+   */
+  institutions: InstitutionInfo[];
+};
+
+/**
+ * Describes the message eigenius.v1.ListInstitutionsResponse.
+ * Use `create(ListInstitutionsResponseSchema)` to create a new message.
+ */
+export const ListInstitutionsResponseSchema: GenMessage<ListInstitutionsResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 22);
+
+/**
+ * @generated from message eigenius.v1.InstitutionInfo
+ */
+export type InstitutionInfo = Message<"eigenius.v1.InstitutionInfo"> & {
+  /**
+   * @generated from field: string iri = 1;
+   */
+  iri: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * IRIs of declared morphism classes
+   *
+   * @generated from field: repeated string morphism_types = 3;
+   */
+  morphismTypes: string[];
+
+  /**
+   * IRIs of declared query classes
+   *
+   * @generated from field: repeated string query_types = 4;
+   */
+  queryTypes: string[];
+};
+
+/**
+ * Describes the message eigenius.v1.InstitutionInfo.
+ * Use `create(InstitutionInfoSchema)` to create a new message.
+ */
+export const InstitutionInfoSchema: GenMessage<InstitutionInfo> = /*@__PURE__*/
+  messageDesc(file_eigenius, 23);
+
+/**
  * @generated from message eigenius.v1.ValidationError
  */
 export type ValidationError = Message<"eigenius.v1.ValidationError"> & {
@@ -522,7 +715,7 @@ export type ValidationError = Message<"eigenius.v1.ValidationError"> & {
  * Use `create(ValidationErrorSchema)` to create a new message.
  */
 export const ValidationErrorSchema: GenMessage<ValidationError> = /*@__PURE__*/
-  messageDesc(file_eigenius, 17);
+  messageDesc(file_eigenius, 24);
 
 /**
  * @generated from service eigenius.v1.EigeniusKernel
@@ -597,6 +790,36 @@ export const EigeniusKernel: GenService<{
     methodKind: "unary";
     input: typeof HealthRequestSchema;
     output: typeof HealthResponseSchema;
+  },
+  /**
+   * Execute a fiber query against a registered institution.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.FiberQuery
+   */
+  fiberQuery: {
+    methodKind: "unary";
+    input: typeof FiberQueryRequestSchema;
+    output: typeof FiberQueryResponseSchema;
+  },
+  /**
+   * Discover morphisms between resources within an institution's fiber.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.DiscoverMorphisms
+   */
+  discoverMorphisms: {
+    methodKind: "unary";
+    input: typeof DiscoverMorphismsRequestSchema;
+    output: typeof DiscoverMorphismsResponseSchema;
+  },
+  /**
+   * List registered institutions and their declared fiber structure.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.ListInstitutions
+   */
+  listInstitutions: {
+    methodKind: "unary";
+    input: typeof ListInstitutionsRequestSchema;
+    output: typeof ListInstitutionsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_eigenius, 0);

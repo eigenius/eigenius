@@ -402,14 +402,108 @@ Note: `severity` was converted from the short name `"high"` back to the full IRI
 
 ---
 
-## 7. Component Argument Structure
+## 7. Typed Component Arguments
 
-CompleteJson uses the same `component_argument` pattern as CompleteText, with an additional `output_schema` field specifying the target class:
+### 7.1 The Problem
+
+Component arguments are currently untyped embedded resources. The kernel doesn't know:
+- Which properties are prompt templates (needing `{{iri}}` validation)
+- Which properties reference classes (needing JSON Schema generation)
+- Which properties are request parameters
+- Whether the argument is structurally valid at all
+
+Hardcoding component-specific logic (e.g., checking for `output_schema` only on CompleteJson) doesn't scale.
+
+### 7.2 The Solution: argument_type
+
+Each component declares an **argument class** — a class definition for its component argument:
+
+```json
+{
+  "@id": "urn:eigenius:program:components:CompleteText",
+  "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+  "urn:eigenius:program:component:argument_type": "urn:eigenius:program:components:completion:Arguments",
+  "urn:eigenius:program:component:output_type": "urn:eigenius:core:string"
+}
+```
+
+The `Arguments` class is an ordinary ontology class that describes the component argument's structure:
+
+```json
+{
+  "@id": "urn:eigenius:program:components:completion:Arguments",
+  "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+  "urn:eigenius:core:description": "Arguments for LLM completion components (CompleteText and CompleteJson).",
+  "urn:eigenius:core:short_name": "CompletionArguments",
+  "urn:eigenius:core:requires": [
+    "urn:eigenius:program:components:completion:user_prompt"
+  ],
+  "urn:eigenius:core:recommends": [
+    "urn:eigenius:program:components:completion:system_prompt",
+    "urn:eigenius:program:components:completion:output_schema",
+    "urn:eigenius:program:components:completion:request_parameters"
+  ]
+}
+```
+
+The properties on this class have typed declarations:
+- `user_prompt` → `data_type: template` — kernel validates template references
+- `system_prompt` → `data_type: template` — kernel validates template references
+- `output_schema` → `data_type: resource, class_types: [Class]` — kernel generates JSON Schema
+- `request_parameters` → `data_type: resource` — nested config, no special handling
+
+### 7.3 Ontology-Driven Dispatch
+
+The kernel dispatch logic reads the component's ontology definition — no hardcoded IRIs:
+
+1. Look up the component by IRI in the layer chain
+2. Read `argument_type` → get the argument class IRI
+3. Walk the argument class's properties:
+   - Properties with `data_type: template` → validate template references against input type
+   - Properties whose value resolves to a Class (via `class_types: [Class]`) → generate JSON Schema from the referenced class
+4. If a JSON Schema was generated → pack it into the argument, convert the response back after dispatch
+5. Validate the component argument against the argument class (structural validation)
+
+### 7.4 Shared Argument Classes
+
+CompleteText and CompleteJson share the same `completion:Arguments` class. The difference:
+- CompleteText ignores `output_schema` (it's recommended, not required) and returns `string`
+- CompleteJson requires `output_schema` to determine the output class and generate the schema
+
+A custom component declares its own argument class with different properties. The kernel handles it the same way — no component-specific code.
+
+### 7.5 Component Declarations
+
+```json
+{
+  "@id": "urn:eigenius:program:components:CompleteText",
+  "urn:eigenius:program:component:argument_type": "urn:eigenius:program:components:completion:Arguments",
+  "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+  "urn:eigenius:program:component:output_type": "urn:eigenius:core:string"
+}
+
+{
+  "@id": "urn:eigenius:program:components:CompleteJson",
+  "urn:eigenius:program:component:argument_type": "urn:eigenius:program:components:completion:Arguments",
+  "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+  "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class"
+}
+
+{
+  "@id": "urn:eigenius:program:components:Identity",
+  "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+  "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class"
+}
+```
+
+Identity has no `argument_type` — it takes no component argument.
+
+### 7.6 Example Component Argument
 
 ```json
 {
   "urn:eigenius:program:component_argument": {
-    "urn:eigenius:program:components:completion:user_prompt": "Extract the employee name, severity, and key facts from this complaint:\n\n{{urn:ex:complaint_text}}",
+    "urn:eigenius:program:components:completion:user_prompt": "Extract entities from:\n\n{{urn:ex:text}}",
     "urn:eigenius:program:components:completion:system_prompt": "You are a structured data extractor.",
     "urn:eigenius:program:components:completion:output_schema": "urn:ex:Analysis",
     "urn:eigenius:program:components:completion:request_parameters": {
@@ -420,8 +514,6 @@ CompleteJson uses the same `component_argument` pattern as CompleteText, with an
   }
 }
 ```
-
-The `output_schema` IRI is resolved against the layer chain to obtain the class definition. Schema generation walks from there.
 
 ---
 

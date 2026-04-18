@@ -15,6 +15,11 @@ import {
   createCompleteTextHandler,
   createMockCompleteTextHandler,
 } from "./components/complete_text.ts";
+import {
+  COMPLETE_JSON_IRI,
+  createCompleteJsonHandler,
+  createMockCompleteJsonHandler,
+} from "./components/complete_json.ts";
 import { ProgramExecutor } from "./program/executor.ts";
 import { startServer } from "./server/mod.ts";
 
@@ -32,12 +37,14 @@ function main() {
   const client = new KernelClient(KERNEL_ENDPOINT);
   const components = new ComponentRegistry();
 
-  // Register CompleteText component
+  // Register LLM components
   if (USE_MOCK_LLM) {
-    console.log("Using mock LLM handler (EIGENIUS_MOCK_LLM=true)");
+    console.log("Using mock LLM handlers (EIGENIUS_MOCK_LLM=true)");
     components.register(COMPLETE_TEXT_IRI, createMockCompleteTextHandler());
+    components.register(COMPLETE_JSON_IRI, createMockCompleteJsonHandler());
   } else {
     components.register(COMPLETE_TEXT_IRI, createCompleteTextHandler());
+    components.register(COMPLETE_JSON_IRI, createCompleteJsonHandler());
   }
 
   const _executor = new ProgramExecutor(client, components);

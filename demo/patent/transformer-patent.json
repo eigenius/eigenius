@@ -1,0 +1,9 @@
+{
+  "@id": "urn:eigenius:demo:patent:US10452978B2",
+  "urn:eigenius:core:is_a": ["urn:eigenius:demo:patent:PatentClaim"],
+  "urn:eigenius:demo:patent:title": "Attention-based sequence transduction neural networks",
+  "urn:eigenius:demo:patent:patent_number": "US10452978B2",
+  "urn:eigenius:demo:patent:assignee": "Google LLC",
+  "urn:eigenius:demo:patent:filing_date": "2018-06-28",
+  "urn:eigenius:demo:patent:abstract_text": "Methods, systems, and apparatus, including computer programs encoded on a computer storage medium, for generating an output sequence from an input sequence. In one aspect, one of the systems includes an encoder neural network configured to receive the input sequence and generate encoded representations of the network inputs, the encoder neural network comprising a sequence of one or more encoder subnetworks, each encoder subnetwork configured to receive a respective encoder subnetwork input for each of the input positions and to generate a respective subnetwork output for each of the input positions, and each encoder subnetwork comprising: an encoder self-attention sub-layer that is configured to receive the subnetwork input for each of the input positions and, for each particular input position in the input order: apply an attention mechanism over the encoder subnetwork inputs using one or more queries derived from the encoder subnetwork input at the particular input position. This is the patent corresponding to the seminal 'Attention Is All You Need' paper by Vaswani, Shazeer, Parmar, Uszkoreit, Jones, Gomez, Kaiser, and Polosukhin (2017), which introduced the Transformer architecture that underlies modern large language models including GPT, BERT, PaLM, and Claude."
+}

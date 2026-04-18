@@ -72,6 +72,7 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
 /// let name : type = value; body
 fn parse_let(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let name = get_string(resource, "urn:eigenius:program:name")?;
+
     let type_iri = get_iri(resource, "urn:eigenius:program:type")?;
     let type_val = resolve_class_type(&type_iri, layer)?;
     let type_exp = crate::nbe::readback::readback_val(0, &type_val);

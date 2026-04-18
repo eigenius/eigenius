@@ -16,4 +16,4 @@ ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
 
 EXPOSE 8080
 
-CMD ["deno", "run", "--allow-net", "--allow-env", "src/main.ts"]
+CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-sys=hostname", "src/main.ts"]

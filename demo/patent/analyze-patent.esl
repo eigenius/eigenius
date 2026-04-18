@@ -1,0 +1,35 @@
+namespace core = "urn:eigenius:core";
+namespace patent = "urn:eigenius:demo:patent";
+namespace completion = "urn:eigenius:program:components:completion";
+namespace request = "urn:eigenius:program:request";
+
+program patent:analyze_patent : patent:PatentClaim -> patent:PatentBrief {
+    // Step 1: Extract structured analysis via CompleteJson
+    let analysis : patent:PatentAnalysis = CompleteJson(input) {
+        completion:user_prompt = "Analyze this patent and extract structured information.\n\nTitle: {{urn:eigenius:demo:patent:title}}\nPatent Number: {{urn:eigenius:demo:patent:patent_number}}\n\nAbstract:\n{{urn:eigenius:demo:patent:abstract_text}}";
+        completion:system_prompt = "You are a patent analyst. Extract the invention category, technical domain, key innovations, practical applications, prior art references, and limitations from the patent text. Be precise and technical.";
+        completion:output_schema = patent:PatentAnalysis;
+        completion:request_parameters = {
+            request:model = "claude-sonnet-4-20250514";
+            request:temperature = 0.0;
+            request:max_tokens = 2000;
+        };
+    };
+
+    // Step 2: Generate plain-language summary using the structured analysis
+    let summary : core:string = CompleteText(analysis) {
+        completion:user_prompt = "Based on this patent analysis, write a 2-3 paragraph plain-language technical summary suitable for a non-specialist decision-maker.\n\nCategory: {{urn:eigenius:demo:patent:invention_category}}\nDomain: {{urn:eigenius:demo:patent:technical_domain}}\nKey Innovations: {{urn:eigenius:demo:patent:key_innovations}}\nApplications: {{urn:eigenius:demo:patent:practical_applications}}";
+        completion:system_prompt = "You are a technical writer who explains complex patents in clear, accessible language. Avoid jargon. Focus on why the invention matters and what problems it solves.";
+        completion:request_parameters = {
+            request:model = "claude-sonnet-4-20250514";
+            request:temperature = 0.3;
+            request:max_tokens = 1000;
+        };
+    };
+
+    // Step 3: Combine into the final brief
+    Construct patent:PatentBrief {
+        patent:summary = summary,
+        patent:analysis = analysis
+    }
+}
