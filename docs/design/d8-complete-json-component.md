@@ -4,7 +4,7 @@
 
 **Status:** Draft
 **Required before:** CompleteJson implementation
-**Depends on:** D1 (Eigon format), D3 (program model), D6 (execution architecture)
+**Depends on:** D1 (Eigon format), D3 (program model), D6 (execution architecture), D9 (NbE unification)
 
 ---
 
@@ -13,6 +13,8 @@
 CompleteJson is an IO component that calls an LLM with a JSON Schema derived from an Eigenius ontology class, receives structured JSON using short names, and converts it back to a fully typed Eigon resource. Unlike CompleteText (which returns raw text), CompleteJson produces typed, validated resources that integrate directly into the knowledge graph.
 
 The core challenge: the LLM sees JSON Schema with short property names (human-readable), but Eigenius uses full IRI property keys. The mapping must be **bijective** — every short name maps to exactly one IRI and vice versa within the scope of a single class.
+
+This document also introduces the `template` data type — a dependent type for prompt templates that carries its property reference requirements as part of its type. This applies to both CompleteText and CompleteJson.
 
 ---
 
@@ -423,9 +425,245 @@ The `output_schema` IRI is resolved against the layer chain to obtain the class 
 
 ---
 
-## 8. Implementation Plan
+## 8. The Template Data Type
 
-### 8.1 Where Each Piece Lives
+### 8.1 Motivation
+
+Prompt templates contain `{{property_iri}}` substitution patterns that reference properties on the input resource. Currently, these are opaque strings — the type system doesn't know which properties a template requires. If a template references a property that doesn't exist on the input, the error surfaces at runtime (the LLM sees a raw `{{...}}` placeholder).
+
+Making `template` a proper data type in the type system solves this: the template's property references become part of its type, and the type checker verifies that the input provides all referenced properties.
+
+### 8.2 The Template Type
+
+A `template` is a dependent type — its type encodes the properties it references:
+
+```
+template : Type
+
+"Summarize {{urn:eigenius:demo:text}} by {{urn:eigenius:demo:author}}"
+  : Template { text : String, author : String }
+```
+
+The template literal is parsed at compile time. Each `{{iri}}` reference is extracted and resolved against the ontology to determine the property's type. The result is a record type representing the template's requirements.
+
+### 8.3 Ontology Declaration
+
+The `user_prompt` and `system_prompt` properties are declared with `data_type: template`:
+
+```json
+{
+  "@id": "urn:eigenius:program:components:completion:user_prompt",
+  "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+  "urn:eigenius:core:data_type": "urn:eigenius:core:template",
+  "urn:eigenius:core:description": "User prompt template with {{property_iri}} substitutions."
+}
+```
+
+The `template` data type is added to the core ontology alongside `string`, `integer`, etc. When the type checker encounters a property with `data_type: template`, it knows to parse the value and extract property references.
+
+### 8.4 Type Checking Rules
+
+**Template literal typing:**
+
+```
+Γ ⊢ "...{{p₁}}...{{p₂}}..." : Template { p₁ : T₁, p₂ : T₂ }
+  where T₁ = resolve_property_type(p₁, layer)
+        T₂ = resolve_property_type(p₂, layer)
+```
+
+The special pattern `{{string}}` (serialize entire input as JSON) has type `Template {}` — it accepts any input, no specific property requirements.
+
+**Combined template requirements:**
+
+When a component argument has multiple template properties, their requirements are merged:
+
+```
+user_prompt   : Template { text : String, author : String }
+system_prompt : Template { topic : String }
+──────────────────────────────────────────────────────────
+combined requirement : { text : String, author : String, topic : String }
+```
+
+Duplicate property references across templates are deduplicated — if both prompts reference `{{urn:eigenius:demo:text}}`, the combined requirement has one `text : String`, not two.
+
+**Component typing (CompleteText):**
+
+```
+Γ ⊢ input : InputType
+Γ ⊢ user_prompt : Template R₁
+Γ ⊢ system_prompt : Template R₂
+InputType has all properties in R₁ ∪ R₂
+──────────────────────────────────────────
+Γ ⊢ CompleteText(input) { user_prompt; system_prompt; ... } : String
+```
+
+**Component typing (CompleteJson):**
+
+```
+Γ ⊢ input : InputType
+Γ ⊢ user_prompt : Template R₁
+Γ ⊢ system_prompt : Template R₂
+InputType has all properties in R₁ ∪ R₂
+Γ ⊢ output_schema : Class C
+C admits bijective short-name mapping (§5)
+──────────────────────────────────────────
+Γ ⊢ CompleteJson(input) { user_prompt; system_prompt; output_schema = C; ... } : C
+```
+
+### 8.5 Input Type Inference
+
+When a program does not declare an explicit `input_type`, the type checker can infer it from the templates:
+
+```esl
+// No input_type declared:
+program demo:summarize : _ -> demo:Document {
+  let summary : core:string = CompleteText(input) {
+    completion:user_prompt = "Summarize: {{urn:eigenius:demo:text}}";
+  };
+  Construct demo:Document { demo:text = summary }
+}
+
+// Inferred: input must have { demo:text : String }
+// Equivalent to declaring input_type: a class with requires [demo:text]
+```
+
+The inference algorithm:
+1. Collect all template properties from all component arguments in the program
+2. Extract all `{{iri}}` references, resolve their types from the ontology
+3. Deduplicate and construct the Sigma type
+4. Use this as the input type for type checking the program body
+
+### 8.6 Mini-TT Extensions
+
+**New term and value constructors:**
+
+```rust
+// Term level
+Exp::Template(String, Vec<(Iri, Box<Exp>)>)
+  // The literal string + extracted property references with their type expressions
+
+// Value level
+Val::Template(String, Vec<(Iri, Val)>)
+  // Evaluated template with resolved property types
+```
+
+**Evaluation:** `eval(Template(s, refs), rho)` evaluates each type expression in the references:
+
+```rust
+Exp::Template(s, refs) => Val::Template(
+    s.clone(),
+    refs.iter().map(|(iri, typ)| (iri.clone(), eval(typ, rho))).collect()
+)
+```
+
+**Readback:** `readback(Template(s, refs))` reads back each type:
+
+```rust
+Val::Template(s, refs) => Exp::Template(
+    s.clone(),
+    refs.iter().map(|(iri, val)| (iri.clone(), readback(level, val))).collect()
+)
+```
+
+**Type checking:** A template literal checks against `Val::Set` (it's a type) and produces a Template value whose references determine the input requirement.
+
+### 8.7 Parsing Templates
+
+Template parsing happens once — when ESL or Eigon-JSON is compiled to Mini-TT terms. The parser:
+
+1. Scans the string for `{{...}}` patterns
+2. For each `{{iri}}`, validates the IRI and resolves the property type from the layer chain
+3. Constructs `Exp::Template(literal, [(iri₁, type₁), (iri₂, type₂), ...])`
+
+If the IRI is `{{string}}` (the special "serialize everything" pattern), no property references are added — the template accepts any input.
+
+If a `{{iri}}` references a property not found in the layer chain, it's a **compile error** — not a runtime error.
+
+### 8.8 Applies to Both Components
+
+The template type applies equally to CompleteText and CompleteJson:
+
+- **CompleteText:** template references determine input requirements; output is `String`
+- **CompleteJson:** template references determine input requirements; `output_schema` determines output type with bijectivity guarantee
+
+The template type is independent of the output side. It validates the input contract. The schema generation (§3) validates the output contract. Together they give full type safety for LLM component calls.
+
+---
+
+## 9. CompleteText Alignment
+
+The template data type changes CompleteText as well. Currently, CompleteText treats prompt strings as opaque — the orchestrator does runtime `{{...}}` substitution with no compile-time validation. With the template type:
+
+### 9.1 Current CompleteText Behavior
+
+```
+user_prompt = "Summarize: {{urn:eigenius:demo:text}}"
+```
+
+- Parsed as `Value::String` — opaque to the type system
+- Template substitution at runtime in the orchestrator (`formatPrompt`)
+- Missing properties silently produce raw `{{...}}` in the LLM prompt
+- No compile-time validation of property references
+
+### 9.2 Updated CompleteText Behavior
+
+```
+user_prompt = "Summarize: {{urn:eigenius:demo:text}}"
+  : Template { text : String }
+```
+
+- Parsed as `Exp::Template` with extracted property references
+- Type checker verifies input has all referenced properties
+- Missing properties are a **compile error**, not a runtime surprise
+- The orchestrator still does the string substitution, but the kernel has already verified the references
+
+### 9.3 CompleteText Typing Rule
+
+```
+Γ ⊢ input : InputType
+Γ ⊢ user_prompt : Template R₁
+Γ ⊢ system_prompt : Template R₂
+InputType has all properties in R₁ ∪ R₂
+──────────────────────────────────────────
+Γ ⊢ CompleteText(input) { user_prompt; system_prompt; ... } : String
+```
+
+The only difference from CompleteJson: the output type is `String` (unstructured text) rather than a typed class `C`. The input validation via templates is identical.
+
+### 9.4 What Changes in the Orchestrator
+
+Nothing — the orchestrator's `formatPrompt` function continues to do the `{{...}}` substitution at runtime. The template type is a kernel-side compile-time check. The orchestrator doesn't need to know about it.
+
+### 9.5 What Changes in the Program Ontology
+
+The `user_prompt` and `system_prompt` properties on the completion argument change from `data_type: string` to `data_type: template`:
+
+```json
+{
+  "@id": "urn:eigenius:program:components:completion:user_prompt",
+  "urn:eigenius:core:data_type": "urn:eigenius:core:template"
+}
+```
+
+This is the only ontology change. The rest is in the type checker and expression parser.
+
+---
+
+## 10. Implementation Plan
+
+### 10.1 Template Type Steps
+
+1. Add `template` data type to core ontology (`ontologies/core/core-ontology.json`)
+2. Update `user_prompt` and `system_prompt` property definitions to `data_type: template`
+3. Add `Exp::Template` and `Val::Template` to Mini-TT terms and values
+4. Add template parsing in `expr.rs` — extract `{{iri}}` references, resolve types from layer
+5. Add type checking rule: template literal → `Template { prop₁ : T₁, ... }`
+6. Add combined requirement merging for multiple templates in a component argument
+7. Add input type compatibility check: verify program's input type has all required properties
+8. Update ESL compiler to handle `template` data type in property definitions
+9. Update CompleteText handler to validate template references at compile time (replaces runtime fallback)
+
+### 10.2 Where Each Piece Lives
 
 | Concern | Location | Rationale |
 |---------|----------|-----------|
@@ -436,7 +674,7 @@ The `output_schema` IRI is resolved against the layer chain to obtain the class 
 
 The orchestrator is a thin pass-through: it receives the JSON Schema from the kernel, calls the LLM, and returns the raw simple JSON. **All conversion logic lives in the kernel.**
 
-### 8.2 Execution Flow
+### 10.3 Execution Flow
 
 1. Kernel executor hits `Apply(CompleteJson, input)` with `component_argument` containing `output_schema: C`.
 2. Kernel calls `schema_for_class(C, layer)` → produces `(json_schema, ShortNameTable)`.
@@ -446,7 +684,7 @@ The orchestrator is a thin pass-through: it receives the JSON Schema from the ke
 6. Kernel receives the simple JSON, calls `convert_json_to_resource(json, &table, C)` → typed Eigon `Resource`.
 7. The resource passes validation (guaranteed by the type-level bijectivity check).
 
-### 8.3 Kernel Modules
+### 10.4 Kernel Modules
 
 **`kernel/src/program/schema.rs`:**
 
@@ -470,19 +708,19 @@ pub fn convert_json_to_resource(
 
 This module is useful beyond CompleteJson — any component needing JSON Schema from an ontology class can use it.
 
-### 8.4 Type Checker Integration
+### 10.5 Type Checker Integration
 
 Extend `kernel/src/program/ground.rs` or add a validation pass in `kernel/src/program/expr.rs`:
 
 When type-checking `Apply(CompleteJson, ...)`, extract `output_schema` from the `component_argument` and call `schema_for_class`. If it returns `Err`, the program is ill-typed.
 
-### 8.5 Orchestrator Component
+### 10.6 Orchestrator Component
 
 `orchestration/src/components/complete_json.ts`:
 
 Simpler than CompleteText — receives the JSON Schema in the argument, calls `generateObject()`, returns the raw JSON. No short-name table needed on the orchestrator side.
 
-### 8.6 Proto Addition
+### 10.7 Proto Addition
 
 ```proto
 // Optional: expose schema generation as a standalone RPC
@@ -500,7 +738,7 @@ message GetSchemaResponse {
 }
 ```
 
-### 8.7 Steps
+### 10.8 Steps
 
 1. Implement `ShortNameTable` and `schema_for_class` in the kernel (property collection, constraint mapping, enum/union handling, uniqueness checks)
 2. Implement `convert_json_to_resource` in the kernel
@@ -513,9 +751,9 @@ message GetSchemaResponse {
 
 ---
 
-## 9. Edge Cases and Limitations
+## 11. Edge Cases and Limitations
 
-### 8.1 Properties Without short_name
+### 11.1 Properties Without short_name
 
 Every property used in schema generation must have a `short_name`. Properties without one are skipped with a warning. This should not happen for well-formed ontologies (short_name is required on Property).
 
@@ -537,7 +775,7 @@ If the LLM omits a required field, `generateObject()` will retry or fail. The sc
 
 ---
 
-## 10. Decisions
+## 12. Decisions
 
 | Question | Decision | Rationale |
 |----------|----------|-----------|
@@ -548,3 +786,8 @@ If the LLM omits a required field, `generateObject()` will retry or fail. The sc
 | Circular references | Rejected | Cannot produce finite JSON Schema |
 | Extra LLM keys | Silently ignored | Defensive; don't fail on LLM over-generation |
 | Format for ShortNameTable over wire | CBOR | Consistent with other kernel → orchestrator data |
+| Template validation approach | Template as data type (Option B) | Template type carries property requirements; type checker verifies input compatibility; one system, not two |
+| How kernel identifies template properties | `data_type: template` on the property definition | Ontology-driven; no hardcoded knowledge of which properties are templates |
+| Template parsing | At compile time (ESL/JSON → Mini-TT) | Parse once, store in term; type checker sees structured references, not strings |
+| Input type inference from templates | Merge all template requirements across user_prompt + system_prompt | Deduplicate; `{{string}}` subsumes all; inferred type is the minimum Sigma |
+| Applies to which components | Both CompleteText and CompleteJson | Template type validates the input contract; schema generation validates the output contract |
