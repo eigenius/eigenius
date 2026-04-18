@@ -3,6 +3,7 @@
 //! Ported from `Main.hs` lines 198-217 in the Mini-TT reference.
 //! Extended with capability modes (Pure/Read/IO) per D9.
 
+use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, Patt};
@@ -23,6 +24,7 @@ pub enum EvalCtx {
     IO {
         layer: Arc<Layer>,
         registry: Arc<ComponentRegistry>,
+        institutions: Arc<InstitutionRegistry>,
         trace_store: Option<Arc<dyn TraceStore>>,
         /// ComponentTraces produced during this evaluation (for trace layer commits).
         dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
@@ -96,12 +98,17 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
         Exp::Snd(e) => ev(e).vsnd(),
 
         Exp::App(e1, e2) => {
-            // In IO mode, check if the function is a component dispatch
-            if let EvalCtx::IO { registry, .. } = ctx {
+            // In IO mode, check if the function is a component or institution dispatch
+            if let EvalCtx::IO {
+                registry,
+                institutions,
+                ..
+            } = ctx
+            {
                 if let Exp::Var(name) = e1.as_ref() {
+                    // Check component registry first
                     if registry.get(name).is_some() {
                         let arg_val = ev(e2);
-                        // Unpack Pair(input, comp_arg) if present
                         let (input_val, comp_arg) = match &arg_val {
                             Val::Pair(input, comp_arg) => {
                                 (input.as_ref().clone(), Some(comp_arg.as_ref()))
@@ -109,6 +116,13 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                             other => (other.clone(), None),
                         };
                         return dispatch_component(name, &input_val, comp_arg, ctx);
+                    }
+                    // Check institution registry for fiber queries
+                    if let Ok(inst_iri) = Iri::parse(name) {
+                        if institutions.get(&inst_iri).is_some() {
+                            let arg_val = ev(e2);
+                            return dispatch_fiber_query(&inst_iri, &arg_val, ctx);
+                        }
                     }
                 }
             }
@@ -233,6 +247,7 @@ fn dispatch_component(
             layer,
             trace_store,
             dispatched_traces,
+            ..
         } => (registry, layer, trace_store, dispatched_traces),
         _ => panic!("dispatch_component called outside IO mode"),
     };
@@ -300,6 +315,37 @@ fn val_to_resource(val: &Val) -> crate::ontology::resource::Resource {
             // This is a lossy conversion — not all Vals map to Resources
             crate::ontology::resource::Resource::new_embedded()
         }
+    }
+}
+
+/// Dispatch a fiber query to an institution.
+fn dispatch_fiber_query(institution_iri: &Iri, query_val: &Val, ctx: &EvalCtx) -> Val {
+    let (institutions, layer) = match ctx {
+        EvalCtx::IO {
+            institutions,
+            layer,
+            ..
+        } => (institutions, layer),
+        _ => panic!("dispatch_fiber_query called outside IO mode"),
+    };
+
+    let reasoner = match institutions.get(institution_iri) {
+        Some(r) => r,
+        None => return query_val.clone(), // Unknown institution — return input
+    };
+
+    let query_resource = val_to_resource(query_val);
+
+    // Create a temporary ExecutionContext for the institution
+    let exec_ctx = crate::context::ExecutionContext::new(
+        Arc::clone(layer),
+        "fiber_query",
+        crate::context::ExecutionMode::ReadOnly,
+    );
+
+    match reasoner.query(&query_resource, &exec_ctx) {
+        Ok(result) => Val::ResourceVal(Box::new(result)),
+        Err(e) => panic!("fiber query failed: {e}"),
     }
 }
 

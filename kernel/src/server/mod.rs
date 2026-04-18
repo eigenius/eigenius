@@ -26,6 +26,7 @@ pub struct EigeniusService {
     context: Arc<RwLock<ExecutionContext>>,
     components: Arc<ComponentRegistry>,
     trace_store: Arc<dyn TraceStore>,
+    institutions: Arc<crate::institution::InstitutionRegistry>,
 }
 
 impl EigeniusService {
@@ -41,6 +42,7 @@ impl EigeniusService {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(components),
             trace_store: Arc::new(InMemoryTraceStore::new()),
+            institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
         })
     }
 
@@ -54,6 +56,7 @@ impl EigeniusService {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(components),
             trace_store,
+            institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
         })
     }
 
@@ -373,6 +376,107 @@ impl EigeniusKernel for EigeniusService {
             version: env!("CARGO_PKG_VERSION").to_string(),
             layer_count: 2, // core + program ontology
             resource_count: all.len() as u64,
+        }))
+    }
+
+    async fn fiber_query(
+        &self,
+        request: Request<FiberQueryRequest>,
+    ) -> Result<Response<FiberQueryResponse>, Status> {
+        let req = request.into_inner();
+        let inst_iri = Iri::parse(&req.institution_iri)
+            .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
+
+        let reasoner = self
+            .institutions
+            .get(&inst_iri)
+            .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
+
+        let query_resources = Self::parse_resources(&req.query, &req.content_type)?;
+        let query = query_resources
+            .into_iter()
+            .next()
+            .ok_or_else(|| Status::invalid_argument("no query resource"))?;
+
+        let ctx = self.context.read().await;
+        match reasoner.query(&query, &ctx) {
+            Ok(result) => Ok(Response::new(FiberQueryResponse {
+                success: true,
+                result: Self::serialize_resource(&result),
+                error: String::new(),
+            })),
+            Err(e) => Ok(Response::new(FiberQueryResponse {
+                success: false,
+                result: Vec::new(),
+                error: format!("{e}"),
+            })),
+        }
+    }
+
+    async fn discover_morphisms(
+        &self,
+        request: Request<DiscoverMorphismsRequest>,
+    ) -> Result<Response<DiscoverMorphismsResponse>, Status> {
+        let req = request.into_inner();
+        let inst_iri = Iri::parse(&req.institution_iri)
+            .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
+
+        let reasoner = self
+            .institutions
+            .get(&inst_iri)
+            .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
+
+        let mut resources = Vec::new();
+        for data in &req.resources {
+            let parsed = Self::parse_resources(data, &req.content_type)?;
+            resources.extend(parsed);
+        }
+
+        let ctx = self.context.read().await;
+        match reasoner.discover_morphisms(&resources, &ctx) {
+            Ok(morphisms) => {
+                let serialized: Vec<Vec<u8>> =
+                    morphisms.iter().map(Self::serialize_resource).collect();
+                Ok(Response::new(DiscoverMorphismsResponse {
+                    success: true,
+                    morphisms: serialized,
+                    error: String::new(),
+                }))
+            }
+            Err(e) => Ok(Response::new(DiscoverMorphismsResponse {
+                success: false,
+                morphisms: Vec::new(),
+                error: format!("{e}"),
+            })),
+        }
+    }
+
+    async fn list_institutions(
+        &self,
+        _request: Request<ListInstitutionsRequest>,
+    ) -> Result<Response<ListInstitutionsResponse>, Status> {
+        let infos: Vec<proto::InstitutionInfo> = self
+            .institutions
+            .list()
+            .iter()
+            .map(|info| proto::InstitutionInfo {
+                iri: info.iri.as_str().to_string(),
+                name: info.name.clone(),
+                morphism_types: info
+                    .morphism_type_iris
+                    .iter()
+                    .map(|i| i.as_str().to_string())
+                    .collect(),
+                query_types: info
+                    .query_type_iris
+                    .iter()
+                    .map(|i| i.as_str().to_string())
+                    .collect(),
+            })
+            .collect();
+
+        Ok(Response::new(ListInstitutionsResponse {
+            institutions: infos,
         }))
     }
 }

@@ -112,6 +112,9 @@ enum Commands {
         file: String,
     },
 
+    /// List registered institutions (requires --endpoint)
+    ListInstitutions,
+
     /// Show version and build info
     Version,
 }
@@ -157,6 +160,7 @@ async fn main() {
             } => remote_run(endpoint, &program_file, &input_file, cli.json).await,
             Commands::Load { file } => remote_load(endpoint, &file, cli.json).await,
             Commands::Reflect { file } => remote_reflect(endpoint, &file, cli.json).await,
+            Commands::ListInstitutions => remote_list_institutions(endpoint, cli.json).await,
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -187,6 +191,10 @@ async fn main() {
         Commands::Serve { port, orchestrator } => cmd_serve(port, orchestrator.as_deref()).await,
         Commands::Compile { file } => cmd_compile(&file, cli.json),
         Commands::Reflect { file } => cmd_reflect(&file, cli.json),
+        Commands::ListInstitutions => {
+            eprintln!("'list-institutions' requires --endpoint");
+            std::process::exit(1);
+        }
         Commands::Db { command } => cmd_db(command),
         Commands::Version => {
             println!("eigenius {}", env!("CARGO_PKG_VERSION"));
@@ -879,6 +887,51 @@ async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
             } else {
                 eprintln!("Reflect failed");
                 std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_list_institutions(endpoint: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    match client
+        .list_institutions(eigenius_kernel::server::proto::ListInstitutionsRequest {})
+        .await
+    {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let json: Vec<serde_json::Value> = resp
+                    .institutions
+                    .iter()
+                    .map(|i| {
+                        serde_json::json!({
+                            "iri": i.iri,
+                            "name": i.name,
+                            "morphism_types": i.morphism_types,
+                            "query_types": i.query_types,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string(&json).unwrap());
+            } else if resp.institutions.is_empty() {
+                println!("No institutions registered.");
+            } else {
+                println!("Registered institutions:");
+                for inst in &resp.institutions {
+                    println!("  {} ({})", inst.name, inst.iri);
+                    for mt in &inst.morphism_types {
+                        println!("    morphism: {mt}");
+                    }
+                    for qt in &inst.query_types {
+                        println!("    query:    {qt}");
+                    }
+                }
             }
         }
         Err(e) => {

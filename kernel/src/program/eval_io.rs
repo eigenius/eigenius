@@ -4,6 +4,7 @@
 //! in IO mode. Programs are parsed to Mini-TT terms, then evaluated
 //! with component dispatch, trace memoization, and resource conversion.
 
+use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::{eval_ctx, EvalCtx};
@@ -31,6 +32,25 @@ pub fn execute_program_nbe(
     registry: Arc<ComponentRegistry>,
     trace_store: Option<Arc<dyn TraceStore>>,
 ) -> Result<NbeExecutionResult, ProgramError> {
+    execute_program_nbe_with_institutions(
+        program,
+        input,
+        layer,
+        registry,
+        Arc::new(InstitutionRegistry::new()),
+        trace_store,
+    )
+}
+
+/// Execute a program resource via NbE in IO mode with institution support.
+pub fn execute_program_nbe_with_institutions(
+    program: &Resource,
+    input: &Resource,
+    layer: Arc<Layer>,
+    registry: Arc<ComponentRegistry>,
+    institutions: Arc<InstitutionRegistry>,
+    trace_store: Option<Arc<dyn TraceStore>>,
+) -> Result<NbeExecutionResult, ProgramError> {
     // Extract the program body expression
     let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
     let body = match program.get(&body_prop) {
@@ -47,6 +67,7 @@ pub fn execute_program_nbe(
     let ctx = EvalCtx::IO {
         layer,
         registry,
+        institutions,
         trace_store,
         dispatched_traces: Arc::clone(&dispatched_traces),
     };

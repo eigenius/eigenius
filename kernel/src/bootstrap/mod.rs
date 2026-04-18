@@ -68,9 +68,9 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads three ontology layers: core → program → reflection.
+/// Loads four ontology layers: core → program → reflection → institution.
 /// All are validated. Returns an `ExecutionContext` with the
-/// reflection layer as head.
+/// institution layer as head.
 pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
     let core = load_layer(
         "core",
@@ -90,8 +90,14 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
         Some(program),
     )?;
 
+    let institution = load_layer(
+        "institution",
+        include_str!("../../../ontologies/institution/institution-ontology.json"),
+        Some(reflection),
+    )?;
+
     Ok(ExecutionContext::new(
-        reflection,
+        institution,
         "working",
         ExecutionMode::ReadWrite,
     ))
@@ -105,10 +111,13 @@ mod tests {
     #[test]
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
-        // Head is the reflection layer (on top of program, on top of core)
+        // Head is the institution layer (on top of reflection, program, core)
         assert!(!ctx.head().is_root());
+        // Reflection layer (parent of institution)
+        let reflection = ctx.head().parent().unwrap();
+        assert!(!reflection.is_root());
         // Program layer (parent of reflection)
-        let program = ctx.head().parent().unwrap();
+        let program = reflection.parent().unwrap();
         assert!(!program.is_root());
         // Core layer (parent of program) should be root
         assert!(program.parent().unwrap().is_root());
@@ -272,6 +281,37 @@ mod tests {
             assert!(
                 ctx.resolve(&iri).is_some(),
                 "should resolve epistemic status {status}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_institution_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in [
+            "Institution",
+            "FiberMorphism",
+            "FiberQuery",
+            "StructuralProperty",
+            "PropertyKind",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:institution:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve institution class {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn can_resolve_property_kinds() {
+        let ctx = bootstrap().unwrap();
+        for kind in ["reflexive", "transitive", "symmetric", "antisymmetric"] {
+            let iri =
+                Iri::parse(&format!("urn:eigenius:institution:property_kinds:{kind}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve property kind {kind}"
             );
         }
     }
