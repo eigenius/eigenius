@@ -115,6 +115,13 @@ enum Commands {
     /// List registered institutions (requires --endpoint)
     ListInstitutions,
 
+    /// Generate JSON Schema for an ontology class (requires --endpoint)
+    GetSchema {
+        /// IRI of the class
+        #[arg(value_name = "CLASS_IRI")]
+        class_iri: String,
+    },
+
     /// Show version and build info
     Version,
 }
@@ -161,6 +168,9 @@ async fn main() {
             Commands::Load { file } => remote_load(endpoint, &file, cli.json).await,
             Commands::Reflect { file } => remote_reflect(endpoint, &file, cli.json).await,
             Commands::ListInstitutions => remote_list_institutions(endpoint, cli.json).await,
+            Commands::GetSchema { class_iri } => {
+                remote_get_schema(endpoint, &class_iri, cli.json).await
+            }
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -193,6 +203,10 @@ async fn main() {
         Commands::Reflect { file } => cmd_reflect(&file, cli.json),
         Commands::ListInstitutions => {
             eprintln!("'list-institutions' requires --endpoint");
+            std::process::exit(1);
+        }
+        Commands::GetSchema { .. } => {
+            eprintln!("'get-schema' requires --endpoint");
             std::process::exit(1);
         }
         Commands::Db { command } => cmd_db(command),
@@ -360,6 +374,17 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
     // Parse and type-check
     match eigenius_kernel::program::expr::parse_program(&program, ctx.head()) {
         Ok((_term, typ)) => {
+            // Validate output schemas (bijectivity check, D8 §4)
+            let schema_errors =
+                eigenius_kernel::program::schema::validate_output_schemas(&program, ctx.head());
+            if !schema_errors.is_empty() {
+                eprintln!("Schema validation failed:");
+                for e in &schema_errors {
+                    eprintln!("  {e}");
+                }
+                std::process::exit(1);
+            }
+
             if json_output {
                 println!("{{\"status\":\"ok\",\"type\":\"{typ:?}\"}}");
             } else {
@@ -932,6 +957,31 @@ async fn remote_list_institutions(endpoint: &str, json_output: bool) {
                         println!("    query:    {qt}");
                     }
                 }
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_get_schema(endpoint: &str, class_iri: &str, _json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    match client
+        .get_schema(eigenius_kernel::server::proto::GetSchemaRequest {
+            class_iri: class_iri.to_string(),
+        })
+        .await
+    {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if resp.success {
+                println!("{}", resp.json_schema);
+            } else {
+                eprintln!("Schema generation failed: {}", resp.error);
+                std::process::exit(1);
             }
         }
         Err(e) => {

@@ -210,7 +210,7 @@ fn generate_property_schema(
                     ));
                 }
             }
-            // Check class_types (nested object)
+            // Check class_types (nested object or union)
             let ct_iri = Iri::parse(wk::CLASS_TYPES).unwrap();
             if let Some(ct_val) = prop_def.get(&ct_iri) {
                 let classes = ct_val.as_iri_array();
@@ -221,6 +221,43 @@ fn generate_property_schema(
                             generate_object_schema(&classes[0], layer, table, visited, depth + 1)?,
                             &description,
                         ),
+                    ));
+                } else if classes.len() > 1 {
+                    // Union type — oneOf with _type discriminator (D8 §3.6)
+                    let mut variants = Vec::new();
+                    for class_iri in &classes {
+                        let class_def = layer.resolve(class_iri).ok_or_else(|| {
+                            SchemaError::ClassNotFound(class_iri.as_str().to_string())
+                        })?;
+                        let class_short = class_def
+                            .get(&Iri::parse(wk::SHORT_NAME).unwrap())
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                SchemaError::MissingShortName(class_iri.as_str().to_string())
+                            })?
+                            .to_string();
+
+                        let mut variant_schema =
+                            generate_object_schema(class_iri, layer, table, visited, depth + 1)?;
+
+                        // Add _type discriminator to the variant
+                        if let Some(props) = variant_schema["properties"].as_object_mut() {
+                            props.insert(
+                                "_type".to_string(),
+                                serde_json::json!({"type": "string", "const": class_short}),
+                            );
+                        }
+                        if let Some(req) = variant_schema["required"].as_array_mut() {
+                            req.insert(0, serde_json::Value::String("_type".to_string()));
+                        } else {
+                            variant_schema["required"] = serde_json::json!(["_type"]);
+                        }
+
+                        variants.push(variant_schema);
+                    }
+                    return Ok((
+                        short_name,
+                        add_description(serde_json::json!({"oneOf": variants}), &description),
                     ));
                 }
             }
@@ -463,6 +500,52 @@ pub fn validate_component_templates(
     errors
 }
 
+/// Validate output schemas referenced in component arguments.
+///
+/// Walks the program's expression tree looking for component arguments
+/// that reference a class via `output_schema`. For each, calls
+/// `schema_for_class` to verify the bijectivity invariant (D8 §4).
+/// Returns errors for any class that fails schema generation.
+pub fn validate_output_schemas(
+    program: &crate::ontology::resource::Resource,
+    layer: &Layer,
+) -> Vec<SchemaError> {
+    let mut errors = Vec::new();
+    let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
+    if let Some(Value::Embedded(body)) = program.get(&body_prop) {
+        validate_output_schemas_walk(body, layer, &mut errors);
+    }
+    errors
+}
+
+fn validate_output_schemas_walk(
+    resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
+    errors: &mut Vec<SchemaError>,
+) {
+    let comp_arg_prop = Iri::parse("urn:eigenius:program:component_argument").unwrap();
+    let output_schema_prop =
+        Iri::parse("urn:eigenius:program:components:completion:output_schema").unwrap();
+
+    // Check if this node has a component_argument with output_schema
+    if let Some(Value::Embedded(comp_arg)) = resource.get(&comp_arg_prop) {
+        if let Some(Value::String(class_iri_str)) = comp_arg.get(&output_schema_prop) {
+            if let Ok(class_iri) = Iri::parse(class_iri_str) {
+                if let Err(e) = schema_for_class(&class_iri, layer) {
+                    errors.push(e);
+                }
+            }
+        }
+    }
+
+    // Recurse into all embedded children
+    for val in resource.properties().values() {
+        if let Value::Embedded(child) = val {
+            validate_output_schemas_walk(child, layer, errors);
+        }
+    }
+}
+
 /// Parse a template string and extract {{iri}} references.
 pub fn parse_template_references(template: &str) -> Vec<String> {
     let re = regex::Regex::new(r"\{\{(\S+?)\}\}").unwrap();
@@ -565,5 +648,208 @@ mod tests {
                 .as_str(),
             Some("urn:test:severity:high")
         );
+    }
+
+    // --- Tests using the schema-test.json ontology ---
+
+    fn build_schema_test_layer() -> std::sync::Arc<crate::layer::Layer> {
+        let ctx = bootstrap::bootstrap().unwrap();
+        let test_json = include_str!("../../../ontologies/examples/schema-test.json");
+        let resources = crate::ontology::eigon_json::parse_document(test_json).unwrap();
+        let mut builder = crate::layer::LayerBuilder::new("schema-test", Some(ctx.head().clone()));
+        for r in resources {
+            builder.add_resource(r).unwrap();
+        }
+        std::sync::Arc::new(builder.build())
+    }
+
+    #[test]
+    fn schema_incident_has_enum() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (schema, table) = schema_for_class(&iri, &layer).unwrap();
+
+        // severity should be an enum with low/medium/high
+        let severity = &schema["properties"]["severity"];
+        assert_eq!(severity["type"], "string");
+        let enum_vals = severity["enum"].as_array().unwrap();
+        assert_eq!(enum_vals.len(), 3);
+        assert!(enum_vals.contains(&serde_json::json!("low")));
+        assert!(enum_vals.contains(&serde_json::json!("medium")));
+        assert!(enum_vals.contains(&serde_json::json!("high")));
+
+        // Enum table should have entries
+        let sev_iri = Iri::parse("urn:eigenius:test:schema:severity").unwrap();
+        assert_eq!(
+            table.enums.get(&(sev_iri.clone(), "high".to_string())),
+            Some(&Iri::parse("urn:eigenius:test:schema:severity:high").unwrap())
+        );
+    }
+
+    #[test]
+    fn schema_incident_has_nested_object() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (schema, _table) = schema_for_class(&iri, &layer).unwrap();
+
+        // location should be a nested object with city, country (required) and building (optional)
+        let location = &schema["properties"]["location"];
+        assert_eq!(location["type"], "object");
+        let loc_props = location["properties"].as_object().unwrap();
+        assert!(loc_props.contains_key("city"));
+        assert!(loc_props.contains_key("country"));
+        assert!(loc_props.contains_key("building"));
+
+        let loc_required = location["required"].as_array().unwrap();
+        assert!(loc_required.contains(&serde_json::json!("city")));
+        assert!(loc_required.contains(&serde_json::json!("country")));
+        // building is recommended, not required
+        assert!(!loc_required.contains(&serde_json::json!("building")));
+    }
+
+    #[test]
+    fn schema_incident_has_union() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (schema, _table) = schema_for_class(&iri, &layer).unwrap();
+
+        // outcome should be oneOf with _type discriminator
+        let outcome = &schema["properties"]["outcome"];
+        let one_of = outcome["oneOf"].as_array().unwrap();
+        assert_eq!(one_of.len(), 2);
+
+        // Each variant should have _type in required
+        for variant in one_of {
+            let req = variant["required"].as_array().unwrap();
+            assert!(req.contains(&serde_json::json!("_type")));
+            let props = variant["properties"].as_object().unwrap();
+            assert!(props.contains_key("_type"));
+            let type_field = &props["_type"];
+            assert_eq!(type_field["type"], "string");
+            // Should have a const value (Resolved or Escalated)
+            assert!(type_field.get("const").is_some());
+        }
+
+        // Verify the specific variants
+        let variant_types: Vec<&str> = one_of
+            .iter()
+            .filter_map(|v| v["properties"]["_type"]["const"].as_str())
+            .collect();
+        assert!(variant_types.contains(&"Resolved"));
+        assert!(variant_types.contains(&"Escalated"));
+    }
+
+    #[test]
+    fn schema_incident_has_array() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (schema, _table) = schema_for_class(&iri, &layer).unwrap();
+
+        // tags should be an array of strings (recommended, so present but not required)
+        let tags = &schema["properties"]["tags"];
+        assert_eq!(tags["type"], "array");
+        assert_eq!(tags["items"]["type"], "string");
+
+        // tags is recommended, not in required array
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.contains(&serde_json::json!("tags")));
+    }
+
+    #[test]
+    fn schema_incident_required_fields() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (schema, _table) = schema_for_class(&iri, &layer).unwrap();
+
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("title")));
+        assert!(required.contains(&serde_json::json!("severity")));
+        assert!(required.contains(&serde_json::json!("location")));
+        assert!(required.contains(&serde_json::json!("outcome")));
+    }
+
+    #[test]
+    fn schema_incident_constraints() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (schema, _table) = schema_for_class(&iri, &layer).unwrap();
+
+        // escalation_level in the Escalated variant should have min/max
+        let outcome = &schema["properties"]["outcome"];
+        let one_of = outcome["oneOf"].as_array().unwrap();
+        let escalated = one_of
+            .iter()
+            .find(|v| v["properties"]["_type"]["const"] == "Escalated")
+            .unwrap();
+        let esc_level = &escalated["properties"]["escalation_level"];
+        assert_eq!(esc_level["type"], "integer");
+        assert_eq!(esc_level["minimum"], 1);
+        assert_eq!(esc_level["maximum"], 5);
+    }
+
+    #[test]
+    fn schema_duplicate_short_name_rejected() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:DuplicateShortNameClass").unwrap();
+        let result = schema_for_class(&iri, &layer);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, SchemaError::DuplicateShortName(ref name, _, _) if name == "name"),
+            "expected DuplicateShortName error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn schema_roundtrip_with_enum() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:Incident").unwrap();
+        let (_schema, table) = schema_for_class(&iri, &layer).unwrap();
+
+        // Simulate an LLM response with short-name keys
+        let json = serde_json::json!({
+            "title": "Server outage",
+            "severity": "high",
+            "location": {"city": "Berlin", "country": "Germany"},
+            "outcome": {"_type": "Resolved", "resolution_notes": "Rebooted"},
+            "tags": ["infrastructure", "critical"]
+        });
+
+        let resource = convert_json_to_resource(&json, &table, &iri).unwrap();
+
+        // title → string
+        assert_eq!(
+            resource
+                .get(&Iri::parse("urn:eigenius:test:schema:title").unwrap())
+                .unwrap()
+                .as_str(),
+            Some("Server outage")
+        );
+        // severity → enum IRI
+        assert_eq!(
+            resource
+                .get(&Iri::parse("urn:eigenius:test:schema:severity").unwrap())
+                .unwrap()
+                .as_str(),
+            Some("urn:eigenius:test:schema:severity:high")
+        );
+        // tags → array of strings
+        let tags = resource
+            .get(&Iri::parse("urn:eigenius:test:schema:tags").unwrap())
+            .unwrap();
+        match tags {
+            Value::Array(arr) => {
+                assert_eq!(arr.len(), 2);
+            }
+            _ => panic!("expected array for tags"),
+        }
+    }
+
+    #[test]
+    fn schema_class_not_found() {
+        let layer = build_schema_test_layer();
+        let iri = Iri::parse("urn:eigenius:test:schema:NonExistent").unwrap();
+        let result = schema_for_class(&iri, &layer);
+        assert!(matches!(result, Err(SchemaError::ClassNotFound(_))));
     }
 }

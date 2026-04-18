@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented
 **Required before:** CompleteJson implementation
 **Depends on:** D1 (Eigon format), D3 (program model), D6 (execution architecture), D9 (NbE unification)
 
