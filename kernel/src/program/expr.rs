@@ -185,7 +185,7 @@ fn parse_pair(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 
 /// Construct ClassName { prop₁: e₁, prop₂: e₂ }
 fn parse_construct(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
-    let _class_iri = get_iri(resource, "urn:eigenius:program:class")?;
+    let class_iri = get_iri(resource, "urn:eigenius:program:class")?;
 
     let fields_prop = Iri::parse("urn:eigenius:program:fields").unwrap();
     let fields = match resource.get(&fields_prop) {
@@ -193,24 +193,18 @@ fn parse_construct(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         _ => return Err("Construct: missing 'fields'".to_string()),
     };
 
-    // Build nested pairs from fields, ordered by property IRI
-    let mut field_exps: Vec<Exp> = Vec::new();
-    for val in fields.properties().values() {
+    // Build named fields: [(prop_iri, expr), ...]
+    let mut named_fields: Vec<(Iri, Box<Exp>)> = Vec::new();
+    for (prop_iri, val) in fields.properties() {
         let field_exp = match val {
             Value::Embedded(r) => parse_expression(r, layer)?,
             Value::String(s) => Exp::Var(s.clone()),
             _ => Exp::Unit,
         };
-        field_exps.push(field_exp);
+        named_fields.push((prop_iri.clone(), Box::new(field_exp)));
     }
 
-    // Build right-nested pairs: (e₁, (e₂, (e₃, ())))
-    let mut result = Exp::Unit;
-    for exp in field_exps.into_iter().rev() {
-        result = Exp::Pair(Box::new(exp), Box::new(result));
-    }
-
-    Ok(result)
+    Ok(Exp::Construct(class_iri, named_fields))
 }
 
 /// e.property

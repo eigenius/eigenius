@@ -236,6 +236,21 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                 other => panic!("property access on non-resource: {:?}", other),
             }
         }
+
+        Exp::Construct(class_iri, fields) => {
+            use crate::ontology::resource::{Resource, Value};
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:is_a").unwrap(),
+                Value::Array(vec![Value::String(class_iri.as_str().to_string())]),
+            );
+            for (prop_iri, expr) in fields {
+                let val = ev(expr);
+                let rval = val_to_resource_value(&val);
+                r.set(prop_iri.clone(), rval);
+            }
+            Val::ResourceVal(Box::new(r))
+        }
     }
 }
 
@@ -593,6 +608,27 @@ fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
         }
         RVal::Embedded(r) => Val::ResourceVal(r.clone()),
         _ => Val::Unit,
+    }
+}
+
+/// Convert a Mini-TT Val to an Eigon resource Value (for Construct).
+fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
+    use crate::ontology::resource::Value as RVal;
+    match val {
+        Val::ResourceVal(r) => {
+            // If the resource has a single string value (e.g. CompleteText output),
+            // extract it. Otherwise embed the full resource.
+            let props: Vec<_> = r.properties().iter().collect();
+            if props.len() == 1 {
+                if let (_, RVal::String(s)) = props[0] {
+                    return RVal::String(s.clone());
+                }
+            }
+            RVal::Embedded(r.clone())
+        }
+        Val::Unit => RVal::String(String::new()),
+        Val::EigonClass(iri) => RVal::String(iri.as_str().to_string()),
+        _ => RVal::Embedded(Box::new(crate::ontology::resource::Resource::new_embedded())),
     }
 }
 
