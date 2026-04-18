@@ -327,11 +327,13 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
-## 8. Phase 5 — Traces and Incremental Execution
+## 8. Phase 5 — Traces and Incremental Execution ✓
 
 **Goal:** Reasoning traces are persisted as resources in the knowledge graph and drive incremental execution. The executor unifies with NbE so that trace-driven evaluation is normalization — existing traces short-circuit, only untraced subexpressions dispatch.
 
 **Duration estimate:** 4–6 weeks.
+
+**Status:** Complete. NbE evaluator with capability modes (Pure/Read/IO) replaces the old executor. Type theory extended with Id types, decidable equality, native constraint checking, and universe stratification. Ground type resolution maps full ontology (requires, recommends, allows_only, class_types). ComponentTraces committed to trace layers as proof artifacts. Incremental execution works within a server session. Known gap: persistent trace store (RocksTraceStore) not wired into the server — deferred to Phase 9. See `docs/design/d9-nbe-unification-and-type-extensions.md`.
 
 ### 8.1 Deliverables
 
