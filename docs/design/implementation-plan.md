@@ -80,7 +80,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 4.5 | ESL | ✓ | Human-friendly surface syntax compiles to Eigon-JSON |
 | 5 | Traces + NbE | ✓ | Trace persistence, type theory extensions, NbE with capability modes |
 | 6 | Institutions | ✓ | Grothendieck institution protocol, fiber reasoners, morphism validation |
-| 7 | CompleteJson | | Structured LLM output via JSON Schema from ontology classes |
+| 7 | CompleteJson | ✓ | Structured LLM output via JSON Schema from ontology classes |
 | 8 | WASM | | Untrusted capabilities run sandboxed via Wasmtime |
 | 8.5 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 8.9 | Codata + Streams | | Persistent traces, resumable execution, coinductive streams |
@@ -410,25 +410,27 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
-## 10. Phase 7 — CompleteJson (Structured LLM Output)
+## 10. Phase 7 — CompleteJson (Structured LLM Output) ✓
 
 **Goal:** The CompleteJson component calls an LLM with a JSON Schema derived from an ontology class, receives structured JSON, and converts it back to a typed Eigon resource with full type-level guarantees.
 
 **Duration estimate:** 3–4 weeks.
 
+**Status:** Complete. Schema generation from ontology classes with enums (`allows_only`), nested objects (`class_types`), and union types (multiple `class_types` with `_type` discriminator). Bijectivity check integrated into `ValidateProgram` and CLI `program-validate`. `GetSchema` RPC and CLI `get-schema` command. `complete_json.ts` orchestrator handler using Vercel AI SDK `generateObject()`. Template data type for prompt validation. Ontology-driven component dispatch via `argument_type`. Patent analysis demo (CompleteJson → CompleteText → Construct pipeline). 14 schema-specific tests covering enums, nested objects, unions, constraints, duplicate short name rejection, and round-trips. See `docs/design/d8-complete-json-component.md`.
+
 ### 10.1 Deliverables
 
 - `schema_for_class` in the kernel: generate JSON Schema + `ShortNameTable` from a class definition. Walk class hierarchy, map data types, constraints, `allows_only` → enums, `class_types` → nested objects / `oneOf` unions.
 - `convert_json_to_resource`: convert LLM JSON response back to typed Eigon resource using the `ShortNameTable`. Bijective mapping guaranteed by construction.
-- Type-level bijectivity check: the Mini-TT type checker verifies that the output class admits a bijective short-name mapping when validating programs that use CompleteJson. Ill-typed programs rejected before execution.
-- `GetSchema` RPC: expose schema generation for tooling and debugging.
+- Type-level bijectivity check: `validate_output_schemas` walks the program expression tree and verifies that each `output_schema` class admits a bijective short-name mapping. Integrated into `ValidateProgram` RPC and CLI `program-validate`.
+- `GetSchema` RPC: expose schema generation for tooling and debugging. CLI `get-schema` command.
 - `complete_json.ts` orchestrator handler: receives JSON Schema, calls `generateObject()`, returns raw JSON.
-- End-to-end test with enums, nested objects, and union types.
+- End-to-end test with enums, nested objects, and union types (`ontologies/examples/schema-test.json`).
 
-### 10.2 Key decisions required
+### 10.2 Resolved decisions
 
-- Recursion depth limit for nested class schemas (proposed: 4 levels)
-- Whether `_type` discriminator field name is configurable
+- Recursion depth limit for nested class schemas: 4 levels
+- `_type` discriminator field name is fixed (not configurable)
 
 ### 10.3 References
 
@@ -579,7 +581,7 @@ The following design documents must be written and reviewed before the phase tha
 | D6 | **Execution Architecture and Durability** | **COMPLETED** — `docs/design/d6-execution-architecture.md`. Kernel↔orchestrator boundary, DAPR integration, durable workflows, activity dispatch, reasoning trace ownership, MCP server placement | Phase 4 | Done |
 | D6b | **Reasoning Trace Schema** | **COMPLETED** — `docs/design/d6b-reasoning-trace-schema.md`. ComponentTrace, ProgramTrace, ObservationTrace, VerificationTrace classes. Provenance chain, epistemic status (observed→derived→verified), universe stratification, trace-based memoization | Phase 4 | Done |
 | D7 | **ESL Surface Syntax** | **COMPLETED** — `docs/design/d7-esl-surface-syntax.md`. Two-layer design (HCL-style structural + ML-style expressions), namespace aliases, program/class/property/resource syntax, EBNF grammar | Phase 4.5 | Done |
-| D8 | **CompleteJson Component** | **COMPLETED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping, type-level guarantees via CIC, kernel-side schema generation and conversion | Phase 4 | Done |
+| D8 | **CompleteJson Component** | **IMPLEMENTED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping with bijectivity check in ValidateProgram. Enums (`allows_only`), nested objects (`class_types`), union types (multiple `class_types` with `_type` discriminator). Template data type for prompt validation. `GetSchema` RPC. Patent demo end-to-end | Phase 7 | Done |
 | D9 | **NbE/Executor Unification** | **COMPLETED** — `docs/design/d9-nbe-unification-and-type-extensions.md`. Capability modes (Pure/Read/IO), type theory extensions (Id, DecEq, NativeDecide, universes), complete ground type resolution, trace storage architecture, crash recovery, trace pruning (proofs-as-programs) | Phase 5 | Done |
 | D10 | **Grothendieck Institution Protocol** | **COMPLETED** — `docs/design/d10-grothendieck-institution-protocol.md`. FiberReasoner trait, InstitutionRegistry, ComorphismRegistry, morphism validation dispatch, fiber query dispatch, institution ontology, Eigon as shared signature category, Mini-TT as kernel service (not institution), Lean 4 as verification institution | Phase 6 | Done |
 | D11 | **Codata, Streams, and Resumable Execution** | **COMPLETED** — `docs/design/d11-codata-streams.md`. Coinductive types via copatterns (Abel et al. 2013), stream semantics, tasks as codata, trace-driven replay, concurrent task model, ESL codata syntax, guardedness checking | Phase 8.9 | Done |

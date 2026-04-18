@@ -251,6 +251,17 @@ impl EigeniusKernel for EigeniusService {
                     }
                 }
 
+                // Validate output schemas (bijectivity check, D8 §4)
+                for e in crate::program::schema::validate_output_schemas(&program, ctx.head()) {
+                    template_errors.push(ValidationError {
+                        resource_iri: String::new(),
+                        property_iri: String::new(),
+                        rule: "schema_bijectivity".to_string(),
+                        message: format!("{e}"),
+                        severity: "error".to_string(),
+                    });
+                }
+
                 if template_errors.is_empty() {
                     Ok(Response::new(ValidateProgramResponse {
                         valid: true,
@@ -535,6 +546,29 @@ impl EigeniusKernel for EigeniusService {
         Ok(Response::new(ListInstitutionsResponse {
             institutions: infos,
         }))
+    }
+
+    async fn get_schema(
+        &self,
+        request: Request<GetSchemaRequest>,
+    ) -> Result<Response<GetSchemaResponse>, Status> {
+        let req = request.into_inner();
+        let class_iri = Iri::parse(&req.class_iri)
+            .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
+
+        let ctx = self.context.read().await;
+        match crate::program::schema::schema_for_class(&class_iri, ctx.head()) {
+            Ok((schema, _table)) => Ok(Response::new(GetSchemaResponse {
+                success: true,
+                json_schema: serde_json::to_string_pretty(&schema).unwrap_or_default(),
+                error: String::new(),
+            })),
+            Err(e) => Ok(Response::new(GetSchemaResponse {
+                success: false,
+                json_schema: String::new(),
+                error: format!("{e}"),
+            })),
+        }
     }
 }
 

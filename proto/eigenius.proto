@@ -37,6 +37,9 @@ service EigeniusKernel {
 
   // List registered institutions and their declared fiber structure.
   rpc ListInstitutions(ListInstitutionsRequest) returns (ListInstitutionsResponse);
+
+  // Generate a JSON Schema for an ontology class.
+  rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
 }
 
 // --- Load ---
@@ -194,6 +197,18 @@ message InstitutionInfo {
   string name = 2;
   repeated string morphism_types = 3;  // IRIs of declared morphism classes
   repeated string query_types = 4;     // IRIs of declared query classes
+}
+
+// --- GetSchema ---
+
+message GetSchemaRequest {
+  string class_iri = 1;           // IRI of the class to generate schema for
+}
+
+message GetSchemaResponse {
+  bool success = 1;
+  string json_schema = 2;         // JSON Schema as a JSON string
+  string error = 3;               // Error message if !success
 }
 
 // --- Common ---
