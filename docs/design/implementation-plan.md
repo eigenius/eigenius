@@ -368,32 +368,38 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
-## 9. Phase 6 — Grothendieck Institutions
+## 9. Phase 6 — Grothendieck Institutions ✓
 
 **Goal:** Domain-specific reasoning systems (institutions) contribute structured fibers to the knowledge graph. Each institution provides its own sentences, models, satisfaction relation, and internal morphisms — not just flat data points.
 
 **Duration estimate:** 6–8 weeks.
 
+**Status:** Core protocol complete. `FiberReasoner` trait, `InstitutionRegistry` with dispatch routing, `ComorphismRegistry`, morphism validation dispatch in the validator, fiber query dispatch through NbE, institution ontology (FiberMorphism, FiberQuery, StructuralProperty, PropertyKind), gRPC RPCs (FiberQuery, DiscoverMorphisms, ListInstitutions), CLI `list-institutions` command. Test institution (ordering/refinement with transitivity validation, 5 tests). Bootstrap loads four layers: core → program → reflection → institution. See `docs/design/d10-grothendieck-institution-protocol.md`.
+
+**Deferred:** Fully worked domain examples (mechanical engineering, biopharma) require WASM sandboxing for domain-specific fiber reasoners — deferred to Phase 8.5.
+
 ### 9.1 Deliverables
 
 - `FiberReasoner` trait: the kernel interface for institution-specific reasoning. Methods: `query`, `validate_morphism`, `discover_morphisms`, `fiber_declaration`.
 - Fiber declaration protocol: institutions advertise their morphism types, query types, and structural properties as ordinary ontology resources at registration time.
-- Morphism types as ontology classes: `MeshRefinement`, `ConformationalProximity`, `ParetoDominance` are typed resources in the knowledge graph, stored and validated by the kernel like any other resource.
-- Institution comorphisms: typed translations between institutions. Ground type resolution (class → Sigma type) is the existing comorphism from Eigon to Mini-TT; new comorphisms connect domain institutions.
+- Morphism types as ontology classes: `FiberMorphism` base class with `source`, `target`, `institution_ref` properties. Domain institutions subclass this.
+- Institution comorphisms: `Comorphism` trait with `translate_forward`/`translate_backward`, `ComorphismRegistry`.
 - Cross-institution queries: EigenQL navigates fiber morphisms using existing query syntax (morphisms are resources).
-- Fiber reasoner dispatch: the kernel recognizes `FiberQuery` subclasses and dispatches to the appropriate institution's reasoner.
-- Two worked examples from the institutions paper: (1) mechanical engineering (CAD + FEA + GenAI), (2) biopharmaceutical R&D (docking + ADMET + assays + PK modeling).
+- Fiber reasoner dispatch: the kernel dispatches fiber queries through NbE in IO mode and morphism validation through the validator.
+- Institution ontology: `ontologies/institution/institution-ontology.json` loaded at bootstrap.
+- gRPC: `FiberQuery`, `DiscoverMorphisms`, `ListInstitutions` RPCs.
+- CLI: `list-institutions` command.
 
-### 9.2 Key decisions required
+### 9.2 Resolved decisions
 
-- Whether fiber reasoners are in-process (Rust trait objects) or dispatched (gRPC/WASM)
-- Whether structural properties (e.g., "MeshRefinement is a preorder") are advisory or enforced
-- How institution registration interacts with the layer system
+- Fiber reasoners are in-process Rust trait objects (Phase 6); gRPC for external services and WASM in Phase 8
+- Structural properties are advisory, not enforced by the kernel
+- Institution registration at server startup, ontology resources committed to bootstrap layer chain
 
 ### 9.3 References
 
+- `docs/design/d10-grothendieck-institution-protocol.md` — full specification
 - `docs/papers/eigenius-institutions.tex` — theoretical foundation
-- Appendix A of the paper — FiberReasoner protocol sketch
 
 ---
 
@@ -448,6 +454,31 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 - **Foundation protection:** Attempt to register a capability under `urn:eigenius:foundation:` from a domain layer — verify rejection.
 - **End-to-end:** Load domain ontology with WASM capability, create a resource of the domain class, dispatch to the WASM capability, verify correct result.
 - **WASM fiber reasoner:** Load a domain institution as WASM, query its morphisms, verify correct fiber reasoning through the sandbox.
+
+---
+
+## 11.5. Phase 8.5 — Worked Institution Examples
+
+**Goal:** Fully worked domain examples demonstrating the Grothendieck institution protocol with WASM-sandboxed fiber reasoners.
+
+**Duration estimate:** 3–4 weeks.
+
+**Prerequisites:** Phase 6 (institution protocol) and Phase 8 (WASM extensibility).
+
+### 11.5.1 Deliverables
+
+- **Mechanical engineering example:** FEA institution with `MeshRefinement` morphisms, convergence queries, and mesh topology validation. CAD institution with `ParametricVariation` morphisms. GenAI institution with `ParetoDominance` morphisms and Pareto front queries. Cross-institution query: "for each GenAI candidate, find the finest-mesh FEA result and check if safety factor > 2.0."
+- **Biopharmaceutical R&D example:** Docking institution with `ConformationalProximity` and `ReScoring` morphisms, ensemble queries. ADMET institution with `ModelAgreement` morphisms, disagreement queries. Assay institution with `ReplicateRelationship` morphisms. PK institution with `CompartmentRefinement` morphisms. Comorphism: docking ΔG → assay IC₅₀ translation.
+- Each institution implemented as a WASM module via the capability SDK (Phase 8).
+- Wire `validate_with_institutions` into the Load RPC path (deferred from Phase 6 — no real institutions to test against until now).
+- Wire institution registration into `start_server` (analogous to component registration).
+- Integration tests exercising cross-institution queries and comorphism translations.
+- Documentation: each example as a tutorial with ontology definitions, fiber reasoner implementation, and sample queries.
+
+### 11.5.2 References
+
+- `docs/papers/eigenius-institutions.tex` §5 (mechanical engineering) and §6 (biopharma)
+- `docs/design/d10-grothendieck-institution-protocol.md` §9 (worked examples)
 
 ---
 

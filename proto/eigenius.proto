@@ -28,6 +28,15 @@ service EigeniusKernel {
 
   // Health check.
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Execute a fiber query against a registered institution.
+  rpc FiberQuery(FiberQueryRequest) returns (FiberQueryResponse);
+
+  // Discover morphisms between resources within an institution's fiber.
+  rpc DiscoverMorphisms(DiscoverMorphismsRequest) returns (DiscoverMorphismsResponse);
+
+  // List registered institutions and their declared fiber structure.
+  rpc ListInstitutions(ListInstitutionsRequest) returns (ListInstitutionsResponse);
 }
 
 // --- Load ---
@@ -146,6 +155,45 @@ message ComponentMetrics {
   int64 prompt_tokens = 3;
   int64 completion_tokens = 4;
   int64 latency_ms = 5;
+}
+
+// --- Institution Protocol ---
+
+message FiberQueryRequest {
+  string institution_iri = 1;   // Which institution to dispatch to
+  bytes query = 2;              // Query resource as CBOR or Eigon-JSON
+  string content_type = 3;
+}
+
+message FiberQueryResponse {
+  bool success = 1;
+  bytes result = 2;             // Result resource as CBOR
+  string error = 3;
+}
+
+message DiscoverMorphismsRequest {
+  string institution_iri = 1;   // Which institution to dispatch to
+  repeated bytes resources = 2; // Resources to analyze, as CBOR
+  string content_type = 3;
+}
+
+message DiscoverMorphismsResponse {
+  bool success = 1;
+  repeated bytes morphisms = 2; // Discovered morphism resources as CBOR
+  string error = 3;
+}
+
+message ListInstitutionsRequest {}
+
+message ListInstitutionsResponse {
+  repeated InstitutionInfo institutions = 1;
+}
+
+message InstitutionInfo {
+  string iri = 1;
+  string name = 2;
+  repeated string morphism_types = 3;  // IRIs of declared morphism classes
+  repeated string query_types = 4;     // IRIs of declared query classes
 }
 
 // --- Common ---

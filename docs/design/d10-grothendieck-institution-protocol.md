@@ -509,7 +509,63 @@ kernel/src/institution/
 - `kernel/src/validation/mod.rs` — dispatch to institution for morphism validation
 - `kernel/src/query/evaluate.rs` — dispatch fiber queries to institutions
 - `kernel/src/server/mod.rs` — expose institution registration and fiber queries via gRPC
-- `proto/eigenius.proto` — add FiberQuery and DiscoverMorphisms RPCs
+- `proto/eigenius.proto` — add FiberQuery, DiscoverMorphisms, and ListInstitutions RPCs
+
+### 10.4 Proto Changes
+
+```proto
+// In EigeniusKernel service:
+
+// Execute a fiber query against a registered institution.
+rpc FiberQuery(FiberQueryRequest) returns (FiberQueryResponse);
+
+// Discover morphisms between resources within an institution's fiber.
+rpc DiscoverMorphisms(DiscoverMorphismsRequest) returns (DiscoverMorphismsResponse);
+
+// List registered institutions and their declared fiber structure.
+rpc ListInstitutions(ListInstitutionsRequest) returns (ListInstitutionsResponse);
+
+message FiberQueryRequest {
+  string institution_iri = 1;   // Which institution to dispatch to
+  bytes query = 2;              // Query resource as CBOR or Eigon-JSON
+  string content_type = 3;
+}
+
+message FiberQueryResponse {
+  bool success = 1;
+  bytes result = 2;             // Result resource as CBOR
+  string error = 3;
+}
+
+message DiscoverMorphismsRequest {
+  string institution_iri = 1;   // Which institution to dispatch to
+  repeated bytes resources = 2; // Resources to analyze, as CBOR
+  string content_type = 3;
+}
+
+message DiscoverMorphismsResponse {
+  bool success = 1;
+  repeated bytes morphisms = 2; // Discovered morphism resources as CBOR
+  string error = 3;
+}
+
+message ListInstitutionsRequest {}
+
+message ListInstitutionsResponse {
+  repeated InstitutionInfo institutions = 1;
+}
+
+message InstitutionInfo {
+  string iri = 1;
+  string name = 2;
+  repeated string morphism_types = 3;  // IRIs of declared morphism classes
+  repeated string query_types = 4;     // IRIs of declared query classes
+}
+```
+
+The `FiberQuery` RPC dispatches to the institution's `query` method. The `DiscoverMorphisms` RPC dispatches to `discover_morphisms`. Morphism validation happens automatically during `Load` — no separate RPC needed (it's part of the validation pipeline).
+
+`ListInstitutions` is a diagnostic/tooling RPC — it returns the registered institutions and their declared types, useful for MCP tools and CLI introspection.
 
 ---
 
@@ -537,3 +593,7 @@ An institution implemented in Rust compiles to WASM and runs in-kernel via Wasmt
 | Comorphism implementation | Rust trait, registered at startup | Type-safe translations between institutions |
 | Fiber reasoner dispatch | By institution IRI on the morphism/query class | Same pattern as component dispatch |
 | WASM institutions | Via the same WASM sandbox as capabilities (Phase 8) | Unified extensibility model |
+| Fiber reasoner hosting | In-process Rust trait objects for Phase 6; gRPC for external services (e.g., Lean 4); WASM in Phase 8 | Start simple, extend later |
+| Institution registration | At server startup, same as component registration | No dynamic registration RPC needed initially |
+| Test institution | Simple ordering/refinement institution with transitivity checking | Minimal but exercises all four FiberReasoner methods |
+| Morphism validation RPC | No separate RPC — dispatched automatically during Load | Validation is part of the existing pipeline, not a new endpoint |

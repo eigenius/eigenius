@@ -14,6 +14,7 @@ pub mod bootstrap;
 pub mod capability;
 pub mod context;
 pub mod esl;
+pub mod institution;
 pub mod layer;
 pub mod nbe;
 pub mod ontology;

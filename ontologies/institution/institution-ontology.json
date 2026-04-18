@@ -1,0 +1,143 @@
+[
+  {
+    "@id": "urn:eigenius:institution:Institution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A registered domain institution that provides fiber reasoning over the shared Eigon signature category.",
+    "urn:eigenius:core:short_name": "Institution",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:institution_iri",
+      "urn:eigenius:institution:institution_name"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:FiberMorphism",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Base class for fiber morphisms. Each institution defines subclasses with domain-specific properties. A morphism relates two resources within an institution's fiber and carries domain-specific structure (e.g., convergence delta, RMSD, Pareto dominance).",
+    "urn:eigenius:core:short_name": "FiberMorphism",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:source",
+      "urn:eigenius:institution:target",
+      "urn:eigenius:institution:institution_ref"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:FiberQuery",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Base class for fiber queries. Each institution defines subclasses representing domain-specific queries it can answer (e.g., convergence analysis, ensemble robustness, Pareto front computation).",
+    "urn:eigenius:core:short_name": "FiberQuery",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:institution_ref"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:StructuralProperty",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An advisory structural property of a morphism type (e.g., reflexive, transitive, symmetric). The kernel stores but does not enforce these; the institution enforces its own invariants via validate_morphism.",
+    "urn:eigenius:core:short_name": "StructuralProperty",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:morphism_class",
+      "urn:eigenius:institution:property_kind"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:institution_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The IRI identifying this institution.",
+    "urn:eigenius:core:short_name": "institution_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:institution_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Human-readable name of the institution.",
+    "urn:eigenius:core:short_name": "institution_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The source resource of a fiber morphism.",
+    "urn:eigenius:core:short_name": "source",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:FiberMorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:target",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The target resource of a fiber morphism.",
+    "urn:eigenius:core:short_name": "target",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:FiberMorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:institution_ref",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Reference to the institution that owns this morphism or query type.",
+    "urn:eigenius:core:short_name": "institution_ref",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:Institution"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:morphism_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The morphism class this structural property applies to.",
+    "urn:eigenius:core:short_name": "morphism_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:StructuralProperty"]
+  },
+  {
+    "@id": "urn:eigenius:institution:property_kind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The kind of structural property: reflexive, transitive, symmetric, antisymmetric.",
+    "urn:eigenius:core:short_name": "property_kind",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:PropertyKind"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:institution:property_kinds:reflexive",
+      "urn:eigenius:institution:property_kinds:transitive",
+      "urn:eigenius:institution:property_kinds:symmetric",
+      "urn:eigenius:institution:property_kinds:antisymmetric"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:StructuralProperty"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:PropertyKind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A kind of structural property that a morphism type can have.",
+    "urn:eigenius:core:short_name": "PropertyKind"
+  },
+  {
+    "@id": "urn:eigenius:institution:property_kinds:reflexive",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:PropertyKind"],
+    "urn:eigenius:core:description": "The morphism is reflexive: every element is related to itself.",
+    "urn:eigenius:core:short_name": "reflexive"
+  },
+  {
+    "@id": "urn:eigenius:institution:property_kinds:transitive",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:PropertyKind"],
+    "urn:eigenius:core:description": "The morphism is transitive: if a→b and b→c then a→c.",
+    "urn:eigenius:core:short_name": "transitive"
+  },
+  {
+    "@id": "urn:eigenius:institution:property_kinds:symmetric",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:PropertyKind"],
+    "urn:eigenius:core:description": "The morphism is symmetric: if a→b then b→a.",
+    "urn:eigenius:core:short_name": "symmetric"
+  },
+  {
+    "@id": "urn:eigenius:institution:property_kinds:antisymmetric",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:PropertyKind"],
+    "urn:eigenius:core:description": "The morphism is antisymmetric: if a→b and b→a then a=b.",
+    "urn:eigenius:core:short_name": "antisymmetric"
+  }
+]
