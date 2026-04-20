@@ -11,7 +11,10 @@
 
 import { createConnectRouter } from "@connectrpc/connect";
 import { ComponentRegistry } from "../components/registry.ts";
-import { registerComponentExecutor } from "./component_executor.ts";
+import {
+  type ComponentExecutorDeps,
+  registerComponentExecutor,
+} from "./component_executor.ts";
 
 /**
  * Start the orchestrator server.
@@ -23,9 +26,10 @@ import { registerComponentExecutor } from "./component_executor.ts";
 export function startServer(
   registry: ComponentRegistry,
   port: number,
+  wasm?: ComponentExecutorDeps["wasm"],
 ): void {
   const router = createConnectRouter();
-  registerComponentExecutor(router, registry);
+  registerComponentExecutor(router, { registry, wasm });
 
   Deno.serve({ port }, async (req: Request) => {
     const url = new URL(req.url);

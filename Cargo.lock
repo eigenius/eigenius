@@ -798,6 +798,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "ciborium",
+ "eigenius-wasm-runtime",
  "hex",
  "proptest",
  "prost 0.13.5",
@@ -855,6 +856,13 @@ dependencies = [
  "serde",
  "tikv-client",
  "tokio",
+]
+
+[[package]]
+name = "eigenius-wasm-runtime"
+version = "0.1.0"
+dependencies = [
+ "wasmtime",
 ]
 
 [[package]]

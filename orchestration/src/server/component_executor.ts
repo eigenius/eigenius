@@ -5,7 +5,12 @@
  * to the local ComponentRegistry. This is the reverse direction:
  * kernel → orchestrator.
  *
- * Architecture reference: D6 (execution architecture)
+ * Also handles `RegisterWasmComponent` for IO WASM components: compiles
+ * the Component Model binary via the napi-rs addon and plugs the
+ * resulting handle into `ComponentRegistry` as a regular handler.
+ *
+ * Architecture reference: D6 (execution architecture), D12 (WASM ext),
+ * D12b (orchestrator-side WASM plan).
  */
 
 import type { ConnectRouter } from "@connectrpc/connect";
@@ -21,16 +26,34 @@ import type {
   RegisterWasmComponentRequest,
 } from "../gen/eigenius_pb.ts";
 import { ComponentRegistry } from "../components/registry.ts";
+import type { WasmComponentRegistry } from "../wasm/registry.ts";
+import {
+  createWasmComponentHandler,
+  type HostBridge,
+} from "../wasm/hostBridge.ts";
+import type { WasmAddon } from "../wasm/loadAddon.ts";
 
 const TEXT_DECODER = new TextDecoder();
+
+export interface ComponentExecutorDeps {
+  registry: ComponentRegistry;
+  /** Optional WASM support bundle. Absent when the native addon failed to load. */
+  wasm?: {
+    addon: WasmAddon;
+    wasmRegistry: WasmComponentRegistry;
+    bridge: HostBridge;
+  };
+}
 
 /**
  * Register the ComponentExecutor service implementation on a Connect router.
  */
 export function registerComponentExecutor(
   router: ConnectRouter,
-  registry: ComponentRegistry,
+  deps: ComponentExecutorDeps,
 ): void {
+  const { registry, wasm } = deps;
+
   router.service(ComponentExecutor, {
     async execute(req: ComponentRequest) {
       const componentIri = req.componentIri;
@@ -84,16 +107,55 @@ export function registerComponentExecutor(
       }
     },
 
-    // deno-lint-ignore require-await
-    async registerWasmComponent(_req: RegisterWasmComponentRequest) {
-      // Not yet implemented. The orchestrator will host IO WASM components
-      // via a napi-rs + wasmtime addon (see Phase 8 plan). Until that's in
-      // place, IO WASM installs are rejected with a clear error.
-      return create(RegisterWasmComponentResponseSchema, {
-        success: false,
-        error:
-          "orchestrator-side WASM hosting is not yet implemented (Phase 8, pending napi-rs integration)",
-      });
+    async registerWasmComponent(req: RegisterWasmComponentRequest) {
+      if (!wasm) {
+        return create(RegisterWasmComponentResponseSchema, {
+          success: false,
+          error:
+            "orchestrator WASM support is disabled (native addon not loaded — " +
+            "build orchestration/native)",
+        });
+      }
+
+      const { addon, wasmRegistry, bridge } = wasm;
+      const componentIri = req.componentIri;
+
+      if (!componentIri) {
+        return create(RegisterWasmComponentResponseSchema, {
+          success: false,
+          error: "component_iri is required",
+        });
+      }
+      if (!req.wasmBinary || req.wasmBinary.length === 0) {
+        return create(RegisterWasmComponentResponseSchema, {
+          success: false,
+          error: "wasm_binary is required",
+        });
+      }
+
+      try {
+        await wasmRegistry.register(componentIri, req.wasmBinary, {
+          fuelLimit: Number(req.fuelLimit ?? 0n),
+          memoryLimitPages: Number(req.memoryLimitPages ?? 0n),
+        });
+
+        registry.register(
+          componentIri,
+          createWasmComponentHandler(componentIri, {
+            addon,
+            wasmRegistry,
+            bridge,
+          }),
+        );
+
+        console.log(`[wasm] registered ${componentIri}`);
+        return create(RegisterWasmComponentResponseSchema, { success: true });
+      } catch (e) {
+        return create(RegisterWasmComponentResponseSchema, {
+          success: false,
+          error: `WASM registration failed: ${(e as Error).message}`,
+        });
+      }
     },
   });
 }

@@ -165,7 +165,7 @@ enum CapabilityCommands {
         #[arg(long, value_name = "KIND", default_value = "component")]
         kind: String,
 
-        /// Quick mode: capability level (pure or read)
+        /// Quick mode: capability level (pure, read, or io)
         #[arg(long, value_name = "LEVEL", default_value = "pure")]
         capability: String,
 

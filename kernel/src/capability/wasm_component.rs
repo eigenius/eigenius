@@ -15,43 +15,19 @@ use crate::ontology::eigon_cbor;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use crate::program::component::{BuiltinComponent, ComponentResult};
+use eigenius_wasm_runtime as wasm_rt;
 use std::sync::Arc;
 use wasmtime::component::types::ComponentFunc;
 use wasmtime::component::{Component, Linker, Val};
 use wasmtime::{Engine, Store};
 
-/// Capability level determines which host imports are linked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CapabilityLevel {
-    /// Pure: no host imports beyond core type machinery.
-    Pure,
-    /// Read: adds `read-access` import (resolve resources from the layer chain).
-    Read,
-}
+pub use eigenius_wasm_runtime::{CapabilityLevel, WasmComponentConfig};
 
 /// Host state carried by the Store. Provides access to the layer chain
 /// for read-access host functions.
 struct HostState {
     #[allow(dead_code)] // read when query-access and read-access imports are linked
     layer: Arc<Layer>,
-}
-
-/// Configuration for a WASM component instance.
-#[derive(Debug, Clone)]
-pub struct WasmComponentConfig {
-    /// Maximum instructions executed per invocation (Wasmtime fuel).
-    pub fuel_limit: u64,
-    /// Maximum linear memory size in 64KB pages. Default 1024 = 64 MB.
-    pub memory_limit_pages: u32,
-}
-
-impl Default for WasmComponentConfig {
-    fn default() -> Self {
-        Self {
-            fuel_limit: 10_000_000,
-            memory_limit_pages: 1024,
-        }
-    }
 }
 
 /// A BuiltinComponent backed by a WASM Component Model binary.
@@ -75,14 +51,9 @@ impl WasmComponent {
         capability_level: CapabilityLevel,
         config: WasmComponentConfig,
     ) -> Result<Self, String> {
-        let mut engine_config = wasmtime::Config::new();
-        engine_config.wasm_component_model(true);
-        engine_config.consume_fuel(true);
+        let engine = wasm_rt::new_engine().map_err(|e| format!("engine creation failed: {e}"))?;
 
-        let engine =
-            Engine::new(&engine_config).map_err(|e| format!("engine creation failed: {e}"))?;
-
-        let component = Component::from_binary(&engine, binary)
+        let component = wasm_rt::compile_component(&engine, binary)
             .map_err(|e| format!("component compilation failed: {e}"))?;
 
         let component_iri = Self::extract_iri(&engine, &component, capability_level, &config)?;
@@ -182,15 +153,20 @@ impl BuiltinComponent for WasmComponent {
             .get_func(&mut store, "execute")
             .ok_or_else(|| "component missing 'execute' export".to_string())?;
 
-        let input_val = Val::List(input_cbor.into_iter().map(Val::U8).collect());
-        let arg_val = Val::List(arg_cbor.into_iter().map(Val::U8).collect());
-
+        let params = wasm_rt::encode_execute_params(&input_cbor, &arg_cbor);
         let mut results = vec![Val::Bool(false)]; // placeholder, will be overwritten
         execute_func
-            .call(&mut store, &[input_val, arg_val], &mut results)
+            .call(&mut store, &params, &mut results)
             .map_err(|e| format!("execute call failed: {e}"))?;
 
-        parse_execute_result(&results[0])
+        let output_bytes = wasm_rt::parse_execute_result(&results[0])?;
+        let output = eigon_cbor::parse_resource_lenient(&output_bytes)
+            .map_err(|e| format!("output CBOR parse failed: {e}"))?;
+
+        Ok(ComponentResult {
+            output,
+            metrics: None,
+        })
     }
 }
 
@@ -252,54 +228,4 @@ fn link_read_access(linker: &mut Linker<HostState>) -> Result<(), String> {
         .map_err(|e| format!("failed to link resolve: {e}"))?;
 
     Ok(())
-}
-
-/// Parse the `result<component-result, string>` returned by `execute`.
-fn parse_execute_result(val: &Val) -> Result<ComponentResult, String> {
-    let result = match val {
-        Val::Result(r) => r,
-        other => return Err(format!("expected result, got {other:?}")),
-    };
-
-    match result.as_ref() {
-        Ok(Some(val)) => {
-            // component-result is a record { output: list<u8> }
-            let fields = match val.as_ref() {
-                Val::Record(f) => f,
-                other => return Err(format!("expected record, got {other:?}")),
-            };
-
-            let (name, output_val) = fields
-                .first()
-                .ok_or_else(|| "component-result has no fields".to_string())?;
-            if name != "output" {
-                return Err(format!("expected 'output' field, got '{name}'"));
-            }
-
-            let bytes = match output_val {
-                Val::List(items) => items
-                    .iter()
-                    .map(|v| match v {
-                        Val::U8(b) => Ok(*b),
-                        other => Err(format!("expected u8, got {other:?}")),
-                    })
-                    .collect::<Result<Vec<u8>, String>>()?,
-                other => return Err(format!("expected list<u8>, got {other:?}")),
-            };
-
-            let output = eigon_cbor::parse_resource_lenient(&bytes)
-                .map_err(|e| format!("output CBOR parse failed: {e}"))?;
-
-            Ok(ComponentResult {
-                output,
-                metrics: None,
-            })
-        }
-        Ok(None) => Err("execute returned Ok(None)".to_string()),
-        Err(Some(boxed)) => match boxed.as_ref() {
-            Val::String(msg) => Err(msg.clone()),
-            other => Err(format!("execute returned error: {other:?}")),
-        },
-        Err(None) => Err("execute returned Err(None)".to_string()),
-    }
 }

@@ -2,9 +2,10 @@
   "name": "@eigenius/orchestration",
   "version": "0.1.0",
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-env --allow-sys=hostname src/main.ts",
-    "start": "deno run --allow-net --allow-env --allow-sys=hostname src/main.ts",
-    "test": "deno test --allow-net --allow-env tests/",
+    "dev": "deno run --watch --allow-net --allow-read --allow-ffi --allow-env --allow-sys --unstable-node-globals --unstable-detect-cjs src/main.ts",
+    "start": "deno run --allow-net --allow-read --allow-ffi --allow-env --allow-sys --unstable-node-globals --unstable-detect-cjs src/main.ts",
+    "test": "deno test --allow-net --allow-read --allow-ffi --allow-env --allow-sys --allow-run --unstable-node-globals --unstable-detect-cjs tests/",
+    "build:addon": "cd native && npm install --silent && ./node_modules/.bin/napi build --platform --release",
     "generate": "cd .. && PATH=$PWD/node_modules/.bin:$PATH buf generate",
     "lint": "deno lint",
     "fmt": "deno fmt --check"
@@ -18,6 +19,7 @@
     "@connectrpc/connect": "npm:@connectrpc/connect@^2",
     "@connectrpc/connect-node": "npm:@connectrpc/connect-node@^2",
     "@bufbuild/protobuf": "npm:@bufbuild/protobuf@^2",
+    "cbor-x": "npm:cbor-x@^1",
     "zod": "npm:zod@^3"
   },
   "lint": {

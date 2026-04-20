@@ -15,6 +15,7 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 
 use super::wasm_component::WasmComponentConfig;
+use eigenius_wasm_runtime as wasm_rt;
 use std::sync::Arc;
 use wasmtime::component::types::ComponentFunc;
 use wasmtime::component::{Component, Linker, Val};
@@ -42,14 +43,9 @@ impl WasmFiberReasoner {
     /// FiberDeclaration. The component must conform to the
     /// `eigenius-institution` world defined in `wit/eigenius-component.wit`.
     pub fn from_bytes(binary: &[u8], config: WasmComponentConfig) -> Result<Self, String> {
-        let mut engine_config = wasmtime::Config::new();
-        engine_config.wasm_component_model(true);
-        engine_config.consume_fuel(true);
+        let engine = wasm_rt::new_engine().map_err(|e| format!("engine creation failed: {e}"))?;
 
-        let engine =
-            Engine::new(&engine_config).map_err(|e| format!("engine creation failed: {e}"))?;
-
-        let component = Component::from_binary(&engine, binary)
+        let component = wasm_rt::compile_component(&engine, binary)
             .map_err(|e| format!("component compilation failed: {e}"))?;
 
         let declaration = Self::extract_declaration(&engine, &component, &config)?;

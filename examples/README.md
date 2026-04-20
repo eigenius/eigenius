@@ -42,6 +42,39 @@ Demonstrates:
 - Constructing a `FiberDeclaration` with morphism/query type definitions
 - Returning typed validation results via the `validation-result` enum
 
+### [wasm-http-shout](wasm-http-shout/)
+
+An **IO component** that calls an LLM by dispatching to the native
+`CompleteText` handler. Takes a `TextInput`, wraps the text in a prompt
+asking for ALL CAPS, dispatches via `io-access.dispatch-component`, and
+wraps the LLM response in a `ShoutedText` output.
+
+Demonstrates:
+
+- Implementing the `eigenius-component-io` WIT world (IO capability level)
+- Calling the host's `io-access.dispatch-component` to reach another
+  component (including native TS handlers) from inside WASM
+- The full orchestrator-hosted flow: kernel install →
+  `RegisterWasmComponent` RPC → orchestrator compile via napi-rs addon →
+  kernel dispatch → guest runs → host callback → response
+
+### [wasm-read-query-probe](wasm-read-query-probe/)
+
+A **minimal IO component** used as a test fixture for the orchestrator's
+`read-access.resolve` and `query-access.query` host imports. Calls both,
+returns bytes-received / rows-received counts. Not intended for end users;
+see [`orchestration/native/src/tests.rs`](../orchestration/native/src/tests.rs)
+for its usage.
+
+### [wasm-cbor-echo](wasm-cbor-echo/)
+
+A **minimal echo component** used to verify CBOR interop between the
+orchestrator's cbor-x codec and the SDK's ciborium codec. Decodes its
+input resource, re-encodes unchanged, returns it. The round-trip test
+at [`orchestration/tests/cbor_roundtrip_test.ts`](../orchestration/tests/cbor_roundtrip_test.ts)
+passes twenty value variants through it (floats, booleans, large
+integers, unicode strings, nested resources, …).
+
 ## Building an example
 
 Each example requires:
