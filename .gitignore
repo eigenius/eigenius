@@ -9,6 +9,9 @@ node_modules/
 # LaTeX output
 /docs/pdf
 
+# Reference material
+/reference
+
 # Deno
 orchestration/node_modules/
 
