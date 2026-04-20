@@ -24,9 +24,24 @@ use proto::*;
 /// The Eigenius gRPC service implementation.
 pub struct EigeniusService {
     context: Arc<RwLock<ExecutionContext>>,
-    components: Arc<ComponentRegistry>,
+    /// Outer lock allows swapping the registry (for WASM registration on load).
+    /// Inner Arc allows cheap cloning for passing to the evaluator.
+    components: Arc<RwLock<Arc<ComponentRegistry>>>,
     trace_store: Arc<dyn TraceStore>,
-    institutions: Arc<crate::institution::InstitutionRegistry>,
+    institutions: Arc<RwLock<crate::institution::InstitutionRegistry>>,
+    /// Optional gRPC client for the orchestrator. Used to forward IO-capability
+    /// WASM components and to dispatch remote IO components during program
+    /// execution. None means no orchestrator is configured — IO WASM installs
+    /// will be rejected with a clear error in that case.
+    orchestrator_client: Option<
+        Arc<
+            tokio::sync::Mutex<
+                proto::component_executor_client::ComponentExecutorClient<
+                    tonic::transport::Channel,
+                >,
+            >,
+        >,
+    >,
 }
 
 impl EigeniusService {
@@ -40,10 +55,27 @@ impl EigeniusService {
         let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
         Ok(Self {
             context: Arc::new(RwLock::new(ctx)),
-            components: Arc::new(components),
+            components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store: Arc::new(InMemoryTraceStore::new()),
-            institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
+            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            orchestrator_client: None,
         })
+    }
+
+    /// Attach an orchestrator client so IO-capability WASM components can be
+    /// forwarded to the orchestrator and remote components dispatched back.
+    pub fn with_orchestrator_client(
+        mut self,
+        client: Arc<
+            tokio::sync::Mutex<
+                proto::component_executor_client::ComponentExecutorClient<
+                    tonic::transport::Channel,
+                >,
+            >,
+        >,
+    ) -> Self {
+        self.orchestrator_client = Some(client);
+        self
     }
 
     /// Create a new service with a custom component registry and trace store.
@@ -54,9 +86,10 @@ impl EigeniusService {
         let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
         Ok(Self {
             context: Arc::new(RwLock::new(ctx)),
-            components: Arc::new(components),
+            components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
-            institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
+            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            orchestrator_client: None,
         })
     }
 
@@ -90,6 +123,142 @@ impl EigeniusService {
     fn serialize_resource(resource: &Resource) -> Vec<u8> {
         eigon_cbor::serialize_resource(resource)
     }
+
+    /// Scan a layer for WASM components/institutions and register them.
+    ///
+    /// Errors encountered during registration are added to `errors` as
+    /// validation errors (but do not fail the load — a malformed WASM
+    /// resource is reported but other resources in the same layer still
+    /// load successfully).
+    async fn register_wasm_from_layer(
+        &self,
+        layer: &crate::layer::Layer,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        // Build a new ComponentRegistry layered on top of the current one.
+        // This avoids needing `BuiltinComponent: Clone` — the parent Arc
+        // is shared, new WASM entries are added to the child.
+        let mut new_registry = {
+            let current = self.components.read().await;
+            ComponentRegistry::new_with_parent(Arc::clone(&current))
+        };
+
+        let scan_result =
+            crate::capability::registration::scan_and_register(layer, &mut new_registry);
+
+        for e in &scan_result.report.errors {
+            errors.push(ValidationError {
+                resource_iri: e.resource_iri.clone(),
+                property_iri: String::new(),
+                rule: "wasm_registration".to_string(),
+                message: e.message.clone(),
+                severity: "error".to_string(),
+            });
+        }
+        for w in &scan_result.report.warnings {
+            eprintln!("  {w}");
+        }
+
+        // Forward IO WASM components to the orchestrator and register a
+        // RemoteComponent locally so the kernel can dispatch to them.
+        let mut any_kernel_component_added = !scan_result.report.components_registered.is_empty()
+            && scan_result.pending_io_components.is_empty();
+        for pending in scan_result.pending_io_components {
+            match self.register_io_wasm(&pending).await {
+                Ok(remote) => {
+                    new_registry.register(pending.resource_iri.clone(), remote);
+                    eprintln!(
+                        "  Registered IO WASM component: {} (orchestrator-hosted)",
+                        pending.resource_iri
+                    );
+                    any_kernel_component_added = true;
+                }
+                Err(e) => {
+                    errors.push(ValidationError {
+                        resource_iri: pending.resource_iri,
+                        property_iri: String::new(),
+                        rule: "wasm_registration".to_string(),
+                        message: e,
+                        severity: "error".to_string(),
+                    });
+                }
+            }
+        }
+
+        if !scan_result.report.components_registered.is_empty() {
+            for iri in &scan_result.report.components_registered {
+                eprintln!("  Registered WASM component: {iri}");
+            }
+        }
+
+        if any_kernel_component_added {
+            let mut guard = self.components.write().await;
+            *guard = Arc::new(new_registry);
+        }
+
+        // Register institutions
+        if !scan_result.wasm_institutions.is_empty() {
+            let mut institutions = self.institutions.write().await;
+            for reasoner in scan_result.wasm_institutions {
+                let iri = reasoner.institution_iri().as_str().to_string();
+                match institutions.register(Box::new(reasoner)) {
+                    Ok(_) => {
+                        eprintln!("  Registered WASM institution: {iri}");
+                    }
+                    Err(e) => {
+                        errors.push(ValidationError {
+                            resource_iri: iri,
+                            property_iri: String::new(),
+                            rule: "wasm_registration".to_string(),
+                            message: format!("institution registration failed: {e}"),
+                            severity: "error".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Forward an IO WASM component to the orchestrator and produce a
+    /// local `RemoteComponent` wrapper that dispatches `Execute` calls
+    /// back to the orchestrator.
+    async fn register_io_wasm(
+        &self,
+        pending: &crate::capability::registration::PendingIoComponent,
+    ) -> Result<Box<dyn crate::program::component::BuiltinComponent>, String> {
+        let client = self.orchestrator_client.as_ref().ok_or_else(|| {
+            "IO WASM components require an orchestrator to be configured \
+                 (pass --orchestrator to `serve`)"
+                .to_string()
+        })?;
+
+        let request = proto::RegisterWasmComponentRequest {
+            component_iri: pending.resource_iri.clone(),
+            wasm_binary: pending.wasm_binary.clone(),
+            fuel_limit: pending.fuel_limit,
+            memory_limit_pages: pending.memory_limit_pages as u64,
+        };
+
+        let response = {
+            let mut c = client.lock().await;
+            c.register_wasm_component(tonic::Request::new(request))
+                .await
+                .map_err(|e| format!("RegisterWasmComponent gRPC call failed: {e}"))?
+        };
+        let resp = response.into_inner();
+        if !resp.success {
+            return Err(format!(
+                "orchestrator rejected WASM registration: {}",
+                resp.error
+            ));
+        }
+
+        // Build a local RemoteComponent that forwards Execute calls.
+        Ok(Box::new(crate::program::remote::RemoteComponent::new(
+            pending.resource_iri.clone(),
+            Arc::clone(client),
+        )))
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -113,6 +282,9 @@ impl EigeniusKernel for EigeniusService {
             match ctx.commit("loaded") {
                 Ok(layer) => {
                     layer_id = layer.id().to_string();
+                    drop(ctx);
+                    // Scan the newly committed layer for WASM components/institutions
+                    self.register_wasm_from_layer(&layer, &mut errors).await;
                 }
                 Err(e) => {
                     errors.push(ValidationError {
@@ -310,11 +482,12 @@ impl EigeniusKernel for EigeniusService {
         // Execute via NbE in IO mode
         let exec_result = {
             let ctx = self.context.read().await;
+            let components = Arc::clone(&*self.components.read().await);
             match crate::program::eval_io::execute_program_nbe(
                 &program,
                 &input,
                 Arc::clone(ctx.head()),
-                Arc::clone(&self.components),
+                components,
                 Some(Arc::clone(&self.trace_store)),
             ) {
                 Ok(result) => result,
@@ -455,8 +628,8 @@ impl EigeniusKernel for EigeniusService {
         let inst_iri = Iri::parse(&req.institution_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
 
-        let reasoner = self
-            .institutions
+        let institutions = self.institutions.read().await;
+        let reasoner = institutions
             .get(&inst_iri)
             .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
 
@@ -489,8 +662,8 @@ impl EigeniusKernel for EigeniusService {
         let inst_iri = Iri::parse(&req.institution_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
 
-        let reasoner = self
-            .institutions
+        let institutions = self.institutions.read().await;
+        let reasoner = institutions
             .get(&inst_iri)
             .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
 
@@ -523,8 +696,8 @@ impl EigeniusKernel for EigeniusService {
         &self,
         _request: Request<ListInstitutionsRequest>,
     ) -> Result<Response<ListInstitutionsResponse>, Status> {
-        let infos: Vec<proto::InstitutionInfo> = self
-            .institutions
+        let institutions = self.institutions.read().await;
+        let infos: Vec<proto::InstitutionInfo> = institutions
             .list()
             .iter()
             .map(|info| proto::InstitutionInfo {
@@ -590,15 +763,17 @@ pub async fn start_server(
     let addr = format!("0.0.0.0:{port}").parse()?;
 
     let mut registry = ComponentRegistry::default();
+    let mut orchestrator_client: Option<crate::program::remote::SharedOrchestratorClient> = None;
 
     if let Some(endpoint) = orchestrator_endpoint {
         println!("Connecting to orchestrator at {endpoint}...");
         match crate::program::remote::connect_orchestrator(endpoint, REMOTE_COMPONENTS).await {
-            Ok(components) => {
+            Ok((client, components)) => {
                 for (iri, component) in components {
                     println!("  Registered remote component: {iri}");
                     registry.register(iri, component);
                 }
+                orchestrator_client = Some(client);
             }
             Err(e) => {
                 eprintln!("Warning: failed to connect to orchestrator: {e}");
@@ -607,12 +782,22 @@ pub async fn start_server(
         }
     }
 
-    let service = EigeniusService::with_components(registry)?;
+    let mut service = EigeniusService::with_components(registry)?;
+    if let Some(client) = orchestrator_client {
+        service = service.with_orchestrator_client(client);
+    }
 
     println!("Eigenius gRPC server listening on {addr}");
 
+    // Raise gRPC message size limits to 128 MB to accommodate WASM component
+    // binaries (which are base64-encoded and can be multiple MB).
     tonic::transport::Server::builder()
-        .add_service(service.into_server())
+        .add_service(
+            service
+                .into_server()
+                .max_decoding_message_size(128 * 1024 * 1024)
+                .max_encoding_message_size(128 * 1024 * 1024),
+        )
         .serve(addr)
         .await?;
 

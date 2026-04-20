@@ -7,7 +7,58 @@
     "urn:eigenius:core:requires": [
       "urn:eigenius:institution:institution_iri",
       "urn:eigenius:institution:institution_name"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:implementation",
+      "urn:eigenius:institution:wasm_binary",
+      "urn:eigenius:institution:wasm_binary_ref",
+      "urn:eigenius:institution:fuel_limit",
+      "urn:eigenius:institution:memory_limit_pages"
     ]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:implementation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Implementation type: 'builtin' for native Rust institutions, 'wasm' for WASM extensions.",
+    "urn:eigenius:core:short_name": "implementation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:wasm_binary",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Inline WASM Component Model binary (base64-encoded bytes) for a wasm institution.",
+    "urn:eigenius:core:short_name": "wasm_binary",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:wasm_binary_ref",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the WASM binary in blob storage for a wasm institution.",
+    "urn:eigenius:core:short_name": "wasm_binary_ref",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:fuel_limit",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum Wasmtime fuel units per invocation. Default 10,000,000.",
+    "urn:eigenius:core:short_name": "fuel_limit",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:memory_limit_pages",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum linear memory size in 64KB pages per instance. Default 1024 = 64 MB.",
+    "urn:eigenius:core:short_name": "memory_limit_pages",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
   },
 
   {

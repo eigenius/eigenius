@@ -14,8 +14,12 @@ import {
   ComponentExecutor,
   ComponentMetricsSchema,
   ComponentResponseSchema,
+  RegisterWasmComponentResponseSchema,
 } from "../gen/eigenius_pb.ts";
-import type { ComponentRequest } from "../gen/eigenius_pb.ts";
+import type {
+  ComponentRequest,
+  RegisterWasmComponentRequest,
+} from "../gen/eigenius_pb.ts";
 import { ComponentRegistry } from "../components/registry.ts";
 
 const TEXT_DECODER = new TextDecoder();
@@ -78,6 +82,18 @@ export function registerComponentExecutor(
           error: `Component execution failed: ${(e as Error).message}`,
         });
       }
+    },
+
+    // deno-lint-ignore require-await
+    async registerWasmComponent(_req: RegisterWasmComponentRequest) {
+      // Not yet implemented. The orchestrator will host IO WASM components
+      // via a napi-rs + wasmtime addon (see Phase 8 plan). Until that's in
+      // place, IO WASM installs are rejected with a clear error.
+      return create(RegisterWasmComponentResponseSchema, {
+        success: false,
+        error:
+          "orchestrator-side WASM hosting is not yet implemented (Phase 8, pending napi-rs integration)",
+      });
     },
   });
 }

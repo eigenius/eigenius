@@ -1,0 +1,117 @@
+package eigenius:component@0.1.0;
+
+/// Types shared across all extension interfaces.
+interface types {
+    /// A CBOR-encoded Eigon resource.
+    type resource-data = list<u8>;
+
+    /// An IRI string.
+    type iri = string;
+
+    /// Result of a component execution.
+    record component-result {
+        /// CBOR-encoded output resource.
+        output: resource-data,
+    }
+}
+
+/// Read-only access to the knowledge graph.
+interface read-access {
+    use types.{resource-data, iri};
+
+    /// Resolve a resource by IRI from the layer chain.
+    resolve: func(iri: iri) -> option<resource-data>;
+}
+
+/// Query access to the knowledge graph.
+interface query-access {
+    use types.{resource-data};
+
+    /// Execute an EigenQL query.
+    query: func(eigenql: string) -> result<list<resource-data>, string>;
+}
+
+/// IO access: dispatch calls to other components (including LLM adapters).
+/// Only provided to orchestrator-hosted WASM components (capability_level=io).
+interface io-access {
+    use types.{resource-data, iri};
+
+    /// Dispatch to another registered component by IRI.
+    /// The input and argument are CBOR-encoded Eigon resources.
+    /// Returns the component's output as CBOR.
+    dispatch-component: func(
+        component-iri: iri,
+        input: resource-data,
+        argument: resource-data,
+    ) -> result<resource-data, string>;
+}
+
+/// A pure WASM component. Hosted in the kernel.
+world eigenius-component {
+    import read-access;
+
+    use types.{resource-data, iri, component-result};
+
+    /// Execute the component with input and optional argument.
+    export execute: func(
+        input: resource-data,
+        argument: resource-data,
+    ) -> result<component-result, string>;
+
+    /// Return the component IRI.
+    export component-iri: func() -> iri;
+}
+
+/// An IO-capability WASM component. Hosted in the orchestrator.
+/// Has read/query access to the knowledge graph plus dispatch access to
+/// other components (including native LLM adapters like CompleteText).
+world eigenius-component-io {
+    import read-access;
+    import query-access;
+    import io-access;
+
+    use types.{resource-data, iri, component-result};
+
+    export execute: func(
+        input: resource-data,
+        argument: resource-data,
+    ) -> result<component-result, string>;
+
+    export component-iri: func() -> iri;
+}
+
+/// Types specific to institution hosting.
+interface institution-types {
+    /// Result of morphism validation.
+    enum validation-result {
+        valid,
+        invalid,
+        undecidable,
+    }
+}
+
+/// A WASM fiber reasoner for a Grothendieck institution. Hosted in the kernel.
+world eigenius-institution {
+    import read-access;
+    import query-access;
+
+    use types.{resource-data, iri};
+    use institution-types.{validation-result};
+
+    /// Declare this institution's fiber structure.
+    /// Returns a CBOR-encoded FiberDeclaration resource.
+    export fiber-declaration: func() -> resource-data;
+
+    /// Execute a fiber query.
+    export query: func(q: resource-data) -> result<resource-data, string>;
+
+    /// Validate a morphism resource.
+    /// Returns the validation result; on Invalid, the optional string is the reason.
+    export validate-morphism: func(morphism: resource-data)
+        -> result<tuple<validation-result, string>, string>;
+
+    /// Discover morphisms between a set of resources.
+    /// Returns a list of new morphism resources (CBOR-encoded).
+    export discover-morphisms: func(resources: list<resource-data>)
+        -> result<list<resource-data>, string>;
+}

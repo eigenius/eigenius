@@ -136,6 +136,25 @@ service ComponentExecutor {
   // Execute an IO component. Called by the kernel when evaluating a
   // program that references a remote component (e.g. CompleteText).
   rpc Execute(ComponentRequest) returns (ComponentResponse);
+
+  // Register a WASM IO component with the orchestrator. Called by the
+  // kernel when loading a component with capability_level=io and
+  // implementation=wasm. The orchestrator transpiles the Component Model
+  // binary (jco) and instantiates it when Execute is called.
+  rpc RegisterWasmComponent(RegisterWasmComponentRequest)
+      returns (RegisterWasmComponentResponse);
+}
+
+message RegisterWasmComponentRequest {
+  string component_iri = 1;     // IRI the kernel will use to dispatch
+  bytes wasm_binary = 2;        // Raw Component Model binary bytes
+  uint64 fuel_limit = 3;        // Optional fuel budget per invocation (0 = default)
+  uint64 memory_limit_pages = 4; // Optional memory cap in 64KB pages (0 = default)
+}
+
+message RegisterWasmComponentResponse {
+  bool success = 1;
+  string error = 2;
 }
 
 message ComponentRequest {

@@ -2,18 +2,24 @@
 resolver = "2"
 members = [
     "kernel",
+    "sdk/wasm-sdk",
     "storage/tikv",
     "storage/rocksdb",
     "storage/memory",
     "storage/indexing",
     "cli",
 ]
+exclude = [
+    "examples/wasm-doc-validator",
+    "examples/wasm-http-shout",
+    "examples/wasm-ordering-institution",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/nicosabena/eigenius"
+repository = "https://github.com/eigenius/eigenius"
 
 [workspace.dependencies]
 # Shared dependencies across workspace crates
@@ -26,6 +32,9 @@ tokio = { version = "1", features = ["full"] }
 tonic = "0.12"
 prost = "0.13"
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# WASM runtime
+wasmtime = { version = "43", features = ["component-model"] }
 
 # Testing
 proptest = "1"

@@ -593,16 +593,14 @@ impl<'a> Validator<'a> {
                         // If we can't resolve, skip — might be external
                     }
                 }
-                Value::Embedded(embedded) => {
-                    if !self.is_instance_of_any(embedded, &allowed_refs) {
-                        errors.push(ValidationError {
-                            resource_id: res_id.clone(),
-                            property: Some(prop_iri.clone()),
-                            rule: ValidationRule::ClassTypeMismatch,
-                            message: "embedded resource is not an instance of any allowed class"
-                                .to_string(),
-                        });
-                    }
+                Value::Embedded(embedded) if !self.is_instance_of_any(embedded, &allowed_refs) => {
+                    errors.push(ValidationError {
+                        resource_id: res_id.clone(),
+                        property: Some(prop_iri.clone()),
+                        rule: ValidationRule::ClassTypeMismatch,
+                        message: "embedded resource is not an instance of any allowed class"
+                            .to_string(),
+                    });
                 }
                 _ => {}
             }

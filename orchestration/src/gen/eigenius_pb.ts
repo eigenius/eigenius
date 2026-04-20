@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file eigenius.proto.
  */
 export const file_eigenius: GenFile = /*@__PURE__*/
-  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iHQoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIfCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCSIuCgtRdWVyeVJlc3VsdBIQCghyZXNvdXJjZRgBIAEoDBINCgVpbmRleBgCIAEoBCI/ChZWYWxpZGF0ZVByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSFAoMY29udGVudF90eXBlGAIgASgJImwKF1ZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEg0KBXZhbGlkGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIUCgxwcm9ncmFtX3R5cGUYAyABKAkiSQoRUnVuUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBINCgVpbnB1dBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkidgoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkiNQoOUmVmbGVjdFJlcXVlc3QSDQoFdHJhY2UYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJIjUKD1JlZmxlY3RSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhEKCXRyYWNlX2lyaRgCIAEoCSIPCg1IZWFsdGhSZXF1ZXN0Il8KDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBCJgChBDb21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSDQoFaW5wdXQYAiABKAwSEAoIYXJndW1lbnQYAyABKAwSFAoMY29udGVudF90eXBlGAQgASgJInMKEUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEg0KBWVycm9yGAMgASgJEi4KB21ldHJpY3MYBCABKAsyHS5laWdlbml1cy52MS5Db21wb25lbnRNZXRyaWNzInkKEENvbXBvbmVudE1ldHJpY3MSEAoIcHJvdmlkZXIYASABKAkSDQoFbW9kZWwYAiABKAkSFQoNcHJvbXB0X3Rva2VucxgDIAEoAxIZChFjb21wbGV0aW9uX3Rva2VucxgEIAEoAxISCgpsYXRlbmN5X21zGAUgASgDIlEKEUZpYmVyUXVlcnlSZXF1ZXN0EhcKD2luc3RpdHV0aW9uX2lyaRgBIAEoCRINCgVxdWVyeRgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiRAoSRmliZXJRdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGcmVzdWx0GAIgASgMEg0KBWVycm9yGAMgASgJIlwKGERpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBIXCg9pbnN0aXR1dGlvbl9pcmkYASABKAkSEQoJcmVzb3VyY2VzGAIgAygMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSJOChlEaXNjb3Zlck1vcnBoaXNtc1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJbW9ycGhpc21zGAIgAygMEg0KBWVycm9yGAMgASgJIhkKF0xpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0Ik4KGExpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRIyCgxpbnN0aXR1dGlvbnMYASADKAsyHC5laWdlbml1cy52MS5JbnN0aXR1dGlvbkluZm8iWQoPSW5zdGl0dXRpb25JbmZvEgsKA2lyaRgBIAEoCRIMCgRuYW1lGAIgASgJEhYKDm1vcnBoaXNtX3R5cGVzGAMgAygJEhMKC3F1ZXJ5X3R5cGVzGAQgAygJIm4KD1ZhbGlkYXRpb25FcnJvchIUCgxyZXNvdXJjZV9pcmkYASABKAkSFAoMcHJvcGVydHlfaXJpGAIgASgJEgwKBHJ1bGUYAyABKAkSDwoHbWVzc2FnZRgEIAEoCRIQCghzZXZlcml0eRgFIAEoCTKdBgoORWlnZW5pdXNLZXJuZWwSOwoETG9hZBIYLmVpZ2VuaXVzLnYxLkxvYWRSZXF1ZXN0GhkuZWlnZW5pdXMudjEuTG9hZFJlc3BvbnNlEkQKB0luc3BlY3QSGy5laWdlbml1cy52MS5JbnNwZWN0UmVxdWVzdBocLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXNwb25zZRI+CgVRdWVyeRIZLmVpZ2VuaXVzLnYxLlF1ZXJ5UmVxdWVzdBoYLmVpZ2VuaXVzLnYxLlF1ZXJ5UmVzdWx0MAESXAoPVmFsaWRhdGVQcm9ncmFtEiMuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVxdWVzdBokLmVpZ2VuaXVzLnYxLlZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEk0KClJ1blByb2dyYW0SHi5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVxdWVzdBofLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXNwb25zZRJECgdSZWZsZWN0EhsuZWlnZW5pdXMudjEuUmVmbGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5SZWZsZWN0UmVzcG9uc2USQQoGSGVhbHRoEhouZWlnZW5pdXMudjEuSGVhbHRoUmVxdWVzdBobLmVpZ2VuaXVzLnYxLkhlYWx0aFJlc3BvbnNlEk0KCkZpYmVyUXVlcnkSHi5laWdlbml1cy52MS5GaWJlclF1ZXJ5UmVxdWVzdBofLmVpZ2VuaXVzLnYxLkZpYmVyUXVlcnlSZXNwb25zZRJiChFEaXNjb3Zlck1vcnBoaXNtcxIlLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBomLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVzcG9uc2USXwoQTGlzdEluc3RpdHV0aW9ucxIkLmVpZ2VuaXVzLnYxLkxpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0GiUuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1Jlc3BvbnNlMl0KEUNvbXBvbmVudEV4ZWN1dG9yEkgKB0V4ZWN1dGUSHS5laWdlbml1cy52MS5Db21wb25lbnRSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iHQoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIfCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCSIuCgtRdWVyeVJlc3VsdBIQCghyZXNvdXJjZRgBIAEoDBINCgVpbmRleBgCIAEoBCI/ChZWYWxpZGF0ZVByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSFAoMY29udGVudF90eXBlGAIgASgJImwKF1ZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEg0KBXZhbGlkGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIUCgxwcm9ncmFtX3R5cGUYAyABKAkiSQoRUnVuUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBINCgVpbnB1dBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkidgoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkiNQoOUmVmbGVjdFJlcXVlc3QSDQoFdHJhY2UYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJIjUKD1JlZmxlY3RSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhEKCXRyYWNlX2lyaRgCIAEoCSIPCg1IZWFsdGhSZXF1ZXN0Il8KDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBCJ6ChxSZWdpc3Rlcldhc21Db21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSEwoLd2FzbV9iaW5hcnkYAiABKAwSEgoKZnVlbF9saW1pdBgDIAEoBBIaChJtZW1vcnlfbGltaXRfcGFnZXMYBCABKAQiPwodUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSJgChBDb21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSDQoFaW5wdXQYAiABKAwSEAoIYXJndW1lbnQYAyABKAwSFAoMY29udGVudF90eXBlGAQgASgJInMKEUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEg0KBWVycm9yGAMgASgJEi4KB21ldHJpY3MYBCABKAsyHS5laWdlbml1cy52MS5Db21wb25lbnRNZXRyaWNzInkKEENvbXBvbmVudE1ldHJpY3MSEAoIcHJvdmlkZXIYASABKAkSDQoFbW9kZWwYAiABKAkSFQoNcHJvbXB0X3Rva2VucxgDIAEoAxIZChFjb21wbGV0aW9uX3Rva2VucxgEIAEoAxISCgpsYXRlbmN5X21zGAUgASgDIlEKEUZpYmVyUXVlcnlSZXF1ZXN0EhcKD2luc3RpdHV0aW9uX2lyaRgBIAEoCRINCgVxdWVyeRgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiRAoSRmliZXJRdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGcmVzdWx0GAIgASgMEg0KBWVycm9yGAMgASgJIlwKGERpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBIXCg9pbnN0aXR1dGlvbl9pcmkYASABKAkSEQoJcmVzb3VyY2VzGAIgAygMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSJOChlEaXNjb3Zlck1vcnBoaXNtc1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJbW9ycGhpc21zGAIgAygMEg0KBWVycm9yGAMgASgJIhkKF0xpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0Ik4KGExpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRIyCgxpbnN0aXR1dGlvbnMYASADKAsyHC5laWdlbml1cy52MS5JbnN0aXR1dGlvbkluZm8iWQoPSW5zdGl0dXRpb25JbmZvEgsKA2lyaRgBIAEoCRIMCgRuYW1lGAIgASgJEhYKDm1vcnBoaXNtX3R5cGVzGAMgAygJEhMKC3F1ZXJ5X3R5cGVzGAQgAygJIiUKEEdldFNjaGVtYVJlcXVlc3QSEQoJY2xhc3NfaXJpGAEgASgJIkgKEUdldFNjaGVtYVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEwoLanNvbl9zY2hlbWEYAiABKAkSDQoFZXJyb3IYAyABKAkibgoPVmFsaWRhdGlvbkVycm9yEhQKDHJlc291cmNlX2lyaRgBIAEoCRIUCgxwcm9wZXJ0eV9pcmkYAiABKAkSDAoEcnVsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJEhAKCHNldmVyaXR5GAUgASgJMukGCg5FaWdlbml1c0tlcm5lbBI7CgRMb2FkEhguZWlnZW5pdXMudjEuTG9hZFJlcXVlc3QaGS5laWdlbml1cy52MS5Mb2FkUmVzcG9uc2USRAoHSW5zcGVjdBIbLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuSW5zcGVjdFJlc3BvbnNlEj4KBVF1ZXJ5EhkuZWlnZW5pdXMudjEuUXVlcnlSZXF1ZXN0GhguZWlnZW5pdXMudjEuUXVlcnlSZXN1bHQwARJcCg9WYWxpZGF0ZVByb2dyYW0SIy5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXF1ZXN0GiQuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USTQoKUnVuUHJvZ3JhbRIeLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXF1ZXN0Gh8uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlc3BvbnNlEkQKB1JlZmxlY3QSGy5laWdlbml1cy52MS5SZWZsZWN0UmVxdWVzdBocLmVpZ2VuaXVzLnYxLlJlZmxlY3RSZXNwb25zZRJBCgZIZWFsdGgSGi5laWdlbml1cy52MS5IZWFsdGhSZXF1ZXN0GhsuZWlnZW5pdXMudjEuSGVhbHRoUmVzcG9uc2USTQoKRmliZXJRdWVyeRIeLmVpZ2VuaXVzLnYxLkZpYmVyUXVlcnlSZXF1ZXN0Gh8uZWlnZW5pdXMudjEuRmliZXJRdWVyeVJlc3BvbnNlEmIKEURpc2NvdmVyTW9ycGhpc21zEiUuZWlnZW5pdXMudjEuRGlzY292ZXJNb3JwaGlzbXNSZXF1ZXN0GiYuZWlnZW5pdXMudjEuRGlzY292ZXJNb3JwaGlzbXNSZXNwb25zZRJfChBMaXN0SW5zdGl0dXRpb25zEiQuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1JlcXVlc3QaJS5laWdlbml1cy52MS5MaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USSgoJR2V0U2NoZW1hEh0uZWlnZW5pdXMudjEuR2V0U2NoZW1hUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkdldFNjaGVtYVJlc3BvbnNlMs0BChFDb21wb25lbnRFeGVjdXRvchJICgdFeGVjdXRlEh0uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkNvbXBvbmVudFJlc3BvbnNlEm4KFVJlZ2lzdGVyV2FzbUNvbXBvbmVudBIpLmVpZ2VuaXVzLnYxLlJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlcXVlc3QaKi5laWdlbml1cy52MS5SZWdpc3Rlcldhc21Db21wb25lbnRSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message eigenius.v1.LoadRequest
@@ -378,6 +378,68 @@ export const HealthResponseSchema: GenMessage<HealthResponse> = /*@__PURE__*/
   messageDesc(file_eigenius, 13);
 
 /**
+ * @generated from message eigenius.v1.RegisterWasmComponentRequest
+ */
+export type RegisterWasmComponentRequest = Message<"eigenius.v1.RegisterWasmComponentRequest"> & {
+  /**
+   * IRI the kernel will use to dispatch
+   *
+   * @generated from field: string component_iri = 1;
+   */
+  componentIri: string;
+
+  /**
+   * Raw Component Model binary bytes
+   *
+   * @generated from field: bytes wasm_binary = 2;
+   */
+  wasmBinary: Uint8Array;
+
+  /**
+   * Optional fuel budget per invocation (0 = default)
+   *
+   * @generated from field: uint64 fuel_limit = 3;
+   */
+  fuelLimit: bigint;
+
+  /**
+   * Optional memory cap in 64KB pages (0 = default)
+   *
+   * @generated from field: uint64 memory_limit_pages = 4;
+   */
+  memoryLimitPages: bigint;
+};
+
+/**
+ * Describes the message eigenius.v1.RegisterWasmComponentRequest.
+ * Use `create(RegisterWasmComponentRequestSchema)` to create a new message.
+ */
+export const RegisterWasmComponentRequestSchema: GenMessage<RegisterWasmComponentRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 14);
+
+/**
+ * @generated from message eigenius.v1.RegisterWasmComponentResponse
+ */
+export type RegisterWasmComponentResponse = Message<"eigenius.v1.RegisterWasmComponentResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string error = 2;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message eigenius.v1.RegisterWasmComponentResponse.
+ * Use `create(RegisterWasmComponentResponseSchema)` to create a new message.
+ */
+export const RegisterWasmComponentResponseSchema: GenMessage<RegisterWasmComponentResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 15);
+
+/**
  * @generated from message eigenius.v1.ComponentRequest
  */
 export type ComponentRequest = Message<"eigenius.v1.ComponentRequest"> & {
@@ -415,7 +477,7 @@ export type ComponentRequest = Message<"eigenius.v1.ComponentRequest"> & {
  * Use `create(ComponentRequestSchema)` to create a new message.
  */
 export const ComponentRequestSchema: GenMessage<ComponentRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 14);
+  messageDesc(file_eigenius, 16);
 
 /**
  * @generated from message eigenius.v1.ComponentResponse
@@ -451,7 +513,7 @@ export type ComponentResponse = Message<"eigenius.v1.ComponentResponse"> & {
  * Use `create(ComponentResponseSchema)` to create a new message.
  */
 export const ComponentResponseSchema: GenMessage<ComponentResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 15);
+  messageDesc(file_eigenius, 17);
 
 /**
  * @generated from message eigenius.v1.ComponentMetrics
@@ -492,7 +554,7 @@ export type ComponentMetrics = Message<"eigenius.v1.ComponentMetrics"> & {
  * Use `create(ComponentMetricsSchema)` to create a new message.
  */
 export const ComponentMetricsSchema: GenMessage<ComponentMetrics> = /*@__PURE__*/
-  messageDesc(file_eigenius, 16);
+  messageDesc(file_eigenius, 18);
 
 /**
  * @generated from message eigenius.v1.FiberQueryRequest
@@ -523,7 +585,7 @@ export type FiberQueryRequest = Message<"eigenius.v1.FiberQueryRequest"> & {
  * Use `create(FiberQueryRequestSchema)` to create a new message.
  */
 export const FiberQueryRequestSchema: GenMessage<FiberQueryRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 17);
+  messageDesc(file_eigenius, 19);
 
 /**
  * @generated from message eigenius.v1.FiberQueryResponse
@@ -552,7 +614,7 @@ export type FiberQueryResponse = Message<"eigenius.v1.FiberQueryResponse"> & {
  * Use `create(FiberQueryResponseSchema)` to create a new message.
  */
 export const FiberQueryResponseSchema: GenMessage<FiberQueryResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 18);
+  messageDesc(file_eigenius, 20);
 
 /**
  * @generated from message eigenius.v1.DiscoverMorphismsRequest
@@ -583,7 +645,7 @@ export type DiscoverMorphismsRequest = Message<"eigenius.v1.DiscoverMorphismsReq
  * Use `create(DiscoverMorphismsRequestSchema)` to create a new message.
  */
 export const DiscoverMorphismsRequestSchema: GenMessage<DiscoverMorphismsRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 19);
+  messageDesc(file_eigenius, 21);
 
 /**
  * @generated from message eigenius.v1.DiscoverMorphismsResponse
@@ -612,7 +674,7 @@ export type DiscoverMorphismsResponse = Message<"eigenius.v1.DiscoverMorphismsRe
  * Use `create(DiscoverMorphismsResponseSchema)` to create a new message.
  */
 export const DiscoverMorphismsResponseSchema: GenMessage<DiscoverMorphismsResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 20);
+  messageDesc(file_eigenius, 22);
 
 /**
  * @generated from message eigenius.v1.ListInstitutionsRequest
@@ -625,7 +687,7 @@ export type ListInstitutionsRequest = Message<"eigenius.v1.ListInstitutionsReque
  * Use `create(ListInstitutionsRequestSchema)` to create a new message.
  */
 export const ListInstitutionsRequestSchema: GenMessage<ListInstitutionsRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 21);
+  messageDesc(file_eigenius, 23);
 
 /**
  * @generated from message eigenius.v1.ListInstitutionsResponse
@@ -642,7 +704,7 @@ export type ListInstitutionsResponse = Message<"eigenius.v1.ListInstitutionsResp
  * Use `create(ListInstitutionsResponseSchema)` to create a new message.
  */
 export const ListInstitutionsResponseSchema: GenMessage<ListInstitutionsResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 22);
+  messageDesc(file_eigenius, 24);
 
 /**
  * @generated from message eigenius.v1.InstitutionInfo
@@ -678,7 +740,57 @@ export type InstitutionInfo = Message<"eigenius.v1.InstitutionInfo"> & {
  * Use `create(InstitutionInfoSchema)` to create a new message.
  */
 export const InstitutionInfoSchema: GenMessage<InstitutionInfo> = /*@__PURE__*/
-  messageDesc(file_eigenius, 23);
+  messageDesc(file_eigenius, 25);
+
+/**
+ * @generated from message eigenius.v1.GetSchemaRequest
+ */
+export type GetSchemaRequest = Message<"eigenius.v1.GetSchemaRequest"> & {
+  /**
+   * IRI of the class to generate schema for
+   *
+   * @generated from field: string class_iri = 1;
+   */
+  classIri: string;
+};
+
+/**
+ * Describes the message eigenius.v1.GetSchemaRequest.
+ * Use `create(GetSchemaRequestSchema)` to create a new message.
+ */
+export const GetSchemaRequestSchema: GenMessage<GetSchemaRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 26);
+
+/**
+ * @generated from message eigenius.v1.GetSchemaResponse
+ */
+export type GetSchemaResponse = Message<"eigenius.v1.GetSchemaResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * JSON Schema as a JSON string
+   *
+   * @generated from field: string json_schema = 2;
+   */
+  jsonSchema: string;
+
+  /**
+   * Error message if !success
+   *
+   * @generated from field: string error = 3;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message eigenius.v1.GetSchemaResponse.
+ * Use `create(GetSchemaResponseSchema)` to create a new message.
+ */
+export const GetSchemaResponseSchema: GenMessage<GetSchemaResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 27);
 
 /**
  * @generated from message eigenius.v1.ValidationError
@@ -715,7 +827,7 @@ export type ValidationError = Message<"eigenius.v1.ValidationError"> & {
  * Use `create(ValidationErrorSchema)` to create a new message.
  */
 export const ValidationErrorSchema: GenMessage<ValidationError> = /*@__PURE__*/
-  messageDesc(file_eigenius, 24);
+  messageDesc(file_eigenius, 28);
 
 /**
  * @generated from service eigenius.v1.EigeniusKernel
@@ -821,6 +933,16 @@ export const EigeniusKernel: GenService<{
     input: typeof ListInstitutionsRequestSchema;
     output: typeof ListInstitutionsResponseSchema;
   },
+  /**
+   * Generate a JSON Schema for an ontology class.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.GetSchema
+   */
+  getSchema: {
+    methodKind: "unary";
+    input: typeof GetSchemaRequestSchema;
+    output: typeof GetSchemaResponseSchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_eigenius, 0);
 
@@ -838,6 +960,19 @@ export const ComponentExecutor: GenService<{
     methodKind: "unary";
     input: typeof ComponentRequestSchema;
     output: typeof ComponentResponseSchema;
+  },
+  /**
+   * Register a WASM IO component with the orchestrator. Called by the
+   * kernel when loading a component with capability_level=io and
+   * implementation=wasm. The orchestrator transpiles the Component Model
+   * binary (jco) and instantiates it when Execute is called.
+   *
+   * @generated from rpc eigenius.v1.ComponentExecutor.RegisterWasmComponent
+   */
+  registerWasmComponent: {
+    methodKind: "unary";
+    input: typeof RegisterWasmComponentRequestSchema;
+    output: typeof RegisterWasmComponentResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_eigenius, 1);
