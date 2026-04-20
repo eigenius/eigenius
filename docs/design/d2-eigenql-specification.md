@@ -364,6 +364,12 @@ The return class determines which properties are valid in the output. The result
 
 Each return item maps a property name to an expression. Expression types must match the declared property data types.
 
+The wire shape of a RETURN-bearing response — row resources plus a
+synthesized row class and Property resources wrapped in a `ResultSet` —
+is specified in [Appendix A](#appendix-a-result-documents). Consumers
+drive lookups through the included class, not through fixed IRI
+conventions.
+
 ### 3.11 GROUP BY clause
 
 ```ebnf
@@ -590,9 +596,16 @@ If no GROUP BY is present but aggregates are used in RETURN, all bindings form a
 
 ### 6.5 RETURN shaping
 
-For each surviving binding (or group), the RETURN clause constructs a result resource:
-1. Create a new resource with `is_a` set to the result class(es)
-2. For each return item, evaluate the expression against the binding and set the property
+For each surviving binding (or group), the RETURN clause constructs a
+row resource:
+1. Create a new resource with `is_a` set to the result class(es) (or the
+   synthesized row class when `RETURN []` is used)
+2. For each return item, evaluate the expression against the binding and
+   set the property on the row under its synthesized Property IRI
+
+Row resources are wrapped in a `ResultSet` together with a synthesized
+row class and Property resources; the complete wire shape is specified
+in [Appendix A](#appendix-a-result-documents).
 
 ### 6.6 Result modifiers
 
@@ -916,3 +929,121 @@ RETURN [] {
 | Recursive rules | DEFINE with self-reference, seminaive fixpoint evaluation | Standard Datalog; enables transitive closure and derived relations |
 | Negated patterns | `NOT ClassName(...)` in MATCH, with stratification checking | Stratified negation prevents paradoxes; well-understood theory |
 | Monotonicity tracking | Queries with negation flagged as non-monotonic | Enables correct cache invalidation on layer changes |
+
+---
+
+## Appendix A. Result Documents
+
+A query response is an **Eigon document** — the same wire shape as a Load
+payload, a CBOR array of top-level resources — but it is not added to any
+layer. Consumers treat it as transient data; clients that want to make it
+durable can feed the identical bytes back into `Load`.
+
+Everything in the response is first-class knowledge-graph content: row
+values, their class, and the class's property definitions are all
+resources with their own IRIs. Clients do not hardcode result keys; they
+discover them by walking the included class. This closes
+[issue #9](https://github.com/eigenius/eigenius/issues/9).
+
+### A.1 Resources in the document
+
+A response to a `RETURN`-bearing query contains four categories of
+resource:
+
+1. **Row `Property` resources** — one per `RETURN` item. Each carries
+   `short_name` (the bare name the user typed), `datatype` (inferred
+   per §5), and sits under `urn:eigenius:core:Property`.
+2. **Row `Class` resource** — lists the properties above and carries a
+   `short_name` derived from the `RETURN` class names (or a generated
+   `QueryRow` if the `RETURN []` form is used).
+3. **Row resources** — one per surviving binding. `is_a` includes the row
+   class IRI. Each property value is stored under the synthesized
+   Property IRI.
+4. **`ResultSet` resource** — wraps the response. Carries:
+   - `urn:eigenius:query:result_class` → row class IRI
+   - `urn:eigenius:query:rows` → list of row resource IRIs (or embedded
+     row resources; see A.4)
+   - `urn:eigenius:query:row_count`, `urn:eigenius:query:elapsed_ms`, etc.
+     for introspection
+
+Match-only queries (no `RETURN`) return a `ResultSet` with an empty row
+class and a boolean `urn:eigenius:query:matched` property. No Property
+resources are synthesized.
+
+### A.2 IRI synthesis
+
+All synthesized IRIs live under the `urn:eigenius:query:gen:<hash>:`
+namespace. `<hash>` is derived from the query text (a stable hash of the
+canonicalized AST in v1; the exact hash function is an implementation
+concern, not part of this spec). Within one response:
+
+- `urn:eigenius:query:gen:<hash>:result` — the ResultSet
+- `urn:eigenius:query:gen:<hash>:row_class` — the row class
+- `urn:eigenius:query:gen:<hash>:row:<short_name>` — each Property
+- `urn:eigenius:query:gen:<hash>:row:<n>` — the nth row resource
+
+Re-running the same query produces identical IRIs. This is not a
+persistence guarantee — nothing in the kernel retains these IRIs between
+requests.
+
+### A.3 Property datatype derivation
+
+Each row Property's `datatype` is the inferred type of its `RETURN`
+expression per §5. Aggregate functions have fixed datatypes:
+
+| Expression | Property datatype |
+|------------|-------------------|
+| `COUNT(_)` | `urn:eigenius:core:Integer` |
+| `SUM(?x)` where `?x : Integer` | `urn:eigenius:core:Integer` |
+| `SUM(?x)` otherwise | `urn:eigenius:core:Float` |
+| `AVG(?x)` | `urn:eigenius:core:Float` |
+| `MIN(?x)`, `MAX(?x)` | same as datatype of `?x` |
+
+Non-aggregate expressions inherit their datatype from the type checker's
+existing inference for that expression shape.
+
+### A.4 Access pattern
+
+A consumer reads a result document like any other Eigon document:
+
+1. Parse the response bytes as an Eigon document.
+2. Find the resource with `is_a` including `urn:eigenius:query:ResultSet`.
+3. Follow `urn:eigenius:query:result_class` to the row class.
+4. Read the class's `urn:eigenius:core:properties` — a list of Property
+   IRIs. For each, read its `urn:eigenius:core:short_name` to build a
+   `short_name → iri` map.
+5. Iterate `urn:eigenius:query:rows` and, for each row, look up values
+   by IRI (not short name). Map them to short names using the table
+   from step 4 when displaying to users or building client-side
+   structures.
+
+Clients never have to guess IRI conventions. Removing a `RETURN` item
+changes the included Property resources, which consumers see
+immediately; adding a computed column gives it a Property resource with
+the inferred datatype.
+
+### A.5 Non-goals for v1
+
+The following are out of scope for this spec and tracked as future work:
+
+- **Persistence of result classes.** Result documents are transient.
+  Adding the same query's class to a durable layer for re-use is a
+  separate concern (candidate future issue: "promote a ResultSet to a
+  layer").
+- **Cross-query class deduplication.** Two queries with the same RETURN
+  shape generate distinct row classes today. Deduplication requires a
+  canonicalization policy over the AST and is deferred.
+- **Streaming pagination.** The wire transport returns a whole document
+  per response. Large result sets may later require chunking, which is
+  an implementation detail not mandated by this spec.
+- **Result-set arithmetic.** Combining, filtering, or joining result
+  sets is the job of a follow-up query; there is no fused "run these
+  two queries and join their results" operator in v1.
+
+### A.6 Evolution
+
+If a future version of the spec introduces durable result classes,
+cross-query deduplication, or streamed pagination, the wire shape can
+evolve without breaking consumers that treat responses as opaque
+documents. Client code that drives from the class's property list,
+rather than from hardcoded IRIs, continues to work across both models.

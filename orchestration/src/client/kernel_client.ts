@@ -89,18 +89,29 @@ export class KernelClient {
   }
 
   /**
-   * Execute an EigenQL query. Collects all streamed results.
+   * Execute an EigenQL query. The kernel returns an Eigon document
+   * (see D2 Appendix A) — we extract the embedded row resources from
+   * the ResultSet and return them individually as CBOR byte arrays so
+   * downstream consumers (notably the WASM `query-access.query` host
+   * import, which contracts for `list<list<u8>>`) don't have to walk
+   * the document themselves.
+   *
+   * Rows keep their synthesized Property IRI keys; callers that want
+   * the short-name view should consult the ResultSet's row class (see
+   * the full document via gRPC if needed) or use this method's result
+   * in combination with the property list.
    */
   async query(eigenql: string): Promise<Uint8Array[]> {
-    const results: Uint8Array[] = [];
-    for await (
-      const result of this.client.query(
-        create(QueryRequestSchema, { eigenql }),
-      )
-    ) {
-      results.push(result.resource);
+    const resp = await this.client.query(
+      create(QueryRequestSchema, { eigenql }),
+    );
+    if (!resp.success) {
+      throw new Error(`Query failed: ${resp.error}`);
     }
-    return results;
+    if (resp.document.length === 0) {
+      return [];
+    }
+    return extractRowBytes(resp.document);
   }
 
   /**
@@ -153,4 +164,37 @@ export class KernelClient {
       create(HealthRequestSchema, {}),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Result-document row extraction
+// ---------------------------------------------------------------------------
+
+// Avoid importing the full cbor module at the top so this file stays
+// usable from tests that mock the transport — cbor-x pulls in native
+// code behind the scenes.
+import { decode as cborDecode, encode as cborEncode } from "cbor-x";
+
+const IS_A = "urn:eigenius:core:is_a";
+const RESULT_SET_CLASS = "urn:eigenius:query:ResultSet";
+const ROWS_PROP = "urn:eigenius:query:rows";
+
+/**
+ * Walk an Eigon-CBOR document (D2 Appendix A) and return each embedded
+ * row as its own CBOR byte array. Returns `[]` for match-only queries.
+ */
+function extractRowBytes(documentBytes: Uint8Array): Uint8Array[] {
+  // deno-lint-ignore no-explicit-any
+  const decoded: any = cborDecode(documentBytes);
+  const resources = Array.isArray(decoded) ? decoded : [decoded];
+
+  const resultSet = resources.find((r) =>
+    r && Array.isArray(r[IS_A]) && r[IS_A].includes(RESULT_SET_CLASS)
+  );
+  if (!resultSet) return [];
+
+  const rows = resultSet[ROWS_PROP];
+  if (!Array.isArray(rows)) return [];
+
+  return rows.map((row) => cborEncode(row));
 }

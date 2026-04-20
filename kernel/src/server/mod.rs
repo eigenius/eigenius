@@ -327,38 +327,32 @@ impl EigeniusKernel for EigeniusService {
         }
     }
 
-    type QueryStream = tokio_stream::wrappers::ReceiverStream<Result<QueryResult, Status>>;
-
     async fn query(
         &self,
         request: Request<QueryRequest>,
-    ) -> Result<Response<Self::QueryStream>, Status> {
+    ) -> Result<Response<QueryResponse>, Status> {
         let req = request.into_inner();
         let ctx = self.context.read().await;
 
-        let result = query::execute(&req.eigenql, ctx.head()).map_err(|errors| {
-            let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
-            Status::failed_precondition(format!("query error: {}", msgs.join("; ")))
-        })?;
-
-        let (tx, rx) = tokio::sync::mpsc::channel(128);
-
-        // Send results
-        tokio::spawn(async move {
-            for (index, resource) in result.resources.iter().enumerate() {
-                let msg = QueryResult {
-                    resource: eigon_cbor::serialize_resource(resource),
-                    index: index as u64,
-                };
-                if tx.send(Ok(msg)).await.is_err() {
-                    break; // Client disconnected
-                }
+        let document = match query::execute(&req.eigenql, ctx.head()) {
+            Ok(doc) => doc,
+            Err(errors) => {
+                let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
+                return Ok(Response::new(QueryResponse {
+                    success: false,
+                    document: Vec::new(),
+                    content_type: String::new(),
+                    error: format!("query error: {}", msgs.join("; ")),
+                }));
             }
-        });
+        };
 
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
-            rx,
-        )))
+        Ok(Response::new(QueryResponse {
+            success: true,
+            document: eigon_cbor::serialize_document(&document),
+            content_type: "application/cbor".to_string(),
+            error: String::new(),
+        }))
     }
 
     async fn validate_program(

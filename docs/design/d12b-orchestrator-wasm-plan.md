@@ -257,9 +257,10 @@ pattern (`connect_lazy`) the kernel uses for its `SharedOrchestratorClient`.
 RPC surface already exists — reuse:
 - `Inspect(iri) -> { found, resource: CBOR bytes }` → `read-access.resolve`.
   Return `None` to the guest when `found == false`.
-- `Query(eigenql) -> stream QueryResult { resource: CBOR bytes, index }`
-  → `query-access.query`. Collect the stream into a `Vec<Buffer>` on the
-  TS side before returning to the guest.
+- `Query(eigenql) -> QueryResponse { document: CBOR bytes }` →
+  `query-access.query`. The TS client decodes the document, finds the
+  ResultSet, and hands the guest the embedded rows as a list of CBOR
+  buffers. See D2 Appendix A for the document shape.
 
 Both RPCs already return CBOR, so no format conversion on the kernel side.
 

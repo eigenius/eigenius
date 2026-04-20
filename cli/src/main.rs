@@ -375,19 +375,19 @@ fn cmd_query(query_str: &str, file: Option<&str>, json_output: bool) {
         }
     }
 
-    // Execute query
+    // Execute query — returns the full result document (Property resources,
+    // row Class, ResultSet with embedded rows) per D2 Appendix A.
     match eigenius_kernel::query::execute(query_str, ctx.head()) {
-        Ok(result) => {
+        Ok(document) => {
             if json_output {
-                let json_results: Vec<serde_json::Value> = result
-                    .resources
+                let json_results: Vec<serde_json::Value> = document
                     .iter()
                     .map(eigon_json::serialize_resource)
                     .collect();
                 println!("{}", serde_json::to_string(&json_results).unwrap());
             } else {
-                println!("{} result(s):", result.resources.len());
-                for resource in &result.resources {
+                println!("{} resource(s) in result document:", document.len());
+                for resource in &document {
                     let json = eigon_json::serialize_resource(resource);
                     println!("{}", serde_json::to_string_pretty(&json).unwrap());
                 }
@@ -855,28 +855,28 @@ async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
 
     match client.query(request).await {
         Ok(response) => {
-            let mut stream = response.into_inner();
-            let mut count = 0u64;
-            while let Ok(Some(result)) = stream.message().await {
-                let resource =
-                    eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(&result.resource)
-                        .unwrap_or_else(|e| {
-                            eprintln!("Failed to parse result: {e}");
-                            std::process::exit(1);
-                        });
-                let json = eigon_json::serialize_resource(&resource);
-                if json_output {
-                    println!("{}", serde_json::to_string(&json).unwrap());
-                } else {
-                    if count == 0 {
-                        println!("Results:");
-                    }
+            let resp = response.into_inner();
+            if !resp.success {
+                eprintln!("Query failed: {}", resp.error);
+                std::process::exit(1);
+            }
+            let document = eigenius_kernel::ontology::eigon_cbor::parse_document(&resp.document)
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to parse result document: {e}");
+                    std::process::exit(1);
+                });
+            if json_output {
+                let arr: Vec<serde_json::Value> = document
+                    .iter()
+                    .map(eigon_json::serialize_resource)
+                    .collect();
+                println!("{}", serde_json::to_string(&arr).unwrap());
+            } else {
+                println!("{} resource(s) in result document:", document.len());
+                for r in &document {
+                    let json = eigon_json::serialize_resource(r);
                     println!("{}", serde_json::to_string_pretty(&json).unwrap());
                 }
-                count += 1;
-            }
-            if !json_output {
-                println!("{count} result(s).");
             }
         }
         Err(e) => {
@@ -1134,9 +1134,6 @@ async fn remote_capability_list(endpoint: &str, json: bool) {
     let components = run_query(&mut client, components_query).await;
     let institutions = run_query(&mut client, institutions_query).await;
 
-    const IRI_KEY: &str = "urn:query:result:iri";
-    const NAME_KEY: &str = "urn:query:result:name";
-
     if json {
         println!(
             "{{\"components\":{},\"institutions\":{}}}",
@@ -1149,8 +1146,8 @@ async fn remote_capability_list(endpoint: &str, json: bool) {
             println!("  (none registered)");
         } else {
             for r in &components {
-                let iri = r.get(IRI_KEY).and_then(|v| v.as_str()).unwrap_or("?");
-                let name = r.get(NAME_KEY).and_then(|v| v.as_str()).unwrap_or("?");
+                let iri = r.get("iri").and_then(|v| v.as_str()).unwrap_or("?");
+                let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                 println!("  {name} ({iri})");
             }
         }
@@ -1160,14 +1157,29 @@ async fn remote_capability_list(endpoint: &str, json: bool) {
             println!("  (none registered)");
         } else {
             for r in &institutions {
-                let iri = r.get(IRI_KEY).and_then(|v| v.as_str()).unwrap_or("?");
-                let name = r.get(NAME_KEY).and_then(|v| v.as_str()).unwrap_or("?");
+                let iri = r.get("iri").and_then(|v| v.as_str()).unwrap_or("?");
+                let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                 println!("  {name} ({iri})");
             }
         }
     }
 }
 
+/// Run a remote EigenQL query and materialise its rows into plain JSON
+/// objects keyed by the RETURN clause's short names.
+///
+/// Walks the response document per D2 Appendix A:
+///   1. Parse the response bytes as an Eigon document.
+///   2. Find the ResultSet (has `is_a` including `urn:eigenius:query:ResultSet`).
+///   3. Find the row class (`result_class` IRI points at a Class resource
+///      in the same document).
+///   4. For each Property IRI listed on the class, read its `short_name`
+///      and build a short_name → property IRI map.
+///   5. For each embedded row in `rows`, emit a JSON object keyed by
+///      short name.
+///
+/// Callers access values by the short name they put in the RETURN clause
+/// — e.g. `row.get("iri")` when the query said `RETURN [] { iri: ?c }`.
 async fn run_query(
     client: &mut eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient<
         tonic::transport::Channel,
@@ -1175,37 +1187,131 @@ async fn run_query(
     eigenql: &str,
 ) -> Vec<serde_json::Value> {
     use eigenius_kernel::ontology::eigon_cbor;
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::resource::{Resource, Value as RValue};
+    use eigenius_kernel::ontology::well_known as wk;
+    use eigenius_kernel::query::document as qdoc;
 
-    match client
+    let resp = match client
         .query(eigenius_kernel::server::proto::QueryRequest {
             eigenql: eigenql.to_string(),
         })
         .await
     {
-        Ok(response) => {
-            let mut stream = response.into_inner();
-            let mut results = Vec::new();
-            while let Some(result) = stream.message().await.unwrap_or(None) {
-                if let Ok(resource) = eigon_cbor::parse_resource_lenient(&result.resource) {
-                    let mut obj = serde_json::Map::new();
-                    for (k, v) in resource.properties() {
-                        if let Some(s) = v.as_str() {
-                            obj.insert(
-                                k.as_str().to_string(),
-                                serde_json::Value::String(s.to_string()),
-                            );
-                        }
-                    }
-                    results.push(serde_json::Value::Object(obj));
-                }
-            }
-            results
-        }
+        Ok(r) => r.into_inner(),
         Err(e) => {
             eprintln!("Query failed: {e}");
-            Vec::new()
+            return Vec::new();
+        }
+    };
+    if !resp.success {
+        eprintln!("Query failed: {}", resp.error);
+        return Vec::new();
+    }
+
+    let document = match eigon_cbor::parse_document(&resp.document) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Failed to parse result document: {e}");
+            return Vec::new();
+        }
+    };
+
+    // Index the document by IRI for class/property lookup.
+    let by_iri: std::collections::BTreeMap<String, &Resource> = document
+        .iter()
+        .filter_map(|r| r.id().map(|iri| (iri.as_str().to_string(), r)))
+        .collect();
+
+    // Locate the ResultSet.
+    let is_a_iri = Iri::parse(wk::IS_A).unwrap();
+    let rs_class = qdoc::RESULT_SET_CLASS;
+    let result_set = document.iter().find(|r| match r.get(&is_a_iri) {
+        Some(RValue::Array(a)) => a.iter().any(|v| s_as_str(v) == rs_class),
+        _ => false,
+    });
+    let result_set = match result_set {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+
+    // Walk to the row class.
+    let row_class_iri = match result_set.get(&Iri::parse(qdoc::RESULT_CLASS_PROP).unwrap()) {
+        Some(RValue::String(s)) => s.clone(),
+        Some(RValue::ResourceRef(i)) => i.as_str().to_string(),
+        _ => return Vec::new(),
+    };
+    let row_class = match by_iri.get(&row_class_iri) {
+        Some(c) => *c,
+        None => return Vec::new(),
+    };
+
+    // Build short_name → property IRI map from the class's property list.
+    let properties_prop = Iri::parse("urn:eigenius:core:properties").unwrap();
+    let short_name_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+    let mut short_to_iri: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    if let Some(RValue::Array(props)) = row_class.get(&properties_prop) {
+        for p in props {
+            let prop_iri = match p {
+                RValue::String(s) => s.clone(),
+                RValue::ResourceRef(i) => i.as_str().to_string(),
+                _ => continue,
+            };
+            let Some(prop_res) = by_iri.get(&prop_iri) else {
+                continue;
+            };
+            if let Some(RValue::String(short)) = prop_res.get(&short_name_prop) {
+                short_to_iri.insert(short.clone(), prop_iri);
+            }
         }
     }
+
+    // Iterate rows (embedded inside the ResultSet) and project each into a
+    // JSON object keyed by short name.
+    let mut out = Vec::new();
+    if let Some(RValue::Array(rows)) = result_set.get(&Iri::parse(qdoc::ROWS_PROP).unwrap()) {
+        for row_val in rows {
+            let row = match row_val {
+                RValue::Embedded(r) => r.as_ref(),
+                _ => continue,
+            };
+            let mut obj = serde_json::Map::new();
+            for (short, iri_str) in &short_to_iri {
+                let Ok(iri) = Iri::parse(iri_str) else {
+                    continue;
+                };
+                if let Some(v) = row.get(&iri) {
+                    if let Some(json) = value_to_json(v) {
+                        obj.insert(short.clone(), json);
+                    }
+                }
+            }
+            out.push(serde_json::Value::Object(obj));
+        }
+    }
+    out
+}
+
+fn s_as_str(v: &eigenius_kernel::ontology::resource::Value) -> &str {
+    use eigenius_kernel::ontology::resource::Value;
+    match v {
+        Value::String(s) => s.as_str(),
+        Value::ResourceRef(i) => i.as_str(),
+        _ => "",
+    }
+}
+
+fn value_to_json(v: &eigenius_kernel::ontology::resource::Value) -> Option<serde_json::Value> {
+    use eigenius_kernel::ontology::resource::Value;
+    Some(match v {
+        Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::ResourceRef(i) => serde_json::Value::String(i.as_str().to_string()),
+        Value::Integer(n) => serde_json::Value::Number((*n).into()),
+        Value::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number)?,
+        Value::Boolean(b) => serde_json::Value::Bool(*b),
+        _ => return None,
+    })
 }
 
 async fn remote_capability_inspect(endpoint: &str, iri: &str, json: bool) {

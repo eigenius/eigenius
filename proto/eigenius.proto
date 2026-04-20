@@ -14,8 +14,11 @@ service EigeniusKernel {
   // Resolve a resource by IRI from the context's layer chain.
   rpc Inspect(InspectRequest) returns (InspectResponse);
 
-  // Execute an EigenQL query. Results are streamed.
-  rpc Query(QueryRequest) returns (stream QueryResult);
+  // Execute an EigenQL query. Returns an Eigon document (wire-identical
+  // to a Load payload) containing a ResultSet plus its row class, row
+  // Property definitions, and the row resources themselves. See
+  // D2 Appendix A for the document shape.
+  rpc Query(QueryRequest) returns (QueryResponse);
 
   // Type-check a program against the context's layer chain.
   rpc ValidateProgram(ValidateProgramRequest) returns (ValidateProgramResponse);
@@ -74,9 +77,16 @@ message QueryRequest {
   string eigenql = 1;           // EigenQL program string
 }
 
-message QueryResult {
-  bytes resource = 1;           // One result resource as CBOR
-  uint64 index = 2;
+message QueryResponse {
+  bool success = 1;
+  // Eigon-CBOR document: an array of top-level resources. The ResultSet
+  // resource references the row class (by IRI) and the row resources
+  // (by IRI or embedded). Property and Class resources for the row
+  // schema are included so clients can discover short-name ↔ IRI
+  // mappings without hardcoding conventions. Empty on failure.
+  bytes document = 2;
+  string content_type = 3;      // "application/cbor"
+  string error = 4;             // Error message if !success
 }
 
 // --- ValidateProgram ---
