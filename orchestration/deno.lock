@@ -5,6 +5,7 @@
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "npm:@ai-sdk/anthropic@latest": "3.0.69_zod@3.25.76",
     "npm:@bufbuild/protobuf@2": "2.11.0",
+    "npm:@bufbuild/protoc-gen-es@^2.11.0": "2.11.0_@bufbuild+protobuf@2.11.0",
     "npm:@connectrpc/connect-node@2": "2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0",
     "npm:@connectrpc/connect@2": "2.1.1_@bufbuild+protobuf@2.11.0",
     "npm:@modelcontextprotocol/sdk@latest": "1.29.0_zod@3.25.76",
@@ -58,6 +59,25 @@
     "@bufbuild/protobuf@2.11.0": {
       "integrity": "sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ=="
     },
+    "@bufbuild/protoc-gen-es@2.11.0_@bufbuild+protobuf@2.11.0": {
+      "integrity": "sha512-VzQuwEQDXipbZ1soWUuAWm1Z0C3B/IDWGeysnbX6ogJ6As91C2mdvAND/ekQ4YIWgen4d5nqLfIBOWLqCCjYUA==",
+      "dependencies": [
+        "@bufbuild/protobuf",
+        "@bufbuild/protoplugin"
+      ],
+      "optionalPeers": [
+        "@bufbuild/protobuf"
+      ],
+      "bin": true
+    },
+    "@bufbuild/protoplugin@2.11.0": {
+      "integrity": "sha512-lyZVNFUHArIOt4W0+dwYBe5GBwbKzbOy8ObaloEqsw9Mmiwv2O48TwddDoHN4itylC+BaEGqFdI1W8WQt2vWJQ==",
+      "dependencies": [
+        "@bufbuild/protobuf",
+        "@typescript/vfs",
+        "typescript"
+      ]
+    },
     "@connectrpc/connect-node@2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0": {
       "integrity": "sha512-s3TfsI1XF+n+1z6MBS9rTnFsxxR4Rw5wmdEnkQINli81ESGxcsfaEet8duzq8LVuuCupmhUsgpRo0Nv9pZkufg==",
       "dependencies": [
@@ -104,6 +124,13 @@
     },
     "@standard-schema/spec@1.1.0": {
       "integrity": "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="
+    },
+    "@typescript/vfs@1.6.4_typescript@5.4.5": {
+      "integrity": "sha512-PJFXFS4ZJKiJ9Qiuix6Dz/OwEIqHD7Dme1UwZhTK11vR+5dqW2ACbdndWQexBzCx+CPuMe5WBYQWCsFyGlQLlQ==",
+      "dependencies": [
+        "debug",
+        "typescript"
+      ]
     },
     "@vercel/oidc@3.1.0": {
       "integrity": "sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w=="
@@ -579,6 +606,10 @@
         "mime-types"
       ]
     },
+    "typescript@5.4.5": {
+      "integrity": "sha512-vcI4UpRgg81oIRUFwR0WSIHKt11nJ7SAVlYNIu+QpqeyXP+gpQJy/Z4+F0aGxSE4MqwjyXvW/TzgkLAx2AGHwQ==",
+      "bin": true
+    },
     "unpipe@1.0.0": {
       "integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ=="
     },
@@ -610,6 +641,7 @@
       "jsr:@std/assert@1",
       "npm:@ai-sdk/anthropic@latest",
       "npm:@bufbuild/protobuf@2",
+      "npm:@bufbuild/protoc-gen-es@^2.11.0",
       "npm:@connectrpc/connect-node@2",
       "npm:@connectrpc/connect@2",
       "npm:@modelcontextprotocol/sdk@latest",

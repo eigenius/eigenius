@@ -151,6 +151,9 @@
     "urn:eigenius:core:recommends": [
       "urn:eigenius:program:component:argument_type",
       "urn:eigenius:program:component:wasm_binary",
+      "urn:eigenius:program:component:wasm_binary_ref",
+      "urn:eigenius:program:component:fuel_limit",
+      "urn:eigenius:program:component:memory_limit_pages",
       "urn:eigenius:program:component:capability_level",
       "urn:eigenius:program:component:deterministic",
       "urn:eigenius:program:component:fallible",
@@ -386,10 +389,36 @@
   {
     "@id": "urn:eigenius:program:component:wasm_binary",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "IRI of the WASM binary in blob storage. Required for wasm components.",
+    "urn:eigenius:core:description": "Inline WASM Component Model binary (base64-encoded bytes). Used for small modules.",
     "urn:eigenius:core:short_name": "wasm_binary",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:wasm_binary_ref",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the WASM binary in blob storage. Used for large modules. Either wasm_binary or wasm_binary_ref is required for wasm components.",
+    "urn:eigenius:core:short_name": "wasm_binary_ref",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:fuel_limit",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum Wasmtime fuel units per invocation (approx. WASM instructions). Default 10,000,000.",
+    "urn:eigenius:core:short_name": "fuel_limit",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
+  },
+  {
+    "@id": "urn:eigenius:program:component:memory_limit_pages",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Maximum linear memory size in 64KB pages per instance. Default 1024 = 64 MB.",
+    "urn:eigenius:core:short_name": "memory_limit_pages",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
     "urn:eigenius:core:domain": ["urn:eigenius:program:Component"]
   },
   {

@@ -113,20 +113,34 @@ impl BuiltinComponent for RemoteComponent {
     }
 }
 
-/// Connect to the orchestrator and register all remote components.
-///
-/// Returns the component registry with remote components registered.
+/// Shared gRPC client type alias to reduce boilerplate.
+pub type SharedOrchestratorClient = Arc<Mutex<ComponentExecutorClient<Channel>>>;
+
+/// Connect to the orchestrator, returning the shared client and the
+/// built-in remote components registered against it.
 pub async fn connect_orchestrator(
     endpoint: &str,
     component_iris: &[&str],
-) -> Result<Vec<(String, Box<dyn BuiltinComponent>)>, String> {
+) -> Result<
+    (
+        SharedOrchestratorClient,
+        Vec<(String, Box<dyn BuiltinComponent>)>,
+    ),
+    String,
+> {
+    // Use `connect_lazy()` so the kernel can start up without requiring the
+    // orchestrator to be ready. The connection is established on the first
+    // RPC call. This matches how production deployments work (services come
+    // up in parallel) and makes local dev less fragile.
     let channel = Channel::from_shared(endpoint.to_string())
         .map_err(|e| format!("invalid endpoint: {e}"))?
-        .connect()
-        .await
-        .map_err(|e| format!("failed to connect to orchestrator at {endpoint}: {e}"))?;
+        .connect_lazy();
 
-    let client = Arc::new(Mutex::new(ComponentExecutorClient::new(channel)));
+    let client: SharedOrchestratorClient = Arc::new(Mutex::new(
+        ComponentExecutorClient::new(channel)
+            .max_decoding_message_size(128 * 1024 * 1024)
+            .max_encoding_message_size(128 * 1024 * 1024),
+    ));
 
     let mut components: Vec<(String, Box<dyn BuiltinComponent>)> = Vec::new();
     for iri in component_iris {
@@ -136,5 +150,5 @@ pub async fn connect_orchestrator(
         ));
     }
 
-    Ok(components)
+    Ok((client, components))
 }

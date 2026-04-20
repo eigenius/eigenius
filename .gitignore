@@ -32,6 +32,8 @@ Thumbs.db
 *.wasm
 *.o
 *.d
+.fingerprint
+/examples/*/target
 
 # Azure
 .azure/

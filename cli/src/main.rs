@@ -122,8 +122,76 @@ enum Commands {
         class_iri: String,
     },
 
+    /// Manage WASM capabilities (components and institutions)
+    Capability {
+        #[command(subcommand)]
+        command: CapabilityCommands,
+    },
+
     /// Show version and build info
     Version,
+}
+
+#[derive(Subcommand)]
+enum CapabilityCommands {
+    /// List registered components and institutions
+    List,
+
+    /// Inspect a registered capability by IRI
+    Inspect {
+        /// IRI of the component or institution
+        #[arg(value_name = "IRI")]
+        iri: String,
+    },
+
+    /// Install a WASM component or institution
+    Install {
+        /// Path to the WASM binary file (built with cargo-component)
+        #[arg(value_name = "WASM_FILE")]
+        binary: String,
+
+        /// Path to an Eigon-JSON or ESL file declaring the capability.
+        /// The file should contain the component/institution resource
+        /// with its type declarations; the CLI fills in `wasm_binary`
+        /// and `implementation: "wasm"`.
+        #[arg(long, value_name = "FILE")]
+        definition: Option<String>,
+
+        /// Quick mode: IRI for the capability when no definition file is provided
+        #[arg(long, value_name = "IRI", conflicts_with = "definition")]
+        as_iri: Option<String>,
+
+        /// Quick mode: kind of capability (component or institution)
+        #[arg(long, value_name = "KIND", default_value = "component")]
+        kind: String,
+
+        /// Quick mode: capability level (pure or read)
+        #[arg(long, value_name = "LEVEL", default_value = "pure")]
+        capability: String,
+
+        /// Quick mode: input_type IRI (components only)
+        #[arg(long, value_name = "IRI")]
+        input_type: Option<String>,
+
+        /// Quick mode: output_type IRI (components only)
+        #[arg(long, value_name = "IRI")]
+        output_type: Option<String>,
+    },
+
+    /// Invoke a registered capability with test input
+    Test {
+        /// IRI of the capability to test
+        #[arg(value_name = "IRI")]
+        iri: String,
+
+        /// Input file (Eigon-JSON or ESL)
+        #[arg(long, value_name = "FILE")]
+        input: String,
+
+        /// For institutions: dispatch as fiber query (default) or discover-morphisms
+        #[arg(long, value_name = "MODE", default_value = "query")]
+        mode: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -171,6 +239,9 @@ async fn main() {
             Commands::GetSchema { class_iri } => {
                 remote_get_schema(endpoint, &class_iri, cli.json).await
             }
+            Commands::Capability { command } => {
+                remote_capability(endpoint, command, cli.json).await
+            }
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -207,6 +278,10 @@ async fn main() {
         }
         Commands::GetSchema { .. } => {
             eprintln!("'get-schema' requires --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Capability { .. } => {
+            eprintln!("'capability' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Db { command } => cmd_db(command),
@@ -718,12 +793,22 @@ fn content_type_for_file(file: &str) -> String {
 use eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient;
 
 async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport::Channel> {
-    EigeniusKernelClient::connect(endpoint.to_string())
+    let channel = tonic::transport::Endpoint::from_shared(endpoint.to_string())
+        .unwrap_or_else(|e| {
+            eprintln!("Invalid endpoint '{endpoint}': {e}");
+            std::process::exit(1);
+        })
+        .connect()
         .await
         .unwrap_or_else(|e| {
             eprintln!("Failed to connect to {endpoint}: {e}");
             std::process::exit(1);
-        })
+        });
+    // Raise gRPC message size limits to 128 MB to accommodate WASM component
+    // binaries (which are base64-encoded and can be multiple MB).
+    EigeniusKernelClient::new(channel)
+        .max_decoding_message_size(128 * 1024 * 1024)
+        .max_encoding_message_size(128 * 1024 * 1024)
 }
 
 async fn remote_inspect(endpoint: &str, iri_str: &str, json_output: bool) {
@@ -988,5 +1073,627 @@ async fn remote_get_schema(endpoint: &str, class_iri: &str, _json_output: bool) 
             eprintln!("gRPC error: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+// --- Capability subcommand ---
+
+async fn remote_capability(endpoint: &str, command: CapabilityCommands, json: bool) {
+    match command {
+        CapabilityCommands::List => remote_capability_list(endpoint, json).await,
+        CapabilityCommands::Inspect { iri } => {
+            remote_capability_inspect(endpoint, &iri, json).await
+        }
+        CapabilityCommands::Install {
+            binary,
+            definition,
+            as_iri,
+            kind,
+            capability,
+            input_type,
+            output_type,
+        } => {
+            remote_capability_install(
+                endpoint,
+                &binary,
+                definition.as_deref(),
+                as_iri.as_deref(),
+                &kind,
+                &capability,
+                input_type.as_deref(),
+                output_type.as_deref(),
+                json,
+            )
+            .await
+        }
+        CapabilityCommands::Test { iri, input, mode } => {
+            remote_capability_test(endpoint, &iri, &input, &mode, json).await
+        }
+    }
+}
+
+async fn remote_capability_list(endpoint: &str, json: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    // Find all Component resources
+    let components_query = r#"
+        MATCH "urn:eigenius:program:Component"(?c) {
+            "urn:eigenius:core:short_name": ?name
+        }
+        RETURN [] { iri: ?c, name: ?name }
+    "#;
+
+    // Find all Institution resources
+    let institutions_query = r#"
+        MATCH "urn:eigenius:institution:Institution"(?i) {
+            "urn:eigenius:institution:institution_name": ?name
+        }
+        RETURN [] { iri: ?i, name: ?name }
+    "#;
+
+    let components = run_query(&mut client, components_query).await;
+    let institutions = run_query(&mut client, institutions_query).await;
+
+    const IRI_KEY: &str = "urn:query:result:iri";
+    const NAME_KEY: &str = "urn:query:result:name";
+
+    if json {
+        println!(
+            "{{\"components\":{},\"institutions\":{}}}",
+            serde_json::to_string(&components).unwrap(),
+            serde_json::to_string(&institutions).unwrap()
+        );
+    } else {
+        println!("Components:");
+        if components.is_empty() {
+            println!("  (none registered)");
+        } else {
+            for r in &components {
+                let iri = r.get(IRI_KEY).and_then(|v| v.as_str()).unwrap_or("?");
+                let name = r.get(NAME_KEY).and_then(|v| v.as_str()).unwrap_or("?");
+                println!("  {name} ({iri})");
+            }
+        }
+        println!();
+        println!("Institutions:");
+        if institutions.is_empty() {
+            println!("  (none registered)");
+        } else {
+            for r in &institutions {
+                let iri = r.get(IRI_KEY).and_then(|v| v.as_str()).unwrap_or("?");
+                let name = r.get(NAME_KEY).and_then(|v| v.as_str()).unwrap_or("?");
+                println!("  {name} ({iri})");
+            }
+        }
+    }
+}
+
+async fn run_query(
+    client: &mut eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient<
+        tonic::transport::Channel,
+    >,
+    eigenql: &str,
+) -> Vec<serde_json::Value> {
+    use eigenius_kernel::ontology::eigon_cbor;
+
+    match client
+        .query(eigenius_kernel::server::proto::QueryRequest {
+            eigenql: eigenql.to_string(),
+        })
+        .await
+    {
+        Ok(response) => {
+            let mut stream = response.into_inner();
+            let mut results = Vec::new();
+            while let Some(result) = stream.message().await.unwrap_or(None) {
+                if let Ok(resource) = eigon_cbor::parse_resource_lenient(&result.resource) {
+                    let mut obj = serde_json::Map::new();
+                    for (k, v) in resource.properties() {
+                        if let Some(s) = v.as_str() {
+                            obj.insert(
+                                k.as_str().to_string(),
+                                serde_json::Value::String(s.to_string()),
+                            );
+                        }
+                    }
+                    results.push(serde_json::Value::Object(obj));
+                }
+            }
+            results
+        }
+        Err(e) => {
+            eprintln!("Query failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
+async fn remote_capability_inspect(endpoint: &str, iri: &str, json: bool) {
+    let mut client = connect_client(endpoint).await;
+
+    let request = eigenius_kernel::server::proto::InspectRequest {
+        iri: iri.to_string(),
+    };
+
+    match client.inspect(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if !resp.found {
+                eprintln!("Capability not found: {iri}");
+                std::process::exit(1);
+            }
+            let resource =
+                match eigenius_kernel::ontology::eigon_cbor::parse_resource(&resp.resource) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("Failed to parse resource: {e}");
+                        std::process::exit(1);
+                    }
+                };
+            if json {
+                let v = eigenius_kernel::ontology::eigon_json::serialize_resource(&resource);
+                println!("{}", serde_json::to_string_pretty(&v).unwrap());
+            } else {
+                print_capability_human(&resource);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_capability_human(resource: &eigenius_kernel::ontology::resource::Resource) {
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::resource::Value;
+
+    let get = |key: &str| -> Option<&Value> { resource.get(&Iri::parse(key).unwrap()) };
+    let get_str =
+        |key: &str| -> Option<String> { get(key).and_then(|v| v.as_str()).map(|s| s.to_string()) };
+
+    if let Some(id) = resource.id() {
+        println!("IRI:             {}", id.as_str());
+    }
+    if let Some(name) = get_str("urn:eigenius:core:short_name") {
+        println!("Name:            {name}");
+    }
+    if let Some(desc) = get_str("urn:eigenius:core:description") {
+        println!("Description:     {desc}");
+    }
+
+    // is_a
+    let is_a_iris = resource.is_a();
+    if !is_a_iris.is_empty() {
+        let classes: Vec<String> = is_a_iris.iter().map(|i| i.as_str().to_string()).collect();
+        println!("Classes:         {}", classes.join(", "));
+    }
+
+    // Component-specific
+    if let Some(impl_) = get_str("urn:eigenius:program:component:implementation") {
+        println!("Implementation:  {impl_}");
+    }
+    if let Some(cap) = get_str("urn:eigenius:program:component:capability_level") {
+        println!("Capability:      {cap}");
+    }
+    if let Some(input) = get_str("urn:eigenius:program:component:input_type") {
+        println!("Input type:      {input}");
+    }
+    if let Some(output) = get_str("urn:eigenius:program:component:output_type") {
+        println!("Output type:     {output}");
+    }
+    if let Some(arg) = get_str("urn:eigenius:program:component:argument_type") {
+        println!("Argument type:   {arg}");
+    }
+
+    // Institution-specific
+    if let Some(impl_) = get_str("urn:eigenius:institution:implementation") {
+        println!("Implementation:  {impl_}");
+    }
+    if let Some(inst_iri) = get_str("urn:eigenius:institution:institution_iri") {
+        println!("Institution IRI: {inst_iri}");
+    }
+
+    // WASM metadata (size in bytes for binary)
+    let wasm_bytes = get("urn:eigenius:program:component:wasm_binary")
+        .or_else(|| get("urn:eigenius:institution:wasm_binary"))
+        .and_then(|v| v.as_str());
+    if let Some(b64) = wasm_bytes {
+        // Rough decoded size: base64 is 4/3 of raw bytes
+        let estimated_size = b64.len() * 3 / 4;
+        println!("WASM binary:     ~{estimated_size} bytes (inline base64)");
+    }
+
+    // Fuel/memory config
+    if let Some(Value::Integer(n)) = get("urn:eigenius:program:component:fuel_limit")
+        .or_else(|| get("urn:eigenius:institution:fuel_limit"))
+    {
+        println!("Fuel limit:      {n}");
+    }
+    if let Some(Value::Integer(n)) = get("urn:eigenius:program:component:memory_limit_pages")
+        .or_else(|| get("urn:eigenius:institution:memory_limit_pages"))
+    {
+        println!("Memory limit:    {n} pages ({} MB)", n * 64 / 1024);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn remote_capability_install(
+    endpoint: &str,
+    binary_file: &str,
+    definition_file: Option<&str>,
+    as_iri: Option<&str>,
+    kind: &str,
+    capability: &str,
+    input_type: Option<&str>,
+    output_type: Option<&str>,
+    json: bool,
+) {
+    let wasm_bytes = std::fs::read(binary_file).unwrap_or_else(|e| {
+        eprintln!("Failed to read WASM file '{binary_file}': {e}");
+        std::process::exit(1);
+    });
+    let base64_binary = encode_base64(&wasm_bytes);
+
+    let resource_json = if let Some(def_file) = definition_file {
+        merge_definition_with_binary(def_file, &base64_binary, kind)
+    } else {
+        let iri = as_iri.unwrap_or_else(|| {
+            eprintln!("'install' requires either --definition or --as (quick mode)");
+            std::process::exit(1);
+        });
+        generate_quick_resource(
+            iri,
+            kind,
+            capability,
+            &base64_binary,
+            input_type,
+            output_type,
+        )
+    };
+
+    // Send via load RPC with auto_commit
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::LoadRequest {
+        resources: resource_json.into_bytes(),
+        content_type: "application/eigon+json".to_string(),
+        auto_commit: true,
+    };
+
+    match client.load(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if resp.success {
+                if json {
+                    println!(
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\"}}",
+                        resp.resource_count, resp.layer_id
+                    );
+                } else {
+                    println!(
+                        "Installed {} resource(s). Layer: {}",
+                        resp.resource_count, resp.layer_id
+                    );
+                    println!(
+                        "(WASM binary: {} bytes from {binary_file})",
+                        wasm_bytes.len()
+                    );
+                }
+            } else {
+                eprintln!("Install failed:");
+                for err in &resp.errors {
+                    eprintln!("  {}: {}", err.rule, err.message);
+                }
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn merge_definition_with_binary(def_file: &str, base64_binary: &str, kind: &str) -> String {
+    // Read and compile to JSON if needed
+    let json_bytes = read_as_json(def_file);
+    let json_str = String::from_utf8(json_bytes).unwrap_or_else(|e| {
+        eprintln!("Definition file is not valid UTF-8: {e}");
+        std::process::exit(1);
+    });
+
+    let mut value: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_else(|e| {
+        eprintln!("Failed to parse definition as JSON: {e}");
+        std::process::exit(1);
+    });
+
+    // The definition may be a single object or an array — find the top-level
+    // capability resource and patch in the wasm_binary + implementation.
+    let (binary_prop, impl_prop) = match kind {
+        "component" => (
+            "urn:eigenius:program:component:wasm_binary",
+            "urn:eigenius:program:component:implementation",
+        ),
+        "institution" => (
+            "urn:eigenius:institution:wasm_binary",
+            "urn:eigenius:institution:implementation",
+        ),
+        other => {
+            eprintln!("Unknown --kind: {other} (expected 'component' or 'institution')");
+            std::process::exit(1);
+        }
+    };
+
+    fn patch(
+        obj: &mut serde_json::Map<String, serde_json::Value>,
+        binary_prop: &str,
+        impl_prop: &str,
+        binary: &str,
+    ) {
+        obj.insert(
+            binary_prop.to_string(),
+            serde_json::Value::String(binary.to_string()),
+        );
+        obj.insert(
+            impl_prop.to_string(),
+            serde_json::Value::String("wasm".to_string()),
+        );
+    }
+
+    match &mut value {
+        serde_json::Value::Object(obj) => patch(obj, binary_prop, impl_prop, base64_binary),
+        serde_json::Value::Array(arr) => {
+            // Patch the first top-level object with @id (that's the capability resource)
+            let mut patched = false;
+            for item in arr.iter_mut() {
+                if let serde_json::Value::Object(obj) = item {
+                    if obj.contains_key("@id") {
+                        patch(obj, binary_prop, impl_prop, base64_binary);
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if !patched {
+                eprintln!("Definition file contains no top-level resource with @id");
+                std::process::exit(1);
+            }
+        }
+        _ => {
+            eprintln!("Definition file root must be an object or array");
+            std::process::exit(1);
+        }
+    }
+
+    serde_json::to_string(&value).unwrap()
+}
+
+fn generate_quick_resource(
+    iri: &str,
+    kind: &str,
+    capability: &str,
+    base64_binary: &str,
+    input_type: Option<&str>,
+    output_type: Option<&str>,
+) -> String {
+    use serde_json::json;
+
+    match kind {
+        "component" => {
+            let input = input_type.unwrap_or("urn:eigenius:core:Class");
+            let output = output_type.unwrap_or("urn:eigenius:core:Class");
+            let cap_iri = match capability {
+                "pure" => "urn:eigenius:program:capability_levels:pure",
+                "read" => "urn:eigenius:program:capability_levels:read",
+                "io" => "urn:eigenius:program:capability_levels:io",
+                other => {
+                    eprintln!("Unknown --capability: {other} (expected 'pure', 'read', or 'io')");
+                    std::process::exit(1);
+                }
+            };
+            json!({
+                "@id": iri,
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+                "urn:eigenius:core:short_name": iri.rsplit(':').next().unwrap_or(iri),
+                "urn:eigenius:program:component:input_type": input,
+                "urn:eigenius:program:component:output_type": output,
+                "urn:eigenius:program:component:capability_level": cap_iri,
+                "urn:eigenius:program:component:implementation": "wasm",
+                "urn:eigenius:program:component:wasm_binary": base64_binary,
+            })
+            .to_string()
+        }
+        "institution" => json!({
+            "@id": iri,
+            "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+            "urn:eigenius:institution:institution_iri": iri,
+            "urn:eigenius:institution:institution_name": iri.rsplit(':').next().unwrap_or(iri),
+            "urn:eigenius:institution:implementation": "wasm",
+            "urn:eigenius:institution:wasm_binary": base64_binary,
+        })
+        .to_string(),
+        other => {
+            eprintln!("Unknown --kind: {other} (expected 'component' or 'institution')");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Encode bytes as standard base64 (RFC 4648, with padding).
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+        out.push(ALPHA[(b0 >> 2) as usize] as char);
+        out.push(ALPHA[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHA[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHA[(b2 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+async fn remote_capability_test(
+    endpoint: &str,
+    iri: &str,
+    input_file: &str,
+    mode: &str,
+    json: bool,
+) {
+    let mut client = connect_client(endpoint).await;
+
+    // Detect institution-hood via ListInstitutions (the authoritative view —
+    // institutions may register under a binary-declared IRI that differs from
+    // the ontology resource's @id).
+    let institutions = client
+        .list_institutions(eigenius_kernel::server::proto::ListInstitutionsRequest {})
+        .await
+        .map(|r| r.into_inner().institutions)
+        .unwrap_or_default();
+
+    let is_institution = institutions.iter().any(|i| i.iri == iri);
+
+    let input_json = read_as_json(input_file);
+
+    if is_institution {
+        let req = if mode == "discover" {
+            eigenius_kernel::server::proto::DiscoverMorphismsRequest {
+                institution_iri: iri.to_string(),
+                resources: vec![input_json],
+                content_type: "application/eigon+json".to_string(),
+            }
+        } else {
+            let response = client
+                .fiber_query(eigenius_kernel::server::proto::FiberQueryRequest {
+                    institution_iri: iri.to_string(),
+                    query: input_json,
+                    content_type: "application/eigon+json".to_string(),
+                })
+                .await;
+            match response {
+                Ok(r) => {
+                    let resp = r.into_inner();
+                    if resp.success {
+                        print_test_result(&resp.result, json);
+                    } else {
+                        eprintln!("Fiber query failed: {}", resp.error);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("gRPC error: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        };
+        match client.discover_morphisms(req).await {
+            Ok(r) => {
+                let resp = r.into_inner();
+                if resp.success {
+                    if json {
+                        let parsed: Vec<serde_json::Value> = resp
+                            .morphisms
+                            .iter()
+                            .filter_map(|m| {
+                                eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(m)
+                                    .ok()
+                                    .map(|r| {
+                                        eigenius_kernel::ontology::eigon_json::serialize_resource(
+                                            &r,
+                                        )
+                                    })
+                            })
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&parsed).unwrap());
+                    } else {
+                        println!("Discovered {} morphism(s)", resp.morphisms.len());
+                    }
+                } else {
+                    eprintln!("Discover morphisms failed: {}", resp.error);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Component: wrap in a trivial program that applies the component to input
+        let program_json = format!(
+            r#"{{
+                "@id": "urn:eigenius:cli:capability_test_program",
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+                "urn:eigenius:program:input_type": "urn:eigenius:core:Class",
+                "urn:eigenius:program:output_type": "urn:eigenius:core:Class",
+                "urn:eigenius:program:body": {{
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+                    "urn:eigenius:program:function": "{iri}",
+                    "urn:eigenius:program:argument": {{
+                        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                        "urn:eigenius:program:name": "input"
+                    }}
+                }}
+            }}"#
+        );
+
+        match client
+            .run_program(eigenius_kernel::server::proto::RunProgramRequest {
+                program: program_json.into_bytes(),
+                input: input_json,
+                content_type: "application/eigon+json".to_string(),
+            })
+            .await
+        {
+            Ok(response) => {
+                let resp = response.into_inner();
+                if resp.success {
+                    print_test_result(&resp.output, json);
+                } else {
+                    eprintln!("Component execution failed:");
+                    for err in &resp.errors {
+                        eprintln!("  {}: {}", err.rule, err.message);
+                    }
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn print_test_result(cbor_bytes: &[u8], json: bool) {
+    if json {
+        if let Ok(resource) =
+            eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(cbor_bytes)
+        {
+            let v = eigenius_kernel::ontology::eigon_json::serialize_resource(&resource);
+            println!("{}", serde_json::to_string_pretty(&v).unwrap());
+        } else {
+            eprintln!("Failed to parse result CBOR");
+            std::process::exit(1);
+        }
+    } else if let Ok(resource) =
+        eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(cbor_bytes)
+    {
+        let v = eigenius_kernel::ontology::eigon_json::serialize_resource(&resource);
+        println!("{}", serde_json::to_string_pretty(&v).unwrap());
+    } else {
+        eprintln!("Failed to parse result");
+        std::process::exit(1);
     }
 }

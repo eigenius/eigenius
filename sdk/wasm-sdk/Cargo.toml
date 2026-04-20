@@ -1,0 +1,13 @@
+[package]
+name = "eigenius-wasm-sdk"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "SDK for building WASM components and institutions for Eigenius."
+
+[dependencies]
+ciborium = { version = "0.2", default-features = false }
+ciborium-io = "0.2"
+
+[lib]
+# Can be compiled for wasm32-unknown-unknown or native (for testing).

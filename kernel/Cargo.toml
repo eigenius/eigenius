@@ -19,6 +19,7 @@ tokio-stream = "0.1"
 tonic.workspace = true
 prost.workspace = true
 uuid.workspace = true
+wasmtime.workspace = true
 
 [build-dependencies]
 tonic-build = "0.12"

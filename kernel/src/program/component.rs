@@ -8,6 +8,7 @@ use crate::ontology::resource::Resource;
 use crate::program::trace::ComponentMetrics;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 /// Errors during program execution.
 #[derive(Debug)]
@@ -57,14 +58,31 @@ pub trait BuiltinComponent: Send + Sync {
 }
 
 /// Registry of built-in components.
+///
+/// Supports an optional parent pointer so that new registrations can stack
+/// on top of an existing (immutable, shared) registry. Lookups walk the
+/// parent chain: local entries shadow parent entries with the same IRI.
+/// This avoids needing `BuiltinComponent: Clone` when swapping registries
+/// at runtime (e.g., when loading WASM components from a new layer).
 pub struct ComponentRegistry {
     components: BTreeMap<String, Box<dyn BuiltinComponent>>,
+    parent: Option<Arc<ComponentRegistry>>,
 }
 
 impl ComponentRegistry {
     pub fn new() -> Self {
         Self {
             components: BTreeMap::new(),
+            parent: None,
+        }
+    }
+
+    /// Create a new registry layered on top of an existing one.
+    /// Local registrations shadow parent entries with the same IRI.
+    pub fn new_with_parent(parent: Arc<ComponentRegistry>) -> Self {
+        Self {
+            components: BTreeMap::new(),
+            parent: Some(parent),
         }
     }
 
@@ -73,7 +91,22 @@ impl ComponentRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn BuiltinComponent> {
-        self.components.get(name).map(|b| b.as_ref())
+        if let Some(c) = self.components.get(name) {
+            return Some(c.as_ref());
+        }
+        self.parent.as_ref().and_then(|p| p.get(name))
+    }
+
+    /// List all registered component IRIs (local + inherited, deduplicated).
+    pub fn list(&self) -> Vec<String> {
+        let mut names: std::collections::BTreeSet<String> =
+            self.components.keys().cloned().collect();
+        if let Some(p) = &self.parent {
+            for name in p.list() {
+                names.insert(name);
+            }
+        }
+        names.into_iter().collect()
     }
 }
 
