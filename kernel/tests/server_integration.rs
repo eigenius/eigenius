@@ -88,11 +88,9 @@ async fn query_all_classes() {
         .await
         .unwrap();
 
-    let mut stream = response.into_inner();
-    let mut count = 0;
-    while let Ok(Some(_result)) = stream.message().await {
-        count += 1;
-    }
+    let resp = response.into_inner();
+    assert!(resp.success, "query failed: {}", resp.error);
+    let count = row_count_from_document(&resp.document);
 
     // Should find core classes (Class, Property, DataType, etc.) + program classes
     assert!(count >= 6, "expected at least 6 classes, got {count}");
@@ -127,11 +125,37 @@ async fn load_and_query() {
         .await
         .unwrap();
 
-    let mut stream = query_response.into_inner();
-    let mut count = 0;
-    while let Ok(Some(_result)) = stream.message().await {
-        count += 1;
-    }
-
+    let resp = query_response.into_inner();
+    assert!(resp.success, "query failed: {}", resp.error);
+    let count = row_count_from_document(&resp.document);
     assert_eq!(count, 1, "expected 1 dog, got {count}");
+}
+
+/// Decode a Query response document and return the ResultSet's
+/// `urn:eigenius:query:row_count`.
+fn row_count_from_document(document: &[u8]) -> i64 {
+    use eigenius_kernel::ontology::eigon_cbor;
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::resource::Value;
+    use eigenius_kernel::ontology::well_known as wk;
+
+    let resources = eigon_cbor::parse_document(document).expect("parse document");
+    let is_a = Iri::parse(wk::IS_A).unwrap();
+    let row_count_prop = Iri::parse("urn:eigenius:query:row_count").unwrap();
+    for r in &resources {
+        match r.get(&is_a) {
+            Some(Value::Array(a))
+                if a.iter().any(|v| match v {
+                    Value::String(s) => s == "urn:eigenius:query:ResultSet",
+                    _ => false,
+                }) =>
+            {
+                if let Some(Value::Integer(n)) = r.get(&row_count_prop) {
+                    return *n;
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("no ResultSet in query response document");
 }

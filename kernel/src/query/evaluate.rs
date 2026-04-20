@@ -5,6 +5,7 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::query::ast::*;
+use crate::query::document::QueryFingerprint;
 use crate::query::error::QueryError;
 use crate::query::functions::{self, like_match, to_f64, values_compare, values_equal};
 use std::collections::BTreeMap;
@@ -13,7 +14,15 @@ use std::collections::BTreeMap;
 type Binding = BTreeMap<String, Value>;
 
 /// Evaluate a parsed and validated EigenQL program against a layer.
-pub fn evaluate(program: &Program, layer: &Layer) -> Result<Vec<Resource>, QueryError> {
+///
+/// Row Property IRIs for RETURN items are synthesized using `fp`, so that
+/// the downstream `document::wrap` step produces Property/Class metadata
+/// resources that line up with the row keys.
+pub fn evaluate(
+    program: &Program,
+    layer: &Layer,
+    fp: &QueryFingerprint,
+) -> Result<Vec<Resource>, QueryError> {
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
     // 1. Evaluate DEFINE rules with seminaive fixpoint
@@ -77,6 +86,7 @@ pub fn evaluate(program: &Program, layer: &Layer) -> Result<Vec<Resource>, Query
                 &program.query.result_classes,
                 &program.query.result,
                 layer,
+                fp,
             )?;
             resources.push(resource);
         }
@@ -90,7 +100,7 @@ pub fn evaluate(program: &Program, layer: &Layer) -> Result<Vec<Resource>, Query
 
     // 6. ORDER BY
     if !program.query.order_by.is_empty() {
-        sort_results(&mut results, &program.query.order_by);
+        sort_results(&mut results, &program.query.order_by, fp);
     }
 
     // 7. OFFSET
@@ -724,11 +734,16 @@ fn eval_aggregate(
 }
 
 /// Shape a binding into a result resource.
+///
+/// Property IRIs for short-name RETURN items are synthesized from `fp`,
+/// so the downstream document wrapper produces matching Property metadata
+/// resources. Full-IRI RETURN items use the user-supplied IRI unchanged.
 fn shape_result(
     binding: &Binding,
     classes: &[Name],
     items: &[ReturnItem],
     layer: &Layer,
+    fp: &QueryFingerprint,
 ) -> Result<Resource, QueryError> {
     let mut resource = Resource::new_embedded(); // Result resources don't get @id
 
@@ -750,8 +765,7 @@ fn shape_result(
     for item in items {
         let prop_iri = match &item.name {
             Name::FullIri(iri) => iri.clone(),
-            Name::ShortName(s) => Iri::parse(&format!("urn:query:result:{s}"))
-                .unwrap_or_else(|_| Iri::parse("urn:query:result:unknown").unwrap()),
+            Name::ShortName(s) => fp.row_property_iri(s),
         };
 
         // Handle aggregate expressions specially
@@ -796,13 +810,13 @@ fn deduplicate(resources: Vec<Resource>) -> Vec<Resource> {
 }
 
 /// Sort results by ORDER BY expressions.
-fn sort_results(resources: &mut [Resource], order_by: &[OrderItem]) {
+fn sort_results(resources: &mut [Resource], order_by: &[OrderItem], fp: &QueryFingerprint) {
     resources.sort_by(|a, b| {
         for item in order_by {
             // Try to evaluate the expression for each resource
             // For now, handle variable references by looking at resource properties
-            let val_a = extract_sort_value(a, &item.expression);
-            let val_b = extract_sort_value(b, &item.expression);
+            let val_a = extract_sort_value(a, &item.expression, fp);
+            let val_b = extract_sort_value(b, &item.expression, fp);
 
             if let (Some(va), Some(vb)) = (&val_a, &val_b) {
                 if let Some(ord) = values_compare(va, vb) {
@@ -820,10 +834,14 @@ fn sort_results(resources: &mut [Resource], order_by: &[OrderItem]) {
     });
 }
 
-fn extract_sort_value(resource: &Resource, expr: &Expression) -> Option<Value> {
+fn extract_sort_value(
+    resource: &Resource,
+    expr: &Expression,
+    fp: &QueryFingerprint,
+) -> Option<Value> {
     match expr {
         Expression::Variable(var) => {
-            let iri = Iri::parse(&format!("urn:query:result:{}", var.name)).ok()?;
+            let iri = fp.row_property_iri(&var.name);
             resource.get(&iri).cloned()
         }
         _ => None,
@@ -862,7 +880,8 @@ mod tests {
     fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
         let tokens = tokenize(query_str).unwrap();
         let program = parser::parse(tokens).unwrap();
-        evaluate(&program, layer).unwrap()
+        let fp = QueryFingerprint::of(query_str);
+        evaluate(&program, layer, &fp).unwrap()
     }
 
     #[test]

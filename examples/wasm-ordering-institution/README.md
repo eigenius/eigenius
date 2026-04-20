@@ -118,6 +118,20 @@ Institutions:
 
 ## Testing
 
+### Quick end-to-end run
+
+All of the steps below (install, list, two convergence queries, inspect)
+are scripted in [`run.sh`](run.sh). Build the release CLI once and execute:
+
+```bash
+cargo build --release -p eigenius-cli
+./examples/wasm-ordering-institution/run.sh
+```
+
+The script starts a kernel on port 50099 (override with `PORT=<port>`),
+tears it down on exit, and prints each step's output. Use this as a
+smoke test after kernel or SDK changes.
+
 ### Converged case
 
 Save a convergence query where the latest delta is well below the

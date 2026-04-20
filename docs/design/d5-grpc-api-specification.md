@@ -31,7 +31,7 @@ service EigeniusKernel {
   rpc Inspect(InspectRequest) returns (InspectResponse);
 
   // --- Query ---
-  rpc Query(QueryRequest) returns (stream QueryResult);
+  rpc Query(QueryRequest) returns (QueryResponse);
 
   // --- Program ---
   rpc ValidateProgram(ValidateProgramRequest) returns (ValidateProgramResponse);
@@ -102,13 +102,15 @@ message QueryRequest {
   string accept = 3;            // "application/cbor" (default) or "application/eigon+json"
 }
 
-message QueryResult {
-  bytes resource = 1;           // One result resource in requested format
-  uint64 index = 2;             // Result index (0-based)
+message QueryResponse {
+  bool success = 1;
+  bytes document = 2;           // Eigon-CBOR document; same wire shape as LoadRequest.resources
+  string content_type = 3;      // "application/cbor"
+  string error = 4;             // Error message if !success
 }
 ```
 
-The stream completes when all results have been sent. Errors are returned as gRPC status codes with detail messages.
+The `document` carries an array of resources: synthesized row Properties, a row Class, and a ResultSet with the row resources embedded. Consumers walk the ResultSet's `result_class` → property list to discover short-name ↔ IRI mappings. See D2 Appendix A for the full shape.
 
 ### 3.4 ValidateProgram
 
