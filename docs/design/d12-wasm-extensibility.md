@@ -2,9 +2,12 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
-**Required before:** Phase 8 implementation
+**Status:** Implemented. Kernel hosting of pure/read components landed
+in Phase 8.0; orchestrator hosting of IO components landed via
+[D12b](d12b-orchestrator-wasm-plan.md) (napi-rs + wasmtime). Decision #19
+below is resolved.
 **Depends on:** D6 (execution architecture), D9 (NbE unification), D10 (institution protocol)
+**Companion:** [D12b — Orchestrator-Side WASM Implementation Plan](d12b-orchestrator-wasm-plan.md)
 **Supersedes:** Previously planned D12 (Capability SDK) and D13 (Wire Format), merged here.
 
 ---
@@ -816,10 +819,12 @@ components like CompleteText and CompleteJson. The orchestrator:
    locally — calling other registered handlers (including LLM adapters)
    without a round-trip
 
-The orchestrator uses Deno's built-in `WebAssembly` API for core module
-support, or a WASM Component Model runtime (`jco` or Wasmtime via Deno
-FFI) for full WIT support. The WIT interface is identical regardless of
-runtime — the same WASM binary works in both kernel and orchestrator.
+The orchestrator hosts WASM components via **wasmtime embedded through a
+napi-rs native addon** (see [D12b](d12b-orchestrator-wasm-plan.md) for the
+implementation plan; a [spike report](../../spikes/napi-rs-async/REPORT.md)
+records the decision rationale over jco/JSPI and Atomics.wait alternatives).
+The WIT interface is runtime-agnostic — the same WASM binary works in both
+kernel and orchestrator.
 
 From the kernel's perspective, an IO WASM component is just another
 remote component dispatched via `ComponentExecutor` gRPC. The kernel
@@ -976,7 +981,7 @@ The program author doesn't know or care that it's WASM.
 | SDK approach (Phase 8) | Manual bindings via wit-bindgen | Ship fast; proc-macro ergonomics deferred |
 | Institution IO access | Not provided | Institutions reason about the graph, not call LLMs |
 | Namespace protection | Existing layer-system enforcement | No new mechanism needed |
-| Orchestrator WASM runtime | Deno WebAssembly or Wasmtime via FFI | TBD during implementation; WIT interface is runtime-agnostic |
+| Orchestrator WASM runtime | Wasmtime via napi-rs native addon | Resolved 2026-04-19 after jco/JSPI spike failed and Atomics.wait was rejected on complexity grounds; see [D12b](d12b-orchestrator-wasm-plan.md) and the [spike report](../../spikes/napi-rs-async/REPORT.md) |
 
 ---
 

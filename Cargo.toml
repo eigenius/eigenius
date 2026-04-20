@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "kernel",
+    "crates/wasm-runtime",
     "sdk/wasm-sdk",
     "storage/tikv",
     "storage/rocksdb",
@@ -10,9 +11,13 @@ members = [
     "cli",
 ]
 exclude = [
+    "examples/wasm-cbor-echo",
     "examples/wasm-doc-validator",
     "examples/wasm-http-shout",
     "examples/wasm-ordering-institution",
+    "examples/wasm-read-query-probe",
+    "orchestration/native",
+    "spikes/napi-rs-async",
 ]
 
 [workspace.package]
@@ -35,6 +40,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # WASM runtime
 wasmtime = { version = "43", features = ["component-model"] }
+eigenius-wasm-runtime = { path = "crates/wasm-runtime" }
 
 # Testing
 proptest = "1"

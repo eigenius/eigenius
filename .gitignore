@@ -3,7 +3,7 @@
 **/*.rs.bk
 
 # Node (buf codegen plugins)
-/node_modules/
+node_modules/
 /package-lock.json
 
 # LaTeX output
@@ -11,6 +11,14 @@
 
 # Deno
 orchestration/node_modules/
+
+# napi-rs native addon (orchestration/native)
+orchestration/native/target/
+orchestration/native/node_modules/
+orchestration/native/*.node
+orchestration/native/index.js
+orchestration/native/index.d.ts
+orchestration/native/package-lock.json
 
 # IDE
 .vscode/
@@ -37,3 +45,6 @@ Thumbs.db
 
 # Azure
 .azure/
+
+# Spikes
+/spikes/

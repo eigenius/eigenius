@@ -22,6 +22,9 @@ import {
 } from "./components/complete_json.ts";
 import { ProgramExecutor } from "./program/executor.ts";
 import { startServer } from "./server/mod.ts";
+import { tryLoadWasmAddon } from "./wasm/loadAddon.ts";
+import { WasmComponentRegistry } from "./wasm/registry.ts";
+import { createHostBridge } from "./wasm/hostBridge.ts";
 
 const KERNEL_ENDPOINT = Deno.env.get("EIGENIUS_KERNEL_ENDPOINT") ??
   "http://localhost:50051";
@@ -49,12 +52,33 @@ function main() {
 
   const _executor = new ProgramExecutor(client, components);
 
+  // Native addon for IO WASM components (optional — skipped if not built).
+  const addon = tryLoadWasmAddon();
+  const wasm = addon
+    ? (() => {
+      const wasmRegistry = new WasmComponentRegistry(addon);
+      const bridge = createHostBridge({
+        addon,
+        registry: components,
+        wasmRegistry,
+        kernel: client,
+      });
+      console.log("WASM IO components: enabled (native addon loaded)");
+      return { addon, wasmRegistry, bridge };
+    })()
+    : undefined;
+  if (!wasm) {
+    console.log(
+      "WASM IO components: disabled (addon not loaded — RegisterWasmComponent will fail)",
+    );
+  }
+
   console.log(
     `Registered components: ${components.listComponents().join(", ")}`,
   );
 
   // Start the orchestrator server (gRPC + health)
-  startServer(components, ORCHESTRATOR_PORT);
+  startServer(components, ORCHESTRATOR_PORT, wasm);
 }
 
 main();
