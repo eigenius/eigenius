@@ -62,7 +62,21 @@ A closed enumeration of distinguishable failure modes, each with documented sema
 - **`Unavailable`** — transient external failure. Retry with backoff is appropriate.
 - **`VersionMismatch`** — contract version incompatibility detected.
 
-Individual contracts may refine or extend this baseline. The refinement must be declared.
+#### Extension by individual contracts
+
+Individual contracts almost always need to refine this baseline. Two patterns recur:
+
+- **Specialization** — refining a baseline category into multiple distinguishable variants. The Lean verification institution refines `DomainRejection` into `ProofDoesNotCheck` (the term doesn't type-check), `PropositionMismatch` (the proof's proposition doesn't correspond to the claim), `EnvironmentMismatch` (the proof was elaborated against a different environment than declared), and `FFIVersionMismatch` (the mirror library doesn't match the current ontology). Each variant is operationally distinguishable and warrants different caller responses; collapsing them into a single `DomainRejection` would discard actionable information.
+- **Net-new categories** — failure modes that don't fit any baseline. The Lean institution adds `EnvironmentUnavailable` (the referenced Lean environment couldn't be loaded), which is closer to `Unavailable` than to `ResourceExhaustion` but neither baseline captures it cleanly.
+
+When extending, contracts must:
+
+1. Declare each new variant in the contract's `ErrorEnum` resource (Section 6.4).
+2. Specify the diagnostic payload type for each variant.
+3. Provide caller-response guidance — what should code do when it encounters this variant?
+4. Indicate the variant's relationship to the baseline: is it a specialization of which baseline category, or a genuinely new category?
+
+Specialization variants should remain classifiable back to their baseline category by callers that don't care about the distinction. A caller that only wants to know "did the verification fail for any reason the institution refused, regardless of why?" should be able to query "is this a `DomainRejection` (in any specialization)?" and get a useful answer. The contract specification makes this classification explicit so that callers can choose their level of granularity rather than being forced to handle every variant individually.
 
 ### 3.6 Resource consumption bounds
 
@@ -153,7 +167,17 @@ A contract committed to layer N cannot be silently changed. Evolution happens by
 
 The contract classes are themselves ontology resources, typed by the Core Ontology. The system's quality-control machinery is expressed in the same primitives as the system's domain data. The self-describing property the platform already commits to extends recursively to its own contracts.
 
-### 5.4 Versioning model
+### 5.4 Bounded trust scope
+
+Each contract has its own trust scope — its own TCB — owned by whoever implements the contract, not by the kernel. The kernel's TCB consists only of the kernel's own code: the type checker, the layer system, the institution registry, the dispatch machinery. The kernel's TCB does not grow when an institution registers; it stays minimal regardless of how many institutions are active or how complex their implementations are.
+
+An institution implementing a contract owns the contract's TCB. For the Lean verification institution, this includes the Lean term checker (a Rust library, currently nanoda_lib), the EigonFFI generator, and the correspondence logic in `validate_morphism`. For an FEA institution, it would include the underlying solver and any pre- or post-processing code. For an LLM-based component, it would include whatever validation logic stands between the LLM's output and the typed result the component returns.
+
+This bounded-scope property has two operational consequences. First, the **blast radius of bugs** is contained: a bug in an institution's TCB can produce wrong results in that institution's fiber, but cannot corrupt the kernel, the ontology, or other institutions' fibers. A buggy proof checker can accept invalid proofs as verified; it cannot make the kernel mis-typecheck a pipeline or alter a layer's content. Second, **audit and review can be scoped to individual institutions** without auditing the entire platform. An organization that needs to review the trust assumptions for verification can review the verification institution's TCB without simultaneously reviewing every other institution's implementation.
+
+The contract specification makes the institution's TCB scope explicit. The `InstitutionRegistration` resource (Section 6.6) and its associated `ImplementationManifest` (Section 6.7) record the components that constitute the institution's implementation precisely so that "what was in the TCB at the time of this trace?" is a queryable property of the system rather than an archaeological exercise.
+
+### 5.5 Versioning model
 
 Contracts evolve by layer extension. A contract resource is content-addressed; its IRI is stable; a new version is a new resource at a new IRI (or at the same IRI in a later layer, depending on the chosen evolution policy). Institutions register against a specific contract IRI, which resolves to a specific content-addressed resource via the layer chain at registration time. This resolution is pinned in the institution's own registration record.
 
@@ -163,6 +187,27 @@ Two evolution policies need to be specified:
 - **Breaking evolution** — new versions may change obligations in ways that invalidate prior compliance. Requires explicit migration for existing institutions.
 
 The default should be additive; breaking evolution should require a new contract class rather than a new version of an existing one.
+
+**Compositionality under version evolution.** Layer-ancestry compositionality applies to contract evolution as well as to ontology evolution. An artifact produced under contract version V₁ — a registered institution, a trace, a generated library — remains valid for queries made under any descendant contract version V₂ ⊒ V₁ where the clauses relevant to the artifact are unchanged. This is what makes additive evolution genuinely backward-compatible: existing artifacts don't need migration unless they want to claim compliance with newly-added clauses. The same compositionality property generalizes to artifacts produced *by* institutions under their contracts — the Lean verification institution exploits it when an EigonFFI library anchored at one ontology layer remains valid for verifying claims in descendant layers where the relevant classes are unchanged.
+
+### 5.6 Trusted artifacts and anchoring
+
+Some institutions don't only produce results at runtime — they produce *trusted artifacts* with persistent existence: generated libraries, schemas, certificates, derived ontology fragments. The Lean verification institution generates EigonFFI libraries; future institutions may generate code stubs, JSON schemas, regulatory certification bundles, or other persistent content that downstream consumers depend on.
+
+The contract framework treats such artifacts as first-class typed resources committed to the knowledge graph, not as files maintained outside it. Each artifact carries declarative provenance:
+
+- The **source layer** it was generated from (when the artifact's content depends on ontology state).
+- The **generator identity** (which tool, which version, identified by content hash) that produced it.
+- The **content hash** of the artifact itself.
+- Optionally, the **content** embedded directly or referenced via content-addressed external storage.
+
+This treatment unlocks two properties that are valuable beyond any single institution.
+
+**Independent provenance verification.** When the generator is deterministic — a design requirement for any generator in an institution's TCB — an auditor with access to the generator binary and the source layer can re-run generation locally and compare hashes. If they match, the artifact is authentic and its declared anchor is truthful. If they diverge, something is wrong: non-determinism in the generator, tampering with the committed artifact, or environment differences that affect generation. The audit is a local computation requiring no trust in any party.
+
+**Anchoring under layer extension.** A generated artifact anchored to source layer L₀ remains valid for use in any descendant layer L₁ ⊒ L₀ where the parts of the ontology the artifact depends on are unchanged. This is the same compositionality property the platform uses for its own layer chain, applied to generated content. Users do not need to regenerate every time anything in the ontology changes — only when changes affect the specific classes the artifact mirrors. The institution's contract specifies what counts as "affecting the artifact" and what does not.
+
+The ontology class for tracked artifacts (`GeneratedArtifact`, Section 6.8) and the contract obligations on generators in TCB (determinism, faithful translation per institution-specific specifications) make this pattern reusable across any institution that needs to produce trusted persistent content.
 
 ## 6. Ontology sketch
 
@@ -225,9 +270,37 @@ When an institution registers, it does so against a specific `BoundaryContract`.
 
 - `registered_iri` — the IRI under which the institution is reachable
 - `contract_reference` — content-addressed IRI of the contract being implemented
-- `implementation_hash` — hash of the WASM module or service endpoint identity
+- `implementation_manifest` — IRI of an `ImplementationManifest` resource (Section 6.7) listing all hashed components of the institution's implementation
 - `registration_layer` — the layer in which this registration was committed
 - `claimed_properties` — optional overrides or refinements of contract clauses
+
+### 6.7 `ImplementationManifest`
+
+For institutions whose implementation consists of multiple trusted components — a checker plus a generator plus a correspondence library, for instance — the manifest enumerates each component:
+
+- `manifest_name` — human-readable identifier
+- `components` — array of `ImplementationComponent` resources, each carrying:
+  - `component_role` — what role this component plays (e.g., `Checker`, `Generator`, `Correspondence`, `CrossChecker`, `Adapter`)
+  - `component_hash` — content hash pinning the exact artifact
+  - `component_version` — human-readable version string
+  - `component_source` — IRI describing where the component came from (an external library with its repository URL, an internally maintained crate, a generated artifact tracked elsewhere in the graph)
+  - `tcb_membership` — whether the component is part of the trust base for this contract (`Trusted`, `Advisory`, or `NonTrusted`); some components like cross-checkers may be advisory rather than trusted
+
+Single-component institutions can use a manifest with one entry. The manifest pattern accommodates the common case where an institution depends on external libraries (which evolve independently and need explicit pinning) alongside internally-maintained code, and it makes the institution's effective TCB a queryable property of the registration.
+
+### 6.8 `GeneratedArtifact`
+
+Base class for trusted artifacts produced by institution generators (Section 5.6). Required properties:
+
+- `source_layer_hash` — layer hash the artifact was generated from. Optional for ontology-independent artifacts.
+- `generator_reference` — IRI of an `ImplementationComponent` (Section 6.7) identifying the generator that produced this artifact, including its content hash.
+- `artifact_content_hash` — content hash of the artifact itself.
+- `artifact_content` — optional embedded content or content-addressed external reference for large artifacts.
+- `artifact_role` — what role the artifact plays in its institution's operation (e.g., `MirrorLibrary`, `Schema`, `CertificateBundle`, `DerivedOntologyFragment`).
+- `mirrored_classes` — for artifacts that mirror or depend on a subset of the ontology, the IRIs of the classes the artifact represents. Supports scoped generations where not every class is included.
+- `generated_at` — timestamp, advisory.
+
+Specific institutions specialize this class with additional properties as needed. The Lean verification institution's `GeneratedLibrary` is a specialization of `GeneratedArtifact` carrying Lean-specific fields (Lean version compatibility, FFI library naming conventions, etc.).
 
 ## 7. The initial set of boundaries
 
@@ -322,6 +395,12 @@ The following are questions this draft deliberately leaves open. They should be 
 5. **Handling of resource bounds at runtime.** Are bound violations treated as `ResourceExhaustion` errors or as a separate category? Who enforces them — the kernel, the institution, both?
 
 6. **Contract for the meta-specification itself.** The meta-specification defines contracts; does it itself need a contract? (The author's current view: no, but the question should be answered explicitly.)
+
+7. **Multi-component implementation manifest evolution.** How should the `ImplementationManifest` (Section 6.7) handle institutions whose component set evolves frequently? Each change to a component produces a new manifest hash; if an institution's external dependencies update weekly, are weekly re-registrations the right model, or should the manifest support partial updates within a single registration? Related: how do `Advisory` or `NonTrusted` component changes interact with re-registration requirements?
+
+8. **Cross-institution cooperation patterns.** Should the meta-spec model patterns where multiple institutions cooperate to strengthen a single epistemic claim — cross-checking by secondary verifiers (the Lean verification institution may use Lean4Lean as a peer to nanoda_lib), parallel verification by independent institutions, voting protocols among multiple ML-based predictors, redundant computation for safety-critical domains? Currently institutions are modeled in isolation. The cooperation pattern may be common enough to deserve first-class treatment in the contract framework, or it may be sufficiently institution-specific that the meta-spec leaves it to individual contract authors.
+
+9. **Epistemic categorization of generated artifacts.** Section 5.6 implicitly takes the position that trusted generated artifacts (mirror libraries, schemas, certificates) are of a different epistemic character than the four documented categories — they are not *declared* (no human authorship), not *observed* (the generator is in the institution's TCB rather than external reality), not *derived* (production by typed pipelines within the kernel's evaluator is not what generation is), and not *verified* (no formal proof attached). Should there be a fifth category — perhaps *generated* — to capture this position cleanly? Or is generated content best modeled as a specialization of *observed* with the generator treated as the "external source"? The decision affects how queries about provenance distinguish "this came from an external observation" from "this came from a deterministic process in our trust base."
 
 These questions are not blockers — work can proceed in parallel with them — but they should be resolved by the time the meta-specification stabilizes, because each of them affects how individual contract specifications are written.
 
