@@ -56,6 +56,18 @@ impl QueryFingerprint {
     pub fn row_property_iri(&self, short_name: &str) -> Iri {
         Iri::parse(&format!("{}:row:{}", self.base(), short_name)).unwrap()
     }
+
+    /// IRI for the `n`th FIBER response at the clause at `clause_idx`
+    /// within the query. Deterministic per (query, clause, binding).
+    pub fn fiber_response_iri(&self, clause_idx: usize, binding_idx: usize) -> Iri {
+        Iri::parse(&format!(
+            "{}:fiber:{}:{}",
+            self.base(),
+            clause_idx,
+            binding_idx
+        ))
+        .unwrap()
+    }
 }
 
 /// Wrap evaluator-produced row resources into a full result document.

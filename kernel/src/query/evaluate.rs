@@ -1,5 +1,7 @@
 //! EigenQL evaluator: pattern matching, fixpoint, aggregation, result shaping.
 
+use crate::context::ExecutionContext;
+use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -10,6 +12,30 @@ use crate::query::error::QueryError;
 use crate::query::functions::{self, like_match, to_f64, values_compare, values_equal};
 use std::collections::BTreeMap;
 
+/// Runtime resources available to FIBER clause evaluation. `None` means
+/// FIBER clauses will be rejected (e.g. CLI local-only queries that have
+/// no registered institutions).
+#[derive(Default, Clone, Copy)]
+pub struct FiberRuntime<'a> {
+    pub institutions: Option<&'a InstitutionRegistry>,
+    pub ctx: Option<&'a ExecutionContext>,
+}
+
+/// Resources produced at runtime by FIBER clauses. They live for the
+/// duration of a single query and are discarded when evaluation ends.
+/// Pattern matching scans these in addition to the layer chain — see
+/// D2 Appendix B §B.3 (the "transient overlay").
+#[derive(Default)]
+struct FiberOverlay {
+    entries: Vec<(Iri, Resource)>,
+}
+
+impl FiberOverlay {
+    fn push(&mut self, iri: Iri, resource: Resource) {
+        self.entries.push((iri, resource));
+    }
+}
+
 /// A binding maps variable names to values.
 type Binding = BTreeMap<String, Value>;
 
@@ -18,10 +44,14 @@ type Binding = BTreeMap<String, Value>;
 /// Row Property IRIs for RETURN items are synthesized using `fp`, so that
 /// the downstream `document::wrap` step produces Property/Class metadata
 /// resources that line up with the row keys.
+///
+/// FIBER clauses require `runtime` to carry both an institution registry
+/// and an execution context; otherwise they error at dispatch time.
 pub fn evaluate(
     program: &Program,
     layer: &Layer,
     fp: &QueryFingerprint,
+    runtime: FiberRuntime<'_>,
 ) -> Result<Vec<Resource>, QueryError> {
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
@@ -60,7 +90,15 @@ pub fn evaluate(
     }
 
     // 2. Evaluate the query
-    let mut bindings = evaluate_match_part(&program.query.body, layer, &derived)?;
+    let mut overlay = FiberOverlay::default();
+    let mut bindings = evaluate_match_part_with_fiber(
+        &program.query.body,
+        layer,
+        &derived,
+        runtime,
+        fp,
+        &mut overlay,
+    )?;
 
     // 3. GROUP BY + aggregation
     if !program.query.group_by.is_empty() || has_aggregates(&program.query.result) {
@@ -120,23 +158,32 @@ pub fn evaluate(
     Ok(results)
 }
 
-/// Evaluate a MatchPart: USING + MATCH + WHERE.
+/// Evaluate a MatchPart's pattern-only bodies (DEFINE rules).
+///
+/// Errors if any FIBER clause is present — DEFINE bodies can't dispatch
+/// to institutions (no overlay, no runtime context at rule-fixpoint time).
+/// The type checker rejects FIBER in DEFINE bodies so this is a defensive
+/// check.
 fn evaluate_match_part(
     part: &MatchPart,
     layer: &Layer,
     derived: &BTreeMap<String, Vec<Binding>>,
 ) -> Result<Vec<Binding>, QueryError> {
-    let mut bindings: Vec<Binding> = vec![BTreeMap::new()]; // Start with one empty binding
+    if part.has_fiber() {
+        return Err(QueryError::evaluation(
+            "FIBER clauses are not allowed in DEFINE bodies",
+        ));
+    }
 
-    for pattern in &part.patterns {
+    let mut bindings: Vec<Binding> = vec![BTreeMap::new()];
+    for pattern in part.patterns() {
         if pattern.negated {
-            bindings = apply_negated_pattern(pattern, layer, derived, bindings)?;
+            bindings = apply_negated_pattern(pattern, layer, derived, &[], bindings)?;
         } else {
-            bindings = apply_pattern(pattern, layer, derived, bindings)?;
+            bindings = apply_pattern(pattern, layer, derived, &[], bindings)?;
         }
     }
 
-    // Apply WHERE conditions
     if !part.conditions.is_empty() {
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
@@ -154,14 +201,239 @@ fn evaluate_match_part(
     Ok(bindings)
 }
 
+/// Evaluate a MatchPart with FIBER-clause support (top-level queries).
+///
+/// Walks `clauses` in order: Pattern clauses extend bindings via the
+/// normal equi-join mechanism, Fiber clauses dispatch once per binding,
+/// inject the response into the overlay, and extend the binding with
+/// the bound variable. WHERE is applied once after all clauses.
+fn evaluate_match_part_with_fiber(
+    part: &MatchPart,
+    layer: &Layer,
+    derived: &BTreeMap<String, Vec<Binding>>,
+    runtime: FiberRuntime<'_>,
+    fp: &QueryFingerprint,
+    overlay: &mut FiberOverlay,
+) -> Result<Vec<Binding>, QueryError> {
+    let mut bindings: Vec<Binding> = vec![BTreeMap::new()];
+
+    // Resolve USING INSTITUTION aliases once; used to dereference FIBER
+    // `institution` short names at dispatch time.
+    let aliases: BTreeMap<&str, &Iri> = part
+        .using_institutions
+        .iter()
+        .map(|a| (a.alias.as_str(), &a.iri))
+        .collect();
+
+    for (clause_idx, clause) in part.clauses.iter().enumerate() {
+        match clause {
+            Clause::Pattern(pattern) => {
+                bindings = if pattern.negated {
+                    apply_negated_pattern(pattern, layer, derived, &overlay.entries, bindings)?
+                } else {
+                    apply_pattern(pattern, layer, derived, &overlay.entries, bindings)?
+                };
+            }
+            Clause::Fiber(fc) => {
+                bindings = apply_fiber_clause(
+                    fc, clause_idx, layer, runtime, fp, &aliases, overlay, bindings,
+                )?;
+            }
+        }
+    }
+
+    if !part.conditions.is_empty() {
+        bindings.retain(|b| {
+            part.conditions.iter().all(|cond| {
+                eval_expression(cond, b, layer)
+                    .and_then(|v| {
+                        v.as_boolean().ok_or_else(|| {
+                            QueryError::evaluation("WHERE condition must be boolean")
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        });
+    }
+
+    Ok(bindings)
+}
+
+/// Dispatch a FIBER clause once per binding in the current candidate set.
+/// Each response is:
+///   - stamped with a synthesized IRI (deterministic per query/clause/binding)
+///   - attached to the transient overlay so later patterns see it
+///   - bound to `fc.binding` in the extended binding
+#[allow(clippy::too_many_arguments)]
+fn apply_fiber_clause(
+    fc: &FiberClause,
+    clause_idx: usize,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+    fp: &QueryFingerprint,
+    aliases: &BTreeMap<&str, &Iri>,
+    overlay: &mut FiberOverlay,
+    existing: Vec<Binding>,
+) -> Result<Vec<Binding>, QueryError> {
+    let institutions = runtime.institutions.ok_or_else(|| {
+        QueryError::evaluation(
+            "FIBER requires an institution registry — not available in this execution context",
+        )
+    })?;
+    let ctx = runtime.ctx.ok_or_else(|| {
+        QueryError::evaluation(
+            "FIBER requires an execution context — not available in this execution context",
+        )
+    })?;
+
+    let inst_iri = resolve_fiber_institution(&fc.institution, aliases)?;
+    let reasoner = institutions.get(&inst_iri).ok_or_else(|| {
+        QueryError::evaluation(format!("no institution registered for IRI '{inst_iri}'"))
+    })?;
+
+    let query_class_iri = match &fc.query_class {
+        Name::FullIri(iri) => iri.clone(),
+        Name::ShortName(name) => resolve_name_to_class_iri(layer, name).ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "FIBER query class '{name}' not resolvable in layer"
+            ))
+        })?,
+    };
+
+    // Build per-class param IRI resolution table (short_name → Iri)
+    // from the class's requires ∪ recommends.
+    let short_to_iri = build_param_iri_table(layer, &query_class_iri);
+
+    let is_a_iri = Iri::parse(wk::IS_A).unwrap();
+
+    let mut extended = Vec::with_capacity(existing.len());
+    for (binding_idx, binding) in existing.iter().enumerate() {
+        // Construct the query resource.
+        let mut query_res = Resource::new_embedded();
+        query_res.set(
+            is_a_iri.clone(),
+            Value::Array(vec![Value::ResourceRef(query_class_iri.clone())]),
+        );
+
+        for param in &fc.params {
+            let param_iri = match &param.name {
+                Name::FullIri(iri) => iri.clone(),
+                Name::ShortName(short) => short_to_iri.get(short).cloned().ok_or_else(|| {
+                    QueryError::evaluation(format!(
+                        "FIBER param '{short}' unresolvable against query class '{query_class_iri}'"
+                    ))
+                })?,
+            };
+            let value = eval_expression(&param.expression, binding, layer)?;
+            query_res.set(param_iri, value);
+        }
+
+        // Dispatch.
+        let response = reasoner.query(&query_res, ctx).map_err(|e| {
+            QueryError::evaluation(format!("fiber dispatch failed (clause {clause_idx}): {e}"))
+        })?;
+
+        // Stamp response with a synthesized @id + attach to overlay.
+        let response_iri = fp.fiber_response_iri(clause_idx, binding_idx);
+        let mut stamped = Resource::new(response_iri.clone());
+        for (k, v) in response.properties() {
+            stamped.set(k.clone(), v.clone());
+        }
+        overlay.push(response_iri.clone(), stamped);
+
+        // Extend the binding with ?var → response_iri.
+        let mut new_binding = binding.clone();
+        new_binding.insert(
+            fc.binding.name.clone(),
+            Value::String(response_iri.as_str().to_string()),
+        );
+        extended.push(new_binding);
+    }
+
+    Ok(extended)
+}
+
+fn resolve_fiber_institution(
+    name: &Name,
+    aliases: &BTreeMap<&str, &Iri>,
+) -> Result<Iri, QueryError> {
+    match name {
+        Name::FullIri(iri) => Ok(iri.clone()),
+        Name::ShortName(alias) => aliases
+            .get(alias.as_str())
+            .map(|i| (*i).clone())
+            .ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "FIBER references undeclared institution alias '{alias}'"
+                ))
+            }),
+    }
+}
+
+fn resolve_name_to_class_iri(layer: &Layer, short: &str) -> Option<Iri> {
+    let class_iri = Iri::parse(wk::CLASS).unwrap();
+    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+    for (iri, res) in layer.all_resources() {
+        if !res.is_instance_of(&class_iri) {
+            continue;
+        }
+        if let Some(Value::String(s)) = res.get(&short_prop) {
+            if s == short {
+                return Some(iri.clone());
+            }
+        }
+    }
+    None
+}
+
+fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri> {
+    let requires_prop = Iri::parse(wk::REQUIRES).unwrap();
+    let recommends_prop = Iri::parse(wk::RECOMMENDS).unwrap();
+    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+
+    let class_resource = match layer.resolve(class_iri) {
+        Some(r) => r,
+        None => return BTreeMap::new(),
+    };
+
+    let mut out = BTreeMap::new();
+    let mut collect = |prop: &Iri| {
+        if let Some(Value::Array(arr)) = class_resource.get(prop) {
+            for v in arr {
+                let prop_iri = match v {
+                    Value::String(s) => Iri::parse(s).ok(),
+                    Value::ResourceRef(i) => Some(i.clone()),
+                    _ => None,
+                };
+                if let Some(iri) = prop_iri {
+                    if let Some(prop_res) = layer.resolve(&iri) {
+                        if let Some(Value::String(name)) = prop_res.get(&short_prop) {
+                            out.insert(name.clone(), iri);
+                        }
+                    }
+                }
+            }
+        }
+    };
+    collect(&requires_prop);
+    collect(&recommends_prop);
+    out
+}
+
 /// Apply a positive pattern: join with existing bindings.
+///
+/// `overlay` is the slice of transient fiber-response resources (possibly
+/// empty) produced by earlier FIBER clauses in the same query. They are
+/// merged into the candidate set alongside layer resources so pattern
+/// matching on FIBER-bound variables works uniformly.
 fn apply_pattern(
     pattern: &Pattern,
     layer: &Layer,
     derived: &BTreeMap<String, Vec<Binding>>,
+    overlay: &[(Iri, Resource)],
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
-    let candidates = collect_candidates(pattern, layer, derived);
+    let candidates = collect_candidates(pattern, layer, derived, overlay);
     let mut result = Vec::new();
 
     for binding in &existing {
@@ -181,9 +453,10 @@ fn apply_negated_pattern(
     pattern: &Pattern,
     layer: &Layer,
     derived: &BTreeMap<String, Vec<Binding>>,
+    overlay: &[(Iri, Resource)],
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
-    let candidates = collect_candidates(pattern, layer, derived);
+    let candidates = collect_candidates(pattern, layer, derived, overlay);
     let mut result = Vec::new();
 
     for binding in &existing {
@@ -203,6 +476,7 @@ fn collect_candidates<'a>(
     pattern: &Pattern,
     layer: &'a Layer,
     derived: &'a BTreeMap<String, Vec<Binding>>,
+    overlay: &'a [(Iri, Resource)],
 ) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
     // Check if this references a derived relation
     if let Some(Name::ShortName(ref name)) = pattern.class {
@@ -225,11 +499,12 @@ fn collect_candidates<'a>(
         }
     }
 
-    // Collect from layer chain
+    // Collect from layer chain + FIBER overlay.
     let all = layer.all_resources();
     let class_iri = pattern.class.as_ref().and_then(|n| resolve_name(n, layer));
 
-    all.into_iter()
+    let mut candidates: Vec<(Option<Iri>, BTreeMap<Iri, Value>)> = all
+        .into_iter()
         .filter(|(_, resource)| {
             if let Some(ref class) = class_iri {
                 resource.is_instance_of(class) || is_subclass_instance(resource, class, layer)
@@ -238,7 +513,20 @@ fn collect_candidates<'a>(
             }
         })
         .map(|(iri, resource)| (Some(iri.clone()), resource.properties().clone()))
-        .collect()
+        .collect();
+
+    for (iri, resource) in overlay {
+        let matches = if let Some(ref class) = class_iri {
+            resource.is_instance_of(class) || is_subclass_instance(resource, class, layer)
+        } else {
+            true
+        };
+        if matches {
+            candidates.push((Some(iri.clone()), resource.properties().clone()));
+        }
+    }
+
+    candidates
 }
 
 /// Try to match a resource against a pattern, extending an existing binding.
@@ -881,7 +1169,7 @@ mod tests {
         let tokens = tokenize(query_str).unwrap();
         let program = parser::parse(tokens).unwrap();
         let fp = QueryFingerprint::of(query_str);
-        evaluate(&program, layer, &fp).unwrap()
+        evaluate(&program, layer, &fp, FiberRuntime::default()).unwrap()
     }
 
     #[test]

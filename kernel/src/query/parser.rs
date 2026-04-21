@@ -31,6 +31,12 @@ impl Parser {
             .unwrap_or(&TokenKind::Eof)
     }
 
+    /// Look `offset` tokens ahead of the current position. Returns
+    /// `None` past end-of-input (distinct from `TokenKind::Eof`).
+    fn peek_at(&self, offset: usize) -> Option<&TokenKind> {
+        self.tokens.get(self.pos + offset).map(|t| &t.kind)
+    }
+
     fn position(&self) -> Option<Position> {
         self.tokens.get(self.pos).map(|t| t.pos.clone())
     }
@@ -80,7 +86,7 @@ impl Parser {
         let variables = self.parse_variable_list()?;
         self.expect(&TokenKind::RParen)?;
         self.expect(&TokenKind::From)?;
-        let body = self.parse_match_part()?;
+        let body = self.parse_match_part(/* allow_fiber */ false)?;
         Ok(RuleDefinition {
             name,
             variables,
@@ -98,7 +104,7 @@ impl Parser {
     }
 
     fn parse_query(&mut self) -> Result<Query, QueryError> {
-        let body = self.parse_match_part()?;
+        let body = self.parse_match_part(/* allow_fiber */ true)?;
 
         let group_by = if self.at(&TokenKind::Group) {
             self.parse_group_by()?
@@ -153,14 +159,60 @@ impl Parser {
 
     // --- MATCH part (shared by DEFINE and Query) ---
 
-    fn parse_match_part(&mut self) -> Result<MatchPart, QueryError> {
-        let using = if self.at(&TokenKind::Using) {
-            self.parse_using()?
-        } else {
-            vec![]
-        };
+    /// Parse a MatchPart shared by DEFINE and the top-level query.
+    ///
+    /// DEFINE bodies (`allow_fiber = false`) get exactly one MATCH
+    /// clause and no FIBER — fiber queries are orchestrator-scoped,
+    /// relation rules are pure. Top-level queries (`allow_fiber = true`)
+    /// may interleave multiple MATCH and FIBER clauses per D2 Appendix B.
+    fn parse_match_part(&mut self, allow_fiber: bool) -> Result<MatchPart, QueryError> {
+        let mut using = Vec::new();
+        let mut using_institutions = Vec::new();
+        while self.at(&TokenKind::Using) {
+            // Peek past USING to distinguish plain USING from USING INSTITUTION.
+            if matches!(self.peek_at(1), Some(TokenKind::Institution)) {
+                if !allow_fiber {
+                    return Err(QueryError::parser(
+                        self.position(),
+                        "USING INSTITUTION is only valid in the top-level query, not in DEFINE"
+                            .to_string(),
+                    ));
+                }
+                using_institutions.push(self.parse_using_institution()?);
+            } else {
+                let more = self.parse_using()?;
+                using.extend(more);
+            }
+        }
 
-        let patterns = self.parse_match_clause()?;
+        let mut clauses = Vec::new();
+        if allow_fiber {
+            loop {
+                match self.peek() {
+                    TokenKind::Match => {
+                        for p in self.parse_match_clause()? {
+                            clauses.push(Clause::Pattern(p));
+                        }
+                    }
+                    TokenKind::Fiber => {
+                        clauses.push(Clause::Fiber(self.parse_fiber_clause()?));
+                    }
+                    _ => break,
+                }
+            }
+        } else {
+            // DEFINE body: exactly one MATCH clause.
+            for p in self.parse_match_clause()? {
+                clauses.push(Clause::Pattern(p));
+            }
+        }
+
+        if clauses.is_empty() {
+            return Err(QueryError::parser(
+                self.position(),
+                "expected MATCH or FIBER clause".to_string(),
+            ));
+        }
 
         let conditions = if self.at(&TokenKind::Where) {
             self.parse_where()?
@@ -170,29 +222,89 @@ impl Parser {
 
         Ok(MatchPart {
             using,
-            patterns,
+            using_institutions,
+            clauses,
             conditions,
         })
     }
 
+    /// Parse a single `USING` clause (possibly with multiple comma-separated
+    /// IRIs). Caller has already peeked that we're at `USING` (not
+    /// `USING INSTITUTION`).
     fn parse_using(&mut self) -> Result<Vec<Iri>, QueryError> {
         let mut iris = Vec::new();
-        while self.at(&TokenKind::Using) {
-            self.advance();
-            loop {
-                let s = self.parse_string_lit()?;
-                let iri = Iri::parse(&s).map_err(|e| {
-                    QueryError::parser(self.position(), format!("invalid IRI in USING: {e}"))
-                })?;
-                iris.push(iri);
-                if self.at(&TokenKind::Comma) {
-                    self.advance();
-                } else {
-                    break;
-                }
+        self.expect(&TokenKind::Using)?;
+        loop {
+            let s = self.parse_string_lit()?;
+            let iri = Iri::parse(&s).map_err(|e| {
+                QueryError::parser(self.position(), format!("invalid IRI in USING: {e}"))
+            })?;
+            iris.push(iri);
+            if self.at(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
             }
         }
         Ok(iris)
+    }
+
+    /// `USING INSTITUTION "iri" AS alias`
+    fn parse_using_institution(&mut self) -> Result<InstitutionAlias, QueryError> {
+        self.expect(&TokenKind::Using)?;
+        self.expect(&TokenKind::Institution)?;
+        let iri_str = self.parse_string_lit()?;
+        let iri = Iri::parse(&iri_str).map_err(|e| {
+            QueryError::parser(
+                self.position(),
+                format!("invalid IRI in USING INSTITUTION: {e}"),
+            )
+        })?;
+        self.expect(&TokenKind::As)?;
+        let alias = self.parse_identifier()?;
+        Ok(InstitutionAlias { iri, alias })
+    }
+
+    /// `FIBER institution_ref : QueryClass { params } AS ?var`
+    fn parse_fiber_clause(&mut self) -> Result<FiberClause, QueryError> {
+        self.expect(&TokenKind::Fiber)?;
+        let institution = self.parse_name()?;
+        self.expect(&TokenKind::Colon)?;
+        let query_class = self.parse_name()?;
+        let params = self.parse_fiber_params()?;
+        self.expect(&TokenKind::As)?;
+        let binding = self.parse_variable()?;
+        Ok(FiberClause {
+            institution,
+            query_class,
+            params,
+            binding,
+        })
+    }
+
+    fn parse_fiber_params(&mut self) -> Result<Vec<ParamBinding>, QueryError> {
+        self.expect(&TokenKind::LBrace)?;
+        if self.at(&TokenKind::RBrace) {
+            self.advance();
+            return Ok(vec![]);
+        }
+        let mut params = vec![self.parse_param_binding()?];
+        while self.at(&TokenKind::Comma) {
+            self.advance();
+            if self.at(&TokenKind::RBrace) {
+                break; // trailing comma
+            }
+            params.push(self.parse_param_binding()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(params)
+    }
+
+    fn parse_param_binding(&mut self) -> Result<ParamBinding, QueryError> {
+        let name = self.parse_name()?;
+        self.expect(&TokenKind::Colon)?;
+        let expression = self.parse_expression()?;
+        Ok(ParamBinding { name, expression })
     }
 
     fn parse_match_clause(&mut self) -> Result<Vec<Pattern>, QueryError> {
@@ -830,13 +942,18 @@ mod tests {
         parse(tokens)
     }
 
+    fn patterns_of(q: &Query) -> Vec<&Pattern> {
+        q.body.patterns().collect()
+    }
+
     #[test]
     fn simple_match_query() {
         let prog = parse_str(r#"MATCH ?x { name: ?n }"#).unwrap();
         assert!(prog.definitions.is_empty());
-        assert_eq!(prog.query.body.patterns.len(), 1);
-        assert!(prog.query.body.patterns[0].class.is_none());
-        assert!(!prog.query.body.patterns[0].negated);
+        let pats = patterns_of(&prog.query);
+        assert_eq!(pats.len(), 1);
+        assert!(pats[0].class.is_none());
+        assert!(!pats[0].negated);
     }
 
     #[test]
@@ -845,8 +962,9 @@ mod tests {
             parse_str(r#"USING "urn:eigenius:core:Class" MATCH Class(?c) { short_name: ?name }"#)
                 .unwrap();
         assert_eq!(prog.query.body.using.len(), 1);
-        assert!(prog.query.body.patterns[0].class.is_some());
-        assert_eq!(prog.query.body.patterns[0].properties.len(), 1);
+        let pats = patterns_of(&prog.query);
+        assert!(pats[0].class.is_some());
+        assert_eq!(pats[0].properties.len(), 1);
     }
 
     #[test]
@@ -855,7 +973,8 @@ mod tests {
             r#"MATCH "urn:eigenius:core:Class"(?c) { "urn:eigenius:core:short_name": ?name }"#,
         )
         .unwrap();
-        let pat = &prog.query.body.patterns[0];
+        let pats = patterns_of(&prog.query);
+        let pat = pats[0];
         assert!(matches!(pat.class, Some(Name::FullIri(_))));
         assert!(matches!(pat.properties[0].property, Name::FullIri(_)));
     }
@@ -970,8 +1089,9 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(!prog.query.body.patterns[0].negated);
-        assert!(prog.query.body.patterns[1].negated);
+        let pats = patterns_of(&prog.query);
+        assert!(!pats[0].negated);
+        assert!(pats[1].negated);
     }
 
     #[test]
@@ -998,7 +1118,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(prog.query.body.patterns.len(), 2);
+        assert_eq!(patterns_of(&prog.query).len(), 2);
     }
 
     #[test]
@@ -1043,5 +1163,125 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    // -----------------------------------------------------------------
+    // #10 — FIBER clause + USING INSTITUTION (D2 Appendix B)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn fiber_with_using_institution_alias() {
+        let prog = parse_str(
+            r#"
+            USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+            MATCH ?m { latest_delta: ?d }
+            FIBER ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+            MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+            WHERE ?c = true
+            "#,
+        )
+        .unwrap();
+
+        // USING INSTITUTION alias captured separately from USING class imports.
+        assert_eq!(prog.query.body.using.len(), 0);
+        assert_eq!(prog.query.body.using_institutions.len(), 1);
+        assert_eq!(prog.query.body.using_institutions[0].alias, "ord");
+        assert_eq!(
+            prog.query.body.using_institutions[0].iri.as_str(),
+            "urn:eigenius:test:wasm:ordering"
+        );
+
+        // Clauses preserved in textual order: Match, Fiber, Match.
+        let clauses = &prog.query.body.clauses;
+        assert_eq!(clauses.len(), 3);
+        assert!(matches!(clauses[0], Clause::Pattern(_)));
+        match &clauses[1] {
+            Clause::Fiber(fc) => {
+                assert!(matches!(fc.institution, Name::ShortName(ref s) if s == "ord"));
+                assert!(
+                    matches!(fc.query_class, Name::ShortName(ref s) if s == "ConvergenceQuery")
+                );
+                assert_eq!(fc.params.len(), 2);
+                assert!(matches!(fc.params[0].name, Name::ShortName(ref s) if s == "tolerance"));
+                assert_eq!(fc.binding.name, "conv");
+            }
+            _ => panic!("expected Fiber clause at index 1"),
+        }
+        assert!(matches!(clauses[2], Clause::Pattern(_)));
+        assert!(prog.query.body.has_fiber());
+    }
+
+    #[test]
+    fn fiber_with_inline_iri() {
+        let prog = parse_str(
+            r#"
+            MATCH ?m { latest_delta: ?d }
+            FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
+                { tolerance: 0.01, latest_delta: ?d } AS ?conv
+            "#,
+        )
+        .unwrap();
+
+        let fc = match &prog.query.body.clauses[1] {
+            Clause::Fiber(fc) => fc,
+            _ => panic!("expected Fiber clause"),
+        };
+        match &fc.institution {
+            Name::FullIri(iri) => {
+                assert_eq!(iri.as_str(), "urn:eigenius:test:wasm:ordering")
+            }
+            other => panic!("expected FullIri institution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fiber_with_mixed_short_name_and_full_iri_params() {
+        let prog = parse_str(
+            r#"
+            USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+            MATCH ?m { latest_delta: ?d }
+            FIBER ord:ConvergenceQuery {
+                tolerance: 0.01,
+                "urn:example:client:correlation_id": "abc"
+            } AS ?conv
+            "#,
+        )
+        .unwrap();
+
+        let fc = match &prog.query.body.clauses[1] {
+            Clause::Fiber(fc) => fc,
+            _ => panic!("expected Fiber clause"),
+        };
+        assert_eq!(fc.params.len(), 2);
+        assert!(matches!(fc.params[0].name, Name::ShortName(ref s) if s == "tolerance"));
+        assert!(matches!(
+            fc.params[1].name,
+            Name::FullIri(ref i) if i.as_str() == "urn:example:client:correlation_id"
+        ));
+    }
+
+    #[test]
+    fn using_and_using_institution_coexist() {
+        let prog = parse_str(
+            r#"
+            USING "urn:eigenius:test:wasm:Refinement"
+            USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+            MATCH Refinement(?m) { latest_delta: ?d }
+            FIBER ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(prog.query.body.using.len(), 1);
+        assert_eq!(prog.query.body.using_institutions.len(), 1);
+    }
+
+    #[test]
+    fn fiber_alone_without_match_errors() {
+        // A query that has only a FIBER clause and no MATCH should still
+        // parse — both kinds are clauses. But a clause list that starts
+        // without any MATCH/FIBER errors.
+        let err = parse_str(r#"WHERE ?x = 1"#);
+        assert!(err.is_err());
     }
 }

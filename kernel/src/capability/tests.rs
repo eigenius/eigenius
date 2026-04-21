@@ -500,3 +500,201 @@ fn wasm_institution_can_validate_repeatedly() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// #10 — EigenQL FIBER clause end-to-end (D2 Appendix B)
+// ---------------------------------------------------------------------------
+
+/// Build a layer containing:
+///   - the ordering institution's query_types (from its fiber declaration),
+///     so the EigenQL type checker can validate FIBER short-name params
+///   - a Refinement class + two Refinement instances with different deltas,
+///     so MATCH has something to iterate over
+fn build_fiber_test_layer() -> (
+    std::sync::Arc<crate::layer::Layer>,
+    crate::institution::InstitutionRegistry,
+) {
+    let reasoner = load_ordering_institution();
+    let mut registry = crate::institution::InstitutionRegistry::new();
+    let published = registry.register(Box::new(reasoner)).unwrap();
+
+    let mut lb = crate::layer::LayerBuilder::new("fiber-test", None);
+
+    // The institution's query_types (incl. ConvergenceQuery with its
+    // required-property declarations) — needed by the type checker.
+    for res in published {
+        lb.add_resource(res).unwrap();
+    }
+
+    // The institution publishes its query class but not the Property
+    // resources its `requires` list references. The EigenQL type checker
+    // needs those Properties (specifically their `short_name`) to
+    // validate FIBER's short-name params (tolerance, latest_delta).
+    for (iri, short) in [
+        (TOLERANCE_PROP, "tolerance"),
+        (LATEST_DELTA_PROP, "latest_delta"),
+    ] {
+        let mut p = Resource::new(Iri::parse(iri).unwrap());
+        p.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            Value::Array(vec![Value::String("urn:eigenius:core:Property".into())]),
+        );
+        p.set(
+            Iri::parse("urn:eigenius:core:short_name").unwrap(),
+            Value::String(short.into()),
+        );
+        p.set(
+            Iri::parse("urn:eigenius:core:data_type").unwrap(),
+            Value::String("urn:eigenius:core:float".into()),
+        );
+        lb.add_resource(p).unwrap();
+    }
+
+    // A Refinement class (so MATCH Refinement(?m) resolves).
+    let ref_class_iri = Iri::parse(REFINEMENT_CLASS).unwrap();
+    let mut ref_class = Resource::new(ref_class_iri.clone());
+    ref_class.set(
+        Iri::parse("urn:eigenius:core:is_a").unwrap(),
+        Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+    );
+    ref_class.set(
+        Iri::parse("urn:eigenius:core:short_name").unwrap(),
+        Value::String("Refinement".into()),
+    );
+    // Declare delta as a required property so the evaluator can
+    // short-name-resolve `delta: ?d` inside a Refinement MATCH.
+    let delta_prop_iri = Iri::parse(DELTA_PROP).unwrap();
+    ref_class.set(
+        Iri::parse("urn:eigenius:core:requires").unwrap(),
+        Value::Array(vec![Value::String(DELTA_PROP.into())]),
+    );
+    lb.add_resource(ref_class).unwrap();
+
+    // The delta property resource (required so short-name resolution works).
+    let mut delta_prop = Resource::new(delta_prop_iri.clone());
+    delta_prop.set(
+        Iri::parse("urn:eigenius:core:is_a").unwrap(),
+        Value::Array(vec![Value::String("urn:eigenius:core:Property".into())]),
+    );
+    delta_prop.set(
+        Iri::parse("urn:eigenius:core:short_name").unwrap(),
+        Value::String("delta".into()),
+    );
+    delta_prop.set(
+        Iri::parse("urn:eigenius:core:data_type").unwrap(),
+        Value::String("urn:eigenius:core:float".into()),
+    );
+    lb.add_resource(delta_prop).unwrap();
+
+    // Two Refinement instances — one with delta well below the tolerance
+    // we'll use (converged), one above it (not converged).
+    for (suffix, delta) in [("converged", 0.005), ("far", 0.5)] {
+        let iri = Iri::parse(&format!("urn:test:refinement:{suffix}")).unwrap();
+        let mut r = Resource::new(iri);
+        r.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            Value::Array(vec![Value::String(REFINEMENT_CLASS.into())]),
+        );
+        r.set(delta_prop_iri.clone(), Value::Float(delta));
+        lb.add_resource(r).unwrap();
+    }
+
+    (std::sync::Arc::new(lb.build()), registry)
+}
+
+#[test]
+fn fiber_clause_converged_only() {
+    use crate::context::{ExecutionContext, ExecutionMode};
+    use crate::query;
+
+    let (layer, institutions) = build_fiber_test_layer();
+    let ctx = ExecutionContext::new(Arc::clone(&layer), "fiber-test", ExecutionMode::ReadOnly);
+
+    let runtime = query::evaluate::FiberRuntime {
+        institutions: Some(&institutions),
+        ctx: Some(&ctx),
+    };
+
+    // Query: for each Refinement, dispatch to the ordering institution's
+    // ConvergenceQuery; project the binding that reports `converged: true`.
+    let query_str = r#"
+        USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+        USING "urn:eigenius:test:wasm:Refinement"
+        MATCH Refinement(?m) { delta: ?d }
+        FIBER ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+        MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+        WHERE ?c = true
+        RETURN [] { m: ?m }
+    "#;
+
+    let document =
+        query::execute_with(query_str, &layer, runtime).expect("FIBER query should succeed");
+
+    // Expect exactly one row — the Refinement whose delta is within tolerance.
+    let result_set = document
+        .iter()
+        .find(
+            |r| match r.get(&Iri::parse("urn:eigenius:core:is_a").unwrap()) {
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .any(|v| matches!(v, Value::String(s) if s == "urn:eigenius:query:ResultSet")),
+                _ => false,
+            },
+        )
+        .expect("document must contain a ResultSet");
+    let row_count = match result_set.get(&Iri::parse("urn:eigenius:query:row_count").unwrap()) {
+        Some(Value::Integer(n)) => *n,
+        _ => panic!("missing row_count"),
+    };
+    assert_eq!(row_count, 1, "expected exactly the converged refinement");
+
+    // The single row's `m` property should reference the converged Refinement.
+    let rows = match result_set.get(&Iri::parse("urn:eigenius:query:rows").unwrap()) {
+        Some(Value::Array(a)) => a,
+        _ => panic!("missing rows"),
+    };
+    let row = match &rows[0] {
+        Value::Embedded(r) => r,
+        _ => panic!("row must be embedded"),
+    };
+    // Find the row Property with short_name "m" and read the value under it.
+    let m_prop_iri = document
+        .iter()
+        .find(|r| {
+            matches!(r.get(&Iri::parse("urn:eigenius:core:short_name").unwrap()),
+            Some(Value::String(s)) if s == "m")
+        })
+        .and_then(|r| r.id().cloned())
+        .expect("Property 'm' must exist");
+    let m_value = row.get(&m_prop_iri).expect("row must have 'm'");
+    let m_str = match m_value {
+        Value::String(s) => s.as_str(),
+        Value::ResourceRef(i) => i.as_str(),
+        other => panic!("unexpected m value: {other:?}"),
+    };
+    assert_eq!(m_str, "urn:test:refinement:converged");
+}
+
+#[test]
+fn fiber_clause_missing_required_param_rejected_by_type_checker() {
+    use crate::query;
+
+    let (layer, _institutions) = build_fiber_test_layer();
+
+    // `latest_delta` is required but omitted here.
+    let query_str = r#"
+        USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+        MATCH ?m { "urn:eigenius:test:wasm:delta": ?d }
+        FIBER ord:ConvergenceQuery { tolerance: 0.01 } AS ?conv
+        RETURN [] { conv: ?conv }
+    "#;
+
+    let result = query::execute(query_str, &layer);
+    let errors = result.expect_err("type checker should reject missing required param");
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.rule == "fiber_missing_required_param"),
+        "expected fiber_missing_required_param error, got {errors:?}"
+    );
+}

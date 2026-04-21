@@ -30,6 +30,9 @@ pub enum TokenKind {
     Distinct,
     Limit,
     Offset,
+    // FIBER-clause keywords (D2 Appendix B)
+    Fiber,
+    Institution,
 
     // Built-in functions
     DateFn,
@@ -578,6 +581,8 @@ impl<'a> Lexer<'a> {
             "DISTINCT" => TokenKind::Distinct,
             "LIMIT" => TokenKind::Limit,
             "OFFSET" => TokenKind::Offset,
+            "FIBER" => TokenKind::Fiber,
+            "INSTITUTION" => TokenKind::Institution,
             // Functions
             "DATE" => TokenKind::DateFn,
             "TIMESTAMP" => TokenKind::TimestampFn,

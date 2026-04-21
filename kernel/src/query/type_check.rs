@@ -24,6 +24,10 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // Check the query
     check_match_part(&program.query.body, layer, &mut errors);
 
+    // FIBER-clause specifics: USING INSTITUTION alias uniqueness, FIBER
+    // referent resolution, required-param coverage, short-name scope.
+    check_fiber_clauses(&program.query.body, layer, &mut errors);
+
     // Collect all bound variables from MATCH patterns
     let bound_vars = collect_bound_variables(program);
 
@@ -82,17 +86,34 @@ fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
     let mut vars = BTreeSet::new();
 
     for def in &program.definitions {
-        collect_pattern_vars(&def.body.patterns, &mut vars);
+        collect_pattern_vars(def.body.patterns(), &mut vars);
         for v in &def.variables {
             vars.insert(v.name.clone());
         }
     }
 
-    collect_pattern_vars(&program.query.body.patterns, &mut vars);
+    collect_pattern_vars(program.query.body.patterns(), &mut vars);
+    // FIBER clauses bind a result variable — make it visible to WHERE /
+    // RETURN / subsequent MATCH patterns.
+    for c in &program.query.body.clauses {
+        if let Clause::Fiber(fc) = c {
+            vars.insert(fc.binding.name.clone());
+        }
+    }
+    for def in &program.definitions {
+        for c in &def.body.clauses {
+            if let Clause::Fiber(fc) = c {
+                vars.insert(fc.binding.name.clone());
+            }
+        }
+    }
     vars
 }
 
-fn collect_pattern_vars(patterns: &[Pattern], vars: &mut BTreeSet<String>) {
+fn collect_pattern_vars<'a>(
+    patterns: impl Iterator<Item = &'a Pattern>,
+    vars: &mut BTreeSet<String>,
+) {
     for pattern in patterns {
         vars.insert(pattern.subject.name.clone());
         for prop in &pattern.properties {
@@ -222,6 +243,198 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
         _ => false,
     }
 }
+
+// ---------------------------------------------------------------------------
+// FIBER-clause checks (D2 Appendix B §B.5)
+// ---------------------------------------------------------------------------
+
+fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError>) {
+    // 1. USING INSTITUTION aliases: uniqueness among themselves and with
+    //    class-name USING imports (bare identifiers in queries).
+    let mut alias_set: BTreeSet<&str> = BTreeSet::new();
+    for alias in &part.using_institutions {
+        if !alias_set.insert(alias.alias.as_str()) {
+            errors.push(QueryError::type_check(
+                "duplicate_using_institution_alias",
+                format!("duplicate USING INSTITUTION alias: '{}'", alias.alias),
+            ));
+        }
+    }
+
+    // 2. Each FIBER clause.
+    let class_iri = Iri::parse(wk::CLASS).unwrap();
+    let requires_prop = Iri::parse(wk::REQUIRES).unwrap();
+    let recommends_prop = Iri::parse(wk::RECOMMENDS).unwrap();
+    let short_name_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+
+    for c in &part.clauses {
+        let fc = match c {
+            Clause::Fiber(fc) => fc,
+            _ => continue,
+        };
+
+        // 2a. Institution ref — if it's a ShortName, alias must be declared.
+        //     If it's a FullIri, we trust it resolves at runtime (institution
+        //     resources aren't always layer-resident).
+        if let Name::ShortName(ref alias) = fc.institution {
+            if !alias_set.contains(alias.as_str()) {
+                errors.push(QueryError::type_check(
+                    "undeclared_institution_alias",
+                    format!(
+                        "FIBER refers to undeclared institution alias '{alias}' — \
+                         add `USING INSTITUTION \"...\" AS {alias}` or use an inline IRI"
+                    ),
+                ));
+            }
+        }
+
+        // 2b. Resolve the query class. If resolvable in the layer, it must
+        //     be a Class; we also use it to scope short-name params.
+        let query_class_iri = match &fc.query_class {
+            Name::FullIri(iri) => Some(iri.clone()),
+            Name::ShortName(name) => resolve_short_name_to_class(layer, name),
+        };
+
+        let class_resource = query_class_iri
+            .as_ref()
+            .and_then(|iri| layer.resolve(iri).cloned());
+
+        if let Some(ref cr) = class_resource {
+            if !cr.is_instance_of(&class_iri) {
+                errors.push(QueryError::type_check(
+                    "fiber_query_class_not_class",
+                    format!(
+                        "FIBER query class '{}' does not resolve to a Class",
+                        query_class_name_display(&fc.query_class)
+                    ),
+                ));
+            }
+        } else {
+            // v1 lenient: if we can't resolve, skip downstream checks and
+            // let the evaluator fail with a clearer message at dispatch
+            // time (institution may have registered the class dynamically).
+            continue;
+        }
+        let class_resource = class_resource.unwrap();
+
+        // Collect the class's allowed property IRIs (requires ∪ recommends)
+        // and build a short_name → IRI map for short-name resolution.
+        let mut allowed_prop_iris: BTreeSet<String> = BTreeSet::new();
+        let mut required_prop_iris: BTreeSet<String> = BTreeSet::new();
+        let mut short_to_iri: BTreeMap<String, String> = BTreeMap::new();
+
+        let required_list = collect_property_iris(&class_resource, &requires_prop);
+        let recommended_list = collect_property_iris(&class_resource, &recommends_prop);
+
+        for iri in &required_list {
+            allowed_prop_iris.insert(iri.as_str().to_string());
+            required_prop_iris.insert(iri.as_str().to_string());
+        }
+        for iri in &recommended_list {
+            allowed_prop_iris.insert(iri.as_str().to_string());
+        }
+        for iri in allowed_prop_iris.iter() {
+            if let Ok(iri_parsed) = Iri::parse(iri) {
+                if let Some(prop_res) = layer.resolve(&iri_parsed) {
+                    if let Some(crate::ontology::resource::Value::String(s)) =
+                        prop_res.get(&short_name_prop)
+                    {
+                        short_to_iri.insert(s.clone(), iri.clone());
+                    }
+                }
+            }
+        }
+
+        // 2c. Validate each param.
+        let mut supplied_iris: BTreeSet<String> = BTreeSet::new();
+        for param in &fc.params {
+            let resolved_iri = match &param.name {
+                Name::FullIri(iri) => Some(iri.as_str().to_string()),
+                Name::ShortName(short) => {
+                    if let Some(iri) = short_to_iri.get(short) {
+                        Some(iri.clone())
+                    } else {
+                        errors.push(QueryError::type_check(
+                            "fiber_param_short_name_unresolved",
+                            format!(
+                                "FIBER param '{short}' is not a declared property of \
+                                 query class '{}' (requires ∪ recommends)",
+                                query_class_name_display(&fc.query_class)
+                            ),
+                        ));
+                        None
+                    }
+                }
+            };
+            if let Some(iri) = resolved_iri {
+                supplied_iris.insert(iri);
+            }
+        }
+
+        // 2d. Required-property coverage.
+        for req in &required_prop_iris {
+            if !supplied_iris.contains(req) {
+                errors.push(QueryError::type_check(
+                    "fiber_missing_required_param",
+                    format!(
+                        "FIBER for query class '{}' is missing required param '{}'",
+                        query_class_name_display(&fc.query_class),
+                        req
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn collect_property_iris(class_resource: &Resource, prop_iri: &Iri) -> Vec<Iri> {
+    use crate::ontology::resource::Value;
+    match class_resource.get(prop_iri) {
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| match v {
+                Value::String(s) => Iri::parse(s).ok(),
+                Value::ResourceRef(i) => Some(i.clone()),
+                _ => None,
+            })
+            .collect(),
+        Some(Value::String(s)) => Iri::parse(s).ok().into_iter().collect(),
+        Some(Value::ResourceRef(i)) => vec![i.clone()],
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_short_name_to_class(layer: &Layer, short: &str) -> Option<Iri> {
+    use crate::ontology::resource::Value;
+    let class_iri = Iri::parse(wk::CLASS).unwrap();
+    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+    for (iri, res) in layer.all_resources() {
+        if !res.is_instance_of(&class_iri) {
+            continue;
+        }
+        if let Some(Value::String(s)) = res.get(&short_prop) {
+            if s == short {
+                return Some(iri.clone());
+            }
+        }
+    }
+    None
+}
+
+fn query_class_name_display(name: &Name) -> String {
+    match name {
+        Name::ShortName(s) => s.clone(),
+        Name::FullIri(i) => i.as_str().to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Imports used above — keep below the public surface to avoid polluting
+// the top.
+// ---------------------------------------------------------------------------
+
+use crate::ontology::resource::Resource;
+use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests {
