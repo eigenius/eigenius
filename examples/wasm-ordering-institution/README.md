@@ -149,6 +149,20 @@ which asks the institution "converged?" once per `Refinement` and keeps
 only the bindings it reports as converged. See D2 Appendix B for the
 FIBER clause semantics.
 
+### Durability smoke (Phase 9a)
+
+[`run_durable.sh`](run_durable.sh) is the CLI-surface counterpart to the
+in-process test at `storage/rocksdb/tests/durability_test.rs`. It starts
+the kernel with `--db <tempdir>`, installs the institution, kills the
+kernel, restarts it against the same DB, and verifies the institution
+still dispatches — no re-install. Use it after changes to the SEED /
+RESUME paths. See D13.
+
+```bash
+cargo build -p eigenius-cli
+./examples/wasm-ordering-institution/run_durable.sh
+```
+
 ### Converged case
 
 Save a convergence query where the latest delta is well below the

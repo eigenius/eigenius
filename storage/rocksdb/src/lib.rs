@@ -475,6 +475,59 @@ impl ResourceStore for RocksStore {
     }
 }
 
+// --- PersistentBackend (D13) ---
+
+impl eigenius_kernel::storage::PersistentBackend for RocksStore {
+    fn get_head(&self) -> Result<Option<LayerId>, StorageError> {
+        RocksStore::get_head(self)
+    }
+
+    fn set_head(&self, id: &LayerId) -> Result<(), StorageError> {
+        RocksStore::set_head(self, id)
+    }
+
+    fn load_chain(&self) -> Result<Option<Arc<Layer>>, StorageError> {
+        RocksStore::load_chain(self)
+    }
+
+    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+        // The LayerStore impl is async but its body is purely synchronous
+        // RocksDB work; re-implement synchronously here to avoid
+        // blocking-in-async cases. Matches D13 §5 "commit-through" design.
+        let id = layer.id().clone();
+        let parent_id = layer.parent().map(|p| p.id().clone());
+
+        self.store_layer_meta(&id, layer.name(), parent_id.as_ref())?;
+        for (iri, resource) in layer.resources() {
+            let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
+            let value = eigon_cbor::serialize_resource(resource);
+            self.db
+                .put(key.as_bytes(), value)
+                .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
+        }
+        self.set_chain(&id, parent_id.as_ref())?;
+        Ok(id)
+    }
+
+    fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let db_key = format!("meta:{key}");
+        self.db
+            .get(db_key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("meta get: {e}")))
+    }
+
+    fn put_meta(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
+        let db_key = format!("meta:{key}");
+        self.db
+            .put(db_key.as_bytes(), value)
+            .map_err(|e| StorageError::Internal(format!("meta put: {e}")))
+    }
+
+    fn as_trace_store(&self) -> &(dyn eigenius_kernel::program::trace::TraceStore + Send + Sync) {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

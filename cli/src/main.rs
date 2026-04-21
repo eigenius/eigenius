@@ -90,6 +90,12 @@ enum Commands {
         /// Orchestrator endpoint for IO component dispatch
         #[arg(long, env = "EIGENIUS_ORCHESTRATOR_ENDPOINT")]
         orchestrator: Option<String>,
+
+        /// Path to a RocksDB directory for persistent state. When omitted,
+        /// the server runs in-memory and loses all state on exit.
+        /// See D13 — Durable Kernel State.
+        #[arg(long, env = "EIGENIUS_DB", value_name = "PATH")]
+        db: Option<String>,
     },
 
     /// Database administration
@@ -269,7 +275,11 @@ async fn main() {
             std::process::exit(1);
         }
         Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
-        Commands::Serve { port, orchestrator } => cmd_serve(port, orchestrator.as_deref()).await,
+        Commands::Serve {
+            port,
+            orchestrator,
+            db,
+        } => cmd_serve(port, orchestrator.as_deref(), db.as_deref()).await,
         Commands::Compile { file } => cmd_compile(&file, cli.json),
         Commands::Reflect { file } => cmd_reflect(&file, cli.json),
         Commands::ListInstitutions => {
@@ -745,8 +755,25 @@ fn cmd_db(command: DbCommands) {
     }
 }
 
-async fn cmd_serve(port: u16, orchestrator: Option<&str>) {
-    if let Err(e) = eigenius_kernel::server::start_server(port, orchestrator).await {
+async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>) {
+    let backend: Option<std::sync::Arc<dyn eigenius_kernel::storage::PersistentBackend>> = match db
+    {
+        Some(path) => {
+            match eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(path)) {
+                Ok(store) => {
+                    println!("Opened persistent backend at {path}");
+                    Some(std::sync::Arc::new(store))
+                }
+                Err(e) => {
+                    eprintln!("Failed to open --db {path}: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
+
+    if let Err(e) = eigenius_kernel::server::start_server(port, orchestrator, backend).await {
         eprintln!("Server error: {e}");
         std::process::exit(1);
     }

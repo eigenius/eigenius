@@ -106,6 +106,23 @@ impl InstitutionRegistry {
     /// Register an institution. Returns the ontology resources to commit
     /// (morphism types, query types, structural properties).
     pub fn register(&mut self, reasoner: Box<dyn FiberReasoner>) -> Result<Vec<Resource>, String> {
+        self.register_inner(reasoner, /* publish */ true)
+    }
+
+    /// Register a reasoner whose declared classes are already in the layer
+    /// chain (e.g., because they were persisted on the initial install).
+    /// Builds dispatch tables, does not return any resources to commit.
+    /// Used by the RESUME path in Phase 9a.
+    pub fn register_rehydrated(&mut self, reasoner: Box<dyn FiberReasoner>) -> Result<(), String> {
+        self.register_inner(reasoner, /* publish */ false)
+            .map(|_| ())
+    }
+
+    fn register_inner(
+        &mut self,
+        reasoner: Box<dyn FiberReasoner>,
+        publish: bool,
+    ) -> Result<Vec<Resource>, String> {
         let decl = reasoner.fiber_declaration();
         let iri = decl.institution_iri.clone();
 
@@ -137,11 +154,14 @@ impl InstitutionRegistry {
             },
         );
 
-        // Collect ontology resources to commit
+        // Collect ontology resources to commit (only when publishing;
+        // RESUME skips this because the resources are already persisted).
         let mut resources = Vec::new();
-        resources.extend(decl.morphism_types);
-        resources.extend(decl.query_types);
-        resources.extend(decl.structural_properties);
+        if publish {
+            resources.extend(decl.morphism_types);
+            resources.extend(decl.query_types);
+            resources.extend(decl.structural_properties);
+        }
 
         self.institutions.insert(iri, reasoner);
         Ok(resources)
