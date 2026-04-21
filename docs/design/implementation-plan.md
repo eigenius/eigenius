@@ -81,10 +81,15 @@ The build is organized into phases. Each phase produces a working system that ca
 | 5 | Traces + NbE | ✓ | Trace persistence, type theory extensions, NbE with capability modes |
 | 6 | Institutions | ✓ | Grothendieck institution protocol, fiber reasoners, morphism validation |
 | 7 | CompleteJson | ✓ | Structured LLM output via JSON Schema from ontology classes |
-| 8 | WASM | | Untrusted capabilities run sandboxed via Wasmtime |
-| 8.5 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
-| 8.9 | Codata + Streams | | Persistent traces, resumable execution, coinductive streams |
-| 9 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
+| 8 | WASM | ✓ | Untrusted capabilities run sandboxed via Wasmtime |
+| 9a | Durable State | | Layers, traces, WASM capabilities survive kernel restart |
+| 9b | Codata + Streams | | Resumable execution, coinductive streams, concurrent tasks |
+| 10 | Kernel Completeness | | Ontology-as-types resolution, universe soundness, typed errors |
+| 11 | Type Theory Extensions | | Map/Reduce, inductive types, decision procedures, Comorphism class |
+| 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
+| 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
+| 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
+| 15 | Specialty Institutions | | Lean 4, SMT solvers, domain-specific proof institutions |
 
 ---
 
@@ -340,7 +345,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 **Duration estimate:** 4–6 weeks.
 
-**Status:** Complete. NbE evaluator with capability modes (Pure/Read/IO) replaces the old executor. Type theory extended with Id types, decidable equality, native constraint checking, and universe stratification. Ground type resolution maps full ontology (requires, recommends, allows_only, class_types). ComponentTraces committed to trace layers as proof artifacts. Incremental execution works within a server session. Known gap: persistent trace store (RocksTraceStore) not wired into the server — deferred to Phase 9. See `docs/design/d9-nbe-unification-and-type-extensions.md`.
+**Status:** Complete. NbE evaluator with capability modes (Pure/Read/IO) replaces the old executor. Type theory extended with Id types, decidable equality, native constraint checking, and universe stratification. Ground type resolution maps full ontology (requires, recommends, allows_only, class_types). ComponentTraces committed to trace layers as proof artifacts. Incremental execution works within a server session. Known gap: persistent trace store (RocksTraceStore) not wired into the server — deferred to Phase 9a. See `docs/design/d9-nbe-unification-and-type-extensions.md`.
 
 ### 8.1 Deliverables
 
@@ -383,7 +388,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 **Status:** Core protocol complete. `FiberReasoner` trait, `InstitutionRegistry` with dispatch routing, `ComorphismRegistry`, morphism validation dispatch in the validator, fiber query dispatch through NbE, institution ontology (FiberMorphism, FiberQuery, StructuralProperty, PropertyKind), gRPC RPCs (FiberQuery, DiscoverMorphisms, ListInstitutions), CLI `list-institutions` command. Test institution (ordering/refinement with transitivity validation, 5 tests). Bootstrap loads four layers: core → program → reflection → institution. See `docs/design/d10-grothendieck-institution-protocol.md`.
 
-**Deferred:** Fully worked domain examples (mechanical engineering, biopharma) require WASM sandboxing for domain-specific fiber reasoners — deferred to Phase 8.5.
+**Deferred:** Fully worked domain examples (mechanical engineering, biopharma) require WASM sandboxing for domain-specific fiber reasoners — deferred to Phase 12.
 
 ### 9.1 Deliverables
 
@@ -466,81 +471,207 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 ---
 
-## 11.5. Phase 8.5 — Worked Institution Examples
+## Phase 9 — Durable Kernel State, Persistent Traces, Resumable Execution, and Codata Streams
 
-**Goal:** Fully worked domain examples demonstrating the Grothendieck institution protocol with WASM-sandboxed fiber reasoners.
+**Goal:** Make the running kernel durable end-to-end — layers, resources, traces, and WASM capabilities (including institutions) all survive restarts — and then build codata-based streaming and resumable execution on top of that foundation.
 
-**Duration estimate:** 3–4 weeks.
+**Duration estimate:** 5–7 weeks total, split into two internal milestones.
 
-**Prerequisites:** Phase 6 (institution protocol) and Phase 8 (WASM extensibility).
+**Prerequisites:** Phase 5 (traces + NbE), Phase 8 (WASM). Institution wiring (`validate_with_institutions` in the Load path, institution registration into `start_server`) moved into Phase 12 (Worked Examples) since it only becomes testable once real institutions exist — 9a's institution re-registration handles the kernel-side plumbing that survives restart.
 
-### 11.5.1 Deliverables
+The phase decomposes into two milestones that are separately reviewable:
 
-- **Mechanical engineering example:** FEA institution with `MeshRefinement` morphisms, convergence queries, and mesh topology validation. CAD institution with `ParametricVariation` morphisms. GenAI institution with `ParetoDominance` morphisms and Pareto front queries. Cross-institution query: "for each GenAI candidate, find the finest-mesh FEA result and check if safety factor > 2.0."
-- **Biopharmaceutical R&D example:** Docking institution with `ConformationalProximity` and `ReScoring` morphisms, ensemble queries. ADMET institution with `ModelAgreement` morphisms, disagreement queries. Assay institution with `ReplicateRelationship` morphisms. PK institution with `CompartmentRefinement` morphisms. Comorphism: docking ΔG → assay IC₅₀ translation.
-- Each institution implemented as a WASM module via the capability SDK (Phase 8).
-- Wire `validate_with_institutions` into the Load RPC path (deferred from Phase 6 — no real institutions to test against until now).
-- Wire institution registration into `start_server` (analogous to component registration).
-- Integration tests exercising cross-institution queries and comorphism translations.
-- Documentation: each example as a tutorial with ontology definitions, fiber reasoner implementation, and sample queries.
+### Phase 9a — Durable kernel state (D13) — ~1 week
 
-### 11.5.2 References
+**Goal:** `eigenius serve --db <path>` persists every committed layer, resource, and trace. Restart rebuilds the running state from the DB; the embedded core ontology is seeded once and never re-overwritten silently.
 
-- `docs/papers/eigenius-institutions.tex` §5 (mechanical engineering) and §6 (biopharma)
-- `docs/design/d10-grothendieck-institution-protocol.md` §9 (worked examples)
+- `--db <path>` flag (and `EIGENIUS_DB` env override) on `serve`. Open `RocksStore` at that path; in-memory fallback preserved for tests.
+- First-run SEED: commit the four embedded ontology layers (core → program → reflection → institution) to the store. Record a seed manifest with SHA-256 of each embedded JSON.
+- Subsequent RESUME: walk the persisted layer chain from the stored head; compare the manifest against embedded SHA-256s and refuse to boot on drift (no silent auto-upgrade).
+- `ExecutionContext::commit` writes through to the store atomically before rotating the in-memory head; `Load` RPC becomes durable automatically.
+- WASM + institution re-registration on RESUME: scan every persisted layer, re-compile + re-register components and institutions into their respective runtime registries. Closes [#15](https://github.com/eigenius/eigenius/issues/15) along the way — institution-declared classes now commit to the layer, not just the registry.
+- Swap `InMemoryTraceStore` for `RocksTraceStore` sharing the same DB handle (separate column family per D4).
+- Integration test: install a capability (WASM component + institution) → kill kernel → restart → verify dispatch still works without re-install.
+- See D13 for the full specification and the five-step implementation ordering.
 
----
+### Phase 9b — Codata, streams, and resumable execution (D11) — ~4–6 weeks
 
-## 11.9. Phase 8.9 — Persistent Traces, Resumable Execution, and Codata Streams
+**Goal:** Extend the execution model with codata (coinductive types) so that data and event streams become first-class. Programs can run as long-lived tasks that suspend on IO and resume from their persisted trace state.
 
-**Goal:** Wire persistent trace storage (RocksDB) into the kernel so that reasoning traces survive crashes and program execution can resume from where it left off. Extend the execution model with codata (coinductive types) to support data and event streams — processes that incrementally progress as new data arrives or gets generated by other programs.
+- Extend Mini-TT with coinductive types (codata): greatest fixed points, copattern matching, observation-based elimination.
+- Model data streams as codata: a stream is a coinductive record with `head : A` and `tail : Stream A` observations.
+- Model event-driven processes as codata: a process observes an event and produces a result plus a continuation.
+- Integration with reasoning traces: each observation step produces a trace entry; the stream's state is reconstructible from traces. (Trace persistence lands in 9a.)
+- ESL syntax for codata declarations and copattern matching (see eigenius/eigenius#7).
+- Concurrent task model: program executions are tasks that may be suspended (waiting for IO) and resumed (IO completed or new data arrived). The trace store is the task's checkpoint — resumption re-evaluates from the root, hitting cached traces. Multiple programs execute concurrently, sharing the trace store for memoization across tasks.
+- In-progress programs tracked as concurrent tasks; the kernel maintains a task table mapping program execution IDs to their current trace state.
+- CLI `tasks` command: list in-progress and completed program executions.
 
-**Duration estimate:** 4–6 weeks.
-
-**Prerequisites:** Phase 5 (traces + NbE), Phase 8 (WASM).
-
-### 11.9.1 Deliverables
-
-**Persistent trace store wiring:**
-- Wire `RocksTraceStore` into `start_server` with a `--db` flag for the storage path
-- Resumable execution: after a crash, re-running a program resumes from the last persisted ComponentTrace
-- In-progress programs tracked as concurrent tasks in the kernel — the kernel maintains a task table mapping program execution IDs to their current trace state
-- CLI `tasks` command: list in-progress and completed program executions
-
-**Codata and stream support:**
-- Extend Mini-TT with coinductive types (codata): greatest fixed points, copattern matching, observation-based elimination
-- Model data streams as codata: a stream is a coinductive record with `head : A` and `tail : Stream A` observations
-- Model event-driven processes as codata: a process observes an event and produces a result plus a continuation
-- Integration with reasoning traces: each observation step produces a trace entry; the stream's state is reconstructible from traces
-- ESL syntax for codata declarations and copattern matching (see eigenius/eigenius#7)
-
-**Concurrent task model:**
-- Program executions are tasks that may be suspended (waiting for IO) and resumed (IO completed or new data arrived)
-- The trace store is the task's checkpoint — resumption re-evaluates from the root, hitting cached traces
-- Multiple programs can execute concurrently, sharing the trace store for memoization across tasks
-- Event-driven programs suspend on stream observations and resume when new data is available
-
-### 11.9.2 Key design questions
+### Phase 9 — Key design questions (D11 scope)
 
 - How do codata types interact with the NbE evaluator? Coinductive types require productive corecursion — the evaluator must guarantee progress (each observation step produces a value before the next observation)
 - How do streams compose with the layer system? Each stream observation could produce resources committed to a new layer, extending the chain incrementally
 - How does the task scheduler interact with the gRPC server? Is it a separate service or part of the kernel?
 - What is the relationship between codata streams and institution fiber morphisms? (A stream of refinements could be a morphism chain in the FEA institution)
 
-### 11.9.3 References
+### Phase 9 — References
 
 - D9: `docs/design/d9-nbe-unification-and-type-extensions.md` §5.10 (known gap: persistent trace store)
-- D11: `docs/design/d11-codata-streams.md` (to be written — see D11 in design documents table)
+- **D13: `docs/design/d13-durable-kernel-state.md`** — durable-state specification, startup sequence, institution/WASM re-registration, migration policy
+- D11: `docs/design/d11-codata-streams.md` — codata, streams, resumable execution
 
 ---
 
-## 12. Phase 9 — Azure Deployment and Operations
+## Phase 10 — Kernel Completeness
 
-**Goal:** Production-ready deployment to Azure Container Apps with CI/CD, observability, and operational tooling. Optional TiKV backend for horizontally scalable storage.
+**Goal:** Close the fundamental kernel correctness gaps that block platform breadth — particularly ontology-as-types resolution, which is a prerequisite for the life-science representation work in Phase 11 and every other domain that typechecks against ontology classes. Framed in `docs/design/life-science-requirements.md` §19 step 1 as "nothing works cleanly until `find_sigma_field` resolves EigonClass to proper dependent records."
+
+**Duration estimate:** 3–5 weeks total, three internal milestones.
+
+**Prerequisites:** Phase 5 (Mini-TT/NbE), Phase 8 (WASM).
+
+**Drives:** eigenius/eigenius#12 (high-priority correctness hazards), #13 (medium), #14 (low).
+
+### Phase 10a — Ontology-as-types resolution — ~2 weeks
+
+**Goal:** `find_sigma_field` walks the layer chain to resolve `EigonClass(iri)` into a proper dependent record type (Sigma chain) instead of silently collapsing to `Val::Set`. Property access on ontology classes type-checks against the class's declared properties and their datatypes.
+
+- Hook `find_sigma_field` into the Read-capability-mode layer access (D9) so it can resolve IRI → Class resource → iterated Sigma field chain at check time.
+- Extend `check_infer` with cases for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq` — currently these fall through to an "unable to infer" error whenever they appear in inference position without an annotation.
+- Integration tests: property access on ontology-typed resources; Construct expressions without annotations; round-trip through patent demo pipeline.
+- Drives the "consolidated ontology-as-types layer-chain plumbing" prerequisite named in life-science §19.
+- See D18 (to be written).
+
+### Phase 10b — Universe stratification and meta-level soundness — ~1–2 weeks
+
+**Goal:** Enforce the three-level epistemic stratification (data → derivation → meta) at ingestion time so meta-level claims over traces are sound. Life-science §16.2 names this as unblocking §13 "Meta-level claims (sound)."
+
+- Enforcement point: resource ingestion in the layer system (not Mini-TT term forms). A resource at epistemic level N that references a resource at level ≥ N is rejected with a clear error.
+- Mini-TT checker: tighten universe-rule handling so attempts to construct self-referential meta-claims fail at check time (before runtime).
+- Integration with D6b trace schema: a ProgramTrace at level 2 references only resources at level ≤ 1.
+- nanoda_lib (see `lean-4-as-institution.md`) as reference for how universe checking integrates with type equality — Eigenius's needs are simpler (three fixed levels vs. Lean's universe polymorphism).
+
+### Phase 10c — Robustness: typed errors, lossy conversions, allocator hygiene — ~1 week
+
+**Goal:** Close the residual low-priority hazards so kernel behaviour under misbehaving institutions is predictable.
+
+- `eval`'s panics in Pure mode → typed `EvalError` returns. Misbehaving institutions can't crash the kernel.
+- `val_to_resource`'s lossy non-ResourceVal collapse → debug-assertion + a clearer error path. Same invariant, louder failure.
+- `Arrow` / `Times` → `Pi(Patt::Unit, …)` / `Sig(Patt::Unit, …)` cloning double-allocation → constructor-level optimisation. Measured improvement, not a correctness fix, but keeps the hot path clean.
+
+### Phase 10 — Test plan
+
+- Ontology-typed property access round-trips through all existing WASM examples without `Val::Set` leakage in the trace.
+- A contrived program that tries to reference a level-2 resource from a level-1 resource is rejected at ingestion with a clear stratification error.
+- The three correctness-hazard issues each get a regression test before closing.
+
+### Phase 10 — References
+
+- `docs/design/life-science-requirements.md` §19 (recommended sequencing), §16.2 (stratification), §16.3 (decision procedures — deferred to Phase 11)
+- `docs/design/d9-nbe-unification-and-type-extensions.md` — Mini-TT surface this extends
+- `docs/design/lean-4-as-institution.md` — nanoda_lib design references
+- D18 (to be written) — Ontology-as-Types Resolution
+
+---
+
+## Phase 11 — Type Theory Extensions
+
+**Goal:** The kernel type theory becomes expressive enough to represent the shapes life-science (and other domain) users need. Inductive types for fiber morphisms, `Map` and `Reduce` as language primitives, institution-registered decision procedures, and `Comorphism` as a first-class ontology class.
+
+**Duration estimate:** 8–11 weeks total, four internal milestones.
+
+**Prerequisites:** Phase 10 (Kernel Completeness — #12's ontology-as-types resolution is a hard prerequisite for inductive-type property access).
+
+**Drives:** `docs/design/life-science-requirements.md` §18 Tier 1 + Tier 2 extensions.
+
+### Phase 11a — `Map` and `Reduce` as type-level primitives — ~2 weeks
+
+**Goal:** Replace ad-hoc `Drec` with structural `Map` and `Reduce` forms that carry termination guarantees by construction. Resolves the Drec termination concern from #13 and unblocks life-science §4 "Finite universal quantification."
+
+- `Map` and `Reduce` become expression forms in the AST, not just ESL keywords (the keywords already exist per `kernel/src/esl/lexer.rs`).
+- Termination by construction: `Map` over a finite list, `Reduce` with a well-founded recursor. No `Drec` in the surface language after this milestone.
+- Parser/elaborator refuses `Drec` except as these primitives expand to it.
+- Life-science §4 bounded universal quantification works cleanly.
+
+### Phase 11b — Inductive types — ~4–6 weeks
+
+**Goal:** Mini-TT gains proper recursive inductive types with derived eliminators. This is the **largest single extension** in the life-science plan (§16.1, Tier 1) and unblocks the deep treatment of fiber morphisms (e.g., "is this ConformationalProximity the composition of two shorter proximities?").
+
+- New expression form `Inductive` for declaring inductive types with constructors and parameters.
+- Positivity checker rejecting non-strictly-positive declarations (for decidability).
+- Automatic eliminator derivation from the inductive specification.
+- Iota-reduction rules for the eliminators; conversion-algorithm integration.
+- **Scope boundary:** single, non-mutual, non-nested, strictly-positive inductive types. Mutual and nested are explicitly deferred.
+- nanoda_lib (`src/inductive.rs`) as the reference implementation. See `lean-4-as-institution.md` Appendix A for the caveat about nested inductives.
+- Side benefit per §16.1: bounded universal quantification becomes cleaner once the underlying `List` type is a properly recursive inductive rather than the simplified sum-of-products form currently in `Exp::list`.
+- See D19 (to be written).
+
+### Phase 11c — Institution-registered decision procedures — ~1–2 weeks
+
+**Goal:** Generalise `NativeDecide` so institutions can register their own constraint reducers — RMSD thresholds for docking, concentration bounds for PK, confidence-interval containment. Life-science §16.3 is the driver; the architectural direction ("domain constraints belong in the institution, not the kernel") is consistent with existing capability dispatch.
+
+- Generalise the `Constraint` enum in `nbe/term.rs` to dispatch to institution-registered decision procedures via IRI.
+- Extension point on `FiberReasoner`: an optional `decide(constraint_iri, args) -> DecResult` method.
+- Life-science §5/§6/§7/§12 predicates reduce at check time rather than at runtime.
+
+### Phase 11d — `Comorphism` as an ontology class — ~1 week
+
+**Goal:** Formalise cross-institution translation as a resource class (not just a conceptual pattern). Required for life-science §11 cross-institution claims AND for Phase 14's reconciliation primitive.
+
+- Define `urn:eigenius:institution:Comorphism` class with properties for source institution, target institution, the translation procedure (institution-registered decision procedure from Phase 11c), and any required structural properties.
+- Examples in the life-science domain: docking-ΔG → assay-IC₅₀, ADMET → PK.
+- Basic kernel support: recognise Comorphism resources during institution registration so a fiber reasoner can declare its outgoing comorphisms.
+
+### Phase 11 — Test plan
+
+- Inductive type declaration + recursor + iota reduction: positive examples (Nat, List, Tree, a life-science morphism type) and negative examples (non-strictly-positive rejected).
+- Map/Reduce desugaring + termination: compile ESL that uses Map/Reduce, verify no `Drec` leaks through.
+- Institution-registered decide: an ordering-institution extension that decides `|delta| ≤ tolerance` at check time; property access through the decided constraint.
+- Comorphism resource declaration + validator-integration test.
+
+### Phase 11 — References
+
+- `docs/design/life-science-requirements.md` §16 (required extensions), §18 (prioritization), §19 (sequencing)
+- `docs/design/lean-4-as-institution.md` — nanoda reference, especially Appendix A
+- D19 (to be written) — Inductive Types in Mini-TT
+
+---
+
+## Phase 12 — Worked Institution Examples
+
+**Goal:** Fully worked domain examples demonstrating the Grothendieck institution protocol with WASM-sandboxed fiber reasoners. Placed after Phase 11 because the ambitious cross-institution queries depend on Phase 11d (`Comorphism` as ontology class), and the deep morphism-composition queries depend on Phase 11b (inductive types).
 
 **Duration estimate:** 3–4 weeks.
 
-### 12.1 Deliverables
+**Prerequisites:** Phase 6 (institution protocol), Phase 8 (WASM extensibility), Phase 10 (ontology-as-types so EigenQL queries over institution classes type-check cleanly), Phase 11 (in full — d for comorphism translations, b for deep composition queries, c for domain-predicate decide reductions).
+
+### Phase 12 — Deliverables
+
+- **Mechanical engineering example:** FEA institution with `MeshRefinement` morphisms, convergence queries, and mesh topology validation. CAD institution with `ParametricVariation` morphisms. GenAI institution with `ParetoDominance` morphisms and Pareto front queries. Cross-institution query: "for each GenAI candidate, find the finest-mesh FEA result and check if safety factor > 2.0."
+- **Biopharmaceutical R&D example:** Docking institution with `ConformationalProximity` and `ReScoring` morphisms, ensemble queries. ADMET institution with `ModelAgreement` morphisms, disagreement queries. Assay institution with `ReplicateRelationship` morphisms. PK institution with `CompartmentRefinement` morphisms. Comorphism: docking ΔG → assay IC₅₀ translation.
+- Each institution implemented as a WASM module via the capability SDK (Phase 8).
+- Wire `validate_with_institutions` into the Load RPC path (deferred from Phase 6 — no real institutions to test against until now).
+- Wire institution registration into `start_server` (analogous to component registration; note Phase 9a already handles the restart-side plumbing).
+- Integration tests exercising cross-institution queries and comorphism translations.
+- Documentation: each example as a tutorial with ontology definitions, fiber reasoner implementation, and sample queries.
+
+### Phase 12 — References
+
+- `docs/papers/eigenius-institutions.tex` §5 (mechanical engineering) and §6 (biopharma)
+- `docs/design/d10-grothendieck-institution-protocol.md` §9 (worked examples)
+- `docs/design/life-science-requirements.md` §10, §11 — representational shapes these examples exercise
+
+---
+
+## Phase 13 — Azure Deployment and Operations
+
+**Goal:** Production-ready deployment to Azure Container Apps with CI/CD, observability, and operational tooling. Optional TiKV backend for horizontally scalable storage. Placed after Phase 12 so releases have compelling worked examples to demonstrate, not just infrastructure.
+
+**Duration estimate:** 3–4 weeks.
+
+**Prerequisites:** Phase 9a (durable state — deployment assumes `--db`). Other phases are optional but shipping a Phase 12 demo is the obvious deployment target.
+
+### Phase 13 — Deliverables
 
 - Azure deployment: update Bicep templates for Container Apps, wire `ANTHROPIC_API_KEY` through Key Vault, configure DAPR sidecars for mTLS and service discovery.
 - CI/CD: GitHub Actions release workflow — build containers, push to ACR, deploy to staging, health check validation, production promotion.
@@ -550,7 +681,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 - TiKV storage backend: optional alternative to RocksDB for horizontally scalable deployments. Same key encoding (D4), same API (`LayerStore`/`ResourceStore` traits). Configurable via environment variable.
 - Operational runbook: deployment procedures, scaling guidelines, backup/restore, incident response.
 
-### 12.2 Test plan
+### Phase 13 — Test plan
 
 - Docker build succeeds for both images
 - Containers start and pass health checks
@@ -559,11 +690,77 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 - Structured logs: verify log entries contain trace IDs and are parseable
 - Metrics: verify Prometheus scrape returns expected metrics
 
-### 12.3 References
+### Phase 13 — References
 
 - eigenius/eigenius#4 — Azure deployment ticket
 - `deploy/bicep/` — existing Bicep templates
 - `docs/design/d4-storage-key-encoding.md` — TiKV-compatible key scheme
+
+---
+
+## Phase 14 — Layer Reconciliation and Multi-Session
+
+**Goal:** Generalise layer extension from "append-only single-writer chain" to "branch-and-merge across sessions." A DB may receive concurrent writes from multiple kernel instances; ontology migrations produce divergent branches that must eventually merge. Reconciliation is proved — a valid merge requires a `Comorphism` witness per Phase 11d — rather than declared.
+
+**Duration estimate:** 4–6 weeks.
+
+**Prerequisites:** Phase 9a (durable state), Phase 11d (`Comorphism` class).
+
+**Motivation:** D13 §8 (migration) and §11 (multi-session) converge on the same primitive. Two sessions produce two layer-chain branches; merging them requires a comorphism proof that they can fuse. The category-theoretic vocabulary from D10 (layers form a category, morphisms between layers are structure-preserving mappings, comorphisms translate between institutional views) is the right lens.
+
+### Phase 14 — Deliverables
+
+- **Layer-chain branching:** the storage layout supports multiple head pointers per DB, each a divergent chain rooted in a common ancestor.
+- **Ontology migration as reconciliation:** replace D13's v1 drift-refusal with a `migrate` command that takes a `Comorphism` resource and rewrites persisted resources across the layer boundary.
+- **Multi-session operation:** `eigenius serve --db <path>` can be one of N concurrent instances sharing a DB. Each instance writes to its own branch; writes to others' branches are forbidden without a merge.
+- **Merge command:** `eigenius db merge <branch-a> <branch-b>` — requires a comorphism witness; refuses to merge if none exists or the witness fails validation. Produces a new layer that supersedes both branches.
+- **Conflict detection:** when two branches define incompatible values for the same resource, the merge surfaces the conflict and requires the comorphism witness to specify the resolution.
+- See D20 (to be written).
+
+### Phase 14 — Key design questions
+
+- How are branch heads identified and named? Content hash, user label, both?
+- What's the invariant for "the common ancestor"? Lowest common ancestor in the layer DAG, or something stronger?
+- How does the kernel enforce that a session's writes stay on its branch? Check-on-commit against the head it was started at.
+- What happens to active WASM institutions during a merge? Most likely: institutions re-register against the merged layer as in D13's RESUME path.
+
+### Phase 14 — References
+
+- D10 — Grothendieck institutions, comorphisms, the category-theoretic vocabulary
+- D13 §8, §11 — drift-refusal and single-session boundary this phase supersedes
+- `docs/design/life-science-requirements.md` §11 (cross-institution claims) — consumer of Comorphism class
+- D20 (to be written) — Layer Reconciliation via Comorphisms
+
+---
+
+## Phase 15 — Specialty Institutions
+
+**Goal:** Proof-assistant and solver institutions extend the platform's reach. Lean 4 is the canonical first example. Others (SMT solvers like Z3, possibly Coq, possibly TLA+) follow the same pattern with their own fiber reasoners.
+
+**Duration estimate:** open-ended per institution; each is roughly 2–4 weeks after prerequisites are in place.
+
+**Prerequisites:** Phase 8 (WASM or subprocess hosting), Phase 11b (inductive types — Lean's claim to fame; an institution can't produce useful inductive results if Mini-TT can't represent them).
+
+**Drives:** `docs/design/lean-4-as-institution.md` (existing sketch).
+
+### Phase 15 — Deliverables (per institution)
+
+- **Fiber declaration:** morphism types the institution understands (for Lean: proofs, reductions, elaborations), query types it answers (e.g., "is this proposition provable?").
+- **Reasoner implementation:** WASM-hosted for Lean-in-WASM if feasible; subprocess-hosted via nanoda_lib integration as a practical first cut.
+- **Comorphism specifications:** per Phase 11d/12, how Lean's natural numbers relate to Mini-TT's Nat, how Lean's Prop relates to Mini-TT's Type(0), etc. Many small comorphisms.
+- **Worked example:** a life-science or engineering claim proved in Lean, with the proof registered as a verified morphism on a class.
+
+### Phase 15 — Open questions (carried from `lean-4-as-institution.md`)
+
+- `verified_in` witness extension (§16.4 / `lean-4-as-institution.md` open question 9) — deferred until a consumer requests it.
+- Hosting model: WASM (sandboxed, matches other institutions) vs. subprocess (matches Lean's normal operating model, avoids wasm-lean complexity). Decision pending empirical data on both options.
+- Trust policy for Lean proofs: how much of the Lean environment is "ambient trust" vs. reproducible per-proof?
+
+### Phase 15 — References
+
+- `docs/design/lean-4-as-institution.md` — extended sketch, nanoda_lib as reference
+- `docs/design/life-science-requirements.md` §16.4 — verified_in witness extension
+- D10 — institution protocol (the contract Lean plays)
 
 ---
 
@@ -584,13 +781,23 @@ The following design documents must be written and reviewed before the phase tha
 | D8 | **CompleteJson Component** | **IMPLEMENTED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping with bijectivity check in ValidateProgram. Enums (`allows_only`), nested objects (`class_types`), union types (multiple `class_types` with `_type` discriminator). Template data type for prompt validation. `GetSchema` RPC. Patent demo end-to-end | Phase 7 | Done |
 | D9 | **NbE/Executor Unification** | **COMPLETED** — `docs/design/d9-nbe-unification-and-type-extensions.md`. Capability modes (Pure/Read/IO), type theory extensions (Id, DecEq, NativeDecide, universes), complete ground type resolution, trace storage architecture, crash recovery, trace pruning (proofs-as-programs) | Phase 5 | Done |
 | D10 | **Grothendieck Institution Protocol** | **COMPLETED** — `docs/design/d10-grothendieck-institution-protocol.md`. FiberReasoner trait, InstitutionRegistry, ComorphismRegistry, morphism validation dispatch, fiber query dispatch, institution ontology, Eigon as shared signature category, Mini-TT as kernel service (not institution), Lean 4 as verification institution | Phase 6 | Done |
-| D11 | **Codata, Streams, and Resumable Execution** | **COMPLETED** — `docs/design/d11-codata-streams.md`. Coinductive types via copatterns (Abel et al. 2013), stream semantics, tasks as codata, trace-driven replay, concurrent task model, ESL codata syntax, guardedness checking | Phase 8.9 | Done |
+| D11 | **Codata, Streams, and Resumable Execution** | **COMPLETED** — `docs/design/d11-codata-streams.md`. Coinductive types via copatterns (Abel et al. 2013), stream semantics, tasks as codata, trace-driven replay, concurrent task model, ESL codata syntax, guardedness checking | Phase 9b | Done |
 | D12 | **WASM Extensibility** | WASM module lifecycle, host function interface (kernel → WASM), resource serialization across the boundary (Eigon-CBOR), capability levels → WASM import sets (pure/read/IO), integration with `ComponentRegistry` and `FiberReasoner`, registration via ontology resources, fuel/memory limits, SDK crate design. Merges the previously separate D12 (Capability SDK) and D13 (Wire Format) — the interface and wire format are inseparable. Resolves §14 open question on capability protocol | Phase 8 | 14–18 pages |
-| D13 | *(merged into D12)* | | | |
-| D14 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 9 | 10–15 pages |
+| D13 | **Durable Kernel State** | **DRAFT** — `docs/design/d13-durable-kernel-state.md`. `serve --db` flag, seeded bootstrap with drift-refusal, commit-through to `RocksStore`, WASM + institution re-registration on restart, persistent trace store. Prerequisite for D11/Phase 9b. (The previous D13 — Wire Format — was merged into D12.) | Phase 9a | Done |
+| D14 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 13 | 10–15 pages |
 | D15 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 6+ | 8–10 pages |
-| D16 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 9 | 6–8 pages |
+| D16 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 13 | 6–8 pages |
 | D17 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 8 | 6–8 pages |
+| D18 | **Ontology-as-Types Resolution** | How `find_sigma_field` walks the layer chain to resolve `EigonClass(iri)` into a dependent-record (Sigma) type at check time. Includes the Read-capability-mode layer-access protocol, caching policy (inferred types memoized per (class IRI, layer head)), and handling for class inheritance / `subclass_of`. Closes the #12 high-priority correctness hazard. Prerequisite for most of D19. | Phase 10a | 8–12 pages |
+| D19 | **Inductive Types in Mini-TT** | Single (non-mutual, non-nested) strictly-positive inductive types: declaration form, positivity checker, recursor/eliminator derivation, iota-reduction rules, integration with the conversion algorithm. Tier 1 extension from `life-science-requirements.md` §16.1. nanoda_lib (`src/inductive.rs`) as a reference, with Eigenius-specific simplifications (no universe polymorphism, no nested inductives v1). | Phase 11b | 15–20 pages |
+| D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Branching head pointers, common-ancestor invariants, comorphism witnesses as merge proofs, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Multi-session operation built on the same primitive. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 14 | 12–16 pages |
+
+**Reference documents** (analysis rather than specification):
+
+| File | Purpose |
+|------|---------|
+| `docs/design/life-science-requirements.md` | Systematic audit of life-science representation needs. Drives the Phase 10–12 sequencing and is the source of record for which kernel extensions each shape requires. |
+| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 15. |
 
 ---
 
