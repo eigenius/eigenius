@@ -29,6 +29,11 @@ pub struct EigeniusService {
     components: Arc<RwLock<Arc<ComponentRegistry>>>,
     trace_store: Arc<dyn TraceStore>,
     institutions: Arc<RwLock<crate::institution::InstitutionRegistry>>,
+    /// Optional persistent backend. When present, committed layers,
+    /// the seed manifest, and trace state all live here; absent means
+    /// the server is in-memory-only (the pre-Phase-9a behaviour).
+    /// See D13.
+    backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
     /// Optional gRPC client for the orchestrator. Used to forward IO-capability
     /// WASM components and to dispatch remote IO components during program
     /// execution. None means no orchestrator is configured — IO WASM installs
@@ -51,6 +56,9 @@ impl EigeniusService {
     }
 
     /// Create a new service with a custom component registry.
+    ///
+    /// Uses the in-memory bootstrap path. See
+    /// [`Self::with_persistent_backend`] for the durable variant.
     pub fn with_components(components: ComponentRegistry) -> Result<Self, String> {
         let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
         Ok(Self {
@@ -58,6 +66,42 @@ impl EigeniusService {
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store: Arc::new(InMemoryTraceStore::new()),
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            backend: None,
+            orchestrator_client: None,
+        })
+    }
+
+    /// Create a new service backed by a persistent store.
+    ///
+    /// Implements the SEED and RESUME paths from D13 §4:
+    /// - Empty backend: commit the four embedded ontologies and a
+    ///   seed manifest, then treat the backend as authoritative.
+    /// - Non-empty backend: reconstruct the `ExecutionContext` from
+    ///   the persisted layer chain, verifying the seed manifest against
+    ///   the current embedded ontologies (refuse to boot on drift).
+    ///
+    /// The backend also supplies the trace store, so
+    /// `ComponentTrace` reads/writes flow through the same DB.
+    pub fn with_persistent_backend(
+        components: ComponentRegistry,
+        backend: Arc<dyn crate::storage::PersistentBackend>,
+    ) -> Result<Self, String> {
+        let ctx = bootstrap::bootstrap_persistent(backend.as_ref())
+            .map_err(|e| format!("persistent bootstrap failed: {e}"))?;
+
+        // Wrap the backend's trace-store view into an Arc<dyn TraceStore>
+        // so the service can hold it independently. We do this by keeping
+        // the backend alive via `trace_store_arc_from_backend` — the
+        // returned Arc shares ownership with `backend`.
+        let trace_store: Arc<dyn TraceStore> =
+            Arc::new(BackendTraceStore::new(Arc::clone(&backend)));
+
+        Ok(Self {
+            context: Arc::new(RwLock::new(ctx)),
+            components: Arc::new(RwLock::new(Arc::new(components))),
+            trace_store,
+            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            backend: Some(backend),
             orchestrator_client: None,
         })
     }
@@ -89,6 +133,7 @@ impl EigeniusService {
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            backend: None,
             orchestrator_client: None,
         })
     }
@@ -96,6 +141,34 @@ impl EigeniusService {
     /// Create a tonic server from this service.
     pub fn into_server(self) -> EigeniusKernelServer<Self> {
         EigeniusKernelServer::new(self)
+    }
+
+    /// Persist a freshly-committed layer through the backend, if one is
+    /// attached. No-op otherwise. See D13 §5.
+    ///
+    /// Returns a validation-like error on storage failure so the caller
+    /// can surface it to clients without crashing the server.
+    fn persist_layer_if_backend(&self, layer: &crate::layer::Layer) -> Option<ValidationError> {
+        let backend = self.backend.as_ref()?;
+        if let Err(e) = backend.store_layer(layer) {
+            return Some(ValidationError {
+                resource_iri: String::new(),
+                property_iri: String::new(),
+                rule: "persist_layer".to_string(),
+                message: format!("{e}"),
+                severity: "error".to_string(),
+            });
+        }
+        if let Err(e) = backend.set_head(layer.id()) {
+            return Some(ValidationError {
+                resource_iri: String::new(),
+                property_iri: String::new(),
+                rule: "persist_head".to_string(),
+                message: format!("{e}"),
+                severity: "error".to_string(),
+            });
+        }
+        None
     }
 
     /// Parse resources from CBOR, JSON, or ESL based on content_type.
@@ -130,11 +203,17 @@ impl EigeniusService {
     /// validation errors (but do not fail the load — a malformed WASM
     /// resource is reported but other resources in the same layer still
     /// load successfully).
+    ///
+    /// Returns the set of declared class/property resources the
+    /// institution registration produced. The caller is expected to
+    /// commit these to a follow-up layer so they become queryable.
+    /// RESUME callers should instead use
+    /// [`Self::rehydrate_wasm_from_layer`] which skips publishing.
     async fn register_wasm_from_layer(
         &self,
         layer: &crate::layer::Layer,
         errors: &mut Vec<ValidationError>,
-    ) {
+    ) -> Vec<Resource> {
         // Build a new ComponentRegistry layered on top of the current one.
         // This avoids needing `BuiltinComponent: Clone` — the parent Arc
         // is shared, new WASM entries are added to the child.
@@ -196,14 +275,22 @@ impl EigeniusService {
             *guard = Arc::new(new_registry);
         }
 
-        // Register institutions
+        // Register institutions. Collect the declared class/property
+        // resources each institution publishes so the caller can commit
+        // them in a follow-up layer. Closes #15 when paired with the
+        // Load-path commit below.
+        let mut published_resources: Vec<Resource> = Vec::new();
         if !scan_result.wasm_institutions.is_empty() {
             let mut institutions = self.institutions.write().await;
             for reasoner in scan_result.wasm_institutions {
                 let iri = reasoner.institution_iri().as_str().to_string();
                 match institutions.register(Box::new(reasoner)) {
-                    Ok(_) => {
-                        eprintln!("  Registered WASM institution: {iri}");
+                    Ok(declared) => {
+                        eprintln!(
+                            "  Registered WASM institution: {iri} (+{} declared classes)",
+                            declared.len()
+                        );
+                        published_resources.extend(declared);
                     }
                     Err(e) => {
                         errors.push(ValidationError {
@@ -217,6 +304,107 @@ impl EigeniusService {
                 }
             }
         }
+        published_resources
+    }
+
+    /// RESUME counterpart of [`Self::register_wasm_from_layer`]. Walks a
+    /// rehydrated layer and re-registers every WASM component /
+    /// institution it finds, **without** re-publishing institution
+    /// declared classes — those are already in the persisted chain.
+    /// IO components are forwarded to the orchestrator again (same
+    /// semantics as fresh install; the orchestrator may reject if it
+    /// already has the component).
+    async fn rehydrate_wasm_from_layer(
+        &self,
+        layer: &crate::layer::Layer,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        let mut new_registry = {
+            let current = self.components.read().await;
+            ComponentRegistry::new_with_parent(Arc::clone(&current))
+        };
+
+        let scan_result =
+            crate::capability::registration::scan_and_register(layer, &mut new_registry);
+
+        for e in &scan_result.report.errors {
+            errors.push(ValidationError {
+                resource_iri: e.resource_iri.clone(),
+                property_iri: String::new(),
+                rule: "wasm_rehydrate".to_string(),
+                message: e.message.clone(),
+                severity: "error".to_string(),
+            });
+        }
+
+        let mut any_kernel_component_added = !scan_result.report.components_registered.is_empty()
+            && scan_result.pending_io_components.is_empty();
+        for pending in scan_result.pending_io_components {
+            match self.register_io_wasm(&pending).await {
+                Ok(remote) => {
+                    new_registry.register(pending.resource_iri.clone(), remote);
+                    eprintln!("  Rehydrated IO WASM component: {}", pending.resource_iri);
+                    any_kernel_component_added = true;
+                }
+                Err(e) => {
+                    errors.push(ValidationError {
+                        resource_iri: pending.resource_iri,
+                        property_iri: String::new(),
+                        rule: "wasm_rehydrate".to_string(),
+                        message: e,
+                        severity: "error".to_string(),
+                    });
+                }
+            }
+        }
+
+        if any_kernel_component_added {
+            let mut guard = self.components.write().await;
+            *guard = Arc::new(new_registry);
+        }
+
+        if !scan_result.wasm_institutions.is_empty() {
+            let mut institutions = self.institutions.write().await;
+            for reasoner in scan_result.wasm_institutions {
+                let iri = reasoner.institution_iri().as_str().to_string();
+                if let Err(e) = institutions.register_rehydrated(Box::new(reasoner)) {
+                    errors.push(ValidationError {
+                        resource_iri: iri,
+                        property_iri: String::new(),
+                        rule: "wasm_rehydrate".to_string(),
+                        message: format!("institution rehydrate failed: {e}"),
+                        severity: "error".to_string(),
+                    });
+                } else {
+                    eprintln!("  Rehydrated WASM institution: {iri}");
+                }
+            }
+        }
+    }
+
+    /// Walk the persisted chain from root to head and rehydrate every
+    /// WASM capability resource found in each layer. Called once by the
+    /// server at startup when a persistent backend is attached.
+    pub async fn rehydrate_wasm_from_chain(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let head = {
+            let ctx = self.context.read().await;
+            Arc::clone(ctx.head())
+        };
+        // Collect root-to-head order so earlier layers register first.
+        let mut chain: Vec<Arc<crate::layer::Layer>> = Vec::new();
+        let mut cursor = Some(head);
+        while let Some(layer) = cursor {
+            let parent = layer.parent().cloned();
+            chain.push(layer);
+            cursor = parent;
+        }
+        chain.reverse();
+
+        for layer in &chain {
+            self.rehydrate_wasm_from_layer(layer, &mut errors).await;
+        }
+        errors
     }
 
     /// Forward an IO WASM component to the orchestrator and produce a
@@ -283,8 +471,51 @@ impl EigeniusKernel for EigeniusService {
                 Ok(layer) => {
                     layer_id = layer.id().to_string();
                     drop(ctx);
-                    // Scan the newly committed layer for WASM components/institutions
-                    self.register_wasm_from_layer(&layer, &mut errors).await;
+                    if let Some(err) = self.persist_layer_if_backend(&layer) {
+                        errors.push(err);
+                    }
+                    // Scan the newly committed layer for WASM components/institutions.
+                    // For institutions, this returns the declared morphism / query
+                    // class resources that the registration produced.
+                    let published = self.register_wasm_from_layer(&layer, &mut errors).await;
+
+                    // Commit the published institution classes as a follow-up layer
+                    // so they become queryable via EigenQL / inspect. Closes #15.
+                    if !published.is_empty() {
+                        let mut ctx = self.context.write().await;
+                        for resource in published {
+                            if let Err(e) = ctx.add_resource(resource) {
+                                errors.push(ValidationError {
+                                    resource_iri: String::new(),
+                                    property_iri: String::new(),
+                                    rule: "institution_publish".to_string(),
+                                    message: format!(
+                                        "failed to add institution-declared class: {e}"
+                                    ),
+                                    severity: "error".to_string(),
+                                });
+                            }
+                        }
+                        if ctx.has_changes() {
+                            match ctx.commit("institution_classes") {
+                                Ok(extra) => {
+                                    drop(ctx);
+                                    if let Some(err) = self.persist_layer_if_backend(&extra) {
+                                        errors.push(err);
+                                    }
+                                }
+                                Err(e) => {
+                                    errors.push(ValidationError {
+                                        resource_iri: String::new(),
+                                        property_iri: String::new(),
+                                        rule: "institution_publish".to_string(),
+                                        message: format!("commit failed: {e}"),
+                                        severity: "error".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     errors.push(ValidationError {
@@ -558,7 +789,14 @@ impl EigeniusKernel for EigeniusService {
                 );
                 let _ = ctx.add_resource(ct_resource);
             }
-            let _ = ctx.commit("trace");
+            if let Ok(layer) = ctx.commit("trace") {
+                // Best-effort persist of the trace layer. A failure here
+                // logs but doesn't fail the RunProgram call — the output
+                // is still valid, the trace just isn't durable.
+                if let Some(err) = self.persist_layer_if_backend(&layer) {
+                    eprintln!("warning: failed to persist trace layer: {}", err.message);
+                }
+            }
         }
 
         Ok(Response::new(RunProgramResponse {
@@ -596,8 +834,15 @@ impl EigeniusKernel for EigeniusService {
             ctx.add_resource(resource)
                 .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
         }
-        ctx.commit("reflect")
+        let layer = ctx
+            .commit("reflect")
             .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
+        if let Some(err) = self.persist_layer_if_backend(&layer) {
+            return Err(Status::internal(format!(
+                "reflect persist failed: {}",
+                err.message
+            )));
+        }
 
         Ok(Response::new(ReflectResponse {
             success: true,
@@ -756,9 +1001,14 @@ const REMOTE_COMPONENTS: &[&str] = &[
 ///
 /// If `orchestrator_endpoint` is provided, remote components are registered
 /// that dispatch IO calls to the orchestrator via ComponentExecutor gRPC.
+///
+/// If `backend` is `Some`, the server runs in durable mode: layers, traces
+/// and WASM capabilities survive restart. An empty backend is seeded with
+/// the embedded ontologies; a populated one is rehydrated. See D13.
 pub async fn start_server(
     port: u16,
     orchestrator_endpoint: Option<&str>,
+    backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -782,9 +1032,31 @@ pub async fn start_server(
         }
     }
 
-    let mut service = EigeniusService::with_components(registry)?;
+    let (mut service, is_persistent) = match backend {
+        Some(b) => {
+            println!("Persistent backend attached; using SEED-or-RESUME bootstrap (D13).");
+            (EigeniusService::with_persistent_backend(registry, b)?, true)
+        }
+        None => {
+            println!("In-memory mode (no --db). All state lost on exit.");
+            (EigeniusService::with_components(registry)?, false)
+        }
+    };
     if let Some(client) = orchestrator_client {
         service = service.with_orchestrator_client(client);
+    }
+
+    // On a persistent backend, walk the rehydrated chain and
+    // re-register every WASM capability it finds. Institutions go
+    // through `register_rehydrated` (doesn't re-publish classes).
+    if is_persistent {
+        let errors = service.rehydrate_wasm_from_chain().await;
+        for e in errors {
+            eprintln!(
+                "warning: WASM rehydrate: [{}] {}",
+                e.resource_iri, e.message
+            );
+        }
     }
 
     println!("Eigenius gRPC server listening on {addr}");
@@ -802,4 +1074,32 @@ pub async fn start_server(
         .await?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// BackendTraceStore — forwards TraceStore calls to a PersistentBackend.
+// Lets the service hold `Arc<dyn TraceStore>` without needing to hand out
+// two Arc types of the same RocksStore.
+// ---------------------------------------------------------------------------
+
+struct BackendTraceStore {
+    backend: Arc<dyn crate::storage::PersistentBackend>,
+}
+
+impl BackendTraceStore {
+    fn new(backend: Arc<dyn crate::storage::PersistentBackend>) -> Self {
+        Self { backend }
+    }
+}
+
+impl TraceStore for BackendTraceStore {
+    fn get_component_trace(&self, key: &[u8; 32]) -> Option<crate::program::trace::ComponentTrace> {
+        self.backend.as_trace_store().get_component_trace(key)
+    }
+
+    fn put_component_trace(&self, key: [u8; 32], trace: crate::program::trace::ComponentTrace) {
+        self.backend
+            .as_trace_store()
+            .put_component_trace(key, trace);
+    }
 }

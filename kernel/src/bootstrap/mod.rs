@@ -17,6 +17,8 @@ pub enum BootstrapError {
     Parse(eigon_json::ParseError),
     Layer(crate::layer::LayerError),
     CoreOntologyInvalid(Vec<crate::validation::ValidationError>),
+    Storage(String),
+    ManifestDrift { stored: String, current: String },
 }
 
 impl fmt::Display for BootstrapError {
@@ -35,6 +37,14 @@ impl fmt::Display for BootstrapError {
                 }
                 Ok(())
             }
+            BootstrapError::Storage(msg) => write!(f, "persistent backend error: {msg}"),
+            BootstrapError::ManifestDrift { stored, current } => writeln!(
+                f,
+                "seed manifest drift — refusing to boot against a DB seeded with different embedded ontologies.\n\
+                 stored:\n{stored}current:\n{current}\n\
+                 Options:\n  1. Use a fresh --db path (reinstalls your capabilities).\n  \
+                 2. Run a migration when `eigenius db migrate` lands (tracked as Phase 14)."
+            ),
         }
     }
 }
@@ -98,6 +108,143 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
 
     Ok(ExecutionContext::new(
         institution,
+        "working",
+        ExecutionMode::ReadWrite,
+    ))
+}
+
+/// Bootstrap against a persistent backend (D13 §4).
+///
+/// Two paths:
+///
+/// - **SEED** (empty backend): run the normal in-memory bootstrap,
+///   then commit each of the four embedded ontology layers to the
+///   backend in parent→child order, record the seed manifest, and
+///   point the head at the institution layer.
+/// - **RESUME** (backend has a head): verify the stored seed manifest
+///   matches the current embedded ontologies' SHA-256 hashes; if it
+///   does, rehydrate the layer chain from the backend. If it doesn't,
+///   return a `ManifestDrift` error with actionable detail.
+pub fn bootstrap_persistent(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<ExecutionContext, BootstrapError> {
+    match backend
+        .get_head()
+        .map_err(|e| BootstrapError::Storage(format!("get_head: {e}")))?
+    {
+        Some(_) => resume_from_backend(backend),
+        None => seed_backend(backend),
+    }
+}
+
+// --- SEED / RESUME helpers ---
+
+const SEED_MANIFEST_KEY: &str = "seed_manifest_v1";
+
+fn embedded_ontologies() -> [(&'static str, &'static str); 4] {
+    [
+        (
+            "core",
+            include_str!("../../../ontologies/core/core-ontology.json"),
+        ),
+        (
+            "program",
+            include_str!("../../../ontologies/program/program-ontology.json"),
+        ),
+        (
+            "reflection",
+            include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        ),
+        (
+            "institution",
+            include_str!("../../../ontologies/institution/institution-ontology.json"),
+        ),
+    ]
+}
+
+fn current_manifest() -> Vec<u8> {
+    // Newline-separated "<name>:<sha256_hex>" lines, stable ordering.
+    let mut out = String::new();
+    for (name, json) in embedded_ontologies() {
+        use sha2::Digest;
+        let hash = sha2::Sha256::digest(json.as_bytes());
+        out.push_str(&format!("{name}:{}\n", hex::encode(hash)));
+    }
+    out.into_bytes()
+}
+
+fn seed_backend(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<ExecutionContext, BootstrapError> {
+    // Build the four ontologies in memory (reusing the existing path)
+    // so they're validated before anything touches the DB.
+    let ctx = bootstrap()?;
+
+    // Walk the chain from the root (core) up and persist each layer.
+    // Layer chain is head → parent → ... → core, so collect bottom-up.
+    let mut chain: Vec<Arc<Layer>> = Vec::new();
+    let mut cursor = Some(Arc::clone(ctx.head()));
+    while let Some(layer) = cursor {
+        let parent = layer.parent().cloned();
+        chain.push(layer);
+        cursor = parent;
+    }
+    chain.reverse(); // root (core) first
+
+    for layer in &chain {
+        backend
+            .store_layer(layer)
+            .map_err(|e| BootstrapError::Storage(format!("store_layer {}: {e}", layer.name())))?;
+    }
+    backend
+        .set_head(ctx.head().id())
+        .map_err(|e| BootstrapError::Storage(format!("set_head: {e}")))?;
+
+    backend
+        .put_meta(SEED_MANIFEST_KEY, &current_manifest())
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(manifest): {e}")))?;
+
+    Ok(ctx)
+}
+
+fn resume_from_backend(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<ExecutionContext, BootstrapError> {
+    // Manifest check before trusting the chain. If drift is detected we
+    // refuse to boot rather than silently upgrading the ontology in
+    // place (D13 §8).
+    let stored = backend
+        .get_meta(SEED_MANIFEST_KEY)
+        .map_err(|e| BootstrapError::Storage(format!("get_meta(manifest): {e}")))?;
+    let current = current_manifest();
+    match stored {
+        Some(bytes) if bytes == current => {}
+        Some(bytes) => {
+            return Err(BootstrapError::ManifestDrift {
+                stored: String::from_utf8_lossy(&bytes).to_string(),
+                current: String::from_utf8_lossy(&current).to_string(),
+            });
+        }
+        None => {
+            // Missing manifest on a non-empty DB: treat as drift rather
+            // than silently trusting. Users with pre-9a DBs will need a
+            // fresh path (v1 policy per D13 §8).
+            return Err(BootstrapError::ManifestDrift {
+                stored: "(missing)".to_string(),
+                current: String::from_utf8_lossy(&current).to_string(),
+            });
+        }
+    }
+
+    let head = backend
+        .load_chain()
+        .map_err(|e| BootstrapError::Storage(format!("load_chain: {e}")))?
+        .ok_or_else(|| {
+            BootstrapError::Storage("head pointer set but chain load returned None".into())
+        })?;
+
+    Ok(ExecutionContext::new(
+        head,
         "working",
         ExecutionMode::ReadWrite,
     ))

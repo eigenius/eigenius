@@ -82,7 +82,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 6 | Institutions | ✓ | Grothendieck institution protocol, fiber reasoners, morphism validation |
 | 7 | CompleteJson | ✓ | Structured LLM output via JSON Schema from ontology classes |
 | 8 | WASM | ✓ | Untrusted capabilities run sandboxed via Wasmtime |
-| 9a | Durable State | | Layers, traces, WASM capabilities survive kernel restart |
+| 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
 | 9b | Codata + Streams | | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | | Ontology-as-types resolution, universe soundness, typed errors |
 | 11 | Type Theory Extensions | | Map/Reduce, inductive types, decision procedures, Comorphism class |
@@ -483,6 +483,8 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ### Phase 9a — Durable kernel state (D13) — ~1 week
 
+**Status:** Complete (April 2026). `eigenius serve --db <path>` persists every committed layer, resource, and trace; restart rebuilds running state from the DB; embedded ontologies are seeded once with a SHA-256 manifest and drift refuses to boot. See D13.
+
 **Goal:** `eigenius serve --db <path>` persists every committed layer, resource, and trace. Restart rebuilds the running state from the DB; the embedded core ontology is seeded once and never re-overwritten silently.
 
 - `--db <path>` flag (and `EIGENIUS_DB` env override) on `serve`. Open `RocksStore` at that path; in-memory fallback preserved for tests.
@@ -490,8 +492,8 @@ The phase decomposes into two milestones that are separately reviewable:
 - Subsequent RESUME: walk the persisted layer chain from the stored head; compare the manifest against embedded SHA-256s and refuse to boot on drift (no silent auto-upgrade).
 - `ExecutionContext::commit` writes through to the store atomically before rotating the in-memory head; `Load` RPC becomes durable automatically.
 - WASM + institution re-registration on RESUME: scan every persisted layer, re-compile + re-register components and institutions into their respective runtime registries. Closes [#15](https://github.com/eigenius/eigenius/issues/15) along the way — institution-declared classes now commit to the layer, not just the registry.
-- Swap `InMemoryTraceStore` for `RocksTraceStore` sharing the same DB handle (separate column family per D4).
-- Integration test: install a capability (WASM component + institution) → kill kernel → restart → verify dispatch still works without re-install.
+- Trace store backed by the persistent backend via `BackendTraceStore` adapter (shares the RocksDB handle; `meta:<key>` prefix for non-layer metadata).
+- Integration coverage: in-process Rust test (`storage/rocksdb/tests/durability_test.rs`) plus CLI-surface smoke script (`examples/wasm-ordering-institution/run_durable.sh`), both installing an institution, restarting against the same DB, and verifying dispatch still works without re-install.
 - See D13 for the full specification and the five-step implementation ordering.
 
 ### Phase 9b — Codata, streams, and resumable execution (D11) — ~4–6 weeks
@@ -783,7 +785,7 @@ The following design documents must be written and reviewed before the phase tha
 | D10 | **Grothendieck Institution Protocol** | **COMPLETED** — `docs/design/d10-grothendieck-institution-protocol.md`. FiberReasoner trait, InstitutionRegistry, ComorphismRegistry, morphism validation dispatch, fiber query dispatch, institution ontology, Eigon as shared signature category, Mini-TT as kernel service (not institution), Lean 4 as verification institution | Phase 6 | Done |
 | D11 | **Codata, Streams, and Resumable Execution** | **COMPLETED** — `docs/design/d11-codata-streams.md`. Coinductive types via copatterns (Abel et al. 2013), stream semantics, tasks as codata, trace-driven replay, concurrent task model, ESL codata syntax, guardedness checking | Phase 9b | Done |
 | D12 | **WASM Extensibility** | WASM module lifecycle, host function interface (kernel → WASM), resource serialization across the boundary (Eigon-CBOR), capability levels → WASM import sets (pure/read/IO), integration with `ComponentRegistry` and `FiberReasoner`, registration via ontology resources, fuel/memory limits, SDK crate design. Merges the previously separate D12 (Capability SDK) and D13 (Wire Format) — the interface and wire format are inseparable. Resolves §14 open question on capability protocol | Phase 8 | 14–18 pages |
-| D13 | **Durable Kernel State** | **DRAFT** — `docs/design/d13-durable-kernel-state.md`. `serve --db` flag, seeded bootstrap with drift-refusal, commit-through to `RocksStore`, WASM + institution re-registration on restart, persistent trace store. Prerequisite for D11/Phase 9b. (The previous D13 — Wire Format — was merged into D12.) | Phase 9a | Done |
+| D13 | **Durable Kernel State** | **COMPLETED** — `docs/design/d13-durable-kernel-state.md`. `serve --db` flag, seeded bootstrap with drift-refusal, commit-through to `RocksStore`, WASM + institution re-registration on restart, persistent trace store via `BackendTraceStore`. Prerequisite for D11/Phase 9b. (The previous D13 — Wire Format — was merged into D12.) | Phase 9a | Done |
 | D14 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 13 | 10–15 pages |
 | D15 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 6+ | 8–10 pages |
 | D16 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 13 | 6–8 pages |
