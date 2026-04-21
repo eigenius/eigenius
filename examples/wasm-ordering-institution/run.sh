@@ -102,5 +102,106 @@ echo
 echo "=== capability inspect ==="
 "$KERNEL_BIN" --endpoint "$ENDPOINT" capability inspect "$INSTITUTION_IRI"
 
+# ---------------------------------------------------------------------------
+# EigenQL FIBER clause — dispatch to this institution from a query (#10).
+#
+# Load a handful of Refinement instances plus the Property definitions the
+# type checker needs to resolve short names (tolerance, latest_delta, delta),
+# then run a query that asks the institution per-refinement and projects
+# the ones it says have converged.
+# ---------------------------------------------------------------------------
+echo
+echo "=== FIBER in EigenQL: load refinements + supporting Property defs ==="
+cat >"$TMPDIR/demo-data.json" <<'EOF'
+[
+  {
+    "@id": "urn:eigenius:test:wasm:Refinement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Refinement",
+    "urn:eigenius:core:description": "A refinement morphism between two results.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:wasm:source",
+      "urn:eigenius:test:wasm:target",
+      "urn:eigenius:test:wasm:delta"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:wasm:ConvergenceQuery",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ConvergenceQuery",
+    "urn:eigenius:core:description": "Has the latest refinement step converged below tolerance?",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:test:wasm:tolerance",
+      "urn:eigenius:test:wasm:latest_delta"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:test:wasm:tolerance",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tolerance",
+    "urn:eigenius:core:description": "Convergence tolerance threshold.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float"
+  },
+  {
+    "@id": "urn:eigenius:test:wasm:latest_delta",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "latest_delta",
+    "urn:eigenius:core:description": "Most recently measured refinement step size.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float"
+  },
+  {
+    "@id": "urn:eigenius:test:wasm:delta",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "delta",
+    "urn:eigenius:core:description": "Refinement step size on a Refinement morphism.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float"
+  },
+  {
+    "@id": "urn:eigenius:test:wasm:source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "source",
+    "urn:eigenius:core:description": "Source result of a Refinement.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:test:wasm:target",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target",
+    "urn:eigenius:core:description": "Target result of a Refinement.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:demo:refinement:converged",
+    "urn:eigenius:core:is_a": ["urn:eigenius:test:wasm:Refinement"],
+    "urn:eigenius:test:wasm:source": "urn:demo:result:x",
+    "urn:eigenius:test:wasm:target": "urn:demo:result:y",
+    "urn:eigenius:test:wasm:delta": 0.005
+  },
+  {
+    "@id": "urn:demo:refinement:far",
+    "urn:eigenius:core:is_a": ["urn:eigenius:test:wasm:Refinement"],
+    "urn:eigenius:test:wasm:source": "urn:demo:result:y",
+    "urn:eigenius:test:wasm:target": "urn:demo:result:z",
+    "urn:eigenius:test:wasm:delta": 0.5
+  }
+]
+EOF
+"$KERNEL_BIN" --endpoint "$ENDPOINT" load "$TMPDIR/demo-data.json"
+
+echo
+echo "=== EigenQL query with FIBER clause ==="
+echo "Asking the institution 'converged?' for each refinement,"
+echo "keeping only those it reports as converged (tolerance=0.01):"
+echo
+"$KERNEL_BIN" --endpoint "$ENDPOINT" query '
+  USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+  USING "urn:eigenius:test:wasm:Refinement"
+  MATCH Refinement(?m) { delta: ?d }
+  FIBER ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+  MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+  WHERE ?c = true
+  RETURN [] { refinement: ?m, delta: ?d }
+'
+
 echo
 echo "=== OK ==="

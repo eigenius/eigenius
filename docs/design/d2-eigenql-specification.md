@@ -1047,3 +1047,233 @@ cross-query deduplication, or streamed pagination, the wire shape can
 evolve without breaking consumers that treat responses as opaque
 documents. Client code that drives from the class's property list,
 rather than from hardcoded IRIs, continues to work across both models.
+
+---
+
+## Appendix B. `FIBER` clause — dispatching to institutions from EigenQL
+
+Closes [issue #10](https://github.com/eigenius/eigenius/issues/10).
+
+EigenQL's MATCH traverses **structural** relationships in the knowledge
+graph. The `FIBER` clause lets a query **dispatch** to a registered
+institution's fiber reasoner (D10) and join the response back into the
+binding set. This turns composed questions like "find all refinements
+whose institution says they have converged" into a single declarative
+query instead of client-side orchestration.
+
+### B.1 Syntax
+
+Two new constructs:
+
+```ebnf
+using_institution  ::= 'USING' 'INSTITUTION' STRING 'AS' IDENTIFIER
+fiber_clause       ::= 'FIBER' institution_ref ':' query_class_ref
+                       '{' param_list '}' 'AS' variable
+institution_ref    ::= IDENTIFIER | STRING   // alias (via USING INSTITUTION) or inline IRI
+query_class_ref    ::= IDENTIFIER | STRING   // short name resolved via the institution's
+                                             //   declared query_types, or a full IRI
+param_list         ::= param (',' param)*
+param              ::= name ':' expression   // same shape as RETURN items
+```
+
+The top-level query grammar grows to allow multiple MATCH/FIBER clauses
+interleaved, and to allow `USING INSTITUTION` alongside `USING`:
+
+```ebnf
+query       ::= (using_clause | using_institution)*
+                clause+
+                where_clause? group_by_clause? return_clause?
+                order_by_clause? limit_clause? offset_clause? 'DISTINCT'?
+
+clause      ::= match_clause | fiber_clause
+```
+
+### B.2 Examples
+
+**With alias** (institution used twice):
+
+```
+USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+
+MATCH Refinement(?m) { latest_delta: ?d, target: ?t }
+FIBER  ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+FIBER  ord:TrendQuery        { window: 10,    delta: ?d }         AS ?trend
+MATCH  ?conv  { "urn:eigenius:test:wasm:converged":  ?c }
+MATCH  ?trend { "urn:eigenius:test:wasm:direction":  ?dir }
+WHERE  ?c = true AND ?dir = "down"
+RETURN [] { m: ?m, t: ?t }
+```
+
+**Inline IRI** (one-shot):
+
+```
+MATCH Refinement(?m) { latest_delta: ?d }
+FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
+      { tolerance: 0.01, latest_delta: ?d } AS ?conv
+MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+WHERE ?c = true
+RETURN [] { m: ?m }
+```
+
+**Mixed param names** (required short name + recommended short name + full-IRI pass-through):
+
+```
+FIBER ord:ConvergenceQuery {
+    tolerance: 0.01,                             # short name in `requires`: must be present
+    latest_delta: ?d,                            # short name in `requires`: must be present
+    window_hint: 50,                             # short name in `recommends`: optional
+    "urn:example:client:correlation_id": ?cid,   # full IRI: pass-through, no scope check
+} AS ?conv
+```
+
+The first two are in the query class's `requires` list and must be
+supplied. The third is in `recommends` — an extra hint the class
+knows about but doesn't demand. The fourth is outside the class
+scope entirely; it's included in the query resource as-is and the
+institution may use it or ignore it. Typos in the short-name
+positions are caught because they don't resolve in the class's
+declared property set.
+
+### B.3 Evaluation — transient overlay
+
+For each surviving binding after all preceding clauses:
+
+1. Resolve the institution (via alias or inline IRI) to a registered
+   `FiberReasoner`.
+2. Construct the query resource: `is_a = [query_class_iri]`, with each
+   `param` evaluated against the binding and set as a property on the
+   resource under the corresponding Property IRI.
+3. Invoke `FiberReasoner::query(&resource, ctx)`.
+4. Attach the response resource to a **query-scoped transient overlay
+   layer** sitting on top of the evaluation layer chain. The overlay is
+   private to the current query and is discarded when evaluation ends.
+5. Bind `?var` to the response resource's IRI.
+
+Subsequent clauses — including `MATCH ?var { … }` decomposition — see
+the response via normal layer iteration, reusing EigenQL's existing
+pattern-match semantics. Nothing special-cases FIBER-bound variables
+downstream.
+
+Rationale: the overlay reuses the existing layer machinery rather than
+introducing a parallel "bound-to-embedded-resource" code path in the
+pattern matcher. The tradeoff is that fiber responses need synthesized
+IRIs — the evaluator coins them under
+`urn:eigenius:query:gen:<query-hash>:fiber:<clause-ordinal>:<binding-ordinal>`,
+deterministic within one query but never persisted.
+
+### B.4 Stratification
+
+Each FIBER clause forms its own stratum. The total evaluation order:
+
+```
+(MATCH | FIBER)+   →   WHERE   →   GROUP BY   →   RETURN   →   ORDER BY   →   LIMIT/OFFSET/DISTINCT
+```
+
+Within the (MATCH | FIBER) sequence, clauses are processed in textual
+order. A FIBER clause may reference any variable bound by a preceding
+MATCH or FIBER clause. Forward references are an error caught at type
+check.
+
+Fiber dispatches happen **once per binding in the current candidate
+set**. Callers who care about dispatch cost should constrain the
+binding set upstream via MATCH; see §B.7 on memoization.
+
+### B.5 Type checking
+
+1. **`USING INSTITUTION "iri" AS alias`.** The IRI must resolve to a
+   resource in the layer chain whose `is_a` includes
+   `urn:eigenius:institution:Institution`. The alias must not collide
+   with a class alias from `USING` or a variable name used elsewhere
+   in the query.
+
+2. **`FIBER inst_ref : QueryClass { params } AS ?var`.**
+   - `inst_ref` is an alias (must be declared) or an inline IRI
+     (must resolve to a registered institution as in 1).
+   - `QueryClass` is a short name or full IRI. It must appear in the
+     institution's declared `urn:eigenius:institution:query_types`.
+   - **Short-name scope.** Short names resolve against the union of
+     the query class's `urn:eigenius:core:requires` and
+     `urn:eigenius:core:recommends` property lists. These are the
+     Properties the class declares as meaningful; a short name that
+     doesn't resolve is an error (this is what catches typos like
+     `tolerence` for `tolerance`).
+   - **Required-property coverage.** Every Property IRI in the query
+     class's `urn:eigenius:core:requires` list must have a matching
+     entry in `params` — supplied by short name, by full IRI, or in
+     whatever form the binding-time expression produces. `recommends`
+     properties are optional (same semantics as the general ontology
+     type system).
+   - **Full-IRI params** (quoted-string names) are pass-through: they
+     are included in the query resource sent to the institution
+     without scope validation. The user takes responsibility for the
+     semantic, same as §3.4's treatment of full-IRI property
+     references in MATCH. The open-world type system permits
+     resources to carry properties beyond their declared class —
+     FIBER params follow the same rule.
+   - **Param expression types.** Each param expression's inferred
+     type must match the declared Property `data_type` on the
+     institution's query class. Lenient v1: if the type checker
+     can't infer an expression's type, skip the check (runtime will
+     catch genuine mismatches).
+   - **Variable binding.** `?var` must not shadow an existing variable.
+
+3. **Subsequent `MATCH ?var { … }`.** Standard MATCH type rules.
+   Because the response class is not declared on the query class
+   (yet — see §B.8), untyped pattern matches on `?var` use only full
+   IRI property references. Short-name dot-paths on `?var` are not
+   available in v1.
+
+### B.6 Error handling
+
+A fiber dispatch that returns `Err` aborts the whole query with that
+error surfaced as the query's error message. Per-binding fallbacks
+(e.g. "filter out bindings whose fiber query failed") are not
+supported — predictability beats cleverness.
+
+### B.7 Memoization
+
+**Not in v1.** Fiber queries are evaluated fresh for every binding.
+Two identical `FIBER` clauses with identical parameters inside the
+same query dispatch twice. This is documented behaviour, not an
+oversight.
+
+Future work: integrate with D6.x trace store so repeated fiber
+dispatches are cached by (institution, query class, param hash) and
+recovered from the trace on subsequent evaluations. Tracked as a
+successor to #10.
+
+### B.8 Relationship to D10
+
+The FIBER clause is the EigenQL surface of D10's `FiberReasoner::query`
+protocol. The institution's declared
+`urn:eigenius:institution:query_types` (a list of Class IRIs) defines
+which `QueryClass` names FIBER accepts.
+
+**Future enhancement (not v1):** each institution query class could
+declare a `response_class` property whose value is a Class resource
+listing the response's Properties. When present, the type checker
+would validate dot-paths on FIBER result variables (§B.5.3), and the
+response would be usable as if it were a typed resource from the
+layer. Scoped out of this issue.
+
+### B.9 Changes elsewhere in this spec
+
+- **§3.1 Top-level grammar.** Update `query` and `match_part` to
+  permit multiple MATCH/FIBER clauses with optional `USING INSTITUTION`.
+- **§3.3 USING clause.** Add a subsection on `USING INSTITUTION` with
+  the alias semantics above.
+- **§3.X FIBER clause.** New section mirroring the grammar and
+  pointing at this appendix.
+- **§5.X FIBER type rules.** New subsection mirroring §B.5.
+- **§6.1 Pattern matching — IRI equality.** Value equality used in
+  equi-joins must treat `Value::ResourceRef(iri)` and `Value::String(s)`
+  as equal when `iri.as_str() == s`. This closes a latent bug in the
+  current evaluator where resources cross-referenced via `ResourceRef`
+  don't join against resources indexed by `String`-typed IRI.
+- **§6.X FIBER evaluation.** New subsection mirroring §B.3/§B.4.
+- **§7 Decisions log.** Add entries for the clause placement, the
+  overlay approach, "full-IRI params bypass class-scope validation
+  (open-world)", and "no memoization in v1".
+
+The specific section numbers shift; the appendix is the canonical
+reference while those inserts settle.

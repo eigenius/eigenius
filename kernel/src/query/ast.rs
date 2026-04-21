@@ -19,12 +19,79 @@ pub struct RuleDefinition {
     pub body: MatchPart,
 }
 
-/// The USING + MATCH + WHERE portion, shared by DEFINE and Query.
+/// The USING + MATCH + (optional FIBER) + WHERE portion, shared by DEFINE and Query.
+///
+/// Clauses preserve textual order so FIBER dispatches can consume
+/// bindings from preceding MATCH/FIBER clauses and subsequent patterns
+/// can consume bindings produced by FIBER — see D2 Appendix B.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchPart {
     pub using: Vec<Iri>,
-    pub patterns: Vec<Pattern>,
+    pub using_institutions: Vec<InstitutionAlias>,
+    pub clauses: Vec<Clause>,
     pub conditions: Vec<Expression>,
+}
+
+impl MatchPart {
+    /// Iterate over just the MATCH patterns, ignoring FIBER clauses.
+    /// Adapter for callers that predate FIBER support (DEFINE bodies,
+    /// stratification, etc.). Use `.clauses` directly when FIBER matters.
+    pub fn patterns(&self) -> impl Iterator<Item = &Pattern> {
+        self.clauses.iter().filter_map(|c| match c {
+            Clause::Pattern(p) => Some(p),
+            Clause::Fiber(_) => None,
+        })
+    }
+
+    /// True if this MatchPart contains any FIBER clauses.
+    pub fn has_fiber(&self) -> bool {
+        self.clauses.iter().any(|c| matches!(c, Clause::Fiber(_)))
+    }
+}
+
+/// A single clause inside a MatchPart.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Clause {
+    /// One structural pattern. Multiple consecutive Pattern clauses
+    /// correspond to comma-separated patterns in one MATCH clause, but
+    /// separating them into multiple MATCH clauses is equivalent
+    /// (equi-join over shared variables).
+    Pattern(Pattern),
+    /// A FIBER dispatch to a registered institution. See D2 Appendix B.
+    Fiber(FiberClause),
+}
+
+/// `USING INSTITUTION "<iri>" AS <alias>` — binds a short name to an
+/// institution IRI for use in subsequent FIBER clauses.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstitutionAlias {
+    pub iri: Iri,
+    pub alias: String,
+}
+
+/// A FIBER clause. Per D2 Appendix B: dispatches to a registered
+/// institution's fiber reasoner with a typed query resource built from
+/// `params`, binds the response resource to `binding` so subsequent
+/// MATCH clauses can decompose it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiberClause {
+    /// Institution reference — either a USING INSTITUTION alias
+    /// (ShortName) or an inline full IRI (FullIri).
+    pub institution: Name,
+    /// Query class name (must appear in the institution's declared
+    /// query_types). Short name or full IRI.
+    pub query_class: Name,
+    /// Parameter bindings passed as properties on the query resource.
+    pub params: Vec<ParamBinding>,
+    /// Variable the response resource is bound to.
+    pub binding: Variable,
+}
+
+/// A single `name: expression` param inside a FIBER clause's braces.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamBinding {
+    pub name: Name,
+    pub expression: Expression,
 }
 
 /// A complete query with all clauses.

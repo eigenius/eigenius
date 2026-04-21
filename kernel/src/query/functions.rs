@@ -125,6 +125,16 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (Value::Integer(a), Value::Float(b)) => (*a as f64) == *b,
         (Value::Float(a), Value::Integer(b)) => *a == (*b as f64),
+        // IRI identity — a ResourceRef to `urn:x:y` equals a String
+        // holding `"urn:x:y"` and another ResourceRef to the same IRI.
+        // Without this, equi-joins over cross-referenced resources
+        // silently miss bindings depending on which Value variant the
+        // loader happened to use (Eigon-JSON generally produces String;
+        // the kernel sometimes produces ResourceRef).
+        (Value::ResourceRef(a), Value::ResourceRef(b)) => a == b,
+        (Value::ResourceRef(r), Value::String(s)) | (Value::String(s), Value::ResourceRef(r)) => {
+            r.as_str() == s
+        }
         _ => false,
     }
 }

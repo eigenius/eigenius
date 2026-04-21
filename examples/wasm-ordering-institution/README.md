@@ -120,7 +120,8 @@ Institutions:
 
 ### Quick end-to-end run
 
-All of the steps below (install, list, two convergence queries, inspect)
+All of the steps below — install, list, two convergence queries, inspect,
+and an EigenQL `FIBER` query (#10) that dispatches into the institution —
 are scripted in [`run.sh`](run.sh). Build the release CLI once and execute:
 
 ```bash
@@ -130,7 +131,23 @@ cargo build --release -p eigenius-cli
 
 The script starts a kernel on port 50099 (override with `PORT=<port>`),
 tears it down on exit, and prints each step's output. Use this as a
-smoke test after kernel or SDK changes.
+smoke test after kernel or SDK changes. The final step loads a couple of
+`Refinement` instances plus the Property definitions the type checker
+needs, then runs:
+
+```eigenql
+USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+USING "urn:eigenius:test:wasm:Refinement"
+MATCH Refinement(?m) { delta: ?d }
+FIBER ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+WHERE ?c = true
+RETURN [] { refinement: ?m, delta: ?d }
+```
+
+which asks the institution "converged?" once per `Refinement` and keeps
+only the bindings it reports as converged. See D2 Appendix B for the
+FIBER clause semantics.
 
 ### Converged case
 

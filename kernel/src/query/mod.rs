@@ -19,12 +19,25 @@ use error::QueryError;
 
 /// Execute an EigenQL program against a layer chain.
 ///
+/// Convenience wrapper for callers that don't dispatch FIBER clauses
+/// (CLI local mode, tests). See [`execute_with`] for the full surface.
+pub fn execute(program_str: &str, layer: &Layer) -> Result<Vec<Resource>, Vec<QueryError>> {
+    execute_with(program_str, layer, evaluate::FiberRuntime::default())
+}
+
+/// Execute an EigenQL program, optionally supplying an institution
+/// registry + execution context so FIBER clauses can dispatch.
+///
 /// Pipeline: lex → parse → stratify → type_check → evaluate → document wrap.
 /// Returns an Eigon document (array of resources) shaped per D2 Appendix A:
 /// synthesized Property resources, a row Class, and a ResultSet referencing
 /// them. Callers typically hand this straight to
 /// `eigon_cbor::serialize_document`.
-pub fn execute(program_str: &str, layer: &Layer) -> Result<Vec<Resource>, Vec<QueryError>> {
+pub fn execute_with(
+    program_str: &str,
+    layer: &Layer,
+    runtime: evaluate::FiberRuntime<'_>,
+) -> Result<Vec<Resource>, Vec<QueryError>> {
     // 1. Lex
     let tokens = lexer::tokenize(program_str).map_err(|e| vec![e])?;
 
@@ -42,7 +55,7 @@ pub fn execute(program_str: &str, layer: &Layer) -> Result<Vec<Resource>, Vec<Qu
 
     // 5. Evaluate — row resources with synthesized Property IRIs
     let fp = QueryFingerprint::of(program_str);
-    let rows = evaluate::evaluate(&program, layer, &fp).map_err(|e| vec![e])?;
+    let rows = evaluate::evaluate(&program, layer, &fp, runtime).map_err(|e| vec![e])?;
 
     // 6. Wrap into a self-describing document (Appendix A).
     Ok(document::wrap(&program.query, program_str, rows))
@@ -202,5 +215,106 @@ mod tests {
                 property_iris
             );
         }
+    }
+
+    // Smoke test for the FIBER-decomposition design proposal (#10):
+    //
+    //     MATCH ?a { ref: ?b }, ?b { name: ?n } RETURN [] { n: ?n }
+    //
+    // confirms that EigenQL's pattern-chain mechanism — two patterns in
+    // one MATCH clause sharing a variable via implicit equi-join —
+    // already lets us decompose a resource bound in one pattern via a
+    // follow-up pattern. The same mechanism would let a FIBER-bound
+    // variable be decomposed by a subsequent pattern, *if* the FIBER
+    // result is reachable the same way (bound to an IRI that resolves
+    // in the layer, or directly to a Resource value the evaluator can
+    // dereference).
+    //
+    // This test validates step one: both resources in the layer.
+    #[test]
+    fn match_pattern_chain_across_shared_variable() {
+        let mut lb = LayerBuilder::new("chain-test", None);
+
+        let a_iri = Iri::parse("urn:chain:a").unwrap();
+        let b_iri = Iri::parse("urn:chain:b").unwrap();
+
+        let mut a = Resource::new(a_iri);
+        a.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String("urn:chain:A".to_string())]),
+        );
+        // ResourceRef-valued cross-reference. The evaluator's
+        // `values_equal` must treat this as equal to the resource's
+        // String-form IRI so the equi-join across patterns succeeds.
+        a.set(
+            Iri::parse("urn:chain:ref").unwrap(),
+            Value::ResourceRef(b_iri.clone()),
+        );
+        lb.add_resource(a).unwrap();
+
+        let mut b = Resource::new(b_iri);
+        b.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String("urn:chain:B".to_string())]),
+        );
+        b.set(
+            Iri::parse("urn:chain:name").unwrap(),
+            Value::String("hello".to_string()),
+        );
+        lb.add_resource(b).unwrap();
+
+        let layer = lb.build();
+
+        let query_str = r#"
+            MATCH ?a { "urn:chain:ref": ?b },
+                  ?b { "urn:chain:name": ?n }
+            RETURN [] { n: ?n }
+        "#;
+        let document = execute(query_str, &layer).expect("query should succeed");
+
+        // Find the ResultSet and confirm one row with the 'n' short-name
+        // mapped to 'hello'.
+        let is_a = Iri::parse(wk::IS_A).unwrap();
+        let result_set = document
+            .iter()
+            .find(|r| match r.get(&is_a) {
+                Some(Value::Array(a)) => a.iter().any(|v| match v {
+                    Value::String(s) => s == "urn:eigenius:query:ResultSet",
+                    _ => false,
+                }),
+                _ => false,
+            })
+            .expect("ResultSet in document");
+        let row_count = match result_set.get(&Iri::parse("urn:eigenius:query:row_count").unwrap()) {
+            Some(Value::Integer(n)) => *n,
+            _ => panic!("missing row_count"),
+        };
+        assert_eq!(row_count, 1, "expected exactly one row");
+
+        let rows = match result_set.get(&Iri::parse("urn:eigenius:query:rows").unwrap()) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("missing rows"),
+        };
+        let row = match &rows[0] {
+            Value::Embedded(r) => r,
+            _ => panic!("row must be embedded"),
+        };
+
+        // Find the row Property with short_name "n" to discover its IRI,
+        // then read the row's value under that IRI.
+        let prop_iri = document
+            .iter()
+            .find(|r| {
+                matches!(r.get(&Iri::parse(wk::SHORT_NAME).unwrap()),
+                    Some(Value::String(s)) if s == "n")
+            })
+            .and_then(|r| r.id().cloned())
+            .expect("Property resource with short_name 'n' must exist");
+
+        let n_value = row.get(&prop_iri).expect("row should have the 'n' value");
+        assert!(
+            matches!(n_value, Value::String(s) if s == "hello"),
+            "expected n=\"hello\", got {n_value:?}"
+        );
     }
 }

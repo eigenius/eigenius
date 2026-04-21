@@ -333,8 +333,14 @@ impl EigeniusKernel for EigeniusService {
     ) -> Result<Response<QueryResponse>, Status> {
         let req = request.into_inner();
         let ctx = self.context.read().await;
+        let institutions = self.institutions.read().await;
 
-        let document = match query::execute(&req.eigenql, ctx.head()) {
+        let runtime = query::evaluate::FiberRuntime {
+            institutions: Some(&institutions),
+            ctx: Some(&ctx),
+        };
+
+        let document = match query::execute_with(&req.eigenql, ctx.head(), runtime) {
             Ok(doc) => doc,
             Err(errors) => {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();

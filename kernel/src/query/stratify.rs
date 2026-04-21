@@ -34,7 +34,7 @@ pub fn stratify(definitions: &[RuleDefinition]) -> Result<Vec<Stratum>, QueryErr
         let pos = pos_deps.entry(def.name.clone()).or_default();
         let neg = neg_deps.entry(def.name.clone()).or_default();
 
-        for pattern in &def.body.patterns {
+        for pattern in def.body.patterns() {
             if let Some(Name::ShortName(ref class_name)) = pattern.class {
                 if relation_names.contains(class_name) {
                     if pattern.negated {
@@ -176,13 +176,16 @@ mod tests {
             variables: vec![Variable::new("x")],
             body: MatchPart {
                 using: vec![],
-                patterns: patterns
+                using_institutions: vec![],
+                clauses: patterns
                     .into_iter()
-                    .map(|(class, negated)| Pattern {
-                        subject: Variable::new("x"),
-                        class: Some(Name::ShortName(class.to_string())),
-                        properties: vec![],
-                        negated,
+                    .map(|(class, negated)| {
+                        Clause::Pattern(Pattern {
+                            subject: Variable::new("x"),
+                            class: Some(Name::ShortName(class.to_string())),
+                            properties: vec![],
+                            negated,
+                        })
                     })
                     .collect(),
                 conditions: vec![],
