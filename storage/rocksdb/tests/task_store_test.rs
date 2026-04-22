@@ -210,7 +210,6 @@ fn list_tasks_excludes_trace_and_ckpt() {
 
 #[test]
 fn session_struct_smoke() {
-    let s = Session::hardwired(fresh_layer_id(0x33));
+    let s = Session::hardwired();
     assert_eq!(s.session_id, Uuid::nil());
-    assert_eq!(s.active_top, fresh_layer_id(0x33));
 }

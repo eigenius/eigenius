@@ -115,6 +115,9 @@ message RunProgramResponse {
   bytes output = 2;             // Output resource as CBOR
   repeated ValidationError errors = 3;
   string trace_iri = 4;         // IRI of the ProgramTrace (if execution succeeded)
+  string task_id = 5;           // Task UUID (D21). Empty string if no
+                                // persistent backend — the task is ephemeral
+                                // and cannot be looked up via GetTaskStatus.
 }
 
 // --- Reflect ---

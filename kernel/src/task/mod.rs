@@ -39,21 +39,20 @@ pub enum TaskError {
 /// A session — the client-scoped unit that tasks attach to (D21 §3.7).
 ///
 /// In 9b-iii there is exactly one session per running kernel, with
-/// `session_id = Uuid::nil()`. Its `active_top` tracks the kernel's
-/// current head and advances linearly with committed `Load` RPCs and
-/// fast-forward task results.
-#[derive(Debug, Clone)]
+/// `session_id = Uuid::nil()`. The session's *active top* is the
+/// kernel's current head (they are synonyms in v1 — see D21 §3.7).
+/// The `EigeniusService` reads `context.head()` to recover the
+/// active top; `Session` itself only carries identity.
+#[derive(Debug, Clone, Copy)]
 pub struct Session {
     pub session_id: Uuid,
-    pub active_top: LayerId,
 }
 
 impl Session {
     /// The single hardwired session for 9b-iii (D21 §3.7).
-    pub fn hardwired(active_top: LayerId) -> Self {
+    pub fn hardwired() -> Self {
         Self {
             session_id: Uuid::nil(),
-            active_top,
         }
     }
 }
@@ -501,7 +500,7 @@ mod tests {
 
     #[test]
     fn hardwired_session() {
-        let s = Session::hardwired(fresh_layer_id());
+        let s = Session::hardwired();
         assert_eq!(s.session_id, Uuid::nil());
     }
 }
