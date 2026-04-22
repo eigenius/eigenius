@@ -52,6 +52,15 @@ pub enum Val {
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),
+
+    // --- Codata (D11, Phase 9b-i) ---
+    /// Codata type value: captures the observation-type pairs plus the
+    /// environment needed to evaluate them.
+    Codata(Vec<(Name, Exp)>, Rho),
+    /// Codata value (corecord): lazy copattern definitions. Each entry
+    /// is `(obs_name, body_exp)`; the body is evaluated only when the
+    /// matching `Observe` is applied, in the captured environment.
+    CoRecord(Vec<(Name, Exp)>, Rho),
 }
 
 /// Neutral terms — computations that cannot reduce further.
@@ -71,6 +80,10 @@ pub enum Neut {
     // --- Eigenius extension ---
     /// Property access on a neutral resource
     PropAccess(Box<Neut>, Iri),
+
+    // --- Codata (D11, Phase 9b-i) ---
+    /// Observation on a neutral codata value: (neut).obs
+    Observe(Box<Neut>, Name),
 }
 
 /// A closure: a pattern, body expression, and captured environment.
@@ -165,6 +178,40 @@ impl Val {
             Val::Pair(_, u2) => *u2,
             Val::Nt(k) => Val::Nt(Neut::Snd(Box::new(k))),
             other => panic!("vsnd: not a pair: {:?}", other),
+        }
+    }
+
+    /// Observation on a codata value: v.obs looks up the named field in
+    /// a `CoRecord` and evaluates its body in the captured environment.
+    /// For a neutral value, produces a blocked `Neut::Observe`. Pure mode.
+    pub fn vobserve(self, obs: &str) -> Val {
+        match self {
+            Val::CoRecord(fields, rho) => {
+                for (name, body) in &fields {
+                    if name == obs {
+                        return crate::nbe::eval::eval(body, &rho);
+                    }
+                }
+                panic!("vobserve: observation '{}' not found in corecord", obs);
+            }
+            Val::Nt(k) => Val::Nt(Neut::Observe(Box::new(k), obs.to_string())),
+            other => panic!("vobserve: not a corecord: {:?}", other),
+        }
+    }
+
+    /// Observation on a codata value, with capability context.
+    pub fn vobserve_ctx(self, obs: &str, ctx: &crate::nbe::eval::EvalCtx) -> Val {
+        match self {
+            Val::CoRecord(fields, rho) => {
+                for (name, body) in &fields {
+                    if name == obs {
+                        return crate::nbe::eval::eval_ctx(body, &rho, ctx);
+                    }
+                }
+                panic!("vobserve_ctx: observation '{}' not found in corecord", obs);
+            }
+            Val::Nt(k) => Val::Nt(Neut::Observe(Box::new(k), obs.to_string())),
+            other => panic!("vobserve_ctx: not a corecord: {:?}", other),
         }
     }
 }

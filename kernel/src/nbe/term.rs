@@ -80,6 +80,28 @@ pub enum Exp {
     Template(String, Vec<(Iri, Box<Exp>)>),
     /// Construct a typed resource: Construct(class_iri, [(prop_iri, expr), ...])
     Construct(Iri, Vec<(Iri, Box<Exp>)>),
+
+    // --- Codata (D11, Phase 9b-i) ---
+    /// Codata type declaration: codata { obs₁ : T₁; obs₂ : T₂; ... }
+    ///
+    /// Dual of `Data`: defines a type by its observations rather than
+    /// its constructors. The canonical example is
+    /// `codata Stream A { head : A; tail : Stream A }`.
+    Codata(Vec<Observation>),
+    /// Codata value (copattern definition): corecord { obs₁ = e₁; obs₂ = e₂; ... }
+    ///
+    /// A corecord binds each observation to a body expression. The body
+    /// is evaluated lazily, once per observation, in the corecord's
+    /// captured environment. Productivity (each observation terminates)
+    /// should be checked by a guardedness pass before running untrusted
+    /// code; the evaluator itself does not enforce it.
+    CoRecord(Vec<CoField>),
+    /// Observation on a codata value: e.obs
+    ///
+    /// Picks the named field from a `CoRecord` and evaluates its body,
+    /// or produces a blocked neutral if `e` is not yet a concrete
+    /// corecord.
+    Observe(Box<Exp>, Name),
 }
 
 /// Declarations.
@@ -112,6 +134,20 @@ pub struct Summand {
 /// A branch of a Case expression: constructor name with body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
+    pub name: Name,
+    pub body: Exp,
+}
+
+/// A declared observation on a codata type: obs : T.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Observation {
+    pub name: Name,
+    pub typ: Exp,
+}
+
+/// A copattern definition in a corecord: obs = e.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoField {
     pub name: Name,
     pub body: Exp,
 }
