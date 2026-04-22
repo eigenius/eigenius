@@ -49,6 +49,12 @@ enum Commands {
         /// Optional Eigon-JSON file to load before querying
         #[arg(long, value_name = "FILE")]
         file: Option<String>,
+
+        /// Evaluate the query against a specific LayerId (hex-encoded SHA-256)
+        /// instead of the session's active top (D21 §3.6). Useful for
+        /// reaching a forked task result layer. Remote mode only.
+        #[arg(long, value_name = "LAYER_ID")]
+        at_layer: Option<String>,
     },
 
     /// Type-check a program
@@ -79,6 +85,12 @@ enum Commands {
         /// IRI of the resource to inspect
         #[arg(value_name = "IRI")]
         iri: String,
+
+        /// Resolve against a specific LayerId (hex-encoded SHA-256)
+        /// instead of the session's active top (D21 §3.6). Remote
+        /// mode only.
+        #[arg(long, value_name = "LAYER_ID")]
+        at_layer: Option<String>,
     },
 
     /// Start the gRPC server
@@ -134,8 +146,34 @@ enum Commands {
         command: CapabilityCommands,
     },
 
+    /// Inspect and control persisted tasks (D21). Remote mode only.
+    Tasks {
+        #[command(subcommand)]
+        command: TaskCommands,
+    },
+
     /// Show version and build info
     Version,
+}
+
+#[derive(Subcommand)]
+enum TaskCommands {
+    /// List all tasks in the session
+    List,
+
+    /// Show a task's status and metadata
+    Status {
+        /// Task UUID
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+    },
+
+    /// Request cooperative cancellation of a task
+    Cancel {
+        /// Task UUID
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -232,8 +270,14 @@ async fn main() {
     // Remote mode: delegate to gRPC client
     if let Some(ref endpoint) = cli.endpoint {
         match cli.command {
-            Commands::Inspect { iri } => remote_inspect(endpoint, &iri, cli.json).await,
-            Commands::Query { query, file: _ } => remote_query(endpoint, &query, cli.json).await,
+            Commands::Inspect { iri, at_layer } => {
+                remote_inspect(endpoint, &iri, at_layer.as_deref(), cli.json).await
+            }
+            Commands::Query {
+                query,
+                file: _,
+                at_layer,
+            } => remote_query(endpoint, &query, at_layer.as_deref(), cli.json).await,
             Commands::Run {
                 program_file,
                 input_file,
@@ -248,6 +292,7 @@ async fn main() {
             Commands::Capability { command } => {
                 remote_capability(endpoint, command, cli.json).await
             }
+            Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -264,7 +309,7 @@ async fn main() {
     match cli.command {
         Commands::Load { file } => cmd_load(&file, cli.json),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
-        Commands::Query { query, file } => cmd_query(&query, file.as_deref(), cli.json),
+        Commands::Query { query, file, .. } => cmd_query(&query, file.as_deref(), cli.json),
         Commands::ProgramValidate {
             program_file,
             ontology,
@@ -274,7 +319,7 @@ async fn main() {
             eprintln!("  eigenius --endpoint http://localhost:50051 run program.json input.json");
             std::process::exit(1);
         }
-        Commands::Inspect { iri } => cmd_inspect(&iri, cli.json),
+        Commands::Inspect { iri, .. } => cmd_inspect(&iri, cli.json),
         Commands::Serve {
             port,
             orchestrator,
@@ -292,6 +337,10 @@ async fn main() {
         }
         Commands::Capability { .. } => {
             eprintln!("'capability' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Tasks { .. } => {
+            eprintln!("'tasks' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Db { command } => cmd_db(command),
@@ -838,11 +887,11 @@ async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport
         .max_encoding_message_size(128 * 1024 * 1024)
 }
 
-async fn remote_inspect(endpoint: &str, iri_str: &str, json_output: bool) {
+async fn remote_inspect(endpoint: &str, iri_str: &str, at_layer: Option<&str>, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::InspectRequest {
-        at_layer: String::new(),
+        at_layer: at_layer.unwrap_or("").to_string(),
         iri: iri_str.to_string(),
     };
 
@@ -874,11 +923,11 @@ async fn remote_inspect(endpoint: &str, iri_str: &str, json_output: bool) {
     }
 }
 
-async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
+async fn remote_query(endpoint: &str, eigenql: &str, at_layer: Option<&str>, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::QueryRequest {
-        at_layer: String::new(),
+        at_layer: at_layer.unwrap_or("").to_string(),
         eigenql: eigenql.to_string(),
     };
 
@@ -1109,6 +1158,136 @@ async fn remote_get_schema(endpoint: &str, class_iri: &str, _json_output: bool) 
 }
 
 // --- Capability subcommand ---
+
+async fn remote_tasks(endpoint: &str, command: TaskCommands, json: bool) {
+    match command {
+        TaskCommands::List => remote_tasks_list(endpoint, json).await,
+        TaskCommands::Status { task_id } => remote_task_status(endpoint, &task_id, json).await,
+        TaskCommands::Cancel { task_id } => remote_task_cancel(endpoint, &task_id, json).await,
+    }
+}
+
+async fn remote_tasks_list(endpoint: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::ListTasksRequest {};
+    match client.list_tasks(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let items: Vec<serde_json::Value> = resp
+                    .tasks
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "task_id": t.task_id,
+                            "program_iri": t.program_iri,
+                            "status": t.status,
+                            "layer_head": t.layer_head,
+                            "step_seq": t.step_seq,
+                            "result_layer_head": t.result_layer_head,
+                            "created_at_ms": t.created_at_ms,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&items).unwrap());
+            } else if resp.tasks.is_empty() {
+                println!("No tasks.");
+            } else {
+                println!("{:<36}  {:<12}  PROGRAM", "TASK ID", "STATUS");
+                for t in &resp.tasks {
+                    println!("{:<36}  {:<12}  {}", t.task_id, t.status, t.program_iri);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::GetTaskStatusRequest {
+        task_id: task_id.to_string(),
+    };
+    match client.get_task_status(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if !resp.found {
+                eprintln!("Task not found: {task_id}");
+                std::process::exit(1);
+            }
+            let t = resp.task.unwrap();
+            if json_output {
+                let j = serde_json::json!({
+                    "task_id": t.task_id,
+                    "session_id": t.session_id,
+                    "program_iri": t.program_iri,
+                    "input_iri": t.input_iri,
+                    "status": t.status,
+                    "layer_head": t.layer_head,
+                    "step_seq": t.step_seq,
+                    "latest_trace_seq": t.latest_trace_seq,
+                    "last_checkpoint_step": t.last_checkpoint_step,
+                    "result_layer_head": t.result_layer_head,
+                    "created_at_ms": t.created_at_ms,
+                    "updated_at_ms": t.updated_at_ms,
+                    "retain_forever": t.retain_forever,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else {
+                println!("Task:         {}", t.task_id);
+                println!("Status:       {}", t.status);
+                println!("Program:      {}", t.program_iri);
+                println!("Input:        {}", t.input_iri);
+                println!("Layer head:   {}", t.layer_head);
+                println!("Step seq:     {}", t.step_seq);
+                println!("Last ckpt:    {}", t.last_checkpoint_step);
+                if !t.result_layer_head.is_empty() {
+                    println!("Result layer: {}", t.result_layer_head);
+                }
+                println!(
+                    "Created:      {} ms (unix epoch)\nUpdated:      {} ms",
+                    t.created_at_ms, t.updated_at_ms
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_task_cancel(endpoint: &str, task_id: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::CancelTaskRequest {
+        task_id: task_id.to_string(),
+    };
+    match client.cancel_task(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "status": resp.status,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if resp.success {
+                println!("Task {task_id}: {}", resp.status);
+            } else {
+                eprintln!("Cancel failed: {}", resp.error);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
 
 async fn remote_capability(endpoint: &str, command: CapabilityCommands, json: bool) {
     match command {
