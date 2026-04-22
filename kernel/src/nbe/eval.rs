@@ -419,18 +419,42 @@ fn dispatch_component(
                 // (D21 §8 step atomicity). Without a TaskContext
                 // there is no safe place to cache an IO output, so
                 // we just record the trace for the layer commit.
+                //
+                // If this dispatch was `components:Checkpoint`, also
+                // build a Checkpoint alongside the trace — the
+                // commit_step method writes all three (trace, record,
+                // checkpoint) atomically (D21 §4).
                 if let Some((tc, step)) = replay_slot.as_ref() {
                     let output_bytes = crate::ontology::eigon_cbor::serialize_resource(&output);
+                    let is_checkpoint =
+                        component_iri == crate::program::component::CHECKPOINT_COMPONENT_IRI;
+                    let checkpoint = if is_checkpoint {
+                        let state_bytes =
+                            crate::ontology::eigon_cbor::serialize_resource(&input_resource);
+                        Some(crate::task::Checkpoint {
+                            session_id: tc.session_id,
+                            task_id: tc.task_id,
+                            step_seq: *step,
+                            state: state_bytes,
+                            created_at: now_millis(),
+                        })
+                    } else {
+                        None
+                    };
                     if let Ok(Some(mut record)) =
                         tc.task_store.get_task(&tc.session_id, &tc.task_id)
                     {
                         record.step_seq = step + 1;
                         record.latest_trace_seq = *step;
+                        if is_checkpoint {
+                            record.last_checkpoint = Some(*step);
+                        }
                         record.updated_at = now_millis();
-                        if let Err(e) =
-                            tc.task_store
-                                .commit_step(&record, Some((*step, output_bytes)), None)
-                        {
+                        if let Err(e) = tc.task_store.commit_step(
+                            &record,
+                            Some((*step, output_bytes)),
+                            checkpoint.as_ref(),
+                        ) {
                             eprintln!("task commit_step failed: {e}");
                         }
                     }

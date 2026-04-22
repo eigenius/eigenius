@@ -493,6 +493,18 @@
     "urn:eigenius:program:component:fallible": false
   },
   {
+    "@id": "urn:eigenius:program:components:Checkpoint",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "Persist the input resource as the running task's current checkpoint (D21 §4) and return the input unchanged. No-op when called outside a persistent task context. IO-level so checkpoint writes happen synchronously with the program's view of its own state.",
+    "urn:eigenius:core:short_name": "Checkpoint",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
+    "urn:eigenius:program:component:deterministic": false,
+    "urn:eigenius:program:component:fallible": false
+  },
+  {
     "@id": "urn:eigenius:program:components:completion:Arguments",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:description": "Arguments for LLM completion components (CompleteText and CompleteJson). Properties with data_type template are validated against input references. Properties referencing a Class trigger JSON Schema generation.",
