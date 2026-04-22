@@ -300,6 +300,115 @@ async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
 }
 
 #[tokio::test]
+async fn inspect_at_layer_reaches_prior_head() {
+    // D21 §3.6 read extension: Inspect with at_layer targets a
+    // specific committed layer. Exercise by loading a class, noting
+    // the current head, loading MORE resources (advancing the head),
+    // then inspecting a class at the earlier head — confirms the
+    // read is scoped.
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = store;
+
+    let service = EigeniusService::with_persistent_backend(
+        eigenius_kernel::program::component::ComponentRegistry::default(),
+        Arc::clone(&backend),
+    )
+    .expect("service");
+
+    // Load class A.
+    let a_json = serde_json::json!([{
+        "@id": "urn:eigenius:example:A",
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+        "urn:eigenius:core:description": "A",
+        "urn:eigenius:core:short_name": "A"
+    }])
+    .to_string();
+    let resp_a = service
+        .load(Request::new(eigenius_kernel::server::proto::LoadRequest {
+            resources: a_json.into_bytes(),
+            content_type: "application/eigon+json".to_string(),
+            auto_commit: true,
+        }))
+        .await
+        .expect("load a")
+        .into_inner();
+    let layer_a = resp_a.layer_id.clone();
+    assert!(!layer_a.is_empty());
+
+    // Load class B, advancing head.
+    let b_json = serde_json::json!([{
+        "@id": "urn:eigenius:example:B",
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+        "urn:eigenius:core:description": "B",
+        "urn:eigenius:core:short_name": "B"
+    }])
+    .to_string();
+    let _ = service
+        .load(Request::new(eigenius_kernel::server::proto::LoadRequest {
+            resources: b_json.into_bytes(),
+            content_type: "application/eigon+json".to_string(),
+            auto_commit: true,
+        }))
+        .await
+        .expect("load b");
+
+    // Current head sees both.
+    let get_current = service
+        .inspect(Request::new(
+            eigenius_kernel::server::proto::InspectRequest {
+                iri: "urn:eigenius:example:B".to_string(),
+                at_layer: String::new(),
+            },
+        ))
+        .await
+        .expect("inspect current")
+        .into_inner();
+    assert!(get_current.found, "B should be in current head");
+
+    // at_layer=A (before B was loaded) sees A but NOT B.
+    let get_at_a = service
+        .inspect(Request::new(
+            eigenius_kernel::server::proto::InspectRequest {
+                iri: "urn:eigenius:example:A".to_string(),
+                at_layer: layer_a.clone(),
+            },
+        ))
+        .await
+        .expect("inspect at A")
+        .into_inner();
+    assert!(get_at_a.found, "A should be in layer A");
+
+    let get_b_at_a = service
+        .inspect(Request::new(
+            eigenius_kernel::server::proto::InspectRequest {
+                iri: "urn:eigenius:example:B".to_string(),
+                at_layer: layer_a,
+            },
+        ))
+        .await
+        .expect("inspect B at A")
+        .into_inner();
+    assert!(
+        !get_b_at_a.found,
+        "B should not be visible at layer A (before B was loaded)"
+    );
+
+    // Bogus at_layer → not_found.
+    let bogus = "00".repeat(32);
+    let err = service
+        .inspect(Request::new(
+            eigenius_kernel::server::proto::InspectRequest {
+                iri: "urn:eigenius:example:A".to_string(),
+                at_layer: bogus,
+            },
+        ))
+        .await
+        .expect_err("bogus layer should error");
+    assert_eq!(err.code(), tonic::Code::NotFound);
+}
+
+#[tokio::test]
 async fn run_program_without_backend_has_empty_task_id() {
     // No persistent backend → no task store → task_id stays empty,
     // preserving the pre-Phase-9b-iii behaviour for ephemeral

@@ -78,6 +78,10 @@ message LoadResponse {
 
 message InspectRequest {
   string iri = 1;
+  // Optional hex-encoded LayerId to pin the read to a specific layer
+  // instead of the session's active top (D21 §3.6). Empty = active top.
+  // Useful for inspecting forked task result layers.
+  string at_layer = 2;
 }
 
 message InspectResponse {
@@ -89,6 +93,9 @@ message InspectResponse {
 
 message QueryRequest {
   string eigenql = 1;           // EigenQL program string
+  // Optional hex-encoded LayerId to evaluate the query against a
+  // specific layer instead of the session's active top (D21 §3.6).
+  string at_layer = 2;
 }
 
 message QueryResponse {
@@ -155,6 +162,10 @@ message HealthResponse {
   string version = 2;
   uint64 layer_count = 3;
   uint64 resource_count = 4;
+  // D21 §4 resume observability: true while the startup resume
+  // sweep is still enqueuing or draining Running/Suspended tasks.
+  bool resume_in_progress = 5;
+  uint32 tasks_resuming = 6;    // Tasks currently in the resume queue
 }
 
 // --- Component Execution (kernel → orchestrator) ---
@@ -232,7 +243,11 @@ message DiscoverMorphismsResponse {
   string error = 3;
 }
 
-message ListInstitutionsRequest {}
+message ListInstitutionsRequest {
+  // Optional hex-encoded LayerId to read against a specific layer
+  // (D21 §3.6). Empty = session's active top.
+  string at_layer = 1;
+}
 
 message ListInstitutionsResponse {
   repeated InstitutionInfo institutions = 1;
@@ -249,6 +264,8 @@ message InstitutionInfo {
 
 message GetSchemaRequest {
   string class_iri = 1;           // IRI of the class to generate schema for
+  // Optional hex-encoded LayerId (D21 §3.6). Empty = session's active top.
+  string at_layer = 2;
 }
 
 message GetSchemaResponse {

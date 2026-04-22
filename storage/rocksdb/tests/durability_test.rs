@@ -118,6 +118,7 @@ async fn install_and_dispatch(service: &EigeniusService) {
     // The #15 fix means the declared class should be queryable immediately.
     let inspect = service
         .inspect(Request::new(InspectRequest {
+            at_layer: String::new(),
             iri: REFINEMENT_CLASS.to_string(),
         }))
         .await
@@ -149,7 +150,9 @@ async fn install_and_dispatch(service: &EigeniusService) {
 /// institution-declared class.
 async fn dispatch_only(service: &EigeniusService) {
     let insts = service
-        .list_institutions(Request::new(ListInstitutionsRequest {}))
+        .list_institutions(Request::new(ListInstitutionsRequest {
+            at_layer: String::new(),
+        }))
         .await
         .expect("list rpc")
         .into_inner();
@@ -160,6 +163,7 @@ async fn dispatch_only(service: &EigeniusService) {
 
     let inspect = service
         .inspect(Request::new(InspectRequest {
+            at_layer: String::new(),
             iri: REFINEMENT_CLASS.to_string(),
         }))
         .await

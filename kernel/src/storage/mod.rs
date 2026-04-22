@@ -79,6 +79,12 @@ pub trait PersistentBackend: Send + Sync + 'static {
     /// Reconstruct the full layer chain from the persisted head.
     fn load_chain(&self) -> Result<Option<Arc<Layer>>, StorageError>;
 
+    /// Reconstruct the layer chain rooted at a specific `LayerId`.
+    /// Used by the `at_layer` read-path extension (D21 §3.7) and by
+    /// resume to re-hydrate a task's pinned head. Returns `None` if
+    /// the target layer is absent from the store.
+    fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError>;
+
     /// Store a layer (metadata + resources + chain pointer). Idempotent
     /// by layer id (content-addressed).
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError>;

@@ -110,7 +110,7 @@ impl RocksStore {
     }
 
     /// Reconstruct a layer chain from a specific layer ID.
-    fn load_chain_from(&self, layer_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError> {
+    pub fn load_chain_from(&self, layer_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError> {
         // Walk the chain to collect IDs from head to root
         let mut chain_ids = vec![layer_id.clone()];
         let mut current = layer_id.clone();
@@ -488,6 +488,10 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
 
     fn load_chain(&self) -> Result<Option<Arc<Layer>>, StorageError> {
         RocksStore::load_chain(self)
+    }
+
+    fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError> {
+        RocksStore::load_chain_from(self, head_id)
     }
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
