@@ -102,15 +102,63 @@ orchestration/   Deno/TypeScript orchestration layer (future)
 
 ### Prerequisites
 
-- Rust (stable, 1.86+)
-- `pkg-config` and `libssl-dev` (for TiKV client dependency)
-- [`just`](https://github.com/casey/just) (task runner, optional)
+The platform builds and runs on Linux (native or Windows with WSL 2)
+and macOS. The demo rig is a Rust kernel, a Deno orchestrator, and a
+CLI, all tied together by gRPC. Optional pieces (WASM examples, GitHub
+issue workflow, Docker-based deployment) add their own tools.
+
+**Core toolchain (required)**
+
+- Rust (stable, **1.95+** — matches `deploy/Dockerfile.kernel`; earlier
+  versions fail to build wasmtime 43 which the WASM runtime depends
+  on). Install via [rustup](https://rustup.rs).
+- [Deno](https://deno.land) — orchestration layer (`orchestration/`).
+- System packages (Ubuntu / WSL 2):
+  ```bash
+  sudo apt-get install -y build-essential pkg-config libssl-dev protobuf-compiler libclang-dev
+  ```
+  - `build-essential` — C/C++ toolchain for RocksDB's native sources.
+  - `pkg-config` + `libssl-dev` — TiKV client dependency.
+  - `protobuf-compiler` — `protoc` for the gRPC build scripts.
+  - `libclang-dev` — bindgen needs it to compile RocksDB headers.
+- [`just`](https://github.com/casey/just) (task runner, optional but
+  matches the commands in this README):
+  ```bash
+  cargo install just
+  ```
+
+**WASM examples (optional)**
+
+Needed to build / modify the fixtures under `examples/wasm-*`:
 
 ```bash
-# Ubuntu/WSL
-sudo apt-get install -y build-essential pkg-config libssl-dev protobuf-compiler libclang-dev
-cargo install just
+rustup target add wasm32-unknown-unknown
+cargo install cargo-component
 ```
+
+**GitHub workflow (optional, recommended)**
+
+The project tracks correctness hazards and phase work as GitHub issues.
+The [`gh` CLI](https://cli.github.com) is the usual entrypoint for
+reading / filing them:
+
+```bash
+# Ubuntu / WSL 2
+sudo apt-get install -y gh
+gh auth login
+```
+
+**Docker (optional)**
+
+The end-to-end demo can run entirely in containers — skips Rust and
+Deno on the host. Install Docker Engine and Compose v2 per your
+distribution's instructions; then see the [Docker Compose](#docker-compose)
+section below.
+
+**Note for WSL 2 users:** all of the above installs into the WSL
+distribution (Ubuntu or similar), not Windows itself. VS Code's WSL
+remote extension is the smoothest way to edit the repo from Windows
+while compiling inside WSL 2.
 
 ### Build and Test
 
