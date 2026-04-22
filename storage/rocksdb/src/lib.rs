@@ -523,6 +523,51 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             .map_err(|e| StorageError::Internal(format!("meta put: {e}")))
     }
 
+    fn delete_meta(&self, key: &str) -> Result<(), StorageError> {
+        let db_key = format!("meta:{key}");
+        self.db
+            .delete(db_key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("meta delete: {e}")))
+    }
+
+    fn write_batch(&self, ops: &[eigenius_kernel::storage::BatchOp]) -> Result<(), StorageError> {
+        use eigenius_kernel::storage::BatchOp;
+        let mut batch = rocksdb::WriteBatch::default();
+        for op in ops {
+            match op {
+                BatchOp::PutMeta { key, value } => {
+                    let db_key = format!("meta:{key}");
+                    batch.put(db_key.as_bytes(), value);
+                }
+                BatchOp::DeleteMeta { key } => {
+                    let db_key = format!("meta:{key}");
+                    batch.delete(db_key.as_bytes());
+                }
+            }
+        }
+        self.db
+            .write(batch)
+            .map_err(|e| StorageError::Internal(format!("write_batch: {e}")))
+    }
+
+    fn list_meta_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        let db_prefix = format!("meta:{prefix}");
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(db_prefix.as_bytes());
+        for item in iter {
+            let (k, _v) =
+                item.map_err(|e| StorageError::Internal(format!("list_meta_prefix: {e}")))?;
+            let key_str = std::str::from_utf8(&k)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 meta key: {e}")))?;
+            // Prefix iterator may overshoot — trim.
+            if !key_str.starts_with(&db_prefix) {
+                break;
+            }
+            out.push(key_str["meta:".len()..].to_string());
+        }
+        Ok(out)
+    }
+
     fn as_trace_store(&self) -> &(dyn eigenius_kernel::program::trace::TraceStore + Send + Sync) {
         self
     }

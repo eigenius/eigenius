@@ -23,4 +23,5 @@ pub mod query;
 pub mod reflection;
 pub mod server;
 pub mod storage;
+pub mod task;
 pub mod validation;
