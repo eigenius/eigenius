@@ -251,6 +251,25 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
             }
             Val::ResourceVal(Box::new(r))
         }
+
+        // Codata (D11, Phase 9b-i)
+        Exp::Codata(observations) => Val::Codata(
+            observations
+                .iter()
+                .map(|o| (o.name.clone(), o.typ.clone()))
+                .collect(),
+            rho.clone(),
+        ),
+
+        Exp::CoRecord(fields) => Val::CoRecord(
+            fields
+                .iter()
+                .map(|f| (f.name.clone(), f.body.clone()))
+                .collect(),
+            rho.clone(),
+        ),
+
+        Exp::Observe(e, name) => ev(e).vobserve_ctx(name, ctx),
     }
 }
 
