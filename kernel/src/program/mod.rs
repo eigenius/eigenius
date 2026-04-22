@@ -117,6 +117,72 @@ mod tests {
         assert_eq!(result.output.get(&name_iri).unwrap().as_str(), Some("Rex"));
     }
 
+    /// End-to-end codata: compile an ESL file that declares a codata
+    /// type and a program that constructs a corecord and observes it;
+    /// verify the program parses to Mini-TT and type-checks.
+    ///
+    /// The program is not executed here — execute_program_nbe expects a
+    /// ResourceVal input, and codata types for program I/O are a
+    /// Phase-9b-iii concern. For 9b-ii we prove the surface syntax,
+    /// compile, parse, and type-check pipeline works end to end.
+    #[test]
+    fn end_to_end_codata_esl() {
+        let mut ctx = bootstrap::bootstrap().unwrap();
+
+        // Compile an ESL file that uses codata + corecord + observation.
+        // The program ignores its input and returns the `fst` observation
+        // of an in-body corecord.
+        let esl_source = r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            class ex:Thing {
+                description = "Test type used for both input and observation fields";
+            }
+
+            codata ex:ThingPair {
+                fst : ex:Thing;
+                snd : ex:Thing;
+            }
+
+            program ex:get_fst : ex:Thing -> ex:Thing {
+                let p : ex:ThingPair = corecord {
+                    fst = input;
+                    snd = input;
+                };
+                p.fst
+            }
+        "#;
+
+        let resources = crate::esl::compile(esl_source).unwrap();
+        assert_eq!(resources.len(), 3);
+
+        // Load codata + program into the context.
+        for r in resources {
+            ctx.add_resource(r).unwrap();
+        }
+        ctx.commit("codata_e2e").unwrap();
+
+        // Look up the program resource.
+        let program_iri = Iri::parse("urn:eigenius:example:get_fst").unwrap();
+        let program = ctx
+            .head()
+            .resolve(&program_iri)
+            .expect("program in layer")
+            .clone();
+
+        // Parse to Mini-TT — exercises parse_corecord + parse_project
+        // paths and resolves ex:Pair to Val::Codata via ground.rs.
+        let (term, typ) = parse_program(&program, ctx.head()).unwrap();
+        assert!(matches!(term, crate::nbe::term::Exp::Lam(_, _)));
+
+        // Type-check — the critical assertion: PropAccess on a
+        // codata-typed value resolves through the codata dispatch we
+        // added to check_infer.
+        let typ_val = eval::eval(&typ, &Rho::Nil);
+        check::check(&Rho::Nil, &vec![], &term, &typ_val).expect("program should type-check");
+    }
+
     /// End-to-end: validate program parsing.
     #[test]
     fn end_to_end_cli_validate() {

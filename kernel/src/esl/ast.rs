@@ -35,6 +35,7 @@ pub enum Declaration {
     Property(PropertyDecl),
     Resource(ResourceDecl),
     Program(ProgramDecl),
+    Codata(CodataDecl),
 }
 
 /// `class ex:Dog : ex:Animal { ... }`
@@ -124,6 +125,23 @@ pub enum ProgramAttribute {
     Description(String),
 }
 
+/// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }`
+#[derive(Debug)]
+pub struct CodataDecl {
+    pub name: QualifiedName,
+    pub observations: Vec<ObservationDecl>,
+    pub pos: Position,
+}
+
+/// A single observation declaration inside a codata block:
+/// `head : ex:Elem`
+#[derive(Debug)]
+pub struct ObservationDecl {
+    pub name: String,
+    pub typ: QualifiedName,
+    pub pos: Position,
+}
+
 /// An expression (ML-style, inside program bodies).
 #[derive(Debug)]
 pub enum Expr {
@@ -189,6 +207,18 @@ pub enum Expr {
     },
     /// `"hello"`, `42`, `true`
     Literal { value: LiteralValue, pos: Position },
+    /// `corecord { obs = e1; ... }`
+    ///
+    /// Values are ordered — the order must match the declared
+    /// observations of the target codata type.
+    CoRecord { fields: Vec<CoField>, pos: Position },
+}
+
+/// A single copattern definition in a corecord: `obs = body`.
+#[derive(Debug)]
+pub struct CoField {
+    pub name: String,
+    pub body: Expr,
 }
 
 /// A literal value in expression position.

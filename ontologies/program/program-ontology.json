@@ -191,7 +191,7 @@
     "urn:eigenius:core:description": "Body expression of a Program, Let, Lambda, or Branch.",
     "urn:eigenius:core:short_name": "body",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:domain": ["urn:eigenius:program:Program", "urn:eigenius:program:Let", "urn:eigenius:program:Lambda", "urn:eigenius:program:Branch"]
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Program", "urn:eigenius:program:Let", "urn:eigenius:program:Lambda", "urn:eigenius:program:Branch", "urn:eigenius:program:CoField"]
   },
   {
     "@id": "urn:eigenius:program:name",
@@ -633,5 +633,42 @@
     "urn:eigenius:core:short_name": "max_tokens",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
     "urn:eigenius:core:min_value": 1
+  },
+
+  {
+    "@id": "urn:eigenius:program:CoRecord",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A corecord expression: `corecord { obs = e1; ... }`. Each CoField binds an observation name to a body expression evaluated lazily when the observation is made. Dual of Construct. See D11.",
+    "urn:eigenius:core:short_name": "CoRecord",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:cofields"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:CoField",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A single copattern definition in a CoRecord: an observation name paired with the body expression that produces that observation's value.",
+    "urn:eigenius:core:short_name": "CoField",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:program:observation_name",
+      "urn:eigenius:program:body"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:program:cofields",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of CoField resources in a CoRecord. The order must match the declared observations of the target codata type.",
+    "urn:eigenius:core:short_name": "cofields",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:program:CoField"],
+    "urn:eigenius:core:domain": ["urn:eigenius:program:CoRecord"]
+  },
+  {
+    "@id": "urn:eigenius:program:observation_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The observation name this CoField defines (e.g. 'head', 'tail').",
+    "urn:eigenius:core:short_name": "observation_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:CoField"]
   }
 ]

@@ -265,11 +265,31 @@ pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
             Ok(g.apply(eval(e, rho).vfst()))
         }
 
-        // Eigenius: property access type inference
-        // Walk the Sigma chain to find the field matching the property's local name.
+        // Eigenius: property/observation access type inference.
+        //
+        // ESL's `.name` syntax unifies two operations:
+        // - property access on resources / Sigma-typed values
+        // - observation on codata-typed values
+        // We dispatch on the inferred type of the target.
         Exp::PropAccess(e, prop) => {
             let t = check_infer(rho, gamma, e)?;
             let prop_name = prop.local_name();
+
+            // Codata observation — same lookup that Exp::Observe does.
+            if let Val::Codata(observations, rho1) = &t {
+                for (name, typ) in observations {
+                    if name == prop_name {
+                        return Ok(eval(typ, rho1));
+                    }
+                }
+                return Err(format!(
+                    "observation '{}' not found in codata type {:?}",
+                    prop_name,
+                    readback_val(rho.len(), &t)
+                ));
+            }
+
+            // Fall back to the existing Sigma / resource behaviour.
             find_sigma_field(&t, prop_name).ok_or_else(|| {
                 format!(
                     "property '{}' not found in type {:?}",
