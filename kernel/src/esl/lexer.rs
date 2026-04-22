@@ -14,6 +14,7 @@ pub enum TokenKind {
     Property,
     Resource,
     Program,
+    Codata,
 
     // Expression keywords
     Let,
@@ -21,6 +22,7 @@ pub enum TokenKind {
     Construct,
     Map,
     Reduce,
+    Corecord,
 
     // Literals
     StringLit(String),
@@ -343,12 +345,14 @@ impl<'a> Lexer<'a> {
             "property" => TokenKind::Property,
             "resource" => TokenKind::Resource,
             "program" => TokenKind::Program,
+            "codata" => TokenKind::Codata,
             // Expression keywords
             "let" => TokenKind::Let,
             "case" => TokenKind::Case,
             "Construct" => TokenKind::Construct,
             "map" => TokenKind::Map,
             "reduce" => TokenKind::Reduce,
+            "corecord" => TokenKind::Corecord,
             // Literals
             "true" => TokenKind::BoolLit(true),
             "false" => TokenKind::BoolLit(false),
@@ -376,13 +380,14 @@ mod tests {
     #[test]
     fn top_level_keywords() {
         assert_eq!(
-            kinds("namespace class property resource program"),
+            kinds("namespace class property resource program codata"),
             vec![
                 TokenKind::Namespace,
                 TokenKind::Class,
                 TokenKind::Property,
                 TokenKind::Resource,
                 TokenKind::Program,
+                TokenKind::Codata,
             ]
         );
     }
@@ -390,13 +395,14 @@ mod tests {
     #[test]
     fn expression_keywords() {
         assert_eq!(
-            kinds("let case Construct map reduce"),
+            kinds("let case Construct map reduce corecord"),
             vec![
                 TokenKind::Let,
                 TokenKind::Case,
                 TokenKind::Construct,
                 TokenKind::Map,
                 TokenKind::Reduce,
+                TokenKind::Corecord,
             ]
         );
     }

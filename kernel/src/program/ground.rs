@@ -30,9 +30,17 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
         _ => {}
     }
 
-    let _resource = layer
+    let resource = layer
         .resolve(class_iri)
         .ok_or_else(|| format!("class '{}' not found in layer chain", class_iri))?;
+
+    // Codata types resolve to Val::Codata with each observation's
+    // result type embedded as a syntactic Exp (evaluated in Rho::Nil
+    // since observation types are fully resolved IRIs — no free
+    // variables). See D11 §3.
+    if is_codata_type(resource) {
+        return resolve_codata_type(class_iri, resource, layer);
+    }
 
     let (required, recommended) = collect_properties(class_iri, layer)?;
 
@@ -264,6 +272,80 @@ fn build_sigma_chain(props: &[(Iri, Val)]) -> Result<Val, String> {
         rho,
     );
     Ok(Val::Sig(Box::new(prop_type.clone()), closure))
+}
+
+/// Check whether a resource represents a codata type declaration.
+fn is_codata_type(resource: &crate::ontology::resource::Resource) -> bool {
+    let is_a = resource.is_a();
+    is_a.iter()
+        .any(|c| c.as_str() == "urn:eigenius:core:CodataType")
+}
+
+/// Resolve a CodataType resource into a `Val::Codata` whose observation
+/// types are resolved to the same Mini-TT forms as any other typed
+/// field. See D11 §3.
+fn resolve_codata_type(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
+) -> Result<Val, String> {
+    let observations_iri = Iri::parse("urn:eigenius:core:observations").unwrap();
+    let obs_array = match resource.get(&observations_iri) {
+        Some(Value::Array(arr)) => arr,
+        _ => {
+            return Err(format!(
+                "codata type '{class_iri}' missing 'observations' array"
+            ))
+        }
+    };
+
+    let mut observations = Vec::new();
+    for entry in obs_array {
+        let obs_res = match entry {
+            Value::Embedded(r) => r.as_ref(),
+            _ => {
+                return Err(format!(
+                    "codata type '{class_iri}' observations must be embedded Observation resources"
+                ))
+            }
+        };
+        let name_iri = Iri::parse("urn:eigenius:core:observation_name").unwrap();
+        let type_iri = Iri::parse("urn:eigenius:core:observation_type").unwrap();
+        let name = match obs_res.get(&name_iri) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                return Err(format!(
+                    "codata type '{class_iri}' observation missing 'observation_name'"
+                ))
+            }
+        };
+        let type_ref = match obs_res.get(&type_iri) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                return Err(format!(
+                    "codata type '{class_iri}' observation '{name}' missing 'observation_type'"
+                ))
+            }
+        };
+        let type_iri_parsed = Iri::parse(&type_ref)
+            .map_err(|e| format!("invalid observation type IRI '{type_ref}': {e}"))?;
+        // Resolve the observation's type via the same machinery —
+        // supports recursion through the codata type itself by
+        // short-circuiting: self-references resolve to an EigonClass
+        // marker that the evaluator can handle.
+        let type_val = if type_iri_parsed == *class_iri {
+            Val::EigonClass(type_iri_parsed.clone())
+        } else {
+            resolve_class_type(&type_iri_parsed, layer)?
+        };
+        // Read back the type value so we have a syntactic Exp for
+        // Val::Codata's observation list (eval under Rho::Nil when
+        // type checking against it).
+        let type_exp = crate::nbe::readback::readback_val(0, &type_val);
+        observations.push((name, type_exp));
+    }
+
+    Ok(Val::Codata(observations, Rho::Nil))
 }
 
 #[cfg(test)]

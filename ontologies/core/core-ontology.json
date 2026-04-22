@@ -463,5 +463,56 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Format"],
     "urn:eigenius:core:description": "A valid regular expression (ECMA 262 syntax).",
     "urn:eigenius:core:short_name": "regex"
+  },
+
+  {
+    "@id": "urn:eigenius:core:CodataType",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A coinductive type defined by its observations (D11). Dual of Class: Class defines a type by constructors and fields; CodataType defines it by the observations that can be made on its values.",
+    "urn:eigenius:core:short_name": "CodataType",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:core:observations"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:Observation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A single observation declaration on a CodataType: a name and a result type.",
+    "urn:eigenius:core:short_name": "Observation",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:observation_name",
+      "urn:eigenius:core:observation_type"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:observations",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of Observation resources declared by a CodataType.",
+    "urn:eigenius:core:short_name": "observations",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Observation"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:CodataType"]
+  },
+  {
+    "@id": "urn:eigenius:core:observation_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The local name of an observation (e.g. 'head', 'tail').",
+    "urn:eigenius:core:short_name": "observation_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Observation"]
+  },
+  {
+    "@id": "urn:eigenius:core:observation_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Result type of an observation: a reference to a Class, CodataType, or DataType resource resolved via the layer chain.",
+    "urn:eigenius:core:short_name": "observation_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:core:CodataType",
+      "urn:eigenius:core:DataType"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Observation"]
   }
 ]

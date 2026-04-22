@@ -81,7 +81,48 @@ impl Compiler {
             ast::Declaration::Property(p) => self.compile_property(p),
             ast::Declaration::Resource(r) => self.compile_resource(r),
             ast::Declaration::Program(p) => self.compile_program(p),
+            ast::Declaration::Codata(c) => self.compile_codata(c),
         }
+    }
+
+    // --- Codata ---
+
+    fn compile_codata(&self, decl: &ast::CodataDecl) -> Result<Vec<Resource>, EslError> {
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:core:CodataType".to_string(),
+            )]),
+        );
+        r.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String(decl.name.name.clone()),
+        );
+
+        let mut observations = Vec::new();
+        for obs in &decl.observations {
+            let type_iri = self.resolve(&obs.typ)?;
+            let mut obs_r = Resource::new_embedded();
+            set_is_a(&mut obs_r, "urn:eigenius:core:Observation");
+            obs_r.set(
+                iri("urn:eigenius:core:observation_name"),
+                Value::String(obs.name.clone()),
+            );
+            obs_r.set(
+                iri("urn:eigenius:core:observation_type"),
+                Value::String(type_iri),
+            );
+            observations.push(Value::Embedded(Box::new(obs_r)));
+        }
+        r.set(
+            iri("urn:eigenius:core:observations"),
+            Value::Array(observations),
+        );
+
+        Ok(vec![r])
     }
 
     // --- Class ---
@@ -504,7 +545,14 @@ impl Compiler {
                     iri("urn:eigenius:program:expression"),
                     Value::Embedded(Box::new(expr_r)),
                 );
-                let prop_iri = self.resolve(property)?;
+                // Bare names are treated as codata observation names
+                // (D11 §8) and emitted under a synthetic URN so the
+                // resulting IRI's `local_name()` returns the bare name.
+                // Namespaced names resolve to full IRIs as before.
+                let prop_iri = match &property.namespace {
+                    Some(_) => self.resolve(property)?,
+                    None => format!("urn:eigenius:_obs:{}", property.name),
+                };
                 r.set(
                     iri("urn:eigenius:program:property"),
                     Value::String(prop_iri),
@@ -584,6 +632,28 @@ impl Compiler {
                     ast::LiteralValue::Bool(b) => Value::Boolean(*b),
                 };
                 r.set(iri("urn:eigenius:program:value"), v);
+                Ok(r)
+            }
+
+            ast::Expr::CoRecord { fields, .. } => {
+                let mut r = Resource::new_embedded();
+                set_is_a(&mut r, "urn:eigenius:program:CoRecord");
+                let mut cofields = Vec::new();
+                for f in fields {
+                    let body_r = self.compile_expr(&f.body)?;
+                    let mut cf = Resource::new_embedded();
+                    set_is_a(&mut cf, "urn:eigenius:program:CoField");
+                    cf.set(
+                        iri("urn:eigenius:program:observation_name"),
+                        Value::String(f.name.clone()),
+                    );
+                    cf.set(
+                        iri("urn:eigenius:program:body"),
+                        Value::Embedded(Box::new(body_r)),
+                    );
+                    cofields.push(Value::Embedded(Box::new(cf)));
+                }
+                r.set(iri("urn:eigenius:program:cofields"), Value::Array(cofields));
                 Ok(r)
             }
         }
@@ -837,6 +907,125 @@ mod tests {
             .as_str()
             .unwrap();
         assert_eq!(func, "urn:eigenius:program:components:CompleteText");
+    }
+
+    #[test]
+    fn compile_codata_declaration() {
+        // A codata type with two observations, one referencing itself.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            codata ex:IntStream {
+                head : core:integer;
+                tail : ex:IntStream;
+            }
+        "#,
+        );
+        assert_eq!(resources.len(), 1);
+        let r = &resources[0];
+        assert_eq!(r.id().unwrap().as_str(), "urn:eigenius:example:IntStream");
+        let is_a = r.is_a();
+        assert_eq!(is_a[0].as_str(), "urn:eigenius:core:CodataType");
+        assert_eq!(
+            r.get(&iri("urn:eigenius:core:short_name"))
+                .unwrap()
+                .as_str(),
+            Some("IntStream")
+        );
+
+        // Observations array
+        let observations = r
+            .get(&iri("urn:eigenius:core:observations"))
+            .expect("observations property");
+        let arr = match observations {
+            Value::Array(a) => a,
+            _ => panic!("observations must be an array"),
+        };
+        assert_eq!(arr.len(), 2);
+
+        // First observation: head -> core:integer
+        let head = match &arr[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("observation must be embedded"),
+        };
+        assert_eq!(
+            head.get(&iri("urn:eigenius:core:observation_name"))
+                .unwrap()
+                .as_str(),
+            Some("head")
+        );
+        assert_eq!(
+            head.get(&iri("urn:eigenius:core:observation_type"))
+                .unwrap()
+                .as_str(),
+            Some("urn:eigenius:core:integer")
+        );
+
+        // Second observation: tail -> ex:IntStream (self-reference)
+        let tail = match &arr[1] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("observation must be embedded"),
+        };
+        assert_eq!(
+            tail.get(&iri("urn:eigenius:core:observation_name"))
+                .unwrap()
+                .as_str(),
+            Some("tail")
+        );
+        assert_eq!(
+            tail.get(&iri("urn:eigenius:core:observation_type"))
+                .unwrap()
+                .as_str(),
+            Some("urn:eigenius:example:IntStream")
+        );
+    }
+
+    #[test]
+    fn compile_corecord_expression() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            program ex:mk_pair : ex:Unit -> ex:Pair {
+                corecord {
+                    fst = 1;
+                    snd = 2;
+                }
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let body = r
+            .get(&iri("urn:eigenius:program:body"))
+            .unwrap()
+            .as_embedded()
+            .unwrap();
+        // Body should be a CoRecord
+        assert_eq!(body.is_a()[0].as_str(), "urn:eigenius:program:CoRecord");
+
+        let cofields = body
+            .get(&iri("urn:eigenius:program:cofields"))
+            .expect("cofields");
+        let arr = match cofields {
+            Value::Array(a) => a,
+            _ => panic!("cofields must be array"),
+        };
+        assert_eq!(arr.len(), 2);
+
+        let fst = match &arr[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("cofield must be embedded"),
+        };
+        assert_eq!(fst.is_a()[0].as_str(), "urn:eigenius:program:CoField");
+        assert_eq!(
+            fst.get(&iri("urn:eigenius:program:observation_name"))
+                .unwrap()
+                .as_str(),
+            Some("fst")
+        );
     }
 
     #[test]

@@ -159,11 +159,14 @@ impl<'a> Parser<'a> {
                 TokenKind::Program => {
                     declarations.push(Declaration::Program(self.parse_program()?))
                 }
+                TokenKind::Codata => {
+                    declarations.push(Declaration::Codata(self.parse_codata()?))
+                }
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -565,11 +568,49 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // --- Codata ---
+
+    /// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }`
+    fn parse_codata(&mut self) -> Result<CodataDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Codata)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut observations = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            let obs_pos = self.current_pos();
+            let obs_name = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let typ = self.parse_qualified_name()?;
+            self.expect_semicolon()?;
+            observations.push(ObservationDecl {
+                name: obs_name,
+                typ,
+                pos: obs_pos,
+            });
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        if observations.is_empty() {
+            return Err(EslError::parser(
+                Some(pos.clone()),
+                "codata type must declare at least one observation".to_string(),
+            ));
+        }
+
+        Ok(CodataDecl {
+            name,
+            observations,
+            pos,
+        })
+    }
+
     // --- Expressions ---
 
     /// Parse an expression. This is the top-level expression parser.
     /// Precedence (loosest to tightest):
-    ///   let, case (extend rightward)
+    ///   let, case, corecord (extend rightward)
     ///   lambda
     ///   application f(arg)
     ///   projection e.prop
@@ -578,6 +619,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             TokenKind::Let => self.parse_let(),
             TokenKind::Case => self.parse_case(),
+            TokenKind::Corecord => self.parse_corecord(),
             TokenKind::Backslash | TokenKind::Lambda => self.parse_lambda(),
             _ => self.parse_apply_or_atom(),
         }
@@ -628,6 +670,32 @@ impl<'a> Parser<'a> {
             body: Box::new(body),
             pos,
         })
+    }
+
+    /// `corecord { head = e1; tail = e2 }`
+    fn parse_corecord(&mut self) -> Result<Expr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Corecord)?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Eq)?;
+            let body = self.parse_expr()?;
+            self.expect_semicolon()?;
+            fields.push(CoField { name, body });
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        if fields.is_empty() {
+            return Err(EslError::parser(
+                Some(pos.clone()),
+                "corecord must have at least one field".to_string(),
+            ));
+        }
+
+        Ok(Expr::CoRecord { fields, pos })
     }
 
     /// `case e { A -> e1; B -> e2 }`

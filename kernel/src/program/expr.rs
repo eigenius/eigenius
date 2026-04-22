@@ -19,6 +19,7 @@ const PROJECT: &str = "urn:eigenius:program:Project";
 const MAP: &str = "urn:eigenius:program:Map";
 const REDUCE: &str = "urn:eigenius:program:Reduce";
 const LITERAL: &str = "urn:eigenius:program:Literal";
+const CORECORD: &str = "urn:eigenius:program:CoRecord";
 
 /// Parse a Program resource into a Mini-TT term with its type.
 ///
@@ -65,6 +66,7 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
         MAP => parse_map(resource, layer),
         REDUCE => parse_reduce(resource, layer),
         LITERAL => parse_literal(resource),
+        CORECORD => parse_corecord(resource, layer),
         _ => Err(format!("unknown expression class: '{class_str}'")),
     }
 }
@@ -215,6 +217,35 @@ fn parse_project(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let prop_iri = get_iri(resource, "urn:eigenius:program:property")?;
 
     Ok(Exp::PropAccess(Box::new(expr_exp), prop_iri))
+}
+
+/// corecord { obs = e; ... }
+fn parse_corecord(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
+    use crate::nbe::term::CoField;
+    let cofields_prop = Iri::parse("urn:eigenius:program:cofields").unwrap();
+    let cofields = match resource.get(&cofields_prop) {
+        Some(Value::Array(arr)) => arr,
+        _ => return Err("CoRecord missing 'cofields' array".to_string()),
+    };
+    let mut fields = Vec::new();
+    for entry in cofields {
+        let cf = match entry {
+            Value::Embedded(r) => r.as_ref(),
+            _ => {
+                return Err(
+                    "CoRecord 'cofields' must contain embedded CoField resources".to_string(),
+                )
+            }
+        };
+        let name = get_string(cf, "urn:eigenius:program:observation_name")?;
+        let body_resource = get_embedded(cf, "urn:eigenius:program:body")?;
+        let body_exp = parse_expression(&body_resource, layer)?;
+        fields.push(CoField {
+            name,
+            body: body_exp,
+        });
+    }
+    Ok(Exp::CoRecord(fields))
 }
 
 /// map(f, collection)

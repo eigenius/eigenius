@@ -232,6 +232,18 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                         None => panic!("property {} not found on resource", prop),
                     }
                 }
+                // Codata observation: the "property" IRI's local name is
+                // treated as the observation name (D11 §8). Evaluate the
+                // matching field body in the corecord's captured env.
+                Val::CoRecord(fields, corecord_rho) => {
+                    let obs_name = prop.local_name();
+                    for (name, body) in &fields {
+                        if name == obs_name {
+                            return eval_ctx(body, &corecord_rho, ctx);
+                        }
+                    }
+                    panic!("observation '{}' not found in corecord", obs_name);
+                }
                 Val::Nt(n) => Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
                 other => panic!("property access on non-resource: {:?}", other),
             }
