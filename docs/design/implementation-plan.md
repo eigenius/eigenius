@@ -83,7 +83,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 7 | CompleteJson | ✓ | Structured LLM output via JSON Schema from ontology classes |
 | 8 | WASM | ✓ | Untrusted capabilities run sandboxed via Wasmtime |
 | 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
-| 9b | Codata + Streams | | Resumable execution, coinductive streams, concurrent tasks |
+| 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | | Ontology-as-types resolution, universe soundness, typed errors |
 | 11 | Type Theory Extensions | | Map/Reduce, inductive types, decision procedures, Comorphism class |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
@@ -496,18 +496,20 @@ The phase decomposes into two milestones that are separately reviewable:
 - Integration coverage: in-process Rust test (`storage/rocksdb/tests/durability_test.rs`) plus CLI-surface smoke script (`examples/wasm-ordering-institution/run_durable.sh`), both installing an institution, restarting against the same DB, and verifying dispatch still works without re-install.
 - See D13 for the full specification and the five-step implementation ordering.
 
-### Phase 9b — Codata, streams, and resumable execution (D11) — ~4–6 weeks
+### Phase 9b — Codata, streams, and resumable execution (D11, D21) — ~4–6 weeks
 
-**Goal:** Extend the execution model with codata (coinductive types) so that data and event streams become first-class. Programs can run as long-lived tasks that suspend on IO and resume from their persisted trace state.
+**Status:** Complete (April 2026). Shipped in four sub-milestones — 9b-i (Mini-TT codata + guardedness), 9b-ii (ESL codata/corecord/observation + ontology), 9b-iii (task model: storage primitives, evaluator re-keying, RPCs, CLI, resume sweep), plus issue #16 filed for sized-types follow-up.
 
-- Extend Mini-TT with coinductive types (codata): greatest fixed points, copattern matching, observation-based elimination.
-- Model data streams as codata: a stream is a coinductive record with `head : A` and `tail : Stream A` observations.
-- Model event-driven processes as codata: a process observes an event and produces a result plus a continuation.
-- Integration with reasoning traces: each observation step produces a trace entry; the stream's state is reconstructible from traces. (Trace persistence lands in 9a.)
-- ESL syntax for codata declarations and copattern matching (see eigenius/eigenius#7).
-- Concurrent task model: program executions are tasks that may be suspended (waiting for IO) and resumed (IO completed or new data arrived). The trace store is the task's checkpoint — resumption re-evaluates from the root, hitting cached traces. Multiple programs execute concurrently, sharing the trace store for memoization across tasks.
-- In-progress programs tracked as concurrent tasks; the kernel maintains a task table mapping program execution IDs to their current trace state.
-- CLI `tasks` command: list in-progress and completed program executions.
+**Goal:** Extend the execution model with codata (coinductive types) so that data and event streams become first-class. Programs run as tracked tasks that persist across kernel restarts, with per-task positional trace keys for correct streaming and a startup resume sweep for crash recovery.
+
+- Mini-TT gains `Codata` / `CoRecord` / `Observe` terms, matching `Val` variants, eval + readback + type checker arms, and a syntactic guardedness check (Agda-style). See D11.
+- ESL surface syntax: top-level `codata Name { obs : T; ... }` declarations, `corecord { obs = e; ... }` expressions, bare-name `.obs` observations unified with property access via `Exp::PropAccess` dispatch. Ontology gains `CodataType`, `Observation`, `CoRecord`, `CoField` classes with their supporting properties.
+- Task model (D21): `TaskRecord`, `Checkpoint`, `TaskContext`, `TaskStore` + `BackendTaskStore` adapter. Per-task positional trace keys `(session_id, task_id, step_seq)` replace Phase 9a's content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state snapshots atomically via `write_batch`.
+- gRPC surface: `RunProgram` returns a `task_id`; new `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs; `Health` reports `resume_in_progress` / `tasks_resuming`; `Inspect` / `Query` / `GetSchema` gain an optional `at_layer` LayerId (D21 §3.6) for reaching forked task result layers.
+- CLI: `eigenius tasks list|status|cancel`, plus `--at-layer` on `inspect` and `query`.
+- Startup resume sweep (D21 §6): bounded-parallel background task that rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks, with `max_parallel_resumes=4` / `max_resume_attempts=1` defaults.
+
+**Deferred to follow-ups:** sized types for productivity checking (#16), async `RunProgram` spawn (breaks existing synchronous clients; additive), cooperative cancellation check in the evaluator proper, `cancel_grace_seconds` force-abort + shadow-keyspace spill, retention pruning on checkpoint commit (D21 §5).
 
 ### Phase 9 — Key design questions (D11 scope)
 
@@ -794,7 +796,7 @@ The following design documents must be written and reviewed before the phase tha
 | D18 | **Ontology-as-Types Resolution** | How `find_sigma_field` walks the layer chain to resolve `EigonClass(iri)` into a dependent-record (Sigma) type at check time. Includes the Read-capability-mode layer-access protocol, caching policy (inferred types memoized per (class IRI, layer head)), and handling for class inheritance / `subclass_of`. Closes the #12 high-priority correctness hazard. Prerequisite for most of D19. | Phase 10a | 8–12 pages |
 | D19 | **Inductive Types in Mini-TT** | Single (non-mutual, non-nested) strictly-positive inductive types: declaration form, positivity checker, recursor/eliminator derivation, iota-reduction rules, integration with the conversion algorithm. Tier 1 extension from `life-science-requirements.md` §16.1. nanoda_lib (`src/inductive.rs`) as a reference, with Eigenius-specific simplifications (no universe polymorphism, no nested inductives v1). | Phase 11b | 15–20 pages |
 | D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Branching head pointers, common-ancestor invariants, comorphism witnesses as merge proofs, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Multi-session operation built on the same primitive. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 14 | 12–16 pages |
-| D21 | **Task Traces and Checkpointing** | **DRAFT (decisions resolved)** — `docs/design/d21-task-traces-and-checkpointing.md`. Re-keys `ComponentTrace` lookups from content-address to per-task positional `(session_id, task_id, step_seq)`; demotes the content-address cache to a Pure/Read-only memo side-table scoped by `layer_head`; introduces the `components:Checkpoint` built-in; specifies the resume protocol; commits to pin-at-entry layer-head semantics, per-step `WriteBatch` atomicity, bounded-parallel background resume (default 4, retry 1), cooperative-with-grace cancellation (30s), and a single `--audit-retention` knob defaulting to `unlimited`. Tasks commit result layers with parent = pinned head; session auto-advances on fast-forward and forks on divergence. Single hardwired session (`session_id = Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion; read RPCs gain optional `at_layer` hint so forked results stay reachable. Prerequisite for 9b-iii. | Phase 9b-iii | 14–16 pages |
+| D21 | **Task Traces and Checkpointing** | **COMPLETED** — `docs/design/d21-task-traces-and-checkpointing.md`. Per-task positional `(session_id, task_id, step_seq)` trace keys replace the Phase-9a content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state atomically via `write_batch`. `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs + `at_layer` on read RPCs. Startup resume sweep (`ResumeConfig`, `ResumeState`) rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks with bounded parallelism. Single hardwired session (`Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion. | Phase 9b-iii | Done |
 
 **Reference documents** (analysis rather than specification):
 
