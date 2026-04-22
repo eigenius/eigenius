@@ -16,3 +16,4 @@ tokio.workspace = true
 [dev-dependencies]
 tempfile = "3"
 tonic.workspace = true
+uuid.workspace = true

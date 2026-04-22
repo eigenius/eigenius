@@ -15,7 +15,7 @@ use std::fmt;
 use std::sync::Arc;
 
 /// Content-addressed layer identifier (SHA-256 hash).
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct LayerId(pub [u8; 32]);
 
 impl fmt::Debug for LayerId {

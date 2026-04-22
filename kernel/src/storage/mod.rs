@@ -91,7 +91,40 @@ pub trait PersistentBackend: Send + Sync + 'static {
     /// Store a metadata value at `key`.
     fn put_meta(&self, key: &str, value: &[u8]) -> Result<(), StorageError>;
 
+    /// Delete a metadata value at `key`. Used by the task-retention
+    /// pruner (D21 §5). No-op if the key is absent.
+    fn delete_meta(&self, key: &str) -> Result<(), StorageError>;
+
+    /// Apply a batch of metadata operations atomically.
+    ///
+    /// Per D21 §8 "step atomicity" — every task step must write its
+    /// IO trace, its meta update, and (on checkpoint steps) its
+    /// checkpoint as a single commit so a crash cannot leave a
+    /// half-applied task step on disk.
+    ///
+    /// RocksDB maps this to `rocksdb::WriteBatch`. In-memory backends
+    /// apply the ops sequentially under their existing lock, which is
+    /// trivially atomic because nothing else observes the store during
+    /// the batch.
+    fn write_batch(&self, ops: &[BatchOp]) -> Result<(), StorageError>;
+
+    /// Enumerate metadata keys sharing a given prefix. Used by the
+    /// task-resume sweep to find all `session:<id>:task:<id>:meta`
+    /// records. Ordering is not guaranteed by the trait; callers must
+    /// impose their own (typically `created_at` from the decoded
+    /// record).
+    fn list_meta_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError>;
+
     /// Borrow the trace store view of this backend. Lets the server
     /// route `ComponentTrace` reads/writes through the same storage.
     fn as_trace_store(&self) -> &(dyn crate::program::trace::TraceStore + Send + Sync);
+}
+
+/// A single operation inside a `write_batch` call.
+#[derive(Debug, Clone)]
+pub enum BatchOp {
+    /// Put a metadata key. Same semantics as `put_meta`.
+    PutMeta { key: String, value: Vec<u8> },
+    /// Delete a metadata key. Same semantics as `delete_meta`.
+    DeleteMeta { key: String },
 }
