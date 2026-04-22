@@ -117,6 +117,10 @@ impl Default for ComponentRegistry {
             "urn:eigenius:program:components:Identity".to_string(),
             Box::new(IdentityComponent),
         );
+        registry.register(
+            "urn:eigenius:program:components:Checkpoint".to_string(),
+            Box::new(CheckpointComponent),
+        );
         registry
     }
 }
@@ -138,3 +142,41 @@ impl BuiltinComponent for IdentityComponent {
         })
     }
 }
+
+/// `components:Checkpoint` — persist the input resource as the
+/// running task's current checkpoint (D21 §4) and return it
+/// unchanged.
+///
+/// The component itself is an identity function at the execute()
+/// level; the checkpoint write lives in `dispatch_component`, which
+/// has access to the `TaskContext` that this trait doesn't.
+/// Registering it here keeps the component registry complete and
+/// makes the IRI resolvable to a real component definition.
+struct CheckpointComponent;
+
+impl BuiltinComponent for CheckpointComponent {
+    fn is_io(&self) -> bool {
+        // IO so the checkpoint write goes through the task-aware
+        // dispatch path (positional step key + commit_step).
+        true
+    }
+
+    fn execute(
+        &self,
+        input: &Resource,
+        _argument: Option<&Resource>,
+        _layer: &Layer,
+    ) -> Result<ComponentResult, String> {
+        // Identity. `dispatch_component` intercepts this component's
+        // IRI and piggybacks the checkpoint write on the commit_step
+        // call. Outside a TaskContext, Checkpoint is a no-op.
+        Ok(ComponentResult {
+            output: input.clone(),
+            metrics: None,
+        })
+    }
+}
+
+/// IRI of the Checkpoint built-in — exported so `dispatch_component`
+/// can recognize it without string duplication. See D21 §4.
+pub const CHECKPOINT_COMPONENT_IRI: &str = "urn:eigenius:program:components:Checkpoint";

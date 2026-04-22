@@ -222,6 +222,64 @@ fn with_task_context_each_step_is_its_own_dispatch() {
 }
 
 #[test]
+fn checkpoint_component_persists_checkpoint_and_updates_record() {
+    // D21 §4: calling `components:Checkpoint` during a task persists
+    // the input resource as a Checkpoint and sets
+    // TaskRecord.last_checkpoint to the current step_seq. Verifies
+    // the commit_step atomic-write path end-to-end.
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = store;
+    let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
+
+    let session_id = Uuid::nil();
+    let task_id = Uuid::from_u128(0xc4ec_0517_0000_0001);
+    let tc = Arc::new(TaskContext::new(
+        session_id,
+        task_id,
+        Arc::clone(&task_store),
+    ));
+    let record = TaskRecord::new_running(
+        session_id,
+        task_id,
+        "urn:test:program:ckpt".to_string(),
+        "urn:test:input:ckpt".to_string(),
+        eigenius_kernel::layer::LayerId([0; 32]),
+        0,
+    );
+    task_store.put_task(&record).unwrap();
+
+    let ctx_kernel = eigenius_kernel::bootstrap::bootstrap().unwrap();
+    let layer = Arc::clone(ctx_kernel.head());
+    // Use the default registry — Checkpoint is a standard built-in.
+    let registry = Arc::new(ComponentRegistry::default());
+
+    let ctx = make_io_ctx(layer, registry, None, Some(Arc::clone(&tc)));
+    // App(Var("urn:eigenius:program:components:Checkpoint"), Unit)
+    let expr = eigenius_kernel::nbe::term::Exp::App(
+        Box::new(eigenius_kernel::nbe::term::Exp::Var(
+            "urn:eigenius:program:components:Checkpoint".to_string(),
+        )),
+        Box::new(eigenius_kernel::nbe::term::Exp::Unit),
+    );
+    let _ = eval_ctx(&expr, &eigenius_kernel::nbe::env::Rho::Nil, &ctx);
+
+    // Record updated: step_seq=1, last_checkpoint=Some(0).
+    let back = task_store.get_task(&session_id, &task_id).unwrap().unwrap();
+    assert_eq!(back.step_seq, 1);
+    assert_eq!(back.latest_trace_seq, 0);
+    assert_eq!(back.last_checkpoint, Some(0));
+
+    // Checkpoint value is readable by step.
+    let ckpt = task_store
+        .get_checkpoint(&session_id, &task_id, 0)
+        .unwrap()
+        .expect("checkpoint persisted");
+    assert_eq!(ckpt.step_seq, 0);
+    assert!(!ckpt.state.is_empty(), "checkpoint state bytes empty");
+}
+
+#[test]
 fn replay_hits_stored_traces_without_redispatching() {
     // Run three IO calls with a TaskContext, then simulate a "crash
     // and restart" by reopening the store with a fresh TaskContext
