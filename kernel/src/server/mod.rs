@@ -31,6 +31,225 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// Live state of the startup resume sweep (D21 §6). `Health` reads
+/// this so clients can tell when resumed tasks have finished draining.
+#[derive(Debug, Default)]
+pub struct ResumeState {
+    /// `true` while the resume sweep is still enqueuing or draining
+    /// tasks. Flips to `false` once the sweep's top-level await
+    /// completes.
+    pub in_progress: std::sync::atomic::AtomicBool,
+    /// Count of tasks currently in the resume queue (enqueued but
+    /// not yet terminal).
+    pub remaining: std::sync::atomic::AtomicU32,
+}
+
+/// Dependencies the resume sweep needs. Extracted from `EigeniusService`
+/// before the service is consumed by `into_server`.
+pub struct ResumeInputs {
+    pub task_store: Arc<dyn crate::task::TaskStore>,
+    pub backend: Arc<dyn crate::storage::PersistentBackend>,
+    pub trace_store: Arc<dyn TraceStore>,
+    pub resume_state: Arc<ResumeState>,
+}
+
+/// Configuration knobs for the resume sweep (D21 §6, §8).
+#[derive(Debug, Clone, Copy)]
+pub struct ResumeConfig {
+    /// Maximum tasks rehydrated concurrently. Prevents thundering the
+    /// orchestrator on a cold restart with many running tasks.
+    pub max_parallel: usize,
+    /// Upper bound on how many times a task is retried within one
+    /// sweep pass. v1 ships with 1 — a task that fails its resume
+    /// run transitions straight to `Failed`.
+    pub max_attempts: u32,
+}
+
+impl Default for ResumeConfig {
+    fn default() -> Self {
+        Self {
+            max_parallel: 4,
+            max_attempts: 1,
+        }
+    }
+}
+
+/// Run the startup resume sweep (D21 §6).
+///
+/// Scans the persistent task store for `Running` / `Suspended` tasks,
+/// rehydrates each task's pinned layer chain, and re-executes the
+/// program with a fresh `TaskContext`. The evaluator's positional
+/// trace cache (D21 §3.2) short-circuits any IO calls that already
+/// completed in the pre-crash run, so repeated starts are idempotent
+/// modulo the program and input being resolvable.
+///
+/// Runs as a background task so gRPC listeners are free during the
+/// sweep. Callers that want synchronous wait semantics can `.await`
+/// the returned `JoinHandle`.
+pub async fn resume_sweep(
+    inputs: ResumeInputs,
+    session_id: uuid::Uuid,
+    components: Arc<ComponentRegistry>,
+    config: ResumeConfig,
+) {
+    use std::sync::atomic::Ordering;
+
+    let records = match inputs.task_store.list_tasks(&session_id) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("resume sweep: list_tasks failed: {e}");
+            return;
+        }
+    };
+    let mut resumable: Vec<crate::task::TaskRecord> = records
+        .into_iter()
+        .filter(|r| r.status.is_resumable())
+        .collect();
+    if resumable.is_empty() {
+        return;
+    }
+    // Oldest first.
+    resumable.sort_by_key(|r| r.created_at);
+
+    let total = resumable.len() as u32;
+    inputs
+        .resume_state
+        .in_progress
+        .store(true, Ordering::SeqCst);
+    inputs.resume_state.remaining.store(total, Ordering::SeqCst);
+    eprintln!(
+        "Resuming {total} task(s) from the persistent store (max_parallel={}, max_attempts={})",
+        config.max_parallel, config.max_attempts
+    );
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(config.max_parallel));
+    let mut handles = Vec::new();
+    for record in resumable {
+        let permit_sem = Arc::clone(&semaphore);
+        let task_store = Arc::clone(&inputs.task_store);
+        let backend = Arc::clone(&inputs.backend);
+        let trace_store = Arc::clone(&inputs.trace_store);
+        let resume_state = Arc::clone(&inputs.resume_state);
+        let components = Arc::clone(&components);
+        let max_attempts = config.max_attempts;
+
+        let handle = tokio::spawn(async move {
+            let _permit = permit_sem.acquire_owned().await.ok();
+            resume_one_task(
+                record,
+                task_store,
+                backend,
+                trace_store,
+                components,
+                max_attempts,
+            )
+            .await;
+            resume_state.remaining.fetch_sub(1, Ordering::SeqCst);
+        });
+        handles.push(handle);
+    }
+
+    for h in handles {
+        let _ = h.await;
+    }
+    inputs
+        .resume_state
+        .in_progress
+        .store(false, Ordering::SeqCst);
+    eprintln!("Resume sweep complete.");
+}
+
+/// Rehydrate a single task: resolve program + input in the pinned
+/// layer, re-execute with a TaskContext, and update the record
+/// based on the outcome.
+async fn resume_one_task(
+    mut record: crate::task::TaskRecord,
+    task_store: Arc<dyn crate::task::TaskStore>,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
+    trace_store: Arc<dyn TraceStore>,
+    components: Arc<ComponentRegistry>,
+    _max_attempts: u32,
+) {
+    use crate::task::TaskStatus;
+    // Rehydrate the pinned layer chain from the backend.
+    let layer = match backend.load_chain_from(&record.layer_head) {
+        Ok(Some(l)) => l,
+        _ => {
+            eprintln!(
+                "resume: task {}: pinned layer {} not in store; marking Failed",
+                record.task_id,
+                hex::encode(record.layer_head.0)
+            );
+            record.status = TaskStatus::Failed;
+            record.updated_at = now_millis();
+            let _ = task_store.put_task(&record);
+            return;
+        }
+    };
+
+    // Resolve program and input resources from the pinned layer.
+    let program = match Iri::parse(&record.program_iri)
+        .ok()
+        .and_then(|i| layer.resolve(&i).cloned())
+    {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "resume: task {}: program '{}' not found at pinned head",
+                record.task_id, record.program_iri
+            );
+            record.status = TaskStatus::Failed;
+            record.updated_at = now_millis();
+            let _ = task_store.put_task(&record);
+            return;
+        }
+    };
+    let input = match Iri::parse(&record.input_iri)
+        .ok()
+        .and_then(|i| layer.resolve(&i).cloned())
+    {
+        Some(r) => r,
+        None => {
+            // Input may legitimately have been inline (no IRI in layer);
+            // synthesize a minimal resource for now. A richer resume
+            // story would persist the input bytes inside the TaskRecord.
+            Resource::new_embedded()
+        }
+    };
+
+    let session_id = record.session_id;
+    let task_id = record.task_id;
+    let tc = Arc::new(crate::task::TaskContext::new(
+        session_id,
+        task_id,
+        Arc::clone(&task_store),
+    ));
+
+    let result = crate::program::eval_io::execute_program_nbe_with_institutions(
+        &program,
+        &input,
+        layer,
+        components,
+        Arc::new(crate::institution::InstitutionRegistry::new()),
+        Some(trace_store),
+        Some(tc),
+    );
+
+    match result {
+        Ok(_) => {
+            record.status = TaskStatus::Completed;
+        }
+        Err(e) => {
+            eprintln!("resume: task {} failed: {e}", task_id);
+            record.status = TaskStatus::Failed;
+        }
+    }
+    record.updated_at = now_millis();
+    if let Err(e) = task_store.put_task(&record) {
+        eprintln!("resume: failed to update task {}: {e}", task_id);
+    }
+}
+
 /// The Eigenius gRPC service implementation.
 pub struct EigeniusService {
     context: Arc<RwLock<ExecutionContext>>,
@@ -55,6 +274,9 @@ pub struct EigeniusService {
     /// fast-forward task completion. In 9b-iii there is exactly one
     /// of these per running kernel.
     session: Arc<RwLock<crate::task::Session>>,
+    /// Live state of the startup resume sweep (D21 §6). Shared with
+    /// the background sweep task so `Health` can report progress.
+    resume_state: Arc<ResumeState>,
     /// Optional gRPC client for the orchestrator. Used to forward IO-capability
     /// WASM components and to dispatch remote IO components during program
     /// execution. None means no orchestrator is configured — IO WASM installs
@@ -90,6 +312,7 @@ impl EigeniusService {
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
+            resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
         })
     }
@@ -130,6 +353,7 @@ impl EigeniusService {
             backend: Some(backend),
             task_store: Some(task_store),
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
+            resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
         })
     }
@@ -164,6 +388,7 @@ impl EigeniusService {
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
+            resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
         })
     }
@@ -171,6 +396,35 @@ impl EigeniusService {
     /// Create a tonic server from this service.
     pub fn into_server(self) -> EigeniusKernelServer<Self> {
         EigeniusKernelServer::new(self)
+    }
+
+    /// Borrow the task store + backend + related Arcs needed to run
+    /// the startup resume sweep (D21 §6). Returns `None` when no
+    /// persistent backend is attached — nothing to resume.
+    pub fn resume_inputs(&self) -> Option<ResumeInputs> {
+        let task_store = Arc::clone(self.task_store.as_ref()?);
+        let backend = Arc::clone(self.backend.as_ref()?);
+        Some(ResumeInputs {
+            task_store,
+            backend,
+            trace_store: Arc::clone(&self.trace_store),
+            resume_state: Arc::clone(&self.resume_state),
+        })
+    }
+
+    /// Snapshot of the current `ComponentRegistry`. Used by the
+    /// startup resume sweep, which needs a ComponentRegistry Arc to
+    /// hand to `execute_program_nbe_with_institutions` without
+    /// holding a lock on `self.components` across an await point.
+    pub async fn components_snapshot(&self) -> Arc<ComponentRegistry> {
+        Arc::clone(&*self.components.read().await)
+    }
+
+    /// Session id of the hardwired session (9b-iii). Read asynchronously
+    /// because the session lives behind a `RwLock` in anticipation of
+    /// multi-session support landing in Phase 14.
+    pub async fn session_id(&self) -> uuid::Uuid {
+        self.session.read().await.session_id
     }
 
     /// Persist a freshly-committed layer through the backend, if one is
@@ -1021,17 +1275,19 @@ impl EigeniusKernel for EigeniusService {
         let ctx = self.context.read().await;
         let all = ctx.head().all_resources();
 
-        // D21 §4 resume observability. In 9b-iii.3 we always report
-        // false/0 because there's no resume sweep yet — 9b-iii.4
-        // populates these counters from the real sweep state. Proto
-        // fields are stable now so clients can start polling.
+        // D21 §6 resume observability — populated by the resume
+        // sweep when it's active.
+        use std::sync::atomic::Ordering;
+        let resume_in_progress = self.resume_state.in_progress.load(Ordering::SeqCst);
+        let tasks_resuming = self.resume_state.remaining.load(Ordering::SeqCst);
+
         Ok(Response::new(HealthResponse {
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
             layer_count: 2, // core + program ontology
             resource_count: all.len() as u64,
-            resume_in_progress: false,
-            tasks_resuming: 0,
+            resume_in_progress,
+            tasks_resuming,
         }))
     }
 
@@ -1372,6 +1628,21 @@ pub async fn start_server(
                 e.resource_iri, e.message
             );
         }
+    }
+
+    // Background task resume sweep (D21 §6). Runs detached so the
+    // gRPC listener is available immediately; clients can poll
+    // `Health.resume_in_progress` / `tasks_resuming` to see when
+    // pre-crash tasks have finished draining.
+    if let Some(inputs) = service.resume_inputs() {
+        let session_id = service.session_id().await;
+        let components = service.components_snapshot().await;
+        tokio::spawn(resume_sweep(
+            inputs,
+            session_id,
+            components,
+            ResumeConfig::default(),
+        ));
     }
 
     println!("Eigenius gRPC server listening on {addr}");
