@@ -70,6 +70,7 @@ pub fn execute_program_nbe_with_institutions(
         institutions,
         trace_store,
         dispatched_traces: Arc::clone(&dispatched_traces),
+        task_context: None,
     };
 
     // Bind input as a Val::ResourceVal in the environment

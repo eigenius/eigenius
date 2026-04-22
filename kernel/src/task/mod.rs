@@ -19,6 +19,7 @@
 
 use crate::layer::LayerId;
 use crate::storage::{BatchOp, PersistentBackend, StorageError};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -189,6 +190,75 @@ impl Checkpoint {
     }
 }
 
+/// The live evaluation context for an executing task.
+///
+/// Threaded through `EvalCtx::IO` so the evaluator can route IO
+/// dispatches through per-task positional trace keys (D21 §3.2)
+/// instead of the cross-task content-address cache.
+///
+/// Fields are shared (Arc / Atomic) because cooperative cancellation
+/// (D21 §8 cancellation) and the async RunProgram path both hand the
+/// same `TaskContext` across tokio tasks.
+pub struct TaskContext {
+    pub session_id: Uuid,
+    pub task_id: Uuid,
+    /// Monotonic step counter. Incremented at each IO dispatch or
+    /// replay consumption.
+    pub step_seq: AtomicU64,
+    /// The store this task's traces + record + checkpoints are
+    /// persisted through.
+    pub task_store: Arc<dyn TaskStore>,
+    /// Cooperative cancellation flag (D21 §8). The evaluator checks
+    /// this between IO dispatches; `CancelTask` flips it.
+    pub cancel_requested: std::sync::atomic::AtomicBool,
+}
+
+impl TaskContext {
+    pub fn new(session_id: Uuid, task_id: Uuid, task_store: Arc<dyn TaskStore>) -> Self {
+        Self {
+            session_id,
+            task_id,
+            step_seq: AtomicU64::new(0),
+            task_store,
+            cancel_requested: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Atomically fetch the current step seq and increment.
+    pub fn next_step(&self) -> u64 {
+        self.step_seq.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Read (without incrementing) the next step seq the evaluator
+    /// will consume.
+    pub fn current_step(&self) -> u64 {
+        self.step_seq.load(Ordering::SeqCst)
+    }
+
+    /// Cooperative cancellation check. Callers should test this
+    /// between IO dispatches; `true` means the evaluator should
+    /// unwind via a `CancelTask`-induced error path.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_requested.load(Ordering::SeqCst)
+    }
+
+    /// Flip the cancellation flag.
+    pub fn request_cancel(&self) {
+        self.cancel_requested.store(true, Ordering::SeqCst);
+    }
+}
+
+impl std::fmt::Debug for TaskContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskContext")
+            .field("session_id", &self.session_id)
+            .field("task_id", &self.task_id)
+            .field("step_seq", &self.current_step())
+            .field("cancel_requested", &self.is_cancelled())
+            .finish()
+    }
+}
+
 // --- Keyspace helpers -------------------------------------------------
 
 /// `session:<id>:task:<id>:meta`
@@ -232,6 +302,18 @@ pub trait TaskStore: Send + Sync {
         task_id: &Uuid,
         step_seq: u64,
     ) -> Result<Option<Checkpoint>, TaskError>;
+
+    /// Read the stored trace bytes for a specific step. Callers decode
+    /// these as a `ComponentTrace` output (typically the output
+    /// `Resource` in CBOR). Returns `Ok(None)` if that step has not
+    /// been traced yet — the caller's cue to actually dispatch the
+    /// component (D21 §6 resume protocol).
+    fn get_trace_bytes(
+        &self,
+        session_id: &Uuid,
+        task_id: &Uuid,
+        step_seq: u64,
+    ) -> Result<Option<Vec<u8>>, TaskError>;
 
     /// Apply a task-step write atomically: the new `TaskRecord`, the
     /// new `ComponentTrace` bytes, and — on checkpoint steps — the
@@ -311,6 +393,16 @@ impl TaskStore for BackendTaskStore {
             Some(bytes) => Ok(Some(Checkpoint::from_cbor(&bytes)?)),
             None => Ok(None),
         }
+    }
+
+    fn get_trace_bytes(
+        &self,
+        session_id: &Uuid,
+        task_id: &Uuid,
+        step_seq: u64,
+    ) -> Result<Option<Vec<u8>>, TaskError> {
+        let key = task_trace_key(session_id, task_id, step_seq);
+        Ok(self.backend.get_meta(&key)?)
     }
 
     fn commit_step(

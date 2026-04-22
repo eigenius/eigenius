@@ -11,6 +11,7 @@ use crate::nbe::val::{Clos, Neut, Val};
 use crate::ontology::iri::Iri;
 use crate::program::component::ComponentRegistry;
 use crate::program::trace::{ComponentTrace, TraceStore};
+use crate::task::TaskContext;
 use std::sync::{Arc, Mutex};
 
 /// Evaluation context controlling what effects are available.
@@ -28,6 +29,11 @@ pub enum EvalCtx {
         trace_store: Option<Arc<dyn TraceStore>>,
         /// ComponentTraces produced during this evaluation (for trace layer commits).
         dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
+        /// Optional task context. When present, IO dispatches route
+        /// through per-task positional trace keys (D21 §3.2) instead
+        /// of the cross-task content-address cache. Synchronous
+        /// `RunProgram` and the type-checker leave this `None`.
+        task_context: Option<Arc<TaskContext>>,
     },
 }
 
@@ -295,14 +301,21 @@ fn dispatch_component(
     component_arg: Option<&Val>,
     ctx: &EvalCtx,
 ) -> Val {
-    let (registry, layer, trace_store, dispatched_traces) = match ctx {
+    let (registry, layer, trace_store, dispatched_traces, task_context) = match ctx {
         EvalCtx::IO {
             registry,
             layer,
             trace_store,
             dispatched_traces,
+            task_context,
             ..
-        } => (registry, layer, trace_store, dispatched_traces),
+        } => (
+            registry,
+            layer,
+            trace_store,
+            dispatched_traces,
+            task_context,
+        ),
         _ => panic!("dispatch_component called outside IO mode"),
     };
 
@@ -324,16 +337,41 @@ fn dispatch_component(
     // JSON Schema generation.
     let schema_table = resolve_component_schemas(component_iri, &mut arg_resource, layer);
 
-    // Check trace cache for IO components
+    // Cache routing is determinism-gated (D21 §3.3):
+    //   - Deterministic components (!is_io): content-address memo —
+    //     identical input yields identical output, so cross-task
+    //     reuse is sound.
+    //   - IO components: positional per-task keys only, via
+    //     TaskContext. The content-address cache would silently
+    //     collapse distinct observations into one (the Phase-9a bug
+    //     D21 §1 motivates); without a TaskContext, IO is simply
+    //     re-dispatched every time rather than mis-cached.
     if component.is_io() {
-        let cache_key = crate::program::trace::compute_trace_key(component_iri, &input_resource);
-        if let Some(store) = trace_store {
-            if let Some(cached) = store.get_component_trace(&cache_key) {
-                return Val::ResourceVal(Box::new(cached.output));
+        // D21 §3.2 replay path: when a TaskContext is attached, look
+        // up this step's trace by (task_id, step_seq) first. A hit
+        // means we're re-running after a crash and this IO call has
+        // already completed — return the cached output without
+        // re-dispatching.
+        //
+        // `step_seq` is consumed (fetch_add) whether the lookup hits
+        // or misses — it's the monotonic position in the task's IO
+        // log.
+        let replay_slot = task_context.as_ref().map(|tc| (tc.clone(), tc.next_step()));
+        if let Some((tc, step)) = replay_slot.as_ref() {
+            if let Ok(Some(bytes)) =
+                tc.task_store
+                    .get_trace_bytes(&tc.session_id, &tc.task_id, *step)
+            {
+                // `parse_resource_lenient` — IO component outputs are
+                // often anonymous embedded Resources with no `@id`,
+                // which the strict parser rejects.
+                if let Ok(output) = crate::ontology::eigon_cbor::parse_resource_lenient(&bytes) {
+                    return Val::ResourceVal(Box::new(output));
+                }
+                // Corrupt trace bytes — fall through to re-dispatch.
             }
         }
 
-        // Dispatch
         match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => {
                 // For CompleteJson: convert the short-name JSON response back to a typed Resource
@@ -363,16 +401,41 @@ fn dispatch_component(
 
                 let ct = ComponentTrace {
                     component: component_iri.to_string(),
-                    input_hash: cache_key,
+                    // input_hash is retained for reflection / audit
+                    // even though IO dispatch no longer routes
+                    // through the content-address cache.
+                    input_hash: crate::program::trace::compute_trace_key(
+                        component_iri,
+                        &input_resource,
+                    ),
                     argument_hash: None,
                     output: output.clone(),
                     cached: false,
                     metrics: result.metrics,
                 };
-                // Cache the result
-                if let Some(store) = trace_store {
-                    store.put_component_trace(cache_key, ct.clone());
+
+                // Persist the per-task trace via commit_step so the
+                // output bytes and updated TaskRecord land atomically
+                // (D21 §8 step atomicity). Without a TaskContext
+                // there is no safe place to cache an IO output, so
+                // we just record the trace for the layer commit.
+                if let Some((tc, step)) = replay_slot.as_ref() {
+                    let output_bytes = crate::ontology::eigon_cbor::serialize_resource(&output);
+                    if let Ok(Some(mut record)) =
+                        tc.task_store.get_task(&tc.session_id, &tc.task_id)
+                    {
+                        record.step_seq = step + 1;
+                        record.latest_trace_seq = *step;
+                        record.updated_at = now_millis();
+                        if let Err(e) =
+                            tc.task_store
+                                .commit_step(&record, Some((*step, output_bytes)), None)
+                        {
+                            eprintln!("task commit_step failed: {e}");
+                        }
+                    }
                 }
+
                 // Record for trace layer commit
                 if let Ok(mut traces) = dispatched_traces.lock() {
                     traces.push(ct);
@@ -386,15 +449,52 @@ fn dispatch_component(
             }
         }
     } else {
-        // Pure component — no caching
+        // Deterministic component — content-address memo is sound
+        // and reused cross-task (D21 §3.3). Identical input across
+        // two tasks hits the same entry, amortizing the dispatch.
+        let cache_key = crate::program::trace::compute_trace_key(component_iri, &input_resource);
+        if let Some(store) = trace_store {
+            if let Some(cached) = store.get_component_trace(&cache_key) {
+                return Val::ResourceVal(Box::new(cached.output));
+            }
+        }
+
         match component.execute(&input_resource, arg_resource.as_ref(), layer) {
-            Ok(result) => Val::ResourceVal(Box::new(result.output)),
+            Ok(result) => {
+                let output = result.output.clone();
+                let ct = ComponentTrace {
+                    component: component_iri.to_string(),
+                    input_hash: cache_key,
+                    argument_hash: None,
+                    output: output.clone(),
+                    cached: false,
+                    metrics: result.metrics,
+                };
+                if let Some(store) = trace_store {
+                    store.put_component_trace(cache_key, ct.clone());
+                }
+                if let Ok(mut traces) = dispatched_traces.lock() {
+                    traces.push(ct);
+                }
+                Val::ResourceVal(Box::new(output))
+            }
             Err(e) => {
                 eprintln!("pure component dispatch failed: {e}");
                 Val::ResourceVal(Box::new(crate::ontology::resource::Resource::new_embedded()))
             }
         }
     }
+}
+
+/// Current time in milliseconds since the Unix epoch. Falls back to 0
+/// if the system clock is before the epoch (shouldn't happen in
+/// practice).
+fn now_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Convert a Val to a Resource for component dispatch.
