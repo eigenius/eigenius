@@ -178,6 +178,51 @@ impl EigeniusService {
     ///
     /// Returns a validation-like error on storage failure so the caller
     /// can surface it to clients without crashing the server.
+    /// Resolve the target layer for a read RPC (D21 §3.6 `at_layer`).
+    ///
+    /// Empty / invalid hex falls back to the session's active top
+    /// (`context.head()`). When `at_layer` is set and a backend is
+    /// attached, reconstructs the layer chain rooted at that id. Errors
+    /// propagate as `Status::invalid_argument` / `Status::not_found`
+    /// so the client sees a clear failure rather than a silent fallback.
+    async fn resolve_read_layer(&self, at_layer: &str) -> Result<Arc<crate::layer::Layer>, Status> {
+        if at_layer.is_empty() {
+            let ctx = self.context.read().await;
+            return Ok(Arc::clone(ctx.head()));
+        }
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "at_layer requires a persistent backend; none attached".to_string(),
+            )
+        })?;
+        let bytes = hex::decode(at_layer)
+            .map_err(|e| Status::invalid_argument(format!("at_layer not valid hex: {e}")))?;
+        if bytes.len() != 32 {
+            return Err(Status::invalid_argument(
+                "at_layer must be a 32-byte SHA-256 (64 hex chars)".to_string(),
+            ));
+        }
+        let mut id = [0u8; 32];
+        id.copy_from_slice(&bytes);
+        let layer_id = crate::layer::LayerId(id);
+        match backend.load_chain_from(&layer_id) {
+            Ok(Some(layer)) => Ok(layer),
+            Ok(None) => Err(Status::not_found(format!(
+                "layer {} not in store",
+                at_layer
+            ))),
+            // RocksStore::load_chain_from walks the chain via
+            // `get_chain` which reports missing entries as
+            // StorageError::NotFound. Treat that as "layer not in
+            // store" rather than an internal error.
+            Err(crate::storage::StorageError::NotFound(_)) => Err(Status::not_found(format!(
+                "layer {} not in store",
+                at_layer
+            ))),
+            Err(e) => Err(Status::internal(format!("load_chain_from failed: {e}"))),
+        }
+    }
+
     fn persist_layer_if_backend(&self, layer: &crate::layer::Layer) -> Option<ValidationError> {
         let backend = self.backend.as_ref()?;
         if let Err(e) = backend.store_layer(layer) {
@@ -575,8 +620,8 @@ impl EigeniusKernel for EigeniusService {
         let iri = Iri::parse(&req.iri)
             .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
 
-        let ctx = self.context.read().await;
-        match ctx.resolve(&iri) {
+        let layer = self.resolve_read_layer(&req.at_layer).await?;
+        match layer.resolve(&iri) {
             Some(resource) => Ok(Response::new(InspectResponse {
                 found: true,
                 resource: Self::serialize_resource(resource),
@@ -593,6 +638,7 @@ impl EigeniusKernel for EigeniusService {
         request: Request<QueryRequest>,
     ) -> Result<Response<QueryResponse>, Status> {
         let req = request.into_inner();
+        let layer = self.resolve_read_layer(&req.at_layer).await?;
         let ctx = self.context.read().await;
         let institutions = self.institutions.read().await;
 
@@ -601,7 +647,7 @@ impl EigeniusKernel for EigeniusService {
             ctx: Some(&ctx),
         };
 
-        let document = match query::execute_with(&req.eigenql, ctx.head(), runtime) {
+        let document = match query::execute_with(&req.eigenql, &layer, runtime) {
             Ok(doc) => doc,
             Err(errors) => {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
@@ -975,11 +1021,17 @@ impl EigeniusKernel for EigeniusService {
         let ctx = self.context.read().await;
         let all = ctx.head().all_resources();
 
+        // D21 §4 resume observability. In 9b-iii.3 we always report
+        // false/0 because there's no resume sweep yet — 9b-iii.4
+        // populates these counters from the real sweep state. Proto
+        // fields are stable now so clients can start polling.
         Ok(Response::new(HealthResponse {
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
             layer_count: 2, // core + program ontology
             resource_count: all.len() as u64,
+            resume_in_progress: false,
+            tasks_resuming: 0,
         }))
     }
 
@@ -1057,8 +1109,17 @@ impl EigeniusKernel for EigeniusService {
 
     async fn list_institutions(
         &self,
-        _request: Request<ListInstitutionsRequest>,
+        request: Request<ListInstitutionsRequest>,
     ) -> Result<Response<ListInstitutionsResponse>, Status> {
+        // `at_layer` is accepted but currently has no effect —
+        // institutions live in a kernel-global runtime registry, not
+        // in the layer chain. If Phase 14 ever introduces per-session
+        // institution scoping, this is where the layer-aware lookup
+        // would branch. For 9b-iii we validate + ignore.
+        let req = request.into_inner();
+        if !req.at_layer.is_empty() {
+            let _ = self.resolve_read_layer(&req.at_layer).await?;
+        }
         let institutions = self.institutions.read().await;
         let infos: Vec<proto::InstitutionInfo> = institutions
             .list()
@@ -1092,8 +1153,8 @@ impl EigeniusKernel for EigeniusService {
         let class_iri = Iri::parse(&req.class_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
 
-        let ctx = self.context.read().await;
-        match crate::program::schema::schema_for_class(&class_iri, ctx.head()) {
+        let layer = self.resolve_read_layer(&req.at_layer).await?;
+        match crate::program::schema::schema_for_class(&class_iri, &layer) {
             Ok((schema, _table)) => Ok(Response::new(GetSchemaResponse {
                 success: true,
                 json_schema: serde_json::to_string_pretty(&schema).unwrap_or_default(),

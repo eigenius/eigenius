@@ -842,6 +842,7 @@ async fn remote_inspect(endpoint: &str, iri_str: &str, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::InspectRequest {
+        at_layer: String::new(),
         iri: iri_str.to_string(),
     };
 
@@ -877,6 +878,7 @@ async fn remote_query(endpoint: &str, eigenql: &str, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::QueryRequest {
+        at_layer: String::new(),
         eigenql: eigenql.to_string(),
     };
 
@@ -1037,7 +1039,9 @@ async fn remote_list_institutions(endpoint: &str, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     match client
-        .list_institutions(eigenius_kernel::server::proto::ListInstitutionsRequest {})
+        .list_institutions(eigenius_kernel::server::proto::ListInstitutionsRequest {
+            at_layer: String::new(),
+        })
         .await
     {
         Ok(response) => {
@@ -1083,6 +1087,7 @@ async fn remote_get_schema(endpoint: &str, class_iri: &str, _json_output: bool) 
 
     match client
         .get_schema(eigenius_kernel::server::proto::GetSchemaRequest {
+            at_layer: String::new(),
             class_iri: class_iri.to_string(),
         })
         .await
@@ -1221,6 +1226,7 @@ async fn run_query(
 
     let resp = match client
         .query(eigenius_kernel::server::proto::QueryRequest {
+            at_layer: String::new(),
             eigenql: eigenql.to_string(),
         })
         .await
@@ -1345,6 +1351,7 @@ async fn remote_capability_inspect(endpoint: &str, iri: &str, json: bool) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::InspectRequest {
+        at_layer: String::new(),
         iri: iri.to_string(),
     };
 
@@ -1689,7 +1696,9 @@ async fn remote_capability_test(
     // institutions may register under a binary-declared IRI that differs from
     // the ontology resource's @id).
     let institutions = client
-        .list_institutions(eigenius_kernel::server::proto::ListInstitutionsRequest {})
+        .list_institutions(eigenius_kernel::server::proto::ListInstitutionsRequest {
+            at_layer: String::new(),
+        })
         .await
         .map(|r| r.into_inner().institutions)
         .unwrap_or_default();

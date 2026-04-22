@@ -47,6 +47,7 @@ async fn inspect_core_class() {
 
     let response = client
         .inspect(InspectRequest {
+            at_layer: String::new(),
             iri: "urn:eigenius:core:Class".to_string(),
         })
         .await
@@ -68,6 +69,7 @@ async fn inspect_not_found() {
 
     let response = client
         .inspect(InspectRequest {
+            at_layer: String::new(),
             iri: "urn:eigenius:nonexistent:Foo".to_string(),
         })
         .await
@@ -82,7 +84,7 @@ async fn query_all_classes() {
     let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
 
     let response = client
-        .query(QueryRequest {
+        .query(QueryRequest { at_layer: String::new(),
             eigenql: r#"USING "urn:eigenius:core:Class" MATCH Class(?c) { short_name: ?name } RETURN [] { short_name: ?name }"#.to_string(),
         })
         .await
@@ -119,7 +121,7 @@ async fn load_and_query() {
 
     // Query for dogs
     let query_response = client
-        .query(QueryRequest {
+        .query(QueryRequest { at_layer: String::new(),
             eigenql: r#"MATCH "urn:eigenius:example:Dog"(?d) { "urn:eigenius:example:name": ?name } RETURN [] { "urn:eigenius:example:name": ?name }"#.to_string(),
         })
         .await
