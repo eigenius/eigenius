@@ -21,6 +21,16 @@ pub mod proto {
 use proto::eigenius_kernel_server::{EigeniusKernel, EigeniusKernelServer};
 use proto::*;
 
+/// Current time in milliseconds since the Unix epoch. Used to stamp
+/// `TaskRecord.{created_at, updated_at}`.
+fn now_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// The Eigenius gRPC service implementation.
 pub struct EigeniusService {
     context: Arc<RwLock<ExecutionContext>>,
@@ -34,6 +44,17 @@ pub struct EigeniusService {
     /// the server is in-memory-only (the pre-Phase-9a behaviour).
     /// See D13.
     backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
+    /// Persistent task store (D21 §3.1). `Some` whenever a backend
+    /// is attached — every `RunProgram` allocates a task record so
+    /// trace lookups can route through per-task positional keys and
+    /// a mid-flight crash leaves a recoverable `Running` task for
+    /// the resume sweep to pick up.
+    task_store: Option<Arc<dyn crate::task::TaskStore>>,
+    /// Single hardwired session (D21 §3.7). Tracks the session's
+    /// active_top; advances on every successful Load and on
+    /// fast-forward task completion. In 9b-iii there is exactly one
+    /// of these per running kernel.
+    session: Arc<RwLock<crate::task::Session>>,
     /// Optional gRPC client for the orchestrator. Used to forward IO-capability
     /// WASM components and to dispatch remote IO components during program
     /// execution. None means no orchestrator is configured — IO WASM installs
@@ -67,6 +88,8 @@ impl EigeniusService {
             trace_store: Arc::new(InMemoryTraceStore::new()),
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
             backend: None,
+            task_store: None,
+            session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             orchestrator_client: None,
         })
     }
@@ -96,12 +119,17 @@ impl EigeniusService {
         let trace_store: Arc<dyn TraceStore> =
             Arc::new(BackendTraceStore::new(Arc::clone(&backend)));
 
+        let task_store: Arc<dyn crate::task::TaskStore> =
+            Arc::new(crate::task::BackendTaskStore::new(Arc::clone(&backend)));
+
         Ok(Self {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
             backend: Some(backend),
+            task_store: Some(task_store),
+            session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             orchestrator_client: None,
         })
     }
@@ -134,6 +162,8 @@ impl EigeniusService {
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
             backend: None,
+            task_store: None,
+            session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             orchestrator_client: None,
         })
     }
@@ -710,19 +740,85 @@ impl EigeniusKernel for EigeniusService {
             .next()
             .ok_or_else(|| Status::invalid_argument("no input resource"))?;
 
+        // D21 §3.1: allocate a task for this invocation. When a task
+        // store is attached (persistent backend), the record is
+        // persisted on entry and again on completion so a mid-flight
+        // crash leaves a recoverable `Running` record for the resume
+        // sweep. The evaluator routes IO dispatches through a
+        // TaskContext so repeated calls with the same input each
+        // occupy their own step_seq slot (D21 §3.2).
+        let (task_context, task_id_str, layer_head, session_id) = match &self.task_store {
+            Some(store) => {
+                let session_id = self.session.read().await.session_id;
+                let task_id = uuid::Uuid::new_v4();
+                let layer_head = {
+                    let ctx = self.context.read().await;
+                    ctx.head().id().clone()
+                };
+                let program_iri = program
+                    .id()
+                    .map(|i| i.as_str().to_string())
+                    .unwrap_or_default();
+                let input_iri = input
+                    .id()
+                    .map(|i| i.as_str().to_string())
+                    .unwrap_or_default();
+                let record = crate::task::TaskRecord::new_running(
+                    session_id,
+                    task_id,
+                    program_iri,
+                    input_iri,
+                    layer_head.clone(),
+                    now_millis(),
+                );
+                if let Err(e) = store.put_task(&record) {
+                    return Err(Status::internal(format!("failed to persist task: {e}")));
+                }
+                let tc = Arc::new(crate::task::TaskContext::new(
+                    session_id,
+                    task_id,
+                    Arc::clone(store),
+                ));
+                (Some(tc), task_id.to_string(), Some(layer_head), session_id)
+            }
+            None => (None, String::new(), None, uuid::Uuid::nil()),
+        };
+
         // Execute via NbE in IO mode
         let exec_result = {
             let ctx = self.context.read().await;
             let components = Arc::clone(&*self.components.read().await);
-            match crate::program::eval_io::execute_program_nbe(
+            // Pass an empty institution registry — the pre-Phase-9b-iii
+            // RunProgram path already did this; fiber queries go
+            // through the FiberQuery RPC, not through program
+            // dispatch. Preserves existing behaviour.
+            match crate::program::eval_io::execute_program_nbe_with_institutions(
                 &program,
                 &input,
                 Arc::clone(ctx.head()),
                 components,
+                Arc::new(crate::institution::InstitutionRegistry::new()),
                 Some(Arc::clone(&self.trace_store)),
+                task_context.clone(),
             ) {
                 Ok(result) => result,
                 Err(e) => {
+                    // Record the failure if we have a task store.
+                    if let (Some(store), Some(head)) = (&self.task_store, layer_head.as_ref()) {
+                        if let Some(tid) = task_context.as_ref().map(|tc| tc.task_id) {
+                            let mut rec = crate::task::TaskRecord::new_running(
+                                session_id,
+                                tid,
+                                String::new(),
+                                String::new(),
+                                head.clone(),
+                                now_millis(),
+                            );
+                            rec.status = crate::task::TaskStatus::Failed;
+                            rec.updated_at = now_millis();
+                            let _ = store.put_task(&rec);
+                        }
+                    }
                     return Ok(Response::new(RunProgramResponse {
                         success: false,
                         output: Vec::new(),
@@ -734,6 +830,7 @@ impl EigeniusKernel for EigeniusService {
                             severity: "error".to_string(),
                         }],
                         trace_iri: String::new(),
+                        task_id: task_id_str.clone(),
                     }));
                 }
             }
@@ -778,10 +875,12 @@ impl EigeniusKernel for EigeniusService {
         );
 
         // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
-        {
+        let result_layer_head = {
             let mut ctx = self.context.write().await;
             // Add ProgramTrace
-            let _ = ctx.add_resource(trace_resource);
+            if let Err(e) = ctx.add_resource(trace_resource) {
+                eprintln!("warning: failed to add ProgramTrace: {e}");
+            }
             // Add each IO ComponentTrace as a resource
             for ct in &dispatched_traces {
                 let ct_resource = crate::program::trace::trace_to_resource(
@@ -796,6 +895,24 @@ impl EigeniusKernel for EigeniusService {
                 if let Some(err) = self.persist_layer_if_backend(&layer) {
                     eprintln!("warning: failed to persist trace layer: {}", err.message);
                 }
+                Some(layer.id().clone())
+            } else {
+                None
+            }
+        };
+
+        // Mark the task Completed and record its result_layer_head so
+        // clients that polled via GetTaskStatus can resolve it (D21
+        // §3.7). `result_layer_head` is the trace layer committed
+        // above — the program's observable outputs.
+        if let (Some(store), Some(tc)) = (&self.task_store, task_context.as_ref()) {
+            if let Ok(Some(mut rec)) = store.get_task(&tc.session_id, &tc.task_id) {
+                rec.status = crate::task::TaskStatus::Completed;
+                rec.result_layer_head = result_layer_head;
+                rec.updated_at = now_millis();
+                if let Err(e) = store.put_task(&rec) {
+                    eprintln!("warning: failed to update task record: {e}");
+                }
             }
         }
 
@@ -804,6 +921,7 @@ impl EigeniusKernel for EigeniusService {
             output: Self::serialize_resource(&output),
             errors: Vec::new(),
             trace_iri: trace_iri_str,
+            task_id: task_id_str,
         }))
     }
 

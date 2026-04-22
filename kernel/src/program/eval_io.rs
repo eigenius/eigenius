@@ -39,10 +39,16 @@ pub fn execute_program_nbe(
         registry,
         Arc::new(InstitutionRegistry::new()),
         trace_store,
+        None,
     )
 }
 
 /// Execute a program resource via NbE in IO mode with institution support.
+///
+/// `task_context`, when present, routes IO dispatches through
+/// per-task positional trace keys so the task can be resumed after a
+/// crash (D21 §3.2). When `None`, the evaluator runs without task
+/// tracking (type-checker, ad-hoc eval, pre-task callers).
 pub fn execute_program_nbe_with_institutions(
     program: &Resource,
     input: &Resource,
@@ -50,6 +56,7 @@ pub fn execute_program_nbe_with_institutions(
     registry: Arc<ComponentRegistry>,
     institutions: Arc<InstitutionRegistry>,
     trace_store: Option<Arc<dyn TraceStore>>,
+    task_context: Option<Arc<crate::task::TaskContext>>,
 ) -> Result<NbeExecutionResult, ProgramError> {
     // Extract the program body expression
     let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
@@ -70,7 +77,7 @@ pub fn execute_program_nbe_with_institutions(
         institutions,
         trace_store,
         dispatched_traces: Arc::clone(&dispatched_traces),
-        task_context: None,
+        task_context,
     };
 
     // Bind input as a Val::ResourceVal in the environment
