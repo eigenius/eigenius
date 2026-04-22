@@ -1106,6 +1106,142 @@ impl EigeniusKernel for EigeniusService {
             })),
         }
     }
+
+    async fn list_tasks(
+        &self,
+        _request: Request<ListTasksRequest>,
+    ) -> Result<Response<ListTasksResponse>, Status> {
+        let tasks = match &self.task_store {
+            Some(store) => {
+                let session_id = self.session.read().await.session_id;
+                match store.list_tasks(&session_id) {
+                    Ok(records) => records.into_iter().map(task_record_to_info).collect(),
+                    Err(e) => {
+                        return Err(Status::internal(format!("list_tasks failed: {e}")));
+                    }
+                }
+            }
+            None => Vec::new(),
+        };
+        Ok(Response::new(ListTasksResponse { tasks }))
+    }
+
+    async fn get_task_status(
+        &self,
+        request: Request<GetTaskStatusRequest>,
+    ) -> Result<Response<GetTaskStatusResponse>, Status> {
+        let req = request.into_inner();
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                return Ok(Response::new(GetTaskStatusResponse {
+                    found: false,
+                    task: None,
+                }))
+            }
+        };
+        let task_id = uuid::Uuid::parse_str(&req.task_id)
+            .map_err(|e| Status::invalid_argument(format!("invalid task_id: {e}")))?;
+        let session_id = self.session.read().await.session_id;
+        match store.get_task(&session_id, &task_id) {
+            Ok(Some(record)) => Ok(Response::new(GetTaskStatusResponse {
+                found: true,
+                task: Some(task_record_to_info(record)),
+            })),
+            Ok(None) => Ok(Response::new(GetTaskStatusResponse {
+                found: false,
+                task: None,
+            })),
+            Err(e) => Err(Status::internal(format!("get_task failed: {e}"))),
+        }
+    }
+
+    async fn cancel_task(
+        &self,
+        request: Request<CancelTaskRequest>,
+    ) -> Result<Response<CancelTaskResponse>, Status> {
+        let req = request.into_inner();
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                return Ok(Response::new(CancelTaskResponse {
+                    success: false,
+                    status: String::new(),
+                    error: "no persistent backend; tasks are not tracked".to_string(),
+                }))
+            }
+        };
+        let task_id = uuid::Uuid::parse_str(&req.task_id)
+            .map_err(|e| Status::invalid_argument(format!("invalid task_id: {e}")))?;
+        let session_id = self.session.read().await.session_id;
+        let mut record = match store.get_task(&session_id, &task_id) {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                return Ok(Response::new(CancelTaskResponse {
+                    success: false,
+                    status: String::new(),
+                    error: format!("task not found: {task_id}"),
+                }));
+            }
+            Err(e) => {
+                return Err(Status::internal(format!("get_task failed: {e}")));
+            }
+        };
+
+        // If already terminal, just echo the current status — there's
+        // nothing to cancel.
+        if record.status.is_terminal() {
+            let status = format!("{:?}", record.status);
+            return Ok(Response::new(CancelTaskResponse {
+                success: true,
+                status,
+                error: String::new(),
+            }));
+        }
+
+        // Flip the persisted status to Cancelling. 9b-iii.4 will
+        // switch this to a cooperative cancellation that the running
+        // evaluator picks up between IO dispatches; for synchronous
+        // 9b-iii.3, CancelTask is effectively an "abandoned" marker
+        // until the next resume sweep re-evaluates the task and sees
+        // it as Cancelling.
+        record.status = crate::task::TaskStatus::Cancelling;
+        record.updated_at = now_millis();
+        if let Err(e) = store.put_task(&record) {
+            return Err(Status::internal(format!("put_task failed: {e}")));
+        }
+
+        Ok(Response::new(CancelTaskResponse {
+            success: true,
+            status: format!("{:?}", record.status),
+            error: String::new(),
+        }))
+    }
+}
+
+/// Convert a `TaskRecord` to the gRPC `TaskInfo` view.
+fn task_record_to_info(record: crate::task::TaskRecord) -> TaskInfo {
+    TaskInfo {
+        task_id: record.task_id.to_string(),
+        session_id: record.session_id.to_string(),
+        program_iri: record.program_iri,
+        input_iri: record.input_iri,
+        status: format!("{:?}", record.status),
+        layer_head: hex::encode(record.layer_head.0),
+        step_seq: record.step_seq,
+        latest_trace_seq: record.latest_trace_seq,
+        last_checkpoint_step: record
+            .last_checkpoint
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
+        result_layer_head: record
+            .result_layer_head
+            .map(|id| hex::encode(id.0))
+            .unwrap_or_default(),
+        created_at_ms: record.created_at,
+        updated_at_ms: record.updated_at,
+        retain_forever: record.retain_forever,
+    }
 }
 
 /// Known remote component IRIs that should be dispatched to the orchestrator.
