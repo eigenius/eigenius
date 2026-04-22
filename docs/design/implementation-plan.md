@@ -521,6 +521,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - D9: `docs/design/d9-nbe-unification-and-type-extensions.md` §5.10 (known gap: persistent trace store)
 - **D13: `docs/design/d13-durable-kernel-state.md`** — durable-state specification, startup sequence, institution/WASM re-registration, migration policy
 - D11: `docs/design/d11-codata-streams.md` — codata, streams, resumable execution
+- **D21: `docs/design/d21-task-traces-and-checkpointing.md`** — per-task trace identity, checkpoint primitive, retention policy. Prerequisite for 9b-iii.
 
 ---
 
@@ -793,6 +794,7 @@ The following design documents must be written and reviewed before the phase tha
 | D18 | **Ontology-as-Types Resolution** | How `find_sigma_field` walks the layer chain to resolve `EigonClass(iri)` into a dependent-record (Sigma) type at check time. Includes the Read-capability-mode layer-access protocol, caching policy (inferred types memoized per (class IRI, layer head)), and handling for class inheritance / `subclass_of`. Closes the #12 high-priority correctness hazard. Prerequisite for most of D19. | Phase 10a | 8–12 pages |
 | D19 | **Inductive Types in Mini-TT** | Single (non-mutual, non-nested) strictly-positive inductive types: declaration form, positivity checker, recursor/eliminator derivation, iota-reduction rules, integration with the conversion algorithm. Tier 1 extension from `life-science-requirements.md` §16.1. nanoda_lib (`src/inductive.rs`) as a reference, with Eigenius-specific simplifications (no universe polymorphism, no nested inductives v1). | Phase 11b | 15–20 pages |
 | D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Branching head pointers, common-ancestor invariants, comorphism witnesses as merge proofs, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Multi-session operation built on the same primitive. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 14 | 12–16 pages |
+| D21 | **Task Traces and Checkpointing** | **DRAFT (decisions resolved)** — `docs/design/d21-task-traces-and-checkpointing.md`. Re-keys `ComponentTrace` lookups from content-address to per-task positional `(session_id, task_id, step_seq)`; demotes the content-address cache to a Pure/Read-only memo side-table scoped by `layer_head`; introduces the `components:Checkpoint` built-in; specifies the resume protocol; commits to pin-at-entry layer-head semantics, per-step `WriteBatch` atomicity, bounded-parallel background resume (default 4, retry 1), cooperative-with-grace cancellation (30s), and a single `--audit-retention` knob defaulting to `unlimited`. Tasks commit result layers with parent = pinned head; session auto-advances on fast-forward and forks on divergence. Single hardwired session (`session_id = Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion; read RPCs gain optional `at_layer` hint so forked results stay reachable. Prerequisite for 9b-iii. | Phase 9b-iii | 14–16 pages |
 
 **Reference documents** (analysis rather than specification):
 
