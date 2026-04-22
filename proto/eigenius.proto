@@ -43,6 +43,20 @@ service EigeniusKernel {
 
   // Generate a JSON Schema for an ontology class.
   rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
+
+  // List all tasks in the session (D21 §3.1). Returns empty when no
+  // persistent backend is attached — ephemeral kernels don't track
+  // tasks across invocations.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+
+  // Look up a specific task's status + metadata (D21 §3.1).
+  rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
+
+  // Request cooperative cancellation of a Running / Suspended task
+  // (D21 §8 cancellation). Sets the task's cancel flag and
+  // transitions to Cancelling; a fully-async evaluator (9b-iii.4)
+  // picks this up between IO dispatches and unwinds.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
 }
 
 // --- Load ---
@@ -241,6 +255,55 @@ message GetSchemaResponse {
   bool success = 1;
   string json_schema = 2;         // JSON Schema as a JSON string
   string error = 3;               // Error message if !success
+}
+
+// --- Tasks (D21) ---
+
+message TaskInfo {
+  string task_id = 1;             // UUID
+  string session_id = 2;          // UUID (always nil in 9b-iii)
+  string program_iri = 3;
+  string input_iri = 4;
+  string status = 5;              // Running | Suspended | Cancelling |
+                                  // Completed | Failed | Cancelled
+  string layer_head = 6;          // hex-encoded pinned LayerId
+  uint64 step_seq = 7;
+  uint64 latest_trace_seq = 8;
+  // Empty string when no checkpoint has been committed yet.
+  // Present as string-encoded step_seq, not a LayerId, matching
+  // TaskRecord.last_checkpoint: Option<u64>.
+  string last_checkpoint_step = 9;
+  string result_layer_head = 10;  // hex-encoded LayerId when Completed; empty otherwise
+  int64 created_at_ms = 11;
+  int64 updated_at_ms = 12;
+  bool retain_forever = 13;
+}
+
+message ListTasksRequest {}
+
+message ListTasksResponse {
+  repeated TaskInfo tasks = 1;
+}
+
+message GetTaskStatusRequest {
+  string task_id = 1;             // UUID as string
+}
+
+message GetTaskStatusResponse {
+  bool found = 1;
+  TaskInfo task = 2;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;             // UUID as string
+}
+
+message CancelTaskResponse {
+  bool success = 1;
+  string status = 2;              // The post-cancel status ("Cancelling" or "Cancelled"
+                                  // if the task was already Running; "Completed"/"Failed"
+                                  // if the task had already reached a terminal state)
+  string error = 3;               // Error message if !success (e.g. no task_store, task not found)
 }
 
 // --- Common ---

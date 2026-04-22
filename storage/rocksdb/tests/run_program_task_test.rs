@@ -130,6 +130,176 @@ async fn run_program_persists_task_record() {
 }
 
 #[tokio::test]
+async fn list_tasks_and_get_task_status() {
+    // Spin up a service, run the identity program, then exercise
+    // ListTasks + GetTaskStatus on its returned task_id.
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = store;
+
+    let service = EigeniusService::with_persistent_backend(
+        eigenius_kernel::program::component::ComponentRegistry::default(),
+        Arc::clone(&backend),
+    )
+    .expect("service");
+
+    let _ = service
+        .load(Request::new(eigenius_kernel::server::proto::LoadRequest {
+            resources: class_and_input_json().into_bytes(),
+            content_type: "application/eigon+json".to_string(),
+            auto_commit: true,
+        }))
+        .await
+        .expect("load");
+
+    let input_bytes = serde_json::json!({
+        "@id": "urn:eigenius:test:input:payload",
+        "urn:eigenius:core:is_a": ["urn:eigenius:example:Thing"]
+    })
+    .to_string()
+    .into_bytes();
+
+    let run_resp = service
+        .run_program(Request::new(RunProgramRequest {
+            program: identity_program_json().into_bytes(),
+            input: input_bytes,
+            content_type: "application/eigon+json".to_string(),
+        }))
+        .await
+        .expect("run_program")
+        .into_inner();
+    let task_id_str = run_resp.task_id.clone();
+    assert!(!task_id_str.is_empty());
+
+    // ListTasks
+    let list = service
+        .list_tasks(Request::new(
+            eigenius_kernel::server::proto::ListTasksRequest {},
+        ))
+        .await
+        .expect("list_tasks")
+        .into_inner();
+    assert_eq!(list.tasks.len(), 1);
+    let info = &list.tasks[0];
+    assert_eq!(info.task_id, task_id_str);
+    assert_eq!(info.status, "Completed");
+    assert_eq!(info.program_iri, "urn:eigenius:test:program:identity");
+    assert_eq!(info.session_id, Uuid::nil().to_string());
+    assert!(!info.layer_head.is_empty());
+
+    // GetTaskStatus (found)
+    let get = service
+        .get_task_status(Request::new(
+            eigenius_kernel::server::proto::GetTaskStatusRequest {
+                task_id: task_id_str.clone(),
+            },
+        ))
+        .await
+        .expect("get_task_status")
+        .into_inner();
+    assert!(get.found);
+    assert_eq!(get.task.as_ref().unwrap().status, "Completed");
+
+    // GetTaskStatus (not found)
+    let get_missing = service
+        .get_task_status(Request::new(
+            eigenius_kernel::server::proto::GetTaskStatusRequest {
+                task_id: Uuid::from_u128(0xdeadbeef).to_string(),
+            },
+        ))
+        .await
+        .expect("get_task_status missing")
+        .into_inner();
+    assert!(!get_missing.found);
+}
+
+#[tokio::test]
+async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
+    // Since RunProgram is synchronous in 9b-iii.3, the task is
+    // always Completed by the time CancelTask runs. For 9b-iii.3c
+    // we verify: cancelling a completed task is a no-op that echoes
+    // the existing status; cancelling a manually-injected Running
+    // record flips it to Cancelling.
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = store;
+
+    let service = EigeniusService::with_persistent_backend(
+        eigenius_kernel::program::component::ComponentRegistry::default(),
+        Arc::clone(&backend),
+    )
+    .expect("service");
+
+    let _ = service
+        .load(Request::new(eigenius_kernel::server::proto::LoadRequest {
+            resources: class_and_input_json().into_bytes(),
+            content_type: "application/eigon+json".to_string(),
+            auto_commit: true,
+        }))
+        .await
+        .expect("load");
+
+    // Inject a Running task directly via the store.
+    let tasks = BackendTaskStore::new(Arc::clone(&backend));
+    let running_id = Uuid::from_u128(0xa111);
+    let running = eigenius_kernel::task::TaskRecord::new_running(
+        Uuid::nil(),
+        running_id,
+        "urn:test:p".to_string(),
+        "urn:test:i".to_string(),
+        eigenius_kernel::layer::LayerId([0; 32]),
+        0,
+    );
+    tasks.put_task(&running).unwrap();
+
+    // Cancel the Running task — flips to Cancelling.
+    let resp = service
+        .cancel_task(Request::new(
+            eigenius_kernel::server::proto::CancelTaskRequest {
+                task_id: running_id.to_string(),
+            },
+        ))
+        .await
+        .expect("cancel")
+        .into_inner();
+    assert!(resp.success);
+    assert_eq!(resp.status, "Cancelling");
+    let back = tasks.get_task(&Uuid::nil(), &running_id).unwrap().unwrap();
+    assert_eq!(back.status, eigenius_kernel::task::TaskStatus::Cancelling);
+
+    // Cancel a Completed task (via RunProgram) — no-op.
+    let input_bytes = serde_json::json!({
+        "@id": "urn:eigenius:test:input:payload",
+        "urn:eigenius:core:is_a": ["urn:eigenius:example:Thing"]
+    })
+    .to_string()
+    .into_bytes();
+
+    let run_resp = service
+        .run_program(Request::new(RunProgramRequest {
+            program: identity_program_json().into_bytes(),
+            input: input_bytes,
+            content_type: "application/eigon+json".to_string(),
+        }))
+        .await
+        .expect("run_program")
+        .into_inner();
+    let completed_id = run_resp.task_id.clone();
+
+    let resp = service
+        .cancel_task(Request::new(
+            eigenius_kernel::server::proto::CancelTaskRequest {
+                task_id: completed_id,
+            },
+        ))
+        .await
+        .expect("cancel completed")
+        .into_inner();
+    assert!(resp.success);
+    assert_eq!(resp.status, "Completed");
+}
+
+#[tokio::test]
 async fn run_program_without_backend_has_empty_task_id() {
     // No persistent backend → no task store → task_id stays empty,
     // preserving the pre-Phase-9b-iii behaviour for ephemeral
