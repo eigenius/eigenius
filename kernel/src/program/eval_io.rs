@@ -88,8 +88,26 @@ pub fn execute_program_nbe_with_institutions(
         Val::ResourceVal(Box::new(input.clone())),
     );
 
-    // Evaluate the body expression in IO mode with tracing
-    let (result, root_trace) = eval_traced(&body_exp, &rho, &ctx);
+    // Evaluate the body expression in IO mode with tracing.
+    // Wrap in catch_unwind so remaining panics in the evaluator
+    // become ProgramError::Execution instead of crashing the server
+    // (Phase 10c, defence-in-depth layer 2).
+    let eval_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eval_traced(&body_exp, &rho, &ctx)
+    }));
+    let (result, root_trace) = match eval_result {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "unknown panic during evaluation".to_string()
+            };
+            return Err(ProgramError::Execution(msg));
+        }
+    };
 
     // Convert the result Val back to a Resource
     let output = val_to_resource(&result)?;
@@ -126,7 +144,17 @@ fn val_to_resource(val: &Val) -> Result<Resource, ProgramError> {
             }
             Ok(r)
         }
-        _ => Ok(Resource::new_embedded()),
+        _ => {
+            // Lossy conversion — fire in debug builds so tests surface
+            // unexpected Val types reaching the execution boundary
+            // (Phase 10c, defence-in-depth layer 3).
+            debug_assert!(
+                false,
+                "val_to_resource: lossy conversion of {:?} to empty resource",
+                val
+            );
+            Ok(Resource::new_embedded())
+        }
     }
 }
 
@@ -134,7 +162,7 @@ fn val_to_resource(val: &Val) -> Result<Resource, ProgramError> {
 mod tests {
     use super::*;
     use crate::ontology::eigon_json;
-    use crate::program::component::ComponentRegistry;
+    use crate::program::component::{ComponentRegistry, ProgramError};
     use crate::program::trace::InMemoryTraceStore;
 
     #[test]
@@ -274,6 +302,61 @@ mod tests {
                 assert_eq!(ct.component, "urn:eigenius:program:components:Identity");
             }
             other => panic!("expected Trace::Component, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn catch_unwind_converts_panic_to_execution_error() {
+        // Phase 10c: A program that triggers a remaining panic (applying a
+        // non-function) should be caught by catch_unwind and returned as
+        // ProgramError::Execution instead of crashing the process.
+        //
+        // Body: Apply(Pair(input, input), input)
+        // This evaluates the function position to Val::Pair, then
+        // app_ctx_traced panics with "not a function".
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+                "urn:eigenius:program:function": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Pair"],
+                    "urn:eigenius:program:first": {
+                        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                        "urn:eigenius:program:name": "input"
+                    },
+                    "urn:eigenius:program:second": {
+                        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                        "urn:eigenius:program:name": "input"
+                    }
+                },
+                "urn:eigenius:program:argument": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                    "urn:eigenius:program:name": "input"
+                }
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+
+        let mut input = Resource::new_embedded();
+        input.set(
+            Iri::parse("urn:eigenius:example:x").unwrap(),
+            Value::String("val".into()),
+        );
+
+        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let registry = Arc::new(ComponentRegistry::default());
+
+        let result = execute_program_nbe(&program, &input, layer, registry, None);
+        match result {
+            Err(ProgramError::Execution(msg)) => {
+                assert!(
+                    msg.contains("not a function"),
+                    "expected 'not a function' in error, got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected ProgramError::Execution, got Ok"),
+            Err(e) => panic!("expected ProgramError::Execution, got {:?}", e),
         }
     }
 }
