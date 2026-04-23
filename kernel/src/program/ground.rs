@@ -236,27 +236,13 @@ fn make_option_type(inner: Val) -> Val {
 
 /// Make a list type wrapping an element type.
 ///
-/// Uses the same encoding as `Exp::list()`: `Data[nil : 1, cons : A × __list_tail]`.
-/// The element type is stored in the closure's environment to avoid
-/// round-tripping through readback. A dummy `__list_tail` binding is
-/// included so that readback (which evaluates summand types) does not
-/// hit an unbound variable. Phase 11b replaces this with a proper
-/// inductive type.
+/// Wraps the canonical `List(A)` inductive declaration from
+/// [`crate::nbe::term::list_decl`] (Phase 11b step 6, D19 §9).
 fn make_list_type(elem: Val) -> Val {
-    let var_name = "__list_elem".to_string();
-    let rho = Rho::Nil
-        .extend(Patt::Var(var_name.clone()), elem)
-        .extend(Patt::Var("__list_tail".to_string()), Val::Set);
-    Val::Data(
-        vec![
-            ("nil".to_string(), Exp::One),
-            (
-                "cons".to_string(),
-                Exp::times(Exp::Var(var_name), Exp::Var("__list_tail".to_string())),
-            ),
-        ],
-        rho,
-    )
+    Val::InductiveType {
+        decl: crate::nbe::term::list_decl(),
+        params: vec![elem],
+    }
 }
 
 /// Make an enum type from allows_only IRIs: Sum(iri1 1 | iri2 1 | ...)

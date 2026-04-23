@@ -1090,26 +1090,14 @@ fn ext_sig(val: &Val) -> Result<(Val, Clos), String> {
     }
 }
 
-/// Check if a value is a list-shaped Data type and return the element type.
+/// Check if a value is a list type and return the element type.
 ///
-/// Recognises `Data[nil : 1, cons : A × _]` — the encoding produced by
-/// `Exp::list()`. Returns `Some(A)` if the structure matches, `None` otherwise.
+/// Recognises the canonical `List(A)` inductive type (the form
+/// produced by `Exp::list()` since Phase 11b step 6, D19 §9).
 fn extract_list_element_type(val: &Val) -> Option<Val> {
-    if let Val::Data(summands, rho) = val {
-        // Must have exactly nil and cons constructors
-        if summands.len() != 2 {
-            return None;
-        }
-        let (ref nil_name, _) = summands[0];
-        let (ref cons_name, ref cons_typ) = summands[1];
-        if nil_name != "nil" || cons_name != "cons" {
-            return None;
-        }
-        // cons type should evaluate to a Sigma (pair) — the element type
-        // is the first component
-        let cons_val = eval(cons_typ, rho).ok()?;
-        if let Val::Sig(elem_type, _) = cons_val {
-            return Some(*elem_type);
+    if let Val::InductiveType { decl, params } = val {
+        if decl.name == "List" && params.len() == 1 {
+            return Some(params[0].clone());
         }
     }
     None
