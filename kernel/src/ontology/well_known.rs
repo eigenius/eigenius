@@ -64,3 +64,13 @@ pub const FMT_REGEX: &str = "urn:eigenius:core:formats:regex";
 // --- Encoding IRIs ---
 
 pub const ENC_BASE64: &str = "urn:eigenius:core:encodings:base64";
+
+// --- Reflection namespace (D6b, Phase 10b) ---
+
+pub const UNIVERSE_LEVEL: &str = "urn:eigenius:reflection:universe_level";
+pub const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
+pub const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
+pub const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
+pub const DERIVATION: &str = "urn:eigenius:reflection:derivation";
+pub const EPISTEMIC_STATUS: &str = "urn:eigenius:reflection:epistemic_status";
+pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";

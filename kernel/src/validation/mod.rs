@@ -33,6 +33,7 @@ pub enum ValidationRule {
     DomainViolation,
     ConditionalRequirement,
     InstitutionValidation,
+    UniverseStratificationViolation,
 }
 
 impl fmt::Display for ValidationError {
@@ -179,6 +180,9 @@ impl<'a> Validator<'a> {
             }
             // Rule 12 (open world): unknown properties are allowed
         }
+
+        // Rule 13: Universe stratification (D6b §7, Phase 10b)
+        errors.extend(self.check_universe_stratification(resource, &res_id));
 
         errors
     }
@@ -734,6 +738,80 @@ impl<'a> Validator<'a> {
             _ => None,
         }
     }
+
+    /// Rule 13: Universe stratification (D6b §7).
+    ///
+    /// A resource at universe level N may only reference resources at
+    /// level N-1 or below. Domain resources (no `universe_level`) are
+    /// always referenceable. This prevents circular meta-reasoning.
+    fn check_universe_stratification(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let this_level = match resource.get(&iri(wk::UNIVERSE_LEVEL)) {
+            Some(Value::Integer(n)) => *n,
+            _ => return vec![], // No universe_level → domain resource, skip
+        };
+
+        let mut errors = Vec::new();
+
+        for (prop_iri, value) in resource.properties() {
+            // Check the property definition's data_type
+            let prop_def = match self.layer.resolve(prop_iri) {
+                Some(d) => d,
+                None => continue,
+            };
+            let dt = match self.get_data_type_str(prop_def) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            // Only check resource and resource_array properties
+            let is_ref = dt == wk::RESOURCE || dt == wk::RESOURCE_ARRAY;
+            if !is_ref {
+                continue;
+            }
+
+            // Collect IRI references from the value
+            let ref_iris = match value {
+                Value::String(s) => vec![s.clone()],
+                Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect(),
+                _ => continue,
+            };
+
+            for ref_str in &ref_iris {
+                let ref_iri = match Iri::parse(ref_str) {
+                    Ok(i) => i,
+                    Err(_) => continue,
+                };
+                if let Some(referenced) = self.layer.resolve(&ref_iri) {
+                    if let Some(Value::Integer(ref_level)) =
+                        referenced.get(&iri(wk::UNIVERSE_LEVEL))
+                    {
+                        if *ref_level >= this_level {
+                            errors.push(ValidationError {
+                                resource_id: res_id.clone(),
+                                property: Some(prop_iri.clone()),
+                                rule: ValidationRule::UniverseStratificationViolation,
+                                message: format!(
+                                    "resource at universe level {} references '{}' at level {} \
+                                     (must be strictly lower)",
+                                    this_level, ref_iri, ref_level
+                                ),
+                            });
+                        }
+                    }
+                    // No universe_level on referenced → domain resource → always OK
+                }
+            }
+        }
+
+        errors
+    }
 }
 
 // --- Format validation helpers ---
@@ -1286,6 +1364,327 @@ mod tests {
             verified_errors.len() >= 2,
             "VerifiedResource should require both 'derivation' and 'verification', got {} errors: {verified_errors:?}",
             verified_errors.len()
+        );
+    }
+
+    // --- Universe stratification tests (Phase 10b) ---
+
+    /// Build a layer with the reflection ontology for stratification tests.
+    /// Includes a `ref_prop` property with data_type=resource so the
+    /// stratification checker has something to inspect.
+    fn build_stratification_layer() -> Arc<Layer> {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("strat_test", Some(base));
+
+        // Add a resource-typed property for referencing other resources
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:ref_prop",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(wk::PROPERTY.to_string())]),
+                    ),
+                    (
+                        wk::DESCRIPTION,
+                        Value::String("A reference property".into()),
+                    ),
+                    (wk::SHORT_NAME, Value::String("ref_prop".into())),
+                    (wk::DATA_TYPE_PROP, Value::String(wk::RESOURCE.to_string())),
+                ],
+            ))
+            .unwrap();
+
+        Arc::new(builder.build())
+    }
+
+    #[test]
+    fn stratification_level1_referencing_level0_passes() {
+        let base = build_stratification_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // Level-0 resource
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:level0",
+                vec![(wk::UNIVERSE_LEVEL, Value::Integer(0))],
+            ))
+            .unwrap();
+
+        // Level-1 resource referencing level-0 — should pass
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:level1",
+                vec![
+                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (
+                        "urn:eigenius:test:ref_prop",
+                        Value::String("urn:eigenius:test:level0".to_string()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let strat_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UniverseStratificationViolation)
+            .collect();
+        assert!(
+            strat_errors.is_empty(),
+            "level-1 referencing level-0 should pass: {strat_errors:?}"
+        );
+    }
+
+    #[test]
+    fn stratification_level1_referencing_level1_rejected() {
+        let base = build_stratification_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // Two level-1 resources, one referencing the other — should fail
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:peer_a",
+                vec![(wk::UNIVERSE_LEVEL, Value::Integer(1))],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:peer_b",
+                vec![
+                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (
+                        "urn:eigenius:test:ref_prop",
+                        Value::String("urn:eigenius:test:peer_a".to_string()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let strat_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UniverseStratificationViolation)
+            .collect();
+        assert!(
+            !strat_errors.is_empty(),
+            "level-1 referencing level-1 should be rejected"
+        );
+    }
+
+    #[test]
+    fn stratification_domain_resources_always_referenceable() {
+        let base = build_stratification_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // A domain resource with no universe_level
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:domain_thing",
+                vec![(wk::DESCRIPTION, Value::String("just a thing".into()))],
+            ))
+            .unwrap();
+
+        // Level-1 resource referencing domain resource — should pass
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:meta1",
+                vec![
+                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (
+                        "urn:eigenius:test:ref_prop",
+                        Value::String("urn:eigenius:test:domain_thing".to_string()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let strat_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UniverseStratificationViolation)
+            .collect();
+        assert!(
+            strat_errors.is_empty(),
+            "referencing domain resources (no universe_level) should always pass: {strat_errors:?}"
+        );
+    }
+
+    #[test]
+    fn stratification_level2_referencing_level1_passes() {
+        let base = build_stratification_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:trace",
+                vec![(wk::UNIVERSE_LEVEL, Value::Integer(1))],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:meta_trace",
+                vec![
+                    (wk::UNIVERSE_LEVEL, Value::Integer(2)),
+                    (
+                        "urn:eigenius:test:ref_prop",
+                        Value::String("urn:eigenius:test:trace".to_string()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let strat_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UniverseStratificationViolation)
+            .collect();
+        assert!(
+            strat_errors.is_empty(),
+            "level-2 referencing level-1 should pass: {strat_errors:?}"
+        );
+    }
+
+    #[test]
+    fn stratification_universe_level_3_rejected_by_range() {
+        // universe_level has max_value=2 in the reflection ontology
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:too_high",
+                vec![(wk::UNIVERSE_LEVEL, Value::Integer(3))],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let range_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:too_high")
+                    && e.rule == ValidationRule::RangeViolation
+            })
+            .collect();
+        assert!(
+            !range_errors.is_empty(),
+            "universe_level=3 should be rejected by max_value=2 range check"
+        );
+    }
+
+    // --- ProgramTrace validation tests (Phase 10b) ---
+
+    #[test]
+    fn program_trace_with_all_required_fields_passes() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // A ProgramTrace with all four required fields
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:good_trace",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:reflection:program",
+                        Value::String("urn:eigenius:test:some_program".to_string()),
+                    ),
+                    (
+                        "urn:eigenius:reflection:trace_tree",
+                        Value::Embedded(Box::new(Resource::new_embedded())),
+                    ),
+                    (
+                        "urn:eigenius:reflection:started_at",
+                        Value::String("2026-04-23T12:00:00Z".to_string()),
+                    ),
+                    (
+                        "urn:eigenius:reflection:completed_at",
+                        Value::String("2026-04-23T12:00:01Z".to_string()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let trace_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:good_trace")
+                    && e.rule == ValidationRule::MissingRequired
+            })
+            .collect();
+        assert!(
+            trace_errors.is_empty(),
+            "ProgramTrace with all required fields should pass: {trace_errors:?}"
+        );
+    }
+
+    #[test]
+    fn program_trace_missing_required_fields_fails() {
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // A ProgramTrace missing trace_tree, started_at, completed_at
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_trace",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:reflection:program",
+                        Value::String("urn:eigenius:test:some_program".to_string()),
+                    ),
+                    // Missing: trace_tree, started_at, completed_at
+                ],
+            ))
+            .unwrap();
+
+        let layer = builder.build();
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+
+        let missing_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_trace")
+                    && e.rule == ValidationRule::MissingRequired
+            })
+            .collect();
+        // Should have at least 3 missing: trace_tree, started_at, completed_at
+        assert!(
+            missing_errors.len() >= 3,
+            "ProgramTrace missing 3 required fields should have >= 3 errors, got {}: {missing_errors:?}",
+            missing_errors.len()
         );
     }
 }

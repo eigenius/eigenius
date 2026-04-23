@@ -101,6 +101,14 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             up_gamma(&ctx.gamma, patt, &t, &eval(body, &ctx.rho))
         }
         Decl::Drec(patt, typ, body) => {
+            // Known subtlety (issue #13 item 3): The body is type-checked
+            // under a generic binding (gen_val) so the checker sees an
+            // opaque variable, not the real recursive value. When the real
+            // value is substituted (UpDec below), neutrals that previously
+            // blocked may reduce to something incompatible. Mini-TT
+            // mitigates this via the guardedness check for codata; full
+            // termination checking is deferred to Phase 11a.
+            //
             // Check that the type is well-formed
             check_type(ctx, typ)?;
             let t = eval(typ, &ctx.rho);
@@ -274,16 +282,19 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             check(ctx, y, &a_val)
         }
 
-        // Type(n) : Type(n+1)
+        // Universe hierarchy: Type(n) : Type(n+1) prevents impredicativity.
+        // Self-referential meta-claims (e.g. a level-1 trace referencing
+        // level-1) are blocked at resource ingestion by the universe
+        // stratification validator (Rule 13), not in the term checker.
         (Exp::Type(n), Val::Type(m)) if *n + 1 == *m => Ok(()),
         // Type(n) : Set (Set is the top universe for backward compatibility)
         (Exp::Type(_), Val::Set) => Ok(()),
         // Set : Type(1)
         (Exp::Set, Val::Type(1)) => Ok(()),
 
-        // Eigenius ground types against Set
+        // EigonClass/EigonPrimitive are ground types at level 0 but
+        // inhabit all higher universes (cumulative).
         (Exp::EigonClass(_), Val::Set) | (Exp::EigonPrimitive(_), Val::Set) => Ok(()),
-        // Eigenius ground types against any Type level
         (Exp::EigonClass(_), Val::Type(_)) | (Exp::EigonPrimitive(_), Val::Type(_)) => Ok(()),
 
         // Codata type formation: codata { ... } : Set

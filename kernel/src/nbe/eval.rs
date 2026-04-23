@@ -10,7 +10,7 @@ use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Clos, Neut, Val};
 use crate::ontology::iri::Iri;
 use crate::program::component::ComponentRegistry;
-use crate::program::trace::{ComponentTrace, TraceStore};
+use crate::program::trace::{ComponentTrace, Trace, TraceStore};
 use crate::task::TaskContext;
 use std::sync::{Arc, Mutex};
 
@@ -288,6 +288,176 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
         ),
 
         Exp::Observe(e, name) => ev(e).vobserve_ctx(name, ctx),
+    }
+}
+
+/// Evaluate an expression with tracing. Returns `(Val, Option<Trace>)`.
+///
+/// Mirrors `eval_ctx` but produces a trace tree alongside the value.
+/// Pure leaf forms (Var, Set, Type, etc.) return `None` trace.
+/// Used by the execution engine to build tree-structured ProgramTraces (D6b §2).
+pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> (Val, Option<Trace>) {
+    match exp {
+        // --- Dec → Trace::Let (IO/Read mode only) ---
+        Exp::Dec(d, e) => {
+            if matches!(ctx, EvalCtx::Pure) {
+                return (eval_ctx(exp, rho, ctx), None);
+            }
+            match d {
+                crate::nbe::term::Decl::Def(patt, _typ, body) => {
+                    let (val, val_trace) = eval_traced(body, rho, ctx);
+                    let rho2 = rho.clone().extend(patt.clone(), val);
+                    let (body_val, body_trace) = eval_traced(e, &rho2, ctx);
+                    let name = match patt {
+                        Patt::Var(n) => n.clone(),
+                        _ => "_".to_string(),
+                    };
+                    let trace = if val_trace.is_some() || body_trace.is_some() {
+                        Some(Trace::Let {
+                            name,
+                            value_trace: val_trace.map(Box::new),
+                            body_trace: body_trace.map(Box::new),
+                        })
+                    } else {
+                        None
+                    };
+                    (body_val, trace)
+                }
+                crate::nbe::term::Decl::Drec(patt, _typ, body) => {
+                    let rho_ext = Rho::UpDec(Box::new(rho.clone()), d.clone());
+                    let (val, val_trace) = eval_traced(body, &rho_ext, ctx);
+                    let rho2 = rho.clone().extend(patt.clone(), val);
+                    let (body_val, body_trace) = eval_traced(e, &rho2, ctx);
+                    let name = match patt {
+                        Patt::Var(n) => n.clone(),
+                        _ => "_".to_string(),
+                    };
+                    let trace = if val_trace.is_some() || body_trace.is_some() {
+                        Some(Trace::Let {
+                            name,
+                            value_trace: val_trace.map(Box::new),
+                            body_trace: body_trace.map(Box::new),
+                        })
+                    } else {
+                        None
+                    };
+                    (body_val, trace)
+                }
+            }
+        }
+
+        // --- App: component dispatch (with Trace::Component) or delegate ---
+        Exp::App(e1, e2) => {
+            if let EvalCtx::IO {
+                registry,
+                institutions,
+                dispatched_traces,
+                ..
+            } = ctx
+            {
+                if let Exp::Var(name) = e1.as_ref() {
+                    if registry.get(name).is_some() {
+                        let arg_val = eval_ctx(e2, rho, ctx);
+                        let (input_val, comp_arg) = match &arg_val {
+                            Val::Pair(input, comp_arg) => {
+                                (input.as_ref().clone(), Some(comp_arg.as_ref()))
+                            }
+                            other => (other.clone(), None),
+                        };
+                        let before = dispatched_traces.lock().unwrap().len();
+                        let val = dispatch_component(name, &input_val, comp_arg, ctx);
+                        let trace = {
+                            let traces = dispatched_traces.lock().unwrap();
+                            if traces.len() > before {
+                                Some(Trace::Component(traces.last().unwrap().clone()))
+                            } else {
+                                None
+                            }
+                        };
+                        return (val, trace);
+                    }
+                    if let Ok(inst_iri) = Iri::parse(name) {
+                        if institutions.get(&inst_iri).is_some() {
+                            let arg_val = eval_ctx(e2, rho, ctx);
+                            return (dispatch_fiber_query(&inst_iri, &arg_val, ctx), None);
+                        }
+                    }
+                }
+            }
+            let f_val = eval_ctx(e1, rho, ctx);
+            let arg_val = eval_ctx(e2, rho, ctx);
+            f_val.app_ctx_traced(arg_val, ctx)
+        }
+
+        // --- PropAccess → Trace::Project ---
+        Exp::PropAccess(e, prop) => {
+            let (v, source_trace) = eval_traced(e, rho, ctx);
+            match v {
+                Val::ResourceVal(r) => {
+                    let result = match r.get(prop) {
+                        Some(val) => resource_value_to_val(val),
+                        None => panic!("property {} not found on resource", prop),
+                    };
+                    (
+                        result,
+                        Some(Trace::Project {
+                            source_trace: source_trace.map(Box::new),
+                            property: prop.clone(),
+                        }),
+                    )
+                }
+                Val::CoRecord(fields, corecord_rho) => {
+                    let obs_name = prop.local_name();
+                    for (name, body) in &fields {
+                        if name == obs_name {
+                            return eval_traced(body, &corecord_rho, ctx);
+                        }
+                    }
+                    panic!("observation '{}' not found in corecord", obs_name);
+                }
+                Val::Nt(n) => (
+                    Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
+                    Some(Trace::Project {
+                        source_trace: source_trace.map(Box::new),
+                        property: prop.clone(),
+                    }),
+                ),
+                other => panic!("property access on non-resource: {:?}", other),
+            }
+        }
+
+        // --- Construct → Trace::Construct ---
+        Exp::Construct(class_iri, fields) => {
+            use crate::ontology::resource::{Resource, Value};
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:is_a").unwrap(),
+                Value::Array(vec![Value::String(class_iri.as_str().to_string())]),
+            );
+            let mut field_traces = std::collections::BTreeMap::new();
+            for (prop_iri, expr) in fields {
+                let (val, trace) = eval_traced(expr, rho, ctx);
+                let rval = val_to_resource_value(&val);
+                r.set(prop_iri.clone(), rval);
+                field_traces.insert(prop_iri.clone(), trace);
+            }
+            let has_traces = field_traces.values().any(|t| t.is_some());
+            let trace = if has_traces {
+                Some(Trace::Construct { field_traces })
+            } else {
+                None
+            };
+            (Val::ResourceVal(Box::new(r)), trace)
+        }
+
+        // --- Observe: delegate to vobserve_ctx_traced ---
+        Exp::Observe(e, name) => {
+            let v = eval_ctx(e, rho, ctx);
+            v.vobserve_ctx_traced(name, ctx)
+        }
+
+        // --- All other forms: structural, no trace ---
+        _ => (eval_ctx(exp, rho, ctx), None),
     }
 }
 
@@ -907,5 +1077,202 @@ mod tests {
     fn eval_eigon_primitive() {
         let v = eval(&Exp::EigonPrimitive(PrimitiveType::String), &Rho::Nil);
         assert!(matches!(v, Val::EigonPrimitive(PrimitiveType::String)));
+    }
+
+    // --- eval_traced tests (Phase 10b) ---
+
+    use crate::institution::InstitutionRegistry;
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::program::component::ComponentRegistry;
+    use crate::program::trace::Trace;
+
+    /// Build a minimal IO evaluation context for traced tests.
+    fn io_ctx() -> EvalCtx {
+        EvalCtx::IO {
+            layer: std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build()),
+            registry: std::sync::Arc::new(ComponentRegistry::default()),
+            institutions: std::sync::Arc::new(InstitutionRegistry::new()),
+            trace_store: None,
+            dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            task_context: None,
+        }
+    }
+
+    #[test]
+    fn eval_traced_let_produces_trace() {
+        // let x : 1 = resource.prop; x
+        // The inner PropAccess should produce a Trace::Project,
+        // and the Let should produce a Trace::Let wrapping it.
+        let ctx = io_ctx();
+
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:test:name").unwrap(),
+            Value::String("Alice".into()),
+        );
+
+        let rho = Rho::Nil.extend(Patt::Var("r".to_string()), Val::ResourceVal(Box::new(r)));
+
+        // let x : 1 = r.name; x
+        let prop_access = Exp::PropAccess(
+            Box::new(Exp::Var("r".to_string())),
+            Iri::parse("urn:eigenius:test:name").unwrap(),
+        );
+        let decl = crate::nbe::term::Decl::Def(
+            Patt::Var("x".to_string()),
+            Box::new(Exp::One),
+            Box::new(prop_access),
+        );
+        let body = Exp::Var("x".to_string());
+        let exp = Exp::Dec(decl, Box::new(body));
+
+        let (val, trace) = eval_traced(&exp, &rho, &ctx);
+
+        // Value should be the extracted property
+        assert!(matches!(val, Val::ResourceVal(_)));
+
+        // Trace should be Let with a Project in value_trace
+        let trace = trace.expect("Let with PropAccess should produce a trace");
+        match trace {
+            Trace::Let {
+                name,
+                value_trace,
+                body_trace,
+            } => {
+                assert_eq!(name, "x");
+                assert!(
+                    matches!(value_trace.as_deref(), Some(Trace::Project { .. })),
+                    "value_trace should be a Project"
+                );
+                // body is just Var, no trace
+                assert!(body_trace.is_none());
+            }
+            other => panic!("expected Trace::Let, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn eval_traced_prop_access_produces_project() {
+        let ctx = io_ctx();
+
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:test:color").unwrap(),
+            Value::String("blue".into()),
+        );
+
+        let rho = Rho::Nil.extend(Patt::Var("item".to_string()), Val::ResourceVal(Box::new(r)));
+
+        let exp = Exp::PropAccess(
+            Box::new(Exp::Var("item".to_string())),
+            Iri::parse("urn:eigenius:test:color").unwrap(),
+        );
+
+        let (_val, trace) = eval_traced(&exp, &rho, &ctx);
+        let trace = trace.expect("PropAccess should always produce a Project trace");
+        match trace {
+            Trace::Project {
+                source_trace,
+                property,
+            } => {
+                assert_eq!(property.as_str(), "urn:eigenius:test:color");
+                // source is Var — no sub-trace
+                assert!(source_trace.is_none());
+            }
+            other => panic!("expected Trace::Project, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn eval_traced_component_dispatch_produces_component_trace() {
+        // Use the built-in Identity component
+        let ctx = io_ctx();
+
+        let mut input = Resource::new_embedded();
+        input.set(
+            Iri::parse("urn:eigenius:test:val").unwrap(),
+            Value::String("hello".into()),
+        );
+
+        let rho = Rho::Nil.extend(
+            Patt::Var("inp".to_string()),
+            Val::ResourceVal(Box::new(input)),
+        );
+
+        // Identity(inp)
+        let exp = Exp::App(
+            Box::new(Exp::Var(
+                "urn:eigenius:program:components:Identity".to_string(),
+            )),
+            Box::new(Exp::Var("inp".to_string())),
+        );
+
+        let (val, trace) = eval_traced(&exp, &rho, &ctx);
+
+        // Value should be the same resource
+        assert!(matches!(val, Val::ResourceVal(_)));
+
+        // Trace should be Component
+        let trace = trace.expect("Component dispatch should produce a trace");
+        match trace {
+            Trace::Component(ct) => {
+                assert_eq!(ct.component, "urn:eigenius:program:components:Identity");
+                assert!(!ct.cached);
+            }
+            other => panic!("expected Trace::Component, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn eval_traced_pure_leaf_returns_none() {
+        // Pure leaf forms (Var, Unit, etc.) should return None trace
+        let ctx = io_ctx();
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Unit);
+        let (_val, trace) = eval_traced(&Exp::Var("x".to_string()), &rho, &ctx);
+        assert!(trace.is_none(), "Var should produce no trace");
+
+        let (_val, trace) = eval_traced(&Exp::Unit, &Rho::Nil, &ctx);
+        assert!(trace.is_none(), "Unit should produce no trace");
+    }
+
+    #[test]
+    fn eval_traced_construct_produces_construct_trace() {
+        let ctx = io_ctx();
+
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:test:src").unwrap(),
+            Value::String("data".into()),
+        );
+        let rho = Rho::Nil.extend(Patt::Var("s".to_string()), Val::ResourceVal(Box::new(r)));
+
+        // Construct ex:Out { ex:val = s.src }
+        let class_iri = Iri::parse("urn:eigenius:test:Out").unwrap();
+        let prop_iri = Iri::parse("urn:eigenius:test:val").unwrap();
+        let field_expr = Exp::PropAccess(
+            Box::new(Exp::Var("s".to_string())),
+            Iri::parse("urn:eigenius:test:src").unwrap(),
+        );
+        let exp = Exp::Construct(class_iri, vec![(prop_iri.clone(), Box::new(field_expr))]);
+
+        let (val, trace) = eval_traced(&exp, &rho, &ctx);
+
+        // Value should be a ResourceVal
+        assert!(matches!(val, Val::ResourceVal(_)));
+
+        // Trace should be Construct with a Project sub-trace
+        let trace = trace.expect("Construct with PropAccess field should produce a trace");
+        match trace {
+            Trace::Construct { field_traces } => {
+                assert_eq!(field_traces.len(), 1);
+                let field_trace = field_traces.get(&prop_iri).unwrap();
+                assert!(
+                    matches!(field_trace, Some(Trace::Project { .. })),
+                    "field should have a Project trace"
+                );
+            }
+            other => panic!("expected Trace::Construct, got {:?}", other),
+        }
     }
 }

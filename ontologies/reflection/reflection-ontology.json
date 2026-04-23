@@ -555,7 +555,8 @@
     "urn:eigenius:core:description": "Universe stratification level. Level N traces reference level N-1 resources.",
     "urn:eigenius:core:short_name": "universe_level",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:min_value": 0
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:max_value": 2
   },
   {
     "@id": "urn:eigenius:reflection:resource",

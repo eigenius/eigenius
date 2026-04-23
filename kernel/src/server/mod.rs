@@ -31,6 +31,41 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// Convert milliseconds since epoch to ISO 8601 string.
+fn millis_to_iso8601(ms: i64) -> String {
+    use std::time::Duration;
+    let d = Duration::from_millis(ms as u64);
+    let secs = d.as_secs();
+    let millis = d.subsec_millis();
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let hours = rem / 3600;
+    let minutes = (rem % 3600) / 60;
+    let seconds = rem % 60;
+    // Simple date calculation from days since epoch
+    let (year, month, day) = days_to_ymd(days);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        year, month, day, hours, minutes, seconds, millis
+    )
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Civil calendar algorithm from Howard Hinnant
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1461 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 /// Live state of the startup resume sweep (D21 §6). `Health` reads
 /// this so clients can tell when resumed tasks have finished draining.
 #[derive(Debug, Default)]
@@ -1085,6 +1120,7 @@ impl EigeniusKernel for EigeniusService {
         };
 
         // Execute via NbE in IO mode
+        let started_at_ms = now_millis();
         let exec_result = {
             let ctx = self.context.read().await;
             let components = Arc::clone(&*self.components.read().await);
@@ -1136,19 +1172,41 @@ impl EigeniusKernel for EigeniusService {
             }
         };
 
-        let output = exec_result.output;
+        let completed_at_ms = now_millis();
+        let mut output = exec_result.output;
         let dispatched_traces = exec_result.dispatched_traces;
+        let root_trace = exec_result.root_trace;
 
-        // Compute metrics from dispatched ComponentTraces
-        let total_tokens: i64 = dispatched_traces
-            .iter()
-            .filter_map(|ct| ct.metrics.as_ref())
-            .map(|m| m.prompt_tokens + m.completion_tokens)
-            .sum();
-        let executed_steps = dispatched_traces.len() as i64;
+        // Compute metrics from the tree-structured trace (preferred) or
+        // flat dispatched_traces list (fallback).
+        let metrics = crate::program::trace::ProgramMetrics::from_trace(&root_trace);
+        let total_tokens = metrics.total_tokens;
+        let executed_steps = metrics.executed_steps;
 
-        // Build ProgramTrace
+        // Build ProgramTrace with all required fields (D6b §2)
         let trace_iri_str = format!("urn:eigenius:trace:exec-{}", uuid::Uuid::new_v4());
+
+        // Attach DerivedResource epistemic stamp to the output (D6b §6, Phase 10b Step 4)
+        {
+            use crate::ontology::well_known as wk;
+            let is_a_iri = Iri::parse("urn:eigenius:core:is_a").unwrap();
+            let mut types = match output.get(&is_a_iri) {
+                Some(crate::ontology::resource::Value::Array(arr)) => arr.clone(),
+                _ => Vec::new(),
+            };
+            types.push(crate::ontology::resource::Value::String(
+                wk::DERIVED_RESOURCE.to_string(),
+            ));
+            output.set(is_a_iri, crate::ontology::resource::Value::Array(types));
+            output.set(
+                Iri::parse(wk::DERIVATION).unwrap(),
+                crate::ontology::resource::Value::String(trace_iri_str.clone()),
+            );
+            output.set(
+                Iri::parse(wk::EPISTEMIC_STATUS).unwrap(),
+                crate::ontology::resource::Value::String(wk::EPISTEMIC_DERIVED.to_string()),
+            );
+        }
 
         let mut trace_resource = Resource::new(Iri::parse(&trace_iri_str).unwrap());
         trace_resource.set(
@@ -1165,6 +1223,23 @@ impl EigeniusKernel for EigeniusService {
                 crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
             );
         }
+        // Required: trace_tree — serialized tree-structured trace
+        if let Some(ref trace) = root_trace {
+            let trace_tree = crate::program::trace::trace_to_resource(trace);
+            trace_resource.set(
+                Iri::parse("urn:eigenius:reflection:trace_tree").unwrap(),
+                crate::ontology::resource::Value::Embedded(Box::new(trace_tree)),
+            );
+        }
+        // Required: started_at, completed_at (ISO 8601)
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:started_at").unwrap(),
+            crate::ontology::resource::Value::String(millis_to_iso8601(started_at_ms)),
+        );
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:completed_at").unwrap(),
+            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
+        );
         trace_resource.set(
             Iri::parse("urn:eigenius:reflection:total_tokens").unwrap(),
             crate::ontology::resource::Value::Integer(total_tokens),
@@ -1172,6 +1247,11 @@ impl EigeniusKernel for EigeniusService {
         trace_resource.set(
             Iri::parse("urn:eigenius:reflection:executed_steps").unwrap(),
             crate::ontology::resource::Value::Integer(executed_steps),
+        );
+        // Recommended: universe_level = 0 (traces about domain resources)
+        trace_resource.set(
+            Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
+            crate::ontology::resource::Value::Integer(0),
         );
 
         // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
@@ -1188,16 +1268,20 @@ impl EigeniusKernel for EigeniusService {
                 );
                 let _ = ctx.add_resource(ct_resource);
             }
-            if let Ok(layer) = ctx.commit("trace") {
-                // Best-effort persist of the trace layer. A failure here
-                // logs but doesn't fail the RunProgram call — the output
-                // is still valid, the trace just isn't durable.
-                if let Some(err) = self.persist_layer_if_backend(&layer) {
-                    eprintln!("warning: failed to persist trace layer: {}", err.message);
+            match ctx.commit("trace") {
+                Ok(layer) => {
+                    // Best-effort persist of the trace layer. A failure here
+                    // logs but doesn't fail the RunProgram call — the output
+                    // is still valid, the trace just isn't durable.
+                    if let Some(err) = self.persist_layer_if_backend(&layer) {
+                        eprintln!("warning: failed to persist trace layer: {}", err.message);
+                    }
+                    Some(layer.id().clone())
                 }
-                Some(layer.id().clone())
-            } else {
-                None
+                Err(e) => {
+                    eprintln!("warning: trace layer commit failed: {e}");
+                    None
+                }
             }
         };
 

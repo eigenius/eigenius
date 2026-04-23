@@ -20,7 +20,6 @@ pub mod nbe;
 pub mod ontology;
 pub mod program;
 pub mod query;
-pub mod reflection;
 pub mod server;
 pub mod storage;
 pub mod task;
