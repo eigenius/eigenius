@@ -141,12 +141,12 @@ fn make_io_ctx(
 }
 
 #[test]
-fn io_without_task_context_never_caches() {
+fn io_without_task_context_never_caches() -> Result<(), Box<dyn std::error::Error>> {
     // D21 §3.3: the content-address memo is unsafe for IO — two
     // calls with the same input may produce different results, so
     // caching them would silently collapse distinct observations.
     // Without a TaskContext, the evaluator must dispatch every call.
-    let ctx_kernel = bootstrap::bootstrap().unwrap();
+    let ctx_kernel = bootstrap::bootstrap()?;
     let layer = Arc::clone(ctx_kernel.head());
 
     let counter = Arc::new(CounterComponent::new());
@@ -156,23 +156,24 @@ fn io_without_task_context_never_caches() {
     let ctx = make_io_ctx(layer, registry, Some(trace_store), None);
     let exp = dispatch_expr();
 
-    let v1 = eval_ctx(&exp, &Rho::Nil, &ctx);
-    let v2 = eval_ctx(&exp, &Rho::Nil, &ctx);
-    let v3 = eval_ctx(&exp, &Rho::Nil, &ctx);
+    let v1 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+    let v2 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+    let v3 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
     // Each call produces a fresh dispatch — no content-address memo
     // collapse.
     assert_eq!(counter_value(&v1), 0);
     assert_eq!(counter_value(&v2), 1);
     assert_eq!(counter_value(&v3), 2);
     assert_eq!(counter.call_count(), 3);
+    Ok(())
 }
 
 #[test]
-fn with_task_context_each_step_is_its_own_dispatch() {
+fn with_task_context_each_step_is_its_own_dispatch() -> Result<(), Box<dyn std::error::Error>> {
     // D21 §3.2: positional keys mean each step consumes a distinct
     // slot; content-address collisions don't collapse them.
-    let tmp = TempDir::new().unwrap();
-    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let tmp = TempDir::new()?;
+    let store = Arc::new(RocksStore::open(tmp.path())?);
     let backend: Arc<dyn PersistentBackend> = store;
     let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
 
@@ -194,9 +195,9 @@ fn with_task_context_each_step_is_its_own_dispatch() {
         eigenius_kernel::layer::LayerId([0; 32]),
         0,
     );
-    task_store.put_task(&record).unwrap();
+    task_store.put_task(&record)?;
 
-    let ctx_kernel = bootstrap::bootstrap().unwrap();
+    let ctx_kernel = bootstrap::bootstrap()?;
     let layer = Arc::clone(ctx_kernel.head());
     let counter = Arc::new(CounterComponent::new());
     let registry = make_registry(Arc::clone(&counter));
@@ -206,9 +207,9 @@ fn with_task_context_each_step_is_its_own_dispatch() {
 
     // Three calls, same input — should produce three distinct
     // dispatches because each occupies its own step_seq.
-    let v1 = eval_ctx(&exp, &Rho::Nil, &ctx);
-    let v2 = eval_ctx(&exp, &Rho::Nil, &ctx);
-    let v3 = eval_ctx(&exp, &Rho::Nil, &ctx);
+    let v1 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+    let v2 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+    let v3 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
     assert_eq!(counter_value(&v1), 0);
     assert_eq!(counter_value(&v2), 1);
     assert_eq!(counter_value(&v3), 2);
@@ -216,19 +217,21 @@ fn with_task_context_each_step_is_its_own_dispatch() {
     assert_eq!(tc.current_step(), 3);
 
     // Record was updated via commit_step.
-    let record_back = task_store.get_task(&session_id, &task_id).unwrap().unwrap();
+    let record_back = task_store.get_task(&session_id, &task_id)?.unwrap();
     assert_eq!(record_back.step_seq, 3);
     assert_eq!(record_back.latest_trace_seq, 2);
+    Ok(())
 }
 
 #[test]
-fn checkpoint_component_persists_checkpoint_and_updates_record() {
+fn checkpoint_component_persists_checkpoint_and_updates_record(
+) -> Result<(), Box<dyn std::error::Error>> {
     // D21 §4: calling `components:Checkpoint` during a task persists
     // the input resource as a Checkpoint and sets
     // TaskRecord.last_checkpoint to the current step_seq. Verifies
     // the commit_step atomic-write path end-to-end.
-    let tmp = TempDir::new().unwrap();
-    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let tmp = TempDir::new()?;
+    let store = Arc::new(RocksStore::open(tmp.path())?);
     let backend: Arc<dyn PersistentBackend> = store;
     let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
 
@@ -247,9 +250,9 @@ fn checkpoint_component_persists_checkpoint_and_updates_record() {
         eigenius_kernel::layer::LayerId([0; 32]),
         0,
     );
-    task_store.put_task(&record).unwrap();
+    task_store.put_task(&record)?;
 
-    let ctx_kernel = eigenius_kernel::bootstrap::bootstrap().unwrap();
+    let ctx_kernel = eigenius_kernel::bootstrap::bootstrap()?;
     let layer = Arc::clone(ctx_kernel.head());
     // Use the default registry — Checkpoint is a standard built-in.
     let registry = Arc::new(ComponentRegistry::default());
@@ -262,36 +265,36 @@ fn checkpoint_component_persists_checkpoint_and_updates_record() {
         )),
         Box::new(eigenius_kernel::nbe::term::Exp::Unit),
     );
-    let _ = eval_ctx(&expr, &eigenius_kernel::nbe::env::Rho::Nil, &ctx);
+    let _ = eval_ctx(&expr, &eigenius_kernel::nbe::env::Rho::Nil, &ctx)?;
 
     // Record updated: step_seq=1, last_checkpoint=Some(0).
-    let back = task_store.get_task(&session_id, &task_id).unwrap().unwrap();
+    let back = task_store.get_task(&session_id, &task_id)?.unwrap();
     assert_eq!(back.step_seq, 1);
     assert_eq!(back.latest_trace_seq, 0);
     assert_eq!(back.last_checkpoint, Some(0));
 
     // Checkpoint value is readable by step.
     let ckpt = task_store
-        .get_checkpoint(&session_id, &task_id, 0)
-        .unwrap()
+        .get_checkpoint(&session_id, &task_id, 0)?
         .expect("checkpoint persisted");
     assert_eq!(ckpt.step_seq, 0);
     assert!(!ckpt.state.is_empty(), "checkpoint state bytes empty");
+    Ok(())
 }
 
 #[test]
-fn replay_hits_stored_traces_without_redispatching() {
+fn replay_hits_stored_traces_without_redispatching() -> Result<(), Box<dyn std::error::Error>> {
     // Run three IO calls with a TaskContext, then simulate a "crash
     // and restart" by reopening the store with a fresh TaskContext
     // (step_seq=0). The evaluator should hit the stored traces for
     // steps 0, 1, 2 without re-dispatching.
-    let tmp = TempDir::new().unwrap();
+    let tmp = TempDir::new()?;
     let session_id = Uuid::nil();
     let task_id = Uuid::from_u128(42);
 
     // --- Round 1: dispatch three times and persist ---
     {
-        let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+        let store = Arc::new(RocksStore::open(tmp.path())?);
         let backend: Arc<dyn PersistentBackend> = store;
         let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
         let tc = Arc::new(TaskContext::new(
@@ -307,23 +310,23 @@ fn replay_hits_stored_traces_without_redispatching() {
             eigenius_kernel::layer::LayerId([0; 32]),
             0,
         );
-        task_store.put_task(&record).unwrap();
+        task_store.put_task(&record)?;
 
-        let ctx_kernel = bootstrap::bootstrap().unwrap();
+        let ctx_kernel = bootstrap::bootstrap()?;
         let layer = Arc::clone(ctx_kernel.head());
         let counter = Arc::new(CounterComponent::new());
         let registry = make_registry(counter);
         let ctx = make_io_ctx(layer, registry, None, Some(Arc::clone(&tc)));
         let exp = dispatch_expr();
 
-        let _ = eval_ctx(&exp, &Rho::Nil, &ctx);
-        let _ = eval_ctx(&exp, &Rho::Nil, &ctx);
-        let _ = eval_ctx(&exp, &Rho::Nil, &ctx);
+        let _ = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+        let _ = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+        let _ = eval_ctx(&exp, &Rho::Nil, &ctx)?;
     }
 
     // --- Round 2: fresh TaskContext, fresh counter, replay ---
     {
-        let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+        let store = Arc::new(RocksStore::open(tmp.path())?);
         let backend: Arc<dyn PersistentBackend> = store;
         let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
         let tc = Arc::new(TaskContext::new(
@@ -332,16 +335,16 @@ fn replay_hits_stored_traces_without_redispatching() {
             Arc::clone(&task_store),
         ));
 
-        let ctx_kernel = bootstrap::bootstrap().unwrap();
+        let ctx_kernel = bootstrap::bootstrap()?;
         let layer = Arc::clone(ctx_kernel.head());
         let counter = Arc::new(CounterComponent::new());
         let registry = make_registry(Arc::clone(&counter));
         let ctx = make_io_ctx(layer, registry, None, Some(Arc::clone(&tc)));
         let exp = dispatch_expr();
 
-        let v1 = eval_ctx(&exp, &Rho::Nil, &ctx);
-        let v2 = eval_ctx(&exp, &Rho::Nil, &ctx);
-        let v3 = eval_ctx(&exp, &Rho::Nil, &ctx);
+        let v1 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+        let v2 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
+        let v3 = eval_ctx(&exp, &Rho::Nil, &ctx)?;
 
         // The counter belongs to the new (fresh) component — if
         // replay worked, it was never called.
@@ -350,4 +353,5 @@ fn replay_hits_stored_traces_without_redispatching() {
         assert_eq!(counter_value(&v2), 1);
         assert_eq!(counter_value(&v3), 2);
     }
+    Ok(())
 }

@@ -30,8 +30,8 @@ mod tests {
 
     /// End-to-end: load a program from JSON, parse to Mini-TT, type-check, execute via NbE.
     #[test]
-    fn end_to_end_identity_program() {
-        let mut ctx = bootstrap::bootstrap().unwrap();
+    fn end_to_end_identity_program() -> Result<(), Box<dyn std::error::Error>> {
+        let mut ctx = bootstrap::bootstrap()?;
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animals = eigon_json::parse_document(animals_json).unwrap();
@@ -47,7 +47,7 @@ mod tests {
         let (term, typ) = parse_program(&program, ctx.head()).unwrap();
 
         // Type-check
-        let typ_val = eval::eval(&typ, &Rho::Nil);
+        let typ_val = eval::eval(&typ, &Rho::Nil)?;
         let mut check_ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(ctx.head()));
         let result = check::check(&mut check_ctx, &term, &typ_val);
         assert!(
@@ -68,7 +68,7 @@ mod tests {
 
         let layer = Arc::clone(ctx.head());
         let registry = Arc::new(ComponentRegistry::default());
-        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        let result = execute_program_nbe(&program, &input, layer, registry, None)?;
 
         let name_iri = Iri::parse("urn:eigenius:example:name").unwrap();
         assert_eq!(result.output.get(&name_iri).unwrap().as_str(), Some("Rex"));
@@ -78,6 +78,7 @@ mod tests {
             result.output.get(&breed_iri).unwrap().as_str(),
             Some("German Shepherd")
         );
+        Ok(())
     }
 
     /// End-to-end: program with let-binding, executed via NbE.
@@ -127,8 +128,8 @@ mod tests {
     /// Phase-9b-iii concern. For 9b-ii we prove the surface syntax,
     /// compile, parse, and type-check pipeline works end to end.
     #[test]
-    fn end_to_end_codata_esl() {
-        let mut ctx = bootstrap::bootstrap().unwrap();
+    fn end_to_end_codata_esl() -> Result<(), Box<dyn std::error::Error>> {
+        let mut ctx = bootstrap::bootstrap()?;
 
         // Compile an ESL file that uses codata + corecord + observation.
         // The program ignores its input and returns the `fst` observation
@@ -180,9 +181,10 @@ mod tests {
         // Type-check — the critical assertion: PropAccess on a
         // codata-typed value resolves through the codata dispatch we
         // added to check_infer.
-        let typ_val = eval::eval(&typ, &Rho::Nil);
+        let typ_val = eval::eval(&typ, &Rho::Nil)?;
         let mut check_ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(ctx.head()));
-        check::check(&mut check_ctx, &term, &typ_val).expect("program should type-check");
+        check::check(&mut check_ctx, &term, &typ_val)?;
+        Ok(())
     }
 
     /// End-to-end: validate program parsing.

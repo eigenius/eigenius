@@ -96,8 +96,12 @@ pub fn execute_program_nbe_with_institutions(
         eval_traced(&body_exp, &rho, &ctx)
     }));
     let (result, root_trace) = match eval_result {
-        Ok(r) => r,
+        Ok(Ok(r)) => r,
+        Ok(Err(eval_err)) => {
+            return Err(ProgramError::Execution(eval_err.to_string()));
+        }
         Err(e) => {
+            // Defence-in-depth: should not fire with Result propagation
             let msg = if let Some(s) = e.downcast_ref::<String>() {
                 s.clone()
             } else if let Some(s) = e.downcast_ref::<&str>() {
