@@ -6,9 +6,10 @@
 
 use crate::nbe::env::Rho;
 use crate::nbe::eval::EvalError;
-use crate::nbe::term::{Exp, Name, Patt, PrimitiveType};
+use crate::nbe::term::{Exp, InductiveDecl, Name, Patt, PrimitiveType};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
+use std::sync::Arc;
 
 /// Semantic values — the result of evaluation.
 #[derive(Debug, Clone)]
@@ -68,6 +69,19 @@ pub enum Val {
     /// and the result of Map. Phase 11b's inductive List evaluates to
     /// this at runtime.
     List(Vec<Val>),
+
+    // --- Inductive types (Phase 11b, D19) ---
+    /// Inductive type former applied to evaluated parameters: `I(p₁, …, pₙ)`.
+    InductiveType {
+        decl: Arc<InductiveDecl>,
+        params: Vec<Val>,
+    },
+    /// Constructor value: `c(args)` on the named inductive.
+    InductiveVal {
+        decl: Arc<InductiveDecl>,
+        ctor_name: Name,
+        args: Vec<Val>,
+    },
 }
 
 /// Neutral terms — computations that cannot reduce further.
@@ -97,6 +111,17 @@ pub enum Neut {
     NtMap(Box<Val>, Box<Neut>),
     /// Reduce blocked on a neutral collection.
     NtReduce(Box<Val>, Box<Val>, Box<Neut>),
+
+    // --- Inductive types (Phase 11b, D19) ---
+    /// Recursor application blocked on a neutral major premise.
+    /// `I.rec params motive minors major` where `major` has not yet
+    /// reduced to a constructor.
+    NtRec {
+        decl: Arc<InductiveDecl>,
+        motive: Box<Val>,
+        minors: Vec<Val>,
+        major: Box<Neut>,
+    },
 }
 
 /// A closure: a pattern, body expression, and captured environment.

@@ -127,6 +127,21 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             }
             result
         }
+
+        // Inductive types (Phase 11b, D19)
+        Val::InductiveType { decl, params } => Exp::InductiveType(
+            decl.clone(),
+            params.iter().map(|p| readback_val(level, p)).collect(),
+        ),
+        Val::InductiveVal {
+            decl,
+            ctor_name,
+            args,
+        } => Exp::InductiveCtor(
+            decl.clone(),
+            ctor_name.clone(),
+            args.iter().map(|a| readback_val(level, a)).collect(),
+        ),
     }
 }
 
@@ -164,6 +179,19 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
             Box::new(readback_val(level, acc)),
             Box::new(readback_neut(level, k)),
         ),
+
+        // Inductive types (Phase 11b, D19)
+        Neut::NtRec {
+            decl,
+            motive,
+            minors,
+            major,
+        } => Exp::InductiveRec {
+            decl: decl.clone(),
+            motive: Box::new(readback_val(level, motive)),
+            minors: minors.iter().map(|m| readback_val(level, m)).collect(),
+            major: Box::new(readback_neut(level, major)),
+        },
     }
 }
 
