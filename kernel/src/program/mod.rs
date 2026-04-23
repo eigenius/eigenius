@@ -17,7 +17,7 @@ pub mod trace;
 #[cfg(test)]
 mod tests {
     use crate::bootstrap;
-    use crate::nbe::check;
+    use crate::nbe::check::{self, CheckCtx};
     use crate::nbe::env::Rho;
     use crate::nbe::eval;
     use crate::ontology::eigon_json;
@@ -48,7 +48,8 @@ mod tests {
 
         // Type-check
         let typ_val = eval::eval(&typ, &Rho::Nil);
-        let result = check::check(&Rho::Nil, &vec![], &term, &typ_val);
+        let mut check_ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(ctx.head()));
+        let result = check::check(&mut check_ctx, &term, &typ_val);
         assert!(
             result.is_ok() || result.is_err(),
             "type check should complete without panic"
@@ -180,7 +181,8 @@ mod tests {
         // codata-typed value resolves through the codata dispatch we
         // added to check_infer.
         let typ_val = eval::eval(&typ, &Rho::Nil);
-        check::check(&Rho::Nil, &vec![], &term, &typ_val).expect("program should type-check");
+        let mut check_ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(ctx.head()));
+        check::check(&mut check_ctx, &term, &typ_val).expect("program should type-check");
     }
 
     /// End-to-end: validate program parsing.

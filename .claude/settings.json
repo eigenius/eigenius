@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(gh issue view:*)",
+      "Read(//home/hm/src/eigenius/**)",
+      "Bash(wc:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(RUSTFLAGS=\"-D warnings\" cargo clippy:*)",
+      "Bash(cargo fmt:*)"
     ]
   }
 }
