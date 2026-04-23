@@ -5,9 +5,10 @@
 
 use crate::layer::Layer;
 use crate::nbe::env::{gen_val, lookup_gamma, up_gamma, Gamma, Rho};
-use crate::nbe::eval::eval;
+use crate::nbe::eval::{eval, EvalCtx};
 use crate::nbe::readback::readback_val;
-use crate::nbe::term::{Decl, Exp, Patt};
+use crate::nbe::recursor::derive_minor_types;
+use crate::nbe::term::{Decl, Exp, InductiveDecl, Patt};
 use crate::nbe::val::{Clos, Val};
 use crate::ontology::iri::Iri;
 use std::collections::BTreeMap;
@@ -328,6 +329,18 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             check_type(ctx, exp)
         }
 
+        // Constructor application against an inductive type — Phase 11b
+        // step 5 checking mode. Parameters come from the expected type;
+        // each constructor argument is checked against its declared
+        // type (with parameters substituted).
+        (
+            Exp::InductiveCtor(decl, ctor_name, args),
+            Val::InductiveType {
+                decl: expected_decl,
+                params,
+            },
+        ) => check_inductive_ctor_args(ctx, decl, ctor_name, args, expected_decl, params),
+
         // Corecord against a codata type: each field's body must have
         // the corresponding observation's type, and every declared
         // observation must be covered.
@@ -611,18 +624,41 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // to track universe levels properly.
         Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(Val::Set),
 
-        // Constructor applications and recursor applications need their
-        // declaration's parameter telescope to derive a type. Wired in
-        // Phase 11b Step 5.
-        Exp::InductiveCtor(decl, ctor, _) => Err(format!(
-            "type inference for inductive constructor `{}.{ctor}` not yet implemented \
-             (Phase 11b step 5)",
-            decl.name
-        )),
-        Exp::InductiveRec { decl, .. } => Err(format!(
-            "type inference for `{}.rec` not yet implemented (Phase 11b step 5)",
-            decl.name
-        )),
+        // Constructor application — inference works when the inductive
+        // has no parameters (the result type is fully determined).
+        // Parameterised inductives need an expected type to drive
+        // parameter inference; require checking mode for those.
+        Exp::InductiveCtor(decl, ctor_name, args) => {
+            if !decl.params.is_empty() {
+                return Err(format!(
+                    "InductiveCtor: cannot infer type of `{}.{ctor_name}` — \
+                     `{}` has {} parameter(s), supply an expected type via checking mode",
+                    decl.name,
+                    decl.name,
+                    decl.params.len()
+                ));
+            }
+            check_inductive_ctor_args(ctx, decl, ctor_name, args, decl, &[])?;
+            Ok(Val::InductiveType {
+                decl: decl.clone(),
+                params: Vec::new(),
+            })
+        }
+
+        // Recursor application — Phase 11b step 5.
+        // 1. The major's inferred type fixes the inductive declaration
+        //    and the parameters.
+        // 2. The motive must accept that inductive type and return a
+        //    sort (for now, `Set`).
+        // 3. Each minor is checked against the type derived by
+        //    [`derive_minor_types`](super::recursor).
+        // 4. The result type is `motive(major)`.
+        Exp::InductiveRec {
+            decl,
+            motive,
+            minors,
+            major,
+        } => check_infer_inductive_rec(ctx, decl, motive, minors, major),
 
         e => Err(format!("cannot infer type of: {e:?}")),
     }
@@ -907,6 +943,143 @@ fn ext_pi(val: &Val) -> Result<(Val, Clos), String> {
         Val::Pi(t, g) => Ok((*t.clone(), g.clone())),
         u => Err(format!("expected Pi type, got: {u:?}")),
     }
+}
+
+/// Check the arguments of an inductive constructor application against
+/// the constructor's declared types.
+///
+/// Walks the constructor's Π-telescope, skipping the parameter prefix,
+/// and checks each user-supplied argument against the corresponding
+/// binder type evaluated in an environment that binds parameters to
+/// the supplied param values and earlier args to their values (so a
+/// constructor type like `cons : (A:Set) → A → List A → List A` can
+/// have its second binder type `List A` reference the first param).
+///
+/// Used by both the bidirectional `check` arm and the inference path
+/// for non-parametric constructors.
+fn check_inductive_ctor_args(
+    ctx: &mut CheckCtx,
+    decl: &Arc<InductiveDecl>,
+    ctor_name: &str,
+    args: &[Exp],
+    expected_decl: &Arc<InductiveDecl>,
+    params: &[Val],
+) -> Result<(), String> {
+    if decl.name != expected_decl.name {
+        return Err(format!(
+            "InductiveCtor: constructor of `{}` does not match expected inductive `{}`",
+            decl.name, expected_decl.name
+        ));
+    }
+    let ctor_idx = decl
+        .ctors
+        .iter()
+        .position(|c| c.name == ctor_name)
+        .ok_or_else(|| {
+            format!(
+                "InductiveCtor: no constructor `{ctor_name}` in `{}`",
+                decl.name
+            )
+        })?;
+    let ctor = &decl.ctors[ctor_idx];
+
+    let mut current = &ctor.typ;
+    let mut params_to_skip = decl.params.len();
+    let mut arg_specs: Vec<(Patt, Exp)> = Vec::new();
+    while let Exp::Pi(patt, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            arg_specs.push((patt.clone(), (**dom).clone()));
+        }
+        current = body;
+    }
+    if arg_specs.len() != args.len() {
+        return Err(format!(
+            "InductiveCtor `{}.{ctor_name}` expects {} args, got {}",
+            decl.name,
+            arg_specs.len(),
+            args.len()
+        ));
+    }
+
+    // Internal env for evaluating expected types: starts with params
+    // bound, then accumulates each checked arg's value.
+    let mut arg_env = Rho::Nil;
+    for ((patt, _), val) in decl.params.iter().zip(params.iter()) {
+        arg_env = arg_env.extend(patt.clone(), val.clone());
+    }
+    for ((arg_patt, arg_typ_exp), arg_exp) in arg_specs.iter().zip(args.iter()) {
+        let arg_typ_val = eval(arg_typ_exp, &arg_env).map_err(|e| e.to_string())?;
+        check(ctx, arg_exp, &arg_typ_val)?;
+        let arg_val = eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
+        arg_env = arg_env.extend(arg_patt.clone(), arg_val);
+    }
+    Ok(())
+}
+
+/// Type-check an `Exp::InductiveRec` application and return its result
+/// type `motive(major)`.
+fn check_infer_inductive_rec(
+    ctx: &mut CheckCtx,
+    decl: &Arc<InductiveDecl>,
+    motive: &Exp,
+    minors: &[Exp],
+    major: &Exp,
+) -> Result<Val, String> {
+    // 1. Major must inhabit the inductive being eliminated.
+    let major_typ = check_infer(ctx, major)?;
+    let (major_decl, params) = match &major_typ {
+        Val::InductiveType { decl: d, params: p } => (d.clone(), p.clone()),
+        other => {
+            return Err(format!(
+                "InductiveRec on `{}`: major has type {:?}, expected an inductive type",
+                decl.name,
+                readback_val(ctx.rho.len(), other)
+            ));
+        }
+    };
+    if major_decl.name != decl.name {
+        return Err(format!(
+            "InductiveRec: declaration mismatch — recursor for `{}`, major has type `{}`",
+            decl.name, major_decl.name
+        ));
+    }
+
+    // 2. Motive : I(params) → Type(1).
+    //    Codomain `Type(1)` admits both `Set` (= Type(0)) and Type(n)
+    //    motive bodies via the existing (Set : Type(1)) and
+    //    (Type(n) : Type(n+1)) rules. Phase 11b extension can
+    //    generalise to arbitrary Sort u with universe inference.
+    let motive_dom = Val::InductiveType {
+        decl: decl.clone(),
+        params: params.clone(),
+    };
+    let motive_typ = Val::Pi(
+        Box::new(motive_dom),
+        Clos::new(Patt::Unit, Exp::Type(1), Rho::Nil),
+    );
+    check(ctx, motive, &motive_typ)?;
+
+    // 3. Minors: one per constructor, each against its derived type.
+    if minors.len() != decl.ctors.len() {
+        return Err(format!(
+            "InductiveRec on `{}`: expected {} minors (one per constructor), got {}",
+            decl.name,
+            decl.ctors.len(),
+            minors.len()
+        ));
+    }
+    let motive_val = eval(motive, &ctx.rho).map_err(|e| e.to_string())?;
+    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::Pure)
+        .map_err(|e| e.to_string())?;
+    for (minor, expected_typ) in minors.iter().zip(expected_minor_types.iter()) {
+        check(ctx, minor, expected_typ)?;
+    }
+
+    // 4. Result: motive(major).
+    let major_val = eval(major, &ctx.rho).map_err(|e| e.to_string())?;
+    motive_val.app(major_val).map_err(|e| e.to_string())
 }
 
 /// Extract a Sigma type: Sig(A, x.B) → (A, x.B)
@@ -1697,5 +1870,288 @@ mod tests {
         let mut c = ctx();
         let field = find_sigma_field(&mut c, &dog_type, "name");
         assert!(field.is_none(), "no layer → should not resolve");
+    }
+
+    // --- Inductive type checking (Phase 11b step 5) ---
+
+    use crate::nbe::term::InductiveCtorDecl;
+
+    fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
+        Arc::new(InductiveDecl {
+            name: name.to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: Vec::new(),
+        })
+    }
+
+    fn nat_decl() -> Arc<InductiveDecl> {
+        let s = ind_self_ref("Nat");
+        let nat_ty = Exp::InductiveType(s, Vec::new());
+        Arc::new(InductiveDecl {
+            name: "Nat".to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "zero".to_string(),
+                    typ: nat_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "succ".to_string(),
+                    typ: Exp::Pi(Patt::Unit, Box::new(nat_ty.clone()), Box::new(nat_ty)),
+                },
+            ],
+        })
+    }
+
+    fn nat_zero_exp(decl: &Arc<InductiveDecl>) -> Exp {
+        Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new())
+    }
+
+    fn nat_succ_exp(decl: &Arc<InductiveDecl>, n: Exp) -> Exp {
+        Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![n])
+    }
+
+    /// Constant `λ_. Set` motive — applied to anything yields `Set`.
+    fn const_set_motive_exp() -> Exp {
+        Exp::Lam(Patt::Unit, Box::new(Exp::Set))
+    }
+
+    #[test]
+    fn check_ctor_zero_against_nat_type() {
+        let nat = nat_decl();
+        let nat_ty = Val::InductiveType {
+            decl: nat.clone(),
+            params: Vec::new(),
+        };
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        check(&mut c, &nat_zero_exp(&nat), &nat_ty).expect("zero : Nat");
+    }
+
+    #[test]
+    fn check_ctor_succ_zero_against_nat_type() {
+        let nat = nat_decl();
+        let nat_ty = Val::InductiveType {
+            decl: nat.clone(),
+            params: Vec::new(),
+        };
+        let exp = nat_succ_exp(&nat, nat_zero_exp(&nat));
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        check(&mut c, &exp, &nat_ty).expect("succ zero : Nat");
+    }
+
+    #[test]
+    fn check_ctor_arg_type_mismatch() {
+        // succ Set should fail because Set : Type, not Nat.
+        let nat = nat_decl();
+        let nat_ty = Val::InductiveType {
+            decl: nat.clone(),
+            params: Vec::new(),
+        };
+        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::Set]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        assert!(check(&mut c, &bogus, &nat_ty).is_err());
+    }
+
+    #[test]
+    fn check_ctor_unknown_constructor_name() {
+        let nat = nat_decl();
+        let nat_ty = Val::InductiveType {
+            decl: nat.clone(),
+            params: Vec::new(),
+        };
+        let bogus = Exp::InductiveCtor(nat.clone(), "two".to_string(), Vec::new());
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let err = check(&mut c, &bogus, &nat_ty).unwrap_err();
+        assert!(err.contains("no constructor"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn check_ctor_wrong_decl_against_other_inductive() {
+        // Construct a Bool decl, then try to type-check Bool's True against Nat.
+        let nat = nat_decl();
+        let bs = ind_self_ref("Bool");
+        let bool_ty_exp = Exp::InductiveType(bs, Vec::new());
+        let bool_decl = Arc::new(InductiveDecl {
+            name: "Bool".to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: vec![InductiveCtorDecl {
+                name: "True".to_string(),
+                typ: bool_ty_exp,
+            }],
+        });
+        let true_exp = Exp::InductiveCtor(bool_decl, "True".to_string(), Vec::new());
+        let nat_ty = Val::InductiveType {
+            decl: nat,
+            params: Vec::new(),
+        };
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let err = check(&mut c, &true_exp, &nat_ty).unwrap_err();
+        assert!(err.contains("does not match"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn infer_ctor_succeeds_for_non_parametric_inductive() {
+        // Nat has no params → inference returns InductiveType{Nat, []}.
+        let nat = nat_decl();
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let typ = check_infer(&mut c, &nat_zero_exp(&nat)).expect("infer Nat.zero");
+        match typ {
+            Val::InductiveType { decl, params } => {
+                assert_eq!(decl.name, "Nat");
+                assert!(params.is_empty());
+            }
+            other => panic!("expected InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_ctor_fails_for_parametric_inductive() {
+        let s = ind_self_ref("List");
+        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_decl = Arc::new(InductiveDecl {
+            name: "List".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Set)],
+            sort: Exp::Set,
+            ctors: vec![InductiveCtorDecl {
+                name: "nil".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Set),
+                    Box::new(list_ty),
+                ),
+            }],
+        });
+        let nil_exp = Exp::InductiveCtor(list_decl, "nil".to_string(), Vec::new());
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let err = check_infer(&mut c, &nil_exp).unwrap_err();
+        assert!(err.contains("checking mode"), "unexpected: {err}");
+    }
+
+    /// Build a `CheckCtx` with `n : Nat` bound (gamma + rho).
+    fn ctx_with_nat_var() -> (Arc<InductiveDecl>, CheckCtx) {
+        let nat = nat_decl();
+        let nat_ty = Val::InductiveType {
+            decl: nat.clone(),
+            params: Vec::new(),
+        };
+        let nat_val = Val::InductiveVal {
+            decl: nat.clone(),
+            ctor_name: "zero".to_string(),
+            args: Vec::new(),
+        };
+        let gamma: Gamma = vec![("n".to_string(), nat_ty)];
+        let rho = Rho::Nil.extend(Patt::Var("n".to_string()), nat_val);
+        (nat, CheckCtx::new(rho, gamma))
+    }
+
+    #[test]
+    fn infer_rec_well_typed() {
+        // Nat.rec (λ_. Set) Nat (λ_n. λ_ih. Nat) n   (motive constant Set)
+        // Motive : Nat → Set, zero minor : Set, succ minor : Nat → Set → Set,
+        // result type: Set.
+        let (nat, mut c) = ctx_with_nat_var();
+        let nat_ty_exp = Exp::InductiveType(nat.clone(), Vec::new());
+        let succ_minor = Exp::Lam(
+            Patt::Unit,
+            Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp.clone()))),
+        );
+        let exp = Exp::InductiveRec {
+            decl: nat,
+            motive: Box::new(const_set_motive_exp()),
+            minors: vec![nat_ty_exp, succ_minor],
+            major: Box::new(Exp::Var("n".to_string())),
+        };
+        let typ = check_infer(&mut c, &exp).expect("Nat.rec well-typed");
+        assert!(matches!(typ, Val::Set), "expected Set, got {typ:?}");
+    }
+
+    #[test]
+    fn infer_rec_wrong_minor_count() {
+        let (nat, mut c) = ctx_with_nat_var();
+        let exp = Exp::InductiveRec {
+            decl: nat,
+            motive: Box::new(const_set_motive_exp()),
+            minors: vec![Exp::InductiveType(nat_decl(), Vec::new())], // only 1 minor, needs 2
+            major: Box::new(Exp::Var("n".to_string())),
+        };
+        let err = check_infer(&mut c, &exp).unwrap_err();
+        assert!(err.contains("expected 2 minors"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn infer_rec_minor_type_mismatch() {
+        // Wrong type for the zero minor — supply Unit instead of a Set.
+        let (nat, mut c) = ctx_with_nat_var();
+        let nat_ty_exp = Exp::InductiveType(nat.clone(), Vec::new());
+        let succ_minor = Exp::Lam(
+            Patt::Unit,
+            Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp))),
+        );
+        let exp = Exp::InductiveRec {
+            decl: nat,
+            motive: Box::new(const_set_motive_exp()),
+            minors: vec![Exp::Unit, succ_minor],
+            major: Box::new(Exp::Var("n".to_string())),
+        };
+        assert!(check_infer(&mut c, &exp).is_err());
+    }
+
+    #[test]
+    fn infer_rec_major_wrong_type() {
+        // Major has type 1 (One), not Nat — must fail with the inductive-type message.
+        let nat = nat_decl();
+        let nat_ty_exp = Exp::InductiveType(nat.clone(), Vec::new());
+        let succ_minor = Exp::Lam(
+            Patt::Unit,
+            Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp.clone()))),
+        );
+        let exp = Exp::InductiveRec {
+            decl: nat,
+            motive: Box::new(const_set_motive_exp()),
+            minors: vec![nat_ty_exp, succ_minor],
+            major: Box::new(Exp::Var("u".to_string())),
+        };
+        let gamma: Gamma = vec![("u".to_string(), Val::One)];
+        let rho = Rho::Nil.extend(Patt::Var("u".to_string()), Val::Unit);
+        let mut c = CheckCtx::new(rho, gamma);
+        let err = check_infer(&mut c, &exp).unwrap_err();
+        assert!(
+            err.contains("expected an inductive type"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn infer_rec_decl_mismatch() {
+        // n : Nat but recursor uses Bool decl.
+        let (_nat, mut c) = ctx_with_nat_var();
+        let bs = ind_self_ref("Bool");
+        let bool_ty = Exp::InductiveType(bs, Vec::new());
+        let bool_decl = Arc::new(InductiveDecl {
+            name: "Bool".to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "True".to_string(),
+                    typ: bool_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "False".to_string(),
+                    typ: bool_ty.clone(),
+                },
+            ],
+        });
+        let exp = Exp::InductiveRec {
+            decl: bool_decl,
+            motive: Box::new(const_set_motive_exp()),
+            minors: vec![bool_ty.clone(), bool_ty],
+            major: Box::new(Exp::Var("n".to_string())),
+        };
+        let err = check_infer(&mut c, &exp).unwrap_err();
+        assert!(err.contains("declaration mismatch"), "unexpected: {err}");
     }
 }
