@@ -409,9 +409,9 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                     minors: minor_vals,
                     major: Box::new(n),
                 })),
-                Val::InductiveVal { .. } => Err(EvalError::NotImplemented(
-                    "inductive recursor iota reduction (Phase 11b step 2)".to_string(),
-                )),
+                Val::InductiveVal {
+                    ctor_name, args, ..
+                } => iota_reduce(decl, &motive_val, &minor_vals, &ctor_name, &args, ctx),
                 other => Err(EvalError::InvalidCaseTarget(format!(
                     "InductiveRec: expected inductive value, got {other:?}"
                 ))),
@@ -774,6 +774,140 @@ fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalEr
         ))),
         other => Err(EvalError::InvalidCaseTarget(format!(
             "Reduce: expected list, got {other:?}"
+        ))),
+    }
+}
+
+/// Iota reduction for an inductive recursor (Phase 11b step 2, D19 §3.4).
+///
+/// Reduces `I.rec params motive m₁..mₖ (cⱼ args)` to
+/// `mⱼ(args, ih₁, …, ihₘ)` where each `ihᵢ` is the recursor applied to a
+/// recursive sub-argument of `cⱼ`. Recursive sub-arguments are identified
+/// by walking the constructor's type telescope: any binder (after the
+/// parameter prefix) whose type is a self-reference `Exp::InductiveType(I, _)`
+/// contributes one IH, computed by recursing into `iota_reduce` for
+/// constructor sub-values or producing a blocked `Neut::NtRec` for
+/// neutrals.
+///
+/// Higher-order recursive arguments (e.g. `(Nat → I) → I`) are rejected
+/// elsewhere by the positivity checker (Phase 11b step 4) — here they
+/// would simply fail the recursive-arg-type check and produce an
+/// arity-mismatch error.
+fn iota_reduce(
+    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    motive: &Val,
+    minors: &[Val],
+    ctor_name: &str,
+    args: &[Val],
+    ctx: &EvalCtx,
+) -> Result<Val, EvalError> {
+    let ctor_idx = decl
+        .ctors
+        .iter()
+        .position(|c| c.name == ctor_name)
+        .ok_or_else(|| {
+            EvalError::ConstructorNotFound(format!(
+                "{}.{ctor_name} (no such constructor in inductive `{}`)",
+                decl.name, decl.name
+            ))
+        })?;
+
+    if minors.len() != decl.ctors.len() {
+        return Err(EvalError::InvalidCaseTarget(format!(
+            "InductiveRec on `{}`: expected {} minors, got {}",
+            decl.name,
+            decl.ctors.len(),
+            minors.len()
+        )));
+    }
+
+    let arg_types = extract_ctor_arg_types(decl, &decl.ctors[ctor_idx].typ);
+    if arg_types.len() != args.len() {
+        return Err(EvalError::InvalidCaseTarget(format!(
+            "InductiveRec: constructor `{}.{ctor_name}` expects {} args, got {}",
+            decl.name,
+            arg_types.len(),
+            args.len()
+        )));
+    }
+
+    // Apply minor to each constructor argument (in original order).
+    let mut result = minors[ctor_idx].clone();
+    for arg in args {
+        result = result.app_ctx(arg.clone(), ctx)?;
+    }
+
+    // Then apply an induction hypothesis for each recursive argument,
+    // in the order the recursive arguments appear.
+    for (arg, arg_typ) in args.iter().zip(arg_types.iter()) {
+        if is_recursive_arg_type(decl, arg_typ) {
+            let ih = build_recursor_ih(decl, motive, minors, arg, ctx)?;
+            result = result.app_ctx(ih, ctx)?;
+        }
+    }
+
+    Ok(result)
+}
+
+/// Walk the constructor's full type expression, skip the parameter
+/// prefix, and return the remaining argument types in order.
+///
+/// The returned slice references the original `Exp` nodes — no
+/// substitution is performed. Callers only inspect the syntactic head
+/// (specifically, looking for `Exp::InductiveType` to detect recursive
+/// arguments), so leaving free variable references intact is fine.
+fn extract_ctor_arg_types<'a>(
+    decl: &crate::nbe::term::InductiveDecl,
+    ctor_typ: &'a Exp,
+) -> Vec<&'a Exp> {
+    let mut types = Vec::new();
+    let mut current = ctor_typ;
+    let mut params_to_skip = decl.params.len();
+    while let Exp::Pi(_, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            types.push(dom.as_ref());
+        }
+        current = body;
+    }
+    types
+}
+
+/// Whether a constructor argument type is a direct self-reference to
+/// the inductive being eliminated.
+///
+/// Phase 11b is non-nested, strictly positive — recursive arguments
+/// have type exactly `Exp::InductiveType(I, _)` for the same inductive.
+/// Higher-order or nested forms are rejected at type-check time.
+fn is_recursive_arg_type(decl: &crate::nbe::term::InductiveDecl, typ: &Exp) -> bool {
+    matches!(typ, Exp::InductiveType(d, _) if d.name == decl.name)
+}
+
+/// Build the induction hypothesis for a recursive constructor argument.
+///
+/// Either recurses into `iota_reduce` (if the argument is itself a
+/// constructor) or produces a blocked `Neut::NtRec` (if the argument
+/// is neutral).
+fn build_recursor_ih(
+    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    motive: &Val,
+    minors: &[Val],
+    arg: &Val,
+    ctx: &EvalCtx,
+) -> Result<Val, EvalError> {
+    match arg {
+        Val::InductiveVal {
+            ctor_name, args, ..
+        } => iota_reduce(decl, motive, minors, ctor_name, args, ctx),
+        Val::Nt(n) => Ok(Val::Nt(Neut::NtRec {
+            decl: decl.clone(),
+            motive: Box::new(motive.clone()),
+            minors: minors.to_vec(),
+            major: Box::new(n.clone()),
+        })),
+        other => Err(EvalError::InvalidCaseTarget(format!(
+            "InductiveRec: recursive argument is not an inductive value: {other:?}"
         ))),
     }
 }
@@ -2083,6 +2217,267 @@ mod tests {
         match rv {
             RVal::Array(items) => assert_eq!(items.len(), 2),
             other => panic!("expected Array, got {other:?}"),
+        }
+    }
+
+    // --- Inductive recursor (iota reduction) tests (Phase 11b step 2) ---
+
+    use crate::nbe::term::{InductiveCtorDecl, InductiveDecl};
+
+    /// Stub self-reference for use inside an inductive's own constructor
+    /// types. Carries the matching name with empty `ctors`; iota
+    /// reduction only inspects names on inner refs, so this is enough
+    /// to drive the algorithm without genuinely cyclic Arc allocation.
+    fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
+        Arc::new(InductiveDecl {
+            name: name.to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: Vec::new(),
+        })
+    }
+
+    /// inductive Nat { zero : Nat, succ : Nat → Nat }
+    fn nat_decl() -> Arc<InductiveDecl> {
+        let s = ind_self_ref("Nat");
+        let nat_ty = Exp::InductiveType(s, Vec::new());
+        Arc::new(InductiveDecl {
+            name: "Nat".to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "zero".to_string(),
+                    typ: nat_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "succ".to_string(),
+                    typ: Exp::Pi(Patt::Unit, Box::new(nat_ty.clone()), Box::new(nat_ty)),
+                },
+            ],
+        })
+    }
+
+    fn ind_zero(decl: &Arc<InductiveDecl>) -> Val {
+        Val::InductiveVal {
+            decl: decl.clone(),
+            ctor_name: "zero".to_string(),
+            args: Vec::new(),
+        }
+    }
+
+    fn ind_succ(decl: &Arc<InductiveDecl>, n: Val) -> Val {
+        Val::InductiveVal {
+            decl: decl.clone(),
+            ctor_name: "succ".to_string(),
+            args: vec![n],
+        }
+    }
+
+    fn nat_n(decl: &Arc<InductiveDecl>, n: usize) -> Val {
+        let mut v = ind_zero(decl);
+        for _ in 0..n {
+            v = ind_succ(decl, v);
+        }
+        v
+    }
+
+    #[test]
+    fn iota_zero_arity_constructor() {
+        // inductive Bool { True, False }
+        // Bool.rec C true_minor false_minor True ↝ true_minor
+        let s = ind_self_ref("Bool");
+        let bool_ty = Exp::InductiveType(s, Vec::new());
+        let bool_decl = Arc::new(InductiveDecl {
+            name: "Bool".to_string(),
+            params: Vec::new(),
+            sort: Exp::Set,
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "True".to_string(),
+                    typ: bool_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "False".to_string(),
+                    typ: bool_ty,
+                },
+            ],
+        });
+        let true_minor = Val::Con("yes".to_string(), Box::new(Val::Unit));
+        let false_minor = Val::Con("no".to_string(), Box::new(Val::Unit));
+        let result = iota_reduce(
+            &bool_decl,
+            &Val::Set,
+            &[true_minor, false_minor],
+            "True",
+            &[],
+            &EvalCtx::Pure,
+        )
+        .expect("iota_reduce");
+        match result {
+            Val::Con(c, _) if c == "yes" => {}
+            other => panic!("expected Con(\"yes\", _), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn iota_recursive_constructor_double() {
+        // Nat.rec zero (λ_n. λih. succ (succ ih)) (succ (succ zero))
+        // ↝ succ (succ (succ (succ zero)))
+        let nat = nat_decl();
+        let zero_minor = nat_n(&nat, 0);
+
+        // succ_minor body: succ (succ ih)
+        let succ_body = Exp::InductiveCtor(
+            nat.clone(),
+            "succ".to_string(),
+            vec![Exp::InductiveCtor(
+                nat.clone(),
+                "succ".to_string(),
+                vec![Exp::Var("ih".to_string())],
+            )],
+        );
+        // λ_n. λih. body
+        let succ_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(Patt::Var("ih".to_string()), Box::new(succ_body)),
+            Rho::Nil,
+        ));
+
+        let result = iota_reduce(
+            &nat,
+            &Val::Set,
+            &[zero_minor, succ_minor],
+            "succ",
+            &[nat_n(&nat, 1)],
+            &EvalCtx::Pure,
+        )
+        .expect("iota_reduce");
+
+        let expected = nat_n(&nat, 4);
+        let result_exp = crate::nbe::readback::readback_val(0, &result);
+        let expected_exp = crate::nbe::readback::readback_val(0, &expected);
+        assert_eq!(result_exp, expected_exp);
+    }
+
+    #[test]
+    fn iota_list_length() {
+        // List.rec zero (λa rest ih. succ ih) [_, _, _] = succ (succ (succ zero))
+        let nat = nat_decl();
+        let s = ind_self_ref("List");
+        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_decl = Arc::new(InductiveDecl {
+            name: "List".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Set)],
+            sort: Exp::Set,
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "nil".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Set),
+                        Box::new(list_ty.clone()),
+                    ),
+                },
+                InductiveCtorDecl {
+                    name: "cons".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Set),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::Var("A".to_string())),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(list_ty.clone()),
+                                Box::new(list_ty),
+                            )),
+                        )),
+                    ),
+                },
+            ],
+        });
+
+        let elem = Val::Unit;
+        let nil_val = Val::InductiveVal {
+            decl: list_decl.clone(),
+            ctor_name: "nil".to_string(),
+            args: Vec::new(),
+        };
+        let cons = |a: Val, l: Val| Val::InductiveVal {
+            decl: list_decl.clone(),
+            ctor_name: "cons".to_string(),
+            args: vec![a, l],
+        };
+        let three = cons(elem.clone(), cons(elem.clone(), cons(elem, nil_val)));
+
+        let nil_minor = nat_n(&nat, 0);
+        // λ_a. λ_rest. λih. succ ih
+        let cons_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(
+                Patt::Unit,
+                Box::new(Exp::Lam(
+                    Patt::Var("ih".to_string()),
+                    Box::new(Exp::InductiveCtor(
+                        nat.clone(),
+                        "succ".to_string(),
+                        vec![Exp::Var("ih".to_string())],
+                    )),
+                )),
+            ),
+            Rho::Nil,
+        ));
+
+        let three_args = match &three {
+            Val::InductiveVal { args, .. } => args.clone(),
+            _ => unreachable!(),
+        };
+        let result = iota_reduce(
+            &list_decl,
+            &Val::Set,
+            &[nil_minor, cons_minor],
+            "cons",
+            &three_args,
+            &EvalCtx::Pure,
+        )
+        .expect("iota_reduce");
+
+        let expected = nat_n(&nat, 3);
+        let result_exp = crate::nbe::readback::readback_val(0, &result);
+        let expected_exp = crate::nbe::readback::readback_val(0, &expected);
+        assert_eq!(result_exp, expected_exp);
+    }
+
+    #[test]
+    fn iota_neutral_major_blocks() {
+        // Eval Exp::InductiveRec on a neutral major must produce Neut::NtRec.
+        let nat = nat_decl();
+        let neutral = Val::Nt(Neut::Gen(0, "n".to_string()));
+        let zero_minor = ind_zero(&nat);
+        // Dummy succ minor body: Unit
+        let succ_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(Patt::Unit, Box::new(Exp::Unit)),
+            Rho::Nil,
+        ));
+        let rho = Rho::Nil
+            .extend(Patt::Var("n".to_string()), neutral)
+            .extend(Patt::Var("zero_min".to_string()), zero_minor)
+            .extend(Patt::Var("succ_min".to_string()), succ_minor);
+        let exp = Exp::InductiveRec {
+            decl: nat.clone(),
+            motive: Box::new(Exp::Set),
+            minors: vec![
+                Exp::Var("zero_min".to_string()),
+                Exp::Var("succ_min".to_string()),
+            ],
+            major: Box::new(Exp::Var("n".to_string())),
+        };
+        let result = eval_ctx(&exp, &rho, &EvalCtx::Pure).expect("eval");
+        match result {
+            Val::Nt(Neut::NtRec { decl: d, .. }) => assert_eq!(d.name, "Nat"),
+            other => panic!("expected NtRec, got {other:?}"),
         }
     }
 }

@@ -175,11 +175,12 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         }
 
         // Inductive type forms (Phase 11b, D19).
-        // Step 1 admits these as valid types without further checking;
-        // Step 4 will run the positivity checker and verify that the
-        // declaration's parameter telescope and constructor types are
-        // well-formed.
-        Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(()),
+        // The introduction form runs the strict-positivity checker
+        // (Phase 11b step 3); references to an already-introduced
+        // inductive only need to be admitted as types — Phase 11b
+        // step 5 will add parameter telescope verification.
+        Exp::Inductive(decl) => crate::nbe::positivity::check_positivity(decl),
+        Exp::InductiveType(_, _) => Ok(()),
 
         a => check(ctx, a, &Val::Set),
     }
