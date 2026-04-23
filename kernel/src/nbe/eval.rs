@@ -170,10 +170,16 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
             rho.clone(),
         ),
 
-        // Sugar: A → B = Π _ : A. B
-        Exp::Arrow(a, b) => eval_ctx(&Exp::Pi(Patt::Unit, a.clone(), b.clone()), rho, ctx),
-        // Sugar: A × B = Σ _ : A. B
-        Exp::Times(a, b) => eval_ctx(&Exp::Sig(Patt::Unit, a.clone(), b.clone()), rho, ctx),
+        // Sugar: A → B = Π _ : A. B  (direct construction, Phase 10c)
+        Exp::Arrow(a, b) => Val::Pi(
+            Box::new(ev(a)),
+            Clos::new(Patt::Unit, *b.clone(), rho.clone()),
+        ),
+        // Sugar: A × B = Σ _ : A. B  (direct construction, Phase 10c)
+        Exp::Times(a, b) => Val::Sig(
+            Box::new(ev(a)),
+            Clos::new(Patt::Unit, *b.clone(), rho.clone()),
+        ),
 
         // Identity type
         Exp::Id(a, x, y) => Val::Id(Box::new(ev(a)), Box::new(ev(x)), Box::new(ev(y))),
@@ -190,7 +196,11 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                     // Blocked — all args become neutral
                     Val::Nt(Neut::App(Box::new(n), Box::new(Val::Unit)))
                 }
-                _ => panic!("J: proof argument is not refl or neutral"),
+                _ => {
+                    // Stuck — proof argument is neither Refl nor neutral.
+                    // Return a stuck neutral rather than panicking (Phase 10c).
+                    Val::Nt(Neut::Gen(usize::MAX, "__j_stuck".to_string()))
+                }
             }
         }
 
@@ -235,7 +245,10 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                     // Direct property access on a known resource
                     match r.get(prop) {
                         Some(val) => resource_value_to_val(val),
-                        None => panic!("property {} not found on resource", prop),
+                        None => {
+                            eprintln!("warning: property {prop} not found on resource");
+                            Val::Unit
+                        }
                     }
                 }
                 // Codata observation: the "property" IRI's local name is
@@ -248,10 +261,14 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Val {
                             return eval_ctx(body, &corecord_rho, ctx);
                         }
                     }
-                    panic!("observation '{}' not found in corecord", obs_name);
+                    eprintln!("warning: observation '{obs_name}' not found in corecord");
+                    Val::Unit
                 }
                 Val::Nt(n) => Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
-                other => panic!("property access on non-resource: {:?}", other),
+                _other => {
+                    eprintln!("warning: property access on non-resource value");
+                    Val::Unit
+                }
             }
         }
 
@@ -396,7 +413,10 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> (Val, Option<Trace>) 
                 Val::ResourceVal(r) => {
                     let result = match r.get(prop) {
                         Some(val) => resource_value_to_val(val),
-                        None => panic!("property {} not found on resource", prop),
+                        None => {
+                            eprintln!("warning: property {prop} not found on resource");
+                            Val::Unit
+                        }
                     };
                     (
                         result,
@@ -413,7 +433,8 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> (Val, Option<Trace>) 
                             return eval_traced(body, &corecord_rho, ctx);
                         }
                     }
-                    panic!("observation '{}' not found in corecord", obs_name);
+                    eprintln!("warning: observation '{obs_name}' not found in corecord");
+                    (Val::Unit, None)
                 }
                 Val::Nt(n) => (
                     Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
@@ -422,7 +443,10 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> (Val, Option<Trace>) 
                         property: prop.clone(),
                     }),
                 ),
-                other => panic!("property access on non-resource: {:?}", other),
+                _other => {
+                    eprintln!("warning: property access on non-resource value");
+                    (Val::Unit, None)
+                }
             }
         }
 
@@ -697,8 +721,14 @@ fn val_to_resource(val: &Val) -> crate::ontology::resource::Resource {
         Val::ResourceVal(r) => r.as_ref().clone(),
         Val::Unit => crate::ontology::resource::Resource::new_embedded(),
         _ => {
-            // For other Val types, create an embedded resource
-            // This is a lossy conversion — not all Vals map to Resources
+            // Lossy conversion — not all Vals map to Resources.
+            // Fire in debug builds so tests surface unexpected Val types
+            // reaching component dispatch (Phase 10c, defence-in-depth layer 3).
+            debug_assert!(
+                false,
+                "val_to_resource: lossy conversion of {:?} to empty resource",
+                val
+            );
             crate::ontology::resource::Resource::new_embedded()
         }
     }
@@ -817,7 +847,28 @@ fn dispatch_fiber_query(institution_iri: &Iri, query_val: &Val, ctx: &EvalCtx) -
 
     match reasoner.query(&query_resource, &exec_ctx) {
         Ok(result) => Val::ResourceVal(Box::new(result)),
-        Err(e) => panic!("fiber query failed: {e}"),
+        Err(e) => {
+            eprintln!("warning: fiber query failed: {e}");
+            query_val.clone()
+        }
+    }
+}
+
+/// Extract the payload value from a single-property wrapper resource.
+///
+/// Convention: `resource_value_to_val` wraps primitive values in a
+/// Resource with one property keyed on the type IRI (e.g.
+/// `urn:eigenius:core:string`). This function extracts that value.
+fn resource_payload(
+    r: &crate::ontology::resource::Resource,
+) -> Option<&crate::ontology::resource::Value> {
+    let props = r.properties();
+    if props.len() == 1 {
+        props.values().next()
+    } else {
+        // Multi-property resources don't follow the wrapper convention;
+        // fall back to first value for backwards compatibility.
+        props.values().next()
     }
 }
 
@@ -826,46 +877,31 @@ fn check_native_constraint(constraint: &crate::nbe::term::Constraint, val: &Val)
     use crate::nbe::term::Constraint;
     match constraint {
         Constraint::MinValue(min) => match val {
-            Val::ResourceVal(r) => r
-                .properties()
-                .values()
-                .next()
+            Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_integer())
                 .is_some_and(|n| n >= *min),
             _ => false,
         },
         Constraint::MaxValue(max) => match val {
-            Val::ResourceVal(r) => r
-                .properties()
-                .values()
-                .next()
+            Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_integer())
                 .is_some_and(|n| n <= *max),
             _ => false,
         },
         Constraint::MinLength(min) => match val {
-            Val::ResourceVal(r) => r
-                .properties()
-                .values()
-                .next()
+            Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.len() as i64 >= *min),
             _ => false,
         },
         Constraint::MaxLength(max) => match val {
-            Val::ResourceVal(r) => r
-                .properties()
-                .values()
-                .next()
+            Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.len() as i64 <= *max),
             _ => false,
         },
         Constraint::Pattern(pattern) => match val {
-            Val::ResourceVal(r) => r
-                .properties()
-                .values()
-                .next()
+            Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| {
                     let full = format!("^(?:{pattern})$");
@@ -874,10 +910,7 @@ fn check_native_constraint(constraint: &crate::nbe::term::Constraint, val: &Val)
             _ => false,
         },
         Constraint::Format(fmt) => match val {
-            Val::ResourceVal(r) => r
-                .properties()
-                .values()
-                .next()
+            Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| match fmt.as_str() {
                     "date" => s.len() == 10 && s.chars().nth(4) == Some('-'),
@@ -911,6 +944,13 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
 }
 
 /// Convert an Eigon resource Value to a Mini-TT Val.
+///
+/// Uses a heuristic IRI check: strings starting with "urn:" or "http"
+/// are treated as class references (`Val::EigonClass`). This can
+/// misclassify string property values that happen to look like IRIs.
+/// The principled fix is type-directed conversion consulting the
+/// property's declared `data_type` — deferred to Phase 11+ when the
+/// type checker has full property-type awareness during evaluation.
 fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
     use crate::ontology::resource::Value as RVal;
     match v {
@@ -1225,6 +1265,84 @@ mod tests {
     }
 
     #[test]
+    fn prop_access_missing_property_returns_unit() {
+        // Phase 10c: PropAccess on a missing property should return Val::Unit
+        // instead of panicking.
+        let ctx = io_ctx();
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:test:exists").unwrap(),
+            Value::String("yes".into()),
+        );
+        let rho = Rho::Nil.extend(Patt::Var("r".to_string()), Val::ResourceVal(Box::new(r)));
+        let exp = Exp::PropAccess(
+            Box::new(Exp::Var("r".to_string())),
+            Iri::parse("urn:eigenius:test:missing").unwrap(),
+        );
+        let (val, _trace) = eval_traced(&exp, &rho, &ctx);
+        assert!(
+            matches!(val, Val::Unit),
+            "missing property should return Val::Unit, got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn prop_access_on_non_resource_returns_unit() {
+        // Phase 10c: PropAccess where the target evaluates to a non-resource
+        // Val should return Val::Unit instead of panicking.
+        let ctx = io_ctx();
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Set);
+        let exp = Exp::PropAccess(
+            Box::new(Exp::Var("x".to_string())),
+            Iri::parse("urn:eigenius:test:prop").unwrap(),
+        );
+        let (val, _trace) = eval_traced(&exp, &rho, &ctx);
+        assert!(
+            matches!(val, Val::Unit),
+            "PropAccess on non-resource should return Val::Unit, got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn arrow_times_direct_evaluation() {
+        // Phase 10c: Arrow/Times should produce identical results to Pi/Sig
+        // with Patt::Unit, but without the re-recursion overhead.
+        let arrow_val = eval(
+            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Set)),
+            &Rho::Nil,
+        );
+        let pi_val = eval(
+            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Set)),
+            &Rho::Nil,
+        );
+        // Both should be Val::Pi
+        assert!(
+            matches!(arrow_val, Val::Pi(_, _)),
+            "Arrow should produce Val::Pi"
+        );
+        assert!(matches!(pi_val, Val::Pi(_, _)), "Pi should produce Val::Pi");
+
+        let times_val = eval(
+            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Set)),
+            &Rho::Nil,
+        );
+        let sig_val = eval(
+            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Set)),
+            &Rho::Nil,
+        );
+        assert!(
+            matches!(times_val, Val::Sig(_, _)),
+            "Times should produce Val::Sig"
+        );
+        assert!(
+            matches!(sig_val, Val::Sig(_, _)),
+            "Sig should produce Val::Sig"
+        );
+    }
+
+    #[test]
     fn eval_traced_pure_leaf_returns_none() {
         // Pure leaf forms (Var, Unit, etc.) should return None trace
         let ctx = io_ctx();
@@ -1234,6 +1352,182 @@ mod tests {
 
         let (_val, trace) = eval_traced(&Exp::Unit, &Rho::Nil, &ctx);
         assert!(trace.is_none(), "Unit should produce no trace");
+    }
+
+    #[test]
+    fn idj_stuck_returns_neutral() {
+        // Phase 10c: J with a non-refl, non-neutral proof should return a
+        // stuck neutral instead of panicking.
+        let ctx = io_ctx();
+        // IdJ(A, C, d, x, y, p) where p = Unit (not Refl or neutral)
+        let args = Box::new([
+            Exp::One,                                                  // A
+            Exp::One,                                                  // C
+            Exp::Lam(Patt::Var("z".to_string()), Box::new(Exp::Unit)), // d
+            Exp::Unit,                                                 // x
+            Exp::Unit,                                                 // y
+            Exp::Unit, // p — not Refl, not neutral → stuck
+        ]);
+        let (val, _trace) = eval_traced(&Exp::IdJ(args), &Rho::Nil, &ctx);
+        match val {
+            Val::Nt(Neut::Gen(_, name)) => {
+                assert_eq!(name, "__j_stuck", "should produce __j_stuck neutral");
+            }
+            other => panic!("expected stuck neutral, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn prop_access_missing_observation_returns_unit() {
+        // Phase 10c: PropAccess on a CoRecord where the observation name
+        // doesn't exist should return Val::Unit instead of panicking.
+        let ctx = io_ctx();
+        let corecord = Val::CoRecord(vec![("head".to_string(), Exp::Unit)], Rho::Nil);
+        let rho = Rho::Nil.extend(Patt::Var("s".to_string()), corecord);
+        // Access observation "missing" which doesn't exist in the corecord
+        let exp = Exp::PropAccess(
+            Box::new(Exp::Var("s".to_string())),
+            Iri::parse("urn:eigenius:test:missing").unwrap(),
+        );
+        let (val, _trace) = eval_traced(&exp, &rho, &ctx);
+        assert!(
+            matches!(val, Val::Unit),
+            "missing observation should return Val::Unit, got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn fiber_query_failure_returns_input() {
+        // Phase 10c: A fiber query that fails should return the input
+        // unchanged instead of panicking.
+        use crate::context::ExecutionContext;
+        use crate::institution::error::{InstitutionError, MorphismValidation};
+        use crate::institution::{FiberDeclaration, FiberReasoner};
+
+        struct FailingInstitution;
+        impl FiberReasoner for FailingInstitution {
+            fn fiber_declaration(&self) -> FiberDeclaration {
+                FiberDeclaration {
+                    institution_iri: Iri::parse("urn:eigenius:test:failing").unwrap(),
+                    name: "Failing".into(),
+                    morphism_types: vec![],
+                    query_types: vec![],
+                    structural_properties: vec![],
+                }
+            }
+            fn query(
+                &self,
+                _query: &Resource,
+                _ctx: &ExecutionContext,
+            ) -> Result<Resource, InstitutionError> {
+                Err(InstitutionError::ComputationFailed(
+                    "intentional test failure".into(),
+                ))
+            }
+            fn validate_morphism(
+                &self,
+                _m: &Resource,
+                _ctx: &ExecutionContext,
+            ) -> Result<MorphismValidation, InstitutionError> {
+                Ok(MorphismValidation::Valid)
+            }
+            fn discover_morphisms(
+                &self,
+                _r: &[Resource],
+                _ctx: &ExecutionContext,
+            ) -> Result<Vec<Resource>, InstitutionError> {
+                Ok(vec![])
+            }
+        }
+
+        let mut inst_registry = InstitutionRegistry::new();
+        inst_registry
+            .register(Box::new(FailingInstitution))
+            .unwrap();
+
+        let layer = std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let ctx = EvalCtx::IO {
+            layer,
+            registry: std::sync::Arc::new(ComponentRegistry::default()),
+            institutions: std::sync::Arc::new(inst_registry),
+            trace_store: None,
+            dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            task_context: None,
+        };
+
+        // Build a resource to use as input
+        let mut input_r = Resource::new_embedded();
+        input_r.set(
+            Iri::parse("urn:eigenius:test:val").unwrap(),
+            Value::String("data".into()),
+        );
+        let rho = Rho::Nil.extend(
+            Patt::Var("q".to_string()),
+            Val::ResourceVal(Box::new(input_r)),
+        );
+
+        // Apply the failing institution IRI to the input
+        let exp = Exp::App(
+            Box::new(Exp::Var("urn:eigenius:test:failing".to_string())),
+            Box::new(Exp::Var("q".to_string())),
+        );
+        let (val, _trace) = eval_traced(&exp, &rho, &ctx);
+
+        // Should return the input unchanged (not panic)
+        match val {
+            Val::ResourceVal(r) => {
+                assert_eq!(
+                    r.get(&Iri::parse("urn:eigenius:test:val").unwrap())
+                        .unwrap()
+                        .as_str(),
+                    Some("data"),
+                    "fiber query failure should return input unchanged"
+                );
+            }
+            other => panic!("expected ResourceVal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn native_decide_constraint_check() {
+        // Phase 10c: Verify check_native_constraint works correctly through
+        // the resource_payload helper after the refactor.
+        use crate::nbe::term::Constraint;
+
+        let ctx = io_ctx();
+
+        // Build a string wrapper resource (matching resource_value_to_val convention)
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:core:string").unwrap(),
+            Value::String("hello".into()),
+        );
+        let rho = Rho::Nil.extend(Patt::Var("s".to_string()), Val::ResourceVal(Box::new(r)));
+
+        // MinLength(3) should pass for "hello" (len=5)
+        let exp = Exp::NativeDecide(
+            Constraint::MinLength(3),
+            Box::new(Exp::Var("s".to_string())),
+        );
+        let (val, _) = eval_traced(&exp, &rho, &ctx);
+        assert!(
+            matches!(val, Val::Refl(_)),
+            "MinLength(3) should pass for 'hello', got {:?}",
+            val
+        );
+
+        // MaxLength(3) should fail for "hello" (len=5)
+        let exp = Exp::NativeDecide(
+            Constraint::MaxLength(3),
+            Box::new(Exp::Var("s".to_string())),
+        );
+        let (val, _) = eval_traced(&exp, &rho, &ctx);
+        assert!(
+            matches!(val, Val::Nt(_)),
+            "MaxLength(3) should fail for 'hello', got {:?}",
+            val
+        );
     }
 
     #[test]
