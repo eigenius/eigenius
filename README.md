@@ -6,12 +6,12 @@ Contemporary LLMs produce text that reads like knowledge but carries no epistemi
 
 The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-## Current Status: Phases 0-4 Complete
+## Current Status: Phases 0–9b Complete
 
 The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
 
 - Parse and serialize Eigon-JSON and CBOR documents
-- Load the self-describing core, program, and reflection ontologies (130+ resources across 3 layers)
+- Load the self-describing core, program, reflection, and institution ontologies (4 bootstrap layers)
 - Build immutable layers with content-addressed identifiers (SHA-256 of CBOR)
 - Validate resources against the full ontology constraint system (12 validation rules)
 - Resolve resources through parent-pointer layer chains
@@ -20,12 +20,17 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Execute programs with local and remote IO components (LLM calls via orchestrator)
 - Dispatch IO components to the Deno orchestrator via gRPC (ComponentExecutor service)
 - Call LLMs via Vercel AI SDK (Anthropic) with prompt templating and metrics
+- Generate structured LLM output via CompleteJson (JSON Schema from ontology classes)
 - Expose kernel operations as MCP tools for LLM agents
 - Track four epistemic categories: declared, observed, derived, verified
-- Record tree-structured reasoning traces with memoization
+- Record tree-structured reasoning traces with memoization and incremental execution
 - Validate epistemic base class requirements (DeclaredResource, DerivedResource, etc.)
-- Persist layers in RocksDB with CBOR serialization
+- Persist layers, traces, and WASM capabilities in RocksDB — survives kernel restart
 - Serve the kernel as a gRPC service (tonic) with streaming query results
+- Compile ESL (Eigenius Surface Language) to Eigon-JSON — all CLI commands accept `.esl` files
+- Register Grothendieck institutions with fiber reasoners and morphism validation
+- Run untrusted WASM capabilities sandboxed via Wasmtime (components and institutions)
+- Model coinductive types (codata/streams) and resumable tasks with checkpointing
 - Run locally via three terminals or Docker Compose
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
@@ -36,14 +41,18 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 
 - **Rust Kernel** — ontology validation, layer management, resource resolution, program execution, gRPC server. Uses `BTreeMap` for deterministic ordering and cache-friendly access.
 - **Deno Orchestrator** — IO component dispatch, LLM integration (Vercel AI SDK), MCP server. Communicates with the kernel via Connect RPC/gRPC.
-- **Layer System** — immutable layers with parent pointers (`Arc<Layer>`), forming a chain. Three bootstrap layers: core → program → reflection. Resolution walks the chain top-down.
+- **Layer System** — immutable layers with parent pointers (`Arc<Layer>`), forming a chain. Four bootstrap layers: core → program → reflection → institution. Resolution walks the chain top-down.
 - **Eigon-JSON / CBOR** — the canonical serialization formats. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types. CBOR for storage and gRPC wire format.
 - **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties. Epistemic base classes enforce provenance requirements.
 - **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
 - **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to Mini-TT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
 - **Epistemic Model** — four categories (declared, observed, derived, verified) enforced via base classes in the reflection ontology. Reasoning traces mirror the expression tree and serve as memoization cache.
+- **Grothendieck Institutions** — domain-specific reasoning systems contribute structured fibers to the knowledge graph. Each institution provides its own sentences, models, satisfaction relation, and internal morphisms via the `FiberReasoner` trait. Cross-institution queries and comorphism translations.
+- **WASM Extensibility** — untrusted capabilities run sandboxed via Wasmtime. Components and institution fiber reasoners can be delivered as WASM modules with fuel/memory limits. Capability SDK for authors.
+- **Durable State** — `eigenius serve --db <path>` persists layers, traces, and WASM capabilities in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
+- **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
-Future phases add: ESL surface syntax (Phase 4.5) and WASM capability sandboxing (Phase 5).
+Next phase: Phase 10 (Kernel Completeness — ontology-as-types resolution, universe soundness, typed errors).
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
@@ -77,25 +86,37 @@ kernel/          Rust kernel crate
   src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator
   src/nbe/         Mini-TT type theory: terms, values, eval, readback, type checker
   src/program/     Program model: expression parser, ground type resolution, executor
+  src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON
+  src/capability/  WASM capability hosting, ComponentRegistry, FiberReasoner dispatch
   src/context/     ExecutionContext (snapshot isolation, read/write control)
-  src/bootstrap/   Core + program ontology loader and system initialization
+  src/bootstrap/   Ontology loader and system initialization (4 bootstrap layers)
   src/storage/     Storage interface traits (LayerStore, ResourceStore)
+  src/task/        Task model: TaskRecord, Checkpoint, resume sweep
 storage/         Storage backend implementations
   memory/          In-memory backend (BTreeMap + Arc<RwLock>)
-  sqlite/          SQLite backend (placeholder)
+  rocksdb/         RocksDB backend (durable layers, traces, capabilities)
   tikv/            TiKV backend (placeholder)
-cli/             Command-line interface (load, validate, query, program-validate, run, inspect)
+  indexing/        SPO/POS/OPS triple index construction
+crates/
+  wasm-runtime/    Wasmtime integration for WASM capability sandboxing
+sdk/
+  wasm-sdk/        Rust SDK for authoring WASM capabilities
+examples/        WASM capability examples (excluded from workspace, built with cargo-component)
+  wasm-cbor-echo/            CBOR echo component
+  wasm-doc-validator/        Document validation component
+  wasm-http-shout/           IO component with HTTP dispatch
+  wasm-ordering-institution/ Ordering institution fiber reasoner
+  wasm-read-query-probe/     Read-capability query probe
+cli/             Command-line interface (load, validate, query, run, serve, tasks, capability, ...)
 ontologies/      Ontology definitions
   core/            Core ontology (core-ontology.json) — self-describing bootstrap
   program/         Program ontology (program-ontology.json) — expression classes, components
   examples/        Example ontologies and programs
-docs/design/     Design documents
-  d1-eigon-serialization-format.md   Eigon-JSON format specification
-  implementation-plan.md             High-level 6-phase plan
-  architecture-v0.3.md               Full architecture specification
+docs/design/     Design documents (D1–D21)
 deploy/          Azure ContainerApps deployment (Dockerfiles, Bicep IaC)
 proto/           gRPC protobuf definitions
-orchestration/   Deno/TypeScript orchestration layer (future)
+orchestration/   Deno/TypeScript orchestration layer
+demo/            End-to-end demo scripts
 ```
 
 ## Getting Started
@@ -127,14 +148,16 @@ issue workflow, Docker-based deployment) add their own tools.
   cargo install just
   ```
 
-**WASM examples (optional)**
+**WASM examples (required for tests)**
 
-Needed to build / modify the fixtures under `examples/wasm-*`:
+Needed to build the WASM fixtures under `examples/wasm-*` that kernel tests depend on via `include_bytes!`:
 
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo install cargo-component
 ```
+
+Once installed, `just build` (or `just build-wasm`) builds all WASM examples and copies the fixtures into `kernel/tests/fixtures/`.
 
 **GitHub workflow (optional, recommended)**
 
@@ -163,9 +186,15 @@ while compiling inside WSL 2.
 ### Build and Test
 
 ```bash
-just build        # or: cargo build --workspace
-just test         # or: cargo test --workspace + deno test
+just build        # build workspace + WASM examples + copy test fixtures
+just test         # cargo test --workspace + deno test
 just check        # fmt + clippy + deno lint
+```
+
+`just build` runs `cargo component build` for each WASM example and copies the resulting `.wasm` files into `kernel/tests/fixtures/` before building the workspace. To rebuild only the WASM fixtures:
+
+```bash
+just build-wasm
 ```
 
 ### CLI
@@ -341,9 +370,20 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON spec: IRI identity, three-layer type system, validation rules, canonical form |
 | [D2: EigenQL Specification](docs/design/d2-eigenql-specification.md) | EigenQL spec: typed stratified Datalog, DEFINE, aggregation, full grammar |
 | [D3: Program Model](docs/design/d3-program-model.md) | Program expression language, component model, scheduling, ESL surface syntax |
+| [D4: Storage Key Encoding](docs/design/d4-storage-key-encoding.md) | Key encoding for RocksDB/TiKV, column families, index layout |
+| [D5: gRPC API Specification](docs/design/d5-grpc-api-specification.md) | RPC definitions, streaming query, error codes, CLI/orchestration integration |
+| [D6: Execution Architecture](docs/design/d6-execution-architecture.md) | Kernel-orchestrator boundary, activity dispatch, MCP server placement |
+| [D6b: Reasoning Trace Schema](docs/design/d6b-reasoning-trace-schema.md) | Trace classes, provenance chain, epistemic status, universe stratification |
 | [D7: ESL Surface Syntax](docs/design/d7-esl-surface-syntax.md) | Two-layer design: HCL-style structural + ML-style expressions |
 | [D8: CompleteJson Component](docs/design/d8-complete-json-component.md) | Structured LLM output via JSON Schema from ontology classes |
-| [Implementation Plan](docs/design/implementation-plan.md) | High-level 6-phase plan from foundation to extensibility |
+| [D9: NbE Unification](docs/design/d9-nbe-unification-and-type-extensions.md) | Capability modes, type theory extensions, ground type resolution, trace storage |
+| [D10: Grothendieck Institutions](docs/design/d10-grothendieck-institution-protocol.md) | FiberReasoner trait, institution registry, comorphisms, fiber query dispatch |
+| [D11: Codata and Streams](docs/design/d11-codata-streams.md) | Coinductive types, stream semantics, tasks as codata, guardedness checking |
+| [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | WASM module lifecycle, host imports, capability levels, fuel/memory limits |
+| [D13: Durable Kernel State](docs/design/d13-durable-kernel-state.md) | `serve --db` flag, seeded bootstrap, drift-refusal, restart re-registration |
+| [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` layer-chain resolution, `CheckCtx`, inference-mode rules (draft) |
+| [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |
+| [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 
 ## License

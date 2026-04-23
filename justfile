@@ -1,8 +1,20 @@
 # Eigenius development tasks
 
 # Build everything
-build:
+build: build-wasm
     cargo build --workspace
+    cargo build --manifest-path orchestration/native/Cargo.toml
+
+# Build WASM examples and copy fixtures for tests
+build-wasm:
+    cd examples/wasm-cbor-echo && cargo component build
+    cd examples/wasm-doc-validator && cargo component build
+    cd examples/wasm-http-shout && cargo component build
+    cd examples/wasm-ordering-institution && cargo component build
+    cd examples/wasm-read-query-probe && cargo component build
+    mkdir -p kernel/tests/fixtures
+    cp examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm kernel/tests/fixtures/
+    cp examples/wasm-ordering-institution/target/wasm32-unknown-unknown/debug/eigenius_wasm_ordering_institution.wasm kernel/tests/fixtures/
 
 # Run all tests (Rust + Deno)
 test:
