@@ -19,7 +19,10 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             let gen = gen_val(level);
             Exp::Lam(
                 gen_patt(level),
-                Box::new(readback_val(level + 1, &f.apply(gen))),
+                Box::new(readback_val(
+                    level + 1,
+                    &f.apply(gen).expect("readback: apply failed"),
+                )),
             )
         }
         Val::Pair(u, v) => Exp::Pair(
@@ -35,7 +38,10 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             Exp::Pi(
                 gen_patt(level),
                 Box::new(readback_val(level, t)),
-                Box::new(readback_val(level + 1, &g.apply(gen))),
+                Box::new(readback_val(
+                    level + 1,
+                    &g.apply(gen).expect("readback: apply failed"),
+                )),
             )
         }
         Val::Sig(t, g) => {
@@ -43,7 +49,10 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             Exp::Sig(
                 gen_patt(level),
                 Box::new(readback_val(level, t)),
-                Box::new(readback_val(level + 1, &g.apply(gen))),
+                Box::new(readback_val(
+                    level + 1,
+                    &g.apply(gen).expect("readback: apply failed"),
+                )),
             )
         }
         Val::One => Exp::One,
@@ -80,7 +89,10 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
                 .iter()
                 .map(|(name, typ)| Observation {
                     name: name.clone(),
-                    typ: readback_val(level, &crate::nbe::eval::eval(typ, rho)),
+                    typ: readback_val(
+                        level,
+                        &crate::nbe::eval::eval(typ, rho).expect("readback: eval failed"),
+                    ),
                 })
                 .collect(),
         ),
@@ -137,7 +149,7 @@ fn readback_data(level: usize, summands: &[(Name, Exp)], rho: &Rho) -> Exp {
     let read_summands: Vec<Summand> = summands
         .iter()
         .map(|(name, exp)| {
-            let val = crate::nbe::eval::eval(exp, rho);
+            let val = crate::nbe::eval::eval(exp, rho).expect("readback: eval failed");
             Summand {
                 name: name.clone(),
                 typ: readback_val(level, &val),
@@ -159,7 +171,10 @@ fn readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Exp {
     let branches: Vec<(Name, Exp)> = cases
         .iter()
         .map(|(name, body)| {
-            let branch_val = crate::nbe::eval::eval(body, rho).app(gen.clone());
+            let branch_val = crate::nbe::eval::eval(body, rho)
+                .expect("readback: eval failed")
+                .app(gen.clone())
+                .expect("readback: app failed");
             (name.clone(), readback_val(level + 1, &branch_val))
         })
         .collect();

@@ -94,11 +94,16 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
         Decl::Def(patt, typ, body) => {
             // Check that the type is well-formed
             check_type(ctx, typ)?;
-            let t = eval(typ, &ctx.rho);
+            let t = eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
             // Check that the body has the declared type
             check(ctx, body, &t)?;
             // Extend the type context
-            up_gamma(&ctx.gamma, patt, &t, &eval(body, &ctx.rho))
+            up_gamma(
+                &ctx.gamma,
+                patt,
+                &t,
+                &eval(body, &ctx.rho).map_err(|e| e.to_string())?,
+            )
         }
         Decl::Drec(patt, typ, body) => {
             // Known subtlety (issue #13 item 3): The body is type-checked
@@ -111,7 +116,7 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             //
             // Check that the type is well-formed
             check_type(ctx, typ)?;
-            let t = eval(typ, &ctx.rho);
+            let t = eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
             let gen = gen_val(&ctx.rho);
             // Extend context with the recursive variable and check body
             let mut inner = ctx.extend(patt, &t, &gen)?;
@@ -124,7 +129,8 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             collect_pattern_names(patt, &mut forbidden);
             check_guarded(body, &forbidden)?;
             // Re-evaluate with the recursive binding
-            let v = eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()));
+            let v = eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))
+                .map_err(|e| e.to_string())?;
             up_gamma(&ctx.gamma, patt, &t, &v)
         }
     }
@@ -138,14 +144,14 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         Exp::Pi(p, a, b) | Exp::Sig(p, a, b) => {
             check_type(ctx, a)?;
             let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &eval(a, &ctx.rho), &gen)?;
+            let mut inner = ctx.extend(p, &eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
             check_type(&mut inner, b)
         }
         Exp::Set | Exp::One | Exp::Type(_) => Ok(()),
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
             check_type(ctx, a)?;
-            let a_val = eval(a, &ctx.rho);
+            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
         }
@@ -181,13 +187,18 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, t, &gen)?;
-            check(&mut inner, e, &g.apply(gen))
+            check(&mut inner, e, &g.apply(gen).map_err(|e| e.to_string())?)
         }
 
         // Pair against Sigma type
         (Exp::Pair(e1, e2), Val::Sig(t, g)) => {
             check(ctx, e1, t)?;
-            check(ctx, e2, &g.apply(eval(e1, &ctx.rho)))
+            check(
+                ctx,
+                e2,
+                &g.apply(eval(e1, &ctx.rho).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?,
+            )
         }
 
         // Constructor against Sum type
@@ -197,7 +208,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 .find(|(name, _)| name == c)
                 .map(|(_, typ)| typ)
                 .ok_or_else(|| format!("constructor {c} not in sum type"))?;
-            check(ctx, e, &eval(a, rho1))
+            check(ctx, e, &eval(a, rho1).map_err(|e| e.to_string())?)
         }
 
         // Case function against Pi from Sum to result
@@ -215,7 +226,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 ));
             }
             for (branch, (c, a)) in branches.iter().zip(cases.iter()) {
-                let a_val = eval(a, rho1);
+                let a_val = eval(a, rho1).map_err(|e| e.to_string())?;
                 let g_c = Clos {
                     patt: Patt::Var("__case_arg".to_string()),
                     body: Exp::App(
@@ -242,7 +253,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Pi(p, a, b), Val::Set) | (Exp::Sig(p, a, b), Val::Set) => {
             check(ctx, a, &Val::Set)?;
             let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &eval(a, &ctx.rho), &gen)?;
+            let mut inner = ctx.extend(p, &eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
             check(&mut inner, b, &Val::Set)
         }
 
@@ -269,7 +280,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // refl(a) : Id(A, a, a) — check that x and y are both a
         (Exp::Refl(a), Val::Id(typ, x, y)) => {
             check(ctx, a, typ)?;
-            let a_val = eval(a, &ctx.rho);
+            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             eq_nf(ctx.rho.len(), x, &a_val)?;
             eq_nf(ctx.rho.len(), y, &a_val)
         }
@@ -277,7 +288,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // Id(A, x, y) : Set
         (Exp::Id(a, x, y), Val::Set) => {
             check(ctx, a, &Val::Set)?;
-            let a_val = eval(a, &ctx.rho);
+            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
         }
@@ -314,7 +325,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 ));
             }
             for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
-                let t = eval(obs_typ, rho1);
+                let t = eval(obs_typ, rho1).map_err(|e| e.to_string())?;
                 check(ctx, &field.body, &t)?;
             }
             Ok(())
@@ -339,7 +350,8 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             let t1 = check_infer(ctx, e1)?;
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
-            Ok(g.apply(eval(e2, &ctx.rho)))
+            Ok(g.apply(eval(e2, &ctx.rho).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?)
         }
 
         Exp::Fst(e) => {
@@ -351,7 +363,13 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         Exp::Snd(e) => {
             let t = check_infer(ctx, e)?;
             let (_, g) = ext_sig(&t)?;
-            Ok(g.apply(eval(e, &ctx.rho).vfst()))
+            Ok(g.apply(
+                eval(e, &ctx.rho)
+                    .map_err(|e| e.to_string())?
+                    .vfst()
+                    .map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?)
         }
 
         // Eigenius: property/observation access type inference.
@@ -368,7 +386,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             if let Val::Codata(observations, rho1) = &t {
                 for (name, typ) in observations {
                     if name == prop_name {
-                        return Ok(eval(typ, rho1));
+                        return eval(typ, rho1).map_err(|e| e.to_string());
                     }
                 }
                 return Err(format!(
@@ -396,7 +414,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                 Val::Codata(observations, rho1) => {
                     for (name, typ) in observations {
                         if name == obs {
-                            return Ok(eval(typ, rho1));
+                            return eval(typ, rho1).map_err(|e| e.to_string());
                         }
                     }
                     Err(format!(
@@ -455,7 +473,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Refl(a): infer a's type, return Id(a_type, a_val, a_val)
         Exp::Refl(a) => {
             let a_type = check_infer(ctx, a)?;
-            let a_val = eval(a, &ctx.rho);
+            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             Ok(Val::Id(
                 Box::new(a_type),
                 Box::new(a_val.clone()),
@@ -467,7 +485,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // so its type is Id(v_type, v_val, v_val)
         Exp::NativeDecide(_, v) => {
             let v_type = check_infer(ctx, v)?;
-            let v_val = eval(v, &ctx.rho);
+            let v_val = eval(v, &ctx.rho).map_err(|e| e.to_string())?;
             Ok(Val::Id(
                 Box::new(v_type),
                 Box::new(v_val.clone()),
@@ -479,11 +497,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // return Id(A_val, x_val, y_val)
         Exp::DecEq(a, x, y) => {
             check_type(ctx, a)?;
-            let a_val = eval(a, &ctx.rho);
+            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            let x_val = eval(x, &ctx.rho);
-            let y_val = eval(y, &ctx.rho);
+            let x_val = eval(x, &ctx.rho).map_err(|e| e.to_string())?;
+            let y_val = eval(y, &ctx.rho).map_err(|e| e.to_string())?;
             Ok(Val::Id(Box::new(a_val), Box::new(x_val), Box::new(y_val)))
         }
 
@@ -495,12 +513,12 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             let [ref a, ref _c, ref d, ref x, ref y, ref p] = **args;
             // A must be a type
             check_type(ctx, a)?;
-            let a_val = eval(a, &ctx.rho);
+            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             // x, y : A
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            let x_val = eval(x, &ctx.rho);
-            let y_val = eval(y, &ctx.rho);
+            let x_val = eval(x, &ctx.rho).map_err(|e| e.to_string())?;
+            let y_val = eval(y, &ctx.rho).map_err(|e| e.to_string())?;
             // p : Id(A, x, y)
             let id_type = Val::Id(
                 Box::new(a_val.clone()),
@@ -515,7 +533,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             // J reduces to d(x) when p = refl(x), so the result type
             // is the return type of d applied to x.
             match d_type {
-                Val::Pi(_, g) => Ok(g.apply(x_val)),
+                Val::Pi(_, g) => g.apply(x_val).map_err(|e| e.to_string()),
                 _ => Ok(Val::Set), // conservative fallback
             }
         }
@@ -720,7 +738,7 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
                 // Not this field — apply the closure with a dummy value
                 // and search the rest of the chain
                 let gen = gen_val(&g.env);
-                let rest = g.apply(gen);
+                let rest = g.apply(gen).ok()?;
                 find_sigma_field(ctx, &rest, field_name)
             }
         }
@@ -740,11 +758,16 @@ fn advance_sigma(typ: &Val, field_name: &str, field_exp: &Exp, rho: &Rho) -> Val
     match typ {
         Val::Sig(_, g) => {
             if g.patt == Patt::Var(field_name.to_string()) {
-                g.apply(eval(field_exp, rho))
+                match eval(field_exp, rho).and_then(|v| g.apply(v)) {
+                    Ok(v) => v,
+                    Err(_) => typ.clone(),
+                }
             } else {
                 let gen = gen_val(&g.env);
-                let rest = g.apply(gen);
-                advance_sigma(&rest, field_name, field_exp, rho)
+                match g.apply(gen) {
+                    Ok(rest) => advance_sigma(&rest, field_name, field_exp, rho),
+                    Err(_) => typ.clone(),
+                }
             }
         }
         _ => typ.clone(),
@@ -959,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn eval_j_with_refl_reduces() {
+    fn eval_j_with_refl_reduces() -> Result<(), Box<dyn std::error::Error>> {
         // J(1, C, d, (), (), refl(())) should reduce to d(())
         use crate::nbe::eval::eval;
         let j = Exp::IdJ(Box::new([
@@ -970,31 +993,34 @@ mod tests {
             Exp::Unit,                                                       // y
             Exp::Refl(Box::new(Exp::Unit)),                                  // p = refl(())
         ]));
-        let result = eval(&j, &Rho::Nil);
+        let result = eval(&j, &Rho::Nil)?;
         // d(()) = (λa.a)(()) = ()
         assert!(matches!(result, Val::Unit));
+        Ok(())
     }
 
     #[test]
-    fn deceq_equal_reduces_to_refl() {
+    fn deceq_equal_reduces_to_refl() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         // DecEq(1, (), ()) → refl(())
         let deceq = Exp::DecEq(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        let result = eval(&deceq, &Rho::Nil);
+        let result = eval(&deceq, &Rho::Nil)?;
         assert!(matches!(result, Val::Refl(_)));
+        Ok(())
     }
 
     #[test]
-    fn deceq_unequal_produces_neutral() {
+    fn deceq_unequal_produces_neutral() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         // DecEq(Set, 1, Set) — One ≠ Set, produces neutral
         let deceq = Exp::DecEq(Box::new(Exp::Set), Box::new(Exp::One), Box::new(Exp::Set));
-        let result = eval(&deceq, &Rho::Nil);
+        let result = eval(&deceq, &Rho::Nil)?;
         assert!(matches!(result, Val::Nt(_)));
+        Ok(())
     }
 
     #[test]
-    fn deceq_iri_equal() {
+    fn deceq_iri_equal() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         let iri = Iri::parse("urn:eigenius:core:string").unwrap();
         let deceq = Exp::DecEq(
@@ -1002,12 +1028,13 @@ mod tests {
             Box::new(Exp::EigonClass(iri.clone())),
             Box::new(Exp::EigonClass(iri)),
         );
-        let result = eval(&deceq, &Rho::Nil);
+        let result = eval(&deceq, &Rho::Nil)?;
         assert!(matches!(result, Val::Refl(_)));
+        Ok(())
     }
 
     #[test]
-    fn deceq_iri_unequal() {
+    fn deceq_iri_unequal() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         let iri1 = Iri::parse("urn:eigenius:core:string").unwrap();
         let iri2 = Iri::parse("urn:eigenius:core:integer").unwrap();
@@ -1016,8 +1043,9 @@ mod tests {
             Box::new(Exp::EigonClass(iri1)),
             Box::new(Exp::EigonClass(iri2)),
         );
-        let result = eval(&deceq, &Rho::Nil);
+        let result = eval(&deceq, &Rho::Nil)?;
         assert!(matches!(result, Val::Nt(_)));
+        Ok(())
     }
 
     #[test]
@@ -1083,28 +1111,30 @@ mod tests {
     }
 
     #[test]
-    fn corecord_checks_against_codata_type() {
+    fn corecord_checks_against_codata_type() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
-        let codata_typ = eval(&pair_codata_type(), &Rho::Nil);
-        check(&mut ctx(), &unit_pair_corecord(), &codata_typ).unwrap();
+        let codata_typ = eval(&pair_codata_type(), &Rho::Nil)?;
+        check(&mut ctx(), &unit_pair_corecord(), &codata_typ)?;
+        Ok(())
     }
 
     #[test]
-    fn corecord_mismatched_fields_rejected() {
+    fn corecord_mismatched_fields_rejected() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
-        let codata_typ = eval(&pair_codata_type(), &Rho::Nil);
+        let codata_typ = eval(&pair_codata_type(), &Rho::Nil)?;
         // Missing 'snd'
         let bad = Exp::CoRecord(vec![crate::nbe::term::CoField {
             name: "fst".to_string(),
             body: Exp::Unit,
         }]);
         assert!(check(&mut ctx(), &bad, &codata_typ).is_err());
+        Ok(())
     }
 
     #[test]
-    fn corecord_wrong_field_order_rejected() {
+    fn corecord_wrong_field_order_rejected() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
-        let codata_typ = eval(&pair_codata_type(), &Rho::Nil);
+        let codata_typ = eval(&pair_codata_type(), &Rho::Nil)?;
         // Fields in wrong order
         let bad = Exp::CoRecord(vec![
             crate::nbe::term::CoField {
@@ -1117,57 +1147,61 @@ mod tests {
             },
         ]);
         assert!(check(&mut ctx(), &bad, &codata_typ).is_err());
+        Ok(())
     }
 
     #[test]
-    fn observation_evaluates_to_field_body() {
+    fn observation_evaluates_to_field_body() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         // corecord { fst = (); snd = () }.fst → ()
         let observe = Exp::Observe(Box::new(unit_pair_corecord()), "fst".to_string());
-        let result = eval(&observe, &Rho::Nil);
+        let result = eval(&observe, &Rho::Nil)?;
         assert!(matches!(result, Val::Unit));
+        Ok(())
     }
 
     #[test]
-    fn observation_unknown_field_panics() {
-        // Using catch_unwind since vobserve panics on unknown field
+    fn observation_unknown_field_returns_err() {
+        // vobserve now returns Err for unknown fields (issue #19)
         use crate::nbe::eval::eval;
         let observe = Exp::Observe(Box::new(unit_pair_corecord()), "missing".to_string());
-        let result = std::panic::catch_unwind(|| eval(&observe, &Rho::Nil));
+        let result = eval(&observe, &Rho::Nil);
         assert!(result.is_err());
     }
 
     #[test]
-    fn observation_type_inference() {
+    fn observation_type_inference() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::env::up_gamma;
         use crate::nbe::eval::eval;
         // Given x : codata { fst : 1; snd : 1 }, infer x.fst : 1
-        let codata_typ = eval(&pair_codata_type(), &Rho::Nil);
+        let codata_typ = eval(&pair_codata_type(), &Rho::Nil)?;
         let gen = Val::Nt(crate::nbe::val::Neut::Gen(0, "x".to_string()));
-        let gamma = up_gamma(&vec![], &Patt::Var("x".to_string()), &codata_typ, &gen).unwrap();
+        let gamma = up_gamma(&vec![], &Patt::Var("x".to_string()), &codata_typ, &gen)?;
         let rho = Rho::Nil.extend(Patt::Var("x".to_string()), gen);
         let mut c = CheckCtx::new(rho, gamma);
         let observe = Exp::Observe(Box::new(Exp::Var("x".to_string())), "fst".to_string());
-        let t = check_infer(&mut c, &observe).unwrap();
+        let t = check_infer(&mut c, &observe)?;
         assert!(matches!(t, Val::One));
+        Ok(())
     }
 
     #[test]
-    fn observation_on_neutral_blocks() {
+    fn observation_on_neutral_blocks() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         // let x = <neutral>; x.fst should produce a Neut::Observe
         let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "x".to_string()));
         let rho = Rho::Nil.extend(Patt::Var("x".to_string()), neut);
         let observe = Exp::Observe(Box::new(Exp::Var("x".to_string())), "fst".to_string());
-        let result = eval(&observe, &rho);
+        let result = eval(&observe, &rho)?;
         assert!(matches!(
             result,
             Val::Nt(crate::nbe::val::Neut::Observe(_, _))
         ));
+        Ok(())
     }
 
     #[test]
-    fn stream_two_observations_advance() {
+    fn stream_two_observations_advance() -> Result<(), Box<dyn std::error::Error>> {
         // letrec nats : Nat → codata { head : Nat; tail : codata { head : Nat; tail : ... } } = λn. corecord { head = n; tail = nats(n+1) }
         //
         // Simplified for testing: use Unit as the element type and
@@ -1212,12 +1246,13 @@ mod tests {
             Box::new(Exp::Observe(Box::new(outer), "tail".to_string())),
             "head".to_string(),
         );
-        let result = eval(&expr, &Rho::Nil);
+        let result = eval(&expr, &Rho::Nil)?;
         assert!(matches!(result, Val::Unit));
+        Ok(())
     }
 
     #[test]
-    fn recursive_stream_via_letrec() {
+    fn recursive_stream_via_letrec() -> Result<(), Box<dyn std::error::Error>> {
         // letrec nats : codata { head : 1; tail : codata {...} } = corecord { head = (); tail = nats }
         // Observing nats.tail.tail.head should give ().
         use crate::nbe::eval::eval;
@@ -1255,8 +1290,9 @@ mod tests {
                 "head".to_string(),
             )),
         );
-        let result = eval(&letrec, &Rho::Nil);
+        let result = eval(&letrec, &Rho::Nil)?;
         assert!(matches!(result, Val::Unit));
+        Ok(())
     }
 
     // --- Guardedness tests (D11 §3, Phase 9b-i) ---

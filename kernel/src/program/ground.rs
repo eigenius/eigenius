@@ -437,19 +437,19 @@ mod tests {
     }
 
     #[test]
-    fn readback_class_with_recommends_roundtrips() {
+    fn readback_class_with_recommends_roundtrips() -> Result<(), Box<dyn std::error::Error>> {
         // This tests the exact path that caused the __data_0 crash:
         // resolve a class with recommends → readback → re-evaluate
         let layer = build_test_layer();
         // core:Class has recommends, so it will have Option types
         let iri = Iri::parse(wk::CLASS).unwrap();
-        let typ = resolve_class_type(&iri, &layer).unwrap();
+        let typ = resolve_class_type(&iri, &layer)?;
 
         // Readback to expression
         let exp = crate::nbe::readback::readback_val(0, &typ);
 
         // Re-evaluate — this is what parse_program does, and it used to crash
-        let val = crate::nbe::eval::eval(&exp, &Rho::Nil);
+        let val = crate::nbe::eval::eval(&exp, &Rho::Nil)?;
 
         // Should still be a Sigma type
         assert!(
@@ -457,5 +457,6 @@ mod tests {
             "re-evaluated class type should be Sig, got {:?}",
             val
         );
+        Ok(())
     }
 }

@@ -41,7 +41,7 @@ impl Rho {
             Rho::UpDec(rho, decl) => match decl {
                 Decl::Def(patt, _typ, body) => {
                     if patt.contains(name) {
-                        let val = crate::nbe::eval::eval(body, rho);
+                        let val = crate::nbe::eval::eval(body, rho).map_err(|e| e.to_string())?;
                         pat_proj(patt, name, &val)
                     } else {
                         rho.get(name)
@@ -51,7 +51,8 @@ impl Rho {
                     if patt.contains(name) {
                         // For recursive definitions, evaluate in the extended environment
                         let rho_ext = Rho::UpDec(rho.clone(), decl.clone());
-                        let val = crate::nbe::eval::eval(body, &rho_ext);
+                        let val =
+                            crate::nbe::eval::eval(body, &rho_ext).map_err(|e| e.to_string())?;
                         pat_proj(patt, name, &val)
                     } else {
                         rho.get(name)
@@ -85,9 +86,9 @@ fn pat_proj(patt: &Patt, name: &str, val: &Val) -> Result<Val, String> {
         Patt::Var(n) if n == name => Ok(val.clone()),
         Patt::Pair(p1, p2) => {
             if p1.contains(name) {
-                pat_proj(p1, name, &val.clone().vfst())
+                pat_proj(p1, name, &val.clone().vfst().map_err(|e| e.to_string())?)
             } else if p2.contains(name) {
-                pat_proj(p2, name, &val.clone().vsnd())
+                pat_proj(p2, name, &val.clone().vsnd().map_err(|e| e.to_string())?)
             } else {
                 Err(format!("patProj: {name} not in pattern"))
             }
@@ -123,9 +124,21 @@ pub fn up_gamma(gamma: &Gamma, patt: &Patt, typ: &Val, val: &Val) -> Result<Gamm
         }
         Patt::Pair(p1, p2) => {
             if let Val::Sig(t, g) = typ {
-                let g1 = up_gamma(gamma, p1, t, &val.clone().vfst())?;
-                let t2 = g.apply(val.clone().vfst());
-                up_gamma(&g1, p2, &t2, &val.clone().vsnd())
+                let g1 = up_gamma(
+                    gamma,
+                    p1,
+                    t,
+                    &val.clone().vfst().map_err(|e| e.to_string())?,
+                )?;
+                let t2 = g
+                    .apply(val.clone().vfst().map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+                up_gamma(
+                    &g1,
+                    p2,
+                    &t2,
+                    &val.clone().vsnd().map_err(|e| e.to_string())?,
+                )
             } else {
                 Err(format!(
                     "upG: expected Sig type for pair pattern, got {:?}",
