@@ -5,7 +5,7 @@
 
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub type Name = String;
 
@@ -272,22 +272,68 @@ impl Exp {
         ])
     }
 
-    /// List type as a recursive Sum: Sum(nil 1 | cons (A × List A))
-    /// For now, represented as a ground type marker.
+    /// List type: `List(element_type)` as a real inductive type
+    /// (Phase 11b step 6, D19 §9). Backed by the canonical `List`
+    /// inductive declaration from [`list_decl`].
     pub fn list(element_type: Exp) -> Exp {
-        // Simplified: lists are treated as a primitive construct
-        // rather than encoding via recursive types
-        Exp::Data(vec![
-            Summand {
-                name: "nil".to_string(),
-                typ: Exp::One,
-            },
-            Summand {
-                name: "cons".to_string(),
-                typ: Exp::times(element_type, Exp::Var("__list_tail".to_string())),
-            },
-        ])
+        Exp::InductiveType(list_decl(), vec![element_type])
     }
+}
+
+/// Canonical `List(A)` inductive declaration, lazily built and shared.
+///
+/// Returns the same `Arc<InductiveDecl>` on every call so that all
+/// list types and constructors throughout the kernel reference one
+/// declaration. The inner self-reference inside the constructor types
+/// uses the "stub Arc" pattern (an empty-ctors `Arc<InductiveDecl>`
+/// with matching name) — Phase 11b's name-based lookups handle this
+/// without needing genuinely cyclic Arc allocation.
+pub fn list_decl() -> Arc<InductiveDecl> {
+    static LIST_DECL: OnceLock<Arc<InductiveDecl>> = OnceLock::new();
+    LIST_DECL.get_or_init(build_list_decl).clone()
+}
+
+fn build_list_decl() -> Arc<InductiveDecl> {
+    let self_ref = Arc::new(InductiveDecl {
+        name: "List".to_string(),
+        params: Vec::new(),
+        sort: Exp::Set,
+        ctors: Vec::new(),
+    });
+    let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
+    Arc::new(InductiveDecl {
+        name: "List".to_string(),
+        params: vec![(Patt::Var("A".to_string()), Exp::Set)],
+        sort: Exp::Set,
+        ctors: vec![
+            // nil : Π A:Set. List A
+            InductiveCtorDecl {
+                name: "nil".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Set),
+                    Box::new(list_a_typ.clone()),
+                ),
+            },
+            // cons : Π A:Set. A → List A → List A
+            InductiveCtorDecl {
+                name: "cons".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Set),
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(Exp::Var("A".to_string())),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(list_a_typ.clone()),
+                            Box::new(list_a_typ),
+                        )),
+                    )),
+                ),
+            },
+        ],
+    })
 }
 
 #[cfg(test)]
@@ -328,5 +374,32 @@ mod tests {
         } else {
             panic!("expected Data");
         }
+    }
+
+    #[test]
+    fn list_uses_canonical_inductive() {
+        // Phase 11b step 6: Exp::list() now produces an inductive
+        // type application backed by the canonical List declaration.
+        let t = Exp::list(Exp::Set);
+        match t {
+            Exp::InductiveType(decl, params) => {
+                assert_eq!(decl.name, "List");
+                assert_eq!(decl.ctors.len(), 2);
+                assert_eq!(decl.ctors[0].name, "nil");
+                assert_eq!(decl.ctors[1].name, "cons");
+                assert_eq!(params.len(), 1);
+                assert!(matches!(params[0], Exp::Set));
+            }
+            other => panic!("expected InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_decl_is_shared_across_calls() {
+        // OnceLock caches the canonical Arc — every call returns the
+        // same allocation by ptr identity.
+        let a = list_decl();
+        let b = list_decl();
+        assert!(Arc::ptr_eq(&a, &b));
     }
 }
