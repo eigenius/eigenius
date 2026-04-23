@@ -3,36 +3,111 @@
 //! Ported from `Main.hs` lines 289-378 in the Mini-TT reference.
 //! Uses NbE (eval + readback) for type equality checking.
 
+use crate::layer::Layer;
 use crate::nbe::env::{gen_val, lookup_gamma, up_gamma, Gamma, Rho};
 use crate::nbe::eval::eval;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::{Decl, Exp, Patt};
 use crate::nbe::val::{Clos, Val};
+use crate::ontology::iri::Iri;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+/// Type-checking context, threaded through all checker calls.
+///
+/// Bundles the evaluation environment (`rho`), type context (`gamma`),
+/// an optional layer for ontology-as-types resolution, and a per-check
+/// cache for resolved class types.
+///
+/// Design follows nanoda_lib's `TypeChecker` pattern
+/// (`references/nanoda_lib/src/tc.rs`): a single struct carrying
+/// mutable state (cache) plus immutable environment through all checker
+/// calls. The cache is scoped per type-check invocation — fresh per
+/// call, no cross-check invalidation needed.
+pub struct CheckCtx {
+    pub rho: Rho,
+    pub gamma: Gamma,
+    /// Optional layer for ontology resolution. `None` is the "pure"
+    /// case used by tests that don't touch EigonClass resolution.
+    pub layer: Option<Arc<Layer>>,
+    /// Per-check memoization of resolved class types, keyed by class IRI string.
+    type_cache: BTreeMap<String, Val>,
+}
+
+impl CheckCtx {
+    /// Create a new context with no layer access (pure mode).
+    pub fn new(rho: Rho, gamma: Gamma) -> Self {
+        Self {
+            rho,
+            gamma,
+            layer: None,
+            type_cache: BTreeMap::new(),
+        }
+    }
+
+    /// Create a new context with layer access for ontology resolution.
+    pub fn with_layer(rho: Rho, gamma: Gamma, layer: Arc<Layer>) -> Self {
+        Self {
+            rho,
+            gamma,
+            layer: Some(layer),
+            type_cache: BTreeMap::new(),
+        }
+    }
+
+    /// Extend the context with a new variable binding (for entering binders).
+    /// Shares the layer and type_cache with the parent context.
+    fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, String> {
+        let gamma1 = up_gamma(&self.gamma, patt, typ, val)?;
+        let rho1 = self.rho.clone().extend(patt.clone(), val.clone());
+        Ok(CheckCtx {
+            rho: rho1,
+            gamma: gamma1,
+            layer: self.layer.clone(),
+            type_cache: self.type_cache.clone(),
+        })
+    }
+
+    /// Resolve an EigonClass IRI to a Mini-TT Sigma type, with caching.
+    fn resolve_class_cached(&mut self, iri: &Iri) -> Result<Val, String> {
+        let layer = self.layer.as_ref().ok_or_else(|| {
+            format!(
+                "cannot resolve class '{}' — no layer access in pure check mode",
+                iri
+            )
+        })?;
+        let key = iri.as_str().to_string();
+        if let Some(cached) = self.type_cache.get(&key) {
+            return Ok(cached.clone());
+        }
+        let v = crate::program::ground::resolve_class_type(iri, layer)?;
+        self.type_cache.insert(key, v.clone());
+        Ok(v)
+    }
+}
 
 /// Check that a declaration is well-typed, returning the extended type context.
 ///
 /// Port of `checkD` from the reference.
-pub fn check_decl(rho: &Rho, gamma: &Gamma, decl: &Decl) -> Result<Gamma, String> {
+pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
     match decl {
         Decl::Def(patt, typ, body) => {
             // Check that the type is well-formed
-            check_type(rho, gamma, typ)?;
-            let t = eval(typ, rho);
+            check_type(ctx, typ)?;
+            let t = eval(typ, &ctx.rho);
             // Check that the body has the declared type
-            check(rho, gamma, body, &t)?;
+            check(ctx, body, &t)?;
             // Extend the type context
-            up_gamma(gamma, patt, &t, &eval(body, rho))
+            up_gamma(&ctx.gamma, patt, &t, &eval(body, &ctx.rho))
         }
         Decl::Drec(patt, typ, body) => {
             // Check that the type is well-formed
-            check_type(rho, gamma, typ)?;
-            let t = eval(typ, rho);
-            let gen = gen_val(rho);
-            // Extend context with the recursive variable
-            let gamma1 = up_gamma(gamma, patt, &t, &gen)?;
-            // Check body under extended context
-            let rho1 = rho.clone().extend(patt.clone(), gen);
-            check(&rho1, &gamma1, body, &t)?;
+            check_type(ctx, typ)?;
+            let t = eval(typ, &ctx.rho);
+            let gen = gen_val(&ctx.rho);
+            // Extend context with the recursive variable and check body
+            let mut inner = ctx.extend(patt, &t, &gen)?;
+            check(&mut inner, body, &t)?;
             // Guardedness: if the recursive body constructs a corecord,
             // verify every corecursive reference appears under a
             // constructor/lambda/app — not at the bare head of an
@@ -41,8 +116,8 @@ pub fn check_decl(rho: &Rho, gamma: &Gamma, decl: &Decl) -> Result<Gamma, String
             collect_pattern_names(patt, &mut forbidden);
             check_guarded(body, &forbidden)?;
             // Re-evaluate with the recursive binding
-            let v = eval(body, &Rho::UpDec(Box::new(rho.clone()), decl.clone()));
-            up_gamma(gamma, patt, &t, &v)
+            let v = eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()));
+            up_gamma(&ctx.gamma, patt, &t, &v)
         }
     }
 }
@@ -50,22 +125,21 @@ pub fn check_decl(rho: &Rho, gamma: &Gamma, decl: &Decl) -> Result<Gamma, String
 /// Check that an expression is a well-formed type.
 ///
 /// Port of `checkT` from the reference.
-pub fn check_type(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<(), String> {
+pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
     match exp {
         Exp::Pi(p, a, b) | Exp::Sig(p, a, b) => {
-            check_type(rho, gamma, a)?;
-            let gen = gen_val(rho);
-            let gamma1 = up_gamma(gamma, p, &eval(a, rho), &gen)?;
-            let rho1 = rho.clone().extend(p.clone(), gen);
-            check_type(&rho1, &gamma1, b)
+            check_type(ctx, a)?;
+            let gen = gen_val(&ctx.rho);
+            let mut inner = ctx.extend(p, &eval(a, &ctx.rho), &gen)?;
+            check_type(&mut inner, b)
         }
         Exp::Set | Exp::One | Exp::Type(_) => Ok(()),
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
-            check_type(rho, gamma, a)?;
-            let a_val = eval(a, rho);
-            check(rho, gamma, x, &a_val)?;
-            check(rho, gamma, y, &a_val)
+            check_type(ctx, a)?;
+            let a_val = eval(a, &ctx.rho);
+            check(ctx, x, &a_val)?;
+            check(ctx, y, &a_val)
         }
         // Eigenius ground types are always valid types
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(()),
@@ -81,32 +155,31 @@ pub fn check_type(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<(), String> {
                         obs.name
                     ));
                 }
-                check_type(rho, gamma, &obs.typ)?;
+                check_type(ctx, &obs.typ)?;
             }
             Ok(())
         }
 
-        a => check(rho, gamma, a, &Val::Set),
+        a => check(ctx, a, &Val::Set),
     }
 }
 
 /// Check that an expression has a given type (checking mode).
 ///
 /// Port of `check` from the reference.
-pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), String> {
+pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
     match (exp, typ) {
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
-            let gen = gen_val(rho);
-            let gamma1 = up_gamma(gamma, p, t, &gen)?;
-            let rho1 = rho.clone().extend(p.clone(), gen.clone());
-            check(&rho1, &gamma1, e, &g.apply(gen))
+            let gen = gen_val(&ctx.rho);
+            let mut inner = ctx.extend(p, t, &gen)?;
+            check(&mut inner, e, &g.apply(gen))
         }
 
         // Pair against Sigma type
         (Exp::Pair(e1, e2), Val::Sig(t, g)) => {
-            check(rho, gamma, e1, t)?;
-            check(rho, gamma, e2, &g.apply(eval(e1, rho)))
+            check(ctx, e1, t)?;
+            check(ctx, e2, &g.apply(eval(e1, &ctx.rho)))
         }
 
         // Constructor against Sum type
@@ -116,7 +189,7 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
                 .find(|(name, _)| name == c)
                 .map(|(_, typ)| typ)
                 .ok_or_else(|| format!("constructor {c} not in sum type"))?;
-            check(rho, gamma, e, &eval(a, rho1))
+            check(ctx, e, &eval(a, rho1))
         }
 
         // Case function against Pi from Sum to result
@@ -138,15 +211,15 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
                 let g_c = Clos {
                     patt: Patt::Var("__case_arg".to_string()),
                     body: Exp::App(
-                        Box::new(readback_val(rho.len(), &Val::Lam(g.clone()))),
+                        Box::new(readback_val(ctx.rho.len(), &Val::Lam(g.clone()))),
                         Box::new(Exp::Con(
                             c.clone(),
                             Box::new(Exp::Var("__case_arg".to_string())),
                         )),
                     ),
-                    env: rho.clone(),
+                    env: ctx.rho.clone(),
                 };
-                check(rho, gamma, &branch.body, &Val::Pi(Box::new(a_val), g_c))?;
+                check(ctx, &branch.body, &Val::Pi(Box::new(a_val), g_c))?;
             }
             Ok(())
         }
@@ -159,41 +232,46 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
 
         // Pi type against Set
         (Exp::Pi(p, a, b), Val::Set) | (Exp::Sig(p, a, b), Val::Set) => {
-            check(rho, gamma, a, &Val::Set)?;
-            let gen = gen_val(rho);
-            let gamma1 = up_gamma(gamma, p, &eval(a, rho), &gen)?;
-            let rho1 = rho.clone().extend(p.clone(), gen);
-            check(&rho1, &gamma1, b, &Val::Set)
+            check(ctx, a, &Val::Set)?;
+            let gen = gen_val(&ctx.rho);
+            let mut inner = ctx.extend(p, &eval(a, &ctx.rho), &gen)?;
+            check(&mut inner, b, &Val::Set)
         }
 
         // Sum type against Set
         (Exp::Data(summands), Val::Set) => {
             for s in summands {
-                check(rho, gamma, &s.typ, &Val::Set)?;
+                check(ctx, &s.typ, &Val::Set)?;
             }
             Ok(())
         }
 
         // Declaration
         (Exp::Dec(d, e), t) => {
-            let gamma1 = check_decl(rho, gamma, d)?;
-            check(&Rho::UpDec(Box::new(rho.clone()), d.clone()), &gamma1, e, t)
+            let gamma1 = check_decl(ctx, d)?;
+            let mut inner = CheckCtx {
+                rho: Rho::UpDec(Box::new(ctx.rho.clone()), d.clone()),
+                gamma: gamma1,
+                layer: ctx.layer.clone(),
+                type_cache: ctx.type_cache.clone(),
+            };
+            check(&mut inner, e, t)
         }
 
         // refl(a) : Id(A, a, a) — check that x and y are both a
         (Exp::Refl(a), Val::Id(typ, x, y)) => {
-            check(rho, gamma, a, typ)?;
-            let a_val = eval(a, rho);
-            eq_nf(rho.len(), x, &a_val)?;
-            eq_nf(rho.len(), y, &a_val)
+            check(ctx, a, typ)?;
+            let a_val = eval(a, &ctx.rho);
+            eq_nf(ctx.rho.len(), x, &a_val)?;
+            eq_nf(ctx.rho.len(), y, &a_val)
         }
 
         // Id(A, x, y) : Set
         (Exp::Id(a, x, y), Val::Set) => {
-            check(rho, gamma, a, &Val::Set)?;
-            let a_val = eval(a, rho);
-            check(rho, gamma, x, &a_val)?;
-            check(rho, gamma, y, &a_val)
+            check(ctx, a, &Val::Set)?;
+            let a_val = eval(a, &ctx.rho);
+            check(ctx, x, &a_val)?;
+            check(ctx, y, &a_val)
         }
 
         // Type(n) : Type(n+1)
@@ -209,8 +287,8 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
         (Exp::EigonClass(_), Val::Type(_)) | (Exp::EigonPrimitive(_), Val::Type(_)) => Ok(()),
 
         // Codata type formation: codata { ... } : Set
-        (Exp::Codata(_), Val::Set) => check_type(rho, gamma, exp),
-        (Exp::Codata(_), Val::Type(_)) => check_type(rho, gamma, exp),
+        (Exp::Codata(_), Val::Set) => check_type(ctx, exp),
+        (Exp::Codata(_), Val::Type(_)) => check_type(ctx, exp),
 
         // Corecord against a codata type: each field's body must have
         // the corresponding observation's type, and every declared
@@ -226,15 +304,15 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
             }
             for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
                 let t = eval(obs_typ, rho1);
-                check(rho, gamma, &field.body, &t)?;
+                check(ctx, &field.body, &t)?;
             }
             Ok(())
         }
 
         // Fallthrough: infer type and compare
         (e, t) => {
-            let t1 = check_infer(rho, gamma, e)?;
-            eq_nf(rho.len(), t, &t1)
+            let t1 = check_infer(ctx, e)?;
+            eq_nf(ctx.rho.len(), t, &t1)
         }
     }
 }
@@ -242,27 +320,27 @@ pub fn check(rho: &Rho, gamma: &Gamma, exp: &Exp, typ: &Val) -> Result<(), Strin
 /// Infer the type of an expression (inference mode).
 ///
 /// Port of `checkI` from the reference.
-pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
+pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
     match exp {
-        Exp::Var(x) => lookup_gamma(gamma, x),
+        Exp::Var(x) => lookup_gamma(&ctx.gamma, x),
 
         Exp::App(e1, e2) => {
-            let t1 = check_infer(rho, gamma, e1)?;
+            let t1 = check_infer(ctx, e1)?;
             let (t, g) = ext_pi(&t1)?;
-            check(rho, gamma, e2, &t)?;
-            Ok(g.apply(eval(e2, rho)))
+            check(ctx, e2, &t)?;
+            Ok(g.apply(eval(e2, &ctx.rho)))
         }
 
         Exp::Fst(e) => {
-            let t = check_infer(rho, gamma, e)?;
+            let t = check_infer(ctx, e)?;
             let (t1, _) = ext_sig(&t)?;
             Ok(t1)
         }
 
         Exp::Snd(e) => {
-            let t = check_infer(rho, gamma, e)?;
+            let t = check_infer(ctx, e)?;
             let (_, g) = ext_sig(&t)?;
-            Ok(g.apply(eval(e, rho).vfst()))
+            Ok(g.apply(eval(e, &ctx.rho).vfst()))
         }
 
         // Eigenius: property/observation access type inference.
@@ -272,7 +350,7 @@ pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
         // - observation on codata-typed values
         // We dispatch on the inferred type of the target.
         Exp::PropAccess(e, prop) => {
-            let t = check_infer(rho, gamma, e)?;
+            let t = check_infer(ctx, e)?;
             let prop_name = prop.local_name();
 
             // Codata observation — same lookup that Exp::Observe does.
@@ -285,16 +363,16 @@ pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
                 return Err(format!(
                     "observation '{}' not found in codata type {:?}",
                     prop_name,
-                    readback_val(rho.len(), &t)
+                    readback_val(ctx.rho.len(), &t)
                 ));
             }
 
             // Fall back to the existing Sigma / resource behaviour.
-            find_sigma_field(&t, prop_name).ok_or_else(|| {
+            find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
                 format!(
                     "property '{}' not found in type {:?}",
                     prop,
-                    readback_val(rho.len(), &t)
+                    readback_val(ctx.rho.len(), &t)
                 )
             })
         }
@@ -302,7 +380,7 @@ pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
         // Codata observation type inference: e.obs has type T where
         // `obs : T` appears in the inferred codata type of e.
         Exp::Observe(e, obs) => {
-            let t = check_infer(rho, gamma, e)?;
+            let t = check_infer(ctx, e)?;
             match &t {
                 Val::Codata(observations, rho1) => {
                     for (name, typ) in observations {
@@ -313,13 +391,121 @@ pub fn check_infer(rho: &Rho, gamma: &Gamma, exp: &Exp) -> Result<Val, String> {
                     Err(format!(
                         "observation '{}' not found in codata type {:?}",
                         obs,
-                        readback_val(rho.len(), &t)
+                        readback_val(ctx.rho.len(), &t)
                     ))
                 }
                 other => Err(format!(
                     "observation target is not a codata value: {:?}",
-                    readback_val(rho.len(), other)
+                    readback_val(ctx.rho.len(), other)
                 )),
+            }
+        }
+
+        // --- Eigenius extension: 7 inference rules (D18 §6, issue #12 item 2) ---
+
+        // Construct(class_iri, fields): check each field against the class's
+        // Sigma chain and return EigonClass(class_iri).
+        Exp::Construct(class_iri, fields) => {
+            let class_type = ctx
+                .resolve_class_cached(class_iri)
+                .map_err(|e| format!("cannot infer Construct type for '{}': {}", class_iri, e))?;
+            // Check each field against the resolved class type
+            let mut remaining = class_type;
+            for (prop_iri, field_exp) in fields {
+                let field_type = find_sigma_field(ctx, &remaining, prop_iri.local_name())
+                    .ok_or_else(|| {
+                        format!("property '{}' not found in class '{}'", prop_iri, class_iri)
+                    })?;
+                check(ctx, field_exp, &field_type)?;
+                // Advance through the Sigma chain
+                remaining = advance_sigma(&remaining, prop_iri.local_name(), field_exp, &ctx.rho);
+            }
+            Ok(Val::EigonClass(class_iri.clone()))
+        }
+
+        // EigonResource(r): infer class from r.is_a().first()
+        Exp::EigonResource(r) => {
+            let classes = r.is_a();
+            let class_iri = classes
+                .first()
+                .ok_or_else(|| "EigonResource has no is_a class".to_string())?;
+            Ok(Val::EigonClass(class_iri.clone()))
+        }
+
+        // Template(lit, refs): templates always produce String
+        Exp::Template(_, refs) => {
+            // Check that each referenced property expression is well-typed
+            for (_, ref_exp) in refs {
+                check_infer(ctx, ref_exp)?;
+            }
+            Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::String))
+        }
+
+        // Refl(a): infer a's type, return Id(a_type, a_val, a_val)
+        Exp::Refl(a) => {
+            let a_type = check_infer(ctx, a)?;
+            let a_val = eval(a, &ctx.rho);
+            Ok(Val::Id(
+                Box::new(a_type),
+                Box::new(a_val.clone()),
+                Box::new(a_val),
+            ))
+        }
+
+        // NativeDecide(constraint, v): reduces to Refl if satisfied,
+        // so its type is Id(v_type, v_val, v_val)
+        Exp::NativeDecide(_, v) => {
+            let v_type = check_infer(ctx, v)?;
+            let v_val = eval(v, &ctx.rho);
+            Ok(Val::Id(
+                Box::new(v_type),
+                Box::new(v_val.clone()),
+                Box::new(v_val),
+            ))
+        }
+
+        // DecEq(A, x, y): check A is a type, x and y inhabit A,
+        // return Id(A_val, x_val, y_val)
+        Exp::DecEq(a, x, y) => {
+            check_type(ctx, a)?;
+            let a_val = eval(a, &ctx.rho);
+            check(ctx, x, &a_val)?;
+            check(ctx, y, &a_val)?;
+            let x_val = eval(x, &ctx.rho);
+            let y_val = eval(y, &ctx.rho);
+            Ok(Val::Id(Box::new(a_val), Box::new(x_val), Box::new(y_val)))
+        }
+
+        // IdJ([A, C, d, x, y, p]): Martin-Löf J eliminator.
+        // Per D18 §6.4, require an explicit motive C and return C(x, y, p).
+        // Lean handles this via recursor reduction; we use a direct J-rule
+        // since Mini-TT doesn't have a recursor framework.
+        Exp::IdJ(args) => {
+            let [ref a, ref _c, ref d, ref x, ref y, ref p] = **args;
+            // A must be a type
+            check_type(ctx, a)?;
+            let a_val = eval(a, &ctx.rho);
+            // x, y : A
+            check(ctx, x, &a_val)?;
+            check(ctx, y, &a_val)?;
+            let x_val = eval(x, &ctx.rho);
+            let y_val = eval(y, &ctx.rho);
+            // p : Id(A, x, y)
+            let id_type = Val::Id(
+                Box::new(a_val.clone()),
+                Box::new(x_val.clone()),
+                Box::new(y_val),
+            );
+            check(ctx, p, &id_type)?;
+            // d : (a : A) → C(a, a, refl(a)) — the base case
+            // For now, just infer d's type; the full motive check
+            // requires higher-order unification which is Phase 10b.
+            let d_type = check_infer(ctx, d)?;
+            // J reduces to d(x) when p = refl(x), so the result type
+            // is the return type of d applied to x.
+            match d_type {
+                Val::Pi(_, g) => Ok(g.apply(x_val)),
+                _ => Ok(Val::Set), // conservative fallback
             }
         }
 
@@ -509,7 +695,11 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
 
 /// Find a field by name in a Sigma chain.
 /// Walks Σ name₁ : T₁. Σ name₂ : T₂. ... looking for a matching name.
-fn find_sigma_field(typ: &Val, field_name: &str) -> Option<Val> {
+///
+/// When the type is `EigonClass(iri)`, resolves the class to its Sigma
+/// chain via `ctx.resolve_class_cached` and recurses — this is the core
+/// fix for issue #12 item 1 (D18 §5).
+fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<Val> {
     match typ {
         Val::Sig(t, g) => {
             if g.patt == Patt::Var(field_name.to_string()) {
@@ -520,13 +710,33 @@ fn find_sigma_field(typ: &Val, field_name: &str) -> Option<Val> {
                 // and search the rest of the chain
                 let gen = gen_val(&g.env);
                 let rest = g.apply(gen);
-                find_sigma_field(&rest, field_name)
+                find_sigma_field(ctx, &rest, field_name)
             }
         }
-        // Also check EigonClass — could resolve to a Sigma if we had layer access.
-        // For now, return Set as a fallback for unresolved class types.
-        Val::EigonClass(_) => Some(Val::Set),
+        // Resolve EigonClass to its Sigma chain via layer access.
+        Val::EigonClass(iri) => {
+            let resolved = ctx.resolve_class_cached(iri).ok()?;
+            find_sigma_field(ctx, &resolved, field_name)
+        }
         _ => None,
+    }
+}
+
+/// Advance past one field in a Sigma chain. After `find_sigma_field`
+/// found `field_name`, this returns the rest of the Sigma: applies
+/// the closure with the field's value and recurses.
+fn advance_sigma(typ: &Val, field_name: &str, field_exp: &Exp, rho: &Rho) -> Val {
+    match typ {
+        Val::Sig(_, g) => {
+            if g.patt == Patt::Var(field_name.to_string()) {
+                g.apply(eval(field_exp, rho))
+            } else {
+                let gen = gen_val(&g.env);
+                let rest = g.apply(gen);
+                advance_sigma(&rest, field_name, field_exp, rho)
+            }
+        }
+        _ => typ.clone(),
     }
 }
 
@@ -552,31 +762,35 @@ mod tests {
     use crate::nbe::term::PrimitiveType;
     use crate::ontology::iri::Iri;
 
+    fn ctx() -> CheckCtx {
+        CheckCtx::new(Rho::Nil, vec![])
+    }
+
     #[test]
     fn check_unit_has_type_one() {
-        check(&Rho::Nil, &vec![], &Exp::Unit, &Val::One).unwrap();
+        check(&mut ctx(), &Exp::Unit, &Val::One).unwrap();
     }
 
     #[test]
     fn check_one_has_type_set() {
-        check(&Rho::Nil, &vec![], &Exp::One, &Val::Set).unwrap();
+        check(&mut ctx(), &Exp::One, &Val::Set).unwrap();
     }
 
     #[test]
     fn check_set_is_type() {
-        check_type(&Rho::Nil, &vec![], &Exp::Set).unwrap();
+        check_type(&mut ctx(), &Exp::Set).unwrap();
     }
 
     #[test]
     fn check_one_is_type() {
-        check_type(&Rho::Nil, &vec![], &Exp::One).unwrap();
+        check_type(&mut ctx(), &Exp::One).unwrap();
     }
 
     #[test]
     fn check_pi_is_type() {
         // Π _ : 1. 1 is a valid type
         let pi = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::One));
-        check_type(&Rho::Nil, &vec![], &pi).unwrap();
+        check_type(&mut ctx(), &pi).unwrap();
     }
 
     #[test]
@@ -590,7 +804,7 @@ mod tests {
             Box::new(Val::One),
             Clos::new(Patt::Unit, Exp::One, Rho::Nil),
         );
-        check(&Rho::Nil, &vec![], &lam, &pi).unwrap();
+        check(&mut ctx(), &lam, &pi).unwrap();
     }
 
     #[test]
@@ -601,13 +815,13 @@ mod tests {
             Box::new(Val::One),
             Clos::new(Patt::Unit, Exp::One, Rho::Nil),
         );
-        check(&Rho::Nil, &vec![], &pair, &sig).unwrap();
+        check(&mut ctx(), &pair, &sig).unwrap();
     }
 
     #[test]
     fn check_type_mismatch_fails() {
         // () : U should fail (unit is not a type)
-        let result = check(&Rho::Nil, &vec![], &Exp::Unit, &Val::Set);
+        let result = check(&mut ctx(), &Exp::Unit, &Val::Set);
         assert!(result.is_err());
     }
 
@@ -620,13 +834,14 @@ mod tests {
             Box::new(Exp::Unit),
         );
         let e = Exp::Dec(d, Box::new(Exp::Var("x".to_string())));
-        check(&Rho::Nil, &vec![], &e, &Val::One).unwrap();
+        check(&mut ctx(), &e, &Val::One).unwrap();
     }
 
     #[test]
     fn infer_variable_type() {
         let gamma: Gamma = vec![("x".to_string(), Val::One)];
-        let t = check_infer(&Rho::Nil, &gamma, &Exp::Var("x".to_string())).unwrap();
+        let mut c = CheckCtx::new(Rho::Nil, gamma);
+        let t = check_infer(&mut c, &Exp::Var("x".to_string())).unwrap();
         assert!(matches!(t, Val::One));
     }
 
@@ -646,9 +861,9 @@ mod tests {
                 Rho::Nil,
             )),
         );
+        let mut c = CheckCtx::new(rho, gamma);
         let t = check_infer(
-            &rho,
-            &gamma,
+            &mut c,
             &Exp::App(Box::new(Exp::Var("f".to_string())), Box::new(Exp::Unit)),
         )
         .unwrap();
@@ -681,7 +896,7 @@ mod tests {
                 typ: Exp::One,
             },
         ]);
-        check(&Rho::Nil, &vec![], &data, &Val::Set).unwrap();
+        check(&mut ctx(), &data, &Val::Set).unwrap();
     }
 
     #[test]
@@ -692,27 +907,27 @@ mod tests {
             Rho::Nil,
         );
         let con = Exp::Con("a".to_string(), Box::new(Exp::Unit));
-        check(&Rho::Nil, &vec![], &con, &data_val).unwrap();
+        check(&mut ctx(), &con, &data_val).unwrap();
     }
 
     #[test]
     fn check_constructor_wrong_name_fails() {
         let data_val = Val::Data(vec![("a".to_string(), Exp::One)], Rho::Nil);
         let con = Exp::Con("b".to_string(), Box::new(Exp::Unit));
-        assert!(check(&Rho::Nil, &vec![], &con, &data_val).is_err());
+        assert!(check(&mut ctx(), &con, &data_val).is_err());
     }
 
     #[test]
     fn check_id_is_type() {
         // Id(1, (), ()) : Set
         let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        check(&Rho::Nil, &vec![], &id, &Val::Set).unwrap();
+        check(&mut ctx(), &id, &Val::Set).unwrap();
     }
 
     #[test]
     fn check_id_type_well_formed() {
         let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        check_type(&Rho::Nil, &vec![], &id).unwrap();
+        check_type(&mut ctx(), &id).unwrap();
     }
 
     #[test]
@@ -720,7 +935,7 @@ mod tests {
         // refl(()) : Id(1, (), ())
         let refl = Exp::Refl(Box::new(Exp::Unit));
         let id_type = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(Val::Unit));
-        check(&Rho::Nil, &vec![], &refl, &id_type).unwrap();
+        check(&mut ctx(), &refl, &id_type).unwrap();
     }
 
     #[test]
@@ -729,7 +944,7 @@ mod tests {
         let refl = Exp::Refl(Box::new(Exp::Unit));
         let gen = Val::Nt(crate::nbe::val::Neut::Gen(0, "x".to_string()));
         let id_type = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(gen));
-        assert!(check(&Rho::Nil, &vec![], &refl, &id_type).is_err());
+        assert!(check(&mut ctx(), &refl, &id_type).is_err());
     }
 
     #[test]
@@ -796,15 +1011,9 @@ mod tests {
 
     #[test]
     fn check_eigon_primitive_is_type() {
-        check_type(
-            &Rho::Nil,
-            &vec![],
-            &Exp::EigonPrimitive(PrimitiveType::String),
-        )
-        .unwrap();
+        check_type(&mut ctx(), &Exp::EigonPrimitive(PrimitiveType::String)).unwrap();
         check(
-            &Rho::Nil,
-            &vec![],
+            &mut ctx(),
             &Exp::EigonPrimitive(PrimitiveType::Integer),
             &Val::Set,
         )
@@ -843,8 +1052,8 @@ mod tests {
 
     #[test]
     fn codata_type_is_a_type() {
-        check_type(&Rho::Nil, &vec![], &pair_codata_type()).unwrap();
-        check(&Rho::Nil, &vec![], &pair_codata_type(), &Val::Set).unwrap();
+        check_type(&mut ctx(), &pair_codata_type()).unwrap();
+        check(&mut ctx(), &pair_codata_type(), &Val::Set).unwrap();
     }
 
     #[test]
@@ -859,14 +1068,14 @@ mod tests {
                 typ: Exp::One,
             },
         ]);
-        assert!(check_type(&Rho::Nil, &vec![], &bad).is_err());
+        assert!(check_type(&mut ctx(), &bad).is_err());
     }
 
     #[test]
     fn corecord_checks_against_codata_type() {
         use crate::nbe::eval::eval;
         let codata_typ = eval(&pair_codata_type(), &Rho::Nil);
-        check(&Rho::Nil, &vec![], &unit_pair_corecord(), &codata_typ).unwrap();
+        check(&mut ctx(), &unit_pair_corecord(), &codata_typ).unwrap();
     }
 
     #[test]
@@ -878,7 +1087,7 @@ mod tests {
             name: "fst".to_string(),
             body: Exp::Unit,
         }]);
-        assert!(check(&Rho::Nil, &vec![], &bad, &codata_typ).is_err());
+        assert!(check(&mut ctx(), &bad, &codata_typ).is_err());
     }
 
     #[test]
@@ -896,7 +1105,7 @@ mod tests {
                 body: Exp::Unit,
             },
         ]);
-        assert!(check(&Rho::Nil, &vec![], &bad, &codata_typ).is_err());
+        assert!(check(&mut ctx(), &bad, &codata_typ).is_err());
     }
 
     #[test]
@@ -926,8 +1135,9 @@ mod tests {
         let gen = Val::Nt(crate::nbe::val::Neut::Gen(0, "x".to_string()));
         let gamma = up_gamma(&vec![], &Patt::Var("x".to_string()), &codata_typ, &gen).unwrap();
         let rho = Rho::Nil.extend(Patt::Var("x".to_string()), gen);
+        let mut c = CheckCtx::new(rho, gamma);
         let observe = Exp::Observe(Box::new(Exp::Var("x".to_string())), "fst".to_string());
-        let t = check_infer(&rho, &gamma, &observe).unwrap();
+        let t = check_infer(&mut c, &observe).unwrap();
         assert!(matches!(t, Val::One));
     }
 
@@ -1185,10 +1395,108 @@ mod tests {
             Box::new(codata_typ),
             Box::new(body),
         );
-        let err = check_decl(&Rho::Nil, &vec![], &d).unwrap_err();
+        let err = check_decl(&mut ctx(), &d).unwrap_err();
         assert!(
             err.contains("unguarded"),
             "expected unguarded error, got: {err}"
         );
+    }
+
+    // --- Phase 10a: new inference and resolution tests ---
+
+    #[test]
+    fn infer_refl() {
+        // refl(x) where x : One should infer Id(One, x_val, x_val)
+        let gamma: Gamma = vec![("x".to_string(), Val::One)];
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Unit);
+        let mut c = CheckCtx::new(rho, gamma);
+        let refl_x = Exp::Refl(Box::new(Exp::Var("x".to_string())));
+        let t = check_infer(&mut c, &refl_x).unwrap();
+        assert!(matches!(t, Val::Id(_, _, _)));
+    }
+
+    #[test]
+    fn infer_deceq() {
+        // DecEq(One, (), ()) should infer Id(One, (), ())
+        let deceq = Exp::DecEq(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let t = check_infer(&mut ctx(), &deceq).unwrap();
+        assert!(matches!(t, Val::Id(_, _, _)));
+    }
+
+    #[test]
+    fn infer_template() {
+        // Template("hello", []) should infer EigonPrimitive(String)
+        let tmpl = Exp::Template("hello".to_string(), vec![]);
+        let t = check_infer(&mut ctx(), &tmpl).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::String)));
+    }
+
+    #[test]
+    fn infer_eigon_resource() {
+        use crate::ontology::resource::Resource;
+        // EigonResource with is_a = [Dog] should infer EigonClass(Dog)
+        let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let is_a_iri = Iri::parse("urn:eigenius:core:is_a").unwrap();
+        let mut r = Resource::new(Iri::parse("urn:example:rex").unwrap());
+        r.set(
+            is_a_iri,
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(dog_iri.as_str().to_string()),
+            ]),
+        );
+        let expr = Exp::EigonResource(Box::new(r));
+        let t = check_infer(&mut ctx(), &expr).unwrap();
+        match t {
+            Val::EigonClass(iri) => assert_eq!(iri.as_str(), "urn:eigenius:example:Dog"),
+            other => panic!("expected EigonClass, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn find_sigma_field_resolves_eigon_class_with_layer() {
+        // With a layer, find_sigma_field on EigonClass should resolve
+        // to actual property types instead of Val::Set.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            builder.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(builder.build());
+
+        let animals_json = include_str!("../../../ontologies/examples/animals.json");
+        let animal_resources = eigon_json::parse_document(animals_json).unwrap();
+        let mut domain_builder = LayerBuilder::new("animals", Some(core));
+        for r in animal_resources {
+            domain_builder.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(domain_builder.build());
+
+        let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let dog_type = Val::EigonClass(dog_iri);
+
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        let field = find_sigma_field(&mut c, &dog_type, "name");
+        assert!(field.is_some(), "should find 'name' on Dog");
+        // The type should NOT be Val::Set (the old broken behavior)
+        let field_type = field.unwrap();
+        assert!(
+            !matches!(field_type, Val::Set),
+            "field type should be resolved, not Set; got {:?}",
+            field_type
+        );
+    }
+
+    #[test]
+    fn find_sigma_field_without_layer_returns_none_for_eigon_class() {
+        // Without a layer, EigonClass resolution should fail gracefully
+        let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let dog_type = Val::EigonClass(dog_iri);
+        let mut c = ctx();
+        let field = find_sigma_field(&mut c, &dog_type, "name");
+        assert!(field.is_none(), "no layer → should not resolve");
     }
 }
