@@ -122,6 +122,7 @@ impl Compiler {
             Value::Array(observations),
         );
 
+        stamp_declared(&mut r);
         Ok(vec![r])
     }
 
@@ -176,6 +177,7 @@ impl Compiler {
             }
         }
 
+        stamp_declared(&mut r);
         Ok(vec![r])
     }
 
@@ -269,6 +271,7 @@ impl Compiler {
             }
         }
 
+        stamp_declared(&mut r);
         Ok(vec![r])
     }
 
@@ -290,6 +293,7 @@ impl Compiler {
             r.set(prop_iri, value);
         }
 
+        stamp_declared(&mut r);
         Ok(vec![r])
     }
 
@@ -362,6 +366,7 @@ impl Compiler {
             Value::Embedded(Box::new(body)),
         );
 
+        stamp_declared(&mut r);
         Ok(vec![r])
     }
 
@@ -733,6 +738,24 @@ fn set_is_a(resource: &mut Resource, class_iri: &str) {
     resource.set(
         iri("urn:eigenius:core:is_a"),
         Value::Array(vec![Value::String(class_iri.to_string())]),
+    );
+}
+
+/// Append `DeclaredResource` to `is_a` and set `declared_by` on a
+/// compiled resource (D6b epistemic stamping, Phase 10b Step 3).
+fn stamp_declared(resource: &mut Resource) {
+    let is_a_iri = iri("urn:eigenius:core:is_a");
+    let mut types = match resource.get(&is_a_iri) {
+        Some(Value::Array(arr)) => arr.clone(),
+        _ => Vec::new(),
+    };
+    types.push(Value::String(
+        crate::ontology::well_known::DECLARED_RESOURCE.to_string(),
+    ));
+    resource.set(is_a_iri, Value::Array(types));
+    resource.set(
+        iri(crate::ontology::well_known::DECLARED_BY),
+        Value::String("esl-compiler".to_string()),
     );
 }
 
@@ -1122,5 +1145,119 @@ mod tests {
                 .as_str(),
             Some("Eigenius is a typed knowledge graph platform.")
         );
+    }
+
+    // --- DeclaredResource stamping tests (Phase 10b) ---
+
+    fn has_declared_resource(r: &Resource) -> bool {
+        r.is_a()
+            .iter()
+            .any(|i| i.as_str() == crate::ontology::well_known::DECLARED_RESOURCE)
+    }
+
+    fn declared_by(r: &Resource) -> Option<String> {
+        r.get(&iri(crate::ontology::well_known::DECLARED_BY))
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn esl_class_stamped_declared_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            class ex:Foo {
+                description = "test";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        assert!(
+            has_declared_resource(r),
+            "ESL class should have DeclaredResource in is_a"
+        );
+        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    #[test]
+    fn esl_property_stamped_declared_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            property ex:bar : core:string {
+                description = "test";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        assert!(
+            has_declared_resource(r),
+            "ESL property should have DeclaredResource in is_a"
+        );
+        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    #[test]
+    fn esl_resource_stamped_declared_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            resource ex:thing : ex:Foo {
+                ex:name = "test";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        assert!(
+            has_declared_resource(r),
+            "ESL resource should have DeclaredResource in is_a"
+        );
+        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    #[test]
+    fn esl_program_stamped_declared_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            program ex:identity : ex:A -> ex:B {
+                input
+            }
+        "#,
+        );
+        let r = &resources[0];
+        assert!(
+            has_declared_resource(r),
+            "ESL program should have DeclaredResource in is_a"
+        );
+        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    #[test]
+    fn esl_codata_stamped_declared_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            codata ex:Stream {
+                head : core:integer;
+                tail : ex:Stream;
+            }
+        "#,
+        );
+        let r = &resources[0];
+        assert!(
+            has_declared_resource(r),
+            "ESL codata should have DeclaredResource in is_a"
+        );
+        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
     }
 }

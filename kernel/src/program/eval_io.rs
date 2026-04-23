@@ -7,13 +7,13 @@
 use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
-use crate::nbe::eval::{eval_ctx, EvalCtx};
+use crate::nbe::eval::{eval_traced, EvalCtx};
 use crate::nbe::term::Patt;
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::program::component::{ComponentRegistry, ProgramError};
-use crate::program::trace::{ComponentTrace, TraceStore};
+use crate::program::trace::{ComponentTrace, Trace, TraceStore};
 use std::sync::{Arc, Mutex};
 
 /// Result of NbE program execution: output resource + dispatched IO traces.
@@ -21,6 +21,8 @@ pub struct NbeExecutionResult {
     pub output: Resource,
     /// ComponentTraces produced during execution (for trace layer commits).
     pub dispatched_traces: Vec<ComponentTrace>,
+    /// Tree-structured trace from `eval_traced` (D6b §2).
+    pub root_trace: Option<Trace>,
 }
 
 /// Execute a program resource via NbE in IO mode.
@@ -86,8 +88,8 @@ pub fn execute_program_nbe_with_institutions(
         Val::ResourceVal(Box::new(input.clone())),
     );
 
-    // Evaluate the body expression in IO mode
-    let result = eval_ctx(&body_exp, &rho, &ctx);
+    // Evaluate the body expression in IO mode with tracing
+    let (result, root_trace) = eval_traced(&body_exp, &rho, &ctx);
 
     // Convert the result Val back to a Resource
     let output = val_to_resource(&result)?;
@@ -101,6 +103,7 @@ pub fn execute_program_nbe_with_institutions(
     Ok(NbeExecutionResult {
         output,
         dispatched_traces: traces,
+        root_trace,
     })
 }
 
@@ -204,5 +207,73 @@ mod tests {
                 .as_str(),
             Some("Rex")
         );
+    }
+
+    #[test]
+    fn execute_identity_produces_root_trace_none() {
+        // A simple Var expression produces no trace (pure leaf)
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                "urn:eigenius:program:name": "input"
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+
+        let mut input = Resource::new_embedded();
+        input.set(
+            Iri::parse("urn:eigenius:example:x").unwrap(),
+            Value::String("val".into()),
+        );
+
+        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let registry = Arc::new(ComponentRegistry::default());
+
+        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        assert!(
+            result.root_trace.is_none(),
+            "identity (Var) should have no trace"
+        );
+    }
+
+    #[test]
+    fn execute_component_produces_root_trace() {
+        // An Identity component dispatch should produce a Component trace
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+                "urn:eigenius:program:function": "urn:eigenius:program:components:Identity",
+                "urn:eigenius:program:argument": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                    "urn:eigenius:program:name": "input"
+                }
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+
+        let mut input = Resource::new_embedded();
+        input.set(
+            Iri::parse("urn:eigenius:example:x").unwrap(),
+            Value::String("val".into()),
+        );
+
+        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let registry = Arc::new(ComponentRegistry::default());
+
+        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        assert!(
+            result.root_trace.is_some(),
+            "Identity component dispatch should produce a root trace"
+        );
+        match result.root_trace.unwrap() {
+            Trace::Component(ct) => {
+                assert_eq!(ct.component, "urn:eigenius:program:components:Identity");
+            }
+            other => panic!("expected Trace::Component, got {:?}", other),
+        }
     }
 }

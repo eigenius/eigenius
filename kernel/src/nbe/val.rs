@@ -112,6 +112,19 @@ impl Clos {
             ctx,
         )
     }
+
+    /// Instantiate the closure with tracing. Returns `(Val, Option<Trace>)`.
+    pub fn apply_ctx_traced(
+        &self,
+        v: Val,
+        ctx: &crate::nbe::eval::EvalCtx,
+    ) -> (Val, Option<crate::program::trace::Trace>) {
+        crate::nbe::eval::eval_traced(
+            &self.body,
+            &self.env.clone().extend(self.patt.clone(), v),
+            ctx,
+        )
+    }
 }
 
 // --- Operations on values (reference lines 147-163) ---
@@ -196,6 +209,68 @@ impl Val {
             }
             Val::Nt(k) => Val::Nt(Neut::Observe(Box::new(k), obs.to_string())),
             other => panic!("vobserve: not a corecord: {:?}", other),
+        }
+    }
+
+    /// Function application with tracing. Returns `(Val, Option<Trace>)`.
+    ///
+    /// For `Fun` applied to `Con`, produces a `Trace::Case`.
+    /// For `Lam`, delegates to `apply_ctx_traced`.
+    pub fn app_ctx_traced(
+        self,
+        v: Val,
+        ctx: &crate::nbe::eval::EvalCtx,
+    ) -> (Val, Option<crate::program::trace::Trace>) {
+        use crate::program::trace::Trace;
+        match self {
+            Val::Lam(f) => f.apply_ctx_traced(v, ctx),
+            Val::Fun(cases, rho) => {
+                if let Val::Con(c, cv) = v {
+                    for (name, exp) in &cases {
+                        if *name == c {
+                            let (branch_fn, branch_trace) =
+                                crate::nbe::eval::eval_traced(exp, &rho, ctx);
+                            let (result, app_trace) = branch_fn.app_ctx_traced(*cv, ctx);
+                            let trace = Some(Trace::Case {
+                                scrutinee_trace: None,
+                                branch_taken: c,
+                                branch_trace: app_trace.or(branch_trace).map(Box::new),
+                            });
+                            return (result, trace);
+                        }
+                    }
+                    panic!("app_ctx_traced: constructor {} not found in case", c);
+                } else if let Val::Nt(k) = v {
+                    (Val::Nt(Neut::NtFun(cases, rho, Box::new(k))), None)
+                } else {
+                    panic!("app_ctx_traced Fun to non-constructor non-neutral");
+                }
+            }
+            Val::Nt(k) => (Val::Nt(Neut::App(Box::new(k), Box::new(v))), None),
+            other => panic!("app_ctx_traced: not a function: {:?}", other),
+        }
+    }
+
+    /// Observation on a codata value with tracing.
+    pub fn vobserve_ctx_traced(
+        self,
+        obs: &str,
+        ctx: &crate::nbe::eval::EvalCtx,
+    ) -> (Val, Option<crate::program::trace::Trace>) {
+        match self {
+            Val::CoRecord(fields, rho) => {
+                for (name, body) in &fields {
+                    if name == obs {
+                        return crate::nbe::eval::eval_traced(body, &rho, ctx);
+                    }
+                }
+                panic!(
+                    "vobserve_ctx_traced: observation '{}' not found in corecord",
+                    obs
+                );
+            }
+            Val::Nt(k) => (Val::Nt(Neut::Observe(Box::new(k), obs.to_string())), None),
+            other => panic!("vobserve_ctx_traced: not a corecord: {:?}", other),
         }
     }
 
