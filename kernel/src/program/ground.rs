@@ -177,28 +177,26 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
         }
 
         wk::RESOURCE_ARRAY => {
-            // Array of resources — check class_types or allows_only
-            let _inner = resolve_array_element_type(resource, layer)?;
-            // Represent as a list type marker
-            Ok(Val::EigonClass(
-                Iri::parse("urn:eigenius:core:resource_array").unwrap(),
-            ))
+            // Array of resources — wrap element type in a list type
+            let inner = resolve_array_element_type(resource, layer)?;
+            Ok(make_list_type(inner))
         }
 
         wk::VALUE_ARRAY => {
-            // Array of values — check element_type
+            // Array of values — wrap element type in a list type
             let et_iri = Iri::parse(wk::ELEMENT_TYPE).unwrap();
-            if let Some(Value::String(et_str)) = resource.get(&et_iri) {
+            let elem_type = if let Some(Value::String(et_str)) = resource.get(&et_iri) {
                 match et_str.as_str() {
-                    wk::STRING => Ok(Val::EigonPrimitive(PrimitiveType::String)),
-                    wk::INTEGER => Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
-                    wk::FLOAT => Ok(Val::EigonPrimitive(PrimitiveType::Float)),
-                    wk::BOOLEAN => Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
-                    _ => Ok(Val::Set),
+                    wk::STRING => Val::EigonPrimitive(PrimitiveType::String),
+                    wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
+                    wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
+                    wk::BOOLEAN => Val::EigonPrimitive(PrimitiveType::Boolean),
+                    _ => Val::Set,
                 }
             } else {
-                Ok(Val::Set)
-            }
+                Val::Set
+            };
+            Ok(make_list_type(elem_type))
         }
 
         _ => Ok(Val::Set), // Unknown data type
@@ -231,6 +229,31 @@ fn make_option_type(inner: Val) -> Val {
         vec![
             ("some".to_string(), Exp::Var(var_name)),
             ("none".to_string(), Exp::One),
+        ],
+        rho,
+    )
+}
+
+/// Make a list type wrapping an element type.
+///
+/// Uses the same encoding as `Exp::list()`: `Data[nil : 1, cons : A × __list_tail]`.
+/// The element type is stored in the closure's environment to avoid
+/// round-tripping through readback. A dummy `__list_tail` binding is
+/// included so that readback (which evaluates summand types) does not
+/// hit an unbound variable. Phase 11b replaces this with a proper
+/// inductive type.
+fn make_list_type(elem: Val) -> Val {
+    let var_name = "__list_elem".to_string();
+    let rho = Rho::Nil
+        .extend(Patt::Var(var_name.clone()), elem)
+        .extend(Patt::Var("__list_tail".to_string()), Val::Set);
+    Val::Data(
+        vec![
+            ("nil".to_string(), Exp::One),
+            (
+                "cons".to_string(),
+                Exp::times(Exp::Var(var_name), Exp::Var("__list_tail".to_string())),
+            ),
         ],
         rho,
     )

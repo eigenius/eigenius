@@ -62,6 +62,12 @@ pub enum Val {
     /// is `(obs_name, body_exp)`; the body is evaluated only when the
     /// matching `Observe` is applied, in the captured environment.
     CoRecord(Vec<(Name, Exp)>, Rho),
+
+    // --- Map/Reduce (Phase 11a) ---
+    /// Finite list (array). Primary representation for resource arrays
+    /// and the result of Map. Phase 11b's inductive List evaluates to
+    /// this at runtime.
+    List(Vec<Val>),
 }
 
 /// Neutral terms — computations that cannot reduce further.
@@ -85,6 +91,12 @@ pub enum Neut {
     // --- Codata (D11, Phase 9b-i) ---
     /// Observation on a neutral codata value: (neut).obs
     Observe(Box<Neut>, Name),
+
+    // --- Map/Reduce (Phase 11a) ---
+    /// Map blocked on a neutral collection.
+    NtMap(Box<Val>, Box<Neut>),
+    /// Reduce blocked on a neutral collection.
+    NtReduce(Box<Val>, Box<Val>, Box<Neut>),
 }
 
 /// A closure: a pattern, body expression, and captured environment.
@@ -289,6 +301,30 @@ impl Val {
             }
             Val::Nt(k) => Ok(Val::Nt(Neut::Observe(Box::new(k), obs.to_string()))),
             other => Err(EvalError::NotACorecord(format!("{other:?}"))),
+        }
+    }
+}
+
+/// Convert a cons-pair list value to a `Vec`.
+///
+/// Recognises the `Con("nil", _)` / `Con("cons", Pair(head, tail))` encoding
+/// used by `Exp::list()`. Returns `None` if the value is not a well-formed
+/// cons list.
+pub fn cons_to_vec(val: &Val) -> Option<Vec<Val>> {
+    let mut items = Vec::new();
+    let mut current = val;
+    loop {
+        match current {
+            Val::Con(name, _) if name == "nil" => return Some(items),
+            Val::Con(name, inner) if name == "cons" => {
+                if let Val::Pair(head, tail) = inner.as_ref() {
+                    items.push(head.as_ref().clone());
+                    current = tail.as_ref();
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
         }
     }
 }

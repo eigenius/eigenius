@@ -351,6 +351,19 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         )),
 
         Exp::Observe(e, name) => ev(e)?.vobserve_ctx(name, ctx),
+
+        // Map/Reduce (Phase 11a)
+        Exp::Map(f, coll) => {
+            let f_val = ev(f)?;
+            let coll_val = ev(coll)?;
+            eval_map(f_val, coll_val, ctx)
+        }
+        Exp::Reduce(f, init, coll) => {
+            let f_val = ev(f)?;
+            let acc = ev(init)?;
+            let coll_val = ev(coll)?;
+            eval_reduce(f_val, acc, coll_val, ctx)
+        }
     }
 }
 
@@ -526,8 +539,189 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
             v.vobserve_ctx_traced(name, ctx)
         }
 
+        // --- Map: traced evaluation producing Trace::Map ---
+        Exp::Map(f, coll) => {
+            let f_val = eval_ctx(f, rho, ctx)?;
+            let coll_val = eval_ctx(coll, rho, ctx)?;
+            match coll_val {
+                Val::List(items) => {
+                    let mut mapped = Vec::with_capacity(items.len());
+                    let mut element_traces = Vec::with_capacity(items.len());
+                    for elem in items {
+                        let (val, trace) = f_val.clone().app_ctx_traced(elem, ctx)?;
+                        mapped.push(val);
+                        element_traces.push(trace);
+                    }
+                    let has_traces = element_traces.iter().any(|t| t.is_some());
+                    let trace = if has_traces {
+                        Some(Trace::Map { element_traces })
+                    } else {
+                        None
+                    };
+                    Ok((Val::List(mapped), trace))
+                }
+                Val::Con(ref name, _) if name == "nil" || name == "cons" => {
+                    match crate::nbe::val::cons_to_vec(&coll_val) {
+                        Some(items) => {
+                            let mut mapped = Vec::with_capacity(items.len());
+                            let mut element_traces = Vec::with_capacity(items.len());
+                            for elem in items {
+                                let (val, trace) = f_val.clone().app_ctx_traced(elem, ctx)?;
+                                mapped.push(val);
+                                element_traces.push(trace);
+                            }
+                            let has_traces = element_traces.iter().any(|t| t.is_some());
+                            let trace = if has_traces {
+                                Some(Trace::Map { element_traces })
+                            } else {
+                                None
+                            };
+                            Ok((Val::List(mapped), trace))
+                        }
+                        None => Err(EvalError::InvalidCaseTarget(
+                            "Map: malformed cons list".to_string(),
+                        )),
+                    }
+                }
+                Val::Nt(n) => Ok((Val::Nt(Neut::NtMap(Box::new(f_val), Box::new(n))), None)),
+                other => Err(EvalError::InvalidCaseTarget(format!(
+                    "Map: expected list, got {other:?}"
+                ))),
+            }
+        }
+
+        // --- Reduce: traced evaluation producing Trace::Reduce ---
+        Exp::Reduce(f, init, coll) => {
+            let f_val = eval_ctx(f, rho, ctx)?;
+            let acc = eval_ctx(init, rho, ctx)?;
+            let coll_val = eval_ctx(coll, rho, ctx)?;
+            match coll_val {
+                Val::List(items) => {
+                    let mut result = acc;
+                    let mut step_traces = Vec::with_capacity(items.len());
+                    for elem in items {
+                        let (step_fn, t1) = f_val.clone().app_ctx_traced(result, ctx)?;
+                        let (next, t2) = step_fn.app_ctx_traced(elem, ctx)?;
+                        result = next;
+                        step_traces.push(t1.or(t2));
+                    }
+                    let has_traces = step_traces.iter().any(|t| t.is_some());
+                    let trace = if has_traces {
+                        Some(Trace::Reduce { step_traces })
+                    } else {
+                        None
+                    };
+                    Ok((result, trace))
+                }
+                Val::Con(ref name, _) if name == "nil" || name == "cons" => {
+                    match crate::nbe::val::cons_to_vec(&coll_val) {
+                        Some(items) => {
+                            let mut result = acc;
+                            let mut step_traces = Vec::with_capacity(items.len());
+                            for elem in items {
+                                let (step_fn, t1) = f_val.clone().app_ctx_traced(result, ctx)?;
+                                let (next, t2) = step_fn.app_ctx_traced(elem, ctx)?;
+                                result = next;
+                                step_traces.push(t1.or(t2));
+                            }
+                            let has_traces = step_traces.iter().any(|t| t.is_some());
+                            let trace = if has_traces {
+                                Some(Trace::Reduce { step_traces })
+                            } else {
+                                None
+                            };
+                            Ok((result, trace))
+                        }
+                        None => Err(EvalError::InvalidCaseTarget(
+                            "Reduce: malformed cons list".to_string(),
+                        )),
+                    }
+                }
+                Val::Nt(n) => Ok((
+                    Val::Nt(Neut::NtReduce(Box::new(f_val), Box::new(acc), Box::new(n))),
+                    None,
+                )),
+                other => Err(EvalError::InvalidCaseTarget(format!(
+                    "Reduce: expected list, got {other:?}"
+                ))),
+            }
+        }
+
         // --- All other forms: structural, no trace ---
         _ => Ok((eval_ctx(exp, rho, ctx)?, None)),
+    }
+}
+
+/// Evaluate Map(f, collection).
+///
+/// Applies `f` to each element of a finite list. Accepts both
+/// `Val::List` (primary, from resource arrays) and cons-pair chains
+/// (legacy, from algebraic construction). Returns `Val::List`.
+fn eval_map(f: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
+    match coll {
+        Val::List(items) => {
+            let mapped: Result<Vec<Val>, EvalError> = items
+                .into_iter()
+                .map(|elem| f.clone().app_ctx(elem, ctx))
+                .collect();
+            Ok(Val::List(mapped?))
+        }
+        Val::Con(ref name, _) if name == "nil" || name == "cons" => {
+            match crate::nbe::val::cons_to_vec(&coll) {
+                Some(items) => {
+                    let mapped: Result<Vec<Val>, EvalError> = items
+                        .into_iter()
+                        .map(|elem| f.clone().app_ctx(elem, ctx))
+                        .collect();
+                    Ok(Val::List(mapped?))
+                }
+                None => Err(EvalError::InvalidCaseTarget(format!(
+                    "Map: malformed cons list: {coll:?}"
+                ))),
+            }
+        }
+        Val::Nt(n) => Ok(Val::Nt(Neut::NtMap(Box::new(f), Box::new(n)))),
+        other => Err(EvalError::InvalidCaseTarget(format!(
+            "Map: expected list, got {other:?}"
+        ))),
+    }
+}
+
+/// Evaluate Reduce(f, accumulator, collection).
+///
+/// Left-folds `f` over a finite list starting with `acc`. Accepts both
+/// `Val::List` and cons-pair chains. `f` is applied as `f(acc, elem)`.
+fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
+    match coll {
+        Val::List(items) => {
+            let mut result = acc;
+            for elem in items {
+                result = f.clone().app_ctx(result, ctx)?.app_ctx(elem, ctx)?;
+            }
+            Ok(result)
+        }
+        Val::Con(ref name, _) if name == "nil" || name == "cons" => {
+            match crate::nbe::val::cons_to_vec(&coll) {
+                Some(items) => {
+                    let mut result = acc;
+                    for elem in items {
+                        result = f.clone().app_ctx(result, ctx)?.app_ctx(elem, ctx)?;
+                    }
+                    Ok(result)
+                }
+                None => Err(EvalError::InvalidCaseTarget(format!(
+                    "Reduce: malformed cons list: {coll:?}"
+                ))),
+            }
+        }
+        Val::Nt(n) => Ok(Val::Nt(Neut::NtReduce(
+            Box::new(f),
+            Box::new(acc),
+            Box::new(n),
+        ))),
+        other => Err(EvalError::InvalidCaseTarget(format!(
+            "Reduce: expected list, got {other:?}"
+        ))),
     }
 }
 
@@ -1034,7 +1228,9 @@ fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
             Val::ResourceVal(Box::new(crate::ontology::resource::Resource::new_embedded()))
         }
         RVal::Embedded(r) => Val::ResourceVal(r.clone()),
-        _ => Val::Unit,
+        RVal::Array(items) => Val::List(items.iter().map(resource_value_to_val).collect()),
+        RVal::ResourceRef(iri) => Val::EigonClass(iri.clone()),
+        RVal::Json(_) => Val::Unit,
     }
 }
 
@@ -1055,6 +1251,15 @@ fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
         }
         Val::Unit => RVal::String(String::new()),
         Val::EigonClass(iri) => RVal::String(iri.as_str().to_string()),
+        Val::List(items) => RVal::Array(items.iter().map(val_to_resource_value).collect()),
+        Val::Con(ref name, _) if name == "nil" || name == "cons" => {
+            match crate::nbe::val::cons_to_vec(val) {
+                Some(items) => RVal::Array(items.iter().map(val_to_resource_value).collect()),
+                None => {
+                    RVal::Embedded(Box::new(crate::ontology::resource::Resource::new_embedded()))
+                }
+            }
+        }
         _ => RVal::Embedded(Box::new(crate::ontology::resource::Resource::new_embedded())),
     }
 }
@@ -1655,5 +1860,176 @@ mod tests {
             other => panic!("expected Trace::Construct, got {:?}", other),
         }
         Ok(())
+    }
+
+    // --- Map/Reduce tests (Phase 11a) ---
+
+    /// Helper: build a cons-pair list from values.
+    fn cons_list(items: Vec<Val>) -> Val {
+        let mut result = Val::Con("nil".into(), Box::new(Val::Unit));
+        for item in items.into_iter().rev() {
+            result = Val::Con(
+                "cons".into(),
+                Box::new(Val::Pair(Box::new(item), Box::new(result))),
+            );
+        }
+        result
+    }
+
+    /// Helper: identity lambda: λx. x
+    fn id_lam() -> Exp {
+        Exp::Lam(
+            Patt::Var("x".to_string()),
+            Box::new(Exp::Var("x".to_string())),
+        )
+    }
+
+    #[test]
+    fn map_empty_list() -> Result<(), EvalError> {
+        let exp = Exp::Map(
+            Box::new(id_lam()),
+            Box::new(Exp::Con("nil".into(), Box::new(Exp::Unit))),
+        );
+        let v = eval(&exp, &Rho::Nil)?;
+        match v {
+            Val::List(items) => assert!(items.is_empty()),
+            other => panic!("expected List, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn map_two_elements() -> Result<(), EvalError> {
+        // Map(λx. x, [Unit, Set]) → [Unit, Set]
+        let list = cons_list(vec![Val::Unit, Val::Set]);
+        let rho = Rho::Nil.extend(Patt::Var("lst".to_string()), list);
+        let exp = Exp::Map(Box::new(id_lam()), Box::new(Exp::Var("lst".to_string())));
+        let v = eval(&exp, &rho)?;
+        match v {
+            Val::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert!(matches!(items[0], Val::Unit));
+                assert!(matches!(items[1], Val::Set));
+            }
+            other => panic!("expected List, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn map_over_val_list() -> Result<(), EvalError> {
+        // Map over Val::List (primary representation)
+        let rho = Rho::Nil.extend(
+            Patt::Var("lst".to_string()),
+            Val::List(vec![Val::Unit, Val::One]),
+        );
+        let exp = Exp::Map(Box::new(id_lam()), Box::new(Exp::Var("lst".to_string())));
+        let v = eval(&exp, &rho)?;
+        match v {
+            Val::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert!(matches!(items[0], Val::Unit));
+                assert!(matches!(items[1], Val::One));
+            }
+            other => panic!("expected List, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn map_neutral_collection() -> Result<(), EvalError> {
+        let rho = Rho::Nil.extend(
+            Patt::Var("n".to_string()),
+            Val::Nt(Neut::Gen(0, "n".to_string())),
+        );
+        let exp = Exp::Map(Box::new(id_lam()), Box::new(Exp::Var("n".to_string())));
+        let v = eval(&exp, &rho)?;
+        assert!(matches!(v, Val::Nt(Neut::NtMap(_, _))));
+        Ok(())
+    }
+
+    #[test]
+    fn reduce_empty_list() -> Result<(), EvalError> {
+        // Reduce(f, Unit, []) → Unit
+        let rho = Rho::Nil.extend(
+            Patt::Var("f".to_string()),
+            Val::Lam(Clos::new(
+                Patt::Var("acc".to_string()),
+                Exp::Lam(
+                    Patt::Var("x".to_string()),
+                    Box::new(Exp::Var("acc".to_string())),
+                ),
+                Rho::Nil,
+            )),
+        );
+        let exp = Exp::Reduce(
+            Box::new(Exp::Var("f".to_string())),
+            Box::new(Exp::Unit),
+            Box::new(Exp::Con("nil".into(), Box::new(Exp::Unit))),
+        );
+        let v = eval(&exp, &rho)?;
+        assert!(matches!(v, Val::Unit));
+        Ok(())
+    }
+
+    #[test]
+    fn reduce_neutral_collection() -> Result<(), EvalError> {
+        let rho = Rho::Nil
+            .extend(
+                Patt::Var("f".to_string()),
+                Val::Lam(Clos::new(
+                    Patt::Var("acc".to_string()),
+                    Exp::Lam(
+                        Patt::Var("x".to_string()),
+                        Box::new(Exp::Var("acc".to_string())),
+                    ),
+                    Rho::Nil,
+                )),
+            )
+            .extend(
+                Patt::Var("n".to_string()),
+                Val::Nt(Neut::Gen(0, "n".to_string())),
+            );
+        let exp = Exp::Reduce(
+            Box::new(Exp::Var("f".to_string())),
+            Box::new(Exp::Unit),
+            Box::new(Exp::Var("n".to_string())),
+        );
+        let v = eval(&exp, &rho)?;
+        assert!(matches!(v, Val::Nt(Neut::NtReduce(_, _, _))));
+        Ok(())
+    }
+
+    #[test]
+    fn resource_value_array_to_list_val() {
+        use crate::ontology::resource::Value as RVal;
+        let arr = RVal::Array(vec![RVal::Integer(1), RVal::Integer(2), RVal::Integer(3)]);
+        let v = resource_value_to_val(&arr);
+        match v {
+            Val::List(items) => assert_eq!(items.len(), 3),
+            other => panic!("expected List, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_val_to_resource_value_array() {
+        use crate::ontology::resource::Value as RVal;
+        let list = Val::List(vec![Val::Unit, Val::Unit]);
+        let rv = val_to_resource_value(&list);
+        match rv {
+            RVal::Array(items) => assert_eq!(items.len(), 2),
+            other => panic!("expected Array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cons_list_to_resource_value_array() {
+        use crate::ontology::resource::Value as RVal;
+        let list = cons_list(vec![Val::Unit, Val::Unit]);
+        let rv = val_to_resource_value(&list);
+        match rv {
+            RVal::Array(items) => assert_eq!(items.len(), 2),
+            other => panic!("expected Array, got {other:?}"),
+        }
     }
 }
