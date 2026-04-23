@@ -5,6 +5,7 @@
 
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
+use std::sync::Arc;
 
 pub type Name = String;
 
@@ -112,6 +113,24 @@ pub enum Exp {
     /// `Reduce(f, initial, collection)` — type: `(B → A → B) → B → List A → B`.
     /// Termination: structural over a finite list.
     Reduce(Box<Exp>, Box<Exp>, Box<Exp>),
+
+    // --- Inductive types (Phase 11b, D19) ---
+    /// Introduce an inductive type declaration.
+    /// Evaluating this form produces the type former; the declaration is
+    /// shared with constructor and recursor occurrences via `Arc`.
+    Inductive(Arc<InductiveDecl>),
+    /// Inductive type applied to parameter expressions: `I(p₁, …, pₙ)`.
+    InductiveType(Arc<InductiveDecl>, Vec<Exp>),
+    /// Constructor application: `c(a₁, …, aₘ)` on the named inductive.
+    InductiveCtor(Arc<InductiveDecl>, Name, Vec<Exp>),
+    /// Recursor application: eliminate a value of the inductive with
+    /// motive and one minor per constructor.
+    InductiveRec {
+        decl: Arc<InductiveDecl>,
+        motive: Box<Exp>,
+        minors: Vec<Exp>,
+        major: Box<Exp>,
+    },
 }
 
 /// Declarations.
@@ -187,6 +206,32 @@ pub enum PrimitiveType {
     Float,
     Boolean,
     Json,
+}
+
+/// Declaration of an inductive type (Phase 11b, D19).
+///
+/// Carries the declaration inline in the AST; shared by value via `Arc`
+/// so type / constructor / recursor occurrences of the same inductive
+/// do not duplicate the telescope. Later phases may migrate this into
+/// a top-level environment (nanoda_lib style); for now the inline
+/// representation keeps the change local to the NbE evaluator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InductiveDecl {
+    pub name: Name,
+    /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
+    pub params: Vec<(Patt, Exp)>,
+    /// Universe of the type former — typically `Exp::Set` or `Exp::Type(n)`.
+    pub sort: Exp,
+    pub ctors: Vec<InductiveCtorDecl>,
+}
+
+/// A single constructor within an `InductiveDecl`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InductiveCtorDecl {
+    pub name: Name,
+    /// Full constructor type: a Π-telescope ending in an application
+    /// of the parent inductive to its parameters.
+    pub typ: Exp,
 }
 
 impl Patt {

@@ -25,6 +25,10 @@ pub enum EvalError {
     ObservationNotFound(String),
     /// Function called outside its required capability mode.
     ModeError(String),
+    /// A code path is acknowledged but not yet implemented.
+    /// Used while incrementally landing larger features (e.g. the
+    /// inductive recursor stub during Phase 11b).
+    NotImplemented(String),
 }
 
 impl std::fmt::Display for EvalError {
@@ -38,6 +42,7 @@ impl std::fmt::Display for EvalError {
             Self::NotACorecord(s) => write!(f, "not a corecord: {s}"),
             Self::ObservationNotFound(s) => write!(f, "observation not found: {s}"),
             Self::ModeError(s) => write!(f, "mode error: {s}"),
+            Self::NotImplemented(s) => write!(f, "not yet implemented: {s}"),
         }
     }
 }
@@ -363,6 +368,54 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             let acc = ev(init)?;
             let coll_val = ev(coll)?;
             eval_reduce(f_val, acc, coll_val, ctx)
+        }
+
+        // Inductive types (Phase 11b, D19)
+        // Step 1 lands the AST and value shells; Step 2 will add iota
+        // reduction for the recursor.
+        Exp::Inductive(decl) => Ok(Val::InductiveType {
+            decl: decl.clone(),
+            params: Vec::new(),
+        }),
+        Exp::InductiveType(decl, params) => {
+            let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
+            Ok(Val::InductiveType {
+                decl: decl.clone(),
+                params: params?,
+            })
+        }
+        Exp::InductiveCtor(decl, ctor_name, args) => {
+            let args: Result<Vec<_>, _> = args.iter().map(&ev).collect();
+            Ok(Val::InductiveVal {
+                decl: decl.clone(),
+                ctor_name: ctor_name.clone(),
+                args: args?,
+            })
+        }
+        Exp::InductiveRec {
+            decl,
+            motive,
+            minors,
+            major,
+        } => {
+            let motive_val = ev(motive)?;
+            let minor_vals: Result<Vec<_>, _> = minors.iter().map(&ev).collect();
+            let minor_vals = minor_vals?;
+            let major_val = ev(major)?;
+            match major_val {
+                Val::Nt(n) => Ok(Val::Nt(Neut::NtRec {
+                    decl: decl.clone(),
+                    motive: Box::new(motive_val),
+                    minors: minor_vals,
+                    major: Box::new(n),
+                })),
+                Val::InductiveVal { .. } => Err(EvalError::NotImplemented(
+                    "inductive recursor iota reduction (Phase 11b step 2)".to_string(),
+                )),
+                other => Err(EvalError::InvalidCaseTarget(format!(
+                    "InductiveRec: expected inductive value, got {other:?}"
+                ))),
+            }
         }
     }
 }

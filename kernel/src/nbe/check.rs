@@ -174,6 +174,13 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
             Ok(())
         }
 
+        // Inductive type forms (Phase 11b, D19).
+        // Step 1 admits these as valid types without further checking;
+        // Step 4 will run the positivity checker and verify that the
+        // declaration's parameter telescope and constructor types are
+        // well-formed.
+        Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(()),
+
         a => check(ctx, a, &Val::Set),
     }
 }
@@ -311,6 +318,14 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // Codata type formation: codata { ... } : Set
         (Exp::Codata(_), Val::Set) => check_type(ctx, exp),
         (Exp::Codata(_), Val::Type(_)) => check_type(ctx, exp),
+
+        // Inductive type formation (Phase 11b, D19).
+        (Exp::Inductive(_), Val::Set) | (Exp::InductiveType(_, _), Val::Set) => {
+            check_type(ctx, exp)
+        }
+        (Exp::Inductive(_), Val::Type(_)) | (Exp::InductiveType(_, _), Val::Type(_)) => {
+            check_type(ctx, exp)
+        }
 
         // Corecord against a codata type: each field's body must have
         // the corresponding observation's type, and every declared
@@ -590,6 +605,24 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(b)
         }
 
+        // Inductive types (Phase 11b, D19).
+        // Type formers inhabit `Set`. Phase 11b Step 5 will tighten this
+        // to track universe levels properly.
+        Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(Val::Set),
+
+        // Constructor applications and recursor applications need their
+        // declaration's parameter telescope to derive a type. Wired in
+        // Phase 11b Step 5.
+        Exp::InductiveCtor(decl, ctor, _) => Err(format!(
+            "type inference for inductive constructor `{}.{ctor}` not yet implemented \
+             (Phase 11b step 5)",
+            decl.name
+        )),
+        Exp::InductiveRec { decl, .. } => Err(format!(
+            "type inference for `{}.rec` not yet implemented (Phase 11b step 5)",
+            decl.name
+        )),
+
         e => Err(format!("cannot infer type of: {e:?}")),
     }
 }
@@ -771,6 +804,36 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
             check_guarded(f, forbidden)?;
             check_guarded(init, forbidden)?;
             check_guarded(coll, forbidden)
+        }
+
+        // Inductive types (Phase 11b, D19): walk parameter / argument /
+        // motive / minor / major sub-expressions structurally. The
+        // `InductiveDecl` itself is treated as a closed declaration —
+        // its constructor types are not visited here.
+        Exp::Inductive(_) => Ok(()),
+        Exp::InductiveType(_, params) => {
+            for p in params {
+                check_guarded(p, forbidden)?;
+            }
+            Ok(())
+        }
+        Exp::InductiveCtor(_, _, args) => {
+            for a in args {
+                check_guarded(a, forbidden)?;
+            }
+            Ok(())
+        }
+        Exp::InductiveRec {
+            motive,
+            minors,
+            major,
+            ..
+        } => {
+            check_guarded(motive, forbidden)?;
+            for m in minors {
+                check_guarded(m, forbidden)?;
+            }
+            check_guarded(major, forbidden)
         }
 
         // Leaves — no sub-expressions to check.
