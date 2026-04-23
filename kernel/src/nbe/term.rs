@@ -102,6 +102,16 @@ pub enum Exp {
     /// or produces a blocked neutral if `e` is not yet a concrete
     /// corecord.
     Observe(Box<Exp>, Name),
+
+    // --- Map/Reduce (Phase 11a) ---
+    /// Map: apply a function to each element of a list.
+    /// `Map(f, collection)` — type: `(A → B) → List A → List B`.
+    /// Termination: structural over a finite list.
+    Map(Box<Exp>, Box<Exp>),
+    /// Reduce: fold a function over a list with an initial accumulator.
+    /// `Reduce(f, initial, collection)` — type: `(B → A → B) → B → List A → B`.
+    /// Termination: structural over a finite list.
+    Reduce(Box<Exp>, Box<Exp>, Box<Exp>),
 }
 
 /// Declarations.

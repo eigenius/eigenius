@@ -256,14 +256,7 @@ fn parse_map(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let coll_resource = get_embedded(resource, "urn:eigenius:program:collection")?;
     let coll_exp = parse_expression(&coll_resource, layer)?;
 
-    // Map is a primitive: App(App(map, f), collection)
-    Ok(Exp::App(
-        Box::new(Exp::App(
-            Box::new(Exp::Var("__map".to_string())),
-            Box::new(func_exp),
-        )),
-        Box::new(coll_exp),
-    ))
+    Ok(Exp::Map(Box::new(func_exp), Box::new(coll_exp)))
 }
 
 /// reduce(f, initial, collection)
@@ -277,15 +270,9 @@ fn parse_reduce(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let coll_resource = get_embedded(resource, "urn:eigenius:program:collection")?;
     let coll_exp = parse_expression(&coll_resource, layer)?;
 
-    // Reduce is a primitive: App(App(App(reduce, f), init), collection)
-    Ok(Exp::App(
-        Box::new(Exp::App(
-            Box::new(Exp::App(
-                Box::new(Exp::Var("__reduce".to_string())),
-                Box::new(func_exp),
-            )),
-            Box::new(init_exp),
-        )),
+    Ok(Exp::Reduce(
+        Box::new(func_exp),
+        Box::new(init_exp),
         Box::new(coll_exp),
     ))
 }

@@ -84,8 +84,8 @@ The build is organized into phases. Each phase produces a working system that ca
 | 8 | WASM | ✓ | Untrusted capabilities run sandboxed via Wasmtime |
 | 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
 | 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
-| 10 | Kernel Completeness | | Ontology-as-types resolution, universe soundness, typed errors |
-| 11 | Type Theory Extensions | | Map/Reduce, inductive types, decision procedures, Comorphism class |
+| 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
+| 11 | Type Theory Extensions | 11a ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
@@ -527,17 +527,21 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ---
 
-## Phase 10 — Kernel Completeness
+## Phase 10 — Kernel Completeness ✓
 
 **Goal:** Close the fundamental kernel correctness gaps that block platform breadth — particularly ontology-as-types resolution, which is a prerequisite for the life-science representation work in Phase 11 and every other domain that typechecks against ontology classes. Framed in `docs/design/life-science-requirements.md` §19 step 1 as "nothing works cleanly until `find_sigma_field` resolves EigonClass to proper dependent records."
 
 **Duration estimate:** 3–5 weeks total, three internal milestones.
 
+**Status:** Complete (April 2026). Ontology-as-types resolution (#18, D18), defence-in-depth for IO-reachable panics, and typed `EvalError` refactor (#19) all shipped. The NbE evaluator returns `Result<Val, EvalError>` throughout — 20 panic sites converted to error returns, all tests use `?` propagation. `catch_unwind` retained as defence-in-depth but the primary error path is now the Result monad.
+
 **Prerequisites:** Phase 5 (Mini-TT/NbE), Phase 8 (WASM).
 
 **Drives:** eigenius/eigenius#12 (high-priority correctness hazards), #13 (medium), #14 (low).
 
-### Phase 10a — Ontology-as-types resolution — ~2 weeks
+### Phase 10a — Ontology-as-types resolution ✓ — ~2 weeks
+
+**Status:** Complete (April 2026). `find_sigma_field` walks the layer chain to resolve `EigonClass(iri)` into dependent record types. `check_infer` extended with inference-mode rules for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq`. `CheckCtx` bundles `rho`/`gamma`/optional layer/per-check type cache. See D18 and #18.
 
 **Goal:** `find_sigma_field` walks the layer chain to resolve `EigonClass(iri)` into a proper dependent record type (Sigma chain) instead of silently collapsing to `Val::Set`. Property access on ontology classes type-checks against the class's declared properties and their datatypes.
 
@@ -545,9 +549,11 @@ The phase decomposes into two milestones that are separately reviewable:
 - Extend `check_infer` with cases for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq` — currently these fall through to an "unable to infer" error whenever they appear in inference position without an annotation.
 - Integration tests: property access on ontology-typed resources; Construct expressions without annotations; round-trip through patent demo pipeline.
 - Drives the "consolidated ontology-as-types layer-chain plumbing" prerequisite named in life-science §19.
-- See D18 (to be written).
+- See D18.
 
 ### Phase 10b — Universe stratification and meta-level soundness — ~1–2 weeks
+
+**Status:** Deferred — enforcement at the layer-ingestion level is not yet wired. The Mini-TT checker's universe rules are adequate for current use. Will revisit when Phase 12 worked examples exercise multi-level epistemic claims.
 
 **Goal:** Enforce the three-level epistemic stratification (data → derivation → meta) at ingestion time so meta-level claims over traces are sound. Life-science §16.2 names this as unblocking §13 "Meta-level claims (sound)."
 
@@ -556,7 +562,9 @@ The phase decomposes into two milestones that are separately reviewable:
 - Integration with D6b trace schema: a ProgramTrace at level 2 references only resources at level ≤ 1.
 - nanoda_lib (see `lean-4-as-institution.md`) as reference for how universe checking integrates with type equality — Eigenius's needs are simpler (three fixed levels vs. Lean's universe polymorphism).
 
-### Phase 10c — Robustness: typed errors, lossy conversions, allocator hygiene — ~1 week
+### Phase 10c — Robustness: typed errors, lossy conversions, allocator hygiene ✓ — ~1 week
+
+**Status:** Complete (April 2026). Defence-in-depth for IO-reachable panics (Phase 10c-i: graceful fallbacks + `catch_unwind`) shipped first, then the full `EvalError` refactor (#19): `eval`/`eval_ctx`/`eval_traced` and all `Val`/`Clos` methods return `Result<Val, EvalError>`. 8-variant `EvalError` enum covers all 20 former panic sites. `check.rs` maps via `.map_err(|e| e.to_string())?`. `readback.rs` stays infallible with `.expect()` (type-checker-validated paths). All test functions use `Result` + `?` — no `.unwrap()` on eval results.
 
 **Goal:** Close the residual low-priority hazards so kernel behaviour under misbehaving institutions is predictable.
 
@@ -589,14 +597,17 @@ The phase decomposes into two milestones that are separately reviewable:
 
 **Drives:** `docs/design/life-science-requirements.md` §18 Tier 1 + Tier 2 extensions.
 
-### Phase 11a — `Map` and `Reduce` as type-level primitives — ~2 weeks
+### Phase 11a — `Map` and `Reduce` as type-level primitives — ✓
 
-**Goal:** Replace ad-hoc `Drec` with structural `Map` and `Reduce` forms that carry termination guarantees by construction. Resolves the Drec termination concern from #13 and unblocks life-science §4 "Finite universal quantification."
+**Status:** Complete.
 
-- `Map` and `Reduce` become expression forms in the AST, not just ESL keywords (the keywords already exist per `kernel/src/esl/lexer.rs`).
-- Termination by construction: `Map` over a finite list, `Reduce` with a well-founded recursor. No `Drec` in the surface language after this milestone.
-- Parser/elaborator refuses `Drec` except as these primitives expand to it.
-- Life-science §4 bounded universal quantification works cleanly.
+- `Exp::Map` and `Exp::Reduce` are first-class AST nodes with dedicated eval/check/readback arms.
+- Dual list representation: `Val::List(Vec<Val>)` (primary, for resource arrays) + cons-pair chains (legacy, for algebraic construction). `cons_to_vec` normalises between them.
+- Neutral forms `Neut::NtMap` / `Neut::NtReduce` for blocked computation.
+- Array↔List bridge: `resource_value_to_val` converts `Value::Array` to `Val::List`; `val_to_resource_value` converts back; `resolve_property_type` returns proper list types for `resource_array` / `value_array` properties.
+- Expression builder emits `Exp::Map` / `Exp::Reduce` directly (removed `__map` / `__reduce` sentinel variables).
+- Traced evaluation produces `Trace::Map` / `Trace::Reduce`.
+- Type checker infers `Map(f, coll)` and `Reduce(f, init, coll)` types with `extract_list_element_type` helper.
 
 ### Phase 11b — Inductive types — ~4–6 weeks
 
@@ -609,7 +620,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - **Scope boundary:** single, non-mutual, non-nested, strictly-positive inductive types. Mutual and nested are explicitly deferred.
 - nanoda_lib (`src/inductive.rs`) as the reference implementation. See `lean-4-as-institution.md` Appendix A for the caveat about nested inductives.
 - Side benefit per §16.1: bounded universal quantification becomes cleaner once the underlying `List` type is a properly recursive inductive rather than the simplified sum-of-products form currently in `Exp::list`.
-- See D19 (to be written).
+- See D19 (`docs/design/d19-inductive-types.md`). Sized types (#16) brought into scope alongside inductive types.
 
 ### Phase 11c — Institution-registered decision procedures — ~1–2 weeks
 
@@ -638,7 +649,7 @@ The phase decomposes into two milestones that are separately reviewable:
 
 - `docs/design/life-science-requirements.md` §16 (required extensions), §18 (prioritization), §19 (sequencing)
 - `docs/design/lean-4-as-institution.md` — nanoda reference, especially Appendix A
-- D19 (to be written) — Inductive Types in Mini-TT
+- D19 (`docs/design/d19-inductive-types.md`) — Inductive Types + Sized Types in Mini-TT
 
 ---
 
@@ -793,8 +804,8 @@ The following design documents must be written and reviewed before the phase tha
 | D15 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 6+ | 8–10 pages |
 | D16 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 13 | 6–8 pages |
 | D17 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 8 | 6–8 pages |
-| D18 | **Ontology-as-Types Resolution** | **DRAFT** — `docs/design/d18-ontology-as-types-resolution.md`. `find_sigma_field` walks the layer chain through `resolve_class_type` instead of silently collapsing `EigonClass` to `Val::Set`. Introduces `CheckCtx` (bundling `rho`/`gamma`/optional layer/per-check type cache) threaded through all checker entrypoints. Adds inference-mode rules for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq`. Rejects no-layer EigonClass resolution explicitly rather than returning a weakened type. Closes the #12 high-priority correctness hazards. Prerequisite for most of D19. | Phase 10a | 10–12 pages |
-| D19 | **Inductive Types in Mini-TT** | Single (non-mutual, non-nested) strictly-positive inductive types: declaration form, positivity checker, recursor/eliminator derivation, iota-reduction rules, integration with the conversion algorithm. Tier 1 extension from `life-science-requirements.md` §16.1. nanoda_lib (`src/inductive.rs`) as a reference, with Eigenius-specific simplifications (no universe polymorphism, no nested inductives v1). | Phase 11b | 15–20 pages |
+| D18 | **Ontology-as-Types Resolution** | **COMPLETED** — `docs/design/d18-ontology-as-types-resolution.md`. `find_sigma_field` walks the layer chain through `resolve_class_type` instead of silently collapsing `EigonClass` to `Val::Set`. Introduces `CheckCtx` (bundling `rho`/`gamma`/optional layer/per-check type cache) threaded through all checker entrypoints. Adds inference-mode rules for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq`. Rejects no-layer EigonClass resolution explicitly rather than returning a weakened type. Closes the #12 high-priority correctness hazards. Prerequisite for most of D19. | Phase 10a | Done |
+| D19 | **Inductive Types in Mini-TT** | **DRAFT** — `docs/design/d19-inductive-types.md`. Single (non-mutual, non-nested) strictly-positive inductive types + sized types (#16). Declaration form, positivity checker, recursor/eliminator derivation, iota-reduction, sized termination for inductive/coinductive interaction. Deferred: mutual (#20), nested (#21), indexed families (#22). | Phase 11b | Draft |
 | D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Branching head pointers, common-ancestor invariants, comorphism witnesses as merge proofs, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Multi-session operation built on the same primitive. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 14 | 12–16 pages |
 | D21 | **Task Traces and Checkpointing** | **COMPLETED** — `docs/design/d21-task-traces-and-checkpointing.md`. Per-task positional `(session_id, task_id, step_seq)` trace keys replace the Phase-9a content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state atomically via `write_batch`. `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs + `at_layer` on read RPCs. Startup resume sweep (`ResumeConfig`, `ResumeState`) rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks with bounded parallelism. Single hardwired session (`Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion. | Phase 9b-iii | Done |
 

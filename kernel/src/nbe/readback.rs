@@ -111,6 +111,22 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
                 })
                 .collect(),
         ),
+
+        // Map/Reduce (Phase 11a)
+        Val::List(items) => {
+            // Read back as nested Con("cons", Pair(head, ...)) terminated by Con("nil", Unit)
+            let mut result = Exp::Con("nil".into(), Box::new(Exp::Unit));
+            for item in items.iter().rev() {
+                result = Exp::Con(
+                    "cons".into(),
+                    Box::new(Exp::Pair(
+                        Box::new(readback_val(level, item)),
+                        Box::new(result),
+                    )),
+                );
+            }
+            result
+        }
     }
 }
 
@@ -137,6 +153,17 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
 
         // Codata (D11, Phase 9b-i)
         Neut::Observe(k, obs) => Exp::Observe(Box::new(readback_neut(level, k)), obs.clone()),
+
+        // Map/Reduce (Phase 11a)
+        Neut::NtMap(f, k) => Exp::Map(
+            Box::new(readback_val(level, f)),
+            Box::new(readback_neut(level, k)),
+        ),
+        Neut::NtReduce(f, acc, k) => Exp::Reduce(
+            Box::new(readback_val(level, f)),
+            Box::new(readback_val(level, acc)),
+            Box::new(readback_neut(level, k)),
+        ),
     }
 }
 
@@ -314,6 +341,44 @@ mod tests {
             assert_eq!(fields[0].body, Exp::Unit);
             assert_eq!(fields[1].body, Exp::Var("self".to_string()));
         }
+    }
+
+    // --- Map/Reduce readback tests (Phase 11a) ---
+
+    #[test]
+    fn readback_empty_list() {
+        let v = Val::List(vec![]);
+        let e = readback_val(0, &v);
+        assert!(matches!(e, Exp::Con(ref c, _) if c == "nil"));
+    }
+
+    #[test]
+    fn readback_two_element_list() {
+        let v = Val::List(vec![Val::Unit, Val::Set]);
+        let e = readback_val(0, &v);
+        // Should be Con("cons", Pair(Unit, Con("cons", Pair(Set, Con("nil", Unit)))))
+        assert!(matches!(e, Exp::Con(ref c, _) if c == "cons"));
+    }
+
+    #[test]
+    fn readback_neutral_map() {
+        let v = Val::Nt(Neut::NtMap(
+            Box::new(Val::Unit), // placeholder function
+            Box::new(Neut::Gen(0, "xs".to_string())),
+        ));
+        let e = readback_val(0, &v);
+        assert!(matches!(e, Exp::Map(_, _)));
+    }
+
+    #[test]
+    fn readback_neutral_reduce() {
+        let v = Val::Nt(Neut::NtReduce(
+            Box::new(Val::Unit), // placeholder function
+            Box::new(Val::Set),  // placeholder accumulator
+            Box::new(Neut::Gen(0, "xs".to_string())),
+        ));
+        let e = readback_val(0, &v);
+        assert!(matches!(e, Exp::Reduce(_, _, _)));
     }
 
     #[test]

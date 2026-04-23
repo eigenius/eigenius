@@ -538,6 +538,58 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             }
         }
 
+        // Map(f, coll): infer f : A → B, coll : List A, return List B.
+        Exp::Map(f, coll) => {
+            let f_type = check_infer(ctx, f)?;
+            let (a, b_clos) = ext_pi(&f_type)
+                .map_err(|_| "Map: first argument must be a function (A → B)".to_string())?;
+            let coll_type = check_infer(ctx, coll)?;
+            let elem_type = extract_list_element_type(&coll_type).ok_or_else(|| {
+                format!(
+                    "Map: second argument must be a list type, got {:?}",
+                    readback_val(ctx.rho.len(), &coll_type)
+                )
+            })?;
+            eq_nf(ctx.rho.len(), &a, &elem_type).map_err(|_| {
+                format!(
+                    "Map: function domain {:?} does not match list element type {:?}",
+                    readback_val(ctx.rho.len(), &a),
+                    readback_val(ctx.rho.len(), &elem_type)
+                )
+            })?;
+            // Compute result element type B by applying closure to a dummy
+            let b = b_clos.apply(gen_val(&ctx.rho)).map_err(|e| e.to_string())?;
+            // Build list type with element type B
+            let list_exp = Exp::list(readback_val(ctx.rho.len(), &b));
+            eval(&list_exp, &ctx.rho).map_err(|e| e.to_string())
+        }
+
+        // Reduce(f, init, coll): infer f : B → A → B, init : B, coll : List A, return B.
+        Exp::Reduce(f, init, coll) => {
+            let f_type = check_infer(ctx, f)?;
+            let (b, inner_clos) = ext_pi(&f_type)
+                .map_err(|_| "Reduce: first argument must be a function (B → A → B)".to_string())?;
+            // f's return must be a function A → B
+            let inner_type = inner_clos
+                .apply(gen_val(&ctx.rho))
+                .map_err(|e| e.to_string())?;
+            let (_a_inner, _b_ret_clos) = ext_pi(&inner_type).map_err(|_| {
+                "Reduce: first argument must be a curried function (B → A → B)".to_string()
+            })?;
+            // Check init : B
+            check(ctx, init, &b)?;
+            // Check coll is a list type
+            let coll_type = check_infer(ctx, coll)?;
+            let _elem_type = extract_list_element_type(&coll_type).ok_or_else(|| {
+                format!(
+                    "Reduce: third argument must be a list type, got {:?}",
+                    readback_val(ctx.rho.len(), &coll_type)
+                )
+            })?;
+            // Return type is B (the accumulator type)
+            Ok(b)
+        }
+
         e => Err(format!("cannot infer type of: {e:?}")),
     }
 }
@@ -710,6 +762,17 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
             Ok(())
         }
 
+        // Map/Reduce (Phase 11a)
+        Exp::Map(f, coll) => {
+            check_guarded(f, forbidden)?;
+            check_guarded(coll, forbidden)
+        }
+        Exp::Reduce(f, init, coll) => {
+            check_guarded(f, forbidden)?;
+            check_guarded(init, forbidden)?;
+            check_guarded(coll, forbidden)
+        }
+
         // Leaves — no sub-expressions to check.
         Exp::Var(_)
         | Exp::Set
@@ -788,6 +851,31 @@ fn ext_sig(val: &Val) -> Result<(Val, Clos), String> {
         Val::Sig(t, g) => Ok((*t.clone(), g.clone())),
         u => Err(format!("expected Sigma type, got: {u:?}")),
     }
+}
+
+/// Check if a value is a list-shaped Data type and return the element type.
+///
+/// Recognises `Data[nil : 1, cons : A × _]` — the encoding produced by
+/// `Exp::list()`. Returns `Some(A)` if the structure matches, `None` otherwise.
+fn extract_list_element_type(val: &Val) -> Option<Val> {
+    if let Val::Data(summands, rho) = val {
+        // Must have exactly nil and cons constructors
+        if summands.len() != 2 {
+            return None;
+        }
+        let (ref nil_name, _) = summands[0];
+        let (ref cons_name, ref cons_typ) = summands[1];
+        if nil_name != "nil" || cons_name != "cons" {
+            return None;
+        }
+        // cons type should evaluate to a Sigma (pair) — the element type
+        // is the first component
+        let cons_val = eval(cons_typ, rho).ok()?;
+        if let Val::Sig(elem_type, _) = cons_val {
+            return Some(*elem_type);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
