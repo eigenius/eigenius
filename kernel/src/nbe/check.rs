@@ -382,10 +382,12 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             Ok(())
         }
 
-        // Fallthrough: infer type and compare
+        // Fallthrough: infer type and compare under subtyping
+        // (`inferred <: expected`). For everything except sized
+        // inductive parameters, `subtype_of` reduces to `eq_nf`.
         (e, t) => {
             let t1 = check_infer(ctx, e)?;
-            eq_nf(ctx.rho.len(), t, &t1)
+            subtype_of(ctx.rho.len(), &t1, t)
         }
     }
 }
@@ -719,6 +721,60 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
     } else {
         Err(format!("type mismatch: {e1:?} ≠ {e2:?}"))
     }
+}
+
+/// Subtyping check: admits `sub <: super` (Phase 11b step 15d, D19 §8.3).
+///
+/// Current scope is exactly the sized-types relaxation — everywhere
+/// else subtyping degenerates to equality (`eq_nf`). The relaxation:
+///
+/// For a pair of applied inductive types `I(p₁ … pₙ)` with identical
+/// declarations, each parameter is compared position-wise:
+/// - positions whose declared type is `SizeSort` are compared with
+///   [`crate::nbe::sized::size_le`] — `sub_pᵢ ≤ sup_pᵢ` suffices;
+/// - all other positions must be definitionally equal (`eq_nf`).
+///
+/// This is what makes `T(s) <: T(ŝ s) <: T(∞)` admissible — the
+/// driving motivation for sized types. Codata (`Val::Codata`) is
+/// structurally identical and will benefit once sized codata arrives;
+/// it falls through to `eq_nf` today because the checker doesn't yet
+/// thread size parameters onto `Codata` value shapes.
+///
+/// Anything that is not a pair of matching `InductiveType` values
+/// falls through to `eq_nf` — preserving current behaviour for
+/// functions, pairs, sums, records, ground types, etc.
+pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), String> {
+    if let (
+        Val::InductiveType {
+            decl: d1,
+            params: p1,
+        },
+        Val::InductiveType {
+            decl: d2,
+            params: p2,
+        },
+    ) = (sub, super_)
+    {
+        if d1 == d2 && p1.len() == p2.len() && p1.len() == d1.params.len() {
+            for (i, (sub_p, sup_p)) in p1.iter().zip(p2.iter()).enumerate() {
+                let decl_param_ty = &d1.params[i].1;
+                if matches!(decl_param_ty, Exp::SizeSort) {
+                    if !crate::nbe::sized::size_le(sub_p, sup_p) {
+                        return Err(format!(
+                            "size subtyping failed at param {i}: \
+                             {:?} ≰ {:?}",
+                            readback_val(level, sub_p),
+                            readback_val(level, sup_p),
+                        ));
+                    }
+                } else {
+                    eq_nf(level, sub_p, sup_p)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+    eq_nf(level, sub, super_)
 }
 
 /// Collect the variable names bound by a pattern.
@@ -2353,5 +2409,172 @@ mod tests {
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         let bogus = Exp::SizeSucc(Box::new(Exp::Set));
         assert!(check(&mut c, &bogus, &Val::SizeSort).is_err());
+    }
+
+    // --- Size-aware subtyping (Phase 11b step 15d, D19 §8.3) ---
+
+    fn sized_stream_decl() -> Arc<InductiveDecl> {
+        // Minimal sized type former: `SizedStream(i : SizeSort, A : Set)`.
+        // We don't need real constructors for the subtyping tests —
+        // `PartialEq` on `InductiveDecl` goes by name, so two calls to
+        // this helper produce decls that compare equal.
+        Arc::new(InductiveDecl {
+            name: "SizedStream".to_string(),
+            params: vec![
+                (Patt::Var("i".to_string()), Exp::SizeSort),
+                (Patt::Var("A".to_string()), Exp::Set),
+            ],
+            sort: Exp::Set,
+            ctors: vec![],
+        })
+    }
+
+    fn mk_sized_type(decl: Arc<InductiveDecl>, size: Val, elem: Val) -> Val {
+        Val::InductiveType {
+            decl,
+            params: vec![size, elem],
+        }
+    }
+
+    #[test]
+    fn subtype_sized_finite_to_inf_admitted() {
+        // SizedStream(ŝ ∞, A) is blocked by ∞-absorption (∞ stays ∞).
+        // Use a neutral size to get a real "finite-side-of-∞" value.
+        let decl = sized_stream_decl();
+        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "i".into()));
+        let sub = mk_sized_type(decl.clone(), neut.clone(), Val::One);
+        let sup = mk_sized_type(decl, Val::SizeInf, Val::One);
+        subtype_of(0, &sub, &sup).expect("T(i) <: T(∞)");
+    }
+
+    #[test]
+    fn subtype_sized_inf_to_finite_rejected() {
+        let decl = sized_stream_decl();
+        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "i".into()));
+        let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
+        let sup = mk_sized_type(decl, neut, Val::One);
+        assert!(
+            subtype_of(0, &sub, &sup).is_err(),
+            "T(∞) <: T(i) must be rejected"
+        );
+    }
+
+    #[test]
+    fn subtype_sized_step_rule_admitted() {
+        // T(i) <: T(ŝ i) admitted by the right-step rule on sizes.
+        let decl = sized_stream_decl();
+        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "i".into()));
+        let sub = mk_sized_type(decl.clone(), neut.clone(), Val::One);
+        let sup = mk_sized_type(decl, Val::SizeSucc(Box::new(neut)), Val::One);
+        subtype_of(0, &sub, &sup).expect("T(i) <: T(ŝ i)");
+    }
+
+    #[test]
+    fn subtype_sized_same_inf_reflexive() {
+        let decl = sized_stream_decl();
+        let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
+        let sup = mk_sized_type(decl, Val::SizeInf, Val::One);
+        subtype_of(0, &sub, &sup).expect("T(∞) <: T(∞) reflexive");
+    }
+
+    #[test]
+    fn subtype_non_size_parameter_still_requires_equality() {
+        // Sized stream parameters disagree on the element type —
+        // size_le only relaxes size positions, so the other position
+        // must still be equal.
+        let decl = sized_stream_decl();
+        let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
+        let sup = mk_sized_type(decl, Val::SizeInf, Val::Set);
+        assert!(
+            subtype_of(0, &sub, &sup).is_err(),
+            "element type mismatch must be rejected"
+        );
+    }
+
+    #[test]
+    fn subtype_non_inductive_falls_back_to_eq_nf() {
+        // Simple non-inductive types fall through to `eq_nf` —
+        // equal types accept, mismatched types reject.
+        subtype_of(0, &Val::One, &Val::One).expect("1 <: 1");
+        assert!(subtype_of(0, &Val::One, &Val::Set).is_err());
+    }
+
+    #[test]
+    fn subtype_distinct_inductive_decls_fall_back_to_eq_nf() {
+        // Two inductive types with different names: the sized-subtyping
+        // branch is skipped (decls differ), and `eq_nf` correctly
+        // rejects them.
+        let decl_a = sized_stream_decl();
+        let decl_b = Arc::new(InductiveDecl {
+            name: "OtherStream".to_string(),
+            params: decl_a.params.clone(),
+            sort: Exp::Set,
+            ctors: vec![],
+        });
+        let sub = mk_sized_type(decl_a, Val::SizeInf, Val::One);
+        let sup = mk_sized_type(decl_b, Val::SizeInf, Val::One);
+        assert!(subtype_of(0, &sub, &sup).is_err());
+    }
+
+    #[test]
+    fn check_var_with_finite_size_against_inf_expected_succeeds() {
+        // End-to-end: a variable `x : SizedStream(i, One)` checks
+        // against the expected type `SizedStream(∞, One)`.
+        //
+        // This exercises the `check()` fallthrough at line ~388 —
+        // it infers `x`'s type from gamma, then calls subtype_of
+        // against the expected type. Without sized subtyping this
+        // would fail (neutral `i` ≠ SizeInf syntactically).
+        let decl = sized_stream_decl();
+
+        // Bind `i : SizeSort`, then `x : SizedStream(i, One)`.
+        let i_val = gen_val(&Rho::Nil); // Val::Nt(Gen(0, _))
+        let rho1 = Rho::Nil.extend(Patt::Var("i".to_string()), i_val.clone());
+        let gamma1 = up_gamma(
+            &Vec::new(),
+            &Patt::Var("i".to_string()),
+            &Val::SizeSort,
+            &i_val,
+        )
+        .unwrap();
+
+        let sub_stream = mk_sized_type(decl.clone(), i_val, Val::One);
+        let x_val = gen_val(&rho1); // Val::Nt(Gen(1, _))
+        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
+        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &sub_stream, &x_val).unwrap();
+
+        let mut c = CheckCtx::new(rho2, gamma2);
+        let expected = mk_sized_type(decl, Val::SizeInf, Val::One);
+        check(&mut c, &Exp::Var("x".to_string()), &expected)
+            .expect("x : SizedStream(i, 1) should check against SizedStream(∞, 1)");
+    }
+
+    #[test]
+    fn check_var_with_inf_size_against_finite_expected_fails() {
+        // Dual: `x : SizedStream(∞, One)` cannot be checked against
+        // `SizedStream(i, One)` — ∞ ≰ i for an unconstrained rigid i.
+        let decl = sized_stream_decl();
+
+        let i_val = gen_val(&Rho::Nil);
+        let rho1 = Rho::Nil.extend(Patt::Var("i".to_string()), i_val.clone());
+        let gamma1 = up_gamma(
+            &Vec::new(),
+            &Patt::Var("i".to_string()),
+            &Val::SizeSort,
+            &i_val,
+        )
+        .unwrap();
+
+        let sup_stream = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
+        let x_val = gen_val(&rho1);
+        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
+        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &sup_stream, &x_val).unwrap();
+
+        let mut c = CheckCtx::new(rho2, gamma2);
+        let expected = mk_sized_type(decl, i_val, Val::One);
+        assert!(
+            check(&mut c, &Exp::Var("x".to_string()), &expected).is_err(),
+            "x : SizedStream(∞, 1) must not check against SizedStream(i, 1)"
+        );
     }
 }
