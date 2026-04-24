@@ -27,6 +27,42 @@ pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
 pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
 pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";
 pub const SET_KIND: &str = "urn:eigenius:core:Set";
+/// Sized-type parameter kind (Phase 11b step 15h): inductive/codata
+/// parameters typed at `Size` — the sort of size values — resolve to
+/// `Exp::SizeSort` in the kernel, enabling bounded-binder-driven
+/// termination/productivity checking.
+pub const SIZE_KIND: &str = "urn:eigenius:core:Size";
+
+/// Name of a named constructor-argument binder (Phase 11b step 15h).
+/// Presence on an `InductiveArgType` resource flags the arg as a
+/// Π/SizedPi binder rather than an anonymous positional type.
+pub const BINDER_NAME: &str = "urn:eigenius:core:binder_name";
+
+/// Upper bound for a bounded size binder (Phase 11b step 15h).
+/// Only meaningful alongside `binder_name` with kind `Size`; carries
+/// the rigid size variable or `Inf` the binder is strictly below.
+pub const BINDER_BOUND: &str = "urn:eigenius:core:binder_bound";
+
+// --- TypeExpr resource shapes for codata observation types (Phase 11b step 15h.3) ---
+
+/// is_a marker for a non-dependent arrow `A -> B` in a codata
+/// observation type.
+pub const TYPE_ARROW: &str = "urn:eigenius:core:TypeArrow";
+/// is_a marker for a size-binder arrow `{j < i} -> body` or
+/// `{j : Kind} -> body` in a codata observation type.
+pub const TYPE_BINDER_ARROW: &str = "urn:eigenius:core:TypeBinderArrow";
+
+/// Domain of a `TypeArrow` — embedded TypeExpr resource (or string).
+pub const ARROW_DOMAIN: &str = "urn:eigenius:core:arrow_domain";
+/// Codomain of a `TypeArrow`.
+pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
+
+/// Kind of a size-binder arrow's bound variable. Qualified-name
+/// string ("urn:eigenius:core:Size" or bare "Size").
+pub const BINDER_KIND: &str = "urn:eigenius:core:binder_kind";
+/// Body of a size-binder arrow — embedded TypeExpr resource or
+/// string.
+pub const BINDER_BODY: &str = "urn:eigenius:core:binder_body";
 
 // --- Properties ---
 

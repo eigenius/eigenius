@@ -565,11 +565,14 @@
   {
     "@id": "urn:eigenius:core:type_params",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Ordered list of type parameters on an InductiveType. Empty for non-parametric inductives (Nat, Bool).",
+    "urn:eigenius:core:description": "Ordered list of type parameters on an InductiveType or CodataType. Empty for non-parametric types (Nat, Bool, non-sized streams).",
     "urn:eigenius:core:short_name": "type_params",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveParam"],
-    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:core:InductiveType",
+      "urn:eigenius:core:CodataType"
+    ]
   },
   {
     "@id": "urn:eigenius:core:ctor_name",
