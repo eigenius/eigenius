@@ -151,6 +151,28 @@ pub enum Exp {
         scrutinee: Box<Exp>,
         arms: Vec<MatchArm>,
     },
+
+    // --- Sized types (Phase 11b step 14, D19 §8) ---
+    /// `SizeSort` — the sort of size expressions. Inhabited by
+    /// `SizeInf` and applications of `SizeSucc`. Itself a type
+    /// (`SizeSort : Type(1)`).
+    ///
+    /// Sizes are used as termination/productivity indices on
+    /// inductive and coinductive types: `List(A, i)` denotes a
+    /// list-at-size-i, where `i` strictly decreases on each
+    /// recursive call (inductives) or strictly increases on each
+    /// observation (codata). This step lands the primitives only;
+    /// constraint generation against inductives is Phase 11b step 15.
+    SizeSort,
+    /// `SizeSucc(s)` — successor of a size: the next size strictly
+    /// larger than `s`. The smallest enclosing size for a value
+    /// produced by one constructor application.
+    SizeSucc(Box<Exp>),
+    /// `SizeInf` — the unbounded ("infinity") size. Used when no
+    /// size discipline is enforced; sized inductive/coinductive
+    /// definitions degenerate to the unsized form when their size
+    /// argument is `SizeInf`.
+    SizeInf,
 }
 
 /// A single arm of an `Exp::Match`.

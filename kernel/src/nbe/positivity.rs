@@ -188,6 +188,11 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
                 || arms.iter().any(|a| has_ind_occurrence(decl, &a.body))
         }
 
+        // Size primitives are over a disjoint sort and can never
+        // contain inductive occurrences.
+        Exp::SizeSucc(s) => has_ind_occurrence(decl, s),
+        Exp::SizeSort | Exp::SizeInf => false,
+
         Exp::Var(_)
         | Exp::Set
         | Exp::Type(_)

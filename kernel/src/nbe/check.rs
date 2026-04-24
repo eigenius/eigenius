@@ -149,6 +149,11 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
             check_type(&mut inner, b)
         }
         Exp::Set | Exp::One | Exp::Type(_) => Ok(()),
+        // `SizeSort` is a type (at the first universe above `Set`).
+        // Phase 11b step 14 treats it as a distinguished sort so
+        // sized-type parameter annotations (`i : SizeSort`) can
+        // be written without further infrastructure.
+        Exp::SizeSort => Ok(()),
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
             check_type(ctx, a)?;
@@ -257,6 +262,14 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
 
         // One against Set (One is a type)
         (Exp::One, Val::Set) => Ok(()),
+
+        // Sized types (Phase 11b step 14, D19 §8).
+        // `SizeSort` is a type — admit it against `Set` / `Type(n)`
+        // the same way Pi and Sigma are. Concrete size values —
+        // `SizeInf` and `SizeSucc(_)` — inhabit `Val::SizeSort`.
+        (Exp::SizeSort, Val::Set) | (Exp::SizeSort, Val::Type(_)) => Ok(()),
+        (Exp::SizeInf, Val::SizeSort) => Ok(()),
+        (Exp::SizeSucc(s), Val::SizeSort) => check(ctx, s, &Val::SizeSort),
 
         // Pi type against Set
         (Exp::Pi(p, a, b), Val::Set) | (Exp::Sig(p, a, b), Val::Set) => {
@@ -680,6 +693,16 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                 .to_string(),
         ),
 
+        // Sized types (Phase 11b step 14). `SizeSort` is itself a
+        // type at universe 1; `SizeInf` and `SizeSucc(_)` inhabit
+        // `SizeSort`.
+        Exp::SizeSort => Ok(Val::Type(1)),
+        Exp::SizeInf => Ok(Val::SizeSort),
+        Exp::SizeSucc(s) => {
+            check(ctx, s, &Val::SizeSort)?;
+            Ok(Val::SizeSort)
+        }
+
         e => Err(format!("cannot infer type of: {e:?}")),
     }
 }
@@ -899,6 +922,12 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
             }
             Ok(())
         }
+
+        // Sized types (Phase 11b step 14): size primitives are
+        // structurally simple — `SizeSucc` has one sub-expression,
+        // `SizeSort` and `SizeInf` are leaves.
+        Exp::SizeSucc(s) => check_guarded(s, forbidden),
+        Exp::SizeSort | Exp::SizeInf => Ok(()),
 
         // Leaves — no sub-expressions to check.
         Exp::Var(_)
@@ -2280,5 +2309,49 @@ mod tests {
         };
         let err = check_infer(&mut c, &exp).unwrap_err();
         assert!(err.contains("declaration mismatch"), "unexpected: {err}");
+    }
+
+    // --- Sized types primitives (Phase 11b step 14) ---
+
+    #[test]
+    fn size_sort_is_a_type() {
+        // SizeSort checks as a type (Type(1)).
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        check_type(&mut c, &Exp::SizeSort).expect("SizeSort should be a type");
+    }
+
+    #[test]
+    fn size_inf_inhabits_size_sort() {
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        check(&mut c, &Exp::SizeInf, &Val::SizeSort).expect("SizeInf : SizeSort");
+    }
+
+    #[test]
+    fn size_succ_of_inf_inhabits_size_sort() {
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let exp = Exp::SizeSucc(Box::new(Exp::SizeInf));
+        check(&mut c, &exp, &Val::SizeSort).expect("SizeSucc(SizeInf) : SizeSort");
+    }
+
+    #[test]
+    fn size_sort_inferred_at_type_1() {
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let typ = check_infer(&mut c, &Exp::SizeSort).expect("infer SizeSort");
+        assert!(matches!(typ, Val::Type(1)));
+    }
+
+    #[test]
+    fn size_inf_inferred_at_size_sort() {
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let typ = check_infer(&mut c, &Exp::SizeInf).expect("infer SizeInf");
+        assert!(matches!(typ, Val::SizeSort));
+    }
+
+    #[test]
+    fn size_succ_requires_size_sort_argument() {
+        // SizeSucc applied to a non-size expression should fail.
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let bogus = Exp::SizeSucc(Box::new(Exp::Set));
+        assert!(check(&mut c, &bogus, &Val::SizeSort).is_err());
     }
 }

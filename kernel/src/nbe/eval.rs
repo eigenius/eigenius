@@ -440,6 +440,11 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                 ))),
             }
         }
+
+        // Sized types (Phase 11b step 14, D19 §8).
+        Exp::SizeSort => Ok(Val::SizeSort),
+        Exp::SizeSucc(s) => Ok(Val::SizeSucc(Box::new(ev(s)?))),
+        Exp::SizeInf => Ok(Val::SizeInf),
     }
 }
 
@@ -2685,5 +2690,43 @@ mod tests {
             Val::List(items) => assert!(items.is_empty()),
             other => panic!("expected empty List, got {other:?}"),
         }
+    }
+
+    // --- Sized types primitives (Phase 11b step 14) ---
+
+    #[test]
+    fn eval_size_sort() -> Result<(), EvalError> {
+        let v = eval(&Exp::SizeSort, &Rho::Nil)?;
+        assert!(matches!(v, Val::SizeSort));
+        Ok(())
+    }
+
+    #[test]
+    fn eval_size_inf() -> Result<(), EvalError> {
+        let v = eval(&Exp::SizeInf, &Rho::Nil)?;
+        assert!(matches!(v, Val::SizeInf));
+        Ok(())
+    }
+
+    #[test]
+    fn eval_size_succ_of_inf() -> Result<(), EvalError> {
+        // SizeSucc(SizeInf) evaluates to Val::SizeSucc(Val::SizeInf)
+        let exp = Exp::SizeSucc(Box::new(Exp::SizeInf));
+        let v = eval(&exp, &Rho::Nil)?;
+        match v {
+            Val::SizeSucc(inner) => assert!(matches!(*inner, Val::SizeInf)),
+            other => panic!("expected SizeSucc(SizeInf), got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn size_primitives_round_trip_through_readback() -> Result<(), EvalError> {
+        // SizeSucc(SizeSucc(SizeInf)) → eval → readback → same Exp
+        let exp = Exp::SizeSucc(Box::new(Exp::SizeSucc(Box::new(Exp::SizeInf))));
+        let v = eval(&exp, &Rho::Nil)?;
+        let readback = crate::nbe::readback::readback_val(0, &v);
+        assert_eq!(readback, exp);
+        Ok(())
     }
 }

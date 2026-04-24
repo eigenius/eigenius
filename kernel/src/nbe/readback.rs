@@ -142,6 +142,11 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             ctor_name.clone(),
             args.iter().map(|a| readback_val(level, a)).collect(),
         ),
+
+        // Sized types (Phase 11b step 14, D19 §8).
+        Val::SizeSort => Exp::SizeSort,
+        Val::SizeSucc(s) => Exp::SizeSucc(Box::new(readback_val(level, s))),
+        Val::SizeInf => Exp::SizeInf,
     }
 }
 

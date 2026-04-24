@@ -82,6 +82,17 @@ pub enum Val {
         ctor_name: Name,
         args: Vec<Val>,
     },
+
+    // --- Sized types (Phase 11b step 14, D19 §8) ---
+    /// The sort of size expressions, `SizeSort`. Itself a type
+    /// (lives at universe `Type(1)` for our hierarchy).
+    SizeSort,
+    /// `SizeSucc(s)` — the successor of a size value. The smallest
+    /// size strictly larger than `s`.
+    SizeSucc(Box<Val>),
+    /// The unbounded "infinity" size — the top element under the
+    /// size partial order.
+    SizeInf,
 }
 
 /// Neutral terms — computations that cannot reduce further.
@@ -141,6 +152,14 @@ pub enum Neut {
         env: Rho,
     },
 }
+
+// --- Sized types (Phase 11b step 14, D19 §8) ---
+//
+// Size values live as their own subset of `Val` rather than going
+// through Sigma/Pi. They form a partial order under `SizeSucc`
+// applications, with `SizeInf` as the top element. Constraint-
+// generation logic (Phase 11b step 15+) inspects these forms when
+// type-checking sized inductive/coinductive applications.
 
 /// A closure: a pattern, body expression, and captured environment.
 #[derive(Debug, Clone)]
