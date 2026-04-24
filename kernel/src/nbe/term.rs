@@ -288,6 +288,17 @@ pub enum Constraint {
     Pattern(String),
     /// String matches a format (date, datetime, uuid, etc.)
     Format(String),
+    /// Institution-dispatched constraint (Phase 11c, life-science §16.3).
+    ///
+    /// The check-time reducer looks up `iri` in the current
+    /// institution registry; if found, evaluates `args` to values,
+    /// marshals them through `val_to_resource_value`, and calls
+    /// `FiberReasoner::decide(iri, resources, ctx)`. The institution
+    /// returns `DecResult::Holds` (reduce to `Refl`), `Fails` (a
+    /// failing neutral, blocking subsequent reduction), or
+    /// `Undecidable` / not-registered (stay as a passthrough
+    /// neutral). See [`crate::institution::DecResult`].
+    Institution { iri: Iri, args: Vec<Exp> },
 }
 
 /// Eigon primitive types.

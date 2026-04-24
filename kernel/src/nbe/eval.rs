@@ -81,12 +81,40 @@ pub enum EvalCtx {
         /// `RunProgram` and the type-checker leave this `None`.
         task_context: Option<Arc<TaskContext>>,
     },
+    /// Pure evaluation with access to an institution registry for
+    /// check-time dispatch of `Constraint::Institution` predicates
+    /// (Phase 11c). No component registry, no trace store — this is
+    /// what the type-checker uses when it wants institutions but not
+    /// full IO.
+    Check {
+        layer: Option<Arc<Layer>>,
+        institutions: Arc<InstitutionRegistry>,
+    },
 }
 
 impl EvalCtx {
     /// A static Pure context for convenience.
     pub fn pure() -> Self {
         EvalCtx::Pure
+    }
+
+    /// Institution registry for this evaluation context, if any.
+    pub fn institutions(&self) -> Option<&Arc<InstitutionRegistry>> {
+        match self {
+            EvalCtx::IO { institutions, .. } => Some(institutions),
+            EvalCtx::Check { institutions, .. } => Some(institutions),
+            EvalCtx::Pure | EvalCtx::Read { .. } => None,
+        }
+    }
+
+    /// Layer for this evaluation context, if any.
+    pub fn layer(&self) -> Option<&Arc<Layer>> {
+        match self {
+            EvalCtx::Pure => None,
+            EvalCtx::Read { layer } => Some(layer),
+            EvalCtx::IO { layer, .. } => Some(layer),
+            EvalCtx::Check { layer, .. } => layer.as_ref(),
+        }
     }
 }
 
@@ -254,13 +282,16 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         // Native constraint checking
         Exp::NativeDecide(constraint, val) => {
             let v = ev(val)?;
-            if check_native_constraint(constraint, &v) {
-                Ok(Val::Refl(Box::new(v)))
-            } else {
-                Ok(Val::Nt(Neut::Gen(
+            match decide_constraint(constraint, &v, rho, ctx)? {
+                crate::institution::DecResult::Holds => Ok(Val::Refl(Box::new(v))),
+                crate::institution::DecResult::Fails => Ok(Val::Nt(Neut::Gen(
                     usize::MAX,
                     "__constraint_failed".to_string(),
-                )))
+                ))),
+                crate::institution::DecResult::Undecidable => Ok(Val::Nt(Neut::Gen(
+                    usize::MAX,
+                    "__constraint_undecidable".to_string(),
+                ))),
             }
         }
 
@@ -1496,35 +1527,58 @@ fn resource_payload(
     }
 }
 
-/// Check a native constraint against a value.
-fn check_native_constraint(constraint: &crate::nbe::term::Constraint, val: &Val) -> bool {
+/// Decide a constraint against a value, three-valued.
+///
+/// Kernel-hardcoded scalar constraints (MinValue/MaxValue/…) fold
+/// to `Holds` or `Fails` based on the structural check. Institution-
+/// dispatched constraints (`Constraint::Institution { iri, args }`)
+/// consult `ctx.institutions()` if present: when an institution is
+/// registered for `iri`, arguments are evaluated and marshalled via
+/// [`val_to_resource_value`], then passed to
+/// [`FiberReasoner::decide`]. Without a registry (bare `Pure` eval),
+/// institution-dispatched constraints return `Undecidable` so
+/// downstream reducers can leave them as passthrough neutrals.
+fn decide_constraint(
+    constraint: &crate::nbe::term::Constraint,
+    val: &Val,
+    rho: &Rho,
+    ctx: &EvalCtx,
+) -> Result<crate::institution::DecResult, EvalError> {
+    use crate::institution::DecResult;
     use crate::nbe::term::Constraint;
+    let bool_to_dec = |b: bool| {
+        if b {
+            DecResult::Holds
+        } else {
+            DecResult::Fails
+        }
+    };
     match constraint {
-        Constraint::MinValue(min) => match val {
+        Constraint::MinValue(min) => Ok(bool_to_dec(match val {
             Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_integer())
                 .is_some_and(|n| n >= *min),
             _ => false,
-        },
-        Constraint::MaxValue(max) => match val {
+        })),
+        Constraint::MaxValue(max) => Ok(bool_to_dec(match val {
             Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_integer())
                 .is_some_and(|n| n <= *max),
             _ => false,
-        },
-        Constraint::MinLength(min) => match val {
+        })),
+        Constraint::MinLength(min) => Ok(bool_to_dec(match val {
             Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.len() as i64 >= *min),
             _ => false,
-        },
-        Constraint::MaxLength(max) => match val {
+        })),
+        Constraint::MaxLength(max) => Ok(bool_to_dec(match val {
             Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| s.len() as i64 <= *max),
             _ => false,
-        },
-        Constraint::Pattern(pattern) => match val {
+        })),
+        Constraint::Pattern(pattern) => Ok(bool_to_dec(match val {
             Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| {
@@ -1532,8 +1586,8 @@ fn check_native_constraint(constraint: &crate::nbe::term::Constraint, val: &Val)
                     regex::Regex::new(&full).is_ok_and(|re| re.is_match(s))
                 }),
             _ => false,
-        },
-        Constraint::Format(fmt) => match val {
+        })),
+        Constraint::Format(fmt) => Ok(bool_to_dec(match val {
             Val::ResourceVal(r) => resource_payload(r)
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| match fmt.as_str() {
@@ -1542,7 +1596,34 @@ fn check_native_constraint(constraint: &crate::nbe::term::Constraint, val: &Val)
                     _ => true,
                 }),
             _ => false,
-        },
+        })),
+        Constraint::Institution { iri, args } => {
+            let Some(institutions) = ctx.institutions() else {
+                return Ok(DecResult::Undecidable);
+            };
+            let Some(reasoner) = institutions.get(iri) else {
+                return Ok(DecResult::Undecidable);
+            };
+            let arg_values: Result<Vec<_>, EvalError> = args
+                .iter()
+                .map(|a| eval_ctx(a, rho, ctx).map(|v| val_to_resource_value(&v)))
+                .collect();
+            let arg_values = arg_values?;
+            let head = ctx.layer().cloned().unwrap_or_else(|| {
+                Arc::new(crate::layer::LayerBuilder::new("__decide_empty_layer__", None).build())
+            });
+            let exec_ctx = crate::context::ExecutionContext::new(
+                head,
+                "__decide__",
+                crate::context::ExecutionMode::ReadOnly,
+            );
+            match reasoner.decide(iri, &arg_values, &exec_ctx) {
+                Ok(result) => Ok(result),
+                Err(e) => Err(EvalError::InvalidCaseTarget(format!(
+                    "institution `{iri}` decide failed: {e}"
+                ))),
+            }
+        }
     }
 }
 
@@ -1627,6 +1708,33 @@ fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
                     RVal::Embedded(Box::new(crate::ontology::resource::Resource::new_embedded()))
                 }
             }
+        }
+        // Phase 11c: marshal inductive constructor values to embedded
+        // resources so institution-registered decide can pattern-match
+        // on them. The ctor name is stamped as is_a and each argument
+        // recursively marshalled under a positional `ctor_arg_{i}`
+        // property. This keeps the shape stable across decl changes —
+        // institutions inspect by position, not by user-chosen names
+        // (which the kernel doesn't record on ctor args).
+        Val::InductiveVal {
+            decl,
+            ctor_name,
+            args,
+        } => {
+            use crate::ontology::well_known as wk;
+            let mut r = crate::ontology::resource::Resource::new_embedded();
+            let qualified = format!("{}:{}", decl.name, ctor_name);
+            r.set(
+                crate::ontology::iri::Iri::parse(wk::IS_A).unwrap(),
+                RVal::Array(vec![RVal::String(qualified)]),
+            );
+            for (i, arg) in args.iter().enumerate() {
+                let key_iri =
+                    crate::ontology::iri::Iri::parse(&format!("urn:eigenius:kernel:ctor_arg_{i}"))
+                        .unwrap();
+                r.set(key_iri, val_to_resource_value(arg));
+            }
+            RVal::Embedded(Box::new(r))
         }
         _ => RVal::Embedded(Box::new(crate::ontology::resource::Resource::new_embedded())),
     }

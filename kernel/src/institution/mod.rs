@@ -51,6 +51,54 @@ pub trait FiberReasoner: Send + Sync {
         resources: &[Resource],
         ctx: &ExecutionContext,
     ) -> Result<Vec<Resource>, InstitutionError>;
+
+    /// Decide a constraint predicate at check time
+    /// (Phase 11c, life-science §16.3).
+    ///
+    /// Called when the kernel evaluates
+    /// `Exp::NativeDecide(Constraint::Institution { iri, args }, v)`
+    /// and the `iri` resolves to this institution. The `args` vector
+    /// holds the user-supplied predicate arguments already marshalled
+    /// from kernel `Val`s to resource `Value`s; institutions can
+    /// pattern-match on scalar primitives, arrays, or embedded
+    /// resources.
+    ///
+    /// Return `Holds` to reduce the constraint to `Refl(v)`, `Fails`
+    /// to emit a failing neutral (blocking subsequent reduction —
+    /// the type-checker surfaces this as a rejection), or
+    /// `Undecidable` to leave the constraint as a passthrough
+    /// neutral.
+    ///
+    /// Default implementation returns `Undecidable` — institutions
+    /// that don't override `decide` opt out cleanly.
+    fn decide(
+        &self,
+        constraint_iri: &Iri,
+        args: &[crate::ontology::resource::Value],
+        ctx: &ExecutionContext,
+    ) -> Result<DecResult, InstitutionError> {
+        let _ = (constraint_iri, args, ctx);
+        Ok(DecResult::Undecidable)
+    }
+}
+
+/// Result of an institution-registered constraint decision.
+///
+/// Three-valued so institutions can distinguish "I determined this
+/// predicate is false" (`Fails`) from "I couldn't evaluate this at
+/// check time, come back at runtime" (`Undecidable`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecResult {
+    /// Predicate holds on the given args. The kernel reduces the
+    /// surrounding `NativeDecide` to `Val::Refl(value)`.
+    Holds,
+    /// Predicate explicitly fails. The kernel emits a failing
+    /// neutral — the type-checker's constraint path rejects this.
+    Fails,
+    /// Institution cannot determine the result (insufficient
+    /// information, requires runtime). The `NativeDecide` stays as
+    /// a passthrough neutral; later reduction may succeed.
+    Undecidable,
 }
 
 /// An institution's fiber declaration, provided at registration time.
