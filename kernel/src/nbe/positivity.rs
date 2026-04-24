@@ -183,6 +183,10 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
                 || has_ind_occurrence(decl, i)
                 || has_ind_occurrence(decl, c)
         }
+        Exp::Match { scrutinee, arms } => {
+            has_ind_occurrence(decl, scrutinee)
+                || arms.iter().any(|a| has_ind_occurrence(decl, &a.body))
+        }
 
         Exp::Var(_)
         | Exp::Set

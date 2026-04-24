@@ -911,11 +911,18 @@ impl Compiler {
                     Value::Embedded(Box::new(scrutinee_r)),
                 );
 
-                let result_iri = self.resolve(result_type)?;
-                r.set(
-                    iri("urn:eigenius:program:result_type"),
-                    Value::String(result_iri),
-                );
+                // `result_type` is optional (Phase 11b step 12). When
+                // present, the expression builder desugars to
+                // `Exp::InductiveRec` with motive `λ_. T`. When
+                // absent, it builds `Exp::Match` and the type
+                // checker infers the motive from context.
+                if let Some(rt) = result_type {
+                    let result_iri = self.resolve(rt)?;
+                    r.set(
+                        iri("urn:eigenius:program:result_type"),
+                        Value::String(result_iri),
+                    );
+                }
 
                 let arm_resources: Result<Vec<Value>, EslError> = arms
                     .iter()

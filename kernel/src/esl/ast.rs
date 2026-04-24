@@ -281,22 +281,24 @@ pub enum Expr {
     /// observations of the target codata type.
     CoRecord { fields: Vec<CoField>, pos: Position },
 
-    /// `match expr : T { ctor -> body; ctor(x, y) -> body; ... }`
-    /// (Phase 11b step 11, D19 §10).
+    /// `match expr [returning T] { ctor -> body; ctor(x, y) -> body; ... }`
+    /// (Phase 11b step 11–12, D19 §10).
     ///
     /// Pattern-matches a value of an inductive type. Each arm names
     /// a constructor and (optionally) binds variables for its
-    /// arguments. The `result_type` annotation is the type of every
-    /// arm body — required for now (motive inference is a future
-    /// extension).
+    /// arguments.
     ///
-    /// Desugars in the kernel-side expression builder to
-    /// `Exp::InductiveRec` with motive `λ_. result_type` and one
-    /// minor per arm (wrapped in lambdas for the bindings + IH
-    /// lambdas for recursive args).
+    /// `result_type` is the optional type annotation for every arm
+    /// body. When present (Phase 11b step 11), the kernel-side
+    /// expression builder desugars to `Exp::InductiveRec` with
+    /// motive `λ_. result_type`. When absent (Phase 11b step 12),
+    /// it produces `Exp::Match`, leaving motive synthesis to the
+    /// type checker — which builds `λ_. expected_type` from the
+    /// checking-mode context. Inference-mode use of an unannotated
+    /// match is a type error with a clear diagnostic.
     Match {
         scrutinee: Box<Expr>,
-        result_type: QualifiedName,
+        result_type: Option<QualifiedName>,
         arms: Vec<MatchArm>,
         pos: Position,
     },

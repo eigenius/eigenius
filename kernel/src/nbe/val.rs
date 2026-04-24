@@ -122,6 +122,24 @@ pub enum Neut {
         minors: Vec<Val>,
         major: Box<Neut>,
     },
+
+    /// `match` blocked on a neutral scrutinee (Phase 11b step 12).
+    ///
+    /// Carries the original arms verbatim — they are not yet
+    /// pre-evaluated because we don't know which one will run, and
+    /// some arms may safely diverge until their constructor is
+    /// matched. The captured `Rho` is the environment in effect at
+    /// the match site, used when the neutral eventually unblocks.
+    ///
+    /// Type-level: a neutral `Match` does not yet know its motive
+    /// (motive inference happens in checking mode). Readback emits
+    /// `Exp::Match` rather than `Exp::InductiveRec`, preserving the
+    /// motive-free shape.
+    NtMatch {
+        scrutinee: Box<Neut>,
+        arms: Vec<crate::nbe::term::MatchArm>,
+        env: Rho,
+    },
 }
 
 /// A closure: a pattern, body expression, and captured environment.

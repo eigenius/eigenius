@@ -131,6 +131,42 @@ pub enum Exp {
         minors: Vec<Exp>,
         major: Box<Exp>,
     },
+
+    /// Pattern-match elimination with *motive inferred from context*
+    /// (Phase 11b step 12, D19 §10). Each arm binds the constructor's
+    /// arguments and evaluates a body. Unlike `InductiveRec`, no
+    /// explicit motive is carried — the type checker synthesises
+    /// `λ_. expected_type` from the checking-mode expected type.
+    ///
+    /// In inference mode this form has no known result type and is
+    /// rejected with a diagnostic pointing to either `returning T`
+    /// annotation or a checking-mode context.
+    ///
+    /// Evaluation is uniform with `InductiveRec`: on a constructor
+    /// scrutinee we dispatch to the matching arm's body (instantiated
+    /// with the constructor's arguments as bindings and the recursor's
+    /// IHs for recursive args); on a neutral scrutinee we produce a
+    /// blocked `Neut::NtMatch`.
+    Match {
+        scrutinee: Box<Exp>,
+        arms: Vec<MatchArm>,
+    },
+}
+
+/// A single arm of an `Exp::Match`.
+///
+/// `ctor_name` is the local name of the constructor (matched against
+/// `decl.ctors[i].name` during elimination). `bindings` lists the
+/// binding patterns for the constructor's positional arguments, in
+/// declaration order. Bindings may be `Patt::Var(name)` for named
+/// access or `Patt::Unit` for wildcards. The IHs produced by the
+/// recursor are currently bound anonymously — accessing them is the
+/// job of a future "IH-aware match" extension.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub ctor_name: Name,
+    pub bindings: Vec<Patt>,
+    pub body: Exp,
 }
 
 /// Declarations.

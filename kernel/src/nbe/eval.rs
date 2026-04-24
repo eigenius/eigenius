@@ -417,7 +417,71 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                 ))),
             }
         }
+
+        // Pattern-match elimination (Phase 11b step 12, D19 §10).
+        // Motive-free: dispatches on a constructor scrutinee directly to
+        // the matching arm, binding the constructor's arguments to the
+        // arm's binding patterns. IHs from the recursor are deliberately
+        // not exposed to user code (a future "IH-aware match" extension
+        // would expose them).
+        Exp::Match { scrutinee, arms } => {
+            let scrutinee_val = ev(scrutinee)?;
+            match scrutinee_val {
+                Val::InductiveVal {
+                    ctor_name, args, ..
+                } => match_dispatch(arms, &ctor_name, &args, rho, ctx),
+                Val::Nt(n) => Ok(Val::Nt(Neut::NtMatch {
+                    scrutinee: Box::new(n),
+                    arms: arms.clone(),
+                    env: rho.clone(),
+                })),
+                other => Err(EvalError::InvalidCaseTarget(format!(
+                    "Match: expected inductive value, got {other:?}"
+                ))),
+            }
+        }
     }
+}
+
+/// Dispatch a constructor-shaped scrutinee to the matching arm's body.
+///
+/// Locates the arm whose `ctor_name` matches, binds each constructor
+/// argument to the corresponding arm binding pattern, and evaluates
+/// the body in the extended environment.
+///
+/// Mismatch between the constructor's arity and the arm's binding
+/// count is a build-time invariant violation (the type checker should
+/// have caught it), so we surface a clear runtime error rather than
+/// silently truncate.
+fn match_dispatch(
+    arms: &[crate::nbe::term::MatchArm],
+    ctor_name: &str,
+    args: &[Val],
+    rho: &Rho,
+    ctx: &EvalCtx,
+) -> Result<Val, EvalError> {
+    let arm = arms
+        .iter()
+        .find(|a| a.ctor_name == ctor_name)
+        .ok_or_else(|| {
+            EvalError::InvalidCaseTarget(format!(
+                "Match: no arm for constructor `{ctor_name}` (non-exhaustive — this should \
+             have been caught at type-check time)"
+            ))
+        })?;
+    if arm.bindings.len() != args.len() {
+        return Err(EvalError::InvalidCaseTarget(format!(
+            "Match arm `{ctor_name}` expects {} bindings, got {} args (this should have \
+             been caught at type-check time)",
+            arm.bindings.len(),
+            args.len()
+        )));
+    }
+    let mut env = rho.clone();
+    for (patt, val) in arm.bindings.iter().zip(args.iter()) {
+        env = env.extend(patt.clone(), val.clone());
+    }
+    eval_ctx(&arm.body, &env, ctx)
 }
 
 /// Evaluate an expression with tracing.
