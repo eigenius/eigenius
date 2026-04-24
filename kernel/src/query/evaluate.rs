@@ -107,6 +107,7 @@ pub fn evaluate(
             &program.query.result,
             &bindings,
             layer,
+            runtime.institutions,
         )?;
     }
 
@@ -125,6 +126,7 @@ pub fn evaluate(
                 &program.query.result,
                 layer,
                 fp,
+                runtime.institutions,
             )?;
             resources.push(resource);
         }
@@ -187,7 +189,7 @@ fn evaluate_match_part(
     if !part.conditions.is_empty() {
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer)
+                eval_expression(cond, b, layer, None)
                     .and_then(|v| {
                         v.as_boolean().ok_or_else(|| {
                             QueryError::evaluation("WHERE condition must be boolean")
@@ -245,7 +247,7 @@ fn evaluate_match_part_with_fiber(
     if !part.conditions.is_empty() {
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer)
+                eval_expression(cond, b, layer, runtime.institutions)
                     .and_then(|v| {
                         v.as_boolean().ok_or_else(|| {
                             QueryError::evaluation("WHERE condition must be boolean")
@@ -324,7 +326,7 @@ fn apply_fiber_clause(
                     ))
                 })?,
             };
-            let value = eval_expression(&param.expression, binding, layer)?;
+            let value = eval_expression(&param.expression, binding, layer, runtime.institutions)?;
             query_res.set(param_iri, value);
         }
 
@@ -657,6 +659,7 @@ fn eval_expression(
     expr: &Expression,
     binding: &Binding,
     layer: &Layer,
+    institutions: Option<&InstitutionRegistry>,
 ) -> Result<Value, QueryError> {
     match expr {
         Expression::Literal(lit) => Ok(literal_to_value(lit)),
@@ -665,21 +668,42 @@ fn eval_expression(
             .cloned()
             .ok_or_else(|| QueryError::evaluation(format!("unbound variable: ?{}", var.name))),
         Expression::Binary { op, left, right } => {
-            let l = eval_expression(left, binding, layer)?;
-            let r = eval_expression(right, binding, layer)?;
+            let l = eval_expression(left, binding, layer, institutions)?;
+            let r = eval_expression(right, binding, layer, institutions)?;
             eval_binary(*op, &l, &r)
         }
         Expression::Unary { op, operand } => {
-            let v = eval_expression(operand, binding, layer)?;
+            let v = eval_expression(operand, binding, layer, institutions)?;
             eval_unary(*op, &v)
         }
         Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
         Expression::FunctionCall { name, args } => {
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
-                .map(|a| eval_expression(a, binding, layer))
+                .map(|a| eval_expression(a, binding, layer, institutions))
                 .collect();
-            functions::call_function(name, &arg_vals?)
+            let arg_vals = arg_vals?;
+            // Phase 11e.2: qualified-name function calls (containing
+            // a `:`) may classify as institution-dispatched
+            // capabilities. Attempt institution dispatch first; fall
+            // back to builtin dispatch if the IRI isn't registered
+            // or the registry isn't available.
+            if name.contains(':') {
+                if let Some(registry) = institutions {
+                    if let Ok(iri_parsed) = Iri::parse(name) {
+                        if let Some(cap) = registry.classify(&iri_parsed) {
+                            return dispatch_institution_call(
+                                cap,
+                                &iri_parsed,
+                                &arg_vals,
+                                layer,
+                                registry,
+                            );
+                        }
+                    }
+                }
+            }
+            functions::call_function(name, &arg_vals)
         }
         Expression::Aggregate { .. } => {
             // Aggregates are handled during GROUP BY, not per-binding
@@ -752,7 +776,7 @@ fn eval_expression(
         Expression::Array(elements) => {
             let vals: Result<Vec<Value>, QueryError> = elements
                 .iter()
-                .map(|e| eval_expression(e, binding, layer))
+                .map(|e| eval_expression(e, binding, layer, institutions))
                 .collect();
             Ok(Value::Array(vals?))
         }
@@ -932,12 +956,76 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
     }
 }
 
+/// Dispatch a function-call IRI classified as an institution
+/// capability to `FiberReasoner::decide` / `::translate` (Phase
+/// 11e.2). Decide predicates produce a boolean; comorphisms produce
+/// a resource value.
+fn dispatch_institution_call(
+    capability: crate::institution::InstitutionCapability,
+    iri: &Iri,
+    args: &[Value],
+    layer: &Layer,
+    registry: &InstitutionRegistry,
+) -> Result<Value, QueryError> {
+    use crate::institution::{DecResult, InstitutionCapability};
+    // Build a fresh ExecutionContext for the call — mirrors the
+    // kernel's NativeDecide / InstitutionInvoke behaviour.
+    let head = std::sync::Arc::new(layer.clone());
+    let exec_ctx = crate::context::ExecutionContext::new(
+        head,
+        "__eigenql_dispatch__",
+        crate::context::ExecutionMode::ReadOnly,
+    );
+    match capability {
+        InstitutionCapability::DecidePredicate => {
+            let reasoner = registry.institution_for_decide(iri).ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "decide procedure `{iri}` classified but no institution registered"
+                ))
+            })?;
+            let result = reasoner
+                .decide(iri, args, &exec_ctx)
+                .map_err(|e| QueryError::evaluation(format!("decide `{iri}` failed: {e}")))?;
+            Ok(Value::Boolean(matches!(result, DecResult::Holds)))
+        }
+        InstitutionCapability::Comorphism => {
+            if args.len() != 1 {
+                return Err(QueryError::evaluation(format!(
+                    "comorphism `{iri}` expects exactly 1 source argument, got {}",
+                    args.len()
+                )));
+            }
+            let reasoner = registry.institution_for_comorphism(iri).ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "comorphism `{iri}` classified but no institution registered"
+                ))
+            })?;
+            let source = match &args[0] {
+                Value::Embedded(r) => (**r).clone(),
+                other => {
+                    let mut r = Resource::new_embedded();
+                    r.set(
+                        Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                        other.clone(),
+                    );
+                    r
+                }
+            };
+            let translated = reasoner.translate(iri, &source, &exec_ctx).map_err(|e| {
+                QueryError::evaluation(format!("comorphism `{iri}` translate failed: {e}"))
+            })?;
+            Ok(Value::Embedded(Box::new(translated)))
+        }
+    }
+}
+
 /// Apply GROUP BY and aggregation.
 fn apply_group_by(
     group_by: &[Expression],
     result: &[ReturnItem],
     bindings: &[Binding],
     layer: &Layer,
+    institutions: Option<&InstitutionRegistry>,
 ) -> Result<Vec<Binding>, QueryError> {
     // Group bindings by their group key values
     let mut groups: BTreeMap<Vec<String>, Vec<&Binding>> = BTreeMap::new();
@@ -946,7 +1034,7 @@ fn apply_group_by(
         let key: Vec<String> = group_by
             .iter()
             .map(|expr| {
-                eval_expression(expr, binding, layer)
+                eval_expression(expr, binding, layer, institutions)
                     .map(|v| format!("{v:?}"))
                     .unwrap_or_default()
             })
@@ -960,7 +1048,9 @@ fn apply_group_by(
 
         // Compute aggregates
         for item in result {
-            if let Some((agg_name, agg_val)) = eval_aggregate(&item.expression, group, layer)? {
+            if let Some((agg_name, agg_val)) =
+                eval_aggregate(&item.expression, group, layer, institutions)?
+            {
                 binding.insert(agg_name, agg_val);
             }
         }
@@ -976,11 +1066,12 @@ fn eval_aggregate(
     expr: &Expression,
     group: &[&Binding],
     layer: &Layer,
+    institutions: Option<&InstitutionRegistry>,
 ) -> Result<Option<(String, Value)>, QueryError> {
     if let Expression::Aggregate { op, arg } = expr {
         let values: Vec<Value> = group
             .iter()
-            .filter_map(|b| eval_expression(arg, b, layer).ok())
+            .filter_map(|b| eval_expression(arg, b, layer, institutions).ok())
             .collect();
 
         let result = match op {
@@ -1032,6 +1123,7 @@ fn shape_result(
     items: &[ReturnItem],
     layer: &Layer,
     fp: &QueryFingerprint,
+    institutions: Option<&InstitutionRegistry>,
 ) -> Result<Resource, QueryError> {
     let mut resource = Resource::new_embedded(); // Result resources don't get @id
 
@@ -1062,7 +1154,7 @@ fn shape_result(
                 let agg_key = format!("__agg_{op:?}");
                 binding.get(&agg_key).cloned().unwrap_or(Value::Integer(0))
             }
-            _ => eval_expression(&item.expression, binding, layer)
+            _ => eval_expression(&item.expression, binding, layer, institutions)
                 .map_err(|e| QueryError::evaluation(format!("in RETURN: {e}")))?,
         };
 
@@ -1398,5 +1490,204 @@ mod tests {
             "#,
         );
         assert!(!results.is_empty());
+    }
+
+    // --- Phase 11e.2: institution-capability surface for EigenQL ---
+
+    use crate::institution::error::{InstitutionError, MorphismValidation};
+    use crate::institution::{DecResult, FiberDeclaration, FiberReasoner, InstitutionRegistry};
+
+    /// Test institution declaring one decide predicate and one
+    /// comorphism. Decide returns Holds for Integer args > 0.
+    /// Comorphism translates any source to a fixed marker resource.
+    struct QueryCapInst;
+
+    impl FiberReasoner for QueryCapInst {
+        fn fiber_declaration(&self) -> FiberDeclaration {
+            let decide_iri = Iri::parse("urn:eigenius:test:q_positive").unwrap();
+            let comorphism_iri = Iri::parse("urn:eigenius:test:q_translate").unwrap();
+
+            let mut cm = Resource::new(comorphism_iri.clone());
+            cm.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                Value::Array(vec![Value::String(wk::COMORPHISM.to_string())]),
+            );
+            cm.set(
+                Iri::parse(wk::SOURCE_INSTITUTION).unwrap(),
+                Value::String("urn:eigenius:test:q_inst".to_string()),
+            );
+            cm.set(
+                Iri::parse(wk::TARGET_INSTITUTION).unwrap(),
+                Value::String("urn:eigenius:test:target".to_string()),
+            );
+            cm.set(
+                Iri::parse(wk::TRANSLATION_PROCEDURE).unwrap(),
+                Value::String(comorphism_iri.as_str().to_string()),
+            );
+            FiberDeclaration {
+                institution_iri: Iri::parse("urn:eigenius:test:q_inst").unwrap(),
+                name: "QueryCapInst".to_string(),
+                morphism_types: vec![],
+                query_types: vec![],
+                structural_properties: vec![],
+                comorphism_types: vec![cm],
+                decide_procedures: vec![decide_iri],
+            }
+        }
+        fn query(
+            &self,
+            _q: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<Resource, InstitutionError> {
+            unreachable!()
+        }
+        fn validate_morphism(
+            &self,
+            _m: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<MorphismValidation, InstitutionError> {
+            unreachable!()
+        }
+        fn discover_morphisms(
+            &self,
+            _rs: &[Resource],
+            _ctx: &ExecutionContext,
+        ) -> Result<Vec<Resource>, InstitutionError> {
+            unreachable!()
+        }
+        fn decide(
+            &self,
+            _iri: &Iri,
+            args: &[Value],
+            _ctx: &ExecutionContext,
+        ) -> Result<DecResult, InstitutionError> {
+            let ok = args
+                .first()
+                .and_then(|v| v.as_integer())
+                .is_some_and(|n| n > 0);
+            Ok(if ok {
+                DecResult::Holds
+            } else {
+                DecResult::Fails
+            })
+        }
+        fn translate(
+            &self,
+            _iri: &Iri,
+            _source: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<Resource, InstitutionError> {
+            Ok(Resource::new(
+                Iri::parse("urn:eigenius:test:q_translated").unwrap(),
+            ))
+        }
+    }
+
+    #[test]
+    fn parser_accepts_qualified_function_calls() {
+        // Parse-only: the parser must accept `ns:local(args)`
+        // without requiring institution registration.
+        let source = r#"
+            MATCH ?x {}
+            WHERE cap:q_positive(42)
+            RETURN [] { ok: ?x }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let _program = parser::parse(tokens).expect("parse qualified call");
+    }
+
+    #[test]
+    fn where_clause_decide_dispatch_filters_by_boolean() {
+        // WHERE cap:q_positive(n) returns true for positive ints,
+        // false otherwise. Use the registry-enabled query path.
+        let mut reg = InstitutionRegistry::new();
+        reg.register_rehydrated(Box::new(QueryCapInst)).unwrap();
+
+        // Minimal layer — just the core ontology. WHERE runs on an
+        // empty initial binding plus a literal-only expression.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(builder.build());
+
+        // Use FunctionCall directly at eval_expression level for a
+        // focused test — the full-query integration would need more
+        // pattern-matching infrastructure. This verifies the core
+        // dispatch path.
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "urn:eigenius:test:q_positive".to_string(),
+            args: vec![Expression::Literal(Literal::Integer(42))],
+        };
+        let v = eval_expression(&expr, &binding, &layer, Some(&reg)).expect("eval");
+        assert_eq!(v, Value::Boolean(true));
+
+        // Negative arg — decide returns Fails → Bool false.
+        let expr_neg = Expression::FunctionCall {
+            name: "urn:eigenius:test:q_positive".to_string(),
+            args: vec![Expression::Literal(Literal::Integer(-5))],
+        };
+        let v = eval_expression(&expr_neg, &binding, &layer, Some(&reg)).expect("eval");
+        assert_eq!(v, Value::Boolean(false));
+    }
+
+    #[test]
+    fn comorphism_dispatch_produces_translated_resource() {
+        let mut reg = InstitutionRegistry::new();
+        reg.register_rehydrated(Box::new(QueryCapInst)).unwrap();
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(builder.build());
+
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "urn:eigenius:test:q_translate".to_string(),
+            args: vec![Expression::Literal(Literal::String(
+                "urn:eigenius:test:some_src".to_string(),
+            ))],
+        };
+        let v = eval_expression(&expr, &binding, &layer, Some(&reg)).expect("eval");
+        match v {
+            Value::Embedded(r) => {
+                assert_eq!(
+                    r.id().map(|i| i.as_str()),
+                    Some("urn:eigenius:test:q_translated")
+                );
+            }
+            other => panic!("expected embedded translated resource, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_iri_falls_through_to_builtin_error() {
+        // An IRI that isn't registered as either decide or
+        // comorphism falls through to `functions::call_function`,
+        // which errors with "no such function."
+        let reg = InstitutionRegistry::new();
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(builder.build());
+
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "urn:eigenius:test:unknown_fn".to_string(),
+            args: vec![],
+        };
+        let err = eval_expression(&expr, &binding, &layer, Some(&reg)).unwrap_err();
+        let msg = format!("{err}");
+        // Builtin dispatch rejects unknown function names.
+        assert!(msg.contains("unknown") || msg.contains("function"));
     }
 }

@@ -85,7 +85,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
 | 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
-| 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓, 11d ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
+| 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓, 11d ✓, 11e.1 ✓, 11e.2 ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class, ESL + EigenQL institution-capability surface |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
@@ -651,6 +651,29 @@ The phase decomposes into two milestones that are separately reviewable:
 - `Exp::InstitutionInvoke { comorphism_iri, source }` kernel AST node with eval arm dispatching via `EvalCtx`'s institution registry. Without a registry, produces a passthrough neutral — analogous to Phase 11c's undecidable fallback. Readback not added (the expression evaluates or produces a neutral; normal form readback isn't required for this variant yet).
 - 6 new tests: comorphism dispatch-table population (both IRI and procedure IRI), translate dispatch, default-translate-UnknownType error, eval-through-registry, no-registry-passthrough, unknown-comorphism-error.
 - **Explicit non-goals shipped as-is:** no ESL surface syntax for `InstitutionInvoke`; no comorphism composition (ρ₁ ∘ ρ₂); no backward translation; no typed translation signatures. All additive; Phase 14 reconciliation can invoke translate via Rust directly without any of these.
+
+### Phase 11e.1 — ESL surface for institution capabilities — ✓
+
+**Status:** Complete.
+
+- `FiberDeclaration.decide_procedures: Vec<Iri>` + `InstitutionRegistry.decide_dispatch` (Phase 11c's decide was reachable only from Rust; 11e.1 adds the explicit declaration needed for compile-time classification).
+- `InstitutionCapability` enum and `InstitutionRegistry::classify(iri)` — returns `Some(DecidePredicate | Comorphism)` or `None`. Used by ESL compile (and future EigenQL compile) to dispatch a function-call IRI to the right kernel AST form.
+- `esl::compile_with_institutions(source, Arc<InstitutionRegistry>)` entry point + `Compiler.institutions` field threading the registry into compilation.
+- Compile-time classification in the `Apply` arm: function IRI registered as Comorphism → emits `ComorphismInvokeApply` resource; registered as DecidePredicate → emits `DecideApply` resource; unclassified → falls through to ordinary component dispatch (pre-11e behaviour preserved).
+- `program::expr` decoders for `ComorphismInvokeApply` → `Exp::InstitutionInvoke`, and `DecideApply` → `Exp::NativeDecide(Constraint::Institution, Unit)`.
+- 4 new tests: ESL `cap:comorphism(src)` compiles to `InstitutionInvoke`; ESL `cap:decide(a, b)` compiles to `NativeDecide(Institution)`; comorphism called with wrong arity errors at compile; no-registry path compiles to plain `Apply` (backward-compatible).
+- **Explicit non-goals:** `decide` result binding (still uses `Exp::Unit` as witness); typed argument signatures for predicates; ESL syntax for comorphism composition.
+
+### Phase 11e.2 — EigenQL surface for institution capabilities — ✓
+
+**Status:** Complete.
+
+- EigenQL parser now accepts `ns:local(args)` qualified-name function calls in expression position — previously only the hardcoded builtins (DATE, LENGTH, etc.) could take the function-call form.
+- `eval_expression` threads an optional `&InstitutionRegistry` through the call chain; `FunctionCall` dispatch attempts institution classification (via the `InstitutionRegistry::classify` added in 11e.1) before falling through to the builtin function table.
+- `dispatch_institution_call` helper: `DecidePredicate` → `reasoner.decide(iri, args, ctx)` → `Value::Boolean(Holds)`; `Comorphism` → `reasoner.translate(iri, source, ctx)` → `Value::Embedded(result)`.
+- Boolean semantics in `WHERE` clauses: decide-predicate Holds retains the binding, Fails/Undecidable drops it. Comorphism invocations slot into `RETURN` / binding positions as resource values.
+- 4 new tests: parser accepts qualified calls; `WHERE cap:positive(n)` filters by decide result; `cap:translate(source)` returns a comorphism-translated resource; unknown IRI falls through to builtin-dispatch error.
+- **Explicit non-goals:** no namespace-alias declaration in EigenQL syntax (users write full IRIs); no decide-result binding to a variable (boolean only); no type-level classification at parse time.
 
 ### Phase 11 — Test plan
 

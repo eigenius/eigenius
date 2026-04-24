@@ -3014,6 +3014,7 @@ mod tests {
                 query_types: vec![],
                 structural_properties: vec![],
                 comorphism_types: vec![cm],
+                decide_procedures: vec![],
             }
         }
         fn query(
