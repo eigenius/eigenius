@@ -609,18 +609,23 @@ The phase decomposes into two milestones that are separately reviewable:
 - Traced evaluation produces `Trace::Map` / `Trace::Reduce`.
 - Type checker infers `Map(f, coll)` and `Reduce(f, init, coll)` types with `extract_list_element_type` helper.
 
-### Phase 11b — Inductive types — ~4–6 weeks
+### Phase 11b — Inductive types — ✓
 
-**Goal:** Mini-TT gains proper recursive inductive types with derived eliminators. This is the **largest single extension** in the life-science plan (§16.1, Tier 1) and unblocks the deep treatment of fiber morphisms (e.g., "is this ConformationalProximity the composition of two shorter proximities?").
+**Status:** Complete. See D19 (`docs/design/d19-inductive-types.md`) §13 for the 18-step implementation plan; all steps delivered.
 
-- New expression form `Inductive` for declaring inductive types with constructors and parameters.
-- Positivity checker rejecting non-strictly-positive declarations (for decidability).
-- Automatic eliminator derivation from the inductive specification.
-- Iota-reduction rules for the eliminators; conversion-algorithm integration.
-- **Scope boundary:** single, non-mutual, non-nested, strictly-positive inductive types. Mutual and nested are explicitly deferred.
-- nanoda_lib (`src/inductive.rs`) as the reference implementation. See `lean-4-as-institution.md` Appendix A for the caveat about nested inductives.
-- Side benefit per §16.1: bounded universal quantification becomes cleaner once the underlying `List` type is a properly recursive inductive rather than the simplified sum-of-products form currently in `Exp::list`.
-- See D19 (`docs/design/d19-inductive-types.md`). Sized types (#16) brought into scope alongside inductive types.
+- `Exp::Inductive`, `Exp::InductiveType`, `Exp::InductiveCtor`, `Exp::InductiveRec`, `Exp::Match` for declaration, application, construction, elimination via recursor, and motive-inferred pattern matching.
+- `Val::InductiveType { decl, params }` / `Val::InductiveVal { decl, ctor_name, args }` / `Neut::NtRec` / `Neut::NtMatch`.
+- Positivity checker module (`nbe/positivity.rs`) rejecting non-strictly-positive declarations.
+- Automatic recursor derivation (`nbe/recursor.rs`), preserving `SizedPi` binders in minor signatures.
+- Iota-reduction integrated with the conversion algorithm; readback round-trips.
+- `Exp::list()` replaced with a proper inductive List backed by `Arc<InductiveDecl>`.
+- ESL surface syntax: `data Name(p : Kind, …) { ctor, ctor({j < i}, Nat(j)), … }` with brace-delimited bounded-size binders.
+- **Sized types (#16, D19 §8):** `Exp::SizeSort` / `SizeSucc` / `SizeInf` / `SizedPi`; ∞-absorption; Warshall meta-solver (`nbe/sized.rs`) + TSO rigid-hypothesis tracker (`nbe/sized_rigid.rs`) ported from MiniAgda; `size_le` / `size_lt` partial orders with hypothesis-consultation variants; size-aware `subtype_of` integrated into the checker fallthrough.
+- **Termination-by-typing:** pattern-match arms on sized inductives introduce the bounded size as a rigid with TSO hypothesis, letting sub-term recursive calls type-check at strictly smaller sizes.
+- **Productivity-by-typing:** `Lam` checked against `Val::SizedPi` opens the bound size with a hypothesis; sized codata observations using `SizedPi` give productivity as a typing consequence. Replaces D11's syntactic `check_guarded` for sized codata; guardedness remains as a legacy fallback for unsized codata per D19 §8.5.
+- **Self-referential parameterised codata:** `Val::CodataType { decl, params }` parallels `Val::InductiveType`; `CodataDecl` carries observations with self-references encoded via a name-only stub Arc; `resolve_full_codata_decl` rehydrates stubs during check.
+- **Scope boundary (D19 §2):** single, non-mutual, non-nested, strictly-positive — all honored. Mutual (#20), nested (#21), indexed families (#22) remain deferred.
+- **Tests:** 585 kernel tests pass, including Nat/List/Tree, sized Nat with bounded binders, sized codata productivity, self-referential sized streams, and mixed inductive+codata end-to-end from ESL.
 
 ### Phase 11c — Institution-registered decision procedures — ~1–2 weeks
 
