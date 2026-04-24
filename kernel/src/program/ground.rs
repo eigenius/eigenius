@@ -7,7 +7,9 @@
 
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
-use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt, PrimitiveType};
+use crate::nbe::term::{
+    CodataDecl, Exp, InductiveCtorDecl, InductiveDecl, Observation, Patt, PrimitiveType,
+};
 use crate::nbe::val::{Clos, Val};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
@@ -301,14 +303,31 @@ fn is_codata_type(resource: &crate::ontology::resource::Resource) -> bool {
         .any(|c| c.as_str() == "urn:eigenius:core:CodataType")
 }
 
-/// Resolve a CodataType resource into a `Val::Codata` whose observation
-/// types are resolved to the same Mini-TT forms as any other typed
-/// field. See D11 §3.
+/// Resolve a CodataType resource into a `Val` form.
+///
+/// Non-parameterised codata resolves to `Val::Codata(observations,
+/// Rho::Nil)` — the anonymous structural form. Parameterised codata
+/// resolves to `Val::CodataType { decl, params: vec![] }` — the
+/// unapplied type former; applying it via `Exp::CodataType(decl,
+/// args)` produces the concrete applied codata type.
+///
+/// Self-references inside observation types (e.g. `tail : Stream(A,
+/// j)` on a `codata Stream(A, i)`) use the name-only stub pattern:
+/// the decl's first `Arc` is built with empty observations, threaded
+/// through the observation decoder as `self_ref`, and the full decl
+/// is then reconstructed with the decoded observations. Name-based
+/// `PartialEq` on `CodataDecl` unifies the stub with the full decl at
+/// evaluation time.
 fn resolve_codata_type(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
     layer: &Layer,
 ) -> Result<Val, String> {
+    let short_name = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+        Some(Value::String(s)) => s.clone(),
+        _ => shortname_of(class_iri),
+    };
+
     let observations_iri = Iri::parse("urn:eigenius:core:observations").unwrap();
     let obs_array = match resource.get(&observations_iri) {
         Some(Value::Array(arr)) => arr,
@@ -319,11 +338,19 @@ fn resolve_codata_type(
         }
     };
 
-    // Type parameters (Phase 11b step 15h.3) — identical shape to
-    // `data`'s param telescope, reuses the same decoder.
+    // Type parameter telescope (empty for non-parameterised codata).
     let params_telescope = decode_params(class_iri, resource)?;
 
-    let mut observations: Vec<(crate::nbe::term::Name, Exp)> = Vec::new();
+    // Self-reference stub — mirrors `resolve_inductive_type`'s use of
+    // a name-only `InductiveDecl`.
+    let self_ref: Arc<CodataDecl> = Arc::new(CodataDecl {
+        name: short_name.clone(),
+        params: params_telescope.clone(),
+        sort: Exp::Set,
+        observations: Vec::new(),
+    });
+
+    let mut observations: Vec<Observation> = Vec::new();
     for entry in obs_array {
         let obs_res = match entry {
             Value::Embedded(r) => r.as_ref(),
@@ -346,34 +373,37 @@ fn resolve_codata_type(
         let type_value = obs_res.get(&type_iri).ok_or_else(|| {
             format!("codata type '{class_iri}' observation '{name}' missing 'observation_type'")
         })?;
-        let type_exp = decode_codata_observation_type(class_iri, layer, type_value)?;
-        observations.push((name, type_exp));
+        let type_exp = decode_codata_observation_type(class_iri, &self_ref, layer, type_value)?;
+        observations.push(Observation {
+            name,
+            typ: type_exp,
+        });
     }
 
-    // If the codata has type parameters, wrap the observation list
-    // in a *lambda* chain — `λ p₁. … λ pₙ. codata { … }`. Unlike
-    // inductive types (which have `Val::InductiveType { decl,
-    // params }`), our `Val::Codata` has no dedicated param-carrying
-    // shape; the Lam-wrapping is the structural workaround that
-    // lets `SizedBox(Inf, One)` reduce to the concrete codata type
-    // with observations evaluated under the applied parameter
-    // environment. The Lam's kernel type (`Π p₁:K₁. … Set`) is
-    // derivable via `check_type` over the ESL source, not inspected
-    // here — the Lam is applied at use sites and the result type
-    // flows from the applications.
+    // Non-parameterised codata: produce the legacy `Val::Codata` shape
+    // used throughout D11-era code. Observation types that are
+    // self-references have been encoded as `Exp::CodataType(self_ref,
+    // [])` which evaluates correctly under `Rho::Nil`.
     if params_telescope.is_empty() {
-        return Ok(Val::Codata(observations, Rho::Nil));
+        return Ok(Val::Codata(
+            observations.into_iter().map(|o| (o.name, o.typ)).collect(),
+            Rho::Nil,
+        ));
     }
-    let mut body = Exp::Codata(
-        observations
-            .into_iter()
-            .map(|(name, typ)| crate::nbe::term::Observation { name, typ })
-            .collect(),
-    );
-    for (patt, _kind) in params_telescope.iter().rev() {
-        body = Exp::Lam(patt.clone(), Box::new(body));
-    }
-    crate::nbe::eval::eval(&body, &Rho::Nil).map_err(|e| e.to_string())
+
+    // Parameterised codata — return the unapplied type former. The
+    // full decl carries the decoded observations; consumers apply it
+    // via `Exp::CodataType(decl, args)`.
+    let decl = Arc::new(CodataDecl {
+        name: short_name,
+        params: params_telescope,
+        sort: Exp::Set,
+        observations,
+    });
+    Ok(Val::CodataType {
+        decl,
+        params: Vec::new(),
+    })
 }
 
 /// Decode a codata observation's type value to an `Exp`.
@@ -390,6 +420,7 @@ fn resolve_codata_type(
 ///   `Exp::SizedPi` when kind is `Size` and a bound is present.
 fn decode_codata_observation_type(
     class_iri: &Iri,
+    self_ref: &Arc<CodataDecl>,
     layer: &Layer,
     value: &Value,
 ) -> Result<Exp, String> {
@@ -405,8 +436,12 @@ fn decode_codata_observation_type(
             }
             let parsed =
                 Iri::parse(s).map_err(|e| format!("invalid observation type IRI '{s}': {e}"))?;
+            // Self-reference — encode as a proper parameterised codata
+            // application with no args. Name-based `PartialEq` on
+            // `CodataDecl` unifies this stub with the full decl at
+            // evaluation time.
             if parsed == *class_iri {
-                Ok(Exp::EigonClass(parsed))
+                Ok(Exp::CodataType(self_ref.clone(), Vec::new()))
             } else {
                 let v = resolve_class_type(&parsed, layer)?;
                 Ok(crate::nbe::readback::readback_val(0, &v))
@@ -422,8 +457,8 @@ fn decode_codata_observation_type(
                 let cod_v = r
                     .get(&Iri::parse(wk::ARROW_CODOMAIN).unwrap())
                     .ok_or_else(|| "TypeArrow missing `arrow_codomain`".to_string())?;
-                let dom = decode_codata_observation_type(class_iri, layer, dom_v)?;
-                let cod = decode_codata_observation_type(class_iri, layer, cod_v)?;
+                let dom = decode_codata_observation_type(class_iri, self_ref, layer, dom_v)?;
+                let cod = decode_codata_observation_type(class_iri, self_ref, layer, cod_v)?;
                 return Ok(Exp::Pi(
                     crate::nbe::term::Patt::Unit,
                     Box::new(dom),
@@ -446,7 +481,7 @@ fn decode_codata_observation_type(
                 let body_v = r
                     .get(&Iri::parse(wk::BINDER_BODY).unwrap())
                     .ok_or_else(|| "TypeBinderArrow missing `binder_body`".to_string())?;
-                let body = decode_codata_observation_type(class_iri, layer, body_v)?;
+                let body = decode_codata_observation_type(class_iri, self_ref, layer, body_v)?;
                 match (kind_is_size, bound_opt) {
                     (true, Some(bstr)) => Ok(Exp::SizedPi {
                         patt: crate::nbe::term::Patt::Var(name),
@@ -470,15 +505,47 @@ fn decode_codata_observation_type(
                         Box::new(body),
                     )),
                 }
-            } else {
-                // Fall back to the InductiveArgType shape (Ref with args).
-                let self_stub = Arc::new(InductiveDecl {
-                    name: shortname_of(class_iri),
+            } else if is_a.iter().any(|s| s == wk::INDUCTIVE_ARG_TYPE) {
+                // Parameterised type reference (`ex:List(A)` or a
+                // self-reference `ex:Stream(A, j)`). Intercept
+                // self-references and emit `Exp::CodataType(self_ref,
+                // args)`; otherwise delegate to `decode_arg_type`
+                // with a never-matching dummy inductive stub (its
+                // name can't collide with any real inductive, so
+                // its self-ref branch never fires).
+                let type_name = r
+                    .get(&Iri::parse(wk::TYPE_NAME).unwrap())
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "InductiveArgType missing `type_name`".to_string())?;
+                if type_name.contains(':') {
+                    if let Ok(parsed) = Iri::parse(type_name) {
+                        if parsed == *class_iri {
+                            let type_args_arr = match r.get(&Iri::parse(wk::TYPE_ARGS).unwrap()) {
+                                Some(Value::Array(a)) => a.clone(),
+                                _ => Vec::new(),
+                            };
+                            let args: Result<Vec<Exp>, String> = type_args_arr
+                                .iter()
+                                .map(|a| {
+                                    decode_codata_observation_type(class_iri, self_ref, layer, a)
+                                })
+                                .collect();
+                            return Ok(Exp::CodataType(self_ref.clone(), args?));
+                        }
+                    }
+                }
+                let dummy = Arc::new(InductiveDecl {
+                    name: "__not_a_real_inductive__".to_string(),
                     params: Vec::new(),
                     sort: Exp::Set,
                     ctors: Vec::new(),
                 });
-                decode_arg_type(class_iri, &self_stub, value, layer)
+                decode_arg_type(class_iri, &dummy, value, layer)
+            } else {
+                Err(format!(
+                    "unrecognised codata observation type resource: is_a {:?}",
+                    is_a
+                ))
             }
         }
         _ => Err("observation_type must be a String or an embedded TypeExpr resource".to_string()),
@@ -1339,41 +1406,39 @@ mod tests {
         let iri = Iri::parse("urn:eigenius:example:SizedBox").unwrap();
         let val = resolve_class_type(&iri, &layer).expect("resolve SizedBox");
 
-        // Parameterised codata resolves to a λ-chain whose body is a
-        // `Val::Codata`. Applying the outer λ to concrete params
-        // reduces to the concrete codata type.
-        match &val {
-            Val::Lam(_) => {} // good
-            other => panic!("expected outer Lam for parameterised codata, got {other:?}"),
-        }
-
-        // Apply the type former at `Inf` and `One` to get the concrete
-        // codata, then check that the `shrink` observation's type
-        // contains a `SizedPi`.
-        use crate::nbe::eval::eval;
-        let applied = Exp::App(
-            Box::new(Exp::App(
-                Box::new(crate::nbe::readback::readback_val(0, &val)),
-                Box::new(Exp::SizeInf),
-            )),
-            Box::new(Exp::One),
-        );
-        let applied_val = eval(&applied, &Rho::Nil).expect("apply codata params");
-        let (observations, captured_rho) = match &applied_val {
-            Val::Codata(obs, rho) => (obs.clone(), rho.clone()),
-            other => panic!("expected Val::Codata after applying params, got {other:?}"),
+        // Parameterised codata resolves to the unapplied type former
+        // `Val::CodataType { decl, params: [] }`. Applying the decl
+        // to concrete arguments via `Exp::CodataType(decl, [...])`
+        // produces the applied codata type.
+        let decl = match &val {
+            Val::CodataType { decl, params } => {
+                assert!(params.is_empty(), "unapplied type former");
+                decl.clone()
+            }
+            other => panic!("expected Val::CodataType for parameterised codata, got {other:?}"),
         };
-        let shrink_typ_exp = observations
-            .iter()
-            .find(|(n, _)| n == "shrink")
-            .map(|(_, t)| t.clone())
-            .expect("shrink observation present");
-        // Evaluate the observation's type under the codata's captured
-        // environment — this is the substitution step that turns
-        // `Var("i")` into `SizeInf`.
-        let shrink_typ_val = eval(&shrink_typ_exp, &captured_rho).expect("eval shrink type");
-        let shrink_typ = crate::nbe::readback::readback_val(0, &shrink_typ_val);
-        match shrink_typ {
+        assert_eq!(decl.name, "SizedBox");
+        assert_eq!(decl.params.len(), 2);
+
+        // Apply `SizedBox(Inf, One)` and inspect the `shrink`
+        // observation's type after parameter substitution.
+        use crate::nbe::check::lookup_codata_observation;
+        use crate::nbe::eval::eval;
+        let applied_ty_val = eval(
+            &Exp::CodataType(decl.clone(), vec![Exp::SizeInf, Exp::One]),
+            &Rho::Nil,
+        )
+        .expect("apply codata params");
+        let (decl_applied, params_applied) = match &applied_ty_val {
+            Val::CodataType { decl, params } => (decl.clone(), params.clone()),
+            other => panic!("expected Val::CodataType after applying params, got {other:?}"),
+        };
+        assert_eq!(params_applied.len(), 2);
+
+        let shrink_ty =
+            lookup_codata_observation(&decl_applied, &params_applied, "shrink", 0).unwrap();
+        let shrink_exp = crate::nbe::readback::readback_val(0, &shrink_ty);
+        match shrink_exp {
             Exp::SizedPi { patt, upper, body } => {
                 assert!(matches!(patt, Patt::Var(_)));
                 assert!(
@@ -1411,16 +1476,17 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:SizedBox").unwrap();
         let codata_former = resolve_class_type(&iri, &layer).expect("resolve SizedBox");
+        let decl = match codata_former {
+            Val::CodataType { decl, .. } => decl,
+            other => panic!("expected Val::CodataType, got {other:?}"),
+        };
 
-        // Apply the type former at (Inf, One) to get a concrete codata.
-        let applied = Exp::App(
-            Box::new(Exp::App(
-                Box::new(crate::nbe::readback::readback_val(0, &codata_former)),
-                Box::new(Exp::SizeInf),
-            )),
-            Box::new(Exp::One),
-        );
-        let ty = eval(&applied, &Rho::Nil).expect("apply codata params");
+        // Apply `SizedBox(Inf, One)` to get a concrete applied codata.
+        let ty = eval(
+            &Exp::CodataType(decl, vec![Exp::SizeInf, Exp::One]),
+            &Rho::Nil,
+        )
+        .expect("apply codata params");
 
         // Corecord `{ get = Unit, shrink = λ_. Unit }` : SizedBox(∞, 1).
         let corecord = Exp::CoRecord(vec![
@@ -1435,6 +1501,163 @@ mod tests {
         ]);
         let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
         check(&mut c, &corecord, &ty).expect("sized corecord from ESL-declared codata type-checks");
+    }
+
+    // --- Self-referential parameterised codata (Phase 11b step 15j, D19 §8) ---
+
+    #[test]
+    fn self_referential_sized_stream_from_esl() {
+        // The D19 §8.2 motivating example — self-referential sized
+        // stream. The `tail` observation's type references the
+        // enclosing codata itself, applied to a strictly-smaller
+        // size. Verifies that the resolver emits
+        // `Exp::CodataType(self_ref, [A, j])` and that applying the
+        // outer codata to concrete args yields a well-typed tail
+        // observation.
+        use crate::nbe::check::lookup_codata_observation;
+        use crate::nbe::eval::eval;
+
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            codata ex:Stream(A : core:Set, i : core:Size) {
+                head : A;
+                tail : {j < i} -> ex:Stream(A, j);
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:Stream").unwrap();
+        let former = resolve_class_type(&iri, &layer).expect("resolve Stream");
+        let decl = match former {
+            Val::CodataType { decl, .. } => decl,
+            other => panic!("expected Val::CodataType, got {other:?}"),
+        };
+        assert_eq!(decl.name, "Stream");
+
+        // `tail`'s declared type should be
+        //   SizedPi { j < i }. CodataType(self_ref, [A, j])
+        // with the inner CodataType carrying a self-reference.
+        let tail = decl
+            .observations
+            .iter()
+            .find(|o| o.name == "tail")
+            .expect("tail present");
+        match &tail.typ {
+            Exp::SizedPi { upper, body, .. } => {
+                assert!(
+                    matches!(upper.as_ref(), Exp::Var(v) if v == "i"),
+                    "upper should be `i`, got {:?}",
+                    upper
+                );
+                match body.as_ref() {
+                    Exp::CodataType(inner_decl, args) => {
+                        assert_eq!(inner_decl.name, "Stream", "self-ref resolves to Stream");
+                        assert_eq!(args.len(), 2);
+                        assert!(matches!(&args[0], Exp::Var(v) if v == "A"));
+                        assert!(matches!(&args[1], Exp::Var(v) if v == "j"));
+                    }
+                    other => panic!("tail body should be CodataType self-ref, got {other:?}"),
+                }
+            }
+            other => panic!("tail type should be SizedPi, got {other:?}"),
+        }
+
+        // Apply `Stream(One, Inf)` and verify `tail` evaluates to a
+        // SizedPi returning Stream(One, j) — the whole self-ref
+        // chain rounds trips through eval.
+        let applied_val = eval(
+            &Exp::CodataType(decl.clone(), vec![Exp::One, Exp::SizeInf]),
+            &Rho::Nil,
+        )
+        .expect("apply Stream(One, Inf)");
+        let (d, p) = match &applied_val {
+            Val::CodataType { decl, params } => (decl.clone(), params.clone()),
+            other => panic!("expected Val::CodataType, got {other:?}"),
+        };
+        let tail_ty = lookup_codata_observation(&d, &p, "tail", 0).unwrap();
+        let tail_exp = crate::nbe::readback::readback_val(0, &tail_ty);
+        match tail_exp {
+            Exp::SizedPi { body, upper, .. } => {
+                assert!(matches!(*upper, Exp::SizeInf));
+                match *body {
+                    Exp::CodataType(d2, args) => {
+                        assert_eq!(d2.name, "Stream");
+                        assert_eq!(args.len(), 2);
+                        assert!(matches!(&args[0], Exp::One));
+                        // Inner `j` is a neutral Var from the SizedPi binder.
+                        assert!(matches!(&args[1], Exp::Var(_)));
+                    }
+                    other => panic!("expected CodataType self-ref, got {other:?}"),
+                }
+            }
+            other => panic!("expected SizedPi, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mixed_sized_inductive_and_codata_from_esl() {
+        // D19 §13 step 18 — the mixed-kinds test. Declare a sized
+        // inductive and a (non-self-ref) codata side by side; apply
+        // the codata at a type whose shape is an inductive value;
+        // type-check a corecord that produces inductive values
+        // through the codata's observations.
+        //
+        // Kept non-self-referential for the codata so the test is a
+        // single-level corecord — self-referential sized codata is
+        // covered by `self_referential_sized_stream_from_esl` above.
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::eval::eval;
+
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SizedNat(i : core:Size) {
+                zero,
+                succ({j < i}, ex:SizedNat(j)),
+            }
+
+            codata ex:Container(A : core:Set) {
+                get : A;
+            }
+            "#,
+        );
+        let nat_iri = Iri::parse("urn:eigenius:example:SizedNat").unwrap();
+        let container_iri = Iri::parse("urn:eigenius:example:Container").unwrap();
+
+        let nat_decl = match resolve_class_type(&nat_iri, &layer).unwrap() {
+            Val::InductiveType { decl, .. } => decl,
+            other => panic!("expected InductiveType, got {other:?}"),
+        };
+        let container_decl = match resolve_class_type(&container_iri, &layer).unwrap() {
+            Val::CodataType { decl, .. } => decl,
+            other => panic!("expected CodataType, got {other:?}"),
+        };
+
+        // `Container(SizedNat(Inf))` — codata parameterised over an
+        // inductive type value, showing mixed-kinds type formation.
+        let element_ty = Exp::InductiveType(nat_decl.clone(), vec![Exp::SizeInf]);
+        let ty = eval(
+            &Exp::CodataType(container_decl, vec![element_ty]),
+            &Rho::Nil,
+        )
+        .expect("apply Container params");
+
+        // `corecord { get = zero[Inf] }` — the get observation
+        // produces an inductive value. Exercises: codata observation
+        // type carries a parameter that evaluates to an inductive
+        // type, and the corecord's field body is an inductive ctor
+        // application which check_inductive_ctor_args verifies.
+        let corecord = Exp::CoRecord(vec![crate::nbe::term::CoField {
+            name: "get".to_string(),
+            body: Exp::InductiveCtor(nat_decl, "zero".to_string(), Vec::new()),
+        }]);
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        check(&mut c, &corecord, &ty)
+            .expect("mixed sized-inductive + codata corecord type-checks end-to-end");
     }
 
     #[test]

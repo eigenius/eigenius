@@ -175,6 +175,13 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         Exp::Codata(observations) => observations
             .iter()
             .any(|o| has_ind_occurrence(decl, &o.typ)),
+        // A parameterised codata application at an inductive arg
+        // position must recurse into any param that carries a
+        // recursive occurrence, exactly like `Exp::InductiveType`.
+        // The codata decl itself is never recursive into the
+        // enclosing inductive (different sort), so we skip the
+        // decl.name check and scan args only.
+        Exp::CodataType(_, args) => args.iter().any(|a| has_ind_occurrence(decl, a)),
         Exp::CoRecord(fields) => fields.iter().any(|f| has_ind_occurrence(decl, &f.body)),
         Exp::Observe(e, _) => has_ind_occurrence(decl, e),
         Exp::Map(f, c) => has_ind_occurrence(decl, f) || has_ind_occurrence(decl, c),

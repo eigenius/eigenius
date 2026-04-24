@@ -133,6 +133,11 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             decl.clone(),
             params.iter().map(|p| readback_val(level, p)).collect(),
         ),
+        // Parameterised codata types (D19 §8, self-referential codata).
+        Val::CodataType { decl, params } => Exp::CodataType(
+            decl.clone(),
+            params.iter().map(|p| readback_val(level, p)).collect(),
+        ),
         Val::InductiveVal {
             decl,
             ctor_name,

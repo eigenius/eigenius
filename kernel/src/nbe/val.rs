@@ -6,7 +6,7 @@
 
 use crate::nbe::env::Rho;
 use crate::nbe::eval::EvalError;
-use crate::nbe::term::{Exp, InductiveDecl, Name, Patt, PrimitiveType};
+use crate::nbe::term::{CodataDecl, Exp, InductiveDecl, Name, Patt, PrimitiveType};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use std::sync::Arc;
@@ -57,8 +57,24 @@ pub enum Val {
 
     // --- Codata (D11, Phase 9b-i) ---
     /// Codata type value: captures the observation-type pairs plus the
-    /// environment needed to evaluate them.
+    /// environment needed to evaluate them. The anonymous form —
+    /// unparameterised and self-reference-incapable. Used for legacy
+    /// codata declarations and the projected view of an applied
+    /// `CodataType` at use sites that don't need the decl reference.
     Codata(Vec<(Name, Exp)>, Rho),
+
+    /// Parameterised codata type former applied to evaluated
+    /// parameters: `C(p₁, …, pₙ)`. The `Arc<CodataDecl>` carries the
+    /// observation list; self-references inside observation types
+    /// resolve via name-based `PartialEq`. Parallels
+    /// `Val::InductiveType`.
+    ///
+    /// `params` is empty for the *unapplied* type former; use
+    /// `Exp::CodataType(decl, args)` to apply arguments.
+    CodataType {
+        decl: Arc<CodataDecl>,
+        params: Vec<Val>,
+    },
     /// Codata value (corecord): lazy copattern definitions. Each entry
     /// is `(obs_name, body_exp)`; the body is evaluated only when the
     /// matching `Observe` is applied, in the captured environment.
