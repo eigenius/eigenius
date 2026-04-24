@@ -4,10 +4,12 @@
 //! to a Mini-TT term. No translation layer needed.
 
 use crate::layer::Layer;
-use crate::nbe::term::{Branch, Decl, Exp, Patt, PrimitiveType};
+use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt, PrimitiveType};
+use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
-use crate::program::ground::resolve_class_type;
+use crate::program::ground::{is_inductive_type, resolve_class_type, resolve_inductive_type};
+use std::sync::Arc;
 const LET: &str = "urn:eigenius:program:Let";
 const APPLY: &str = "urn:eigenius:program:Apply";
 const VAR: &str = "urn:eigenius:program:Var";
@@ -57,7 +59,7 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
     match class_str {
         LET => parse_let(resource, layer),
         APPLY => parse_apply(resource, layer),
-        VAR => parse_var(resource),
+        VAR => parse_var(resource, layer),
         LAMBDA => parse_lambda(resource, layer),
         CASE => parse_case(resource, layer),
         PAIR => parse_pair(resource, layer),
@@ -69,6 +71,49 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
         CORECORD => parse_corecord(resource, layer),
         _ => Err(format!("unknown expression class: '{class_str}'")),
     }
+}
+
+/// Resolve a possible constructor IRI of the form `<parent_iri>:<ctor_name>`.
+///
+/// Returns `(decl, ctor_idx, arity)` for the matching constructor, where
+/// `arity` is the number of non-parameter binders in the constructor's
+/// Π-telescope. Returns `None` if `s` doesn't look like a ctor IRI or
+/// the implied parent isn't an inductive type in the layer.
+///
+/// IRI-keyed (Phase 11b step 9): no layer-wide name search. The split
+/// is by the last `:` — the ESL compiler builds ctor IRIs as exactly
+/// `parent_iri + ":" + ctor_name`, so this round-trips by construction.
+fn resolve_ctor_iri(s: &str, layer: &Layer) -> Option<(Arc<InductiveDecl>, usize, usize)> {
+    let (parent_str, ctor_name) = s.rsplit_once(':')?;
+    let parent_iri = Iri::parse(parent_str).ok()?;
+    let resource = layer.resolve(&parent_iri)?;
+    if !is_inductive_type(resource) {
+        return None;
+    }
+    let val = resolve_inductive_type(&parent_iri, resource).ok()?;
+    let Val::InductiveType { decl, .. } = val else {
+        return None;
+    };
+    let idx = decl.ctors.iter().position(|c| c.name == ctor_name)?;
+    let arity = ctor_arity(&decl, idx);
+    Some((decl, idx, arity))
+}
+
+/// Number of non-parameter argument binders in a constructor's
+/// Π-telescope.
+fn ctor_arity(decl: &InductiveDecl, idx: usize) -> usize {
+    let mut current = &decl.ctors[idx].typ;
+    let mut params_to_skip = decl.params.len();
+    let mut count = 0;
+    while let Exp::Pi(_, _, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            count += 1;
+        }
+        current = body;
+    }
+    count
 }
 
 /// let name : type = value; body
@@ -94,6 +139,36 @@ fn parse_let(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     // Function can be a string (component IRI) or embedded expression
     let func_prop = Iri::parse("urn:eigenius:program:function").unwrap();
+
+    // Constructor application special case (Phase 11b step 9): when the
+    // function string is a ctor IRI of the form `<parent>:<ctor>`,
+    // emit `Exp::InductiveCtor` directly. IRI-keyed lookup — no
+    // layer-wide name search.
+    //
+    // The component_argument slot is ignored on this path. Phase 11b
+    // restricts ESL constructor application to single-argument ctors;
+    // multi-arg ctors need either a different surface form or pair-
+    // decomposition logic (deferred).
+    if let Some(Value::String(s)) = resource.get(&func_prop) {
+        if let Some((decl, idx, arity)) = resolve_ctor_iri(s, layer) {
+            if arity == 1 {
+                let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
+                let arg_exp = match resource.get(&arg_prop) {
+                    Some(Value::Embedded(r)) => parse_expression(r, layer)?,
+                    Some(Value::String(s)) => Exp::Var(s.clone()),
+                    _ => {
+                        return Err(format!(
+                            "constructor `{}.{}` application requires an argument",
+                            decl.name, decl.ctors[idx].name
+                        ))
+                    }
+                };
+                let ctor_name = decl.ctors[idx].name.clone();
+                return Ok(Exp::InductiveCtor(decl, ctor_name, vec![arg_exp]));
+            }
+        }
+    }
+
     let func_exp = match resource.get(&func_prop) {
         Some(Value::String(s)) => {
             // Component reference — treat as a variable
@@ -130,8 +205,19 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 }
 
 /// x
-fn parse_var(resource: &Resource) -> Result<Exp, String> {
+fn parse_var(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let name = get_string(resource, "urn:eigenius:program:name")?;
+    // Constructor reference special case (Phase 11b step 9): if the
+    // var name is a ctor IRI of the form `<parent>:<ctor>`, emit
+    // `Exp::InductiveCtor` rather than a free variable. The ESL
+    // compiler resolves bare names against its per-file ctor table
+    // and writes the canonical IRI here.
+    if let Some((decl, idx, arity)) = resolve_ctor_iri(&name, layer) {
+        if arity == 0 {
+            let ctor_name = decl.ctors[idx].name.clone();
+            return Ok(Exp::InductiveCtor(decl, ctor_name, Vec::new()));
+        }
+    }
     Ok(Exp::Var(name))
 }
 
@@ -427,5 +513,186 @@ mod tests {
         let layer = crate::layer::LayerBuilder::new("empty", None).build();
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Pair(_, _)));
+    }
+
+    // --- Constructor application resolution (Phase 11b step 9) ---
+
+    use crate::layer::LayerBuilder;
+    use crate::ontology::eigon_json;
+    use std::sync::Arc;
+
+    fn build_layer_with_esl(esl_source: &str) -> Arc<crate::layer::Layer> {
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build());
+
+        let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
+        let mut user_builder = LayerBuilder::new("user", Some(core));
+        for r in user_resources {
+            user_builder.add_resource(r).unwrap();
+        }
+        Arc::new(user_builder.build())
+    }
+
+    /// Helper: parse a program by its IRI from a layer, return its body.
+    fn parse_program_body(program_iri: &str, layer: &crate::layer::Layer) -> Exp {
+        let iri = Iri::parse(program_iri).unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, _typ) = parse_program(resource, layer).expect("parse_program");
+        match term {
+            Exp::Lam(_, body) => *body,
+            other => panic!("expected Lam, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nullary_constructor_resolves_to_inductive_ctor() {
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:zero_program : core:string -> ex:Nat {
+                zero
+            }
+            "#,
+        );
+        let body = parse_program_body("urn:eigenius:example:zero_program", &layer);
+        match body {
+            Exp::InductiveCtor(decl, name, args) => {
+                assert_eq!(decl.name, "Nat");
+                assert_eq!(name, "zero");
+                assert!(args.is_empty());
+            }
+            other => panic!("expected InductiveCtor(zero), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unary_constructor_resolves_to_inductive_ctor_application() {
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:two : core:string -> ex:Nat {
+                succ(succ(zero))
+            }
+            "#,
+        );
+        let body = parse_program_body("urn:eigenius:example:two", &layer);
+        // Outer: succ(...)
+        let (outer_decl, outer_name, mut outer_args) = match body {
+            Exp::InductiveCtor(d, n, a) => (d, n, a),
+            other => panic!("expected outer InductiveCtor, got {other:?}"),
+        };
+        assert_eq!(outer_decl.name, "Nat");
+        assert_eq!(outer_name, "succ");
+        assert_eq!(outer_args.len(), 1);
+        // Middle: succ(zero)
+        let (mid_decl, mid_name, mut mid_args) = match outer_args.remove(0) {
+            Exp::InductiveCtor(d, n, a) => (d, n, a),
+            other => panic!("expected middle InductiveCtor, got {other:?}"),
+        };
+        assert_eq!(mid_decl.name, "Nat");
+        assert_eq!(mid_name, "succ");
+        assert_eq!(mid_args.len(), 1);
+        // Innermost: zero
+        match mid_args.remove(0) {
+            Exp::InductiveCtor(d, n, a) => {
+                assert_eq!(d.name, "Nat");
+                assert_eq!(n, "zero");
+                assert!(a.is_empty());
+            }
+            other => panic!("expected zero InductiveCtor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn constructor_program_type_checks_and_evaluates() {
+        // End-to-end: ESL → resources → layer → parse_program → check → eval.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:two : core:string -> ex:Nat {
+                succ(succ(zero))
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:two").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+
+        // Type-check: term should have type `typ` in an empty context
+        // with the layer available for class resolution.
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+
+        // Evaluate by applying to a dummy string input.
+        let input_val = crate::nbe::val::Val::Unit; // placeholder; type unused at runtime
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val.app(input_val).expect("apply program");
+
+        // Result should be succ(succ(zero)) — InductiveVal nested twice.
+        match result {
+            crate::nbe::val::Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } => {
+                assert_eq!(decl.name, "Nat");
+                assert_eq!(ctor_name, "succ");
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    crate::nbe::val::Val::InductiveVal {
+                        decl: d2,
+                        ctor_name: n2,
+                        args: a2,
+                    } => {
+                        assert_eq!(d2.name, "Nat");
+                        assert_eq!(n2, "succ");
+                        match &a2[0] {
+                            crate::nbe::val::Val::InductiveVal {
+                                decl: d3,
+                                ctor_name: n3,
+                                args: a3,
+                            } => {
+                                assert_eq!(d3.name, "Nat");
+                                assert_eq!(n3, "zero");
+                                assert!(a3.is_empty());
+                            }
+                            other => panic!("expected innermost zero, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected middle succ, got {other:?}"),
+                }
+            }
+            other => panic!("expected outer succ InductiveVal, got {other:?}"),
+        }
     }
 }

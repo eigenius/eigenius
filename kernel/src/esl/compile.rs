@@ -14,9 +14,17 @@ use std::collections::BTreeMap;
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
 
-    // Register namespace aliases
+    // Register namespace aliases.
     for ns in &file.namespaces {
         compiler.namespaces.insert(ns.alias.clone(), ns.uri.clone());
+    }
+
+    // First pass: collect every declared inductive constructor so that
+    // bare-name references in expression position resolve to the
+    // canonical ctor IRI (Phase 11b step 9). Conflicts within a file
+    // are caught here rather than at use time.
+    if let Err(e) = compiler.collect_ctor_table(file) {
+        return Err(vec![e]);
     }
 
     let mut errors = Vec::new();
@@ -38,13 +46,45 @@ pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
 
 struct Compiler {
     namespaces: BTreeMap<String, String>,
+    /// Per-file constructor table: short ctor name → full ctor IRI.
+    /// Built in `collect_ctor_table` before any declaration is compiled,
+    /// so expression compilation can resolve bare ctor references.
+    ctors: BTreeMap<String, String>,
 }
 
 impl Compiler {
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
+            ctors: BTreeMap::new(),
         }
+    }
+
+    /// Walk every `data` declaration in the file and register its
+    /// constructors in the ctor table. Each ctor's IRI is derived from
+    /// the parent inductive's IRI plus its local name (`urn:…:Nat:succ`).
+    /// Duplicate ctor names within a file are an error.
+    fn collect_ctor_table(&mut self, file: &ast::File) -> Result<(), EslError> {
+        for decl in &file.declarations {
+            if let ast::Declaration::Data(d) = decl {
+                let parent_iri = self.resolve(&d.name)?;
+                for ctor in &d.ctors {
+                    let ctor_iri = format!("{parent_iri}:{}", ctor.name);
+                    if let Some(existing) = self.ctors.insert(ctor.name.clone(), ctor_iri) {
+                        return Err(EslError::compiler(
+                            Some(ctor.pos.clone()),
+                            format!(
+                                "constructor `{}` declared in `{}` collides with an earlier \
+                                 declaration whose IRI is `{existing}` — rename one of them \
+                                 (qualified ctor references in source are a future addition)",
+                                ctor.name, parent_iri
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Resolve a qualified name to a full IRI string.
@@ -170,11 +210,19 @@ impl Compiler {
             .collect();
         r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
 
+        let parent_iri_str = self.resolve(&decl.name)?;
         let ctors: Result<Vec<Value>, EslError> = decl
             .ctors
             .iter()
             .map(|c| {
-                let mut cr = Resource::new_embedded();
+                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name);
+                let ctor_iri = Iri::parse(&ctor_iri_str).map_err(|e| {
+                    EslError::compiler(
+                        Some(c.pos.clone()),
+                        format!("invalid ctor IRI `{ctor_iri_str}`: {e}"),
+                    )
+                })?;
+                let mut cr = Resource::new(ctor_iri);
                 set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
                 cr.set(iri(wk::CTOR_NAME), Value::String(c.name.clone()));
                 let arg_types: Result<Vec<Value>, EslError> = c
@@ -510,13 +558,21 @@ impl Compiler {
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Apply");
 
-                // Resolve function name — try as qualified, fall back to component shorthand
-                let func_iri = match self.resolve(function) {
-                    Ok(iri_str) => iri_str,
-                    Err(_) => {
-                        // Bare name — try as a built-in component
+                // Resolve function name. Order:
+                // 1. Bare name matching a declared inductive ctor → ctor IRI
+                //    (Phase 11b step 9). Takes precedence over component
+                //    shorthand so user ctors can never be accidentally
+                //    routed through the component dispatcher.
+                // 2. Qualified name → namespace-resolved IRI.
+                // 3. Bare name with no ctor match → component shorthand.
+                let func_iri = if function.namespace.is_none() {
+                    if let Some(ctor_iri) = self.ctors.get(&function.name) {
+                        ctor_iri.clone()
+                    } else {
                         format!("urn:eigenius:program:components:{}", function.name)
                     }
+                } else {
+                    self.resolve(function)?
                 };
                 r.set(
                     iri("urn:eigenius:program:function"),
@@ -543,10 +599,16 @@ impl Compiler {
             ast::Expr::Var { name, .. } => {
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Var");
-                r.set(
-                    iri("urn:eigenius:program:name"),
-                    Value::String(name.clone()),
-                );
+                // Bare name matching a declared ctor → ctor IRI as the
+                // var name (Phase 11b step 9). The expression builder
+                // recognises the IRI shape and produces an
+                // `Exp::InductiveCtor` with no arguments.
+                let resolved = self
+                    .ctors
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone());
+                r.set(iri("urn:eigenius:program:name"), Value::String(resolved));
                 Ok(r)
             }
 
@@ -1407,6 +1469,12 @@ mod tests {
             Value::Embedded(r) => r.as_ref(),
             _ => panic!("ctor must be embedded"),
         };
+        // Each ctor carries an IRI derived from parent + local name
+        // (Phase 11b step 9 — IRI as canonical identity).
+        assert_eq!(
+            zero.id().map(|i| i.as_str()),
+            Some("urn:eigenius:example:Nat:zero")
+        );
         assert_eq!(
             zero.get(&iri("urn:eigenius:core:ctor_name"))
                 .and_then(|v| v.as_str()),
@@ -1423,6 +1491,10 @@ mod tests {
             Value::Embedded(r) => r.as_ref(),
             _ => panic!("ctor must be embedded"),
         };
+        assert_eq!(
+            succ.id().map(|i| i.as_str()),
+            Some("urn:eigenius:example:Nat:succ")
+        );
         assert_eq!(
             succ.get(&iri("urn:eigenius:core:ctor_name"))
                 .and_then(|v| v.as_str()),
@@ -1560,5 +1632,31 @@ mod tests {
             "ESL data should have DeclaredResource in is_a"
         );
         assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    #[test]
+    fn ctor_name_collision_within_a_file_is_rejected() {
+        // Two inductives both declaring `mk` — the per-file ctor table
+        // catches the collision at compile time so bare references can
+        // be unambiguously resolved later.
+        let result = esl::compile(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Foo {
+                mk,
+            }
+
+            data ex:Bar {
+                mk,
+            }
+            "#,
+        );
+        let err = result.expect_err("collision must be rejected");
+        let msg = err[0].message.clone();
+        assert!(
+            msg.contains("constructor `mk`") && msg.contains("collides"),
+            "unexpected error: {msg}"
+        );
     }
 }
