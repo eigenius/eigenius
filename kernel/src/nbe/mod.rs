@@ -12,5 +12,6 @@ pub mod eval;
 pub mod positivity;
 pub mod readback;
 pub mod recursor;
+pub mod sized;
 pub mod term;
 pub mod val;
