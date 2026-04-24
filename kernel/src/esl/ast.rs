@@ -280,6 +280,38 @@ pub enum Expr {
     /// Values are ordered — the order must match the declared
     /// observations of the target codata type.
     CoRecord { fields: Vec<CoField>, pos: Position },
+
+    /// `match expr : T { ctor -> body; ctor(x, y) -> body; ... }`
+    /// (Phase 11b step 11, D19 §10).
+    ///
+    /// Pattern-matches a value of an inductive type. Each arm names
+    /// a constructor and (optionally) binds variables for its
+    /// arguments. The `result_type` annotation is the type of every
+    /// arm body — required for now (motive inference is a future
+    /// extension).
+    ///
+    /// Desugars in the kernel-side expression builder to
+    /// `Exp::InductiveRec` with motive `λ_. result_type` and one
+    /// minor per arm (wrapped in lambdas for the bindings + IH
+    /// lambdas for recursive args).
+    Match {
+        scrutinee: Box<Expr>,
+        result_type: QualifiedName,
+        arms: Vec<MatchArm>,
+        pos: Position,
+    },
+}
+
+/// One arm of a `match` expression.
+///
+/// Bindings are positional and must match the constructor's arity.
+/// Use `_` for arguments that are not referenced in the body.
+#[derive(Debug)]
+pub struct MatchArm {
+    pub ctor_name: String,
+    pub bindings: Vec<String>,
+    pub body: Expr,
+    pub pos: Position,
 }
 
 /// A single copattern definition in a corecord: `obs = body`.

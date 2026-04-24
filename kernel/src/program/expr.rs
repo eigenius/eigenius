@@ -16,6 +16,7 @@ const CTOR_APPLY: &str = "urn:eigenius:program:CtorApply";
 const VAR: &str = "urn:eigenius:program:Var";
 const LAMBDA: &str = "urn:eigenius:program:Lambda";
 const CASE: &str = "urn:eigenius:program:Case";
+const MATCH: &str = "urn:eigenius:program:Match";
 const PAIR: &str = "urn:eigenius:program:Pair";
 const CONSTRUCT: &str = "urn:eigenius:program:Construct";
 const PROJECT: &str = "urn:eigenius:program:Project";
@@ -64,6 +65,7 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
         VAR => parse_var(resource, layer),
         LAMBDA => parse_lambda(resource, layer),
         CASE => parse_case(resource, layer),
+        MATCH => parse_match(resource, layer),
         PAIR => parse_pair(resource, layer),
         CONSTRUCT => parse_construct(resource, layer),
         PROJECT => parse_project(resource, layer),
@@ -279,6 +281,192 @@ fn parse_case(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     // case e of branches → App(Case(branches), e)
     let case_fn = Exp::Case(branches);
     Ok(Exp::App(Box::new(case_fn), Box::new(scrutinee_exp)))
+}
+
+/// `match scrutinee : T { ctor -> body; ctor(bindings) -> body; ... }`
+/// (Phase 11b step 11, D19 §10).
+///
+/// Desugars to `Exp::InductiveRec` with:
+/// - **motive**: `λ_:I. T` — constant function returning the
+///   user-annotated result type. Motive inference is a future
+///   extension.
+/// - **minors**: one per constructor in the inductive, in declaration
+///   order. Each minor is the matching arm's body wrapped in lambdas
+///   for the bindings and (anonymous) lambdas for any IH arguments
+///   the recursor produces for recursive constructor arguments.
+///
+/// Surfaces structural errors at parse time:
+/// - non-exhaustive matches (missing case for some declared ctor)
+/// - duplicate arms (two arms for the same ctor)
+/// - arm referencing an unknown ctor of the parent inductive
+/// - binding count mismatch (e.g. `cons(x)` for a 2-arg `cons`)
+fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
+    use std::collections::BTreeMap;
+
+    let scrutinee_resource = get_embedded(resource, "urn:eigenius:program:scrutinee")?;
+    let scrutinee_exp = parse_expression(&scrutinee_resource, layer)?;
+
+    let result_type_iri = get_iri(resource, "urn:eigenius:program:result_type")?;
+    let result_type_val = resolve_class_type(&result_type_iri, layer)?;
+
+    let arms_prop = Iri::parse("urn:eigenius:program:arms").unwrap();
+    let arms_arr = match resource.get(&arms_prop) {
+        Some(Value::Array(arr)) => arr,
+        _ => return Err("Match: missing or non-array `arms`".to_string()),
+    };
+    if arms_arr.is_empty() {
+        return Err("Match: must have at least one arm".to_string());
+    }
+
+    // Decode each arm into (ctor_iri, bindings, body).
+    let mut arms_by_ctor: BTreeMap<String, (Vec<String>, Exp, Position)> = BTreeMap::new();
+    let mut parent_iri_str: Option<String> = None;
+    for entry in arms_arr {
+        let ar = match entry {
+            Value::Embedded(r) => r.as_ref(),
+            _ => return Err("Match arm must be embedded".to_string()),
+        };
+        let ctor_iri = get_string(ar, "urn:eigenius:program:ctor")?;
+        let (parent_str, ctor_local) = ctor_iri.rsplit_once(':').ok_or_else(|| {
+            format!("Match arm ctor IRI `{ctor_iri}` is not in `<parent>:<ctor>` form")
+        })?;
+        // All arms must address the same parent inductive.
+        match &parent_iri_str {
+            Some(existing) if existing != parent_str => {
+                return Err(format!(
+                    "Match arms reference different inductives: `{existing}` vs `{parent_str}`"
+                ))
+            }
+            None => parent_iri_str = Some(parent_str.to_string()),
+            _ => {}
+        }
+        let bindings_arr = match ar.get(&Iri::parse("urn:eigenius:program:bindings").unwrap()) {
+            Some(Value::Array(arr)) => arr,
+            _ => return Err("Match arm missing `bindings` array".to_string()),
+        };
+        let bindings: Result<Vec<String>, String> = bindings_arr
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                _ => Err("Match arm binding must be a string".to_string()),
+            })
+            .collect();
+        let bindings = bindings?;
+        let body_resource = get_embedded(ar, "urn:eigenius:program:body")?;
+        let body = parse_expression(&body_resource, layer)?;
+        if arms_by_ctor
+            .insert(ctor_local.to_string(), (bindings, body, Position::Unknown))
+            .is_some()
+        {
+            return Err(format!("Match has duplicate arms for ctor `{ctor_local}`"));
+        }
+    }
+
+    let parent_iri_str = parent_iri_str.expect("at least one arm guarantees this");
+    let parent_iri = Iri::parse(&parent_iri_str)
+        .map_err(|e| format!("invalid match arm parent IRI `{parent_iri_str}`: {e}"))?;
+    let parent_resource = layer
+        .resolve(&parent_iri)
+        .ok_or_else(|| format!("match arm parent inductive `{parent_iri_str}` not in layer"))?;
+    if !is_inductive_type(parent_resource) {
+        return Err(format!(
+            "match arm parent `{parent_iri_str}` is not an inductive type"
+        ));
+    }
+    let parent_val = resolve_inductive_type(&parent_iri, parent_resource, layer)?;
+    let decl: Arc<InductiveDecl> = match parent_val {
+        Val::InductiveType { decl, .. } => decl,
+        _ => unreachable!("is_inductive_type checked"),
+    };
+
+    // Reject arms that reference a ctor not in the parent inductive.
+    for ctor_name in arms_by_ctor.keys() {
+        if !decl.ctors.iter().any(|c| &c.name == ctor_name) {
+            return Err(format!(
+                "Match arm references ctor `{}.{ctor_name}` which is not declared in that inductive",
+                decl.name
+            ));
+        }
+    }
+
+    // Build minors in declaration order; require every ctor has an arm.
+    let mut minors = Vec::with_capacity(decl.ctors.len());
+    for ctor in &decl.ctors {
+        let (bindings, body, _) = arms_by_ctor.remove(&ctor.name).ok_or_else(|| {
+            format!(
+                "non-exhaustive match: missing case for `{}.{}`",
+                decl.name, ctor.name
+            )
+        })?;
+        let arity = ctor_arity(
+            &decl,
+            decl.ctors.iter().position(|c| c.name == ctor.name).unwrap(),
+        );
+        if bindings.len() != arity {
+            return Err(format!(
+                "match arm `{}.{}` expects {arity} bindings, got {}",
+                decl.name,
+                ctor.name,
+                bindings.len()
+            ));
+        }
+        // Identify which binders are recursive (their type is the
+        // inductive itself) — those produce IH lambdas in the minor.
+        let recursive_count = recursive_arg_count(&decl, &ctor.typ);
+        let mut minor = body;
+        // Wrap IH lambdas first so they end up innermost.
+        for _ in 0..recursive_count {
+            minor = Exp::Lam(Patt::Unit, Box::new(minor));
+        }
+        // Wrap binding lambdas in reverse so the first binding is outermost.
+        for binding in bindings.iter().rev() {
+            let patt = if binding == "_" {
+                Patt::Unit
+            } else {
+                Patt::Var(binding.clone())
+            };
+            minor = Exp::Lam(patt, Box::new(minor));
+        }
+        minors.push(minor);
+    }
+
+    let motive_body = crate::nbe::readback::readback_val(0, &result_type_val);
+    let motive = Exp::Lam(Patt::Unit, Box::new(motive_body));
+
+    Ok(Exp::InductiveRec {
+        decl,
+        motive: Box::new(motive),
+        minors,
+        major: Box::new(scrutinee_exp),
+    })
+}
+
+/// Count the recursive (self-referential) constructor argument
+/// binders in a constructor's Π-telescope, skipping the parameter
+/// prefix.
+fn recursive_arg_count(decl: &InductiveDecl, ctor_typ: &Exp) -> usize {
+    let mut current = ctor_typ;
+    let mut params_to_skip = decl.params.len();
+    let mut count = 0;
+    while let Exp::Pi(_, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else if matches!(dom.as_ref(), Exp::InductiveType(d, _) if d.name == decl.name) {
+            count += 1;
+        }
+        current = body;
+    }
+    count
+}
+
+/// Stub Position for embedded match arms (we don't preserve source
+/// positions across the resource boundary today).
+#[derive(Debug, Clone, Copy)]
+struct Position;
+
+impl Position {
+    #[allow(non_upper_case_globals)]
+    const Unknown: Self = Self;
 }
 
 /// (first, second)
@@ -948,5 +1136,227 @@ mod tests {
         assert!(body
             .get(&Iri::parse("urn:eigenius:program:component_argument").unwrap())
             .is_some());
+    }
+
+    // --- Match expressions (Phase 11b step 11) ---
+
+    #[test]
+    fn match_on_nat_simple_zero_case_evaluates() {
+        // Match `zero` returning Nat: zero -> succ(zero), succ(_) -> zero.
+        // For input zero: should return succ(zero).
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:flip : core:string -> ex:Nat {
+                match zero returning ex:Nat {
+                    zero -> succ(zero);
+                    succ(_) -> zero;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:flip").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val
+            .app(crate::nbe::val::Val::Unit)
+            .expect("apply program");
+        // Result: succ(zero)
+        match result {
+            crate::nbe::val::Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } => {
+                assert_eq!(decl.name, "Nat");
+                assert_eq!(ctor_name, "succ");
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    crate::nbe::val::Val::InductiveVal { ctor_name, .. } => {
+                        assert_eq!(ctor_name, "zero");
+                    }
+                    other => panic!("expected zero arg, got {other:?}"),
+                }
+            }
+            other => panic!("expected succ InductiveVal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_on_nat_succ_case_binds_predecessor() {
+        // Match `succ(zero)` returning Nat: zero -> zero, succ(n) -> n.
+        // For input succ(zero): the n binding is zero, so result is zero.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:pred_of_one : core:string -> ex:Nat {
+                match succ(zero) returning ex:Nat {
+                    zero -> zero;
+                    succ(n) -> n;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:pred_of_one").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val
+            .app(crate::nbe::val::Val::Unit)
+            .expect("apply program");
+        match result {
+            crate::nbe::val::Val::InductiveVal { ctor_name, .. } => {
+                assert_eq!(ctor_name, "zero", "succ(zero) → pred → zero");
+            }
+            other => panic!("expected zero, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_on_natlist_with_multi_arg_pattern() {
+        // Match a 2-element list returning Nat:
+        //   nil -> zero
+        //   cons(x, _) -> x
+        // For cons(succ(zero), nil): should bind x = succ(zero), return succ(zero).
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            data ex:NatList {
+                nil,
+                cons(ex:Nat, ex:NatList),
+            }
+
+            program ex:head_or_zero : core:string -> ex:Nat {
+                match cons(succ(zero), nil) returning ex:Nat {
+                    nil -> zero;
+                    cons(x, _) -> x;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:head_or_zero").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val
+            .app(crate::nbe::val::Val::Unit)
+            .expect("apply program");
+        // Result: succ(zero)
+        match result {
+            crate::nbe::val::Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } => {
+                assert_eq!(decl.name, "Nat");
+                assert_eq!(ctor_name, "succ");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("expected succ(zero), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_non_exhaustive_is_rejected() {
+        // Missing the `succ` case → parse_program should fail.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:bad : core:string -> ex:Nat {
+                match zero returning ex:Nat {
+                    zero -> zero;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let err = parse_program(resource, &layer).unwrap_err();
+        assert!(
+            err.contains("non-exhaustive"),
+            "expected non-exhaustive error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn match_arm_binding_count_mismatch_is_rejected() {
+        // `cons(x)` for 2-arg cons should error.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            data ex:NatList {
+                nil,
+                cons(ex:Nat, ex:NatList),
+            }
+
+            program ex:bad : core:string -> ex:Nat {
+                match nil returning ex:Nat {
+                    nil -> zero;
+                    cons(x) -> x;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let err = parse_program(resource, &layer).unwrap_err();
+        assert!(
+            err.contains("expects 2 bindings"),
+            "expected binding count error, got: {err}"
+        );
     }
 }

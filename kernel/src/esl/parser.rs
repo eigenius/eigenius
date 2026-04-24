@@ -773,6 +773,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             TokenKind::Let => self.parse_let(),
             TokenKind::Case => self.parse_case(),
+            TokenKind::Match => self.parse_match(),
             TokenKind::Corecord => self.parse_corecord(),
             TokenKind::Backslash | TokenKind::Lambda => self.parse_lambda(),
             _ => self.parse_apply_or_atom(),
@@ -872,6 +873,89 @@ impl<'a> Parser<'a> {
         Ok(Expr::Case {
             scrutinee: Box::new(scrutinee),
             branches,
+            pos,
+        })
+    }
+
+    /// `match e returning T { ctor -> body; ctor(x, y) -> body; ... }`
+    /// (Phase 11b step 11, D19 §10).
+    ///
+    /// `returning T` annotates the result type of every arm body —
+    /// required for now (motive inference is a future extension).
+    /// We use a dedicated keyword rather than `:` because the
+    /// scrutinee is an arbitrary expression that may itself end in
+    /// a qualified-name reference; `expr : T` is grammatically
+    /// ambiguous when `expr` parses greedily for namespaced names.
+    fn parse_match(&mut self) -> Result<Expr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Match)?;
+        let scrutinee = self.parse_apply_or_atom()?;
+        self.expect(&TokenKind::Returning)?;
+        let result_type = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut arms = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            arms.push(self.parse_match_arm()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        if arms.is_empty() {
+            return Err(EslError::parser(
+                Some(pos),
+                "match expression must have at least one arm".to_string(),
+            ));
+        }
+
+        Ok(Expr::Match {
+            scrutinee: Box::new(scrutinee),
+            result_type,
+            arms,
+            pos,
+        })
+    }
+
+    /// One arm of a match: `ctor -> body;` or `ctor(x, y, ...) -> body;`.
+    fn parse_match_arm(&mut self) -> Result<MatchArm, EslError> {
+        let pos = self.current_pos();
+        let ctor_name = self.expect_ident()?;
+        let bindings = if self.at(&TokenKind::LParen) {
+            self.advance();
+            let mut bindings = Vec::new();
+            while !self.at(&TokenKind::RParen) && !self.at_eof() {
+                bindings.push(self.expect_ident()?);
+                if self.at(&TokenKind::Comma) {
+                    self.advance();
+                } else if !self.at(&TokenKind::RParen) {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!(
+                            "expected ',' or ')' in match arm bindings, found {:?}",
+                            self.peek()
+                        ),
+                    ));
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+            if bindings.is_empty() {
+                return Err(EslError::parser(
+                    Some(pos.clone()),
+                    format!(
+                        "empty binding list — write `{ctor_name}` for nullary instead of `{ctor_name}()`"
+                    ),
+                ));
+            }
+            bindings
+        } else {
+            Vec::new()
+        };
+        self.expect(&TokenKind::Arrow)?;
+        let body = self.parse_expr()?;
+        self.expect_semicolon()?;
+        Ok(MatchArm {
+            ctor_name,
+            bindings,
+            body,
             pos,
         })
     }
