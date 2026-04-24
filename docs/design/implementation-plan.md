@@ -85,7 +85,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
 | 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
-| 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
+| 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓, 11d ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
@@ -640,13 +640,17 @@ The phase decomposes into two milestones that are separately reviewable:
 - 8 new tests: default-Undecidable (no registry), Holds→Refl, Fails→failing neutral, Undecidable→passthrough neutral, unregistered-IRI→Undecidable, scalar/list/InductiveVal arg roundtrip through the bridge, and a full check-time integration test.
 - **Explicit non-goals shipped as-is:** no ESL surface syntax for institution-dispatched constraints yet; no counter-examples on `Fails`. Both are additive and deferrable until a real institution drives the need.
 
-### Phase 11d — `Comorphism` as an ontology class — ~1 week
+### Phase 11d — `Comorphism` as an ontology class — ✓
 
-**Goal:** Formalise cross-institution translation as a resource class (not just a conceptual pattern). Required for life-science §11 cross-institution claims AND for Phase 14's reconciliation primitive.
+**Status:** Complete.
 
-- Define `urn:eigenius:institution:Comorphism` class with properties for source institution, target institution, the translation procedure (institution-registered decision procedure from Phase 11c), and any required structural properties.
-- Examples in the life-science domain: docking-ΔG → assay-IC₅₀, ADMET → PK.
-- Basic kernel support: recognise Comorphism resources during institution registration so a fiber reasoner can declare its outgoing comorphisms.
+- `urn:eigenius:institution:Comorphism` class in the core ontology with required properties `source_institution`, `target_institution`, `translation_procedure`.
+- `FiberDeclaration.comorphism_types: Vec<Resource>` — institutions declare their outgoing comorphisms at registration.
+- `InstitutionRegistry.comorphism_dispatch: BTreeMap<Iri, Iri>` maps both Comorphism IRI and its `translation_procedure` IRI to the declaring institution; `institution_for_comorphism()` / `comorphism_institution_iri()` accessors.
+- `FiberReasoner::translate(comorphism_iri, source, ctx) -> Result<Resource, _>` method with default error. Mirrors Phase 11c's `decide` pattern.
+- `Exp::InstitutionInvoke { comorphism_iri, source }` kernel AST node with eval arm dispatching via `EvalCtx`'s institution registry. Without a registry, produces a passthrough neutral — analogous to Phase 11c's undecidable fallback. Readback not added (the expression evaluates or produces a neutral; normal form readback isn't required for this variant yet).
+- 6 new tests: comorphism dispatch-table population (both IRI and procedure IRI), translate dispatch, default-translate-UnknownType error, eval-through-registry, no-registry-passthrough, unknown-comorphism-error.
+- **Explicit non-goals shipped as-is:** no ESL surface syntax for `InstitutionInvoke`; no comorphism composition (ρ₁ ∘ ρ₂); no backward translation; no typed translation signatures. All additive; Phase 14 reconciliation can invoke translate via Rust directly without any of these.
 
 ### Phase 11 — Test plan
 

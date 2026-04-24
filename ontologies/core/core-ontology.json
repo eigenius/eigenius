@@ -623,5 +623,40 @@
     "urn:eigenius:core:short_name": "param_kind",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
+  },
+  {
+    "@id": "urn:eigenius:institution:Comorphism",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A cross-institution translation (D10 §6, Phase 11d). Witnesses that resources in a source institution can be translated into resources in a target institution. Referenced by kernel `Exp::InstitutionInvoke` at invocation sites; used by Phase 14 layer reconciliation as a merge witness. Institutions declare their outgoing comorphisms via `FiberDeclaration.comorphism_types`; the institution implements `FiberReasoner::translate(comorphism_iri, source, ctx)`.",
+    "urn:eigenius:core:short_name": "Comorphism",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:source_institution",
+      "urn:eigenius:institution:target_institution",
+      "urn:eigenius:institution:translation_procedure"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:source_institution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The source institution IRI — the institution whose resources this comorphism translates FROM.",
+    "urn:eigenius:core:short_name": "source_institution",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:target_institution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The target institution IRI — the institution whose resources this comorphism translates TO.",
+    "urn:eigenius:core:short_name": "target_institution",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
+  },
+  {
+    "@id": "urn:eigenius:institution:translation_procedure",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the translation procedure — the identifier the source institution's `FiberReasoner::translate` method dispatches on. Conventionally the same IRI as the Comorphism resource itself, but callers may register multiple comorphisms that share a procedure.",
+    "urn:eigenius:core:short_name": "translation_procedure",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
   }
 ]

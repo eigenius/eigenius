@@ -190,6 +190,9 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         // enclosing inductive (different sort), so we skip the
         // decl.name check and scan args only.
         Exp::CodataType(_, args) => args.iter().any(|a| has_ind_occurrence(decl, a)),
+        // Cross-institution translation — scan the source
+        // expression; the comorphism IRI is opaque.
+        Exp::InstitutionInvoke { source, .. } => has_ind_occurrence(decl, source),
         Exp::CoRecord(fields) => fields.iter().any(|f| has_ind_occurrence(decl, &f.body)),
         Exp::Observe(e, _) => has_ind_occurrence(decl, e),
         Exp::Map(f, c) => has_ind_occurrence(decl, f) || has_ind_occurrence(decl, c),

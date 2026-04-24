@@ -1235,6 +1235,7 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
             }
             check_guarded(v, forbidden)
         }
+        Exp::InstitutionInvoke { source, .. } => check_guarded(source, forbidden),
         Exp::DecEq(a, x, y) => {
             check_guarded(a, forbidden)?;
             check_guarded(x, forbidden)?;
@@ -3904,13 +3905,7 @@ mod tests {
 
     impl FiberReasoner for Arc<FakeInstitution> {
         fn fiber_declaration(&self) -> FiberDeclaration {
-            FiberDeclaration {
-                institution_iri: self.iri.clone(),
-                name: "FakeInstitution".to_string(),
-                morphism_types: Vec::new(),
-                query_types: Vec::new(),
-                structural_properties: Vec::new(),
-            }
+            FiberDeclaration::minimal(self.iri.clone(), "FakeInstitution")
         }
 
         fn query(
