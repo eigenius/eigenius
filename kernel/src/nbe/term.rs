@@ -215,7 +215,19 @@ pub enum PrimitiveType {
 /// do not duplicate the telescope. Later phases may migrate this into
 /// a top-level environment (nanoda_lib style); for now the inline
 /// representation keeps the change local to the NbE evaluator.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Equality is defined by `name` alone — not structural. This matches
+/// the name-based dispatch the kernel uses everywhere (iota reduction,
+/// type checker arm, cross-inductive references). Semantically two
+/// inductive declarations with the same name are the same inductive
+/// (we don't support overloading). The practical payoff: a "stub"
+/// `Arc<InductiveDecl>` carrying just a name can stand in for the
+/// full declaration at use sites where the full ctor list isn't yet
+/// available (self-references during ctor-type construction, cross-
+/// inductive argument-type references) without breaking type-checker
+/// equality. This was originally worked around with clever shared-Arc
+/// tricks; the name-based `PartialEq` is the proper structural fix.
+#[derive(Debug, Clone)]
 pub struct InductiveDecl {
     pub name: Name,
     /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
@@ -223,6 +235,12 @@ pub struct InductiveDecl {
     /// Universe of the type former — typically `Exp::Set` or `Exp::Type(n)`.
     pub sort: Exp,
     pub ctors: Vec<InductiveCtorDecl>,
+}
+
+impl PartialEq for InductiveDecl {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
 }
 
 /// A single constructor within an `InductiveDecl`.

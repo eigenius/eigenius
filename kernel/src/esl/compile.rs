@@ -895,6 +895,69 @@ impl Compiler {
                 r.set(iri("urn:eigenius:program:cofields"), Value::Array(cofields));
                 Ok(r)
             }
+
+            ast::Expr::Match {
+                scrutinee,
+                result_type,
+                arms,
+                pos,
+            } => {
+                let mut r = Resource::new_embedded();
+                set_is_a(&mut r, "urn:eigenius:program:Match");
+
+                let scrutinee_r = self.compile_expr(scrutinee)?;
+                r.set(
+                    iri("urn:eigenius:program:scrutinee"),
+                    Value::Embedded(Box::new(scrutinee_r)),
+                );
+
+                let result_iri = self.resolve(result_type)?;
+                r.set(
+                    iri("urn:eigenius:program:result_type"),
+                    Value::String(result_iri),
+                );
+
+                let arm_resources: Result<Vec<Value>, EslError> = arms
+                    .iter()
+                    .map(|arm| {
+                        let ctor_iri = self.ctors.get(&arm.ctor_name).ok_or_else(|| {
+                            EslError::compiler(
+                                Some(arm.pos.clone()),
+                                format!(
+                                    "match arm references unknown constructor `{}` — \
+                                     not declared in any `data` block in this file",
+                                    arm.ctor_name
+                                ),
+                            )
+                        })?;
+                        let mut ar = Resource::new_embedded();
+                        set_is_a(&mut ar, "urn:eigenius:program:MatchArm");
+                        ar.set(
+                            iri("urn:eigenius:program:ctor"),
+                            Value::String(ctor_iri.clone()),
+                        );
+                        let bindings: Vec<Value> = arm
+                            .bindings
+                            .iter()
+                            .map(|b| Value::String(b.clone()))
+                            .collect();
+                        ar.set(iri("urn:eigenius:program:bindings"), Value::Array(bindings));
+                        let body_r = self.compile_expr(&arm.body)?;
+                        ar.set(
+                            iri("urn:eigenius:program:body"),
+                            Value::Embedded(Box::new(body_r)),
+                        );
+                        Ok(Value::Embedded(Box::new(ar)))
+                    })
+                    .collect();
+                r.set(
+                    iri("urn:eigenius:program:arms"),
+                    Value::Array(arm_resources?),
+                );
+
+                let _ = pos; // kept on AST for future diagnostics
+                Ok(r)
+            }
         }
     }
 

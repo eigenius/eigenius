@@ -20,6 +20,8 @@ pub enum TokenKind {
     // Expression keywords
     Let,
     Case,
+    Match,
+    Returning,
     Construct,
     Map,
     Reduce,
@@ -351,6 +353,8 @@ impl<'a> Lexer<'a> {
             // Expression keywords
             "let" => TokenKind::Let,
             "case" => TokenKind::Case,
+            "match" => TokenKind::Match,
+            "returning" => TokenKind::Returning,
             "Construct" => TokenKind::Construct,
             "map" => TokenKind::Map,
             "reduce" => TokenKind::Reduce,
