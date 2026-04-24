@@ -384,6 +384,13 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                 params: params?,
             })
         }
+        Exp::CodataType(decl, params) => {
+            let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
+            Ok(Val::CodataType {
+                decl: decl.clone(),
+                params: params?,
+            })
+        }
         Exp::InductiveCtor(decl, ctor_name, args) => {
             let args: Result<Vec<_>, _> = args.iter().map(&ev).collect();
             Ok(Val::InductiveVal {

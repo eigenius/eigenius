@@ -174,6 +174,20 @@ pub enum Exp {
     /// argument is `SizeInf`.
     SizeInf,
 
+    /// Applied codata type expression: `C(p₁, …, pₙ)` where `C` is
+    /// declared by an `Arc<CodataDecl>` and the `Vec<Exp>` supplies
+    /// the type arguments (including size arguments). Parallels
+    /// `Exp::InductiveType`.
+    ///
+    /// Observation types inside the referenced decl may contain
+    /// further `Exp::CodataType` values — in particular,
+    /// self-references of the form `Exp::CodataType(self_ref_stub,
+    /// new_args)` where `self_ref_stub` is an `Arc<CodataDecl>`
+    /// whose only load-bearing field is its name (PartialEq on
+    /// CodataDecl compares by name, so the stub unifies with the
+    /// full declaration at evaluation time).
+    CodataType(Arc<CodataDecl>, Vec<Exp>),
+
     /// Bounded size Π-type: `Π {i < upper}. body` — the function
     /// type of a sized function that takes a size argument strictly
     /// smaller than `upper`.
@@ -316,6 +330,33 @@ pub struct InductiveDecl {
 }
 
 impl PartialEq for InductiveDecl {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+/// Coinductive (codata) declaration — the parameterised analogue of
+/// the anonymous [`Exp::Codata`] form. Admits type parameters
+/// (including `Size` parameters for sized codata) and supports
+/// self-references in observation types via
+/// [`Exp::CodataType`] with a name-only stub `Arc<CodataDecl>`.
+///
+/// `PartialEq` is name-based — mirrors `InductiveDecl`. This is what
+/// lets an observation type declared as `Stream(A, j)` (encoded as
+/// `Exp::CodataType(stub, …)`) unify with the full declaration when
+/// the full decl is looked up through any `Arc<CodataDecl>` reference
+/// with the same name.
+#[derive(Debug, Clone)]
+pub struct CodataDecl {
+    pub name: Name,
+    /// Parameter telescope shared by every observation.
+    pub params: Vec<(Patt, Exp)>,
+    /// Universe of the type former.
+    pub sort: Exp,
+    pub observations: Vec<Observation>,
+}
+
+impl PartialEq for CodataDecl {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }

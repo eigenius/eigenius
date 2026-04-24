@@ -85,7 +85,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
 | 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
-| 11 | Type Theory Extensions | 11a ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
+| 11 | Type Theory Extensions | 11a ✓, 11b ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |

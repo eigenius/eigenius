@@ -229,6 +229,11 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         // step 5 will add parameter telescope verification.
         Exp::Inductive(decl) => crate::nbe::positivity::check_positivity(decl),
         Exp::InductiveType(_, _) => Ok(()),
+        // Applied codata type. Admitted as a type when the decl is
+        // already known valid; the declaration-site validation runs
+        // at ingest time via the ground resolver. We conservatively
+        // just accept, matching `InductiveType`'s behaviour.
+        Exp::CodataType(_, _) => Ok(()),
 
         a => check(ctx, a, &Val::Set),
     }
@@ -423,6 +428,10 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // Codata type formation: codata { ... } : Set
         (Exp::Codata(_), Val::Set) => check_type(ctx, exp),
         (Exp::Codata(_), Val::Type(_)) => check_type(ctx, exp),
+        // Parameterised codata — applied codata type expression.
+        (Exp::CodataType(_, _), Val::Set) | (Exp::CodataType(_, _), Val::Type(_)) => {
+            check_type(ctx, exp)
+        }
 
         // Inductive type formation (Phase 11b, D19).
         (Exp::Inductive(_), Val::Set) | (Exp::InductiveType(_, _), Val::Set) => {
@@ -467,6 +476,44 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             }
             for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
                 let t = eval(obs_typ, rho1).map_err(|e| e.to_string())?;
+                check(ctx, &field.body, &t)?;
+            }
+            Ok(())
+        }
+
+        // Corecord against a parameterised codata type (D19 self-ref
+        // path). Same flow as the anonymous variant, but the
+        // observations come from `decl.observations` and each
+        // observation's type is evaluated in an environment where
+        // the decl's type parameters are bound to the applied
+        // `params`. This is what lets a self-referential observation
+        // like `tail : Stream(A, j)` resolve to the concrete codata
+        // type when the corecord is checked against `Stream(A_val, i)`.
+        (Exp::CoRecord(fields), Val::CodataType { decl, params }) => {
+            // Self-references inside observation types evaluate to
+            // `Val::CodataType { stub_decl, params }` where the stub
+            // has empty observations. Rehydrate the full decl from
+            // the layer when we encounter a stub — analogous to how
+            // `resolve_class_cached` threads EigonClass references.
+            let full_decl = resolve_full_codata_decl(ctx, decl)?;
+            let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+            let obs_names: Vec<&str> = full_decl
+                .observations
+                .iter()
+                .map(|o| o.name.as_str())
+                .collect();
+            if field_names != obs_names {
+                return Err(format!(
+                    "corecord fields {:?} do not match codata observations {:?}",
+                    field_names, obs_names
+                ));
+            }
+            let mut obs_env = Rho::Nil;
+            for ((patt, _), val) in full_decl.params.iter().zip(params.iter()) {
+                obs_env = obs_env.extend(patt.clone(), val.clone());
+            }
+            for (field, obs) in fields.iter().zip(full_decl.observations.iter()) {
+                let t = eval(&obs.typ, &obs_env).map_err(|e| e.to_string())?;
                 check(ctx, &field.body, &t)?;
             }
             Ok(())
@@ -556,6 +603,10 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                     readback_val(ctx.rho.len(), &t)
                 ));
             }
+            if let Val::CodataType { decl, params } = &t {
+                let full_decl = resolve_full_codata_decl(ctx, decl)?;
+                return lookup_codata_observation(&full_decl, params, prop_name, ctx.rho.len());
+            }
 
             // Fall back to the existing Sigma / resource behaviour.
             find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
@@ -583,6 +634,10 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                         obs,
                         readback_val(ctx.rho.len(), &t)
                     ))
+                }
+                Val::CodataType { decl, params } => {
+                    let full_decl = resolve_full_codata_decl(ctx, decl)?;
+                    lookup_codata_observation(&full_decl, params, obs, ctx.rho.len())
                 }
                 other => Err(format!(
                     "observation target is not a codata value: {:?}",
@@ -817,6 +872,107 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
     }
 }
 
+/// Rehydrate a possibly-stub `Arc<CodataDecl>` to the full
+/// declaration with populated observations.
+///
+/// The ground resolver emits self-references inside observation types
+/// as `Exp::CodataType(self_ref_stub, args)` where `self_ref_stub` is
+/// an `Arc<CodataDecl>` with empty observations — it's the
+/// initial-Arc trick that mirrors `resolve_inductive_type`'s pattern.
+/// That works for inductive types because constructor applications
+/// always carry the full decl at the use site, but corecord values
+/// and observations don't carry a decl reference in their Exp — the
+/// decl comes from the inferred/expected type, which may be the
+/// stub.
+///
+/// This helper walks the current layer looking for a `CodataType`
+/// resource whose short name matches `stub.name` and re-resolves it
+/// to a full decl. Costly per call; a future optimisation could
+/// memoise this in `CheckCtx` next to `type_cache`.
+fn resolve_full_codata_decl(
+    ctx: &CheckCtx,
+    stub: &Arc<crate::nbe::term::CodataDecl>,
+) -> Result<Arc<crate::nbe::term::CodataDecl>, String> {
+    if !stub.observations.is_empty() {
+        return Ok(stub.clone());
+    }
+    let layer = ctx.layer.as_ref().ok_or_else(|| {
+        format!(
+            "cannot rehydrate stub codata decl `{}` — no layer in check context",
+            stub.name
+        )
+    })?;
+    let short_name_iri =
+        Iri::parse(crate::ontology::well_known::SHORT_NAME).expect("well-known IRI");
+    for (iri, resource) in layer.all_resources() {
+        if !resource
+            .is_a()
+            .iter()
+            .any(|c| c.as_str() == "urn:eigenius:core:CodataType")
+        {
+            continue;
+        }
+        if let Some(crate::ontology::resource::Value::String(sn)) = resource.get(&short_name_iri) {
+            if sn == &stub.name {
+                let v = crate::program::ground::resolve_class_type(iri, layer)?;
+                match v {
+                    Val::CodataType { decl, .. } => return Ok(decl),
+                    Val::Codata(_, _) => {
+                        return Err(format!(
+                            "codata `{}` resolved to the non-parameterised `Val::Codata` \
+                             form — cannot be used as a stub target",
+                            stub.name
+                        ));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "codata `{}` resolved to an unexpected Val form",
+                            stub.name
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Err(format!(
+        "cannot find codata decl with short_name `{}` in the layer chain",
+        stub.name
+    ))
+}
+
+/// Look up an observation by name on an applied codata type, returning
+/// the observation's type evaluated in an environment that binds the
+/// codata's parameters to the applied argument values.
+///
+/// This is the parameterised-codata analogue of the projection that
+/// `Val::Codata(observations, rho)` does inline — the decl carries
+/// the observation list, the `params` vector supplies the concrete
+/// argument values, and self-references inside observation types
+/// unify by name via `CodataDecl::PartialEq`.
+pub fn lookup_codata_observation(
+    decl: &Arc<crate::nbe::term::CodataDecl>,
+    params: &[Val],
+    obs_name: &str,
+    level: usize,
+) -> Result<Val, String> {
+    let obs = decl
+        .observations
+        .iter()
+        .find(|o| o.name == obs_name)
+        .ok_or_else(|| {
+            format!(
+                "observation '{}' not found in codata type '{}'",
+                obs_name, decl.name
+            )
+        })?;
+    let mut env = Rho::Nil;
+    for ((patt, _), val) in decl.params.iter().zip(params.iter()) {
+        env = env.extend(patt.clone(), val.clone());
+    }
+    let _ = level; // reserved for richer diagnostics in future
+    eval(&obs.typ, &env).map_err(|e| e.to_string())
+}
+
 /// Check type equality by normalization.
 ///
 /// Port of `eqNf` from the reference: normalize both sides
@@ -1043,6 +1199,15 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
         Exp::Codata(observations) => {
             for o in observations {
                 check_guarded(&o.typ, forbidden)?;
+            }
+            Ok(())
+        }
+        // Parameterised codata application — recurse into its
+        // argument expressions only; the codata decl's observations
+        // are type-level and already validated at decl-site.
+        Exp::CodataType(_, args) => {
+            for a in args {
+                check_guarded(a, forbidden)?;
             }
             Ok(())
         }
