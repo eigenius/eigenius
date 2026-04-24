@@ -514,5 +514,111 @@
       "urn:eigenius:core:DataType"
     ],
     "urn:eigenius:core:domain": ["urn:eigenius:core:Observation"]
+  },
+
+  {
+    "@id": "urn:eigenius:core:InductiveType",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An inductive type defined by its constructors (D19, Phase 11b). Dual of CodataType: an inductive type is built up from a finite set of constructors, while a codata type is taken apart by its observations.",
+    "urn:eigenius:core:short_name": "InductiveType",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:core:ctors"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:type_params"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:InductiveCtor",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A single constructor of an InductiveType: a name and an ordered list of argument types. The constructor's result type is the inductive itself applied to its parameters.",
+    "urn:eigenius:core:short_name": "InductiveCtor",
+    "urn:eigenius:core:requires": ["urn:eigenius:core:ctor_name"]
+  },
+  {
+    "@id": "urn:eigenius:core:InductiveArgType",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A constructor-argument type: a parameterised name reference. `type_name` is either a class IRI (Nat, ex:Foo) or a bare parameter name from the enclosing inductive's type parameters (e.g. `A` in List(A)). `type_args` carries the parameters when the reference itself is parametric (e.g. `List(A)`).",
+    "urn:eigenius:core:short_name": "InductiveArgType",
+    "urn:eigenius:core:requires": ["urn:eigenius:core:type_name"]
+  },
+  {
+    "@id": "urn:eigenius:core:InductiveParam",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A type parameter on an InductiveType: a name and a kind. Phase 11b admits only kind `Set`; the kind field is kept so future extensions can declare higher-universe parameters without a schema break.",
+    "urn:eigenius:core:short_name": "InductiveParam",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:param_name",
+      "urn:eigenius:core:param_kind"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:ctors",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of constructor declarations on an InductiveType.",
+    "urn:eigenius:core:short_name": "ctors",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveCtor"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
+  },
+  {
+    "@id": "urn:eigenius:core:type_params",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of type parameters on an InductiveType. Empty for non-parametric inductives (Nat, Bool).",
+    "urn:eigenius:core:short_name": "type_params",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveParam"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
+  },
+  {
+    "@id": "urn:eigenius:core:ctor_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The local name of an InductiveCtor (e.g. `nil`, `cons`).",
+    "urn:eigenius:core:short_name": "ctor_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveCtor"]
+  },
+  {
+    "@id": "urn:eigenius:core:arg_types",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of constructor argument types. Empty for nullary constructors.",
+    "urn:eigenius:core:short_name": "arg_types",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveArgType"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveCtor"]
+  },
+  {
+    "@id": "urn:eigenius:core:type_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Either a class IRI or a bare parameter name from the enclosing inductive's type parameters.",
+    "urn:eigenius:core:short_name": "type_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
+  },
+  {
+    "@id": "urn:eigenius:core:type_args",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Type arguments applied to a parametric type reference, e.g. `[A]` for `List(A)`. Empty for bare references.",
+    "urn:eigenius:core:short_name": "type_args",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveArgType"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
+  },
+  {
+    "@id": "urn:eigenius:core:param_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The local name of an InductiveParam.",
+    "urn:eigenius:core:short_name": "param_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
+  },
+  {
+    "@id": "urn:eigenius:core:param_kind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The kind of an InductiveParam — currently always `urn:eigenius:core:Set`.",
+    "urn:eigenius:core:short_name": "param_kind",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
   }
 ]

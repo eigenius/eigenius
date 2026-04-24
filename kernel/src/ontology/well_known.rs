@@ -12,6 +12,22 @@ pub const FORMAT: &str = "urn:eigenius:core:Format";
 pub const ENCODING: &str = "urn:eigenius:core:Encoding";
 pub const CONDITIONAL_REQUIREMENT: &str = "urn:eigenius:core:ConditionalRequirement";
 
+// --- Inductive types (Phase 11b, D19) ---
+
+pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
+pub const INDUCTIVE_CTOR: &str = "urn:eigenius:core:InductiveCtor";
+pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
+pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
+pub const CTORS: &str = "urn:eigenius:core:ctors";
+pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
+pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
+pub const ARG_TYPES: &str = "urn:eigenius:core:arg_types";
+pub const TYPE_NAME: &str = "urn:eigenius:core:type_name";
+pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
+pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
+pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";
+pub const SET_KIND: &str = "urn:eigenius:core:Set";
+
 // --- Properties ---
 
 pub const IS_A: &str = "urn:eigenius:core:is_a";

@@ -82,16 +82,7 @@ impl Compiler {
             ast::Declaration::Resource(r) => self.compile_resource(r),
             ast::Declaration::Program(p) => self.compile_program(p),
             ast::Declaration::Codata(c) => self.compile_codata(c),
-            // Phase 11b step 7 lands the parser only; compilation to
-            // resource encoding is Step 8.
-            ast::Declaration::Data(d) => Err(EslError::parser(
-                Some(d.pos.clone()),
-                format!(
-                    "compilation of `data` declarations is not yet implemented \
-                     (Phase 11b step 8): `{}`",
-                    d.name.name
-                ),
-            )),
+            ast::Declaration::Data(d) => self.compile_data(d),
         }
     }
 
@@ -134,6 +125,104 @@ impl Compiler {
 
         stamp_declared(&mut r);
         Ok(vec![r])
+    }
+
+    // --- Data (Phase 11b step 8, D19 §10) ---
+
+    /// Compile a `data` declaration to an `InductiveType` resource.
+    ///
+    /// The resource shape is documented in
+    /// [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json):
+    /// embedded `InductiveParam` resources for type parameters and
+    /// embedded `InductiveCtor` resources for constructors, each with
+    /// embedded `InductiveArgType` resources for arg types.
+    ///
+    /// Argument-type names that match a declared parameter are
+    /// recorded as bare names; everything else is resolved through
+    /// the namespace table to a class IRI. Phase 11b step 8b will
+    /// decode this back into an `Arc<InductiveDecl>` for use by the
+    /// kernel.
+    fn compile_data(&self, decl: &ast::DataDecl) -> Result<Vec<Resource>, EslError> {
+        use crate::ontology::well_known as wk;
+
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::INDUCTIVE_TYPE.to_string())]),
+        );
+        r.set(iri(wk::SHORT_NAME), Value::String(decl.name.name.clone()));
+
+        let param_names: std::collections::HashSet<&str> =
+            decl.params.iter().map(|p| p.name.as_str()).collect();
+
+        let params: Result<Vec<Value>, EslError> = decl
+            .params
+            .iter()
+            .map(|p| {
+                let mut pr = Resource::new_embedded();
+                set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
+                pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
+                let kind = self.resolve(&p.kind)?;
+                pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                Ok(Value::Embedded(Box::new(pr)))
+            })
+            .collect();
+        r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
+
+        let ctors: Result<Vec<Value>, EslError> = decl
+            .ctors
+            .iter()
+            .map(|c| {
+                let mut cr = Resource::new_embedded();
+                set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
+                cr.set(iri(wk::CTOR_NAME), Value::String(c.name.clone()));
+                let arg_types: Result<Vec<Value>, EslError> = c
+                    .args
+                    .iter()
+                    .map(|a| self.compile_ctor_arg_type(a, &param_names))
+                    .collect();
+                cr.set(iri(wk::ARG_TYPES), Value::Array(arg_types?));
+                Ok(Value::Embedded(Box::new(cr)))
+            })
+            .collect();
+        r.set(iri(wk::CTORS), Value::Array(ctors?));
+
+        stamp_declared(&mut r);
+        Ok(vec![r])
+    }
+
+    /// Compile a constructor argument type to an embedded
+    /// `InductiveArgType` resource.
+    ///
+    /// Bare references that match a declared parameter name are kept
+    /// as the bare string (so the decoder can recognise them as
+    /// parameter substitutions). Everything else must namespace-resolve
+    /// to a class IRI.
+    fn compile_ctor_arg_type(
+        &self,
+        arg: &ast::CtorArgType,
+        params: &std::collections::HashSet<&str>,
+    ) -> Result<Value, EslError> {
+        use crate::ontology::well_known as wk;
+        let mut ar = Resource::new_embedded();
+        set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
+
+        let type_name = if arg.name.namespace.is_none() && params.contains(arg.name.name.as_str()) {
+            arg.name.name.clone()
+        } else {
+            self.resolve(&arg.name)?
+        };
+        ar.set(iri(wk::TYPE_NAME), Value::String(type_name));
+
+        let type_args: Result<Vec<Value>, EslError> = arg
+            .params
+            .iter()
+            .map(|p| self.compile_ctor_arg_type(p, params))
+            .collect();
+        ar.set(iri(wk::TYPE_ARGS), Value::Array(type_args?));
+
+        Ok(Value::Embedded(Box::new(ar)))
     }
 
     // --- Class ---
@@ -1267,6 +1356,208 @@ mod tests {
         assert!(
             has_declared_resource(r),
             "ESL codata should have DeclaredResource in is_a"
+        );
+        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    // --- `data` declaration compilation (Phase 11b step 8) ---
+
+    #[test]
+    fn compile_data_nat_non_parametric() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 1);
+        let r = &resources[0];
+        assert_eq!(r.id().unwrap().as_str(), "urn:eigenius:example:Nat");
+        assert!(r
+            .is_a()
+            .iter()
+            .any(|i| i.as_str() == "urn:eigenius:core:InductiveType"));
+        assert_eq!(
+            r.get(&iri("urn:eigenius:core:short_name"))
+                .and_then(|v| v.as_str()),
+            Some("Nat")
+        );
+
+        // No params for Nat.
+        let params = match r.get(&iri("urn:eigenius:core:type_params")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("type_params must be an array"),
+        };
+        assert!(params.is_empty());
+
+        // Two constructors.
+        let ctors = match r.get(&iri("urn:eigenius:core:ctors")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("ctors must be an array"),
+        };
+        assert_eq!(ctors.len(), 2);
+
+        // zero
+        let zero = match &ctors[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("ctor must be embedded"),
+        };
+        assert_eq!(
+            zero.get(&iri("urn:eigenius:core:ctor_name"))
+                .and_then(|v| v.as_str()),
+            Some("zero")
+        );
+        let zero_args = match zero.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("arg_types must be an array"),
+        };
+        assert!(zero_args.is_empty());
+
+        // succ(ex:Nat)
+        let succ = match &ctors[1] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("ctor must be embedded"),
+        };
+        assert_eq!(
+            succ.get(&iri("urn:eigenius:core:ctor_name"))
+                .and_then(|v| v.as_str()),
+            Some("succ")
+        );
+        let succ_args = match succ.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("arg_types must be an array"),
+        };
+        assert_eq!(succ_args.len(), 1);
+        let succ_arg = match &succ_args[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("arg type must be embedded"),
+        };
+        assert_eq!(
+            succ_arg
+                .get(&iri("urn:eigenius:core:type_name"))
+                .and_then(|v| v.as_str()),
+            Some("urn:eigenius:example:Nat")
+        );
+    }
+
+    #[test]
+    fn compile_data_list_parametric_records_param_references_as_bare_names() {
+        // The bare `A` in `cons(A, ex:List(A))` is a reference to the
+        // type parameter — compile encodes it as the raw name `"A"`,
+        // not a resolved IRI.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:List(A : core:Set) {
+                nil,
+                cons(A, ex:List(A)),
+            }
+            "#,
+        );
+        let r = &resources[0];
+
+        // One param, name=A, kind=core:Set.
+        let params = match r.get(&iri("urn:eigenius:core:type_params")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("type_params must be an array"),
+        };
+        assert_eq!(params.len(), 1);
+        let p = match &params[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("param must be embedded"),
+        };
+        assert_eq!(
+            p.get(&iri("urn:eigenius:core:param_name"))
+                .and_then(|v| v.as_str()),
+            Some("A")
+        );
+        assert_eq!(
+            p.get(&iri("urn:eigenius:core:param_kind"))
+                .and_then(|v| v.as_str()),
+            Some("urn:eigenius:core:Set")
+        );
+
+        // cons ctor: first arg is bare "A", second is parametric List(A).
+        let ctors = match r.get(&iri("urn:eigenius:core:ctors")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("ctors must be an array"),
+        };
+        let cons = match &ctors[1] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("cons must be embedded"),
+        };
+        let cons_args = match cons.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("arg_types must be an array"),
+        };
+        assert_eq!(cons_args.len(), 2);
+
+        // arg 0: bare A — type_name is "A", no type_args.
+        let arg0 = match &cons_args[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("arg must be embedded"),
+        };
+        assert_eq!(
+            arg0.get(&iri("urn:eigenius:core:type_name"))
+                .and_then(|v| v.as_str()),
+            Some("A")
+        );
+        let arg0_args = match arg0.get(&iri("urn:eigenius:core:type_args")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("type_args must be an array"),
+        };
+        assert!(arg0_args.is_empty());
+
+        // arg 1: ex:List(A) — type_name is IRI, type_args = [bare A].
+        let arg1 = match &cons_args[1] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("arg must be embedded"),
+        };
+        assert_eq!(
+            arg1.get(&iri("urn:eigenius:core:type_name"))
+                .and_then(|v| v.as_str()),
+            Some("urn:eigenius:example:List")
+        );
+        let arg1_args = match arg1.get(&iri("urn:eigenius:core:type_args")) {
+            Some(Value::Array(a)) => a,
+            _ => panic!("type_args must be an array"),
+        };
+        assert_eq!(arg1_args.len(), 1);
+        let arg1_a = match &arg1_args[0] {
+            Value::Embedded(r) => r.as_ref(),
+            _ => panic!("type arg must be embedded"),
+        };
+        assert_eq!(
+            arg1_a
+                .get(&iri("urn:eigenius:core:type_name"))
+                .and_then(|v| v.as_str()),
+            Some("A")
+        );
+    }
+
+    #[test]
+    fn compile_data_is_stamped_as_declared_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Bool {
+                tt,
+                ff,
+            }
+            "#,
+        );
+        let r = &resources[0];
+        assert!(
+            has_declared_resource(r),
+            "ESL data should have DeclaredResource in is_a"
         );
         assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
     }
