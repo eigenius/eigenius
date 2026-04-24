@@ -33,6 +33,19 @@ pub const SET_KIND: &str = "urn:eigenius:core:Set";
 /// termination/productivity checking.
 pub const SIZE_KIND: &str = "urn:eigenius:core:Size";
 
+// --- Comorphism class (Phase 11d, D10 §6) ---
+
+/// is_a marker for a cross-institution comorphism resource.
+pub const COMORPHISM: &str = "urn:eigenius:institution:Comorphism";
+/// The source institution IRI on a Comorphism resource.
+pub const SOURCE_INSTITUTION: &str = "urn:eigenius:institution:source_institution";
+/// The target institution IRI on a Comorphism resource.
+pub const TARGET_INSTITUTION: &str = "urn:eigenius:institution:target_institution";
+/// The translation procedure IRI on a Comorphism resource — the
+/// identifier the source institution's `FiberReasoner::translate`
+/// method dispatches on.
+pub const TRANSLATION_PROCEDURE: &str = "urn:eigenius:institution:translation_procedure";
+
 /// Name of a named constructor-argument binder (Phase 11b step 15h).
 /// Presence on an `InductiveArgType` resource flags the arg as a
 /// Π/SizedPi binder rather than an anonymous positional type.

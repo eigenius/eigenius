@@ -188,6 +188,25 @@ pub enum Exp {
     /// full declaration at evaluation time).
     CodataType(Arc<CodataDecl>, Vec<Exp>),
 
+    /// Cross-institution translation via a declared comorphism
+    /// (Phase 11d, D10 §6).
+    ///
+    /// `comorphism_iri` identifies a `Comorphism` resource in the
+    /// institution registry; `source` is the expression producing
+    /// the source-institution resource to translate. Evaluation
+    /// looks up the declaring institution via
+    /// `InstitutionRegistry::institution_for_comorphism`, calls
+    /// `FiberReasoner::translate(iri, source_resource, ctx)`, and
+    /// wraps the resulting resource as `Val::ResourceVal`.
+    ///
+    /// Without an institution registry in scope (bare `EvalCtx::Pure`)
+    /// the expression stays as a passthrough neutral — runtime
+    /// callers attach the registry via `EvalCtx::IO` or `Check`.
+    InstitutionInvoke {
+        comorphism_iri: Iri,
+        source: Box<Exp>,
+    },
+
     /// Bounded size Π-type: `Π {i < upper}. body` — the function
     /// type of a sized function that takes a size argument strictly
     /// smaller than `upper`.

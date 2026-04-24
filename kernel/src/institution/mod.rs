@@ -80,6 +80,32 @@ pub trait FiberReasoner: Send + Sync {
         let _ = (constraint_iri, args, ctx);
         Ok(DecResult::Undecidable)
     }
+
+    /// Translate a resource across an institution boundary using a
+    /// declared comorphism (Phase 11d, D10 §6).
+    ///
+    /// Called when the kernel evaluates
+    /// `Exp::InstitutionInvoke { comorphism_iri, source }` or when
+    /// Phase 14 reconciliation walks a merge witness. The
+    /// `comorphism_iri` is looked up via
+    /// [`InstitutionRegistry::institution_for_comorphism`]; the
+    /// declaring institution's `translate` is called with the source
+    /// resource and the current execution context.
+    ///
+    /// Default implementation returns an error — institutions that
+    /// declare `comorphism_types` must override `translate` to
+    /// produce translated resources.
+    fn translate(
+        &self,
+        comorphism_iri: &Iri,
+        source: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<Resource, InstitutionError> {
+        let _ = (source, ctx);
+        Err(InstitutionError::UnknownType(format!(
+            "institution does not implement `translate` for comorphism `{comorphism_iri}`"
+        )))
+    }
 }
 
 /// Result of an institution-registered constraint decision.
@@ -119,6 +145,31 @@ pub struct FiberDeclaration {
     /// Advisory structural properties of morphisms.
     /// The kernel stores these but does not enforce them.
     pub structural_properties: Vec<Resource>,
+
+    /// Comorphism resources declared by this institution (Phase 11d,
+    /// D10 §6). Each is a `Comorphism`-class resource carrying
+    /// `source_institution`, `target_institution`, and
+    /// `translation_procedure`. The declaring institution implements
+    /// [`FiberReasoner::translate`] to perform the actual
+    /// translation when invoked via `Exp::InstitutionInvoke` or the
+    /// Phase 14 reconciliation walker.
+    pub comorphism_types: Vec<Resource>,
+}
+
+impl FiberDeclaration {
+    /// Build a minimal declaration with no morphisms, queries,
+    /// structural properties, or comorphisms. Convenience for tests
+    /// and institutions that don't need the full declaration surface.
+    pub fn minimal(institution_iri: Iri, name: impl Into<String>) -> Self {
+        Self {
+            institution_iri,
+            name: name.into(),
+            morphism_types: Vec::new(),
+            query_types: Vec::new(),
+            structural_properties: Vec::new(),
+            comorphism_types: Vec::new(),
+        }
+    }
 }
 
 /// Information about a registered institution (for introspection).
@@ -128,6 +179,7 @@ pub struct InstitutionInfo {
     pub name: String,
     pub morphism_type_iris: Vec<Iri>,
     pub query_type_iris: Vec<Iri>,
+    pub comorphism_iris: Vec<Iri>,
 }
 
 /// Registry of institutions.
@@ -137,6 +189,10 @@ pub struct InstitutionRegistry {
     morphism_dispatch: BTreeMap<Iri, Iri>,
     /// Maps query class IRI → institution IRI for dispatch routing.
     query_dispatch: BTreeMap<Iri, Iri>,
+    /// Maps comorphism IRI → declaring institution IRI (Phase 11d).
+    /// Looked up by `Exp::InstitutionInvoke` eval, Phase 14
+    /// reconciliation, and user-facing introspection.
+    comorphism_dispatch: BTreeMap<Iri, Iri>,
     /// Info for each registered institution.
     info: BTreeMap<Iri, InstitutionInfo>,
 }
@@ -147,6 +203,7 @@ impl InstitutionRegistry {
             institutions: BTreeMap::new(),
             morphism_dispatch: BTreeMap::new(),
             query_dispatch: BTreeMap::new(),
+            comorphism_dispatch: BTreeMap::new(),
             info: BTreeMap::new(),
         }
     }
@@ -191,6 +248,33 @@ impl InstitutionRegistry {
             }
         }
 
+        // Build comorphism dispatch: Comorphism resource IRI →
+        // declaring institution IRI. Both the Comorphism's own IRI
+        // and its `translation_procedure` IRI are indexed so lookups
+        // work whether callers cite the comorphism or the procedure.
+        let mut comorphism_iris = Vec::new();
+        for cm in &decl.comorphism_types {
+            let cm_iri = cm
+                .id()
+                .ok_or_else(|| format!("comorphism resource on institution `{iri}` missing @id"))?;
+            self.comorphism_dispatch.insert(cm_iri.clone(), iri.clone());
+            comorphism_iris.push(cm_iri.clone());
+            // Also index by the translation_procedure IRI when set —
+            // some declarations use a separate procedure identifier
+            // from the resource IRI so multiple comorphisms can share
+            // a procedure.
+            let procedure_key = Iri::parse(crate::ontology::well_known::TRANSLATION_PROCEDURE)
+                .expect("well-known IRI");
+            if let Some(crate::ontology::resource::Value::String(proc_str)) = cm.get(&procedure_key)
+            {
+                if let Ok(proc_iri) = Iri::parse(proc_str) {
+                    if proc_iri != *cm_iri {
+                        self.comorphism_dispatch.insert(proc_iri, iri.clone());
+                    }
+                }
+            }
+        }
+
         // Store info
         self.info.insert(
             iri.clone(),
@@ -199,6 +283,7 @@ impl InstitutionRegistry {
                 name: decl.name.clone(),
                 morphism_type_iris: morphism_iris,
                 query_type_iris: query_iris,
+                comorphism_iris,
             },
         );
 
@@ -209,6 +294,7 @@ impl InstitutionRegistry {
             resources.extend(decl.morphism_types);
             resources.extend(decl.query_types);
             resources.extend(decl.structural_properties);
+            resources.extend(decl.comorphism_types);
         }
 
         self.institutions.insert(iri, reasoner);
@@ -230,6 +316,23 @@ impl InstitutionRegistry {
     pub fn institution_for_query(&self, query_class_iri: &Iri) -> Option<&dyn FiberReasoner> {
         let inst_iri = self.query_dispatch.get(query_class_iri)?;
         self.get(inst_iri)
+    }
+
+    /// Find the institution declaring a given comorphism (Phase 11d).
+    /// Accepts either the Comorphism resource's IRI or its
+    /// `translation_procedure` IRI — both are indexed during
+    /// registration.
+    pub fn institution_for_comorphism(&self, comorphism_iri: &Iri) -> Option<&dyn FiberReasoner> {
+        let inst_iri = self.comorphism_dispatch.get(comorphism_iri)?;
+        self.get(inst_iri)
+    }
+
+    /// Return the institution IRI that declared the comorphism
+    /// (non-reasoner view, useful for introspection or when the
+    /// caller needs the institution identity rather than its
+    /// implementation).
+    pub fn comorphism_institution_iri(&self, comorphism_iri: &Iri) -> Option<&Iri> {
+        self.comorphism_dispatch.get(comorphism_iri)
     }
 
     /// List all registered institutions.
@@ -328,6 +431,7 @@ mod tests {
                 morphism_types: vec![refinement_class],
                 query_types: vec![query_class],
                 structural_properties: vec![],
+                comorphism_types: vec![],
             }
         }
 
@@ -485,5 +589,202 @@ mod tests {
         let registry = InstitutionRegistry::new();
         let iri = Iri::parse("urn:eigenius:nonexistent:Foo").unwrap();
         assert!(registry.institution_for_morphism(&iri).is_none());
+    }
+
+    // --- Phase 11d: comorphism declaration + translate ---
+
+    /// Test institution that declares one comorphism and implements
+    /// `translate` to produce a constant "translated" resource.
+    struct ComorphismDeclarer {
+        institution_iri: Iri,
+        comorphism_iri: Iri,
+    }
+
+    impl FiberReasoner for ComorphismDeclarer {
+        fn fiber_declaration(&self) -> FiberDeclaration {
+            let mut cm = Resource::new(self.comorphism_iri.clone());
+            cm.set(
+                Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+                crate::ontology::resource::Value::Array(vec![
+                    crate::ontology::resource::Value::String(
+                        crate::ontology::well_known::COMORPHISM.to_string(),
+                    ),
+                ]),
+            );
+            cm.set(
+                Iri::parse(crate::ontology::well_known::SOURCE_INSTITUTION).unwrap(),
+                crate::ontology::resource::Value::String(self.institution_iri.as_str().to_string()),
+            );
+            cm.set(
+                Iri::parse(crate::ontology::well_known::TARGET_INSTITUTION).unwrap(),
+                crate::ontology::resource::Value::String(
+                    "urn:eigenius:test:target_institution".to_string(),
+                ),
+            );
+            cm.set(
+                Iri::parse(crate::ontology::well_known::TRANSLATION_PROCEDURE).unwrap(),
+                crate::ontology::resource::Value::String(self.comorphism_iri.as_str().to_string()),
+            );
+            FiberDeclaration {
+                institution_iri: self.institution_iri.clone(),
+                name: "ComorphismDeclarer".to_string(),
+                morphism_types: vec![],
+                query_types: vec![],
+                structural_properties: vec![],
+                comorphism_types: vec![cm],
+            }
+        }
+
+        fn query(
+            &self,
+            _q: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<Resource, InstitutionError> {
+            unreachable!()
+        }
+        fn validate_morphism(
+            &self,
+            _m: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<MorphismValidation, InstitutionError> {
+            unreachable!()
+        }
+        fn discover_morphisms(
+            &self,
+            _rs: &[Resource],
+            _ctx: &ExecutionContext,
+        ) -> Result<Vec<Resource>, InstitutionError> {
+            unreachable!()
+        }
+        fn translate(
+            &self,
+            comorphism_iri: &Iri,
+            source: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<Resource, InstitutionError> {
+            // Produce a "translated" resource whose id carries the
+            // source's id + the comorphism suffix, so tests can
+            // observe the call flowed through.
+            let source_id_str = source
+                .id()
+                .map(|i| i.as_str().to_string())
+                .unwrap_or_else(|| "anon".to_string());
+            let out_iri = Iri::parse(&format!(
+                "urn:eigenius:test:translated:{}:{}",
+                comorphism_iri.as_str().replace(':', "_"),
+                source_id_str.replace(':', "_")
+            ))
+            .unwrap();
+            let out = Resource::new(out_iri);
+            Ok(out)
+        }
+    }
+
+    #[test]
+    fn register_declares_comorphisms_in_dispatch_table() {
+        let institution_iri = Iri::parse("urn:eigenius:test:declarer").unwrap();
+        let comorphism_iri = Iri::parse("urn:eigenius:test:my_comorphism").unwrap();
+        let decl = ComorphismDeclarer {
+            institution_iri: institution_iri.clone(),
+            comorphism_iri: comorphism_iri.clone(),
+        };
+
+        let mut reg = InstitutionRegistry::new();
+        let resources = reg.register(Box::new(decl)).unwrap();
+        // The Comorphism resource is returned for committing to the layer.
+        assert!(
+            resources
+                .iter()
+                .any(|r| r.id().map(|i| i == &comorphism_iri).unwrap_or(false)),
+            "comorphism resource should be published among registration outputs"
+        );
+
+        // Dispatch table resolves comorphism IRI → institution.
+        assert_eq!(
+            reg.comorphism_institution_iri(&comorphism_iri),
+            Some(&institution_iri)
+        );
+        // institution_for_comorphism returns the reasoner.
+        assert!(reg.institution_for_comorphism(&comorphism_iri).is_some());
+    }
+
+    #[test]
+    fn translate_dispatches_to_declaring_institution() {
+        let institution_iri = Iri::parse("urn:eigenius:test:declarer2").unwrap();
+        let comorphism_iri = Iri::parse("urn:eigenius:test:comorphism2").unwrap();
+        let decl = ComorphismDeclarer {
+            institution_iri: institution_iri.clone(),
+            comorphism_iri: comorphism_iri.clone(),
+        };
+
+        let mut reg = InstitutionRegistry::new();
+        reg.register(Box::new(decl)).unwrap();
+
+        let reasoner = reg
+            .institution_for_comorphism(&comorphism_iri)
+            .expect("registered");
+        let src = Resource::new(Iri::parse("urn:eigenius:test:src_resource").unwrap());
+        let layer =
+            std::sync::Arc::new(crate::layer::LayerBuilder::new("test_layer", None).build());
+        let exec =
+            ExecutionContext::new(layer, "test_exec", crate::context::ExecutionMode::ReadOnly);
+        let result = reasoner
+            .translate(&comorphism_iri, &src, &exec)
+            .expect("translate");
+        let id_str = result.id().unwrap().as_str();
+        assert!(
+            id_str.contains("comorphism2") && id_str.contains("src_resource"),
+            "translated resource id should carry the comorphism+source suffix, got: {id_str}"
+        );
+    }
+
+    #[test]
+    fn default_translate_returns_unknown_type_error() {
+        use crate::institution::DecResult;
+        struct NoTranslate;
+        impl FiberReasoner for NoTranslate {
+            fn fiber_declaration(&self) -> FiberDeclaration {
+                FiberDeclaration::minimal(
+                    Iri::parse("urn:eigenius:test:no_translate").unwrap(),
+                    "NoTranslate",
+                )
+            }
+            fn query(
+                &self,
+                _q: &Resource,
+                _ctx: &ExecutionContext,
+            ) -> Result<Resource, InstitutionError> {
+                unreachable!()
+            }
+            fn validate_morphism(
+                &self,
+                _m: &Resource,
+                _ctx: &ExecutionContext,
+            ) -> Result<MorphismValidation, InstitutionError> {
+                unreachable!()
+            }
+            fn discover_morphisms(
+                &self,
+                _rs: &[Resource],
+                _ctx: &ExecutionContext,
+            ) -> Result<Vec<Resource>, InstitutionError> {
+                unreachable!()
+            }
+        }
+
+        let inst = NoTranslate;
+        let iri = Iri::parse("urn:eigenius:test:nonexistent_comorphism").unwrap();
+        let src = Resource::new(Iri::parse("urn:eigenius:test:src").unwrap());
+        let layer =
+            std::sync::Arc::new(crate::layer::LayerBuilder::new("test_layer", None).build());
+        let exec =
+            ExecutionContext::new(layer, "test_exec", crate::context::ExecutionMode::ReadOnly);
+        let err = inst.translate(&iri, &src, &exec).unwrap_err();
+        assert!(
+            matches!(err, InstitutionError::UnknownType(_)),
+            "default translate should return UnknownType, got {err:?}"
+        );
+        // DecResult is unrelated — reference to keep the import used.
+        let _ = DecResult::Holds;
     }
 }
