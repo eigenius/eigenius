@@ -370,7 +370,7 @@ fn resolve_codata_type(
 
 /// Check whether a resource represents an inductive type declaration
 /// (Phase 11b step 9).
-fn is_inductive_type(resource: &crate::ontology::resource::Resource) -> bool {
+pub(crate) fn is_inductive_type(resource: &crate::ontology::resource::Resource) -> bool {
     resource
         .is_a()
         .iter()
@@ -387,7 +387,7 @@ fn is_inductive_type(resource: &crate::ontology::resource::Resource) -> bool {
 /// Returns the unapplied type former — `Val::InductiveType { decl,
 /// params: vec![] }`. For parameterised inductives, Phase 11b step 10+
 /// will add the pathway that applies parameters at use sites.
-fn resolve_inductive_type(
+pub(crate) fn resolve_inductive_type(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
 ) -> Result<Val, String> {
