@@ -417,30 +417,110 @@ impl Graph {
 /// `i ≤ ŝ(j)` given `i ≤ j`) is the job of the rigid-hypothesis
 /// solver ([`crate::nbe::sized_rigid`]), not this relation.
 pub fn size_le(s1: &crate::nbe::val::Val, s2: &crate::nbe::val::Val) -> bool {
+    size_le_with_hyps(s1, s2, &crate::nbe::sized_rigid::Tso::new())
+}
+
+/// Partial-order comparison on size values, consulting a TSO of rigid
+/// hypotheses for neutral-vs-neutral entailment.
+///
+/// Same rules as [`size_le`] (∞ top, structural, right-step,
+/// readback reflexivity), plus one:
+///
+/// 4. **Hypothesis entailment.** If `s1` normalises to `ŝⁿ r₁` and
+///    `s2` to `ŝᵐ r₂` for rigid size vars `r₁, r₂` (represented as
+///    `Val::Nt(Gen(level, _))`, where level doubles as rigid-id),
+///    and the TSO records `r₁ + k ≤ r₂`, then `size_le` holds iff
+///    `n ≤ m + k`. This catches `i ≤ j` when `{i < j}` is in scope
+///    as a bounded binder, `ŝ i ≤ j` likewise, etc.
+///
+/// The TSO is consulted as a last resort: structural rules are
+/// always tried first, so callers can pass an empty TSO with no
+/// semantic difference from [`size_le`].
+pub fn size_le_with_hyps(
+    s1: &crate::nbe::val::Val,
+    s2: &crate::nbe::val::Val,
+    tso: &crate::nbe::sized_rigid::Tso,
+) -> bool {
     use crate::nbe::val::Val;
     // Rule 1: anything ≤ ∞.
     if matches!(s2, Val::SizeInf) {
         return true;
     }
-    // ∞ ≤ non-∞ cannot hold (∞ is top; the previous line already
-    // handled ∞ ≤ ∞).
+    // ∞ ≤ non-∞ cannot hold.
     if matches!(s1, Val::SizeInf) {
         return false;
     }
     // Structural: ŝ(a) ≤ ŝ(b) ⇐ a ≤ b.
     if let (Val::SizeSucc(a), Val::SizeSucc(b)) = (s1, s2) {
-        return size_le(a, b);
+        return size_le_with_hyps(a, b, tso);
     }
     // Rule 2 (right-step): s ≤ ŝ(b) ⇐ s ≤ b.
     if let Val::SizeSucc(b) = s2 {
-        if size_le(s1, b) {
+        if size_le_with_hyps(s1, b, tso) {
             return true;
         }
     }
-    // Rule 3: reflexivity on the leftover (neutrals, etc.) via readback.
+    // Rule 3: readback equality (reflexivity on neutrals etc.).
     let e1 = crate::nbe::readback::readback_val(0, s1);
     let e2 = crate::nbe::readback::readback_val(0, s2);
-    e1 == e2
+    if e1 == e2 {
+        return true;
+    }
+    // Rule 4: rigid hypothesis entailment via the TSO.
+    if let (Some((n, r1)), Some((m, r2))) = (strip_to_rigid(s1), strip_to_rigid(s2)) {
+        if let Some(k) = tso.is_ancestor(r1, r2) {
+            // `ŝⁿ r₁ ≤ ŝᵐ r₂` iff `r₁ + n ≤ r₂ + m` iff `n ≤ m + k`.
+            if n <= m.saturating_add(k) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Peel outer `SizeSucc` layers off `v` and, if the core is a neutral
+/// `Gen(level, _)`, return `(succ_count, level)`. Returns `None` for
+/// anything that isn't of shape `ŝⁿ (neutral size var)` — non-rigid
+/// values (e.g. projections, applications) fall through to the caller.
+fn strip_to_rigid(v: &crate::nbe::val::Val) -> Option<(u32, u32)> {
+    use crate::nbe::val::{Neut, Val};
+    let mut n = 0u32;
+    let mut cur = v;
+    loop {
+        match cur {
+            Val::SizeSucc(inner) => {
+                n = n.checked_add(1)?;
+                cur = inner;
+            }
+            Val::Nt(Neut::Gen(level, _)) => {
+                return Some((n, *level as u32));
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Strict-decrease on size values: `size_lt(s1, s2)` holds iff
+/// `s1 < s2`, equivalently `ŝ(s1) ≤ s2`.
+///
+/// Used by termination checking (D19 §8.4): a recursive call on an
+/// inductive value indexed by size `j` is permitted when `j < i` for
+/// the outer recursion's size `i`. A productive corecursive call is
+/// permitted when the observed output size is strictly greater than
+/// the input — also a `size_lt` query.
+pub fn size_lt(s1: &crate::nbe::val::Val, s2: &crate::nbe::val::Val) -> bool {
+    size_lt_with_hyps(s1, s2, &crate::nbe::sized_rigid::Tso::new())
+}
+
+/// Strict-decrease with rigid hypothesis consultation. See
+/// [`size_le_with_hyps`] and [`size_lt`].
+pub fn size_lt_with_hyps(
+    s1: &crate::nbe::val::Val,
+    s2: &crate::nbe::val::Val,
+    tso: &crate::nbe::sized_rigid::Tso,
+) -> bool {
+    use crate::nbe::val::Val;
+    size_le_with_hyps(&Val::SizeSucc(Box::new(s1.clone())), s2, tso)
 }
 
 /// Floyd–Warshall transitive closure over the min-plus semiring.
@@ -796,6 +876,143 @@ mod tests {
         // ŝ(∞) is never constructed; skip this case.
         // a ≤ ŝ(a) at inner level ⇒ ŝ(a) ≤ ŝ(ŝ(a)).
         assert!(size_le(&succ_val(a.clone()), &succ_val(succ_val(a))));
+    }
+
+    // --- size_le_with_hyps / size_lt_with_hyps (TSO-backed) tests ---
+    //
+    // Checked against MiniAgda's TSO semantics: edge
+    // `child → (distance, parent)` encodes `child + distance ≤ parent`,
+    // so `{i < j}` becomes `tso.insert(i_level, 1, j_level)`.
+
+    use crate::nbe::sized_rigid::Tso;
+
+    #[test]
+    fn hyps_none_matches_size_le() {
+        // Empty TSO: size_le_with_hyps ≡ size_le on all inputs.
+        let s = size_neut(0);
+        let empty = Tso::new();
+        assert_eq!(size_le(&s, &s), size_le_with_hyps(&s, &s, &empty));
+        assert_eq!(
+            size_le(&s, &Val::SizeInf),
+            size_le_with_hyps(&s, &Val::SizeInf, &empty)
+        );
+    }
+
+    #[test]
+    fn hyp_i_lt_j_admits_i_le_j() {
+        // Given hypothesis i < j, prove i ≤ j.
+        let mut tso = Tso::new();
+        tso.insert(0, 1, 1); // level 0 < level 1
+        assert!(size_le_with_hyps(&size_neut(0), &size_neut(1), &tso));
+    }
+
+    #[test]
+    fn hyp_i_le_j_admits_i_le_j_but_not_strict() {
+        // Given hypothesis i ≤ j (distance 0), prove i ≤ j but reject i < j.
+        let mut tso = Tso::new();
+        tso.insert(0, 0, 1); // level 0 ≤ level 1 (not strict)
+        assert!(size_le_with_hyps(&size_neut(0), &size_neut(1), &tso));
+        assert!(!size_lt_with_hyps(&size_neut(0), &size_neut(1), &tso));
+    }
+
+    #[test]
+    fn hyp_i_lt_j_admits_i_lt_j() {
+        // Given i < j, prove i < j (strict).
+        let mut tso = Tso::new();
+        tso.insert(0, 1, 1);
+        assert!(size_lt_with_hyps(&size_neut(0), &size_neut(1), &tso));
+    }
+
+    #[test]
+    fn hyp_i_lt_j_does_not_admit_j_le_i() {
+        // Hypothesis is directional — i < j tells us nothing about j vs i.
+        let mut tso = Tso::new();
+        tso.insert(0, 1, 1);
+        assert!(!size_le_with_hyps(&size_neut(1), &size_neut(0), &tso));
+    }
+
+    #[test]
+    fn hyp_transitive_through_tso_chain() {
+        // i < j, j < k ⊢ i < k (two hops in the TSO).
+        let mut tso = Tso::new();
+        tso.insert(0, 1, 1); // 0 < 1
+        tso.insert(1, 1, 2); // 1 < 2
+        assert!(size_lt_with_hyps(&size_neut(0), &size_neut(2), &tso));
+        assert!(size_le_with_hyps(&size_neut(0), &size_neut(2), &tso));
+    }
+
+    #[test]
+    fn hyp_i_lt_j_admits_succ_i_le_j() {
+        // i < j ⊢ ŝ i ≤ j: offset n=1 on LHS matched by k=1 from TSO.
+        let mut tso = Tso::new();
+        tso.insert(0, 1, 1);
+        assert!(size_le_with_hyps(
+            &succ_val(size_neut(0)),
+            &size_neut(1),
+            &tso
+        ));
+    }
+
+    #[test]
+    fn hyp_i_lt_j_does_not_admit_succ_succ_i_le_j() {
+        // i < j does NOT give ŝŝ i ≤ j (that needs i < j by 2).
+        let mut tso = Tso::new();
+        tso.insert(0, 1, 1);
+        assert!(!size_le_with_hyps(
+            &succ_val(succ_val(size_neut(0))),
+            &size_neut(1),
+            &tso
+        ));
+    }
+
+    #[test]
+    fn hyp_distance_2_admits_two_step_decrease() {
+        // {i + 2 ≤ j} ⊢ ŝŝ i ≤ j.
+        let mut tso = Tso::new();
+        tso.insert(0, 2, 1);
+        assert!(size_le_with_hyps(
+            &succ_val(succ_val(size_neut(0))),
+            &size_neut(1),
+            &tso
+        ));
+    }
+
+    // --- size_lt (strict decrease) tests ---
+
+    #[test]
+    fn size_lt_anything_below_inf() {
+        // Any size is strictly below ∞.
+        assert!(size_lt(&Val::SizeInf, &Val::SizeInf)); // ŝ(∞) absorbs to ∞ and ∞ ≤ ∞
+        assert!(size_lt(&size_neut(0), &Val::SizeInf));
+        assert!(size_lt(&succ_val(size_neut(0)), &Val::SizeInf));
+    }
+
+    #[test]
+    fn size_lt_step_succ() {
+        // s < ŝ(s) (the canonical strict-decrease witness).
+        let s = size_neut(0);
+        assert!(size_lt(&s, &succ_val(s.clone())));
+    }
+
+    #[test]
+    fn size_lt_not_reflexive_on_neutral() {
+        // s < s must be false for a bare neutral — no strict order.
+        let s = size_neut(0);
+        assert!(!size_lt(&s, &s));
+    }
+
+    #[test]
+    fn size_lt_distinct_neutrals_incomparable() {
+        // Unrelated neutrals: neither strict order holds.
+        assert!(!size_lt(&size_neut(0), &size_neut(1)));
+        assert!(!size_lt(&size_neut(1), &size_neut(0)));
+    }
+
+    #[test]
+    fn size_lt_succ_step_transitive() {
+        // s < ŝ(ŝ(s)) — two succ layers between.
+        let s = size_neut(0);
+        assert!(size_lt(&s, &succ_val(succ_val(s.clone()))));
     }
 
     #[test]

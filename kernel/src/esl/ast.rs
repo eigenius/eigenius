@@ -126,10 +126,14 @@ pub enum ProgramAttribute {
     Description(String),
 }
 
-/// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }`
+/// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }` —
+/// optionally parameterised `codata ex:Stream(i : Size, A : Set) { … }`.
 #[derive(Debug)]
 pub struct CodataDecl {
     pub name: QualifiedName,
+    /// Type parameters: `(A : Set, i : Size, ...)`. Empty for
+    /// non-parametric codata — the legacy shape.
+    pub params: Vec<DataParam>,
     pub observations: Vec<ObservationDecl>,
     pub pos: Position,
 }
@@ -170,9 +174,32 @@ pub struct DataParam {
 #[derive(Debug)]
 pub struct CtorDecl {
     pub name: String,
-    /// Positional argument types. Empty for nullary constructors.
-    pub args: Vec<CtorArgType>,
+    /// Positional or named constructor arguments.
+    pub args: Vec<CtorArg>,
     pub pos: Position,
+}
+
+/// A single constructor argument.
+///
+/// Positional (the legacy form) carries just a type; the binder is
+/// implicitly anonymous. Named (Phase 11b step 15h) introduces a
+/// bound variable that subsequent args can reference, and can carry
+/// an optional upper bound for sized termination tracking.
+#[derive(Debug, Clone)]
+pub enum CtorArg {
+    /// `cons(A, List(A))` — positional, anonymous binder.
+    Positional(CtorArgType),
+    /// `succ(j : core:Size, ex:Nat(j))` — named binder with kind.
+    /// The optional `bound` encodes a `< upper` clause; when the
+    /// kind is `core:Size` and `bound` is present, this compiles to
+    /// `Exp::SizedPi { upper, body }` and introduces a TSO
+    /// hypothesis in the constructor's telescope.
+    Named {
+        name: String,
+        kind: QualifiedName,
+        bound: Option<QualifiedName>,
+        pos: Position,
+    },
 }
 
 /// A constructor argument type — a parameterised name reference.
@@ -189,12 +216,56 @@ pub struct CtorArgType {
 }
 
 /// A single observation declaration inside a codata block:
-/// `head : ex:Elem`
+/// `head : ex:Elem` or, for sized codata,
+/// `tail : {j < i} -> ex:Stream(j, A)`.
 #[derive(Debug)]
 pub struct ObservationDecl {
     pub name: String,
-    pub typ: QualifiedName,
+    pub typ: TypeExpr,
     pub pos: Position,
+}
+
+/// A type expression (Phase 11b step 15h.3).
+///
+/// Covers the shapes needed for sized codata observations:
+/// - Parameterised type refs (`ex:Stream(j, A)`)
+/// - Size literals (`Inf`) and built-in sort (`Size`)
+/// - Function types with optional bounded size binder
+///   (`{j < i} -> ex:Stream(j, A)` or `A -> B`)
+///
+/// Purposely restricted — this isn't a full type-expression grammar,
+/// just enough for the codata observation-type surface. Data ctor
+/// arg types still use the simpler `CtorArgType` shape.
+#[derive(Debug, Clone)]
+pub enum TypeExpr {
+    /// Type reference with zero or more type args: `Name` or
+    /// `Name(arg, arg, ...)`. Bare identifiers (no namespace) are
+    /// resolved as: declared param / `Inf` / `Size` first, otherwise
+    /// namespace lookup.
+    Ref {
+        name: QualifiedName,
+        args: Vec<TypeExpr>,
+        pos: Position,
+    },
+    /// Non-dependent arrow `A -> B` — used when the user writes a
+    /// plain function type without a named binder.
+    Arrow {
+        domain: Box<TypeExpr>,
+        codomain: Box<TypeExpr>,
+        pos: Position,
+    },
+    /// Size-binder arrow `{j < bound} -> body` (sized) or
+    /// `{j : Kind} -> body` (unbounded) or
+    /// `{j : Kind < bound} -> body`.
+    /// Compiles to `Exp::SizedPi` when bound is present and kind is
+    /// `Size`; to plain `Exp::Pi` otherwise.
+    BinderArrow {
+        name: String,
+        kind: QualifiedName,
+        bound: Option<QualifiedName>,
+        body: Box<TypeExpr>,
+        pos: Position,
+    },
 }
 
 /// An expression (ML-style, inside program bodies).

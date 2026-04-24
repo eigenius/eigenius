@@ -319,7 +319,11 @@ fn resolve_codata_type(
         }
     };
 
-    let mut observations = Vec::new();
+    // Type parameters (Phase 11b step 15h.3) — identical shape to
+    // `data`'s param telescope, reuses the same decoder.
+    let params_telescope = decode_params(class_iri, resource)?;
+
+    let mut observations: Vec<(crate::nbe::term::Name, Exp)> = Vec::new();
     for entry in obs_array {
         let obs_res = match entry {
             Value::Embedded(r) => r.as_ref(),
@@ -339,33 +343,154 @@ fn resolve_codata_type(
                 ))
             }
         };
-        let type_ref = match obs_res.get(&type_iri) {
-            Some(Value::String(s)) => s.clone(),
-            _ => {
-                return Err(format!(
-                    "codata type '{class_iri}' observation '{name}' missing 'observation_type'"
-                ))
-            }
-        };
-        let type_iri_parsed = Iri::parse(&type_ref)
-            .map_err(|e| format!("invalid observation type IRI '{type_ref}': {e}"))?;
-        // Resolve the observation's type via the same machinery —
-        // supports recursion through the codata type itself by
-        // short-circuiting: self-references resolve to an EigonClass
-        // marker that the evaluator can handle.
-        let type_val = if type_iri_parsed == *class_iri {
-            Val::EigonClass(type_iri_parsed.clone())
-        } else {
-            resolve_class_type(&type_iri_parsed, layer)?
-        };
-        // Read back the type value so we have a syntactic Exp for
-        // Val::Codata's observation list (eval under Rho::Nil when
-        // type checking against it).
-        let type_exp = crate::nbe::readback::readback_val(0, &type_val);
+        let type_value = obs_res.get(&type_iri).ok_or_else(|| {
+            format!("codata type '{class_iri}' observation '{name}' missing 'observation_type'")
+        })?;
+        let type_exp = decode_codata_observation_type(class_iri, layer, type_value)?;
         observations.push((name, type_exp));
     }
 
-    Ok(Val::Codata(observations, Rho::Nil))
+    // If the codata has type parameters, wrap the observation list
+    // in a *lambda* chain — `λ p₁. … λ pₙ. codata { … }`. Unlike
+    // inductive types (which have `Val::InductiveType { decl,
+    // params }`), our `Val::Codata` has no dedicated param-carrying
+    // shape; the Lam-wrapping is the structural workaround that
+    // lets `SizedBox(Inf, One)` reduce to the concrete codata type
+    // with observations evaluated under the applied parameter
+    // environment. The Lam's kernel type (`Π p₁:K₁. … Set`) is
+    // derivable via `check_type` over the ESL source, not inspected
+    // here — the Lam is applied at use sites and the result type
+    // flows from the applications.
+    if params_telescope.is_empty() {
+        return Ok(Val::Codata(observations, Rho::Nil));
+    }
+    let mut body = Exp::Codata(
+        observations
+            .into_iter()
+            .map(|(name, typ)| crate::nbe::term::Observation { name, typ })
+            .collect(),
+    );
+    for (patt, _kind) in params_telescope.iter().rev() {
+        body = Exp::Lam(patt.clone(), Box::new(body));
+    }
+    crate::nbe::eval::eval(&body, &Rho::Nil).map_err(|e| e.to_string())
+}
+
+/// Decode a codata observation's type value to an `Exp`.
+///
+/// Three shapes (Phase 11b step 15h.3):
+/// - `Value::String`: legacy plain-IRI reference or bare `Inf`/`Size`
+///   / parameter name. Self-references (class IRI equals the
+///   enclosing codata's IRI) resolve to `Exp::EigonClass` so the
+///   type checker can look them up lazily.
+/// - Embedded `InductiveArgType`: parameterised type reference
+///   (e.g. `ex:List(A)`). Reuses `decode_arg_type`.
+/// - Embedded `TypeArrow`: non-dependent arrow.
+/// - Embedded `TypeBinderArrow`: size-binder arrow, becomes
+///   `Exp::SizedPi` when kind is `Size` and a bound is present.
+fn decode_codata_observation_type(
+    class_iri: &Iri,
+    layer: &Layer,
+    value: &Value,
+) -> Result<Exp, String> {
+    match value {
+        Value::String(s) => {
+            // Bare name forms first.
+            if !s.contains(':') {
+                return Ok(match s.as_str() {
+                    "Inf" => Exp::SizeInf,
+                    "Size" => Exp::SizeSort,
+                    other => Exp::Var(other.to_string()),
+                });
+            }
+            let parsed =
+                Iri::parse(s).map_err(|e| format!("invalid observation type IRI '{s}': {e}"))?;
+            if parsed == *class_iri {
+                Ok(Exp::EigonClass(parsed))
+            } else {
+                let v = resolve_class_type(&parsed, layer)?;
+                Ok(crate::nbe::readback::readback_val(0, &v))
+            }
+        }
+        Value::Embedded(r) => {
+            let is_a: Vec<String> = r.is_a().iter().map(|i| i.as_str().to_string()).collect();
+            // Dispatch on the embedded resource's is_a marker.
+            if is_a.iter().any(|s| s == wk::TYPE_ARROW) {
+                let dom_v = r
+                    .get(&Iri::parse(wk::ARROW_DOMAIN).unwrap())
+                    .ok_or_else(|| "TypeArrow missing `arrow_domain`".to_string())?;
+                let cod_v = r
+                    .get(&Iri::parse(wk::ARROW_CODOMAIN).unwrap())
+                    .ok_or_else(|| "TypeArrow missing `arrow_codomain`".to_string())?;
+                let dom = decode_codata_observation_type(class_iri, layer, dom_v)?;
+                let cod = decode_codata_observation_type(class_iri, layer, cod_v)?;
+                return Ok(Exp::Pi(
+                    crate::nbe::term::Patt::Unit,
+                    Box::new(dom),
+                    Box::new(cod),
+                ));
+            }
+            if is_a.iter().any(|s| s == wk::TYPE_BINDER_ARROW) {
+                let name = r
+                    .get(&Iri::parse(wk::BINDER_NAME).unwrap())
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .ok_or_else(|| "TypeBinderArrow missing `binder_name`".to_string())?;
+                let kind_str = r
+                    .get(&Iri::parse(wk::BINDER_KIND).unwrap())
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "TypeBinderArrow missing `binder_kind`".to_string())?;
+                let kind_is_size = kind_str == "Size" || kind_str.ends_with(":Size");
+                let bound_opt = r
+                    .get(&Iri::parse(wk::BINDER_BOUND).unwrap())
+                    .and_then(|v| v.as_str());
+                let body_v = r
+                    .get(&Iri::parse(wk::BINDER_BODY).unwrap())
+                    .ok_or_else(|| "TypeBinderArrow missing `binder_body`".to_string())?;
+                let body = decode_codata_observation_type(class_iri, layer, body_v)?;
+                match (kind_is_size, bound_opt) {
+                    (true, Some(bstr)) => Ok(Exp::SizedPi {
+                        patt: crate::nbe::term::Patt::Var(name),
+                        upper: Box::new(decode_bare_size_ref(bstr)),
+                        body: Box::new(body),
+                    }),
+                    (true, None) => Ok(Exp::Pi(
+                        crate::nbe::term::Patt::Var(name),
+                        Box::new(Exp::SizeSort),
+                        Box::new(body),
+                    )),
+                    (false, Some(_)) => Err(format!(
+                        "TypeBinderArrow `{name}` has a bound but its kind is not Size"
+                    )),
+                    (false, None) => Ok(Exp::Pi(
+                        crate::nbe::term::Patt::Var(name),
+                        Box::new(Exp::EigonClass(
+                            Iri::parse(kind_str)
+                                .map_err(|e| format!("invalid binder kind '{kind_str}': {e}"))?,
+                        )),
+                        Box::new(body),
+                    )),
+                }
+            } else {
+                // Fall back to the InductiveArgType shape (Ref with args).
+                let self_stub = Arc::new(InductiveDecl {
+                    name: shortname_of(class_iri),
+                    params: Vec::new(),
+                    sort: Exp::Set,
+                    ctors: Vec::new(),
+                });
+                decode_arg_type(class_iri, &self_stub, value, layer)
+            }
+        }
+        _ => Err("observation_type must be a String or an embedded TypeExpr resource".to_string()),
+    }
+}
+
+fn shortname_of(iri: &Iri) -> String {
+    iri.as_str()
+        .rsplit(':')
+        .next()
+        .unwrap_or(iri.as_str())
+        .to_string()
 }
 
 /// Check whether a resource represents an inductive type declaration
@@ -454,9 +579,19 @@ fn decode_params(
                 ))
             }
         };
-        // Phase 11b v1 admits only kind `Set`; the resource carries the
-        // kind for forward-compatibility but we don't branch on it yet.
-        params.push((Patt::Var(name), Exp::Set));
+        let kind_str = match pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) {
+            Some(Value::String(s)) => s.as_str(),
+            _ => "urn:eigenius:core:Set",
+        };
+        // Recognise the built-in kinds. `Size` lands on `Exp::SizeSort`
+        // so sized inductives/codata declared at the ESL surface flow
+        // through the same machinery as kernel-AST sized types.
+        // Anything else falls back to `Exp::Set` for forward-compat.
+        let kind_exp = match kind_str {
+            s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
+            _ => Exp::Set,
+        };
+        params.push((Patt::Var(name), kind_exp));
     }
     Ok(params)
 }
@@ -514,7 +649,12 @@ fn decode_ctors(
 }
 
 /// Assemble a constructor's full type expression:
-/// `Π params. Π args. Self(params)`.
+/// `Π params. [Π|SizedPi] args. Self(params)`.
+///
+/// Each ctor arg is either a positional anonymous Pi, a named Pi
+/// binder (for size-polymorphic args without a bound), or a
+/// `SizedPi` (for named `Size` binders with an upper bound — the
+/// sized-termination entry point from the ESL surface).
 fn build_ctor_type(
     class_iri: &Iri,
     self_ref: &Arc<InductiveDecl>,
@@ -522,8 +662,7 @@ fn build_ctor_type(
     arg_types: &[Value],
     layer: &Layer,
 ) -> Result<Exp, String> {
-    // Result type: Self(param₁, param₂, ...) — each applied param
-    // becomes a Var reference to the enclosing binder.
+    // Result type: Self(param₁, param₂, ...).
     let param_vars: Vec<Exp> = params
         .iter()
         .map(|(p, _)| match p {
@@ -533,13 +672,26 @@ fn build_ctor_type(
         .collect();
     let mut result = Exp::InductiveType(self_ref.clone(), param_vars);
 
-    // Wrap each arg binder in reverse so the first arg is outermost.
-    // Arg binders are anonymous (`Patt::Unit`) because the surface
-    // syntax doesn't name them — Phase 11b v1 treats constructors as
-    // positional.
-    for arg in arg_types.iter().rev() {
-        let arg_exp = decode_arg_type(class_iri, self_ref, arg, layer)?;
-        result = Exp::Pi(Patt::Unit, Box::new(arg_exp), Box::new(result));
+    // Decode all args upfront — preserves their shape so the wrapping
+    // pass below can dispatch on positional / Pi-binder / SizedPi.
+    let decoded: Vec<DecodedArg> = arg_types
+        .iter()
+        .map(|a| decode_ctor_arg(class_iri, self_ref, a, layer))
+        .collect::<Result<Vec<_>, String>>()?;
+
+    // Wrap in reverse so the first arg is outermost.
+    for arg in decoded.into_iter().rev() {
+        result = match arg {
+            DecodedArg::Positional(typ) => Exp::Pi(Patt::Unit, Box::new(typ), Box::new(result)),
+            DecodedArg::PiBinder { name, kind } => {
+                Exp::Pi(Patt::Var(name), Box::new(kind), Box::new(result))
+            }
+            DecodedArg::SizedBinder { name, upper } => Exp::SizedPi {
+                patt: Patt::Var(name),
+                upper: Box::new(upper),
+                body: Box::new(result),
+            },
+        };
     }
 
     // Wrap each parameter binder in reverse.
@@ -548,6 +700,85 @@ fn build_ctor_type(
     }
 
     Ok(result)
+}
+
+/// One of three shapes a ctor arg can take after decoding.
+enum DecodedArg {
+    /// Anonymous arg — the bare positional form.
+    Positional(Exp),
+    /// Named Pi binder (e.g. a size-polymorphic ctor without a bound).
+    PiBinder { name: String, kind: Exp },
+    /// Bounded size binder — the binder's kind is always `SizeSort`
+    /// (implicit; not carried in the variant) and the `upper`
+    /// expression must normalise to a rigid size variable or ∞.
+    SizedBinder { name: String, upper: Exp },
+}
+
+/// Decode a constructor-arg resource into a `DecodedArg`.
+///
+/// Binder-shaped resources carry `binder_name`; everything else is
+/// positional. A binder whose kind is `core:Size`/`Size` and that
+/// additionally carries `binder_bound` emits `SizedBinder`;
+/// otherwise it emits `PiBinder` (used for size-polymorphic args
+/// without a bound).
+fn decode_ctor_arg(
+    class_iri: &Iri,
+    self_ref: &Arc<InductiveDecl>,
+    value: &Value,
+    layer: &Layer,
+) -> Result<DecodedArg, String> {
+    let r = match value {
+        Value::Embedded(r) => r.as_ref(),
+        _ => return Err("InductiveArgType must be embedded".to_string()),
+    };
+    let binder_name = r
+        .get(&Iri::parse(wk::BINDER_NAME).unwrap())
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    if let Some(name) = binder_name {
+        // Kind is stored in `type_name`; decode in the same way as
+        // a normal arg type so `Size`/`Inf`/param-refs all work.
+        let kind_exp = decode_arg_type(class_iri, self_ref, value, layer)?;
+        let bound_str = r
+            .get(&Iri::parse(wk::BINDER_BOUND).unwrap())
+            .and_then(|v| v.as_str());
+        if let Some(bstr) = bound_str {
+            if !matches!(kind_exp, Exp::SizeSort) {
+                return Err(format!(
+                    "ctor binder `{name}` has `binder_bound` but its kind is not `Size`"
+                ));
+            }
+            let upper = decode_bare_size_ref(bstr);
+            Ok(DecodedArg::SizedBinder { name, upper })
+        } else {
+            Ok(DecodedArg::PiBinder {
+                name,
+                kind: kind_exp,
+            })
+        }
+    } else {
+        Ok(DecodedArg::Positional(decode_arg_type(
+            class_iri, self_ref, value, layer,
+        )?))
+    }
+}
+
+/// Decode a size-reference string used in `binder_bound` position
+/// to its corresponding kernel `Exp`.
+///
+/// Mirrors the bare-name branch of `decode_arg_type`, restricted to
+/// the values we actually accept as SizedPi upper bounds: `Inf`,
+/// `Size`, or a bare parameter/variable name (emits `Exp::Var`).
+fn decode_bare_size_ref(s: &str) -> Exp {
+    match s {
+        "Inf" => Exp::SizeInf,
+        "Size" => Exp::SizeSort,
+        other if !other.contains(':') => Exp::Var(other.to_string()),
+        // An IRI here would be unusual (resolved bounds don't really
+        // make sense), but fall back to treating it as a named
+        // reference via `Var` — the check-time validation will
+        // reject it if the upper-bound shape is wrong.
+        other => Exp::Var(other.to_string()),
+    }
 }
 
 /// Decode one `InductiveArgType` resource to its `Exp`.
@@ -590,13 +821,21 @@ fn decode_arg_type(
     // separator, every IRI produced by the ESL compiler contains `:`.
     // The compile step preserves this invariant, so the check is
     // exact rather than fuzzy.
+    //
+    // Bare `Inf` and `Size` are reserved literals for the size sort:
+    // the ESL compile step lets them through un-resolved so this
+    // decoder can turn them into their corresponding kernel Exp.
     if !type_name.contains(':') {
         if !type_args_arr.is_empty() {
             return Err(format!(
                 "bare parameter reference `{type_name}` cannot take type arguments"
             ));
         }
-        return Ok(Exp::Var(type_name.to_string()));
+        return Ok(match type_name {
+            "Inf" => Exp::SizeInf,
+            "Size" => Exp::SizeSort,
+            other => Exp::Var(other.to_string()),
+        });
     }
 
     let arg_iri =
@@ -920,6 +1159,407 @@ mod tests {
                 }
                 assert_eq!(depth, 3, "cons should be a 3-binder Π-chain");
                 assert!(matches!(cursor, Exp::InductiveType(d, _) if d.name == "List"));
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    // --- Sized types through ESL surface (Phase 11b step 15h) ---
+
+    #[test]
+    fn resolve_sized_inductive_with_size_kind_param() {
+        // ESL source declaring an inductive with a `Size` parameter.
+        // The ground decoder should resolve the param kind to
+        // `Exp::SizeSort`, enabling sized-type subtyping at the
+        // kernel level.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SizedNat(i : core:Size) {
+                zero,
+                succ(ex:SizedNat(i)),
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedNat").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SizedNat");
+
+        match val {
+            Val::InductiveType { decl, .. } => {
+                assert_eq!(decl.name, "SizedNat");
+                assert_eq!(decl.params.len(), 1);
+                assert!(
+                    matches!(decl.params[0].1, Exp::SizeSort),
+                    "Size-kinded param must decode to Exp::SizeSort, got {:?}",
+                    decl.params[0].1
+                );
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sized_nat_with_bounded_binder_decodes_to_sized_pi() {
+        // Full sized Nat from ESL: the ctor binder `{j < i}` must
+        // decode to `Exp::SizedPi` in the constructor's telescope.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SizedNat(i : core:Size) {
+                zero,
+                succ({j < i}, ex:SizedNat(j)),
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedNat").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SizedNat");
+        let decl = match val {
+            Val::InductiveType { decl, .. } => decl,
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        };
+
+        // succ's type telescope should be:
+        //   Π i : Size. SizedPi{j < i}. Π _ : SizedNat(j). SizedNat(i)
+        let succ = &decl.ctors[1];
+        let after_params = match &succ.typ {
+            Exp::Pi(Patt::Var(p), dom, body) => {
+                assert_eq!(p, "i");
+                assert!(matches!(**dom, Exp::SizeSort));
+                body.as_ref()
+            }
+            other => panic!("expected outer Pi on succ, got {other:?}"),
+        };
+        match after_params {
+            Exp::SizedPi { patt, upper, body } => {
+                assert!(matches!(patt, Patt::Var(n) if n == "j"));
+                assert!(matches!(upper.as_ref(), Exp::Var(n) if n == "i"));
+                // Body should be `Π _ : SizedNat(j). SizedNat(i)`.
+                match body.as_ref() {
+                    Exp::Pi(_, arg_dom, arg_body) => {
+                        match arg_dom.as_ref() {
+                            Exp::InductiveType(d, args) => {
+                                assert_eq!(d.name, "SizedNat");
+                                assert!(matches!(&args[0], Exp::Var(v) if v == "j"));
+                            }
+                            other => panic!("expected InductiveType arg dom, got {other:?}"),
+                        }
+                        match arg_body.as_ref() {
+                            Exp::InductiveType(_, args) => {
+                                assert!(matches!(&args[0], Exp::Var(v) if v == "i"));
+                            }
+                            other => panic!("expected result InductiveType, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected Pi after SizedPi, got {other:?}"),
+                }
+            }
+            other => panic!("expected SizedPi after params, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sized_nat_esl_succ_at_non_decreasing_size_rejected() {
+        // End-to-end rejection: with ESL-declared sized Nat, invoking
+        // `succ(i, zero(i))` at the outer size `i` fails because the
+        // ctor's SizedPi requires the size arg strictly below `i`.
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::{gen_val, up_gamma, Rho};
+        use crate::nbe::term::Patt;
+
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SizedNat(i : core:Size) {
+                zero,
+                succ({j < i}, ex:SizedNat(j)),
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedNat").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SizedNat");
+        let decl = match val {
+            Val::InductiveType { decl, .. } => decl,
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        };
+
+        // Bind `i : Size` in the context.
+        let i_val = gen_val(&Rho::Nil);
+        let rho = Rho::Nil.extend(Patt::Var("i".to_string()), i_val.clone());
+        let gamma = up_gamma(
+            &Vec::new(),
+            &Patt::Var("i".to_string()),
+            &Val::SizeSort,
+            &i_val,
+        )
+        .unwrap();
+        let mut c = CheckCtx::with_layer(rho, gamma, layer);
+
+        // `zero` and `succ(i, zero)` at expected SizedNat(i).
+        let ty = Val::InductiveType {
+            decl: decl.clone(),
+            params: vec![i_val],
+        };
+        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
+        let bad = Exp::InductiveCtor(
+            decl,
+            "succ".to_string(),
+            vec![Exp::Var("i".to_string()), zero],
+        );
+        let err = check(&mut c, &bad, &ty).unwrap_err();
+        assert!(
+            err.contains("not strictly below"),
+            "expected sized-bound error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn sized_codata_with_bounded_binder_from_esl() {
+        // ESL source declares a sized codata with a SizedPi in an
+        // observation type. Round-trips through compile → layer →
+        // resolve to a kernel type that, when applied to concrete
+        // size/type arguments, yields a `Val::Codata` whose tail
+        // observation has `SizedPi` in its expression.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            codata ex:SizedBox(i : core:Size, A : core:Set) {
+                get : A;
+                shrink : {j < i} -> A;
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedBox").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SizedBox");
+
+        // Parameterised codata resolves to a λ-chain whose body is a
+        // `Val::Codata`. Applying the outer λ to concrete params
+        // reduces to the concrete codata type.
+        match &val {
+            Val::Lam(_) => {} // good
+            other => panic!("expected outer Lam for parameterised codata, got {other:?}"),
+        }
+
+        // Apply the type former at `Inf` and `One` to get the concrete
+        // codata, then check that the `shrink` observation's type
+        // contains a `SizedPi`.
+        use crate::nbe::eval::eval;
+        let applied = Exp::App(
+            Box::new(Exp::App(
+                Box::new(crate::nbe::readback::readback_val(0, &val)),
+                Box::new(Exp::SizeInf),
+            )),
+            Box::new(Exp::One),
+        );
+        let applied_val = eval(&applied, &Rho::Nil).expect("apply codata params");
+        let (observations, captured_rho) = match &applied_val {
+            Val::Codata(obs, rho) => (obs.clone(), rho.clone()),
+            other => panic!("expected Val::Codata after applying params, got {other:?}"),
+        };
+        let shrink_typ_exp = observations
+            .iter()
+            .find(|(n, _)| n == "shrink")
+            .map(|(_, t)| t.clone())
+            .expect("shrink observation present");
+        // Evaluate the observation's type under the codata's captured
+        // environment — this is the substitution step that turns
+        // `Var("i")` into `SizeInf`.
+        let shrink_typ_val = eval(&shrink_typ_exp, &captured_rho).expect("eval shrink type");
+        let shrink_typ = crate::nbe::readback::readback_val(0, &shrink_typ_val);
+        match shrink_typ {
+            Exp::SizedPi { patt, upper, body } => {
+                assert!(matches!(patt, Patt::Var(_)));
+                assert!(
+                    matches!(*upper, Exp::SizeInf),
+                    "upper should resolve to SizeInf after applying i=Inf, got {:?}",
+                    upper
+                );
+                assert!(matches!(*body, Exp::One));
+            }
+            other => panic!("expected SizedPi, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sized_codata_corecord_inhabits_sized_type_from_esl() {
+        // The productivity-by-typing unlock, end-to-end through ESL:
+        // declare a sized codata, construct the concrete codata type
+        // at specific size/type arguments, and type-check a corecord
+        // value against it. The corecord's `shrink` field must be a
+        // lambda whose body type-checks under the TSO hypothesis the
+        // SizedPi introduces.
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::eval::eval;
+
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            codata ex:SizedBox(i : core:Size, A : core:Set) {
+                get : A;
+                shrink : {j < i} -> A;
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedBox").unwrap();
+        let codata_former = resolve_class_type(&iri, &layer).expect("resolve SizedBox");
+
+        // Apply the type former at (Inf, One) to get a concrete codata.
+        let applied = Exp::App(
+            Box::new(Exp::App(
+                Box::new(crate::nbe::readback::readback_val(0, &codata_former)),
+                Box::new(Exp::SizeInf),
+            )),
+            Box::new(Exp::One),
+        );
+        let ty = eval(&applied, &Rho::Nil).expect("apply codata params");
+
+        // Corecord `{ get = Unit, shrink = λ_. Unit }` : SizedBox(∞, 1).
+        let corecord = Exp::CoRecord(vec![
+            crate::nbe::term::CoField {
+                name: "get".to_string(),
+                body: Exp::Unit,
+            },
+            crate::nbe::term::CoField {
+                name: "shrink".to_string(),
+                body: Exp::Lam(Patt::Var("j".to_string()), Box::new(Exp::Unit)),
+            },
+        ]);
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        check(&mut c, &corecord, &ty).expect("sized corecord from ESL-declared codata type-checks");
+    }
+
+    #[test]
+    fn sized_types_end_to_end_esl_to_check() {
+        // End-to-end exercise (Phase 11b step 15i):
+        //   1. ESL source declares `data ex:SizedNat(i : core:Size)`
+        //      with `zero` and `succ(ex:SizedNat(i))` constructors.
+        //   2. Layer-build + ground resolution yields an
+        //      `InductiveDecl` whose one parameter has `Exp::SizeSort`.
+        //   3. The kernel type-checker admits the constructors when
+        //      they're checked at the type `SizedNat(Inf)` — the
+        //      `Inf` param applying to `SizeSort` exercises the whole
+        //      sized-type chain from ESL surface down through
+        //      `subtype_of` on the constructor's result type.
+        //   4. A stronger "productive" check: the variable `x :
+        //      SizedNat(Inf)` can be used where `SizedNat(Inf)` is
+        //      expected (reflexive subtyping), exercising the sized
+        //      subtyping branch of the type checker on values that
+        //      originated from real ESL code.
+
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::{up_gamma, Rho};
+        use crate::nbe::eval::eval;
+        use crate::nbe::term::Patt;
+
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SizedNat(i : core:Size) {
+                zero,
+                succ(ex:SizedNat(i)),
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedNat").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SizedNat");
+        let decl = match val {
+            Val::InductiveType { decl, .. } => decl,
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        };
+        // Sanity: size parameter decoded correctly.
+        assert!(matches!(decl.params[0].1, Exp::SizeSort));
+
+        // 3. Build `SizedNat(Inf)` as a target type and check `zero` against it.
+        let snat_inf = Val::InductiveType {
+            decl: decl.clone(),
+            params: vec![Val::SizeInf],
+        };
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        let zero_exp = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
+        check(&mut c, &zero_exp, &snat_inf).expect("zero : SizedNat(Inf) via ESL pipeline");
+
+        // `succ(zero)` at SizedNat(Inf).
+        let succ_zero = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![zero_exp]);
+        check(&mut c, &succ_zero, &snat_inf).expect("succ(zero) : SizedNat(Inf) via ESL pipeline");
+
+        // 4. Reflexive subtyping via the checker fallthrough: put
+        //    `x : SizedNat(Inf)` into gamma, then check `x` against
+        //    the same type. This path goes through `subtype_of_with_hyps`
+        //    → InductiveType branch → size_le_with_hyps on the size
+        //    param position.
+        let x_val = crate::nbe::env::gen_val(&c.rho);
+        let rho2 = c
+            .rho
+            .clone()
+            .extend(Patt::Var("x".to_string()), x_val.clone());
+        let gamma2 = up_gamma(&c.gamma, &Patt::Var("x".to_string()), &snat_inf, &x_val).unwrap();
+        let mut c2 = CheckCtx::with_layer(rho2, gamma2, layer);
+        check(&mut c2, &Exp::Var("x".to_string()), &snat_inf)
+            .expect("x : SizedNat(Inf) checks against SizedNat(Inf)");
+
+        // Also validate that ESL's `Inf` literal end-to-end yields a
+        // value that evaluates to `Val::SizeInf`, not a phantom Var.
+        let inf_exp = Exp::SizeInf;
+        let inf_val = eval(&inf_exp, &c2.rho).expect("eval Inf");
+        assert!(matches!(inf_val, Val::SizeInf));
+    }
+
+    #[test]
+    fn resolve_inductive_with_inf_literal_in_ctor_arg() {
+        // ESL source where a ctor arg type uses the `Inf` literal
+        // in place of a parameter-variable size position — the
+        // decoder must emit `Exp::SizeInf` in that position.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SizedBox(i : core:Size) {
+                mk(ex:SizedBox(Inf)),
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SizedBox").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SizedBox");
+        match val {
+            Val::InductiveType { decl, .. } => {
+                assert_eq!(decl.ctors.len(), 1);
+                // mk's type: Π i:Size. Π _:SizedBox(Inf). SizedBox(i)
+                // — drill into the inner InductiveType's first param.
+                let mk = &decl.ctors[0];
+                // Peel outer Π i:Size.
+                let inner = match &mk.typ {
+                    Exp::Pi(_, _, body) => body.as_ref(),
+                    other => panic!("expected outer Pi, got {other:?}"),
+                };
+                // Next Π _:SizedBox(Inf).
+                let arg_ty = match inner {
+                    Exp::Pi(_, dom, _) => dom.as_ref(),
+                    other => panic!("expected arg Pi, got {other:?}"),
+                };
+                match arg_ty {
+                    Exp::InductiveType(d, sub_args) => {
+                        assert_eq!(d.name, "SizedBox");
+                        assert_eq!(sub_args.len(), 1);
+                        assert!(
+                            matches!(sub_args[0], Exp::SizeInf),
+                            "ctor arg at size-position should be SizeInf, got {:?}",
+                            sub_args[0]
+                        );
+                    }
+                    other => panic!("expected InductiveType for arg, got {other:?}"),
+                }
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
         }

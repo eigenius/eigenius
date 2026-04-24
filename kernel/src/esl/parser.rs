@@ -576,6 +576,14 @@ impl<'a> Parser<'a> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Codata)?;
         let name = self.parse_qualified_name()?;
+
+        // Optional type parameters, e.g. `(i : core:Size, A : core:Set)`.
+        let params = if self.at(&TokenKind::LParen) {
+            self.parse_data_params()?
+        } else {
+            Vec::new()
+        };
+
         self.expect(&TokenKind::LBrace)?;
 
         let mut observations = Vec::new();
@@ -583,7 +591,7 @@ impl<'a> Parser<'a> {
             let obs_pos = self.current_pos();
             let obs_name = self.expect_ident()?;
             self.expect(&TokenKind::Colon)?;
-            let typ = self.parse_qualified_name()?;
+            let typ = self.parse_type_expr()?;
             self.expect_semicolon()?;
             observations.push(ObservationDecl {
                 name: obs_name,
@@ -602,9 +610,115 @@ impl<'a> Parser<'a> {
 
         Ok(CodataDecl {
             name,
+            params,
             observations,
             pos,
         })
+    }
+
+    /// Parse a type expression (Phase 11b step 15h.3).
+    ///
+    /// Grammar (right-associative arrow, tight-binding ref):
+    /// ```text
+    /// TypeExpr ::= Atom '->' TypeExpr        -- arrow
+    ///            | BinderArrow               -- `{j < i} -> …`
+    ///            | Atom
+    /// Atom     ::= QualifiedName [ '(' TypeExpr (',' TypeExpr)* ')' ]
+    /// BinderArrow ::= '{' ident (':' QualifiedName)? ('<' QualifiedName)? '}' '->' TypeExpr
+    /// ```
+    fn parse_type_expr(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+
+        // Size-binder arrow form — unambiguous because codata obs
+        // types start fresh (no braces ever appear as a normal type
+        // here).
+        if self.at(&TokenKind::LBrace) {
+            self.advance();
+            let name = self.expect_ident()?;
+            let (kind, bound) = if self.at(&TokenKind::Colon) {
+                self.advance();
+                let kind = self.parse_qualified_name()?;
+                let bound = if self.at(&TokenKind::Less) {
+                    self.advance();
+                    Some(self.parse_qualified_name()?)
+                } else {
+                    None
+                };
+                (kind, bound)
+            } else if self.at(&TokenKind::Less) {
+                self.advance();
+                let bound = self.parse_qualified_name()?;
+                (
+                    QualifiedName {
+                        namespace: None,
+                        name: "Size".to_string(),
+                        pos: pos.clone(),
+                    },
+                    Some(bound),
+                )
+            } else {
+                return Err(EslError::parser(
+                    Some(self.current_pos()),
+                    format!(
+                        "expected ':' or '<' after binder name in type expression, \
+                         found {:?}",
+                        self.peek()
+                    ),
+                ));
+            };
+            self.expect(&TokenKind::RBrace)?;
+            self.expect(&TokenKind::Arrow)?;
+            let body = self.parse_type_expr()?;
+            return Ok(TypeExpr::BinderArrow {
+                name,
+                kind,
+                bound,
+                body: Box::new(body),
+                pos,
+            });
+        }
+
+        // Atom, optionally followed by `->` for a non-dependent arrow.
+        let atom = self.parse_type_atom()?;
+        if self.at(&TokenKind::Arrow) {
+            self.advance();
+            let codomain = self.parse_type_expr()?;
+            Ok(TypeExpr::Arrow {
+                domain: Box::new(atom),
+                codomain: Box::new(codomain),
+                pos,
+            })
+        } else {
+            Ok(atom)
+        }
+    }
+
+    fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        let name = self.parse_qualified_name()?;
+        let args = if self.at(&TokenKind::LParen) {
+            self.advance();
+            let mut args = Vec::new();
+            while !self.at(&TokenKind::RParen) && !self.at_eof() {
+                args.push(self.parse_type_expr()?);
+                if self.at(&TokenKind::Comma) {
+                    self.advance();
+                } else if !self.at(&TokenKind::RParen) {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!(
+                            "expected ',' or ')' in type argument list, found {:?}",
+                            self.peek()
+                        ),
+                    ));
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+            args
+        } else {
+            Vec::new()
+        };
+        Ok(TypeExpr::Ref { name, args, pos })
     }
 
     // --- Data (Phase 11b step 7, D19 §10) ---
@@ -702,7 +816,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let mut args = Vec::new();
             while !self.at(&TokenKind::RParen) && !self.at_eof() {
-                args.push(self.parse_ctor_arg_type()?);
+                args.push(self.parse_ctor_arg()?);
                 if self.at(&TokenKind::Comma) {
                     self.advance();
                 } else if !self.at(&TokenKind::RParen) {
@@ -729,6 +843,71 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         Ok(CtorDecl { name, args, pos })
+    }
+
+    /// A single constructor argument.
+    ///
+    /// Two surface forms (Phase 11b step 15h):
+    ///
+    /// - Positional (legacy): `Name` or `Name(params, ...)`.
+    /// - Brace-delimited named binder:
+    ///   - `{j < i}` — sized binder, kind `Size` implicit; compiles
+    ///     to `Exp::SizedPi` with upper bound `i`.
+    ///   - `{j : Kind}` — named binder with explicit kind (no bound);
+    ///     compiles to a plain Π binder.
+    ///   - `{j : Kind < i}` — named binder with both explicit kind
+    ///     and an upper bound. When `Kind` is `Size` this becomes
+    ///     a `SizedPi`; otherwise bounded-binding on non-size kinds
+    ///     is rejected at decode time.
+    ///
+    /// Braces disambiguate binders from positional qualified names
+    /// (`ex:Nat`) — without them the two shapes are token-identical.
+    fn parse_ctor_arg(&mut self) -> Result<CtorArg, EslError> {
+        if self.at(&TokenKind::LBrace) {
+            let pos = self.current_pos();
+            self.advance();
+            let name = self.expect_ident()?;
+            let (kind, bound) = if self.at(&TokenKind::Colon) {
+                self.advance();
+                let kind = self.parse_qualified_name()?;
+                let bound = if self.at(&TokenKind::Less) {
+                    self.advance();
+                    Some(self.parse_qualified_name()?)
+                } else {
+                    None
+                };
+                (kind, bound)
+            } else if self.at(&TokenKind::Less) {
+                // `{name < bound}` — implicit Size kind.
+                self.advance();
+                let bound = self.parse_qualified_name()?;
+                (
+                    QualifiedName {
+                        namespace: None,
+                        name: "Size".to_string(),
+                        pos: pos.clone(),
+                    },
+                    Some(bound),
+                )
+            } else {
+                return Err(EslError::parser(
+                    Some(self.current_pos()),
+                    format!(
+                        "expected ':' or '<' after binder name in ctor arg, found {:?}",
+                        self.peek()
+                    ),
+                ));
+            };
+            self.expect(&TokenKind::RBrace)?;
+            Ok(CtorArg::Named {
+                name,
+                kind,
+                bound,
+                pos,
+            })
+        } else {
+            Ok(CtorArg::Positional(self.parse_ctor_arg_type()?))
+        }
     }
 
     /// A constructor argument type: `Name` or `Name(arg, ...)`.
@@ -1680,8 +1859,13 @@ mod tests {
                 assert!(d.ctors[0].args.is_empty());
                 assert_eq!(d.ctors[1].name, "succ");
                 assert_eq!(d.ctors[1].args.len(), 1);
-                assert_eq!(d.ctors[1].args[0].name.name, "Nat");
-                assert!(d.ctors[1].args[0].params.is_empty());
+                match &d.ctors[1].args[0] {
+                    CtorArg::Positional(t) => {
+                        assert_eq!(t.name.name, "Nat");
+                        assert!(t.params.is_empty());
+                    }
+                    other => panic!("expected Positional, got {other:?}"),
+                }
             }
             _ => panic!("expected data"),
         }
@@ -1731,14 +1915,123 @@ mod tests {
                 assert!(d.ctors[0].args.is_empty());
                 assert_eq!(d.ctors[1].name, "cons");
                 assert_eq!(d.ctors[1].args.len(), 2);
-                // First arg: bare `A` (param reference)
-                assert_eq!(d.ctors[1].args[0].name.name, "A");
-                assert!(d.ctors[1].args[0].params.is_empty());
-                // Second arg: `ex:List(A)` (self-reference applied to A)
-                assert_eq!(d.ctors[1].args[1].name.name, "List");
-                assert_eq!(d.ctors[1].args[1].params.len(), 1);
-                assert_eq!(d.ctors[1].args[1].params[0].name.name, "A");
+                // First arg: bare `A` (param reference) — positional
+                match &d.ctors[1].args[0] {
+                    CtorArg::Positional(t) => {
+                        assert_eq!(t.name.name, "A");
+                        assert!(t.params.is_empty());
+                    }
+                    other => panic!("expected Positional, got {other:?}"),
+                }
+                // Second arg: `ex:List(A)` — positional, applied to `A`.
+                match &d.ctors[1].args[1] {
+                    CtorArg::Positional(t) => {
+                        assert_eq!(t.name.name, "List");
+                        assert_eq!(t.params.len(), 1);
+                        assert_eq!(t.params[0].name.name, "A");
+                    }
+                    other => panic!("expected Positional, got {other:?}"),
+                }
             }
+            _ => panic!("expected data"),
+        }
+    }
+
+    // --- Bounded binders in ctor args (Phase 11b step 15h.2) ---
+
+    #[test]
+    fn data_ctor_bounded_size_binder_implicit_kind() {
+        // `{j < i}` — size kind implicit, bound to `i`.
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat(i : core:Size) {
+                zero,
+                succ({j < i}, ex:Nat(j)),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                let succ = &d.ctors[1];
+                assert_eq!(succ.args.len(), 2);
+                match &succ.args[0] {
+                    CtorArg::Named {
+                        name, kind, bound, ..
+                    } => {
+                        assert_eq!(name, "j");
+                        assert_eq!(kind.name, "Size");
+                        assert!(kind.namespace.is_none());
+                        let b = bound.as_ref().expect("bound present");
+                        assert_eq!(b.name, "i");
+                    }
+                    other => panic!("expected Named, got {other:?}"),
+                }
+                assert!(matches!(&succ.args[1], CtorArg::Positional(_)));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_ctor_bounded_size_binder_explicit_kind() {
+        // `{j : core:Size < i}` — same as implicit-kind form.
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat(i : core:Size) {
+                zero,
+                succ({j : core:Size < i}, ex:Nat(j)),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => match &d.ctors[1].args[0] {
+                CtorArg::Named {
+                    name, kind, bound, ..
+                } => {
+                    assert_eq!(name, "j");
+                    assert_eq!(kind.namespace.as_deref(), Some("core"));
+                    assert_eq!(kind.name, "Size");
+                    assert_eq!(bound.as_ref().unwrap().name, "i");
+                }
+                other => panic!("expected Named, got {other:?}"),
+            },
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_ctor_unbounded_named_binder() {
+        // `{A : core:Set}` — unbounded Pi binder, kind Set.
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Wrap {
+                mk({A : core:Set}, A),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => match &d.ctors[0].args[0] {
+                CtorArg::Named {
+                    name, kind, bound, ..
+                } => {
+                    assert_eq!(name, "A");
+                    assert_eq!(kind.name, "Set");
+                    assert!(bound.is_none());
+                }
+                other => panic!("expected Named, got {other:?}"),
+            },
             _ => panic!("expected data"),
         }
     }

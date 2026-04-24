@@ -192,6 +192,12 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         // contain inductive occurrences.
         Exp::SizeSucc(s) => has_ind_occurrence(decl, s),
         Exp::SizeSort | Exp::SizeInf => false,
+        // SizedPi is a binder; recurse into both the upper bound and
+        // body. The upper bound is a size and can't carry an inductive
+        // occurrence, but `body` may.
+        Exp::SizedPi { upper, body, .. } => {
+            has_ind_occurrence(decl, upper) || has_ind_occurrence(decl, body)
+        }
 
         Exp::Var(_)
         | Exp::Set

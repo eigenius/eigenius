@@ -173,6 +173,26 @@ pub enum Exp {
     /// definitions degenerate to the unsized form when their size
     /// argument is `SizeInf`.
     SizeInf,
+
+    /// Bounded size Π-type: `Π {i < upper}. body` — the function
+    /// type of a sized function that takes a size argument strictly
+    /// smaller than `upper`.
+    ///
+    /// The binder `patt` has type `SizeSort` implicitly; the hypothesis
+    /// `patt < upper` is registered in the type-checker's rigid
+    /// hypothesis tracker (TSO) when `body` is checked. Applying a
+    /// value of this type to a size `i` requires proving
+    /// `size_lt(i, upper)` — either structurally (`i = SizeSucc(..)`
+    /// making ∞-absorption trivial) or via the hypothesis chain.
+    ///
+    /// `upper` must normalise to a rigid size variable or `SizeInf`
+    /// — the TSO can only track hypotheses rooted at rigid nodes.
+    /// Composite upper bounds like `{i < ŝ j}` are rejected in v1.
+    SizedPi {
+        patt: Patt,
+        upper: Box<Exp>,
+        body: Box<Exp>,
+    },
 }
 
 /// A single arm of an `Exp::Match`.

@@ -93,6 +93,11 @@ pub enum Val {
     /// The unbounded "infinity" size — the top element under the
     /// size partial order.
     SizeInf,
+
+    /// Bounded size Π-type value: `Π {i < upper}. body(i)`.
+    /// `upper` is the evaluated size upper bound; the closure binds
+    /// the fresh size variable in the body.
+    SizedPi(Box<Val>, Clos),
 }
 
 /// Neutral terms — computations that cannot reduce further.

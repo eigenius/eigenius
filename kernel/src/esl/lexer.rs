@@ -45,6 +45,7 @@ pub enum TokenKind {
     Semicolon, // ;
     Colon,     // :
     Comma,     // ,
+    Less,      // < (size bound in `j : Size < i`, Phase 11b step 15h)
 
     // Structural
     LParen,   // (
@@ -188,6 +189,7 @@ impl<'a> Lexer<'a> {
             b'.' => Some(TokenKind::Dot),
             b'=' => Some(TokenKind::Eq),
             b'\\' => Some(TokenKind::Backslash),
+            b'<' => Some(TokenKind::Less),
             _ => None,
         };
 

@@ -129,6 +129,7 @@ impl Compiler {
     // --- Codata ---
 
     fn compile_codata(&self, decl: &ast::CodataDecl) -> Result<Vec<Resource>, EslError> {
+        use crate::ontology::well_known as wk;
         let id = self.resolve_iri(&decl.name)?;
         let mut r = Resource::new(id);
 
@@ -143,19 +144,34 @@ impl Compiler {
             Value::String(decl.name.name.clone()),
         );
 
+        // Type parameters (Phase 11b step 15h.3) — same shape as
+        // `data`'s params so the decoder can reuse `decode_params`.
+        let param_names: std::collections::HashSet<&str> =
+            decl.params.iter().map(|p| p.name.as_str()).collect();
+        let params: Result<Vec<Value>, EslError> = decl
+            .params
+            .iter()
+            .map(|p| {
+                let mut pr = Resource::new_embedded();
+                set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
+                pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
+                let kind = self.resolve(&p.kind)?;
+                pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                Ok(Value::Embedded(Box::new(pr)))
+            })
+            .collect();
+        r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
+
         let mut observations = Vec::new();
         for obs in &decl.observations {
-            let type_iri = self.resolve(&obs.typ)?;
+            let type_value = self.compile_type_expr(&obs.typ, &param_names)?;
             let mut obs_r = Resource::new_embedded();
             set_is_a(&mut obs_r, "urn:eigenius:core:Observation");
             obs_r.set(
                 iri("urn:eigenius:core:observation_name"),
                 Value::String(obs.name.clone()),
             );
-            obs_r.set(
-                iri("urn:eigenius:core:observation_type"),
-                Value::String(type_iri),
-            );
+            obs_r.set(iri("urn:eigenius:core:observation_type"), type_value);
             observations.push(Value::Embedded(Box::new(obs_r)));
         }
         r.set(
@@ -165,6 +181,106 @@ impl Compiler {
 
         stamp_declared(&mut r);
         Ok(vec![r])
+    }
+
+    /// Compile a type expression to a `Value` — either a plain string
+    /// (for simple Ref types — preserves backward compat with the
+    /// pre-15h.3 String IRI shape) or an embedded resource (for
+    /// Arrow/BinderArrow/parameterised Ref).
+    fn compile_type_expr(
+        &self,
+        typ: &ast::TypeExpr,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Value, EslError> {
+        use crate::ontology::well_known as wk;
+        match typ {
+            ast::TypeExpr::Ref { name, args, .. } => {
+                let resolved = if name.namespace.is_none() {
+                    let n = name.name.as_str();
+                    if scope.contains(n) || n == "Inf" || n == "Size" {
+                        n.to_string()
+                    } else {
+                        self.resolve(name)?
+                    }
+                } else {
+                    self.resolve(name)?
+                };
+                if args.is_empty() {
+                    // Simple Ref — keep the legacy string form so
+                    // existing codata resources (and their tests) are
+                    // unchanged.
+                    Ok(Value::String(resolved))
+                } else {
+                    let mut ar = Resource::new_embedded();
+                    set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
+                    ar.set(iri(wk::TYPE_NAME), Value::String(resolved));
+                    let arg_values: Result<Vec<Value>, EslError> = args
+                        .iter()
+                        .map(|a| self.compile_type_expr(a, scope))
+                        .collect();
+                    ar.set(iri(wk::TYPE_ARGS), Value::Array(arg_values?));
+                    Ok(Value::Embedded(Box::new(ar)))
+                }
+            }
+            ast::TypeExpr::Arrow {
+                domain, codomain, ..
+            } => {
+                let mut ar = Resource::new_embedded();
+                set_is_a(&mut ar, wk::TYPE_ARROW);
+                ar.set(
+                    iri(wk::ARROW_DOMAIN),
+                    self.compile_type_expr(domain, scope)?,
+                );
+                ar.set(
+                    iri(wk::ARROW_CODOMAIN),
+                    self.compile_type_expr(codomain, scope)?,
+                );
+                Ok(Value::Embedded(Box::new(ar)))
+            }
+            ast::TypeExpr::BinderArrow {
+                name,
+                kind,
+                bound,
+                body,
+                ..
+            } => {
+                let mut ar = Resource::new_embedded();
+                set_is_a(&mut ar, wk::TYPE_BINDER_ARROW);
+                ar.set(iri(wk::BINDER_NAME), Value::String(name.clone()));
+                let kind_str = if kind.namespace.is_none() {
+                    let n = kind.name.as_str();
+                    if scope.contains(n) || n == "Inf" || n == "Size" {
+                        n.to_string()
+                    } else {
+                        self.resolve(kind)?
+                    }
+                } else {
+                    self.resolve(kind)?
+                };
+                ar.set(iri(wk::BINDER_KIND), Value::String(kind_str));
+                if let Some(b) = bound {
+                    let bound_str = if b.namespace.is_none() {
+                        let n = b.name.as_str();
+                        if scope.contains(n) || n == "Inf" || n == "Size" {
+                            n.to_string()
+                        } else {
+                            self.resolve(b)?
+                        }
+                    } else {
+                        self.resolve(b)?
+                    };
+                    ar.set(iri(wk::BINDER_BOUND), Value::String(bound_str));
+                }
+                // The body sees the binder `name` in scope.
+                let mut body_scope = scope.clone();
+                body_scope.insert(name.as_str());
+                ar.set(
+                    iri(wk::BINDER_BODY),
+                    self.compile_type_expr(body, &body_scope)?,
+                );
+                Ok(Value::Embedded(Box::new(ar)))
+            }
+        }
     }
 
     // --- Data (Phase 11b step 8, D19 §10) ---
@@ -225,12 +341,29 @@ impl Compiler {
                 let mut cr = Resource::new(ctor_iri);
                 set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
                 cr.set(iri(wk::CTOR_NAME), Value::String(c.name.clone()));
-                let arg_types: Result<Vec<Value>, EslError> = c
-                    .args
-                    .iter()
-                    .map(|a| self.compile_ctor_arg_type(a, &param_names))
-                    .collect();
-                cr.set(iri(wk::ARG_TYPES), Value::Array(arg_types?));
+                // Compile ctor args left-to-right, threading named
+                // binders into scope as we go so subsequent positional
+                // args can reference them.
+                let mut local_binders: Vec<String> = Vec::new();
+                let mut arg_values: Vec<Value> = Vec::with_capacity(c.args.len());
+                for arg in &c.args {
+                    let mut scope: std::collections::HashSet<&str> = param_names.clone();
+                    for b in &local_binders {
+                        scope.insert(b.as_str());
+                    }
+                    match arg {
+                        ast::CtorArg::Positional(t) => {
+                            arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
+                        }
+                        ast::CtorArg::Named {
+                            name, kind, bound, ..
+                        } => {
+                            arg_values.push(self.compile_ctor_binder(name, kind, bound, &scope)?);
+                            local_binders.push(name.clone());
+                        }
+                    }
+                }
+                cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                 Ok(Value::Embedded(Box::new(cr)))
             })
             .collect();
@@ -256,8 +389,18 @@ impl Compiler {
         let mut ar = Resource::new_embedded();
         set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
 
-        let type_name = if arg.name.namespace.is_none() && params.contains(arg.name.name.as_str()) {
-            arg.name.name.clone()
+        // Resolution rules, in order:
+        // 1. Declared type parameter → bare name (decoder emits `Var`)
+        // 2. Built-in size literal (`Inf`) / sort (`Size`) → bare name
+        //    (decoder emits `SizeInf` / `SizeSort` respectively)
+        // 3. Otherwise resolve through the namespace registry
+        let type_name = if arg.name.namespace.is_none() {
+            let n = arg.name.name.as_str();
+            if params.contains(n) || n == "Inf" || n == "Size" {
+                arg.name.name.clone()
+            } else {
+                self.resolve(&arg.name)?
+            }
         } else {
             self.resolve(&arg.name)?
         };
@@ -269,6 +412,61 @@ impl Compiler {
             .map(|p| self.compile_ctor_arg_type(p, params))
             .collect();
         ar.set(iri(wk::TYPE_ARGS), Value::Array(type_args?));
+
+        Ok(Value::Embedded(Box::new(ar)))
+    }
+
+    /// Compile a named constructor-argument binder
+    /// (`ident : Kind [< Bound]`, Phase 11b step 15h).
+    ///
+    /// Encoded as an `InductiveArgType` resource carrying a
+    /// `binder_name` key — its presence distinguishes binders from
+    /// positional args at decode time. `binder_bound` holds the
+    /// optional upper bound (resolved identically to type names:
+    /// declared params / built-ins bare, everything else via
+    /// namespace resolution).
+    fn compile_ctor_binder(
+        &self,
+        name: &str,
+        kind: &ast::QualifiedName,
+        bound: &Option<ast::QualifiedName>,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Value, EslError> {
+        use crate::ontology::well_known as wk;
+        let mut ar = Resource::new_embedded();
+        set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
+
+        // The "type" part of the binder (kind). Resolution rules
+        // mirror `compile_ctor_arg_type` — declared params and
+        // `Inf`/`Size` built-ins stay bare; other names resolve
+        // through the namespace registry.
+        let kind_str = if kind.namespace.is_none() {
+            let n = kind.name.as_str();
+            if scope.contains(n) || n == "Inf" || n == "Size" {
+                kind.name.clone()
+            } else {
+                self.resolve(kind)?
+            }
+        } else {
+            self.resolve(kind)?
+        };
+        ar.set(iri(wk::TYPE_NAME), Value::String(kind_str));
+        ar.set(iri(wk::TYPE_ARGS), Value::Array(Vec::new()));
+        ar.set(iri(wk::BINDER_NAME), Value::String(name.to_string()));
+
+        if let Some(b) = bound {
+            let bound_str = if b.namespace.is_none() {
+                let n = b.name.as_str();
+                if scope.contains(n) || n == "Inf" || n == "Size" {
+                    b.name.clone()
+                } else {
+                    self.resolve(b)?
+                }
+            } else {
+                self.resolve(b)?
+            };
+            ar.set(iri(wk::BINDER_BOUND), Value::String(bound_str));
+        }
 
         Ok(Value::Embedded(Box::new(ar)))
     }

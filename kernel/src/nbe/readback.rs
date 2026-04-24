@@ -147,6 +147,17 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         Val::SizeSort => Exp::SizeSort,
         Val::SizeSucc(s) => Exp::SizeSucc(Box::new(readback_val(level, s))),
         Val::SizeInf => Exp::SizeInf,
+        Val::SizedPi(upper, g) => {
+            let gen = gen_val(level);
+            Exp::SizedPi {
+                patt: gen_patt(level),
+                upper: Box::new(readback_val(level, upper)),
+                body: Box::new(readback_val(
+                    level + 1,
+                    &g.apply(gen).expect("readback: apply failed"),
+                )),
+            }
+        }
     }
 }
 

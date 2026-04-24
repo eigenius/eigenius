@@ -77,19 +77,35 @@ pub fn derive_minor_type(
     let ctor = &decl.ctors[ctor_idx];
 
     // Collect non-parameter binders from the constructor's Π-telescope.
-    // Each entry pairs the binder pattern (preserved when the user
-    // supplied a name) with the binder type expression. Param binders
-    // at the head are skipped.
+    // Handles both ordinary Pi and bounded-size SizedPi binders; the
+    // latter are preserved in the generated minor so that the user's
+    // minor body gets the `bound < upper` hypothesis available.
     let mut current = &ctor.typ;
     let mut params_to_skip = decl.params.len();
-    let mut arg_specs: Vec<(Patt, Exp)> = Vec::new();
-    while let Exp::Pi(patt, dom, body) = current {
-        if params_to_skip > 0 {
-            params_to_skip -= 1;
-        } else {
-            arg_specs.push((patt.clone(), (**dom).clone()));
+    let mut arg_specs: Vec<MinorArg> = Vec::new();
+    loop {
+        match current {
+            Exp::Pi(patt, dom, body) => {
+                if params_to_skip > 0 {
+                    params_to_skip -= 1;
+                } else {
+                    arg_specs.push(MinorArg::Value {
+                        patt: patt.clone(),
+                        typ: (**dom).clone(),
+                    });
+                }
+                current = body;
+            }
+            Exp::SizedPi { patt, upper, body } => {
+                // Size binders never appear in the param prefix.
+                arg_specs.push(MinorArg::Size {
+                    patt: patt.clone(),
+                    upper: (**upper).clone(),
+                });
+                current = body;
+            }
+            _ => break,
         }
-        current = body;
     }
 
     // Pick a stable, fresh variable name for each non-param arg. We
@@ -99,7 +115,7 @@ pub fn derive_minor_type(
     let arg_names: Vec<String> = arg_specs
         .iter()
         .enumerate()
-        .map(|(i, (patt, _))| match patt {
+        .map(|(i, a)| match a.patt() {
             Patt::Var(n) => n.clone(),
             _ => format!("__a_{i}"),
         })
@@ -119,10 +135,14 @@ pub fn derive_minor_type(
     // Wrap one IH binder per recursive argument, in original order
     // (rev iteration so the first recursive arg ends up outermost
     // among the IHs, matching iota_reduce's application order).
+    // Only `MinorArg::Value` entries can be recursive occurrences —
+    // size binders always have domain `SizeSort`.
     let recursive_indices: Vec<usize> = arg_specs
         .iter()
         .enumerate()
-        .filter(|(_, (_, typ))| is_direct_recursive_ref(decl, typ))
+        .filter(
+            |(_, a)| matches!(a, MinorArg::Value { typ, .. } if is_direct_recursive_ref(decl, typ)),
+        )
         .map(|(i, _)| i)
         .collect();
     for (rec_pos, &arg_idx) in recursive_indices.iter().enumerate().rev() {
@@ -136,13 +156,21 @@ pub fn derive_minor_type(
     }
 
     // Wrap the constructor argument binders, in reverse so the first
-    // arg ends up outermost.
-    for (i, (_, typ)) in arg_specs.iter().enumerate().rev() {
-        body_exp = Exp::Pi(
-            Patt::Var(arg_names[i].clone()),
-            Box::new(typ.clone()),
-            Box::new(body_exp),
-        );
+    // arg ends up outermost. Preserves SizedPi for Size args so the
+    // minor's body gets the bound hypothesis available via the same
+    // check-mode plumbing used on any `SizedPi`-typed value.
+    for (i, spec) in arg_specs.iter().enumerate().rev() {
+        let binder_patt = Patt::Var(arg_names[i].clone());
+        body_exp = match spec {
+            MinorArg::Value { typ, .. } => {
+                Exp::Pi(binder_patt, Box::new(typ.clone()), Box::new(body_exp))
+            }
+            MinorArg::Size { upper, .. } => Exp::SizedPi {
+                patt: binder_patt,
+                upper: Box::new(upper.clone()),
+                body: Box::new(body_exp),
+            },
+        };
     }
 
     // Evaluate in an environment that binds parameter names to their
@@ -165,6 +193,24 @@ pub fn derive_minor_type(
 /// helpers are deduplicated in a follow-up pass.
 fn is_direct_recursive_ref(decl: &InductiveDecl, typ: &Exp) -> bool {
     matches!(typ, Exp::InductiveType(d, _) if d.name == decl.name)
+}
+
+/// One constructor arg in the minor-derivation telescope.
+///
+/// Mirror of `check::CtorArg` — kept separate so recursor.rs stays
+/// independent of check.rs. Consolidate if a third site emerges.
+#[derive(Debug, Clone)]
+enum MinorArg {
+    Value { patt: Patt, typ: Exp },
+    Size { patt: Patt, upper: Exp },
+}
+
+impl MinorArg {
+    fn patt(&self) -> &Patt {
+        match self {
+            MinorArg::Value { patt, .. } | MinorArg::Size { patt, .. } => patt,
+        }
+    }
 }
 
 #[cfg(test)]
