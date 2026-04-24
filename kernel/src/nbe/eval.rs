@@ -636,6 +636,29 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
                         )),
                     }
                 }
+                Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+                    match crate::nbe::val::inductive_list_to_vec(&coll_val) {
+                        Some(items) => {
+                            let mut mapped = Vec::with_capacity(items.len());
+                            let mut element_traces = Vec::with_capacity(items.len());
+                            for elem in items {
+                                let (val, trace) = f_val.clone().app_ctx_traced(elem, ctx)?;
+                                mapped.push(val);
+                                element_traces.push(trace);
+                            }
+                            let has_traces = element_traces.iter().any(|t| t.is_some());
+                            let trace = if has_traces {
+                                Some(Trace::Map { element_traces })
+                            } else {
+                                None
+                            };
+                            Ok((Val::List(mapped), trace))
+                        }
+                        None => Err(EvalError::InvalidCaseTarget(
+                            "Map: malformed inductive list".to_string(),
+                        )),
+                    }
+                }
                 Val::Nt(n) => Ok((Val::Nt(Neut::NtMap(Box::new(f_val), Box::new(n))), None)),
                 other => Err(EvalError::InvalidCaseTarget(format!(
                     "Map: expected list, got {other:?}"
@@ -690,6 +713,30 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
                         )),
                     }
                 }
+                Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+                    match crate::nbe::val::inductive_list_to_vec(&coll_val) {
+                        Some(items) => {
+                            let mut result = acc;
+                            let mut step_traces = Vec::with_capacity(items.len());
+                            for elem in items {
+                                let (step_fn, t1) = f_val.clone().app_ctx_traced(result, ctx)?;
+                                let (next, t2) = step_fn.app_ctx_traced(elem, ctx)?;
+                                result = next;
+                                step_traces.push(t1.or(t2));
+                            }
+                            let has_traces = step_traces.iter().any(|t| t.is_some());
+                            let trace = if has_traces {
+                                Some(Trace::Reduce { step_traces })
+                            } else {
+                                None
+                            };
+                            Ok((result, trace))
+                        }
+                        None => Err(EvalError::InvalidCaseTarget(
+                            "Reduce: malformed inductive list".to_string(),
+                        )),
+                    }
+                }
                 Val::Nt(n) => Ok((
                     Val::Nt(Neut::NtReduce(Box::new(f_val), Box::new(acc), Box::new(n))),
                     None,
@@ -733,6 +780,20 @@ fn eval_map(f: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
                 ))),
             }
         }
+        Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+            match crate::nbe::val::inductive_list_to_vec(&coll) {
+                Some(items) => {
+                    let mapped: Result<Vec<Val>, EvalError> = items
+                        .into_iter()
+                        .map(|elem| f.clone().app_ctx(elem, ctx))
+                        .collect();
+                    Ok(Val::List(mapped?))
+                }
+                None => Err(EvalError::InvalidCaseTarget(format!(
+                    "Map: malformed inductive list: {coll:?}"
+                ))),
+            }
+        }
         Val::Nt(n) => Ok(Val::Nt(Neut::NtMap(Box::new(f), Box::new(n)))),
         other => Err(EvalError::InvalidCaseTarget(format!(
             "Map: expected list, got {other:?}"
@@ -742,8 +803,8 @@ fn eval_map(f: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
 
 /// Evaluate Reduce(f, accumulator, collection).
 ///
-/// Left-folds `f` over a finite list starting with `acc`. Accepts both
-/// `Val::List` and cons-pair chains. `f` is applied as `f(acc, elem)`.
+/// Left-folds `f` over a finite list starting with `acc`. Accepts the
+/// same three list shapes as [`eval_map`].
 fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
     match coll {
         Val::List(items) => {
@@ -764,6 +825,20 @@ fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalEr
                 }
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "Reduce: malformed cons list: {coll:?}"
+                ))),
+            }
+        }
+        Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+            match crate::nbe::val::inductive_list_to_vec(&coll) {
+                Some(items) => {
+                    let mut result = acc;
+                    for elem in items {
+                        result = f.clone().app_ctx(result, ctx)?.app_ctx(elem, ctx)?;
+                    }
+                    Ok(result)
+                }
+                None => Err(EvalError::InvalidCaseTarget(format!(
+                    "Reduce: malformed inductive list: {coll:?}"
                 ))),
             }
         }
@@ -2478,6 +2553,73 @@ mod tests {
         match result {
             Val::Nt(Neut::NtRec { decl: d, .. }) => assert_eq!(d.name, "Nat"),
             other => panic!("expected NtRec, got {other:?}"),
+        }
+    }
+
+    // --- Map/Reduce on InductiveVal-backed List values (Phase 11b step 7) ---
+
+    /// Build a `Val::InductiveVal`-backed `List(_)` from `items`,
+    /// terminated by `nil`. Uses the canonical `list_decl()` so the
+    /// inductive name matches what Map/Reduce dispatch on.
+    fn ind_list(items: Vec<Val>) -> Val {
+        let list = crate::nbe::term::list_decl();
+        let mut current = Val::InductiveVal {
+            decl: list.clone(),
+            ctor_name: "nil".to_string(),
+            args: Vec::new(),
+        };
+        for item in items.into_iter().rev() {
+            current = Val::InductiveVal {
+                decl: list.clone(),
+                ctor_name: "cons".to_string(),
+                args: vec![item, current],
+            };
+        }
+        current
+    }
+
+    #[test]
+    fn map_over_inductive_list() {
+        // Map identity over a 3-element InductiveVal list → Val::List of 3 items.
+        let id_lam = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Var("x".to_string()),
+            Exp::Var("x".to_string()),
+            Rho::Nil,
+        ));
+        let lst = ind_list(vec![Val::Unit, Val::Unit, Val::Unit]);
+        let result = eval_map(id_lam, lst, &EvalCtx::Pure).expect("eval_map");
+        match result {
+            Val::List(items) => assert_eq!(items.len(), 3),
+            other => panic!("expected List, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reduce_over_inductive_list() {
+        // Reduce a constant function (λacc x. acc) over an inductive list.
+        let lst = ind_list(vec![Val::Unit, Val::Unit]);
+        // λacc. λx. acc
+        let f = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Var("acc".to_string()),
+            Exp::Lam(Patt::Unit, Box::new(Exp::Var("acc".to_string()))),
+            Rho::Nil,
+        ));
+        let result = eval_reduce(f, Val::Set, lst, &EvalCtx::Pure).expect("eval_reduce");
+        assert!(matches!(result, Val::Set));
+    }
+
+    #[test]
+    fn map_over_empty_inductive_list() {
+        let id_lam = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Var("x".to_string()),
+            Exp::Var("x".to_string()),
+            Rho::Nil,
+        ));
+        let lst = ind_list(Vec::new());
+        let result = eval_map(id_lam, lst, &EvalCtx::Pure).expect("eval_map");
+        match result {
+            Val::List(items) => assert!(items.is_empty()),
+            other => panic!("expected empty List, got {other:?}"),
         }
     }
 }
