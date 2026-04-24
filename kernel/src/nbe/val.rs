@@ -354,6 +354,51 @@ pub fn cons_to_vec(val: &Val) -> Option<Vec<Val>> {
     }
 }
 
+/// Convert a canonical-`List` inductive value to a `Vec`.
+///
+/// Recognises `Val::InductiveVal { decl, ctor_name, args }` where
+/// `decl.name == "List"` and `ctor_name` is `nil` or `cons`. The `cons`
+/// case expects exactly two args: head and tail (where tail is itself
+/// a list value to recurse into).
+///
+/// Closes the runtime gap left open by Phase 11b step 6: list types
+/// migrated to the canonical inductive `List(A)`, but list values
+/// remained in the legacy `Val::List(Vec)` and `Val::Con` forms.
+/// Step 7+ producers (ESL `data` syntax compilation, direct
+/// `Exp::InductiveCtor(list_decl(), …)` use) will produce
+/// `InductiveVal`-backed lists; Map/Reduce dispatch on this helper
+/// to keep them working uniformly.
+pub fn inductive_list_to_vec(val: &Val) -> Option<Vec<Val>> {
+    let mut items = Vec::new();
+    let mut current = val;
+    loop {
+        match current {
+            Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } if decl.name == "List" && ctor_name == "nil" => {
+                if !args.is_empty() {
+                    return None;
+                }
+                return Some(items);
+            }
+            Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } if decl.name == "List" && ctor_name == "cons" => {
+                if args.len() != 2 {
+                    return None;
+                }
+                items.push(args[0].clone());
+                current = &args[1];
+            }
+            _ => return None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

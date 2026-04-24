@@ -82,6 +82,16 @@ impl Compiler {
             ast::Declaration::Resource(r) => self.compile_resource(r),
             ast::Declaration::Program(p) => self.compile_program(p),
             ast::Declaration::Codata(c) => self.compile_codata(c),
+            // Phase 11b step 7 lands the parser only; compilation to
+            // resource encoding is Step 8.
+            ast::Declaration::Data(d) => Err(EslError::parser(
+                Some(d.pos.clone()),
+                format!(
+                    "compilation of `data` declarations is not yet implemented \
+                     (Phase 11b step 8): `{}`",
+                    d.name.name
+                ),
+            )),
         }
     }
 

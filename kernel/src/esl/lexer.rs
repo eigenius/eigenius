@@ -15,6 +15,7 @@ pub enum TokenKind {
     Resource,
     Program,
     Codata,
+    Data,
 
     // Expression keywords
     Let,
@@ -346,6 +347,7 @@ impl<'a> Lexer<'a> {
             "resource" => TokenKind::Resource,
             "program" => TokenKind::Program,
             "codata" => TokenKind::Codata,
+            "data" => TokenKind::Data,
             // Expression keywords
             "let" => TokenKind::Let,
             "case" => TokenKind::Case,

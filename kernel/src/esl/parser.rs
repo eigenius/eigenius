@@ -162,11 +162,12 @@ impl<'a> Parser<'a> {
                 TokenKind::Codata => {
                     declarations.push(Declaration::Codata(self.parse_codata()?))
                 }
+                TokenKind::Data => declarations.push(Declaration::Data(self.parse_data()?)),
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -604,6 +605,159 @@ impl<'a> Parser<'a> {
             observations,
             pos,
         })
+    }
+
+    // --- Data (Phase 11b step 7, D19 §10) ---
+
+    /// `data Name { ctor, ctor(arg, ...), ... }` — non-parametric.
+    /// `data Name(p1 : K1, p2 : K2, ...) { ... }` — parametric.
+    ///
+    /// v1 surface form (Haskell-style): constructors are named, with
+    /// optional positional argument types in parentheses. Constructor
+    /// argument types are parameterised name references; the implicit
+    /// result type is the inductive itself applied to its parameters.
+    fn parse_data(&mut self) -> Result<DataDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Data)?;
+        let name = self.parse_qualified_name()?;
+
+        let params = if self.at(&TokenKind::LParen) {
+            self.parse_data_params()?
+        } else {
+            Vec::new()
+        };
+
+        self.expect(&TokenKind::LBrace)?;
+        let mut ctors = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            ctors.push(self.parse_ctor_decl()?);
+            if self.at(&TokenKind::Comma) {
+                self.advance();
+            } else if !self.at(&TokenKind::RBrace) {
+                return Err(EslError::parser(
+                    Some(self.current_pos()),
+                    format!(
+                        "expected ',' or '}}' after constructor, found {:?}",
+                        self.peek()
+                    ),
+                ));
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        if ctors.is_empty() {
+            return Err(EslError::parser(
+                Some(pos.clone()),
+                "inductive data type must declare at least one constructor".to_string(),
+            ));
+        }
+
+        Ok(DataDecl {
+            name,
+            params,
+            ctors,
+            pos,
+        })
+    }
+
+    /// `(name : Kind, name : Kind, ...)` — parameter list for parametric data.
+    fn parse_data_params(&mut self) -> Result<Vec<DataParam>, EslError> {
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        while !self.at(&TokenKind::RParen) && !self.at_eof() {
+            let pos = self.current_pos();
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let kind = self.parse_qualified_name()?;
+            params.push(DataParam { name, kind, pos });
+            if self.at(&TokenKind::Comma) {
+                self.advance();
+            } else if !self.at(&TokenKind::RParen) {
+                return Err(EslError::parser(
+                    Some(self.current_pos()),
+                    format!(
+                        "expected ',' or ')' after data parameter, found {:?}",
+                        self.peek()
+                    ),
+                ));
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        if params.is_empty() {
+            return Err(EslError::parser(
+                Some(self.current_pos()),
+                "empty data parameter list — write `data Name { ... }` for non-parametric \
+                 inductives instead of `data Name() { ... }`"
+                    .to_string(),
+            ));
+        }
+        Ok(params)
+    }
+
+    /// `name` (nullary) or `name(arg, arg, ...)` (with positional args).
+    fn parse_ctor_decl(&mut self) -> Result<CtorDecl, EslError> {
+        let pos = self.current_pos();
+        let name = self.expect_ident()?;
+        let args = if self.at(&TokenKind::LParen) {
+            self.advance();
+            let mut args = Vec::new();
+            while !self.at(&TokenKind::RParen) && !self.at_eof() {
+                args.push(self.parse_ctor_arg_type()?);
+                if self.at(&TokenKind::Comma) {
+                    self.advance();
+                } else if !self.at(&TokenKind::RParen) {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!(
+                            "expected ',' or ')' in constructor arg list, found {:?}",
+                            self.peek()
+                        ),
+                    ));
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+            if args.is_empty() {
+                return Err(EslError::parser(
+                    Some(pos.clone()),
+                    format!(
+                        "empty constructor arg list — write `{name}` for nullary instead of `{name}()`"
+                    ),
+                ));
+            }
+            args
+        } else {
+            Vec::new()
+        };
+        Ok(CtorDecl { name, args, pos })
+    }
+
+    /// A constructor argument type: `Name` or `Name(arg, ...)`.
+    fn parse_ctor_arg_type(&mut self) -> Result<CtorArgType, EslError> {
+        let pos = self.current_pos();
+        let name = self.parse_qualified_name()?;
+        let params = if self.at(&TokenKind::LParen) {
+            self.advance();
+            let mut params = Vec::new();
+            while !self.at(&TokenKind::RParen) && !self.at_eof() {
+                params.push(self.parse_ctor_arg_type()?);
+                if self.at(&TokenKind::Comma) {
+                    self.advance();
+                } else if !self.at(&TokenKind::RParen) {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!(
+                            "expected ',' or ')' in type argument list, found {:?}",
+                            self.peek()
+                        ),
+                    ));
+                }
+            }
+            self.expect(&TokenKind::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+        Ok(CtorArgType { name, params, pos })
     }
 
     // --- Expressions ---
@@ -1403,5 +1557,132 @@ mod tests {
             },
             _ => panic!("expected program"),
         }
+    }
+
+    // --- `data` declarations (Phase 11b step 7, D19 §10) ---
+
+    #[test]
+    fn data_nat_non_parametric_with_recursive_arg() {
+        let file = parse_str(
+            r#"
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(file.declarations.len(), 1);
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Nat");
+                assert!(d.params.is_empty());
+                assert_eq!(d.ctors.len(), 2);
+                assert_eq!(d.ctors[0].name, "zero");
+                assert!(d.ctors[0].args.is_empty());
+                assert_eq!(d.ctors[1].name, "succ");
+                assert_eq!(d.ctors[1].args.len(), 1);
+                assert_eq!(d.ctors[1].args[0].name.name, "Nat");
+                assert!(d.ctors[1].args[0].params.is_empty());
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_bool_two_nullary_ctors() {
+        let file = parse_str(
+            r#"
+            data ex:Bool {
+                tt,
+                ff,
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Bool");
+                assert_eq!(d.ctors.len(), 2);
+                assert!(d.ctors[0].args.is_empty());
+                assert!(d.ctors[1].args.is_empty());
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_list_parametric_with_self_reference() {
+        let file = parse_str(
+            r#"
+            data ex:List(A : core:Set) {
+                nil,
+                cons(A, ex:List(A)),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "List");
+                assert_eq!(d.params.len(), 1);
+                assert_eq!(d.params[0].name, "A");
+                assert_eq!(d.params[0].kind.name, "Set");
+                assert_eq!(d.ctors.len(), 2);
+                assert_eq!(d.ctors[0].name, "nil");
+                assert!(d.ctors[0].args.is_empty());
+                assert_eq!(d.ctors[1].name, "cons");
+                assert_eq!(d.ctors[1].args.len(), 2);
+                // First arg: bare `A` (param reference)
+                assert_eq!(d.ctors[1].args[0].name.name, "A");
+                assert!(d.ctors[1].args[0].params.is_empty());
+                // Second arg: `ex:List(A)` (self-reference applied to A)
+                assert_eq!(d.ctors[1].args[1].name.name, "List");
+                assert_eq!(d.ctors[1].args[1].params.len(), 1);
+                assert_eq!(d.ctors[1].args[1].params[0].name.name, "A");
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_no_constructors_rejected() {
+        let err = parse_str(
+            r#"
+            data ex:Empty {
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("at least one constructor"));
+    }
+
+    #[test]
+    fn data_empty_param_list_rejected() {
+        // `data Name() { ... }` is not valid syntax — must omit `()`
+        // for non-parametric inductives.
+        let err = parse_str(
+            r#"
+            data ex:Foo() {
+                mk,
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("empty data parameter list"));
+    }
+
+    #[test]
+    fn data_empty_ctor_arg_list_rejected() {
+        // `mk()` is not valid — write `mk` for nullary.
+        let err = parse_str(
+            r#"
+            data ex:Foo {
+                mk(),
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("empty constructor arg list"));
     }
 }

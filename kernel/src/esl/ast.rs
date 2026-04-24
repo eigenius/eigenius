@@ -36,6 +36,7 @@ pub enum Declaration {
     Resource(ResourceDecl),
     Program(ProgramDecl),
     Codata(CodataDecl),
+    Data(DataDecl),
 }
 
 /// `class ex:Dog : ex:Animal { ... }`
@@ -130,6 +131,60 @@ pub enum ProgramAttribute {
 pub struct CodataDecl {
     pub name: QualifiedName,
     pub observations: Vec<ObservationDecl>,
+    pub pos: Position,
+}
+
+/// `data ex:List(A : Set) { nil, cons(A, List(A)) }` —
+/// Phase 11b step 7 inductive type declaration (D19 §10).
+///
+/// v1 surface syntax (Haskell-style):
+/// - Constructors are named, optionally with positional argument types
+///   in parentheses.
+/// - Argument types are parameterised name references (`Nat`, `List(A)`).
+/// - The constructor's result type is implicitly `Self(params)` —
+///   not written out explicitly. This sidesteps the need for a general
+///   type-expression parser at this stage.
+#[derive(Debug)]
+pub struct DataDecl {
+    pub name: QualifiedName,
+    /// Type parameters: `(A : Set, B : Set, ...)`. Empty for
+    /// non-parametric inductives.
+    pub params: Vec<DataParam>,
+    pub ctors: Vec<CtorDecl>,
+    pub pos: Position,
+}
+
+/// A type parameter on a `data` declaration: `A : Set`.
+///
+/// For Phase 11b v1 the kind is always `Set`; the field is kept in
+/// the AST so that future kinds (e.g. `Type(n)`) can be added without
+/// a syntax break.
+#[derive(Debug)]
+pub struct DataParam {
+    pub name: String,
+    pub kind: QualifiedName,
+    pub pos: Position,
+}
+
+/// A single constructor declaration: `nil` or `cons(A, List(A))`.
+#[derive(Debug)]
+pub struct CtorDecl {
+    pub name: String,
+    /// Positional argument types. Empty for nullary constructors.
+    pub args: Vec<CtorArgType>,
+    pub pos: Position,
+}
+
+/// A constructor argument type — a parameterised name reference.
+///
+/// Examples:
+/// - `Nat` — `name=Nat`, `params=[]`
+/// - `A` (a type parameter) — `name=A`, `params=[]`
+/// - `List(A)` — `name=List`, `params=[CtorArgType { name=A, params=[] }]`
+#[derive(Debug, Clone)]
+pub struct CtorArgType {
+    pub name: QualifiedName,
+    pub params: Vec<CtorArgType>,
     pub pos: Position,
 }
 
