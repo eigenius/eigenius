@@ -163,7 +163,15 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         }
         Exp::Refl(a) => has_ind_occurrence(decl, a),
         Exp::IdJ(args) => args.iter().any(|a| has_ind_occurrence(decl, a)),
-        Exp::NativeDecide(_, e) => has_ind_occurrence(decl, e),
+        Exp::NativeDecide(c, e) => {
+            let args_contain = match c {
+                crate::nbe::term::Constraint::Institution { args, .. } => {
+                    args.iter().any(|a| has_ind_occurrence(decl, a))
+                }
+                _ => false,
+            };
+            args_contain || has_ind_occurrence(decl, e)
+        }
         Exp::DecEq(a, x, y) => {
             has_ind_occurrence(decl, a)
                 || has_ind_occurrence(decl, x)

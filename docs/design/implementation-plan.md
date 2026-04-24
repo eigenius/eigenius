@@ -85,7 +85,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 9a | Durable State | ✓ | Layers, traces, WASM capabilities survive kernel restart |
 | 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
-| 11 | Type Theory Extensions | 11a ✓, 11b ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
+| 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
@@ -627,13 +627,18 @@ The phase decomposes into two milestones that are separately reviewable:
 - **Scope boundary (D19 §2):** single, non-mutual, non-nested, strictly-positive — all honored. Mutual (#20), nested (#21), indexed families (#22) remain deferred.
 - **Tests:** 585 kernel tests pass, including Nat/List/Tree, sized Nat with bounded binders, sized codata productivity, self-referential sized streams, and mixed inductive+codata end-to-end from ESL.
 
-### Phase 11c — Institution-registered decision procedures — ~1–2 weeks
+### Phase 11c — Institution-registered decision procedures — ✓
 
-**Goal:** Generalise `NativeDecide` so institutions can register their own constraint reducers — RMSD thresholds for docking, concentration bounds for PK, confidence-interval containment. Life-science §16.3 is the driver; the architectural direction ("domain constraints belong in the institution, not the kernel") is consistent with existing capability dispatch.
+**Status:** Complete.
 
-- Generalise the `Constraint` enum in `nbe/term.rs` to dispatch to institution-registered decision procedures via IRI.
-- Extension point on `FiberReasoner`: an optional `decide(constraint_iri, args) -> DecResult` method.
-- Life-science §5/§6/§7/§12 predicates reduce at check time rather than at runtime.
+- `Constraint::Institution { iri, args }` variant on `Constraint` ([kernel/src/nbe/term.rs](../../kernel/src/nbe/term.rs)) — institution-dispatched predicates carry an IRI and a vector of argument expressions.
+- `FiberReasoner::decide(constraint_iri, args, ctx) -> DecResult` method with `Undecidable` default ([kernel/src/institution/mod.rs](../../kernel/src/institution/mod.rs)). Institutions opt in by overriding; silent default means existing reasoners don't break.
+- `DecResult { Holds, Fails, Undecidable }` — three-valued so institutions can distinguish "predicate is false" from "can't determine at check time."
+- `EvalCtx::Check { layer, institutions }` variant — a check-time evaluation mode that carries an institution registry but not the full IO apparatus (no component registry, no trace store). The type-checker escalates from `EvalCtx::Pure` to `EvalCtx::Check` when a registry is attached.
+- `CheckCtx` gains an optional `Arc<InstitutionRegistry>` (`with_institutions`) and a `ctx.eval(...)` method routing internal evals through `EvalCtx::Check`. This is the plumbing that makes institution-dispatched constraints fire at check time rather than at runtime — exactly what the plan specified.
+- `val_to_resource_value` extended to marshal `Val::InductiveVal` to an embedded resource (ctor name as `is_a`, positional args under `ctor_arg_{i}`). Combined with the existing Phase 11a bridge for `Val::List` and cons-pair chains, this gives institutions concrete life-science argument shapes — scalars, ensembles, Pose-like inductive values — without ad-hoc marshalling.
+- 8 new tests: default-Undecidable (no registry), Holds→Refl, Fails→failing neutral, Undecidable→passthrough neutral, unregistered-IRI→Undecidable, scalar/list/InductiveVal arg roundtrip through the bridge, and a full check-time integration test.
+- **Explicit non-goals shipped as-is:** no ESL surface syntax for institution-dispatched constraints yet; no counter-examples on `Fails`. Both are additive and deferrable until a real institution drives the need.
 
 ### Phase 11d — `Comorphism` as an ontology class — ~1 week
 

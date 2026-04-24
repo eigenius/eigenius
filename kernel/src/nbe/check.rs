@@ -5,7 +5,7 @@
 
 use crate::layer::Layer;
 use crate::nbe::env::{gen_val, lookup_gamma, up_gamma, Gamma, Rho};
-use crate::nbe::eval::{eval, EvalCtx};
+use crate::nbe::eval::{eval, eval_ctx, EvalCtx};
 use crate::nbe::readback::readback_val;
 use crate::nbe::recursor::derive_minor_types;
 use crate::nbe::term::{Decl, Exp, InductiveDecl, Patt};
@@ -42,6 +42,13 @@ pub struct CheckCtx {
     /// Consulted by [`subtype_of`] and any direct size-comparison
     /// site via [`crate::nbe::sized::size_le_with_hyps`].
     pub size_tso: crate::nbe::sized_rigid::Tso,
+    /// Optional institution registry for check-time dispatch of
+    /// `Constraint::Institution` predicates (Phase 11c). When
+    /// present, `eval` calls escalate from `EvalCtx::Pure` to
+    /// `EvalCtx::Check` so the institution-dispatched decide fires;
+    /// when absent, institution-dispatched constraints stay as
+    /// passthrough neutrals (D19 §8.5-style fallback).
+    pub institutions: Option<Arc<crate::institution::InstitutionRegistry>>,
 }
 
 impl CheckCtx {
@@ -53,6 +60,7 @@ impl CheckCtx {
             layer: None,
             type_cache: BTreeMap::new(),
             size_tso: crate::nbe::sized_rigid::Tso::new(),
+            institutions: None,
         }
     }
 
@@ -64,7 +72,46 @@ impl CheckCtx {
             layer: Some(layer),
             type_cache: BTreeMap::new(),
             size_tso: crate::nbe::sized_rigid::Tso::new(),
+            institutions: None,
         }
+    }
+
+    /// Attach an institution registry for check-time dispatch of
+    /// `Constraint::Institution` predicates (Phase 11c).
+    pub fn with_institutions(
+        mut self,
+        institutions: Arc<crate::institution::InstitutionRegistry>,
+    ) -> Self {
+        self.institutions = Some(institutions);
+        self
+    }
+
+    /// Produce an [`EvalCtx`] suitable for evaluating expressions
+    /// under this check context.
+    ///
+    /// Returns `EvalCtx::Check { layer, institutions }` when an
+    /// institution registry is attached; otherwise `EvalCtx::Pure`.
+    /// All internal `eval` calls in `check.rs` should route through
+    /// this so institution-dispatched constraints fire at check
+    /// time rather than deferring to runtime.
+    pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
+        if let Some(institutions) = &self.institutions {
+            crate::nbe::eval::EvalCtx::Check {
+                layer: self.layer.clone(),
+                institutions: institutions.clone(),
+            }
+        } else {
+            crate::nbe::eval::EvalCtx::Pure
+        }
+    }
+
+    /// Evaluate an expression under this check context's
+    /// [`EvalCtx`]. Prefer this over the bare `eval` function
+    /// inside `check.rs` so institution-dispatched constraints
+    /// (`Constraint::Institution`) fire when the context has a
+    /// registry attached.
+    pub fn eval(&self, exp: &Exp, rho: &Rho) -> Result<Val, crate::nbe::eval::EvalError> {
+        eval_ctx(exp, rho, &self.eval_ctx())
     }
 
     /// Extend the context with a new variable binding (for entering binders).
@@ -78,6 +125,7 @@ impl CheckCtx {
             layer: self.layer.clone(),
             type_cache: self.type_cache.clone(),
             size_tso: self.size_tso.clone(),
+            institutions: self.institutions.clone(),
         })
     }
 
@@ -107,7 +155,7 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
         Decl::Def(patt, typ, body) => {
             // Check that the type is well-formed
             check_type(ctx, typ)?;
-            let t = eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
+            let t = ctx.eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
             // Check that the body has the declared type
             check(ctx, body, &t)?;
             // Extend the type context
@@ -115,7 +163,7 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
                 &ctx.gamma,
                 patt,
                 &t,
-                &eval(body, &ctx.rho).map_err(|e| e.to_string())?,
+                &ctx.eval(body, &ctx.rho).map_err(|e| e.to_string())?,
             )
         }
         Decl::Drec(patt, typ, body) => {
@@ -129,7 +177,7 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             //
             // Check that the type is well-formed
             check_type(ctx, typ)?;
-            let t = eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
+            let t = ctx.eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
             let gen = gen_val(&ctx.rho);
             // Extend context with the recursive variable and check body
             let mut inner = ctx.extend(patt, &t, &gen)?;
@@ -142,7 +190,8 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             collect_pattern_names(patt, &mut forbidden);
             check_guarded(body, &forbidden)?;
             // Re-evaluate with the recursive binding
-            let v = eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))
+            let v = ctx
+                .eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))
                 .map_err(|e| e.to_string())?;
             up_gamma(&ctx.gamma, patt, &t, &v)
         }
@@ -157,7 +206,8 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         Exp::Pi(p, a, b) | Exp::Sig(p, a, b) => {
             check_type(ctx, a)?;
             let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            let mut inner =
+                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
             check_type(&mut inner, b)
         }
         // Bounded size Π-type: `{i < upper}. body`. The upper bound
@@ -167,7 +217,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         // the strict-decrease fact.
         Exp::SizedPi { patt, upper, body } => {
             check(ctx, upper, &Val::SizeSort)?;
-            let upper_val = eval(upper, &ctx.rho).map_err(|e| e.to_string())?;
+            let upper_val = ctx.eval(upper, &ctx.rho).map_err(|e| e.to_string())?;
             let new_level = ctx.rho.len();
             let i_val = gen_val(&ctx.rho);
             let mut inner = ctx.extend(patt, &Val::SizeSort, &i_val)?;
@@ -199,7 +249,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
             check_type(ctx, a)?;
-            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
         }
@@ -298,7 +348,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             check(
                 ctx,
                 e2,
-                &g.apply(eval(e1, &ctx.rho).map_err(|e| e.to_string())?)
+                &g.apply(ctx.eval(e1, &ctx.rho).map_err(|e| e.to_string())?)
                     .map_err(|e| e.to_string())?,
             )
         }
@@ -310,7 +360,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 .find(|(name, _)| name == c)
                 .map(|(_, typ)| typ)
                 .ok_or_else(|| format!("constructor {c} not in sum type"))?;
-            check(ctx, e, &eval(a, rho1).map_err(|e| e.to_string())?)
+            check(ctx, e, &ctx.eval(a, rho1).map_err(|e| e.to_string())?)
         }
 
         // Case function against Pi from Sum to result
@@ -328,7 +378,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 ));
             }
             for (branch, (c, a)) in branches.iter().zip(cases.iter()) {
-                let a_val = eval(a, rho1).map_err(|e| e.to_string())?;
+                let a_val = ctx.eval(a, rho1).map_err(|e| e.to_string())?;
                 let g_c = Clos {
                     patt: Patt::Var("__case_arg".to_string()),
                     body: Exp::App(
@@ -363,7 +413,8 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Pi(p, a, b), Val::Set) | (Exp::Sig(p, a, b), Val::Set) => {
             check(ctx, a, &Val::Set)?;
             let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            let mut inner =
+                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
             check(&mut inner, b, &Val::Set)
         }
 
@@ -390,6 +441,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 layer: ctx.layer.clone(),
                 type_cache: ctx.type_cache.clone(),
                 size_tso: ctx.size_tso.clone(),
+                institutions: ctx.institutions.clone(),
             };
             check(&mut inner, e, t)
         }
@@ -397,7 +449,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // refl(a) : Id(A, a, a) — check that x and y are both a
         (Exp::Refl(a), Val::Id(typ, x, y)) => {
             check(ctx, a, typ)?;
-            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             eq_nf(ctx.rho.len(), x, &a_val)?;
             eq_nf(ctx.rho.len(), y, &a_val)
         }
@@ -405,7 +457,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // Id(A, x, y) : Set
         (Exp::Id(a, x, y), Val::Set) => {
             check(ctx, a, &Val::Set)?;
-            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
         }
@@ -475,7 +527,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 ));
             }
             for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
-                let t = eval(obs_typ, rho1).map_err(|e| e.to_string())?;
+                let t = ctx.eval(obs_typ, rho1).map_err(|e| e.to_string())?;
                 check(ctx, &field.body, &t)?;
             }
             Ok(())
@@ -513,7 +565,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 obs_env = obs_env.extend(patt.clone(), val.clone());
             }
             for (field, obs) in fields.iter().zip(full_decl.observations.iter()) {
-                let t = eval(&obs.typ, &obs_env).map_err(|e| e.to_string())?;
+                let t = ctx.eval(&obs.typ, &obs_env).map_err(|e| e.to_string())?;
                 check(ctx, &field.body, &t)?;
             }
             Ok(())
@@ -546,7 +598,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             // binders in scope contribute entailment.
             if let Val::SizedPi(upper, g) = &t1 {
                 check(ctx, e2, &Val::SizeSort)?;
-                let arg_val = eval(e2, &ctx.rho).map_err(|e| e.to_string())?;
+                let arg_val = ctx.eval(e2, &ctx.rho).map_err(|e| e.to_string())?;
                 if !crate::nbe::sized::size_lt_with_hyps(&arg_val, upper, &ctx.size_tso) {
                     return Err(format!(
                         "SizedPi application: argument {:?} is not strictly below upper bound {:?}",
@@ -558,7 +610,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             }
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
-            Ok(g.apply(eval(e2, &ctx.rho).map_err(|e| e.to_string())?)
+            Ok(g.apply(ctx.eval(e2, &ctx.rho).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?)
         }
 
@@ -572,7 +624,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             let t = check_infer(ctx, e)?;
             let (_, g) = ext_sig(&t)?;
             Ok(g.apply(
-                eval(e, &ctx.rho)
+                ctx.eval(e, &ctx.rho)
                     .map_err(|e| e.to_string())?
                     .vfst()
                     .map_err(|e| e.to_string())?,
@@ -594,7 +646,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             if let Val::Codata(observations, rho1) = &t {
                 for (name, typ) in observations {
                     if name == prop_name {
-                        return eval(typ, rho1).map_err(|e| e.to_string());
+                        return ctx.eval(typ, rho1).map_err(|e| e.to_string());
                     }
                 }
                 return Err(format!(
@@ -626,7 +678,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                 Val::Codata(observations, rho1) => {
                     for (name, typ) in observations {
                         if name == obs {
-                            return eval(typ, rho1).map_err(|e| e.to_string());
+                            return ctx.eval(typ, rho1).map_err(|e| e.to_string());
                         }
                     }
                     Err(format!(
@@ -689,7 +741,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Refl(a): infer a's type, return Id(a_type, a_val, a_val)
         Exp::Refl(a) => {
             let a_type = check_infer(ctx, a)?;
-            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             Ok(Val::Id(
                 Box::new(a_type),
                 Box::new(a_val.clone()),
@@ -701,7 +753,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // so its type is Id(v_type, v_val, v_val)
         Exp::NativeDecide(_, v) => {
             let v_type = check_infer(ctx, v)?;
-            let v_val = eval(v, &ctx.rho).map_err(|e| e.to_string())?;
+            let v_val = ctx.eval(v, &ctx.rho).map_err(|e| e.to_string())?;
             Ok(Val::Id(
                 Box::new(v_type),
                 Box::new(v_val.clone()),
@@ -713,11 +765,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // return Id(A_val, x_val, y_val)
         Exp::DecEq(a, x, y) => {
             check_type(ctx, a)?;
-            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            let x_val = eval(x, &ctx.rho).map_err(|e| e.to_string())?;
-            let y_val = eval(y, &ctx.rho).map_err(|e| e.to_string())?;
+            let x_val = ctx.eval(x, &ctx.rho).map_err(|e| e.to_string())?;
+            let y_val = ctx.eval(y, &ctx.rho).map_err(|e| e.to_string())?;
             Ok(Val::Id(Box::new(a_val), Box::new(x_val), Box::new(y_val)))
         }
 
@@ -729,12 +781,12 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             let [ref a, ref _c, ref d, ref x, ref y, ref p] = **args;
             // A must be a type
             check_type(ctx, a)?;
-            let a_val = eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             // x, y : A
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            let x_val = eval(x, &ctx.rho).map_err(|e| e.to_string())?;
-            let y_val = eval(y, &ctx.rho).map_err(|e| e.to_string())?;
+            let x_val = ctx.eval(x, &ctx.rho).map_err(|e| e.to_string())?;
+            let y_val = ctx.eval(y, &ctx.rho).map_err(|e| e.to_string())?;
             // p : Id(A, x, y)
             let id_type = Val::Id(
                 Box::new(a_val.clone()),
@@ -777,7 +829,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             let b = b_clos.apply(gen_val(&ctx.rho)).map_err(|e| e.to_string())?;
             // Build list type with element type B
             let list_exp = Exp::list(readback_val(ctx.rho.len(), &b));
-            eval(&list_exp, &ctx.rho).map_err(|e| e.to_string())
+            ctx.eval(&list_exp, &ctx.rho).map_err(|e| e.to_string())
         }
 
         // Reduce(f, init, coll): infer f : B → A → B, init : B, coll : List A, return B.
@@ -1175,7 +1227,14 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
             }
             Ok(())
         }
-        Exp::NativeDecide(_, v) => check_guarded(v, forbidden),
+        Exp::NativeDecide(c, v) => {
+            if let crate::nbe::term::Constraint::Institution { args, .. } = c {
+                for a in args {
+                    check_guarded(a, forbidden)?;
+                }
+            }
+            check_guarded(v, forbidden)
+        }
         Exp::DecEq(a, x, y) => {
             check_guarded(a, forbidden)?;
             check_guarded(x, forbidden)?;
@@ -1462,9 +1521,9 @@ fn check_inductive_ctor_args(
     for (spec, arg_exp) in arg_specs.iter().zip(args.iter()) {
         match spec {
             CtorArg::Value { patt, typ } => {
-                let arg_typ_val = eval(typ, &arg_env).map_err(|e| e.to_string())?;
+                let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
                 check(ctx, arg_exp, &arg_typ_val)?;
-                let arg_val = eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
+                let arg_val = ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
                 arg_env = arg_env.extend(patt.clone(), arg_val);
             }
             CtorArg::Size { patt, upper } => {
@@ -1473,8 +1532,8 @@ fn check_inductive_ctor_args(
                 // (evaluated in `arg_env` so it can reference the
                 // inductive's size parameter).
                 check(ctx, arg_exp, &Val::SizeSort)?;
-                let upper_val = eval(upper, &arg_env).map_err(|e| e.to_string())?;
-                let arg_val = eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
+                let upper_val = ctx.eval(upper, &arg_env).map_err(|e| e.to_string())?;
+                let arg_val = ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
                 if !crate::nbe::sized::size_lt_with_hyps(&arg_val, &upper_val, &ctx.size_tso) {
                     return Err(format!(
                         "InductiveCtor `{}.{ctor_name}`: size argument {:?} is not \
@@ -1503,7 +1562,7 @@ fn check_inductive_ctor_args(
     // Without this check a buggy constructor declaration of the form
     // `foo : Π p:P. OtherInductive` or `foo : ... → SizedNat (↑ i)`
     // used at `SizedNat i` would pass silently.
-    let actual_result = eval(current, &arg_env).map_err(|e| e.to_string())?;
+    let actual_result = ctx.eval(current, &arg_env).map_err(|e| e.to_string())?;
     let expected_result = Val::InductiveType {
         decl: expected_decl.clone(),
         params: params.to_vec(),
@@ -1574,7 +1633,7 @@ fn check_infer_inductive_rec(
             minors.len()
         ));
     }
-    let motive_val = eval(motive, &ctx.rho).map_err(|e| e.to_string())?;
+    let motive_val = ctx.eval(motive, &ctx.rho).map_err(|e| e.to_string())?;
     let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::Pure)
         .map_err(|e| e.to_string())?;
     for (minor, expected_typ) in minors.iter().zip(expected_minor_types.iter()) {
@@ -1582,7 +1641,7 @@ fn check_infer_inductive_rec(
     }
 
     // 4. Result: motive(major).
-    let major_val = eval(major, &ctx.rho).map_err(|e| e.to_string())?;
+    let major_val = ctx.eval(major, &ctx.rho).map_err(|e| e.to_string())?;
     motive_val.app(major_val).map_err(|e| e.to_string())
 }
 
@@ -1677,11 +1736,12 @@ fn check_match(
             layer: ctx.layer.clone(),
             type_cache: ctx.type_cache.clone(),
             size_tso: ctx.size_tso.clone(),
+            institutions: ctx.institutions.clone(),
         };
         for (spec, binding) in arg_specs.iter().zip(arm.bindings.iter()) {
             match spec {
                 CtorArg::Value { patt, typ } => {
-                    let arg_typ_val = eval(typ, &arg_env).map_err(|e| e.to_string())?;
+                    let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
                     let gen = gen_val(&arm_ctx.rho);
                     arm_ctx = arm_ctx.extend(binding, &arg_typ_val, &gen)?;
                     arg_env = arg_env.extend(patt.clone(), gen);
@@ -1694,7 +1754,7 @@ fn check_match(
                     // on the destructured sub-value type-check at a
                     // strictly-smaller size — i.e. termination via
                     // pattern-match on a sized inductive.
-                    let upper_val = eval(upper, &arg_env).map_err(|e| e.to_string())?;
+                    let upper_val = ctx.eval(upper, &arg_env).map_err(|e| e.to_string())?;
                     let new_level = arm_ctx.rho.len();
                     let gen = gen_val(&arm_ctx.rho);
                     arm_ctx = arm_ctx.extend(binding, &Val::SizeSort, &gen)?;
@@ -3803,5 +3863,319 @@ mod tests {
             ],
         };
         check(&mut c2, &match_exp, &snat_i).expect("old-style sized Nat match still works");
+    }
+
+    // --- Phase 11c: institution-registered decision procedures ---
+    //
+    // Verify that `Constraint::Institution { iri, args }` dispatches
+    // to `FiberReasoner::decide` at check time when a registry is
+    // attached to `CheckCtx`. These tests construct a tiny in-test
+    // reasoner (no WASM, no ontology layer) and exercise the three
+    // `DecResult` outcomes.
+
+    use crate::context::ExecutionContext;
+    use crate::institution::{DecResult, FiberDeclaration, FiberReasoner, InstitutionRegistry};
+    use crate::nbe::term::Constraint;
+    use crate::ontology::resource::Value as RVal;
+
+    /// Simple test institution whose `decide` returns a pre-canned
+    /// result for each constraint IRI and records the args it saw.
+    struct FakeInstitution {
+        iri: Iri,
+        /// For each call, the args observed (captured via `Mutex`).
+        observed: std::sync::Mutex<Vec<Vec<RVal>>>,
+        /// Pre-canned result the next `decide` call returns.
+        result: DecResult,
+    }
+
+    impl FakeInstitution {
+        fn new(iri: &str, result: DecResult) -> Arc<Self> {
+            Arc::new(Self {
+                iri: Iri::parse(iri).unwrap(),
+                observed: std::sync::Mutex::new(Vec::new()),
+                result,
+            })
+        }
+
+        fn last_args(&self) -> Option<Vec<RVal>> {
+            self.observed.lock().unwrap().last().cloned()
+        }
+    }
+
+    impl FiberReasoner for Arc<FakeInstitution> {
+        fn fiber_declaration(&self) -> FiberDeclaration {
+            FiberDeclaration {
+                institution_iri: self.iri.clone(),
+                name: "FakeInstitution".to_string(),
+                morphism_types: Vec::new(),
+                query_types: Vec::new(),
+                structural_properties: Vec::new(),
+            }
+        }
+
+        fn query(
+            &self,
+            _q: &crate::ontology::resource::Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
+        {
+            unreachable!("query unused in decide tests")
+        }
+
+        fn validate_morphism(
+            &self,
+            _m: &crate::ontology::resource::Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<
+            crate::institution::error::MorphismValidation,
+            crate::institution::error::InstitutionError,
+        > {
+            unreachable!("validate_morphism unused in decide tests")
+        }
+
+        fn discover_morphisms(
+            &self,
+            _rs: &[crate::ontology::resource::Resource],
+            _ctx: &ExecutionContext,
+        ) -> Result<
+            Vec<crate::ontology::resource::Resource>,
+            crate::institution::error::InstitutionError,
+        > {
+            unreachable!("discover_morphisms unused in decide tests")
+        }
+
+        fn decide(
+            &self,
+            _constraint_iri: &Iri,
+            args: &[RVal],
+            _ctx: &ExecutionContext,
+        ) -> Result<DecResult, crate::institution::error::InstitutionError> {
+            self.observed.lock().unwrap().push(args.to_vec());
+            Ok(self.result)
+        }
+    }
+
+    fn registry_with(fake: Arc<FakeInstitution>) -> Arc<InstitutionRegistry> {
+        let mut reg = InstitutionRegistry::new();
+        reg.register_rehydrated(Box::new(fake)).unwrap();
+        Arc::new(reg)
+    }
+
+    fn wrap_int(n: i64) -> Exp {
+        let iri = Iri::parse("urn:eigenius:test:Int").unwrap();
+        let mut r = crate::ontology::resource::Resource::new(iri);
+        r.set(
+            Iri::parse("urn:eigenius:core:value").unwrap(),
+            RVal::Integer(n),
+        );
+        Exp::EigonResource(Box::new(r))
+    }
+
+    #[test]
+    fn decide_without_registry_is_undecidable() {
+        // Bare `EvalCtx::Pure` has no registry → institution-dispatched
+        // constraint falls through to `Undecidable`, reducing to the
+        // passthrough neutral.
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:always_holds").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(7)));
+        let v = eval_ctx(&exp, &Rho::Nil, &EvalCtx::Pure).expect("eval");
+        assert!(
+            matches!(v, Val::Nt(crate::nbe::val::Neut::Gen(_, ref n)) if n == "__constraint_undecidable")
+        );
+    }
+
+    #[test]
+    fn decide_holds_reduces_to_refl() {
+        // Institution returns Holds → eval reduces NativeDecide to Refl.
+        let fake = FakeInstitution::new("urn:eigenius:test:yes", DecResult::Holds);
+        let reg = registry_with(fake.clone());
+
+        let ctx = EvalCtx::Check {
+            layer: None,
+            institutions: reg,
+        };
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:yes").unwrap(),
+            args: vec![wrap_int(42)],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(7)));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        assert!(matches!(v, Val::Refl(_)), "expected Refl, got {v:?}");
+
+        // The fake observed the evaluated arg as an embedded resource
+        // (the 42 integer).
+        let observed = fake.last_args().expect("institution was called");
+        assert_eq!(observed.len(), 1);
+    }
+
+    #[test]
+    fn decide_fails_produces_failing_neutral() {
+        let fake = FakeInstitution::new("urn:eigenius:test:no", DecResult::Fails);
+        let reg = registry_with(fake);
+        let ctx = EvalCtx::Check {
+            layer: None,
+            institutions: reg,
+        };
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:no").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        match v {
+            Val::Nt(crate::nbe::val::Neut::Gen(_, name)) => {
+                assert_eq!(name, "__constraint_failed");
+            }
+            other => panic!("expected failing neutral, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_undecidable_produces_passthrough_neutral() {
+        let fake = FakeInstitution::new("urn:eigenius:test:dunno", DecResult::Undecidable);
+        let reg = registry_with(fake);
+        let ctx = EvalCtx::Check {
+            layer: None,
+            institutions: reg,
+        };
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:dunno").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        match v {
+            Val::Nt(crate::nbe::val::Neut::Gen(_, name)) => {
+                assert_eq!(name, "__constraint_undecidable");
+            }
+            other => panic!("expected undecidable neutral, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_unregistered_iri_is_undecidable() {
+        // Registry exists but doesn't know the constraint IRI → Undecidable.
+        let fake = FakeInstitution::new("urn:eigenius:test:other", DecResult::Holds);
+        let reg = registry_with(fake);
+        let ctx = EvalCtx::Check {
+            layer: None,
+            institutions: reg,
+        };
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:unknown_iri").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        assert!(
+            matches!(v, Val::Nt(crate::nbe::val::Neut::Gen(_, ref name)) if name == "__constraint_undecidable")
+        );
+    }
+
+    #[test]
+    fn decide_list_arg_roundtrip() {
+        // §6 life-science ensemble predicate: the arg is a list of
+        // values. Verify the Val::List marshals through to an
+        // RVal::Array that the institution sees.
+        let fake = FakeInstitution::new("urn:eigenius:test:ensemble", DecResult::Holds);
+        let reg = registry_with(fake.clone());
+        let ctx = EvalCtx::Check {
+            layer: None,
+            institutions: reg,
+        };
+
+        // Evaluate a list literal of integers — we spell it at the
+        // Val level and stash it in rho for the NativeDecide arg to
+        // reference by Var.
+        let list_val = Val::List(vec![
+            crate::nbe::eval::eval(&wrap_int(1), &Rho::Nil).unwrap(),
+            crate::nbe::eval::eval(&wrap_int(2), &Rho::Nil).unwrap(),
+            crate::nbe::eval::eval(&wrap_int(3), &Rho::Nil).unwrap(),
+        ]);
+        let rho = Rho::Nil.extend(Patt::Var("xs".to_string()), list_val);
+
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:ensemble").unwrap(),
+            args: vec![Exp::Var("xs".to_string())],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        eval_ctx(&exp, &rho, &ctx).expect("eval");
+
+        let observed = fake.last_args().expect("called");
+        assert_eq!(observed.len(), 1);
+        match &observed[0] {
+            RVal::Array(items) => assert_eq!(items.len(), 3),
+            other => panic!("expected RVal::Array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_inductive_val_arg_roundtrip() {
+        // §5 Pose-like inductive arg. Marshal `succ(zero)` of a Nat
+        // through the Val::InductiveVal arm of val_to_resource_value
+        // and verify the institution sees an Embedded resource whose
+        // `is_a` carries the ctor name.
+        let nat = nat_decl();
+        let fake = FakeInstitution::new("urn:eigenius:test:pose", DecResult::Holds);
+        let reg = registry_with(fake.clone());
+        let ctx = EvalCtx::Check {
+            layer: None,
+            institutions: reg,
+        };
+
+        let succ_zero_exp = Exp::InductiveCtor(
+            nat.clone(),
+            "succ".to_string(),
+            vec![Exp::InductiveCtor(nat, "zero".to_string(), Vec::new())],
+        );
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:pose").unwrap(),
+            args: vec![succ_zero_exp],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+
+        let observed = fake.last_args().expect("called");
+        assert_eq!(observed.len(), 1);
+        match &observed[0] {
+            RVal::Embedded(r) => {
+                let is_a = r.is_a();
+                assert_eq!(is_a.len(), 1);
+                assert!(is_a[0].as_str().ends_with(":succ"));
+            }
+            other => panic!("expected RVal::Embedded (ctor resource), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_fires_at_check_time_when_registry_on_ctx() {
+        // Integration: check-time dispatch via CheckCtx. A NativeDecide
+        // whose constraint fails inside a body blocks subsequent
+        // reduction — but from CheckCtx's perspective, the decide call
+        // *did* fire (the institution observed it), confirming the
+        // registry was threaded through the check eval_ctx.
+        let fake = FakeInstitution::new("urn:eigenius:test:check_time", DecResult::Holds);
+        let reg = registry_with(fake.clone());
+
+        let c = CheckCtx::new(Rho::Nil, Vec::new()).with_institutions(reg);
+
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:check_time").unwrap(),
+            args: vec![wrap_int(7)],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(99)));
+
+        // Drive eval through CheckCtx.eval — this is the hook that
+        // Phase 11c added to make institution-dispatched constraints
+        // fire during type-checking.
+        let v = c.eval(&exp, &Rho::Nil).expect("CheckCtx eval");
+        assert!(matches!(v, Val::Refl(_)));
+        assert!(
+            fake.last_args().is_some(),
+            "institution should have been consulted at check time"
+        );
     }
 }
