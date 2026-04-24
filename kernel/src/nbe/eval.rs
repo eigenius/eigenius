@@ -443,7 +443,15 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
 
         // Sized types (Phase 11b step 14, D19 §8).
         Exp::SizeSort => Ok(Val::SizeSort),
-        Exp::SizeSucc(s) => Ok(Val::SizeSucc(Box::new(ev(s)?))),
+        // ∞ is a fixed point of successor: `ŝ(∞) = ∞`. Matches
+        // MiniAgda's `sizeSuccE Infty = Infty` (Abstract.hs:300).
+        // Without this absorption, `SizeSucc(SizeInf)` and `SizeInf`
+        // would compare unequal, creating spurious type mismatches
+        // whenever code mixes sized and unsized (`∞`-indexed) uses.
+        Exp::SizeSucc(s) => match ev(s)? {
+            Val::SizeInf => Ok(Val::SizeInf),
+            other => Ok(Val::SizeSucc(Box::new(other))),
+        },
         Exp::SizeInf => Ok(Val::SizeInf),
     }
 }
@@ -2709,24 +2717,71 @@ mod tests {
     }
 
     #[test]
-    fn eval_size_succ_of_inf() -> Result<(), EvalError> {
-        // SizeSucc(SizeInf) evaluates to Val::SizeSucc(Val::SizeInf)
+    fn size_succ_of_inf_absorbs_to_inf() {
+        // `ŝ(∞) = ∞` — MiniAgda's fixed-point absorption
+        // (Abstract.hs:300). Prevents spurious inequality between
+        // sized types that happen to mix `SizeSucc` and `SizeInf`.
         let exp = Exp::SizeSucc(Box::new(Exp::SizeInf));
-        let v = eval(&exp, &Rho::Nil)?;
-        match v {
-            Val::SizeSucc(inner) => assert!(matches!(*inner, Val::SizeInf)),
-            other => panic!("expected SizeSucc(SizeInf), got {other:?}"),
-        }
-        Ok(())
+        let v = eval(&exp, &Rho::Nil).expect("eval");
+        assert!(
+            matches!(v, Val::SizeInf),
+            "SizeSucc(SizeInf) must collapse to SizeInf, got {v:?}"
+        );
     }
 
     #[test]
-    fn size_primitives_round_trip_through_readback() -> Result<(), EvalError> {
-        // SizeSucc(SizeSucc(SizeInf)) → eval → readback → same Exp
+    fn nested_size_succ_at_inf_still_absorbs() {
+        // ŝ(ŝ(∞)) evaluates inner first, gets ∞, outer ŝ also
+        // absorbs — final value is ∞.
         let exp = Exp::SizeSucc(Box::new(Exp::SizeSucc(Box::new(Exp::SizeInf))));
-        let v = eval(&exp, &Rho::Nil)?;
+        let v = eval(&exp, &Rho::Nil).expect("eval");
+        assert!(
+            matches!(v, Val::SizeInf),
+            "nested SizeSucc at SizeInf must collapse, got {v:?}"
+        );
+    }
+
+    #[test]
+    fn size_succ_of_variable_does_not_absorb() {
+        // SizeSucc over a neutral size variable stays as SizeSucc —
+        // absorption only triggers for the concrete ∞ case.
+        let rho = Rho::Nil.extend(
+            Patt::Var("i".to_string()),
+            Val::Nt(Neut::Gen(0, "i".to_string())),
+        );
+        let exp = Exp::SizeSucc(Box::new(Exp::Var("i".to_string())));
+        let v = eval(&exp, &rho).expect("eval");
+        match v {
+            Val::SizeSucc(inner) => {
+                assert!(matches!(*inner, Val::Nt(Neut::Gen(_, _))));
+            }
+            other => panic!("expected SizeSucc(neutral), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn finite_size_primitives_round_trip_through_readback() -> Result<(), EvalError> {
+        // For non-∞ sizes (neutral variables), readback round-trips
+        // the successor chain losslessly.
+        let rho = Rho::Nil.extend(
+            Patt::Var("j".to_string()),
+            Val::Nt(Neut::Gen(0, "j".to_string())),
+        );
+        let exp = Exp::SizeSucc(Box::new(Exp::SizeSucc(Box::new(Exp::Var("j".to_string())))));
+        let v = eval(&exp, &rho)?;
         let readback = crate::nbe::readback::readback_val(0, &v);
-        assert_eq!(readback, exp);
+        // The neutral variable reads back with its gen-level name,
+        // so we can't just assert_eq against the input. Verify
+        // structure instead: two SizeSucc wrappers around some Var.
+        match &readback {
+            Exp::SizeSucc(inner1) => match inner1.as_ref() {
+                Exp::SizeSucc(inner2) => {
+                    assert!(matches!(inner2.as_ref(), Exp::Var(_)));
+                }
+                other => panic!("expected nested SizeSucc, got {other:?}"),
+            },
+            other => panic!("expected outer SizeSucc, got {other:?}"),
+        }
         Ok(())
     }
 }
