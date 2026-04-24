@@ -208,10 +208,23 @@ pub enum Expr {
         body: Box<Expr>,
         pos: Position,
     },
-    /// `f(arg)` or `f(arg, component_arg)`
+    /// `f(arg₁, arg₂, …)` with optional trailing config block
+    /// `{ key = val; … }` for IO component dispatch.
+    ///
+    /// `args` carries every positional argument the parser saw —
+    /// the compiler is responsible for arity validation based on
+    /// what `function` resolves to:
+    ///
+    /// - Inductive constructors take any non-zero arity (Phase 11b).
+    /// - IO components take exactly 1 positional arg, with the
+    ///   optional trailing block (or a 2-positional sugar form,
+    ///   `f(a, b)` ≡ `f(a) { … b … }`) supplying configuration.
+    ///
+    /// Mismatches surface as compile-time errors rather than parser
+    /// errors so the diagnostic can mention the function's role.
     Apply {
         function: QualifiedName,
-        argument: Box<Expr>,
+        args: Vec<Expr>,
         component_argument: Option<Box<Expr>>,
         pos: Position,
     },

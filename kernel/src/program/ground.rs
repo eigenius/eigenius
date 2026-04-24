@@ -50,7 +50,7 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
     // params: vec![] }`. Parameter application is the job of Step 10
     // (constructor application resolution).
     if is_inductive_type(resource) {
-        return resolve_inductive_type(class_iri, resource);
+        return resolve_inductive_type(class_iri, resource, layer);
     }
 
     let (required, recommended) = collect_properties(class_iri, layer)?;
@@ -390,6 +390,7 @@ pub(crate) fn is_inductive_type(resource: &crate::ontology::resource::Resource) 
 pub(crate) fn resolve_inductive_type(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
 ) -> Result<Val, String> {
     let short_name = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
         Some(Value::String(s)) => s.clone(),
@@ -407,7 +408,7 @@ pub(crate) fn resolve_inductive_type(
     });
 
     let params_telescope = decode_params(class_iri, resource)?;
-    let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope)?;
+    let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope, layer)?;
 
     let decl = Arc::new(InductiveDecl {
         name: short_name,
@@ -465,6 +466,7 @@ fn decode_ctors(
     resource: &crate::ontology::resource::Resource,
     self_ref: &Arc<InductiveDecl>,
     params: &[(Patt, Exp)],
+    layer: &Layer,
 ) -> Result<Vec<InductiveCtorDecl>, String> {
     let ctors_iri = Iri::parse(wk::CTORS).unwrap();
     let arr = match resource.get(&ctors_iri) {
@@ -502,7 +504,7 @@ fn decode_ctors(
                 ))
             }
         };
-        let ctor_typ = build_ctor_type(class_iri, self_ref, params, arg_types_arr)?;
+        let ctor_typ = build_ctor_type(class_iri, self_ref, params, arg_types_arr, layer)?;
         out.push(InductiveCtorDecl {
             name,
             typ: ctor_typ,
@@ -518,6 +520,7 @@ fn build_ctor_type(
     self_ref: &Arc<InductiveDecl>,
     params: &[(Patt, Exp)],
     arg_types: &[Value],
+    layer: &Layer,
 ) -> Result<Exp, String> {
     // Result type: Self(param₁, param₂, ...) — each applied param
     // becomes a Var reference to the enclosing binder.
@@ -535,7 +538,7 @@ fn build_ctor_type(
     // syntax doesn't name them — Phase 11b v1 treats constructors as
     // positional.
     for arg in arg_types.iter().rev() {
-        let arg_exp = decode_arg_type(class_iri, self_ref, arg)?;
+        let arg_exp = decode_arg_type(class_iri, self_ref, arg, layer)?;
         result = Exp::Pi(Patt::Unit, Box::new(arg_exp), Box::new(result));
     }
 
@@ -549,18 +552,25 @@ fn build_ctor_type(
 
 /// Decode one `InductiveArgType` resource to its `Exp`.
 ///
-/// Three cases driven by the encoded `type_name`:
+/// Cases driven by the encoded `type_name`:
 /// - Bare string (no namespace separator): a parameter reference,
 ///   emitted as `Exp::Var`.
 /// - IRI equal to the enclosing inductive's IRI: a self-reference,
 ///   emitted as `Exp::InductiveType(self_ref, type_args...)`.
-/// - Any other IRI: a class reference; emitted as the matching
-///   primitive or `Exp::EigonClass(iri)` to let the type checker
-///   resolve it via the layer chain.
+/// - IRI of another inductive type in the layer chain: emitted as
+///   `Exp::InductiveType(stub_decl, type_args...)` where the stub
+///   carries the matching short name. This makes cross-inductive
+///   constructor arguments type-check correctly without resolving
+///   the full target decl (which would risk infinite recursion for
+///   mutually-referential inductives).
+/// - Primitive IRI: emitted as `Exp::EigonPrimitive`.
+/// - Any other class IRI: emitted as `Exp::EigonClass(iri)` to let
+///   the type checker resolve it via the layer chain.
 fn decode_arg_type(
     class_iri: &Iri,
     self_ref: &Arc<InductiveDecl>,
     value: &Value,
+    layer: &Layer,
 ) -> Result<Exp, String> {
     let r = match value {
         Value::Embedded(r) => r.as_ref(),
@@ -596,7 +606,7 @@ fn decode_arg_type(
     if arg_iri == *class_iri {
         let sub_args: Result<Vec<Exp>, String> = type_args_arr
             .iter()
-            .map(|a| decode_arg_type(class_iri, self_ref, a))
+            .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
             .collect();
         return Ok(Exp::InductiveType(self_ref.clone(), sub_args?));
     }
@@ -611,15 +621,38 @@ fn decode_arg_type(
         _ => {}
     }
 
+    // Cross-inductive reference: the arg type is some other declared
+    // inductive in the layer. Emit an `Exp::InductiveType` with a
+    // name-only stub Arc so the type checker matches by name. We
+    // deliberately do NOT recurse into `resolve_inductive_type` for
+    // the target — the stub is enough for name-based dispatch and
+    // avoids infinite recursion on mutually-referential decls (out of
+    // scope but worth guarding against).
+    if let Some(other_resource) = layer.resolve(&arg_iri) {
+        if is_inductive_type(other_resource) {
+            let other_name = match other_resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+                Some(Value::String(s)) => s.clone(),
+                _ => arg_iri.local_name().to_string(),
+            };
+            let stub = Arc::new(InductiveDecl {
+                name: other_name,
+                params: Vec::new(),
+                sort: Exp::Set,
+                ctors: Vec::new(),
+            });
+            let sub_args: Result<Vec<Exp>, String> = type_args_arr
+                .iter()
+                .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
+                .collect();
+            return Ok(Exp::InductiveType(stub, sub_args?));
+        }
+    }
+
     // Any other class IRI: emit an EigonClass marker. The type
     // checker resolves this against the layer chain at use time.
-    // Parameterised references (e.g. `Foo(A)`) currently drop their
-    // type args on this path — a follow-up will handle external
-    // parameterised inductives once cross-inductive references matter.
     if !type_args_arr.is_empty() {
         return Err(format!(
-            "cross-inductive parameterised references (`{type_name}(...)`) are not yet \
-             supported — only self-references may take type arguments in Phase 11b"
+            "parameterised references to non-inductive class `{type_name}` are not supported"
         ));
     }
     Ok(Exp::EigonClass(arg_iri))

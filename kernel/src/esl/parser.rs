@@ -939,34 +939,18 @@ impl<'a> Parser<'a> {
                         }
                     };
 
-                    let argument = if args.is_empty() {
-                        Box::new(Expr::Literal {
-                            value: LiteralValue::Bool(true), // unit placeholder
-                            pos: pos.clone(),
-                        })
+                    // Trailing block: f(args) { key = val; } supplies a
+                    // component_argument (static config for IO components).
+                    let block_component_argument = if self.at(&TokenKind::LBrace) {
+                        Some(Box::new(self.parse_block_expr()?))
                     } else {
-                        Box::new(args.remove(0))
-                    };
-
-                    let component_argument = if args.is_empty() {
                         None
-                    } else {
-                        Some(Box::new(args.remove(0)))
                     };
-
-                    // Check for trailing block: f(arg) { key = val; }
-                    // This is the component argument (static configuration)
-                    let component_argument =
-                        if component_argument.is_none() && self.at(&TokenKind::LBrace) {
-                            Some(Box::new(self.parse_block_expr()?))
-                        } else {
-                            component_argument
-                        };
 
                     Expr::Apply {
                         function,
-                        argument,
-                        component_argument,
+                        args,
+                        component_argument: block_component_argument,
                         pos,
                     }
                 }
@@ -1684,5 +1668,66 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.message.contains("empty constructor arg list"));
+    }
+
+    #[test]
+    fn function_application_collects_all_positional_args() {
+        // Parser captures every positional arg into the Vec — no silent
+        // drop, no premature arity rejection. The compiler decides what
+        // arities are valid based on whether the function is a ctor or
+        // a component.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            program ex:demo : ex:Foo -> ex:Bar {
+                f(a, b, c, d)
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Program(p) => match &p.body {
+                Expr::Apply {
+                    args,
+                    component_argument,
+                    ..
+                } => {
+                    assert_eq!(args.len(), 4, "all 4 args preserved");
+                    assert!(component_argument.is_none());
+                }
+                other => panic!("expected Apply, got {other:?}"),
+            },
+            _ => panic!("expected program"),
+        }
+    }
+
+    #[test]
+    fn function_application_with_trailing_block_sets_component_argument() {
+        // f(a) { key = val; } — block syntax for component config.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            program ex:demo : ex:Foo -> ex:Bar {
+                f(a) { ex:key = "val"; }
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Program(p) => match &p.body {
+                Expr::Apply {
+                    args,
+                    component_argument,
+                    ..
+                } => {
+                    assert_eq!(args.len(), 1);
+                    assert!(component_argument.is_some());
+                }
+                other => panic!("expected Apply, got {other:?}"),
+            },
+            _ => panic!("expected program"),
+        }
     }
 }

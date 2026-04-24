@@ -12,6 +12,7 @@ use crate::program::ground::{is_inductive_type, resolve_class_type, resolve_indu
 use std::sync::Arc;
 const LET: &str = "urn:eigenius:program:Let";
 const APPLY: &str = "urn:eigenius:program:Apply";
+const CTOR_APPLY: &str = "urn:eigenius:program:CtorApply";
 const VAR: &str = "urn:eigenius:program:Var";
 const LAMBDA: &str = "urn:eigenius:program:Lambda";
 const CASE: &str = "urn:eigenius:program:Case";
@@ -59,6 +60,7 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
     match class_str {
         LET => parse_let(resource, layer),
         APPLY => parse_apply(resource, layer),
+        CTOR_APPLY => parse_ctor_apply(resource, layer),
         VAR => parse_var(resource, layer),
         LAMBDA => parse_lambda(resource, layer),
         CASE => parse_case(resource, layer),
@@ -90,7 +92,7 @@ fn resolve_ctor_iri(s: &str, layer: &Layer) -> Option<(Arc<InductiveDecl>, usize
     if !is_inductive_type(resource) {
         return None;
     }
-    let val = resolve_inductive_type(&parent_iri, resource).ok()?;
+    let val = resolve_inductive_type(&parent_iri, resource, layer).ok()?;
     let Val::InductiveType { decl, .. } = val else {
         return None;
     };
@@ -137,37 +139,11 @@ fn parse_let(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 
 /// f(arg) with optional component_argument
 fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
-    // Function can be a string (component IRI) or embedded expression
+    // Constructor application no longer flows through this path: the
+    // ESL compiler routes ctor references to `CtorApply` resources
+    // (parsed by `parse_ctor_apply`). Anything reaching here is a
+    // genuine function application or a component dispatch.
     let func_prop = Iri::parse("urn:eigenius:program:function").unwrap();
-
-    // Constructor application special case (Phase 11b step 9): when the
-    // function string is a ctor IRI of the form `<parent>:<ctor>`,
-    // emit `Exp::InductiveCtor` directly. IRI-keyed lookup — no
-    // layer-wide name search.
-    //
-    // The component_argument slot is ignored on this path. Phase 11b
-    // restricts ESL constructor application to single-argument ctors;
-    // multi-arg ctors need either a different surface form or pair-
-    // decomposition logic (deferred).
-    if let Some(Value::String(s)) = resource.get(&func_prop) {
-        if let Some((decl, idx, arity)) = resolve_ctor_iri(s, layer) {
-            if arity == 1 {
-                let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
-                let arg_exp = match resource.get(&arg_prop) {
-                    Some(Value::Embedded(r)) => parse_expression(r, layer)?,
-                    Some(Value::String(s)) => Exp::Var(s.clone()),
-                    _ => {
-                        return Err(format!(
-                            "constructor `{}.{}` application requires an argument",
-                            decl.name, decl.ctors[idx].name
-                        ))
-                    }
-                };
-                let ctor_name = decl.ctors[idx].name.clone();
-                return Ok(Exp::InductiveCtor(decl, ctor_name, vec![arg_exp]));
-            }
-        }
-    }
 
     let func_exp = match resource.get(&func_prop) {
         Some(Value::String(s)) => {
@@ -202,6 +178,49 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     };
 
     Ok(Exp::App(Box::new(func_exp), Box::new(effective_arg)))
+}
+
+/// Inductive constructor application (Phase 11b step 10, multi-arg).
+///
+/// Resource shape: `function: <ctor_iri>` plus `arguments: Array<Expr>`
+/// — the canonical path for constructor application produced by the
+/// ESL compiler. Decodes each argument expression and assembles
+/// `Exp::InductiveCtor(decl, ctor_name, args)`.
+///
+/// Arity is checked against the declared constructor — mismatches
+/// fail here rather than later at type-check time so the diagnostic
+/// points to the ESL source.
+fn parse_ctor_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
+    let func_str = get_string(resource, "urn:eigenius:program:function")?;
+    let (decl, idx, arity) = resolve_ctor_iri(&func_str, layer).ok_or_else(|| {
+        format!("CtorApply function `{func_str}` does not resolve to a known inductive constructor")
+    })?;
+    let ctor_name = decl.ctors[idx].name.clone();
+
+    let args_prop = Iri::parse("urn:eigenius:program:arguments").unwrap();
+    let arg_values = match resource.get(&args_prop) {
+        Some(Value::Array(arr)) => arr.as_slice(),
+        None => &[],
+        Some(_) => return Err("CtorApply: `arguments` must be an array".to_string()),
+    };
+    if arg_values.len() != arity {
+        return Err(format!(
+            "CtorApply `{}.{ctor_name}` expects {arity} args, got {}",
+            decl.name,
+            arg_values.len()
+        ));
+    }
+    let args: Result<Vec<Exp>, String> = arg_values
+        .iter()
+        .map(|v| match v {
+            Value::Embedded(r) => parse_expression(r, layer),
+            Value::String(s) => Ok(Exp::Var(s.clone())),
+            other => Err(format!(
+                "CtorApply argument must be embedded or string, got {other:?}"
+            )),
+        })
+        .collect();
+    Ok(Exp::InductiveCtor(decl, ctor_name, args?))
 }
 
 /// x
@@ -694,5 +713,240 @@ mod tests {
             }
             other => panic!("expected outer succ InductiveVal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn binary_constructor_program_end_to_end() {
+        // Phase 11b step 10: 2-arg constructors.
+        // Build a non-parametric NatList; construct cons(zero, cons(succ(zero), nil)).
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            data ex:NatList {
+                nil,
+                cons(ex:Nat, ex:NatList),
+            }
+
+            program ex:two_elem_list : core:string -> ex:NatList {
+                cons(zero, cons(succ(zero), nil))
+            }
+            "#,
+        );
+
+        let body = parse_program_body("urn:eigenius:example:two_elem_list", &layer);
+        // Outer: cons(zero, cons(...)) — 2 args
+        let (outer_decl, outer_name, outer_args) = match body {
+            Exp::InductiveCtor(d, n, a) => (d, n, a),
+            other => panic!("expected outer InductiveCtor, got {other:?}"),
+        };
+        assert_eq!(outer_decl.name, "NatList");
+        assert_eq!(outer_name, "cons");
+        assert_eq!(outer_args.len(), 2, "cons should have 2 args");
+        // First arg: zero (Nat)
+        match &outer_args[0] {
+            Exp::InductiveCtor(d, n, a) => {
+                assert_eq!(d.name, "Nat");
+                assert_eq!(n, "zero");
+                assert!(a.is_empty());
+            }
+            other => panic!("expected zero, got {other:?}"),
+        }
+        // Second arg: cons(succ(zero), nil)
+        match &outer_args[1] {
+            Exp::InductiveCtor(d, n, a) => {
+                assert_eq!(d.name, "NatList");
+                assert_eq!(n, "cons");
+                assert_eq!(a.len(), 2);
+            }
+            other => panic!("expected nested cons, got {other:?}"),
+        }
+
+        // Type-check and evaluate end-to-end.
+        let iri = Iri::parse("urn:eigenius:example:two_elem_list").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val.app(crate::nbe::val::Val::Unit).expect("apply");
+        // Walk the resulting list: cons(zero, cons(succ(zero), nil))
+        let (decl, ctor, args) = match result {
+            crate::nbe::val::Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } => (decl, ctor_name, args),
+            other => panic!("expected InductiveVal, got {other:?}"),
+        };
+        assert_eq!(decl.name, "NatList");
+        assert_eq!(ctor, "cons");
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn ctor_arity_mismatch_in_application_is_rejected() {
+        // Calling a 2-arg ctor with only 1 arg should fail at parse time
+        // with a clear arity-mismatch error.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            data ex:NatList {
+                nil,
+                cons(ex:Nat, ex:NatList),
+            }
+
+            program ex:bad : core:string -> ex:NatList {
+                cons(zero)
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let err = parse_program(resource, &layer).unwrap_err();
+        assert!(
+            err.contains("expects 2 args, got 1"),
+            "expected arity error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn ternary_constructor_program_end_to_end() {
+        // Phase 11b step 10 (proper fix): 3-arg constructor end-to-end.
+        // This was previously impossible because ESL `Apply` had only
+        // 2 arg slots; the multi-arg refactor (`Apply.args: Vec<Expr>`)
+        // makes 3+ arg ctor application a first-class operation.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            data ex:Triple {
+                triple(ex:Nat, ex:Nat, ex:Nat),
+            }
+
+            program ex:my_triple : core:string -> ex:Triple {
+                triple(zero, succ(zero), succ(succ(zero)))
+            }
+            "#,
+        );
+
+        let body = parse_program_body("urn:eigenius:example:my_triple", &layer);
+        let (decl, name, args) = match body {
+            Exp::InductiveCtor(d, n, a) => (d, n, a),
+            other => panic!("expected InductiveCtor, got {other:?}"),
+        };
+        assert_eq!(decl.name, "Triple");
+        assert_eq!(name, "triple");
+        assert_eq!(args.len(), 3, "all 3 args preserved end to end");
+
+        // Type-check + evaluate.
+        let iri = Iri::parse("urn:eigenius:example:my_triple").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val
+            .app(crate::nbe::val::Val::Unit)
+            .expect("apply program");
+        match result {
+            crate::nbe::val::Val::InductiveVal {
+                decl,
+                ctor_name,
+                args,
+            } => {
+                assert_eq!(decl.name, "Triple");
+                assert_eq!(ctor_name, "triple");
+                assert_eq!(args.len(), 3);
+            }
+            other => panic!("expected Triple InductiveVal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_ctor_three_arg_call_is_compile_error() {
+        // Non-ctor 3+ args is now a *compile* error (with role-aware
+        // diagnostic), not a parser error. Previously this was a
+        // silent corruption (the 3rd arg was dropped).
+        let result = crate::esl::compile(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            program ex:bad : ex:Foo -> ex:Bar {
+                f(a, b, c)
+            }
+            "#,
+        );
+        let errs = result.unwrap_err();
+        let msg = &errs[0].message;
+        assert!(
+            msg.contains("3 positional arguments"),
+            "unexpected error: {msg}"
+        );
+        assert!(
+            msg.contains("only defined for declared inductive constructors"),
+            "diagnostic should explain the rule: {msg}"
+        );
+    }
+
+    #[test]
+    fn non_ctor_two_arg_legacy_sugar_still_works() {
+        // Backward compat: `f(a, b)` for a non-ctor function still
+        // means "input + component_argument" (legacy sugar for the
+        // block form). Existing ESL programs continue to work.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            program ex:demo : core:string -> core:string {
+                Identity(input, "config")
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:demo").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let body = match resource
+            .get(&Iri::parse("urn:eigenius:program:body").unwrap())
+            .expect("program body")
+        {
+            crate::ontology::resource::Value::Embedded(b) => b.as_ref(),
+            other => panic!("body must be embedded, got {other:?}"),
+        };
+        // The Apply resource should carry both `argument` and
+        // `component_argument` (sugar form preserved).
+        let is_a = body.is_a();
+        assert_eq!(is_a[0].as_str(), "urn:eigenius:program:Apply");
+        assert!(body
+            .get(&Iri::parse("urn:eigenius:program:component_argument").unwrap())
+            .is_some());
     }
 }
