@@ -192,6 +192,25 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
             minors: minors.iter().map(|m| readback_val(level, m)).collect(),
             major: Box::new(readback_neut(level, major)),
         },
+
+        // Pattern-match blocked on a neutral scrutinee (Phase 11b
+        // step 12). Read back as `Exp::Match`, preserving the motive-
+        // free shape — the type checker re-synthesises the motive
+        // from context the next time this term is checked.
+        //
+        // The captured `env` is intentionally not consulted during
+        // readback. Arm bodies may reference variables from that env;
+        // for the readback to be self-contained we'd have to inline
+        // those references. This is the conservative readback shape
+        // (parallel to how `Val::CoRecord` is read back).
+        Neut::NtMatch {
+            scrutinee,
+            arms,
+            env: _,
+        } => Exp::Match {
+            scrutinee: Box::new(readback_neut(level, scrutinee)),
+            arms: arms.clone(),
+        },
     }
 }
 

@@ -857,7 +857,9 @@ impl<'a> Parser<'a> {
     fn parse_case(&mut self) -> Result<Expr, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Case)?;
-        let scrutinee = self.parse_apply_or_atom()?;
+        // No-trailing-block: the following `{` is the case body, not
+        // a component config block on the scrutinee.
+        let scrutinee = self.parse_apply_or_atom_no_trailing_block()?;
         self.expect(&TokenKind::LBrace)?;
 
         let mut branches = Vec::new();
@@ -889,9 +891,19 @@ impl<'a> Parser<'a> {
     fn parse_match(&mut self) -> Result<Expr, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Match)?;
-        let scrutinee = self.parse_apply_or_atom()?;
-        self.expect(&TokenKind::Returning)?;
-        let result_type = self.parse_qualified_name()?;
+        // No-trailing-block: a following `{` opens the match body, not
+        // a component config block on the scrutinee.
+        let scrutinee = self.parse_apply_or_atom_no_trailing_block()?;
+        // `returning T` is optional. When omitted, the kernel-side
+        // type checker synthesises the motive from the expected type
+        // (Phase 11b step 12). When present, the expression builder
+        // desugars eagerly to `Exp::InductiveRec`.
+        let result_type = if self.at(&TokenKind::Returning) {
+            self.advance();
+            Some(self.parse_qualified_name()?)
+        } else {
+            None
+        };
         self.expect(&TokenKind::LBrace)?;
 
         let mut arms = Vec::new();
@@ -960,9 +972,22 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse function application or an atom.
-    /// `f(arg)` or `map(f, coll)` or `reduce(f, init, coll)` or plain atom.
+    /// Parse function application or an atom, allowing the trailing
+    /// `{ … }` config-block sugar for component dispatch (`f(arg) { … }`).
     fn parse_apply_or_atom(&mut self) -> Result<Expr, EslError> {
+        self.parse_apply_or_atom_inner(true)
+    }
+
+    /// Like `parse_apply_or_atom` but with trailing config-block
+    /// parsing disabled. Use this in positions where a following `{`
+    /// belongs to the surrounding grammar — e.g. the scrutinee of
+    /// `case` or `match`, where `{` opens the body, not a component
+    /// configuration block.
+    fn parse_apply_or_atom_no_trailing_block(&mut self) -> Result<Expr, EslError> {
+        self.parse_apply_or_atom_inner(false)
+    }
+
+    fn parse_apply_or_atom_inner(&mut self, allow_trailing_block: bool) -> Result<Expr, EslError> {
         let mut expr = self.parse_atom()?;
 
         // Handle projection chains: e.prop.prop2
@@ -1025,11 +1050,16 @@ impl<'a> Parser<'a> {
 
                     // Trailing block: f(args) { key = val; } supplies a
                     // component_argument (static config for IO components).
-                    let block_component_argument = if self.at(&TokenKind::LBrace) {
-                        Some(Box::new(self.parse_block_expr()?))
-                    } else {
-                        None
-                    };
+                    // Suppressed in contexts where a following `{`
+                    // belongs to the surrounding grammar (e.g.
+                    // `match expr { … }` — the brace opens the match
+                    // body, not a config block).
+                    let block_component_argument =
+                        if allow_trailing_block && self.at(&TokenKind::LBrace) {
+                            Some(Box::new(self.parse_block_expr()?))
+                        } else {
+                            None
+                        };
 
                     Expr::Apply {
                         function,

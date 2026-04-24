@@ -44,6 +44,8 @@ Always run `cargo fmt --all` before committing. CI enforces formatting and will 
 
 ## Engineering principles
 
+**Project posture.** Eigenius is the foundation of a platform intended to change how typed knowledge is represented, processed, and verified. There is no tight release timeline. **Getting the design right matters more than getting it done quickly.** Time pressure is not a valid reason to compromise structural decisions — there is no time pressure. If a proper fix is multi-session, multi-day, or multi-week, that is fine; invest the time. The cost of shipping a wrong shape is paid continuously by everyone who works on the system afterward, and paid most heavily when the wrong shape has to be unwound under the pressure of downstream consumers. Avoid that entirely by building the right shape the first time.
+
 This project values long-term system health over short-term commit ease. When you discover a structural problem (wrong shape, silent corruption, inconsistent design, misaligned identity), **fix the structure** — do not paper over it with a guard, error message, or bridge. Defaulting to the smallest local fix when the underlying design is wrong creates compounding tech debt and forces future contributors to repeatedly work around the same broken foundation.
 
 **Rule of thumb**: if the immediate fix you're considering is a *guard* against bad behavior rather than *eliminating the bad behavior*, you are about to add a Band-Aid. Stop, reconsider, and fix the structure.

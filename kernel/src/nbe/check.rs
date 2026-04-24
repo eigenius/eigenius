@@ -341,6 +341,15 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             },
         ) => check_inductive_ctor_args(ctx, decl, ctor_name, args, expected_decl, params),
 
+        // Pattern-match elimination with motive inferred from the
+        // expected type (Phase 11b step 12, D19 §10). The motive is
+        // synthesised as `λ_. expected_type` (constant); per-arm
+        // bodies are checked against `expected_type` in a context
+        // extended with bindings of the constructor's argument types.
+        // Exhaustiveness, no-duplicate-arms, and binding-count match
+        // are validated here.
+        (Exp::Match { scrutinee, arms }, expected) => check_match(ctx, scrutinee, arms, expected),
+
         // Corecord against a codata type: each field's body must have
         // the corresponding observation's type, and every declared
         // observation must be covered.
@@ -660,6 +669,17 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             major,
         } => check_infer_inductive_rec(ctx, decl, motive, minors, major),
 
+        // Pattern-match without an explicit motive cannot run in
+        // inference mode — its result type is determined by checking-
+        // mode context. Surface a diagnostic that points users to the
+        // two ways out.
+        Exp::Match { .. } => Err(
+            "match expression has no inferable type — use it in a checking-mode position \
+             (e.g. as a program body or a typed `let` value), or annotate the result type \
+             with `returning T` so the parser builds an `InductiveRec` instead"
+                .to_string(),
+        ),
+
         e => Err(format!("cannot infer type of: {e:?}")),
     }
 }
@@ -872,6 +892,13 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
             }
             check_guarded(major, forbidden)
         }
+        Exp::Match { scrutinee, arms } => {
+            check_guarded(scrutinee, forbidden)?;
+            for arm in arms {
+                check_guarded(&arm.body, forbidden)?;
+            }
+            Ok(())
+        }
 
         // Leaves — no sub-expressions to check.
         Exp::Var(_)
@@ -1080,6 +1107,118 @@ fn check_infer_inductive_rec(
     // 4. Result: motive(major).
     let major_val = eval(major, &ctx.rho).map_err(|e| e.to_string())?;
     motive_val.app(major_val).map_err(|e| e.to_string())
+}
+
+/// Type-check `match scrutinee { arm₁; arm₂; … }` against an expected
+/// result type (Phase 11b step 12, D19 §10).
+///
+/// 1. Infer the scrutinee's type — must be `Val::InductiveType { decl, params }`.
+/// 2. Validate exhaustiveness (every constructor in `decl` has an arm)
+///    and no duplicate arms.
+/// 3. For each arm, build a context extended with bindings for the
+///    constructor's positional arguments (with parameters substituted),
+///    then check the arm body against `expected_type`. Binding count
+///    must match the constructor's arity.
+///
+/// The motive synthesised by this check is the constant function
+/// `λ_. expected_type`, so each arm body is checked at the same type.
+/// Dependent motives (where the result type varies with the matched
+/// constructor) need explicit annotation via `Exp::InductiveRec` and
+/// are not handled by this path.
+fn check_match(
+    ctx: &mut CheckCtx,
+    scrutinee: &Exp,
+    arms: &[crate::nbe::term::MatchArm],
+    expected: &Val,
+) -> Result<(), String> {
+    use std::collections::BTreeMap;
+
+    let scrutinee_type = check_infer(ctx, scrutinee)?;
+    let (decl, params) = match &scrutinee_type {
+        Val::InductiveType { decl, params } => (decl.clone(), params.clone()),
+        other => {
+            return Err(format!(
+                "match scrutinee has type {:?}, expected an inductive type",
+                readback_val(ctx.rho.len(), other)
+            ));
+        }
+    };
+
+    let mut arms_by_ctor: BTreeMap<&str, &crate::nbe::term::MatchArm> = BTreeMap::new();
+    for arm in arms {
+        if arms_by_ctor.insert(arm.ctor_name.as_str(), arm).is_some() {
+            return Err(format!(
+                "duplicate match arm for `{}.{}`",
+                decl.name, arm.ctor_name
+            ));
+        }
+    }
+    for ctor_name in arms_by_ctor.keys() {
+        if !decl.ctors.iter().any(|c| &c.name == ctor_name) {
+            return Err(format!(
+                "match arm references unknown constructor `{}.{ctor_name}`",
+                decl.name
+            ));
+        }
+    }
+
+    for ctor in &decl.ctors {
+        let arm = arms_by_ctor.get(ctor.name.as_str()).ok_or_else(|| {
+            format!(
+                "non-exhaustive match: missing case for `{}.{}`",
+                decl.name, ctor.name
+            )
+        })?;
+
+        // Extract this constructor's argument types (after the
+        // parameter prefix) from its Π-telescope.
+        let mut current = &ctor.typ;
+        let mut params_to_skip = decl.params.len();
+        let mut arg_specs: Vec<(Patt, Exp)> = Vec::new();
+        while let Exp::Pi(patt, dom, body) = current {
+            if params_to_skip > 0 {
+                params_to_skip -= 1;
+            } else {
+                arg_specs.push((patt.clone(), (**dom).clone()));
+            }
+            current = body;
+        }
+
+        if arm.bindings.len() != arg_specs.len() {
+            return Err(format!(
+                "match arm `{}.{}` expects {} bindings, got {}",
+                decl.name,
+                ctor.name,
+                arg_specs.len(),
+                arm.bindings.len()
+            ));
+        }
+
+        // Build the arm's check context: start from the outer ctx,
+        // bind parameters for evaluating arg types, then extend with
+        // each binding (bound to a fresh generic value of the
+        // corresponding arg type).
+        let mut arg_env = Rho::Nil;
+        for ((patt, _), val) in decl.params.iter().zip(params.iter()) {
+            arg_env = arg_env.extend(patt.clone(), val.clone());
+        }
+        let mut arm_ctx = CheckCtx {
+            rho: ctx.rho.clone(),
+            gamma: ctx.gamma.clone(),
+            layer: ctx.layer.clone(),
+            type_cache: ctx.type_cache.clone(),
+        };
+        for ((arg_patt, arg_typ_exp), binding) in arg_specs.iter().zip(arm.bindings.iter()) {
+            let arg_typ_val = eval(arg_typ_exp, &arg_env).map_err(|e| e.to_string())?;
+            let gen = gen_val(&arm_ctx.rho);
+            arm_ctx = arm_ctx.extend(binding, &arg_typ_val, &gen)?;
+            arg_env = arg_env.extend(arg_patt.clone(), gen);
+        }
+
+        check(&mut arm_ctx, &arm.body, expected)?;
+    }
+
+    Ok(())
 }
 
 /// Extract a Sigma type: Sig(A, x.B) → (A, x.B)

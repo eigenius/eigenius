@@ -301,13 +301,8 @@ fn parse_case(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 /// - arm referencing an unknown ctor of the parent inductive
 /// - binding count mismatch (e.g. `cons(x)` for a 2-arg `cons`)
 fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
-    use std::collections::BTreeMap;
-
     let scrutinee_resource = get_embedded(resource, "urn:eigenius:program:scrutinee")?;
     let scrutinee_exp = parse_expression(&scrutinee_resource, layer)?;
-
-    let result_type_iri = get_iri(resource, "urn:eigenius:program:result_type")?;
-    let result_type_val = resolve_class_type(&result_type_iri, layer)?;
 
     let arms_prop = Iri::parse("urn:eigenius:program:arms").unwrap();
     let arms_arr = match resource.get(&arms_prop) {
@@ -318,9 +313,39 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         return Err("Match: must have at least one arm".to_string());
     }
 
-    // Decode each arm into (ctor_iri, bindings, body).
-    let mut arms_by_ctor: BTreeMap<String, (Vec<String>, Exp, Position)> = BTreeMap::new();
-    let mut parent_iri_str: Option<String> = None;
+    // Decode each arm into a generic structure usable by both code
+    // paths (motive-eager `InductiveRec` and motive-deferred `Match`).
+    let parsed_arms = decode_match_arms(arms_arr, layer)?;
+
+    // Branch on whether `result_type` was annotated in the source.
+    // Present → eager desugar to `Exp::InductiveRec` with motive
+    // `λ_. result_type` (Phase 11b step 11 path).
+    // Absent → produce `Exp::Match`; the kernel's type checker
+    // synthesises the motive from checking-mode context (Phase 11b
+    // step 12 path, D19 §10).
+    let result_type_prop = Iri::parse("urn:eigenius:program:result_type").unwrap();
+    if let Some(Value::String(rt_iri_str)) = resource.get(&result_type_prop) {
+        let result_type_iri = Iri::parse(rt_iri_str)
+            .map_err(|e| format!("invalid `result_type` IRI '{rt_iri_str}': {e}"))?;
+        let result_type_val = resolve_class_type(&result_type_iri, layer)?;
+        build_inductive_rec(parsed_arms, scrutinee_exp, result_type_val, layer)
+    } else {
+        build_match_exp(parsed_arms, scrutinee_exp, layer)
+    }
+}
+
+/// Parsed match arm shared between `Exp::InductiveRec` and
+/// `Exp::Match` build paths.
+struct ParsedArm {
+    parent_iri_str: String,
+    ctor_local: String,
+    binding_names: Vec<String>,
+    body: Exp,
+}
+
+/// Decode the embedded `MatchArm` resources into a uniform shape.
+fn decode_match_arms(arms_arr: &[Value], layer: &Layer) -> Result<Vec<ParsedArm>, String> {
+    let mut out = Vec::with_capacity(arms_arr.len());
     for entry in arms_arr {
         let ar = match entry {
             Value::Embedded(r) => r.as_ref(),
@@ -330,40 +355,42 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         let (parent_str, ctor_local) = ctor_iri.rsplit_once(':').ok_or_else(|| {
             format!("Match arm ctor IRI `{ctor_iri}` is not in `<parent>:<ctor>` form")
         })?;
-        // All arms must address the same parent inductive.
-        match &parent_iri_str {
-            Some(existing) if existing != parent_str => {
-                return Err(format!(
-                    "Match arms reference different inductives: `{existing}` vs `{parent_str}`"
-                ))
-            }
-            None => parent_iri_str = Some(parent_str.to_string()),
-            _ => {}
-        }
         let bindings_arr = match ar.get(&Iri::parse("urn:eigenius:program:bindings").unwrap()) {
             Some(Value::Array(arr)) => arr,
             _ => return Err("Match arm missing `bindings` array".to_string()),
         };
-        let bindings: Result<Vec<String>, String> = bindings_arr
+        let binding_names: Result<Vec<String>, String> = bindings_arr
             .iter()
             .map(|v| match v {
                 Value::String(s) => Ok(s.clone()),
                 _ => Err("Match arm binding must be a string".to_string()),
             })
             .collect();
-        let bindings = bindings?;
         let body_resource = get_embedded(ar, "urn:eigenius:program:body")?;
         let body = parse_expression(&body_resource, layer)?;
-        if arms_by_ctor
-            .insert(ctor_local.to_string(), (bindings, body, Position::Unknown))
-            .is_some()
-        {
-            return Err(format!("Match has duplicate arms for ctor `{ctor_local}`"));
+        out.push(ParsedArm {
+            parent_iri_str: parent_str.to_string(),
+            ctor_local: ctor_local.to_string(),
+            binding_names: binding_names?,
+            body,
+        });
+    }
+    Ok(out)
+}
+
+/// Verify all arms address the same inductive, then resolve it to
+/// `Arc<InductiveDecl>`.
+fn resolve_match_parent(arms: &[ParsedArm], layer: &Layer) -> Result<Arc<InductiveDecl>, String> {
+    let parent_iri_str = &arms[0].parent_iri_str;
+    for arm in &arms[1..] {
+        if arm.parent_iri_str != *parent_iri_str {
+            return Err(format!(
+                "Match arms reference different inductives: `{parent_iri_str}` vs `{}`",
+                arm.parent_iri_str
+            ));
         }
     }
-
-    let parent_iri_str = parent_iri_str.expect("at least one arm guarantees this");
-    let parent_iri = Iri::parse(&parent_iri_str)
+    let parent_iri = Iri::parse(parent_iri_str)
         .map_err(|e| format!("invalid match arm parent IRI `{parent_iri_str}`: {e}"))?;
     let parent_resource = layer
         .resolve(&parent_iri)
@@ -374,12 +401,31 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         ));
     }
     let parent_val = resolve_inductive_type(&parent_iri, parent_resource, layer)?;
-    let decl: Arc<InductiveDecl> = match parent_val {
-        Val::InductiveType { decl, .. } => decl,
+    match parent_val {
+        Val::InductiveType { decl, .. } => Ok(decl),
         _ => unreachable!("is_inductive_type checked"),
-    };
+    }
+}
 
-    // Reject arms that reference a ctor not in the parent inductive.
+/// Build `Exp::InductiveRec` from match arms when the source had a
+/// `returning T` annotation. Validates exhaustiveness, binding
+/// counts, and unknown ctors.
+fn build_inductive_rec(
+    parsed_arms: Vec<ParsedArm>,
+    scrutinee_exp: Exp,
+    result_type_val: Val,
+    layer: &Layer,
+) -> Result<Exp, String> {
+    use std::collections::BTreeMap;
+    let decl = resolve_match_parent(&parsed_arms, layer)?;
+
+    let mut arms_by_ctor: BTreeMap<String, ParsedArm> = BTreeMap::new();
+    for arm in parsed_arms {
+        let ctor = arm.ctor_local.clone();
+        if arms_by_ctor.insert(ctor.clone(), arm).is_some() {
+            return Err(format!("Match has duplicate arms for ctor `{ctor}`"));
+        }
+    }
     for ctor_name in arms_by_ctor.keys() {
         if !decl.ctors.iter().any(|c| &c.name == ctor_name) {
             return Err(format!(
@@ -389,10 +435,9 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         }
     }
 
-    // Build minors in declaration order; require every ctor has an arm.
     let mut minors = Vec::with_capacity(decl.ctors.len());
     for ctor in &decl.ctors {
-        let (bindings, body, _) = arms_by_ctor.remove(&ctor.name).ok_or_else(|| {
+        let arm = arms_by_ctor.remove(&ctor.name).ok_or_else(|| {
             format!(
                 "non-exhaustive match: missing case for `{}.{}`",
                 decl.name, ctor.name
@@ -402,29 +447,21 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
             &decl,
             decl.ctors.iter().position(|c| c.name == ctor.name).unwrap(),
         );
-        if bindings.len() != arity {
+        if arm.binding_names.len() != arity {
             return Err(format!(
                 "match arm `{}.{}` expects {arity} bindings, got {}",
                 decl.name,
                 ctor.name,
-                bindings.len()
+                arm.binding_names.len()
             ));
         }
-        // Identify which binders are recursive (their type is the
-        // inductive itself) — those produce IH lambdas in the minor.
         let recursive_count = recursive_arg_count(&decl, &ctor.typ);
-        let mut minor = body;
-        // Wrap IH lambdas first so they end up innermost.
+        let mut minor = arm.body;
         for _ in 0..recursive_count {
             minor = Exp::Lam(Patt::Unit, Box::new(minor));
         }
-        // Wrap binding lambdas in reverse so the first binding is outermost.
-        for binding in bindings.iter().rev() {
-            let patt = if binding == "_" {
-                Patt::Unit
-            } else {
-                Patt::Var(binding.clone())
-            };
+        for binding in arm.binding_names.iter().rev() {
+            let patt = patt_for_binding(binding);
             minor = Exp::Lam(patt, Box::new(minor));
         }
         minors.push(minor);
@@ -439,6 +476,45 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         minors,
         major: Box::new(scrutinee_exp),
     })
+}
+
+/// Build `Exp::Match` from match arms when the source had no
+/// `returning T` annotation (Phase 11b step 12). The kernel's type
+/// checker synthesises the motive from checking-mode context.
+fn build_match_exp(
+    parsed_arms: Vec<ParsedArm>,
+    scrutinee_exp: Exp,
+    layer: &Layer,
+) -> Result<Exp, String> {
+    // Validate the parent inductive resolves cleanly so any
+    // `unknown inductive` errors fire here rather than later in the
+    // type checker.
+    let _ = resolve_match_parent(&parsed_arms, layer)?;
+
+    let arms: Vec<crate::nbe::term::MatchArm> = parsed_arms
+        .into_iter()
+        .map(|arm| crate::nbe::term::MatchArm {
+            ctor_name: arm.ctor_local,
+            bindings: arm.binding_names.iter().map(patt_for_binding).collect(),
+            body: arm.body,
+        })
+        .collect();
+
+    Ok(Exp::Match {
+        scrutinee: Box::new(scrutinee_exp),
+        arms,
+    })
+}
+
+/// Convert a binding name string to a `Patt`. Underscore is the
+/// wildcard binding (`Patt::Unit`); everything else is `Patt::Var`.
+fn patt_for_binding(name: impl AsRef<str>) -> Patt {
+    let n = name.as_ref();
+    if n == "_" {
+        Patt::Unit
+    } else {
+        Patt::Var(n.to_string())
+    }
 }
 
 /// Count the recursive (self-referential) constructor argument
@@ -457,16 +533,6 @@ fn recursive_arg_count(decl: &InductiveDecl, ctor_typ: &Exp) -> usize {
         current = body;
     }
     count
-}
-
-/// Stub Position for embedded match arms (we don't preserve source
-/// positions across the resource boundary today).
-#[derive(Debug, Clone, Copy)]
-struct Position;
-
-impl Position {
-    #[allow(non_upper_case_globals)]
-    const Unknown: Self = Self;
 }
 
 /// (first, second)
@@ -1357,6 +1423,166 @@ mod tests {
         assert!(
             err.contains("expects 2 bindings"),
             "expected binding count error, got: {err}"
+        );
+    }
+
+    // --- Inferred-motive match (Phase 11b step 12, D19 §10) ---
+
+    #[test]
+    fn match_without_returning_annotation_uses_exp_match() {
+        // No `returning T`: parse_match should produce Exp::Match
+        // (motive-deferred), not Exp::InductiveRec.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:flip : core:string -> ex:Nat {
+                match zero {
+                    zero -> succ(zero);
+                    succ(_) -> zero;
+                }
+            }
+            "#,
+        );
+        let body = parse_program_body("urn:eigenius:example:flip", &layer);
+        match body {
+            Exp::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].ctor_name, "zero");
+                assert_eq!(arms[1].ctor_name, "succ");
+            }
+            other => panic!("expected Exp::Match (no annotation), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_without_annotation_in_checking_mode_evaluates() {
+        // End-to-end: motive inferred from program return type.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:flip : core:string -> ex:Nat {
+                match zero {
+                    zero -> succ(zero);
+                    succ(_) -> zero;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:flip").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check (motive inferred)");
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val
+            .app(crate::nbe::val::Val::Unit)
+            .expect("apply program");
+        // Result should be succ(zero).
+        match result {
+            crate::nbe::val::Val::InductiveVal {
+                ctor_name, args, ..
+            } => {
+                assert_eq!(ctor_name, "succ");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("expected succ InductiveVal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_with_bindings_and_inferred_motive_works() {
+        // succ(n) -> n with motive inferred from program return type.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:pred_of_one : core:string -> ex:Nat {
+                match succ(zero) {
+                    zero -> zero;
+                    succ(n) -> n;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:pred_of_one").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        check(&mut ctx, &term, &typ_val).expect("type check");
+        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let result = prog_val
+            .app(crate::nbe::val::Val::Unit)
+            .expect("apply program");
+        match result {
+            crate::nbe::val::Val::InductiveVal { ctor_name, .. } => {
+                assert_eq!(ctor_name, "zero");
+            }
+            other => panic!("expected zero InductiveVal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_inferred_non_exhaustive_is_rejected_at_check_time() {
+        // Missing arm should fail at type-check time (since the
+        // exhaustiveness check moves into the type checker for the
+        // motive-deferred path).
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:bad : core:string -> ex:Nat {
+                match zero {
+                    zero -> zero;
+                }
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
+        let resource = layer.resolve(&iri).expect("program resource");
+        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        use crate::nbe::check::{check, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        let err = check(&mut ctx, &term, &typ_val).unwrap_err();
+        assert!(
+            err.contains("non-exhaustive"),
+            "expected non-exhaustive error, got: {err}"
         );
     }
 }
