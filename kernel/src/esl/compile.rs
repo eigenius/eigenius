@@ -551,41 +551,114 @@ impl Compiler {
 
             ast::Expr::Apply {
                 function,
-                argument,
+                args,
                 component_argument,
-                ..
+                pos,
             } => {
+                // Constructor dispatch (Phase 11b step 10): bare names
+                // matching a declared ctor route to a `CtorApply`
+                // resource carrying every positional arg. Constructor
+                // application accepts any arity ≥ 0; the kernel-side
+                // type checker validates against the declared
+                // constructor's expected arg count.
+                if function.namespace.is_none() {
+                    if let Some(ctor_iri) = self.ctors.get(&function.name) {
+                        if component_argument.is_some() {
+                            return Err(EslError::compiler(
+                                Some(pos.clone()),
+                                format!(
+                                    "constructor `{}` cannot take a configuration block — \
+                                     constructors are pure data",
+                                    function.name
+                                ),
+                            ));
+                        }
+                        let mut r = Resource::new_embedded();
+                        set_is_a(&mut r, "urn:eigenius:program:CtorApply");
+                        r.set(
+                            iri("urn:eigenius:program:function"),
+                            Value::String(ctor_iri.clone()),
+                        );
+                        let arg_resources: Result<Vec<Value>, EslError> = args
+                            .iter()
+                            .map(|a| Ok(Value::Embedded(Box::new(self.compile_expr(a)?))))
+                            .collect();
+                        r.set(
+                            iri("urn:eigenius:program:arguments"),
+                            Value::Array(arg_resources?),
+                        );
+                        return Ok(r);
+                    }
+                }
+
+                // Non-ctor function (component dispatch or qualified
+                // function reference). Arity rules:
+                // - Exactly 1 positional arg → that arg is the input;
+                //   optional trailing `{ … }` block becomes
+                //   `component_argument`.
+                // - Exactly 2 positional args, no block → the legacy
+                //   sugar `f(a, b)` ≡ `f(a) { … b … }`; the second
+                //   positional becomes `component_argument`.
+                // - Anything else for a non-ctor is a compile error.
+                let (argument_expr, comp_arg_expr): (&ast::Expr, Option<&ast::Expr>) =
+                    match (args.as_slice(), &component_argument) {
+                        ([a], None) => (a, None),
+                        ([a], Some(b)) => (a, Some(b.as_ref())),
+                        ([a, b], None) => (a, Some(b)),
+                        ([], _) => {
+                            return Err(EslError::compiler(
+                                Some(pos.clone()),
+                                format!(
+                                    "function `{}` called with no positional arguments",
+                                    function.name
+                                ),
+                            ))
+                        }
+                        ([_, _], Some(_)) => {
+                            return Err(EslError::compiler(
+                                Some(pos.clone()),
+                                format!(
+                                    "function `{}` got both a 2nd positional argument and a \
+                                 configuration block — supply only one",
+                                    function.name
+                                ),
+                            ))
+                        }
+                        (more, _) => {
+                            return Err(EslError::compiler(
+                                Some(pos.clone()),
+                                format!(
+                                    "function `{}` called with {} positional arguments; \
+                                 non-constructor calls accept 1 (with optional config block) \
+                                 or 2 (legacy sugar). Multi-positional-arg dispatch is only \
+                                 defined for declared inductive constructors.",
+                                    function.name,
+                                    more.len()
+                                ),
+                            ))
+                        }
+                    };
+
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Apply");
 
-                // Resolve function name. Order:
-                // 1. Bare name matching a declared inductive ctor → ctor IRI
-                //    (Phase 11b step 9). Takes precedence over component
-                //    shorthand so user ctors can never be accidentally
-                //    routed through the component dispatcher.
-                // 2. Qualified name → namespace-resolved IRI.
-                // 3. Bare name with no ctor match → component shorthand.
-                let func_iri = if function.namespace.is_none() {
-                    if let Some(ctor_iri) = self.ctors.get(&function.name) {
-                        ctor_iri.clone()
-                    } else {
-                        format!("urn:eigenius:program:components:{}", function.name)
-                    }
-                } else {
+                let func_iri = if function.namespace.is_some() {
                     self.resolve(function)?
+                } else {
+                    format!("urn:eigenius:program:components:{}", function.name)
                 };
                 r.set(
                     iri("urn:eigenius:program:function"),
                     Value::String(func_iri),
                 );
 
-                let arg_r = self.compile_expr(argument)?;
+                let arg_r = self.compile_expr(argument_expr)?;
                 r.set(
                     iri("urn:eigenius:program:argument"),
                     Value::Embedded(Box::new(arg_r)),
                 );
 
-                if let Some(comp_arg) = component_argument {
+                if let Some(comp_arg) = comp_arg_expr {
                     let comp_arg_r = self.compile_expr(comp_arg)?;
                     r.set(
                         iri("urn:eigenius:program:component_argument"),
