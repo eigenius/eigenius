@@ -7,12 +7,13 @@
 
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
-use crate::nbe::term::{Exp, Patt, PrimitiveType};
+use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt, PrimitiveType};
 use crate::nbe::val::{Clos, Val};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Resolve a class IRI to a Mini-TT type.
 ///
@@ -40,6 +41,16 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
     // variables). See D11 §3.
     if is_codata_type(resource) {
         return resolve_codata_type(class_iri, resource, layer);
+    }
+
+    // Inductive types resolve to Val::InductiveType with the full
+    // Arc<InductiveDecl> built from the resource's params + ctors
+    // embedded shape (Phase 11b step 9, D19 §10). The value returned
+    // is the unapplied type former — `Val::InductiveType { decl,
+    // params: vec![] }`. Parameter application is the job of Step 10
+    // (constructor application resolution).
+    if is_inductive_type(resource) {
+        return resolve_inductive_type(class_iri, resource);
     }
 
     let (required, recommended) = collect_properties(class_iri, layer)?;
@@ -357,6 +368,263 @@ fn resolve_codata_type(
     Ok(Val::Codata(observations, Rho::Nil))
 }
 
+/// Check whether a resource represents an inductive type declaration
+/// (Phase 11b step 9).
+fn is_inductive_type(resource: &crate::ontology::resource::Resource) -> bool {
+    resource
+        .is_a()
+        .iter()
+        .any(|c| c.as_str() == wk::INDUCTIVE_TYPE)
+}
+
+/// Resolve an `InductiveType` resource into `Val::InductiveType`.
+///
+/// Builds an `Arc<InductiveDecl>` from the resource's embedded params
+/// and ctors, reconstructing each constructor's full Π-telescope
+/// type (`Π param₁ … Π param_n. Π arg₁ … Π arg_m. Self(params)`) from
+/// the compact AST shape that the ESL compiler emitted.
+///
+/// Returns the unapplied type former — `Val::InductiveType { decl,
+/// params: vec![] }`. For parameterised inductives, Phase 11b step 10+
+/// will add the pathway that applies parameters at use sites.
+fn resolve_inductive_type(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Result<Val, String> {
+    let short_name = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+        Some(Value::String(s)) => s.clone(),
+        _ => return Err(format!("inductive type '{class_iri}' missing 'short_name'")),
+    };
+
+    // Build the self-reference stub used inside constructor types.
+    // Empty `ctors` is fine — name-based lookup is all the kernel
+    // needs for inner self-refs (see Phase 11b step 2 notes).
+    let self_ref = Arc::new(InductiveDecl {
+        name: short_name.clone(),
+        params: Vec::new(),
+        sort: Exp::Set,
+        ctors: Vec::new(),
+    });
+
+    let params_telescope = decode_params(class_iri, resource)?;
+    let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope)?;
+
+    let decl = Arc::new(InductiveDecl {
+        name: short_name,
+        params: params_telescope,
+        sort: Exp::Set,
+        ctors,
+    });
+    Ok(Val::InductiveType {
+        decl,
+        params: Vec::new(),
+    })
+}
+
+fn decode_params(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Result<Vec<(Patt, Exp)>, String> {
+    let type_params_iri = Iri::parse(wk::TYPE_PARAMS).unwrap();
+    let arr = match resource.get(&type_params_iri) {
+        Some(Value::Array(a)) => a,
+        Some(_) => {
+            return Err(format!(
+                "inductive type '{class_iri}' has non-array `type_params`"
+            ))
+        }
+        None => return Ok(Vec::new()),
+    };
+    let mut params = Vec::new();
+    for entry in arr {
+        let pr = match entry {
+            Value::Embedded(r) => r.as_ref(),
+            _ => {
+                return Err(format!(
+                    "inductive type '{class_iri}' `type_params` must be embedded InductiveParam resources"
+                ))
+            }
+        };
+        let name = match pr.get(&Iri::parse(wk::PARAM_NAME).unwrap()) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                return Err(format!(
+                    "inductive type '{class_iri}' param missing `param_name`"
+                ))
+            }
+        };
+        // Phase 11b v1 admits only kind `Set`; the resource carries the
+        // kind for forward-compatibility but we don't branch on it yet.
+        params.push((Patt::Var(name), Exp::Set));
+    }
+    Ok(params)
+}
+
+fn decode_ctors(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+    self_ref: &Arc<InductiveDecl>,
+    params: &[(Patt, Exp)],
+) -> Result<Vec<InductiveCtorDecl>, String> {
+    let ctors_iri = Iri::parse(wk::CTORS).unwrap();
+    let arr = match resource.get(&ctors_iri) {
+        Some(Value::Array(a)) => a,
+        _ => {
+            return Err(format!(
+                "inductive type '{class_iri}' missing or non-array `ctors`"
+            ))
+        }
+    };
+    let mut out = Vec::new();
+    for entry in arr {
+        let cr = match entry {
+            Value::Embedded(r) => r.as_ref(),
+            _ => {
+                return Err(format!(
+                    "inductive type '{class_iri}' ctors must be embedded InductiveCtor resources"
+                ))
+            }
+        };
+        let name = match cr.get(&Iri::parse(wk::CTOR_NAME).unwrap()) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                return Err(format!(
+                    "inductive type '{class_iri}' ctor missing `ctor_name`"
+                ))
+            }
+        };
+        let arg_types_arr = match cr.get(&Iri::parse(wk::ARG_TYPES).unwrap()) {
+            Some(Value::Array(a)) => a.as_slice(),
+            None => &[],
+            Some(_) => {
+                return Err(format!(
+                    "inductive type '{class_iri}.{name}' has non-array `arg_types`"
+                ))
+            }
+        };
+        let ctor_typ = build_ctor_type(class_iri, self_ref, params, arg_types_arr)?;
+        out.push(InductiveCtorDecl {
+            name,
+            typ: ctor_typ,
+        });
+    }
+    Ok(out)
+}
+
+/// Assemble a constructor's full type expression:
+/// `Π params. Π args. Self(params)`.
+fn build_ctor_type(
+    class_iri: &Iri,
+    self_ref: &Arc<InductiveDecl>,
+    params: &[(Patt, Exp)],
+    arg_types: &[Value],
+) -> Result<Exp, String> {
+    // Result type: Self(param₁, param₂, ...) — each applied param
+    // becomes a Var reference to the enclosing binder.
+    let param_vars: Vec<Exp> = params
+        .iter()
+        .map(|(p, _)| match p {
+            Patt::Var(n) => Exp::Var(n.clone()),
+            _ => Exp::Unit,
+        })
+        .collect();
+    let mut result = Exp::InductiveType(self_ref.clone(), param_vars);
+
+    // Wrap each arg binder in reverse so the first arg is outermost.
+    // Arg binders are anonymous (`Patt::Unit`) because the surface
+    // syntax doesn't name them — Phase 11b v1 treats constructors as
+    // positional.
+    for arg in arg_types.iter().rev() {
+        let arg_exp = decode_arg_type(class_iri, self_ref, arg)?;
+        result = Exp::Pi(Patt::Unit, Box::new(arg_exp), Box::new(result));
+    }
+
+    // Wrap each parameter binder in reverse.
+    for (patt, kind) in params.iter().rev() {
+        result = Exp::Pi(patt.clone(), Box::new(kind.clone()), Box::new(result));
+    }
+
+    Ok(result)
+}
+
+/// Decode one `InductiveArgType` resource to its `Exp`.
+///
+/// Three cases driven by the encoded `type_name`:
+/// - Bare string (no namespace separator): a parameter reference,
+///   emitted as `Exp::Var`.
+/// - IRI equal to the enclosing inductive's IRI: a self-reference,
+///   emitted as `Exp::InductiveType(self_ref, type_args...)`.
+/// - Any other IRI: a class reference; emitted as the matching
+///   primitive or `Exp::EigonClass(iri)` to let the type checker
+///   resolve it via the layer chain.
+fn decode_arg_type(
+    class_iri: &Iri,
+    self_ref: &Arc<InductiveDecl>,
+    value: &Value,
+) -> Result<Exp, String> {
+    let r = match value {
+        Value::Embedded(r) => r.as_ref(),
+        _ => return Err("InductiveArgType must be embedded".to_string()),
+    };
+    let type_name = match r.get(&Iri::parse(wk::TYPE_NAME).unwrap()) {
+        Some(Value::String(s)) => s.as_str(),
+        _ => return Err("InductiveArgType missing `type_name`".to_string()),
+    };
+    let type_args_arr = match r.get(&Iri::parse(wk::TYPE_ARGS).unwrap()) {
+        Some(Value::Array(a)) => a.as_slice(),
+        None => &[],
+        Some(_) => return Err("InductiveArgType `type_args` must be an array".to_string()),
+    };
+
+    // Heuristic distinguisher: bare parameter names carry no namespace
+    // separator, every IRI produced by the ESL compiler contains `:`.
+    // The compile step preserves this invariant, so the check is
+    // exact rather than fuzzy.
+    if !type_name.contains(':') {
+        if !type_args_arr.is_empty() {
+            return Err(format!(
+                "bare parameter reference `{type_name}` cannot take type arguments"
+            ));
+        }
+        return Ok(Exp::Var(type_name.to_string()));
+    }
+
+    let arg_iri =
+        Iri::parse(type_name).map_err(|e| format!("invalid type_name IRI '{type_name}': {e}"))?;
+
+    // Self-reference: the arg type is the inductive being built.
+    if arg_iri == *class_iri {
+        let sub_args: Result<Vec<Exp>, String> = type_args_arr
+            .iter()
+            .map(|a| decode_arg_type(class_iri, self_ref, a))
+            .collect();
+        return Ok(Exp::InductiveType(self_ref.clone(), sub_args?));
+    }
+
+    // Primitive type IRIs get folded to the corresponding Exp form.
+    match arg_iri.as_str() {
+        wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
+        wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
+        wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
+        wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
+        wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
+        _ => {}
+    }
+
+    // Any other class IRI: emit an EigonClass marker. The type
+    // checker resolves this against the layer chain at use time.
+    // Parameterised references (e.g. `Foo(A)`) currently drop their
+    // type args on this path — a follow-up will handle external
+    // parameterised inductives once cross-inductive references matter.
+    if !type_args_arr.is_empty() {
+        return Err(format!(
+            "cross-inductive parameterised references (`{type_name}(...)`) are not yet \
+             supported — only self-references may take type arguments in Phase 11b"
+        ));
+    }
+    Ok(Exp::EigonClass(arg_iri))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +735,160 @@ mod tests {
             val
         );
         Ok(())
+    }
+
+    // --- Inductive type resolution (Phase 11b step 9) ---
+
+    /// Build a test layer from core-ontology.json + an ESL source
+    /// compiled in-line. Used to verify the round-trip
+    /// ESL → JSON resources → layer → `resolve_inductive_type`.
+    fn build_layer_with_esl(esl_source: &str) -> Arc<Layer> {
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build());
+
+        let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
+        let mut user_builder = LayerBuilder::new("user", Some(core));
+        for r in user_resources {
+            user_builder.add_resource(r).unwrap();
+        }
+        Arc::new(user_builder.build())
+    }
+
+    #[test]
+    fn resolve_nat_inductive_from_esl() {
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+            "#,
+        );
+        let nat_iri = Iri::parse("urn:eigenius:example:Nat").unwrap();
+        let val = resolve_class_type(&nat_iri, &layer).expect("resolve Nat");
+
+        match val {
+            Val::InductiveType { decl, params } => {
+                assert!(params.is_empty());
+                assert_eq!(decl.name, "Nat");
+                assert!(decl.params.is_empty());
+                assert_eq!(decl.ctors.len(), 2);
+                assert_eq!(decl.ctors[0].name, "zero");
+                assert_eq!(decl.ctors[1].name, "succ");
+
+                // zero's type: InductiveType(Nat, [])
+                match &decl.ctors[0].typ {
+                    Exp::InductiveType(d, args) => {
+                        assert_eq!(d.name, "Nat");
+                        assert!(args.is_empty());
+                    }
+                    other => panic!("expected InductiveType for zero, got {other:?}"),
+                }
+
+                // succ's type: Π _:Nat. Nat
+                match &decl.ctors[1].typ {
+                    Exp::Pi(Patt::Unit, dom, body) => {
+                        assert!(
+                            matches!(dom.as_ref(), Exp::InductiveType(d, a) if d.name == "Nat" && a.is_empty())
+                        );
+                        assert!(
+                            matches!(body.as_ref(), Exp::InductiveType(d, a) if d.name == "Nat" && a.is_empty())
+                        );
+                    }
+                    other => panic!("expected Pi for succ, got {other:?}"),
+                }
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_bool_inductive_from_esl() {
+        let layer = build_layer_with_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Bool {
+                tt,
+                ff,
+            }
+            "#,
+        );
+        let bool_iri = Iri::parse("urn:eigenius:example:Bool").unwrap();
+        let val = resolve_class_type(&bool_iri, &layer).expect("resolve Bool");
+        match val {
+            Val::InductiveType { decl, params } => {
+                assert!(params.is_empty());
+                assert_eq!(decl.name, "Bool");
+                assert_eq!(decl.ctors.len(), 2);
+                assert_eq!(decl.ctors[0].name, "tt");
+                assert_eq!(decl.ctors[1].name, "ff");
+                // Both ctor types are bare InductiveType — no Pi wrapping
+                assert!(matches!(decl.ctors[0].typ, Exp::InductiveType(_, _)));
+                assert!(matches!(decl.ctors[1].typ, Exp::InductiveType(_, _)));
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_list_parametric_inductive_from_esl() {
+        let layer = build_layer_with_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:List(A : core:Set) {
+                nil,
+                cons(A, ex:List(A)),
+            }
+            "#,
+        );
+        let list_iri = Iri::parse("urn:eigenius:example:List").unwrap();
+        let val = resolve_class_type(&list_iri, &layer).expect("resolve List");
+        match val {
+            Val::InductiveType { decl, params } => {
+                assert!(params.is_empty());
+                assert_eq!(decl.name, "List");
+                assert_eq!(decl.params.len(), 1);
+                assert!(matches!(&decl.params[0].0, Patt::Var(n) if n == "A"));
+
+                // nil's type: Π A:Set. List(A)
+                match &decl.ctors[0].typ {
+                    Exp::Pi(Patt::Var(pn), dom, body) => {
+                        assert_eq!(pn, "A");
+                        assert!(matches!(dom.as_ref(), Exp::Set));
+                        match body.as_ref() {
+                            Exp::InductiveType(d, args) => {
+                                assert_eq!(d.name, "List");
+                                assert_eq!(args.len(), 1);
+                                assert!(matches!(&args[0], Exp::Var(n) if n == "A"));
+                            }
+                            other => panic!("expected InductiveType in nil body, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected Pi for nil, got {other:?}"),
+                }
+
+                // cons's type: Π A:Set. Π _:A. Π _:List(A). List(A) — depth 3
+                let mut depth = 0;
+                let mut cursor = &decl.ctors[1].typ;
+                while let Exp::Pi(_, _, body) = cursor {
+                    depth += 1;
+                    cursor = body;
+                }
+                assert_eq!(depth, 3, "cons should be a 3-binder Π-chain");
+                assert!(matches!(cursor, Exp::InductiveType(d, _) if d.name == "List"));
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
     }
 }
