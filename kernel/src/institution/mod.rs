@@ -108,6 +108,20 @@ pub trait FiberReasoner: Send + Sync {
     }
 }
 
+/// Classification of an IRI by the institution-level capability it
+/// dispatches to (Phase 11e, D10). Used by surface-language
+/// compilers (ESL, EigenQL) to decide which kernel AST node to
+/// emit for a function-call-shaped reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstitutionCapability {
+    /// The IRI was declared as a decide predicate by some
+    /// institution — emit `Exp::NativeDecide(Constraint::Institution {..}, _)`.
+    DecidePredicate,
+    /// The IRI was declared as a comorphism — emit
+    /// `Exp::InstitutionInvoke { iri, source }`.
+    Comorphism,
+}
+
 /// Result of an institution-registered constraint decision.
 ///
 /// Three-valued so institutions can distinguish "I determined this
@@ -154,6 +168,14 @@ pub struct FiberDeclaration {
     /// translation when invoked via `Exp::InstitutionInvoke` or the
     /// Phase 14 reconciliation walker.
     pub comorphism_types: Vec<Resource>,
+
+    /// Decide-predicate IRIs this institution answers (Phase 11e).
+    /// Listed so the ESL compiler (and future EigenQL compiler) can
+    /// classify a function-call IRI at compile time as a
+    /// `FiberReasoner::decide`-dispatched predicate vs. a component
+    /// or a comorphism. The IRIs go into
+    /// [`InstitutionRegistry::decide_dispatch`] for O(log n) lookup.
+    pub decide_procedures: Vec<Iri>,
 }
 
 impl FiberDeclaration {
@@ -168,6 +190,7 @@ impl FiberDeclaration {
             query_types: Vec::new(),
             structural_properties: Vec::new(),
             comorphism_types: Vec::new(),
+            decide_procedures: Vec::new(),
         }
     }
 }
@@ -180,6 +203,7 @@ pub struct InstitutionInfo {
     pub morphism_type_iris: Vec<Iri>,
     pub query_type_iris: Vec<Iri>,
     pub comorphism_iris: Vec<Iri>,
+    pub decide_procedure_iris: Vec<Iri>,
 }
 
 /// Registry of institutions.
@@ -193,6 +217,12 @@ pub struct InstitutionRegistry {
     /// Looked up by `Exp::InstitutionInvoke` eval, Phase 14
     /// reconciliation, and user-facing introspection.
     comorphism_dispatch: BTreeMap<Iri, Iri>,
+    /// Maps decide-predicate IRI → declaring institution IRI
+    /// (Phase 11e). Used by ESL/EigenQL compilers to classify a
+    /// function-call IRI as a `Constraint::Institution` predicate
+    /// at compile time, and by the kernel to resolve which
+    /// institution handles a given `decide` call.
+    decide_dispatch: BTreeMap<Iri, Iri>,
     /// Info for each registered institution.
     info: BTreeMap<Iri, InstitutionInfo>,
 }
@@ -204,6 +234,7 @@ impl InstitutionRegistry {
             morphism_dispatch: BTreeMap::new(),
             query_dispatch: BTreeMap::new(),
             comorphism_dispatch: BTreeMap::new(),
+            decide_dispatch: BTreeMap::new(),
             info: BTreeMap::new(),
         }
     }
@@ -275,6 +306,13 @@ impl InstitutionRegistry {
             }
         }
 
+        // Build decide dispatch: procedure IRI → institution IRI.
+        let mut decide_iris = Vec::new();
+        for proc_iri in &decl.decide_procedures {
+            self.decide_dispatch.insert(proc_iri.clone(), iri.clone());
+            decide_iris.push(proc_iri.clone());
+        }
+
         // Store info
         self.info.insert(
             iri.clone(),
@@ -284,6 +322,7 @@ impl InstitutionRegistry {
                 morphism_type_iris: morphism_iris,
                 query_type_iris: query_iris,
                 comorphism_iris,
+                decide_procedure_iris: decide_iris,
             },
         );
 
@@ -333,6 +372,34 @@ impl InstitutionRegistry {
     /// implementation).
     pub fn comorphism_institution_iri(&self, comorphism_iri: &Iri) -> Option<&Iri> {
         self.comorphism_dispatch.get(comorphism_iri)
+    }
+
+    /// Find the institution that answers a given decide-predicate
+    /// IRI (Phase 11e). `None` if no institution declared this
+    /// procedure.
+    pub fn institution_for_decide(&self, procedure_iri: &Iri) -> Option<&dyn FiberReasoner> {
+        let inst_iri = self.decide_dispatch.get(procedure_iri)?;
+        self.get(inst_iri)
+    }
+
+    /// Return the institution IRI that declared a decide procedure.
+    pub fn decide_institution_iri(&self, procedure_iri: &Iri) -> Option<&Iri> {
+        self.decide_dispatch.get(procedure_iri)
+    }
+
+    /// Classify an IRI by the capability kind it dispatches to
+    /// (Phase 11e). Returns `None` if the registry doesn't know the
+    /// IRI — the caller should fall through to non-institution
+    /// lookups (component registry, class constructor, unbound
+    /// variable).
+    pub fn classify(&self, iri: &Iri) -> Option<InstitutionCapability> {
+        if self.decide_dispatch.contains_key(iri) {
+            Some(InstitutionCapability::DecidePredicate)
+        } else if self.comorphism_dispatch.contains_key(iri) {
+            Some(InstitutionCapability::Comorphism)
+        } else {
+            None
+        }
     }
 
     /// List all registered institutions.
@@ -432,6 +499,7 @@ mod tests {
                 query_types: vec![query_class],
                 structural_properties: vec![],
                 comorphism_types: vec![],
+                decide_procedures: vec![],
             }
         }
 
@@ -632,6 +700,7 @@ mod tests {
                 query_types: vec![],
                 structural_properties: vec![],
                 comorphism_types: vec![cm],
+                decide_procedures: vec![],
             }
         }
 

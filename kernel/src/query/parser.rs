@@ -710,10 +710,36 @@ impl Parser {
                 Ok(expr)
             }
 
-            // Identifier as expression (shortname reference)
+            // Identifier as expression — a bare shortname literal, or a
+            // qualified-name function call (Phase 11e.2).
+            //
+            // `ns:local(args)` is dispatched through the institution
+            // registry at evaluate time: if the resolved IRI classifies
+            // as a decide predicate, the call returns a boolean; if it
+            // classifies as a comorphism, the call returns a resource.
+            // Unrecognised IRIs fall through to builtin dispatch which
+            // produces a "no such function" error.
             TokenKind::Identifier(_) => {
-                let name = self.parse_identifier()?;
-                Ok(Expression::Literal(Literal::String(name)))
+                let first = self.parse_identifier()?;
+                // `ident : ident` — qualified name. Otherwise bare shortname.
+                let full_name = if self.at(&TokenKind::Colon) {
+                    self.advance();
+                    let local = self.parse_identifier()?;
+                    format!("{first}:{local}")
+                } else {
+                    first
+                };
+                if self.at(&TokenKind::LParen) {
+                    self.advance();
+                    let args = self.parse_expression_list()?;
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Expression::FunctionCall {
+                        name: full_name,
+                        args,
+                    })
+                } else {
+                    Ok(Expression::Literal(Literal::String(full_name)))
+                }
             }
 
             _ => Err(QueryError::parser(

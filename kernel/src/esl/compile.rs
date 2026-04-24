@@ -12,7 +12,22 @@ use std::collections::BTreeMap;
 
 /// Compile an ESL AST to Eigon-JSON resources.
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
+    compile_file_with_institutions(file, None)
+}
+
+/// Compile an ESL AST with access to an institution registry
+/// (Phase 11e). When provided, function-call-shaped references whose
+/// function IRI classifies as a registered comorphism or decide
+/// predicate are emitted as specialized program resources (decoded
+/// by `program::expr` into the corresponding kernel AST node). When
+/// absent, all function calls emit plain `Apply` resources — the
+/// pre-11e behaviour.
+pub fn compile_file_with_institutions(
+    file: &ast::File,
+    institutions: Option<std::sync::Arc<crate::institution::InstitutionRegistry>>,
+) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
+    compiler.institutions = institutions;
 
     // Register namespace aliases.
     for ns in &file.namespaces {
@@ -50,6 +65,36 @@ struct Compiler {
     /// Built in `collect_ctor_table` before any declaration is compiled,
     /// so expression compilation can resolve bare ctor references.
     ctors: BTreeMap<String, String>,
+    /// Optional institution registry (Phase 11e) — when present,
+    /// drives compile-time classification of function-call IRIs as
+    /// `DecidePredicate` or `Comorphism` capabilities.
+    institutions: Option<std::sync::Arc<crate::institution::InstitutionRegistry>>,
+}
+
+/// Resolve a function-name reference in an ESL `Apply` to its full
+/// IRI, given the compiler's namespace table. Returns `None` if the
+/// name has no namespace and contains no `:` (i.e. a truly bare
+/// reference that can't be an IRI).
+///
+/// The ESL parser collapses `ns:local` function references in
+/// expression position back into `QualifiedName { namespace: None,
+/// name: "ns:local" }`, so this helper splits on the first `:` when
+/// the explicit namespace field is absent — symmetric with
+/// `compile_ctor_arg_type`'s treatment of bare names.
+fn resolve_apply_function(
+    namespace: Option<&str>,
+    name: &str,
+    namespaces: &BTreeMap<String, String>,
+) -> Option<String> {
+    if let Some(ns) = namespace {
+        if let Some(uri) = namespaces.get(ns) {
+            return Some(format!("{uri}:{name}"));
+        }
+        return None;
+    }
+    let (ns_alias, local) = name.split_once(':')?;
+    let uri = namespaces.get(ns_alias)?;
+    Some(format!("{uri}:{local}"))
 }
 
 impl Compiler {
@@ -57,6 +102,7 @@ impl Compiler {
         Self {
             namespaces: BTreeMap::new(),
             ctors: BTreeMap::new(),
+            institutions: None,
         }
     }
 
@@ -786,6 +832,92 @@ impl Compiler {
                             Value::Array(arg_resources?),
                         );
                         return Ok(r);
+                    }
+                }
+
+                // Phase 11e — institution capability classification.
+                // When the function resolves to a registered
+                // comorphism or decide-predicate IRI, emit a
+                // specialized program resource. Otherwise fall
+                // through to ordinary component-dispatch.
+                //
+                // The parser collapses `ns:local` function names
+                // into a bare `Expr::Var { name: "ns:local" }` with
+                // `QualifiedName.namespace = None`, so we split on
+                // the first `:` and look up the namespace ourselves.
+                if let Some(registry) = &self.institutions {
+                    let resolved_func_iri = resolve_apply_function(
+                        function.namespace.as_deref(),
+                        &function.name,
+                        &self.namespaces,
+                    );
+                    if let Some(func_iri_str) = resolved_func_iri {
+                        if let Ok(func_iri_parsed) = Iri::parse(&func_iri_str) {
+                            match registry.classify(&func_iri_parsed) {
+                                Some(crate::institution::InstitutionCapability::Comorphism) => {
+                                    if args.len() != 1 || component_argument.is_some() {
+                                        return Err(EslError::compiler(
+                                            Some(pos.clone()),
+                                            format!(
+                                                "comorphism `{}` expects exactly 1 source \
+                                                 argument, got {} positional arg(s){}",
+                                                func_iri_str,
+                                                args.len(),
+                                                if component_argument.is_some() {
+                                                    " plus a configuration block"
+                                                } else {
+                                                    ""
+                                                }
+                                            ),
+                                        ));
+                                    }
+                                    let src_r = self.compile_expr(&args[0])?;
+                                    let mut r = Resource::new_embedded();
+                                    set_is_a(&mut r, "urn:eigenius:program:ComorphismInvokeApply");
+                                    r.set(
+                                        iri("urn:eigenius:program:function"),
+                                        Value::String(func_iri_str),
+                                    );
+                                    r.set(
+                                        iri("urn:eigenius:program:source"),
+                                        Value::Embedded(Box::new(src_r)),
+                                    );
+                                    return Ok(r);
+                                }
+                                Some(
+                                    crate::institution::InstitutionCapability::DecidePredicate,
+                                ) => {
+                                    if component_argument.is_some() {
+                                        return Err(EslError::compiler(
+                                            Some(pos.clone()),
+                                            format!(
+                                                "decide predicate `{}` does not accept a \
+                                                 configuration block",
+                                                func_iri_str
+                                            ),
+                                        ));
+                                    }
+                                    let arg_resources: Result<Vec<Value>, EslError> = args
+                                        .iter()
+                                        .map(|a| {
+                                            Ok(Value::Embedded(Box::new(self.compile_expr(a)?)))
+                                        })
+                                        .collect();
+                                    let mut r = Resource::new_embedded();
+                                    set_is_a(&mut r, "urn:eigenius:program:DecideApply");
+                                    r.set(
+                                        iri("urn:eigenius:program:function"),
+                                        Value::String(func_iri_str),
+                                    );
+                                    r.set(
+                                        iri("urn:eigenius:program:arguments"),
+                                        Value::Array(arg_resources?),
+                                    );
+                                    return Ok(r);
+                                }
+                                None => {}
+                            }
+                        }
                     }
                 }
 

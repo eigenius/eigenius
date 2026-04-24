@@ -133,6 +133,7 @@ impl WasmFiberReasoner {
             query_types,
             structural_properties,
             comorphism_types: Vec::new(),
+            decide_procedures: Vec::new(),
         })
     }
 
@@ -188,6 +189,7 @@ impl FiberReasoner for WasmFiberReasoner {
             query_types: self.declaration.query_types.clone(),
             structural_properties: self.declaration.structural_properties.clone(),
             comorphism_types: self.declaration.comorphism_types.clone(),
+            decide_procedures: self.declaration.decide_procedures.clone(),
         }
     }
 
