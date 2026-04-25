@@ -1,10 +1,19 @@
+<p align="center">
+  <img src="docs/guides/assets/eigenius_logo_400x400.png" alt="Eigenius" width="200">
+</p>
+
 # Eigenius
 
-An open-source platform for **AI-driven science and engineering**.
+An open-source **AI platform for science and engineering** built on a typed, queryable knowledge graph.
 
 Contemporary LLMs produce text that reads like knowledge but carries no epistemic warranty — there is no structural way to distinguish a correct derivation from a convincing hallucination. Eigenius addresses this by anchoring knowledge in a typed, queryable knowledge graph where every fact has tracked provenance, every derivation is replayable, and formal proofs provide machine-checked certainty.
 
 The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
+
+> This is still a very early stage of this project. Anticipate
+> features not working or missing functionality overall. Our goal
+> is to close those quality gaps rather aggressively. Feel free
+> to submit issues in the discussion forum or directly as issue.
 
 ## User guides
 
@@ -14,7 +23,7 @@ Three task-first guides, grounded in the implementation:
 - **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
 - **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch, stratification, and the result-document format.
 
-Landing page: **[docs/guides/](docs/guides/README.md)**.
+Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
 
 ## Current Status: Phases 0–11e Complete
 

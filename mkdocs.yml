@@ -1,4 +1,5 @@
-site_name: eigenius
+site_name: Eigenius
 docs_dir: docs/guides
 theme:
   name: material
+  logo: assets/eigenius_logo_400x400.png
