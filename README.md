@@ -6,7 +6,17 @@ Contemporary LLMs produce text that reads like knowledge but carries no epistemi
 
 The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-## Current Status: Phases 0–9b Complete
+## User guides
+
+Three task-first guides, grounded in the implementation:
+
+- **[Platform user guide](docs/guides/platform/README.md)** — thirteen chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, building WASM components and institutions, deployment.
+- **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
+- **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch, stratification, and the result-document format.
+
+Landing page: **[docs/guides/](docs/guides/README.md)**.
+
+## Current Status: Phases 0–11e Complete
 
 The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
 
@@ -31,6 +41,12 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Register Grothendieck institutions with fiber reasoners and morphism validation
 - Run untrusted WASM capabilities sandboxed via Wasmtime (components and institutions)
 - Model coinductive types (codata/streams) and resumable tasks with checkpointing
+- Resolve ontology classes as kernel types on demand via the layer chain (Phase 10, D18)
+- Type-check inductive types with bounded binders for sized termination, plus self-referential parameterised codata for productivity by typing (Phase 11b, D19)
+- Use `Map` and `Reduce` as type-level primitives with structural-recursion termination (Phase 11a)
+- Fire institution-registered decide procedures at type-check time via property constraints (Phase 11c)
+- Declare cross-institution `Comorphism` translations as first-class ontology resources, invocable from program bodies and from EigenQL (Phase 11d, 11e.1, 11e.2)
+- Dispatch qualified-name function calls (`cap:predicate(...)`, `cap:translate(...)`) through a single institution-classification table shared by ESL and EigenQL (Phase 11e)
 - Run locally via three terminals or Docker Compose
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
@@ -52,7 +68,7 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Durable State** — `eigenius serve --db <path>` persists layers, traces, and WASM capabilities in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
 - **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
-Next phase: Phase 10 (Kernel Completeness — ontology-as-types resolution, universe soundness, typed errors).
+Next phase: Phase 12 (Worked Institution Examples — life-science worked examples drawing on the Phase 11 inductive/codata/institution-dispatch surface).
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
@@ -381,10 +397,12 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D11: Codata and Streams](docs/design/d11-codata-streams.md) | Coinductive types, stream semantics, tasks as codata, guardedness checking |
 | [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | WASM module lifecycle, host imports, capability levels, fuel/memory limits |
 | [D13: Durable Kernel State](docs/design/d13-durable-kernel-state.md) | `serve --db` flag, seeded bootstrap, drift-refusal, restart re-registration |
-| [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` layer-chain resolution, `CheckCtx`, inference-mode rules (draft) |
+| [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` layer-chain resolution, `CheckCtx`, inference-mode rules |
+| [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized termination via bounded binders, self-referential parameterised codata, productivity by typing |
 | [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |
 | [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
+| [Lean 4 as Institution](docs/design/lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
 
 ## License
 
