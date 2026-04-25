@@ -31,6 +31,7 @@ import {
   registerComponentExecutor,
 } from "./component_executor.ts";
 import { registerNotebookService } from "../notebook/notebook_service.ts";
+import { registerEigeniusKernelPassthrough } from "../notebook/eigenius_kernel_passthrough.ts";
 
 /**
  * Start the orchestrator server.
@@ -54,6 +55,7 @@ export function startServer(
   const router = createConnectRouter();
   registerComponentExecutor(router, { registry, wasm });
   registerNotebookService(router, { kernel });
+  registerEigeniusKernelPassthrough(router, { kernel });
 
   Deno.serve({ port }, async (req: Request) => {
     const url = new URL(req.url);
@@ -91,7 +93,8 @@ export function startServer(
 
   console.log(`Orchestrator server listening on port ${port}`);
   console.log(`  Connect: ComponentExecutor (kernel → orchestrator IO dispatch)`);
-  console.log(`  Connect: NotebookService (browser → orchestrator → kernel)`);
+  console.log(`  Connect: NotebookService    (browser → orchestrator → kernel)`);
+  console.log(`  Connect: EigeniusKernel     (browser → orchestrator → kernel passthrough)`);
   console.log(`  HTTP:    GET /health`);
 }
 

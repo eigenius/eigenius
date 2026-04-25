@@ -30,10 +30,28 @@ import {
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create } from "@bufbuild/protobuf";
 import {
+  EigeniusKernel,
+  type HealthResponse,
+  HealthRequestSchema,
+  type InspectResponse,
+  InspectRequestSchema,
+  type InstitutionInfo,
   type LayerTopologyResponse,
   LayerTopologyRequestSchema,
+  ListInstitutionsRequestSchema,
   NotebookService,
+  type QueryResponse,
+  QueryRequestSchema,
 } from "../generated/eigenius_pb.ts";
+
+// Re-export wire types so consumers don't have to reach into generated/.
+export type {
+  HealthResponse,
+  InspectResponse,
+  InstitutionInfo,
+  LayerTopologyResponse,
+  QueryResponse,
+};
 
 export interface EigenOptions {
   /** Orchestrator endpoint, e.g. `"http://localhost:8080"`. Required. */
@@ -74,10 +92,27 @@ export interface LayerTopologyOptions {
   includeResources?: boolean;
 }
 
+export interface InspectOptions {
+  /**
+   * Hex-encoded `LayerId` to read against. Empty / omitted = the
+   * orchestrator's session active top (D21 §3.6 convention).
+   */
+  atLayer?: string;
+}
+
+export interface QueryOptions {
+  /**
+   * Hex-encoded `LayerId` to evaluate the query against. Empty /
+   * omitted = the orchestrator's session active top.
+   */
+  atLayer?: string;
+}
+
 export class Eigen {
   private readonly endpoint: string;
   private readonly transport: Transport;
   private readonly notebook: Client<typeof NotebookService>;
+  private readonly kernel: Client<typeof EigeniusKernel>;
 
   constructor(options: EigenOptions) {
     this.endpoint = options.endpoint;
@@ -86,12 +121,17 @@ export class Eigen {
       fetch: options.fetch,
     });
     this.notebook = createClient(NotebookService, this.transport);
+    this.kernel = createClient(EigeniusKernel, this.transport);
   }
 
   /** The orchestrator endpoint this client is bound to. */
   getEndpoint(): string {
     return this.endpoint;
   }
+
+  // ------------------------------------------------------------------
+  // NotebookService methods (browser-specific; only LayerTopology in MVP)
+  // ------------------------------------------------------------------
 
   /**
    * Walk the layer chain and return a topology graph.
@@ -112,5 +152,62 @@ export class Eigen {
         includeResources: options.includeResources ?? false,
       }),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // EigeniusKernel passthroughs (existing kernel surface; the orchestrator
+  // exposes a curated subset — see eigenius_kernel_passthrough.ts).
+  // ------------------------------------------------------------------
+
+  /**
+   * Resolve a resource by IRI.
+   *
+   * Returns the response with `found: false` if the IRI doesn't
+   * resolve in the layer chain — this is not an error, just an
+   * absence. The `resource` field is a CBOR-encoded Eigon resource.
+   */
+  async inspect(iri: string, options: InspectOptions = {}): Promise<InspectResponse> {
+    return await this.kernel.inspect(
+      create(InspectRequestSchema, {
+        iri,
+        atLayer: options.atLayer ?? "",
+      }),
+    );
+  }
+
+  /**
+   * Execute an EigenQL query.
+   *
+   * Returns the kernel's response unchanged — `document` is a CBOR
+   * Eigon document containing the ResultSet, its row class, and the
+   * row resources (D2 Appendix A). Future SDK convenience methods
+   * may decode this into typed `ResultRow` objects; for now consumers
+   * decode `document` themselves with the cbor-x library or similar.
+   */
+  async query(eigenql: string, options: QueryOptions = {}): Promise<QueryResponse> {
+    return await this.kernel.query(
+      create(QueryRequestSchema, {
+        eigenql,
+        atLayer: options.atLayer ?? "",
+      }),
+    );
+  }
+
+  /**
+   * List registered institutions and their declared fiber structure.
+   */
+  async listInstitutions(): Promise<readonly InstitutionInfo[]> {
+    const response = await this.kernel.listInstitutions(
+      create(ListInstitutionsRequestSchema, {}),
+    );
+    return response.institutions;
+  }
+
+  /**
+   * Liveness check on the kernel. Returns kernel version, layer count,
+   * resource count, and resume-sweep state.
+   */
+  async health(): Promise<HealthResponse> {
+    return await this.kernel.health(create(HealthRequestSchema, {}));
   }
 }
