@@ -24,7 +24,7 @@ The guides **complement** D7/D2 — design docs are spec-first, the guides are t
 # ESL User Guide — content plan
 
 ## 1. Introduction (~1 page)
-**Cover**: What ESL is, the two-layer design (HCL-style declarations + ML-style expressions), where it sits (compiles to Eigon-JSON resources; resources drive both type-checking and runtime). Relationship to kernel type theory (expressions type-check against the Mini-TT kernel at [kernel/src/nbe/check.rs](../../kernel/src/nbe/check.rs); resources resolve to kernel types at [kernel/src/program/ground.rs](../../kernel/src/program/ground.rs)).
+**Cover**: What ESL is, the two-layer design (HCL-style declarations + ML-style expressions), where it sits (compiles to Eigon-JSON resources; resources drive both type-checking and runtime). Relationship to kernel type theory: ESL declarations become resources in the layer, and the Mini-TT kernel reaches back into that layer at type-check time so a single IRI is simultaneously a Class resource and a type. Forward-pointer to §6 for how the bridge works in detail.
 
 **Refs**: [D7 §1–2](../design/d7-esl-surface-syntax.md), [kernel/src/esl/mod.rs](../../kernel/src/esl/mod.rs)
 
@@ -99,28 +99,94 @@ Special sub-sections:
 - **Corecord** `corecord { head = e; tail = λj. ... }` — `Lam` vs `SizedPi` check arm (Phase 11f productivity-by-typing)
 - **Institution capability call** `urn:ins:cap(args)` — classification at compile → `Exp::NativeDecide(Institution{..}, Unit)` or `Exp::InstitutionInvoke{..}` (Phase 11e.1)
 
-## 6. Type theory primer (~4–6 pages)
+## 6. Resources, types, and the layer (~4–5 pages)
+
+The thing that makes Eigenius unusual: a single IRI is simultaneously a
+resource you can query and a type you can ascribe to. The kernel's
+type-checker reaches back into the layer at check time. Without
+internalising this, several things in the rest of the guide feel
+arbitrary — why `class Person { … }` can appear in a type ascription,
+why properties carry `data_type` IRIs that the kernel chases through,
+why constraints attached to a property can fire during type-check.
+
+**Cover**:
+
+### 6.1 Two worlds, one IRI
+The resource graph carries `Class`/`Property`/`InductiveType`/
+`CodataType` as data; the kernel's type theory has Π/Σ/Inductive/
+Coinductive/Universe as judgments. They share the IRI namespace and
+exchange information through `Exp::EigonClass` — the kernel's escape
+hatch back into the layer.
+
+### 6.2 The bridge: ontology-as-types resolution
+How `Exp::EigonClass(iri)` is resolved by the kernel — `resolve_class_type`,
+`resolve_property_type`, `collect_properties`, `decode_arg_type`. Lazy
+resolution: the type-checker doesn't pre-load the ontology; it queries
+`Layer::find` on demand. The `Read` capability is required for any
+check that touches `EigonClass`.
+
+**Refs**: [program/ground.rs](../../kernel/src/program/ground.rs), [D18](../design/d18-ontology-as-types-resolution.md), [nbe/term.rs Exp::EigonClass](../../kernel/src/nbe/term.rs).
+
+### 6.3 The mappings
+Concrete table from declaration to resource shape to kernel term/type:
+
+| ESL declaration | Resource shape | Kernel type/term |
+|---|---|---|
+| `class C { p : T, q : U }` | `Class` resource with `requires: [p_iri, q_iri]` | Σ-type `(p : T, q : U)` |
+| `property p : T` (with `recommends`) | `Property` resource with `data_type: T_iri` | Field of type T (Option-wrapped if `recommends`) |
+| `data D(params) { ctor(args) }` | `InductiveType` + `InductiveCtor` resources | Kernel `Exp::Inductive` decl + `Exp::InductiveCtor` |
+| `codata D(params) { obs : T }` | `CodataType` resource | Kernel `Exp::Codata` decl |
+| `resource r : C { p = v }` | Resource with `is_a: [C]` and properties set | Value of Σ-type C |
+| `program P(input : I) -> O = body` | Program resource | Π-wrapped Lam |
+
+### 6.4 When the kernel calls back into the layer
+During `check_infer` / `eval`, encountering an `Exp::EigonClass(iri)`
+triggers a layer lookup. Implications:
+- Changing the layer changes type-check results — the same ESL source
+  may type-check in one layer chain and not in another
+- Property additions become available immediately as fields in
+  subsequent type-checks (no re-bootstrap)
+- The `Read` capability is required throughout the check pass when
+  any `EigonClass` reference is in scope
+
+### 6.5 Why this matters in practice
+Three concrete consequences:
+- A `class` declared in one ESL file can be used as a type in another
+  by IRI alone, with no module-import machinery — the layer is the
+  module system
+- Constraints declared on a property (Phase 11c) fire at the use
+  site whenever the property is consumed — the kernel calls
+  `decide_constraint` through the same `EigonClass` resolution
+  path during the `Check` capability mode
+- Institution-registered comorphisms and decide procedures (Phase 11d/11e)
+  attach to IRIs that the same classification table resolves — see §8 and §9
+
+**Refs**: [program/ground.rs resolve_property_type + collect_properties + resolve_codata_type](../../kernel/src/program/ground.rs), [nbe/check.rs check_infer EigonClass arm](../../kernel/src/nbe/check.rs), [nbe/eval.rs eval EigonClass arm](../../kernel/src/nbe/eval.rs), [D18](../design/d18-ontology-as-types-resolution.md).
+
+## 7. Type theory primer (~4–6 pages)
 Keep brief; this is a user guide, not a textbook. Cover:
 - **Universes**: `Set` and `Type(n)`, cumulativity, why it matters in practice
-- **Π-types** (dependent functions) and **Σ-types** (dependent pairs) — how they underlie classes and programs
+- **Π-types** (dependent functions) and **Σ-types** (dependent pairs) — how they underlie classes and programs (link to §6.3 mappings)
 - **Inductive types**: constructors, recursor/match, iota reduction
 - **Coinductive types**: observations, corecord productivity
 - **Sized types**: size variables, `∞`, bounded binders, termination/productivity proofs — link to the sized-Nat and sized-stream examples
 - **Identity types**: `Refl`, J eliminator, use in constraint witnesses
 - **Normalization-by-evaluation**: why it's the conversion engine, what "neutral terms" are
 
+Cross-link to §6 wherever a type construct surfaces as a resource shape (Σ ↔ class, Inductive ↔ data declaration, etc.).
+
 **Refs**: [nbe/term.rs](../../kernel/src/nbe/term.rs) and [nbe/val.rs](../../kernel/src/nbe/val.rs) for the AST shape; [D19 §3](../design/d19-inductive-types.md) for the core theory; [D11](../design/d11-codata-streams.md) for codata.
 
-## 7. Capability modes (~1.5 pages)
+## 8. Capability modes (~1.5 pages)
 **Four modes** from [EvalCtx](../../kernel/src/nbe/eval.rs):
-- **Pure** — normalization only, no external access. Type-checking's default.
-- **Read** — adds `Arc<Layer>` for property / class resolution.
+- **Pure** — normalization only, no external access. Type-checking's default for closed expressions with no `EigonClass` references.
+- **Read** — adds `Arc<Layer>` for property / class resolution. Required for any check that crosses the §6 bridge into the layer.
 - **IO** — adds component registry, institution registry, trace store, optional task context. Runtime.
-- **Check** — Pure + institution registry. Type-checker's mode when institution-dispatched constraints need to fire during check.
+- **Check** — Read + institution registry, used by the type-checker when institution-dispatched constraints need to fire during check (Phase 11c).
 
-Tabulate which kernel AST nodes have different behavior in each mode (e.g., `App` on a component dispatches in IO, returns neutral in Pure; `NativeDecide(Institution{..}, _)` decides in Check/IO, stays neutral in Pure/Read).
+Tabulate which kernel AST nodes have different behavior in each mode (e.g., `App` on a component dispatches in IO, returns neutral in Pure; `NativeDecide(Institution{..}, _)` decides in Check/IO, stays neutral in Pure/Read; `EigonClass(iri)` resolves in Read/Check/IO, stays neutral in Pure).
 
-## 8. Institutions in ESL (~2 pages)
+## 9. Institutions in ESL (~2 pages)
 **Cover**:
 - What an institution is (fiber reasoner + registered capabilities)
 - Declaration surface via the **core ontology**: `urn:eigenius:institution:Comorphism` class from Phase 11d
@@ -132,10 +198,10 @@ Tabulate which kernel AST nodes have different behavior in each mode (e.g., `App
 
 Include the [life-science §16.3](../design/life-science-requirements.md) motivating example (RMSD predicate, docking→assay comorphism) written in ESL.
 
-## 9. Error messages (~1 page)
+## 10. Error messages (~1 page)
 Samples from tests: `"bare name 'X' has no namespace"`, `"cannot infer type of ..."`, `"InductiveCtor 'X.succ': size argument ... is not strictly below upper bound ..."`, `"comorphism 'X' expects exactly 1 source argument, got N"`. Explain each and how to fix.
 
-## 10. Appendix: EBNF + keyword reference
+## 11. Appendix: EBNF + keyword reference
 Link to [D7 §7](../design/d7-esl-surface-syntax.md) as authoritative. Include only delta (bounded-binder syntax added in Phase 11h, institution-capability syntax from 11e.1).
 
 ---
@@ -217,7 +283,7 @@ How queries dispatch to institutions. Covers:
 **Refs**: [evaluate.rs apply_fiber_clause](../../kernel/src/query/evaluate.rs), [D2 §3.5/§5.8/§6.12](../design/d2-eigenql-specification.md), [D10 §5](../design/d10-grothendieck-institution-protocol.md).
 
 ## 8. Institutions in EigenQL (~2 pages)
-Parallel to the ESL guide's §8 but from the query perspective:
+Parallel to the ESL guide's §9 but from the query perspective:
 - How to register an institution that EigenQL can query
 - The three entry points into an institution from a query:
   1. FIBER clause → `reasoner.query(..)` (pre-existing, from D10)
@@ -268,7 +334,7 @@ This table is the user-facing summary of Phase 11e's design decision to unify ev
 **Order to write**: EigenQL first (smaller surface, less type theory to explain), then ESL (builds on the institution-capability table already drafted).
 
 **Estimated length**:
-- ESL guide: ~35–45 pages
+- ESL guide: ~40–50 pages (added §6 Resources/types/layer chapter)
 - EigenQL guide: ~20–25 pages
 - Shared appendix: ~3 pages
 

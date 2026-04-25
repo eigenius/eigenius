@@ -1,0 +1,293 @@
+# 5. Expressions
+
+The expression sublanguage appears inside `program` bodies. It's an ML-style typed expression language that compiles to kernel `Exp` terms via a two-step pipeline: ESL `Expr` → embedded resource (encoded program AST) → kernel `Exp`.
+
+The two-step encoding exists because programs are first-class resources. The compiled body is a Resource subgraph that can be queried, traced, and persisted alongside everything else. The kernel reconstructs the `Exp` from this resource subgraph at type-check or eval time via [`parse_program`](../../../kernel/src/program/expr.rs).
+
+This chapter walks every expression form from [`ast::Expr`](../../../kernel/src/esl/ast.rs). For each: syntax, the resource shape it compiles to, the kernel `Exp` it parses to, the type-check rule, the evaluation rule, and any capability-mode notes.
+
+## 5.1. `let`
+
+```esl
+let name : Type = value_expr;
+body_expr
+```
+
+Compiles to an embedded resource of class `program:Let` carrying `name`, `type`, `value`, `body`. The kernel form is `Exp::Let(name, type, value, body)`.
+
+**Type-check.** `value_expr` is checked against `Type`; `body_expr` is checked in an environment extended with `name : Type`. The whole expression has the type of `body_expr`.
+
+**Evaluation.** Evaluate `value_expr`, bind it to `name`, evaluate `body_expr` in the extended environment.
+
+The semicolon between the let and body is mandatory — it's how the parser knows where the value expression ends and the body begins.
+
+## 5.2. Function application — `f(args)`
+
+Function application is the most overloaded form in ESL. Depending on what `function` resolves to, it dispatches to one of five paths:
+
+1. **Inductive constructor** — `function` is the bare name of a constructor declared by `data`.
+2. **Component** — `function` is a component name resolved against the registered component set.
+3. **Institution decide predicate** — `function` is a qualified name `cap:predicate` that classifies as a registered decide procedure (Phase 11e.1).
+4. **Institution comorphism** — `function` is a qualified name `cap:translate` that classifies as a registered comorphism (Phase 11e.1).
+5. **Direct lambda application** — `function` is a lambda or other higher-order expression.
+
+The compiler picks the path. For the first four, it emits a specialised resource shape; for the fifth, it falls through to the generic `program:Apply`.
+
+### 5.2.1. Constructor application
+
+```esl
+succ(zero)
+cons(1, cons(2, nil))
+```
+
+Bare-name function references that match a declared constructor compile to `program:CtorApply` with the constructor IRI in `function` and a positional `arguments` array. The kernel form is `Exp::InductiveCtor(decl, ctor_name, args)`.
+
+**Type-check.** The constructor's declared signature gives the expected types for each arg. Sized constructors (Phase 11g) verify that any size argument supplied is strictly below the declared upper bound — otherwise: `"InductiveCtor 'X.succ': size argument ... is not strictly below upper bound ..."`.
+
+**Evaluation.** Constructs `Val::InductiveVal { decl, ctor_name, args }`.
+
+A constructor cannot take a trailing config block — `succ(zero) { ... }` is a compile error.
+
+### 5.2.2. Component application
+
+```esl
+CompleteText(input)                    // single positional arg
+CompleteText(input) { model = "x" }    // single positional + config block
+CompleteText(input, config_resource)   // legacy: second positional → config
+```
+
+Bare-name function references that don't match a constructor are looked up in the registered component set. The compiler resolves `CompleteText` to `urn:eigenius:program:components:CompleteText` (or another registered IRI) and emits a `program:Apply` with the resolved IRI as the function and the input expression as the argument.
+
+The optional trailing `{ ... }` config block becomes a `component_argument` resource — a structured config resource passed alongside the runtime input.
+
+**Type-check.** The component's declared input/output type informs the check.
+
+**Evaluation.** In `IO` capability mode, the component dispatcher invokes the registered handler. In `Pure`/`Read` mode, the application stays neutral — the program type-checks but doesn't run.
+
+See [chapter 8](08-capability-modes.md) for the per-mode behaviour.
+
+### 5.2.3. Decide-predicate application
+
+```esl
+cap:within_tolerance(input, 0.1)
+```
+
+When the qualified name `cap:within_tolerance` classifies through the institution registry as a `DecidePredicate`, the compiler emits `program:DecideApply` carrying the IRI and an `arguments` array of any positional args. The kernel form is `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)`.
+
+**Type-check.** Result type is `Bool`. Args are not statically checked — the institution validates them at call time.
+
+**Evaluation.** In `Check` or `IO` mode (any mode with an institution registry), invokes `reasoner.decide(iri, args, ctx)` and maps the three-valued result to a boolean (`Holds → true`, `Fails`/`Undecidable → false`).
+
+A trailing config block on a decide call is a compile error.
+
+### 5.2.4. Comorphism application
+
+```esl
+cap:dock_to_assay(docking_result)
+```
+
+When the qualified name classifies as a `Comorphism`, the compiler emits `program:ComorphismInvokeApply` carrying the IRI and a single `source` resource. The kernel form is `Exp::InstitutionInvoke { iri, source }`.
+
+**Arity rule.** Comorphisms take exactly one positional argument. Two args, or one positional plus a config block, errors with `"comorphism 'X' expects exactly 1 source argument, got N"`.
+
+**Type-check.** Result type is the institution's declared response class.
+
+**Evaluation.** Invokes `reasoner.translate(iri, source, ctx)`, returning an embedded resource.
+
+### 5.2.5. Generic apply
+
+```esl
+(\x -> x)(input)
+my_lambda(value)
+```
+
+Anything else compiles to `program:Apply` with the function expression and the argument expression as embedded sub-resources. The kernel form is `Exp::App(f, arg)`.
+
+**Type-check.** Standard Π-application: `f : A → B`, `arg : A`, result is `B`.
+
+**Evaluation.** Standard β-reduction.
+
+## 5.3. Lambda — `\x -> e` or `λx -> e`
+
+```esl
+\x -> body
+λx -> body
+```
+
+Compiles to `program:Lambda` with `param` and `body`. The kernel form is `Exp::Lam(x, body)`.
+
+**Type-check.** Lambdas are checked against an expected `Pi(x : A, B)` — `body` is checked against `B` in an environment extended with `x : A`. Lambdas are not type-inferable in isolation; they need a checking-mode context.
+
+**Evaluation.** Yields a closure `Val::Lam(closure)`.
+
+The body extends as far right as possible — `\x -> let y = ... ; ...` puts the entire let-expression in the lambda body. Use parentheses if you need to limit scope.
+
+## 5.4. Variable — `x`
+
+```esl
+input         // the implicit program parameter
+my_value      // any locally-bound name
+```
+
+Bare identifiers compile to `program:Var` with the name. The kernel form is `Exp::Var(name)`.
+
+**Type-check.** Looks up `name` in the local environment. If not found, the type-checker may attempt to resolve the name as a class IRI through `EigonClass` — see [chapter 6](06-resources-types-and-the-layer.md).
+
+**Evaluation.** Looks up the name in the runtime environment.
+
+## 5.5. Pattern match — `match e returning T { arm => body; ... }`
+
+```esl
+match my_nat returning ex:Nat {
+    zero -> zero;
+    succ(n) -> n;
+}
+```
+
+Pattern-matches a value of an inductive type. Each arm names a constructor by its bare name and (optionally) binds variables for its arguments positionally. Use `_` for arguments not referenced in the body.
+
+Compiles to either:
+
+- `program:InductiveRec` (when `returning T` is present) — a fully-elaborated recursor with motive `λ_. T`, ready for the kernel.
+- `program:Match` (when `returning T` is omitted) — a checking-mode match where the kernel synthesises the motive from the surrounding context.
+
+The kernel form is correspondingly `Exp::InductiveRec` or `Exp::Match`.
+
+**`returning` clause.** Always include it when the match's result type isn't obvious from the surrounding context. Without it, the kernel synthesises the motive from the checking-mode expectation; in inference mode (e.g. as the right-hand side of a `let` without an annotation), an unannotated match fails with `"cannot infer type of match — add a returning clause or annotate context"`.
+
+**Sized recursion.** When the scrutinee has a sized inductive type, each arm body sees a hypothesis recording that any recursive call within the arm must be on a strictly smaller size. This is what powers sized termination ([D19 §4](../../design/d19-inductive-types.md)).
+
+**Evaluation.** Iota-reduces — selects the arm matching the constructor and substitutes the bindings.
+
+## 5.6. `Construct` — record/resource construction
+
+```esl
+Construct ex:Document {
+    ex:text = my_summary,
+    ex:author = input.ex:user
+}
+```
+
+Constructs a fresh resource of the given class with the listed field assignments. Compiles to `program:Construct` carrying the class IRI and a `fields` array of `(property_iri, expr)` pairs. The kernel form depends on what the class resolves to:
+
+- If `ex:Document` is a `Class` resource (Σ-type), constructs a Σ-tuple.
+- If `ex:Document` is something else (an inductive type, etc.), the form may differ — `Construct` is the user-facing front for "build a value of this declared type".
+
+**Type-check.** Each field expression is checked against the property's declared type. Required (`requires`) properties of the class must be supplied; `recommends` properties are optional. Extra properties not declared by the class are an error.
+
+**Evaluation.** Builds a value of the declared type with the given field values.
+
+## 5.7. Projection — `e.prop`
+
+```esl
+input.ex:name
+input.ex:user.ex:email
+```
+
+Reads a property from a resource. Compiles to `program:Project` carrying the underlying expression and the property IRI.
+
+**Type-check.** The expression's type is unfolded as a Σ-type or `EigonClass`-resolved class; the property must appear in its field list. Result type is the property's declared `data_type`.
+
+**Evaluation.** Looks up the property on the value (a resource ref or embedded resource).
+
+Chained projection (`a.b.c`) is left-associative — equivalent to `(a.b).c`.
+
+## 5.8. `map` — apply a function over a collection
+
+```esl
+map(\x -> process(x), my_items)
+```
+
+Compiles to `program:MapExpr` with `function` and `collection`. The kernel form is `Exp::Map(f, coll)`.
+
+**Type-check.** Function must be `A → B`; collection must be `List A` (or array-shaped); result is `List B`.
+
+**Evaluation.** Apply `f` to each element. Termination is structural over the finite list.
+
+## 5.9. `reduce` — fold over a collection
+
+```esl
+reduce(\acc x -> combine(acc, x), initial, my_items)
+```
+
+Compiles to `program:ReduceExpr` with `function`, `initial`, `collection`. The kernel form is `Exp::Reduce(f, init, coll)`.
+
+**Type-check.** Function must be `B → A → B`; `init : B`; collection is `List A`; result is `B`.
+
+**Evaluation.** Left fold over the list with `init` as starting accumulator.
+
+## 5.10. `corecord` — coinductive value construction
+
+```esl
+corecord {
+    head = first_value;
+    tail = make_next_stream();
+}
+```
+
+Builds a value of a coinductive type. Each cofield names an observation and supplies its value (or a function for size-bounded observations).
+
+Compiles to `program:CoRecord` carrying a `cofields` array of `(observation_name, body)` pairs.
+
+**Field order matters.** Cofields must be listed in the same order as the codata's declared observations. The compiler does not reorder; the kernel validates against the declared sequence.
+
+**Sized observations.** For an observation typed `{j < i} -> Body`, the body must be a lambda taking the size argument: `tail = λj -> ...`. The kernel verifies productivity — the body's recursive references must use strictly smaller sizes ([D19 §8](../../design/d19-inductive-types.md), Phase 11f productivity-by-typing).
+
+**Type-check.** The expected codata type is required (checking mode); each cofield body is checked against its observation's declared type.
+
+**Evaluation.** Yields `Val::CoRecord(closures)`. Observations are evaluated lazily — the body for each observation runs only when that observation is consumed.
+
+## 5.11. `case` — closed-tag matching
+
+```esl
+case my_result {
+    Ok -> success_value;
+    Err -> fallback;
+}
+```
+
+A simpler match form for closed-tag types (variants without binding). Compiles to `program:Case` with `scrutinee` and a `branches` array of `(tag, body)` pairs.
+
+`case` is an older form; for new code, prefer `match` with explicit constructors.
+
+## 5.12. `Pair` — `(a, b)`
+
+```esl
+(name, age)
+```
+
+Compiles to `program:Pair` with `first` and `second`. The kernel form is `Exp::Pair(a, b)`.
+
+**Type-check.** Components are checked individually; result type is `Sigma(_ : A, B)`.
+
+**Evaluation.** Yields `Val::Pair(a, b)`.
+
+## 5.13. Literals
+
+```esl
+"hello"   // string literal
+42        // integer literal
+3.14      // float literal
+true      // boolean literal
+```
+
+Compile to `program:Literal` carrying the value with its data type. Kernel form is `Exp::Literal(...)` for the appropriate kind.
+
+**Type-check.** Inferred type is the matching `core:` primitive.
+
+**Evaluation.** Identity — the literal is its own value.
+
+## 5.14. Capability modes — quick reference
+
+[Chapter 8](08-capability-modes.md) covers this in detail. The short version:
+
+- **Pure**: only normalisation. Lambdas, lets, pairs, projections of static records, etc., reduce. Component apps and decide calls stay neutral.
+- **Read**: Pure + layer access. Adds the ability to resolve `EigonClass` references and read property values from layer resources.
+- **Check**: Read + institution registry. Used by the type-checker when constraints with institution-decide procedures need to fire.
+- **IO**: Read + institution registry + component dispatch + trace store. The runtime mode.
+
+Most expressions reduce in Pure. Component application, decide predicates, and comorphism invocation only do real work in Check (decide) or IO (all three).
+
+---
+
+Next: **[6. Resources, types, and the layer →](06-resources-types-and-the-layer.md)**

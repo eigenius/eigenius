@@ -7,7 +7,7 @@
 //! under a nested Π.
 //!
 //! The algorithm follows nanoda_lib's `check_positivity1`
-//! ([inductive.rs:666-787](../../../references/nanoda_lib/src/inductive.rs))
+//! ([inductive.rs:666-787](https://github.com/ammkrn/nanoda_lib/blob/main/src/inductive.rs#L666-L787))
 //! restricted to the fragment that the Phase 11b iota reduction can
 //! actually eliminate — direct recursive arguments only.
 //!
