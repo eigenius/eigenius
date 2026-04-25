@@ -4,3 +4,7 @@ plugins:
     out: orchestration/src/gen
     opt:
       - target=ts
+  - local: protoc-gen-es
+    out: clients/eigenius-ts/generated
+    opt:
+      - target=ts

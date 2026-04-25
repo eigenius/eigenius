@@ -25,25 +25,35 @@
 
 import { createConnectRouter } from "@connectrpc/connect";
 import { ComponentRegistry } from "../components/registry.ts";
+import { KernelClient } from "../client/kernel_client.ts";
 import {
   type ComponentExecutorDeps,
   registerComponentExecutor,
 } from "./component_executor.ts";
+import { registerNotebookService } from "../notebook/notebook_service.ts";
 
 /**
  * Start the orchestrator server.
  *
- * Listens on `port` and serves:
- * - gRPC: ComponentExecutor.Execute (Connect protocol)
+ * Listens on `port` and serves three Connect surfaces plus a health endpoint:
+ * - gRPC: ComponentExecutor.Execute       (kernel → orchestrator IO dispatch)
+ * - gRPC: NotebookService.LayerTopology   (browser → orchestrator → kernel)
  * - HTTP: GET /health
+ *
+ * The browser also reaches the existing EigeniusKernel surface (Inspect,
+ * Query, Load, RunProgram, etc.) via the orchestrator's kernel client;
+ * NotebookService is only for browser-specific RPCs that don't fit the
+ * kernel's machine-to-machine surface (D22 §3.2).
  */
 export function startServer(
   registry: ComponentRegistry,
+  kernel: KernelClient,
   port: number,
   wasm?: ComponentExecutorDeps["wasm"],
 ): void {
   const router = createConnectRouter();
   registerComponentExecutor(router, { registry, wasm });
+  registerNotebookService(router, { kernel });
 
   Deno.serve({ port }, async (req: Request) => {
     const url = new URL(req.url);
@@ -70,16 +80,19 @@ export function startServer(
       // Fall through to a 404 if not handled.
       const response = await handleConnectRequest(router, req);
       if (response) return response;
-    } catch {
-      // Not a Connect request, fall through
+    } catch (e) {
+      console.error(
+        `Connect handler threw: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
 
     return new Response("Not Found", { status: 404 });
   });
 
   console.log(`Orchestrator server listening on port ${port}`);
-  console.log(`  gRPC: ComponentExecutor service (Connect protocol)`);
-  console.log(`  HTTP: GET /health`);
+  console.log(`  Connect: ComponentExecutor (kernel → orchestrator IO dispatch)`);
+  console.log(`  Connect: NotebookService (browser → orchestrator → kernel)`);
+  console.log(`  HTTP:    GET /health`);
 }
 
 /**
@@ -97,7 +110,11 @@ async function handleConnectRequest(
       const uReq = {
         httpVersion: "2.0",
         method: req.method,
-        url: url.pathname + url.search,
+        // Must be a full URL, not just the path — the Connect protocol
+        // handler factory does `new URL(uReq.url)` which throws on a
+        // bare path. (gRPC took a different code path so this was
+        // latent until the first Connect-protocol client hit it.)
+        url: req.url,
         header: new Headers(req.headers),
         body: asyncIterableFromRequest(req),
         signal: req.signal,
