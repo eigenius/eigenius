@@ -41,21 +41,21 @@ class ex:Dog : ex:Animal {
 }
 ```
 
-Compiles to a `Class` resource:
+Compiles to a `Class` resource. Eigon-JSON uses full property IRIs as keys — `@id` is the only reserved short key ([D1](../../design/d1-eigon-serialization-format.md)):
 
 ```json
 {
     "@id": "urn:eigenius:example:Document",
-    "is_a": ["urn:eigenius:core:Class"],
-    "short_name": "Document",
-    "description": "A text document",
-    "requires": ["urn:eigenius:example:text"],
-    "recommends": ["urn:eigenius:example:author",
-                   "urn:eigenius:example:created_at"]
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Document",
+    "urn:eigenius:core:description": "A text document",
+    "urn:eigenius:core:requires": ["urn:eigenius:example:text"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:example:author",
+                                     "urn:eigenius:example:created_at"]
 }
 ```
 
-A class declared with `: Parent` adds `subclass_of: [Parent]`. Multiple parents are not currently supported in the surface syntax.
+A class declared with `: Parent` adds `urn:eigenius:core:subclass_of: [Parent]`. Multiple parents are not currently supported in the surface syntax.
 
 **Items inside the body** ([`ast::ClassItem`](../../../kernel/src/esl/ast.rs)):
 

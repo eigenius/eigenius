@@ -2,6 +2,8 @@
 
 ESL — the **Eigenius Surface Language** — is the surface syntax developers write to declare ontologies, define typed programs, and construct resource instances in Eigenius. It compiles to Eigon-JSON, the canonical resource format ([D1](../../design/d1-eigon-serialization-format.md)). Once compiled, the resources are loaded into a layer and become subject to all the same machinery as any other resource — type-checking, querying via [EigenQL](../eigenql/README.md), institution dispatch, persistence.
 
+Eigon-JSON is a derivation of [**JSON-AD**](https://docs.atomicdata.dev/), the JSON serialization of Atomic Data — the resource format whose property keys are themselves IRIs and whose schema is itself queryable resources. The lineage and the deliberate divergences (URN-scheme IRIs instead of fetchable HTTPS URLs, no `@context`, layer-resolved namespaces, three-layer type system) are documented in [D1 §1.1–1.2](../../design/d1-eigon-serialization-format.md).
+
 Two design decisions shape the rest of the guide:
 
 1. **ESL is sugar over Eigon-JSON.** Every ESL construct has a 1:1 mapping to an Eigon-JSON resource. The compiler never invents semantics; it only restates the source in resource form. The runtime never sees ESL — only resources.
