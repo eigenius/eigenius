@@ -1,0 +1,16 @@
+# Eigenius authors
+#
+# This is the official list of Eigenius authors for copyright purposes.
+# It disambiguates the "Copyright YYYY The Eigenius Authors" notice that
+# appears in source-file license headers.
+#
+# This file is distinct from the full contributor history, which can be
+# obtained from the version-control log:
+#
+#     git log --format='%aN' | sort -u
+#
+# Names should be added in alphabetical order, in the format:
+#
+#     Name (or Organization) (@github-handle)
+
+Hans-Martin Will (@hmwill)
