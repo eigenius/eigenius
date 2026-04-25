@@ -24,7 +24,7 @@ pub struct FiberRuntime<'a> {
 /// Resources produced at runtime by FIBER clauses. They live for the
 /// duration of a single query and are discarded when evaluation ends.
 /// Pattern matching scans these in addition to the layer chain — see
-/// D2 Appendix B §B.3 (the "transient overlay").
+/// D2 §6.12 (the "transient overlay").
 #[derive(Default)]
 struct FiberOverlay {
     entries: Vec<(Iri, Resource)>,

@@ -30,7 +30,7 @@ pub enum TokenKind {
     Distinct,
     Limit,
     Offset,
-    // FIBER-clause keywords (D2 Appendix B)
+    // FIBER-clause keywords (D2 §3.3.1, §3.5)
     Fiber,
     Institution,
 

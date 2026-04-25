@@ -65,7 +65,7 @@ Both comment forms are discarded. Block comments may span multiple lines.
 Keywords are case-sensitive and uppercase:
 
 ```
-MATCH  WHERE  RETURN  USING  AS  DEFINE  FROM
+MATCH  WHERE  RETURN  USING  INSTITUTION  AS  DEFINE  FROM  FIBER
 AND  OR  NOT  IN  LIKE  EXISTS
 GROUP  BY  ORDER  ASC  DESC
 DISTINCT  LIMIT  OFFSET
@@ -77,6 +77,8 @@ Built-in function names are also keywords:
 DATE  TIMESTAMP  REGEX  LENGTH  CONTAINS  CONCAT
 COUNT  SUM  AVG  MIN  MAX
 ```
+
+`INSTITUTION` and `FIBER` are reserved for institution dispatch (§3.3.1, §3.5).
 
 ### 2.3 Identifiers and variables
 
@@ -143,28 +145,46 @@ USING "urn:eigenius:example:Dog", "urn:eigenius:example:Animal"
 program     ::= define_clause* query
 query       ::= match_part group_by_clause? return_clause? order_by_clause?
                 limit_clause? offset_clause? 'DISTINCT'?
-match_part  ::= using_clause? match_clause where_clause?
+match_part  ::= (using_clause | using_institution)* clause+ where_clause?
+clause      ::= match_clause | fiber_clause
 ```
+
+A `match_part` accepts any interleaving of plain `USING` clauses and
+`USING INSTITUTION` clauses, followed by one or more `MATCH` or `FIBER`
+clauses in textual order, optionally followed by a `WHERE`. Clauses are
+processed left to right: each `MATCH` or `FIBER` may bind variables that
+subsequent clauses consume.
+
+**DEFINE bodies are restricted.** The `match_part` inside a `DEFINE`
+body permits plain `USING` clauses and exactly one `MATCH` clause; it
+forbids both `USING INSTITUTION` and `FIBER`. See §3.2 and §6.7.
 
 ### 3.2 DEFINE clause
 
 ```ebnf
-define_clause ::= 'DEFINE' IDENTIFIER '(' variable_list ')' 'FROM' match_part
-variable_list ::= variable (',' variable)*
+define_clause   ::= 'DEFINE' IDENTIFIER '(' variable_list ')' 'FROM' define_body
+define_body     ::= using_clause* match_clause where_clause?
+variable_list   ::= variable (',' variable)*
 ```
 
 A DEFINE clause introduces a named derived relation. The relation name is an identifier. The variable list declares the relation's arity and column names.
 
 Multiple DEFINE clauses with the same name define a **union** — a resource matches the relation if it matches any definition. Self-reference in a DEFINE's MATCH clause creates **recursion**.
 
-**Negation in MATCH patterns.** Within a DEFINE's MATCH clause (and in the final query's MATCH clause), a pattern may be prefixed with `NOT` to express negation:
+**DEFINE body restrictions.** `define_body` is the restricted form of
+`match_part`: it permits plain `USING` clauses and exactly one `MATCH`,
+but forbids both `FIBER` and `USING INSTITUTION`. Institution dispatch
+is reserved for the top-level query so that derived relations remain
+pure and stratifiable. To feed institution responses into a derived
+relation, run an outer query that issues `FIBER` and stores the
+responses as resources, then run a follow-up query whose `DEFINE`s
+operate on those.
 
-```ebnf
-pattern ::= typed_pattern | untyped_pattern | negated_pattern
-negated_pattern ::= 'NOT' (typed_pattern | untyped_pattern)
-```
-
-A negated pattern succeeds when no matching resource exists. Negation is subject to stratification checking (see §6.9).
+**Negation in MATCH patterns.** Within a DEFINE's MATCH clause (and in
+the final query's MATCH clauses), a pattern may be prefixed with `NOT`
+to express negation. The grammar is defined in §3.4. A negated pattern
+succeeds when no matching resource exists; negation is subject to
+stratification checking (see §6.9).
 
 **Example — transitive ancestor relation:**
 
@@ -196,8 +216,7 @@ RETURN [] { name: ?name }
 ### 3.3 USING clause
 
 ```ebnf
-using_clause       ::= single_using+
-single_using       ::= 'USING' string_list
+using_clause       ::= 'USING' string_list
 string_list        ::= STRING (',' STRING)*
 ```
 
@@ -207,26 +226,58 @@ USING is a convenience — it enables bare identifier references like `Dog` inst
 
 Multiple USING clauses are allowed and their imports are merged (duplicates removed). Shortnames must be unique within the query scope; a duplicate shortname is an error.
 
+#### 3.3.1 USING INSTITUTION
+
+```ebnf
+using_institution ::= 'USING' 'INSTITUTION' STRING 'AS' IDENTIFIER
+```
+
+A `USING INSTITUTION` clause binds a short alias to a registered
+institution IRI for use in subsequent `FIBER` clauses (§3.5). The IRI
+must resolve to a resource registered with the kernel's institution
+registry whose `is_a` includes `urn:eigenius:institution:Institution`.
+
+The alias inhabits a separate namespace from `USING` class shortnames
+and from variable names — it is only valid as the institution-reference
+position in `FIBER`. Two `USING INSTITUTION` clauses may not declare
+the same alias. Type-check errors for these conditions are listed in §5.
+
+`USING` and `USING INSTITUTION` clauses may appear in any order and may
+be interleaved (per the §3.1 `match_part` grammar).
+
+`USING INSTITUTION` is only valid in the top-level query's `match_part`,
+not in a `DEFINE` body — see §3.2.
+
 ### 3.4 MATCH clause
 
 ```ebnf
-match_clause  ::= 'MATCH' pattern_list
-pattern_list  ::= pattern (',' pattern)*
+match_clause    ::= 'MATCH' pattern_list
+pattern_list    ::= pattern (',' pattern)*
 
-pattern       ::= typed_pattern | untyped_pattern
-typed_pattern ::= name '(' variable ')' object_pattern
+pattern         ::= 'NOT'? (typed_pattern | untyped_pattern)
+typed_pattern   ::= name '(' variable ')' object_pattern
 untyped_pattern ::= variable object_pattern
 
-object_pattern ::= '{' property_list? '}'
-property_list  ::= property (',' property)*
-property       ::= name ':' value
+object_pattern  ::= '{' property_list? '}'
+property_list   ::= property (',' property)*
+property        ::= name ':' value
 
-name          ::= IDENTIFIER | STRING
+name            ::= IDENTIFIER | STRING
 ```
 
 **Typed patterns** constrain matches to instances of the named class (and its subclasses via `subclass_of`). The class is referenced by shortname (resolved from USING imports) or by full IRI (as a string literal). Properties referenced in a typed pattern must be valid for the specified class, accounting for property inheritance through the subclass chain.
 
+A typed pattern's class name may also be the name of a `DEFINE`d
+relation. Patterns of the form `Relation(?var) { ... }` look up bindings
+of the derived relation, not class instances. The parser does not
+syntactically distinguish the two — resolution is by name in the
+type-checker's scope (USING-imported class shortname vs. DEFINEd
+relation name).
+
 **Untyped patterns** match any resource. Properties are not validated against a class schema.
+
+**Negated patterns** (`NOT` prefix) succeed when no resource matches the
+inner pattern shape. Negation is subject to stratification (§6.9).
 
 **Name resolution.** A `name` is either:
 - A bare identifier — resolved as a shortname against USING imports (for class names) or against the matched class's property set (for property names)
@@ -243,7 +294,80 @@ MATCH ?person {
 }
 ```
 
-### 3.5 WHERE clause
+### 3.5 FIBER clause
+
+```ebnf
+fiber_clause      ::= 'FIBER' institution_ref ':' query_class_ref
+                      '{' param_list? '}' 'AS' variable
+institution_ref   ::= IDENTIFIER | STRING
+query_class_ref   ::= IDENTIFIER | STRING
+param_list        ::= param (',' param)*
+param             ::= name ':' expression
+```
+
+A `FIBER` clause dispatches to a registered institution's fiber
+reasoner (D10 `FiberReasoner::query`) and binds the response resource
+to a variable that subsequent clauses can decompose with `MATCH`.
+
+- `institution_ref` is either a `USING INSTITUTION` alias
+  (`IDENTIFIER`) or an inline full IRI (quoted `STRING`).
+- `query_class_ref` is the institution's query class — a short name
+  resolved against the institution's declared `query_types`, or a
+  full IRI.
+- The brace block contains parameter bindings (`name : expression`)
+  passed as properties on the constructed query resource.
+- `AS variable` binds the response resource's IRI to a variable usable
+  in later clauses.
+
+`FIBER` is only valid in the top-level query's `match_part`, never in
+a `DEFINE` body. See §5 for type rules and §6.12 for evaluation.
+
+**Examples**
+
+With alias:
+
+```
+USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+
+MATCH Refinement(?m) { latest_delta: ?d, target: ?t }
+FIBER  ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+FIBER  ord:TrendQuery        { window: 10,    delta: ?d }         AS ?trend
+MATCH  ?conv  { "urn:eigenius:test:wasm:converged":  ?c }
+MATCH  ?trend { "urn:eigenius:test:wasm:direction":  ?dir }
+WHERE  ?c = true AND ?dir = "down"
+RETURN [] { m: ?m, t: ?t }
+```
+
+Inline IRI (one-shot):
+
+```
+MATCH Refinement(?m) { latest_delta: ?d }
+FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
+      { tolerance: 0.01, latest_delta: ?d } AS ?conv
+MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+WHERE ?c = true
+RETURN [] { m: ?m }
+```
+
+Mixed param names — required short name, recommended short name, full-IRI pass-through:
+
+```
+FIBER ord:ConvergenceQuery {
+    tolerance: 0.01,                           // short name in `requires`: must be present
+    latest_delta: ?d,                          // short name in `requires`: must be present
+    window_hint: 50,                           // short name in `recommends`: optional
+    "urn:example:client:correlation_id": ?cid  // full IRI: pass-through, no scope check
+} AS ?conv
+```
+
+The first two are in the query class's `requires` list and must be
+supplied. The third is in `recommends` — an extra hint the class
+knows about but doesn't demand. The fourth is outside the class
+scope entirely; it is included in the query resource as-is. Typos in
+the short-name positions are caught at type-check time because they
+fail to resolve in the class's declared property set.
+
+### 3.6 WHERE clause
 
 ```ebnf
 where_clause    ::= 'WHERE' expression_list
@@ -252,14 +376,14 @@ expression_list ::= expression (',' expression)*
 
 Multiple expressions in the WHERE clause are implicitly ANDed.
 
-### 3.6 Expressions
+### 3.7 Expressions
 
 Operator precedence (highest to lowest):
 
 | Precedence | Operators | Associativity |
 |------------|-----------|---------------|
 | 1 | Unary `NOT`, `+`, `-` | Right |
-| 2 | `**` | Left |
+| 2 | `**` | Left (parser quirk; see note) |
 | 3 | `*`, `/`, `%` | Left |
 | 4 | `+`, `-`, `\|\|` | Left |
 | 5 | `<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE` | Left |
@@ -267,12 +391,16 @@ Operator precedence (highest to lowest):
 | 7 | `AND` | Left |
 | 8 | `OR` | Left |
 
+`**` is conventionally right-associative in mathematics (`2**3**2 = 512`)
+but the current parser folds it left (`(2**3)**2 = 64`). Always parenthesise
+stacked exponents when the order matters.
+
 ```ebnf
 expression      ::= or_expr
 or_expr         ::= and_expr ('OR' and_expr)*
 and_expr        ::= equality_expr ('AND' equality_expr)*
 equality_expr   ::= relational_expr (('=' | '<>') relational_expr)*
-relational_expr ::= additive_expr (('<' | '<=' | '>' | '>=' | comparison_op) additive_expr)*
+relational_expr ::= additive_expr ((cmp_op | comparison_op) additive_expr)*
 additive_expr   ::= mult_expr (('+' | '-' | '||') mult_expr)*
 mult_expr       ::= power_expr (('*' | '/' | '%') power_expr)*
 power_expr      ::= unary_expr ('**' unary_expr)*
@@ -282,18 +410,29 @@ unary_expr      ::= primary_expr
                    | '+' unary_expr
                    | '-' unary_expr
 
+cmp_op          ::= '<' | '<=' | '>' | '>='
 comparison_op   ::= 'IN' | 'NOT' 'IN' | 'LIKE' | 'NOT' 'LIKE'
 
 primary_expr    ::= value
                    | '(' expression ')'
                    | array_literal
-                   | object_literal
                    | function_call
                    | aggregate_call
+                   | qualified_call
+                   | shortname_literal
                    | variable '.' IDENTIFIER ('.' IDENTIFIER)*
+
+shortname_literal ::= IDENTIFIER     // bare identifier — string-typed shortname literal
 ```
 
-### 3.7 Function calls
+A bare `IDENTIFIER` in expression position evaluates to the identifier
+text as a string-typed scalar. This is the same form used to pass class
+or property short names as scalar values (e.g. in `RETURN`).
+
+### 3.8 Function calls
+
+EigenQL has three categories of function call. The first is the closed
+set of built-in scalar functions:
 
 ```ebnf
 function_call ::= DATE '(' value ')'
@@ -313,7 +452,32 @@ function_call ::= DATE '(' value ')'
 | `CONTAINS` | array, value | boolean | Test if array contains value |
 | `CONCAT` | array, array | array | Concatenate two arrays |
 
-### 3.8 Aggregate functions
+The second category is institution-dispatched function calls: a
+`qualified_call` invokes a decide predicate or comorphism registered by
+an institution (D10).
+
+```ebnf
+qualified_call ::= qualified_name '(' arg_list? ')'
+qualified_name ::= IDENTIFIER ':' IDENTIFIER
+arg_list       ::= expression (',' expression)*
+```
+
+The qualified name resolves to a full IRI through the institution
+registry's classification table (`InstitutionRegistry::classify`), per
+§5 and §6.13:
+
+| Classification | Number of args | Returns |
+|---|---|---|
+| Decide predicate | any | boolean (three-valued result mapped: `Holds → true`, `Fails → false`, `Undecidable → false`) |
+| Comorphism | exactly one source resource | embedded resource (`Value::Embedded`) |
+
+A qualified name that fails to classify (no institution registered for
+the IRI, or the IRI is not in the institution's `decide_procedures` or
+`comorphism_types`) is an evaluation error: `unknown function`.
+
+The third category is the aggregate calls covered in §3.9.
+
+### 3.9 Aggregate functions
 
 ```ebnf
 aggregate_call ::= COUNT '(' expression ')'
@@ -335,7 +499,7 @@ Aggregate functions may only appear in the RETURN clause. A query that uses aggr
 - Aggregate all result properties (no grouping needed), or
 - Include a GROUP BY clause specifying the non-aggregated properties
 
-### 3.9 Literals and values
+### 3.10 Literals and values
 
 ```ebnf
 value         ::= literal | variable
@@ -343,22 +507,30 @@ literal       ::= STRING | NUMBER | BOOLEAN
 
 variable      ::= VARIABLE
 
-array_literal  ::= '[' ']' | '[' expression_list ']'
-object_literal ::= '{' '}' | '{' object_property_list '}'
-
-object_property_list ::= object_property (',' object_property)*
-object_property      ::= name ':' expression
+array_literal ::= '[' ']' | '[' expression_list ']'
 ```
 
-### 3.10 RETURN clause
+The grammar does not include an object literal in expression position;
+embedded resource construction is performed only by the kernel during
+RETURN shaping (§6.5) and FIBER param materialisation (§6.12).
+
+### 3.11 RETURN clause
 
 ```ebnf
-return_clause      ::= 'RETURN' return_class_names '{' return_list '}'
+return_clause      ::= 'RETURN' return_class_names? '{' return_list? '}'
 return_class_names ::= name | '[' name_list ']' | '[' ']'
 return_list        ::= return_item (',' return_item)*
 return_item        ::= name ':' expression
 name_list          ::= name (',' name)*
 ```
+
+The class spec preceding the body has three forms: a single bare name
+(`RETURN Person { ... }`), a bracketed list (`RETURN [Person, Animal] { ... }`,
+including the empty list `[]` for an untyped result), or omitted entirely
+(braces directly after `RETURN`).
+
+The body may be empty (`{ }`) — useful for guard queries that return only
+the boolean `matched` and `row_count` (see §6.5 and Appendix A).
 
 The return class determines which properties are valid in the output. The result class may be a single class name, an array of class names (for resources with multiple class membership), or empty (untyped result).
 
@@ -370,7 +542,7 @@ is specified in [Appendix A](#appendix-a-result-documents). Consumers
 drive lookups through the included class, not through fixed IRI
 conventions.
 
-### 3.11 GROUP BY clause
+### 3.12 GROUP BY clause
 
 ```ebnf
 group_by_clause ::= 'GROUP' 'BY' expression_list
@@ -378,7 +550,7 @@ group_by_clause ::= 'GROUP' 'BY' expression_list
 
 Groups result rows by the specified expressions before applying aggregation. All non-aggregated expressions in the RETURN clause must appear in the GROUP BY clause.
 
-### 3.12 ORDER BY clause
+### 3.13 ORDER BY clause
 
 ```ebnf
 order_by_clause ::= 'ORDER' 'BY' order_item (',' order_item)*
@@ -387,7 +559,7 @@ order_item      ::= expression ('ASC' | 'DESC')?
 
 Sorts results by the specified expressions. Default sort direction is ASC. Expressions must reference variables or properties present in the RETURN clause.
 
-### 3.13 LIMIT and OFFSET
+### 3.14 LIMIT and OFFSET
 
 ```ebnf
 limit_clause  ::= 'LIMIT' NUMBER
@@ -396,7 +568,7 @@ offset_clause ::= 'OFFSET' NUMBER
 
 LIMIT restricts the number of results returned. OFFSET skips the first N results. Both values must be non-negative integers. OFFSET without LIMIT is allowed.
 
-### 3.14 DISTINCT
+### 3.15 DISTINCT
 
 ```ebnf
 distinct_clause ::= 'DISTINCT'
@@ -419,20 +591,42 @@ interface Program {
 interface RuleDefinition {
   name: string;                 // Relation name
   variables: Variable[];        // Declared variables (arity)
-  match: MatchPart;             // The match_part (using + match + where)
+  body: MatchPart;              // The DEFINE body (USING + MATCH + WHERE)
 }
 
 interface MatchPart {
-  using: string[];              // IRI strings from USING clause
-  patterns: Pattern[];          // MATCH patterns
+  using: string[];              // IRI strings from USING clauses
+  usingInstitutions: InstitutionAlias[];  // USING INSTITUTION clauses
+  clauses: Clause[];            // MATCH and FIBER clauses, in textual order
   conditions: Expression[];     // WHERE conditions
 }
 
+interface InstitutionAlias {
+  iri: string;                  // Institution IRI
+  alias: string;                // Identifier used in subsequent FIBER clauses
+}
+
+type Clause =
+  | { kind: 'pattern'; pattern: Pattern }
+  | { kind: 'fiber'; fiber: FiberClause };
+
+interface FiberClause {
+  institution: Name;            // Alias (shortname) or full IRI
+  queryClass: Name;             // Class shortname or full IRI
+  params: ParamBinding[];       // Property bindings for the query resource
+  binding: Variable;            // ?var bound to the response resource IRI
+}
+
+interface ParamBinding {
+  name: Name;
+  expression: Expression;
+}
+
 interface Query {
-  match: MatchPart;             // USING + MATCH + WHERE
+  body: MatchPart;              // USING + USING INSTITUTION + (MATCH | FIBER)+ + WHERE
   groupBy: Expression[];        // GROUP BY expressions
   resultClasses: Name[];        // RETURN class names
-  result: RenameResult[];       // RETURN property mappings
+  result: ReturnItem[];         // RETURN property mappings
   orderBy: OrderItem[];         // ORDER BY items
   limit?: number;               // LIMIT value
   offset?: number;              // OFFSET value
@@ -467,7 +661,7 @@ interface Variable {
 
 type VariableOrValue<T> = { variable: Variable } | { value: T };
 
-interface RenameResult {
+interface ReturnItem {
   name: Name;
   expression: Expression;
 }
@@ -478,11 +672,10 @@ type Expression =
   | { binary: BinaryOperator; left: Expression; right: Expression }
   | { unary: UnaryOperator; operand: Expression }
   | { notExists: Variable }                               // NOT EXISTS(?var)
-  | { function: string; arguments: Expression[] }         // Function call
+  | { function: string; arguments: Expression[] }         // Function call (builtin or qualified)
   | { aggregate: AggregateOp; argument: Expression }      // Aggregate function
   | { path: Variable; segments: string[] }                // Dot-path: ?var.a.b
   | { array: Expression[] }                               // Array literal
-  | { object: { key: Name; value: Expression }[] }        // Object literal
 
 type BinaryOperator =
   | '=' | '<>' | '<' | '<=' | '>' | '>='
@@ -495,6 +688,11 @@ type UnaryOperator = 'not' | '+' | '-';
 
 type AggregateOp = 'count' | 'sum' | 'avg' | 'min' | 'max';
 ```
+
+The `function` Expression variant carries the textual function name —
+either a builtin (`"DATE"`, `"LENGTH"`, …) or a qualified name
+(`"docking:within_tolerance"`). Resolution and dispatch are performed
+at evaluate time per §6.13.
 
 ---
 
@@ -560,6 +758,85 @@ Aggregates may only appear in RETURN expressions. Non-aggregated RETURN expressi
 - The final segment may resolve to a property of any data type.
 - Dot-paths are unavailable for full IRI property references — use multi-pattern decomposition instead.
 
+### 5.7 USING INSTITUTION type rules
+
+- The IRI in `USING INSTITUTION "iri" AS alias` must resolve to a
+  resource registered with the kernel's institution registry whose
+  `is_a` includes `urn:eigenius:institution:Institution`. Failure rule:
+  `using_institution_unresolved`.
+- An alias must be unique within a `match_part`. Failure rule:
+  `duplicate_using_institution_alias`.
+- Aliases inhabit a separate namespace from `USING` class shortnames
+  and from variable names; collisions across namespaces are not
+  detected at type check (the parser distinguishes them by context).
+
+### 5.8 FIBER type rules
+
+For each `FIBER inst_ref : QueryClass { params } AS ?var` clause:
+
+1. **Institution resolution.** `inst_ref` is either an alias declared by
+   a `USING INSTITUTION` (rule `undeclared_institution_alias` if
+   missing) or an inline IRI (rule `using_institution_unresolved` if
+   not registered).
+
+2. **Query class.** `QueryClass` must resolve to a resource whose
+   `is_a` includes `urn:eigenius:core:Class`. Failure rule:
+   `fiber_query_class_not_class`. The class must additionally appear
+   in the institution's declared `query_types` — runtime enforced.
+
+3. **Short-name parameter scope.** A short-name parameter must resolve
+   against the union of the query class's `urn:eigenius:core:requires`
+   and `urn:eigenius:core:recommends` property lists. A short name that
+   fails to resolve is rule `fiber_param_short_name_unresolved`. This
+   is the rule that catches typos like `tolerence` for `tolerance`.
+
+4. **Required-property coverage.** Every property in the query class's
+   `requires` list must have a matching entry in `params`. Missing
+   coverage is rule `fiber_missing_required_param`.
+
+5. **Full-IRI parameters** (quoted-string names) bypass class-scope
+   validation — the open-world type system permits resources to carry
+   properties beyond their declared class, and FIBER params follow
+   the same rule. Type-checker does not warn on these.
+
+6. **Parameter expression types.** Each param expression's inferred
+   type must match the declared `data_type` on the resolved Property
+   resource. Lenient v1: if the type checker cannot infer an
+   expression's type, the check is skipped (runtime catches genuine
+   mismatches).
+
+7. **Variable binding.** `?var` must not shadow an existing variable.
+
+The response resource bound to `?var` is treated as an untyped resource
+in subsequent `MATCH ?var { ... }` clauses — short-name dot-paths on
+`?var` are not available in v1, since the institution does not declare
+the response class. Use full-IRI property references when decomposing.
+
+### 5.9 Institution-dispatched function-call type rules
+
+For each expression of the form `qualified_name(args...)` where
+`qualified_name = ns : local`:
+
+1. **Classification.** The implementation joins `ns` and `local` to
+   form an IRI string and looks it up via
+   `InstitutionRegistry::classify`. The result is `DecidePredicate`,
+   `Comorphism`, or unrecognised. Unrecognised qualified names are
+   not a type-check error — they fall through to evaluate-time
+   builtin dispatch and surface as evaluation error `unknown function`
+   (see §6.13).
+
+2. **Decide predicates.** No static arity or argument-type check —
+   the institution validates arity and argument compatibility in its
+   `decide` implementation. Result type is boolean.
+
+3. **Comorphisms.** Must receive exactly one argument — the source
+   resource. A different number of arguments is an evaluation error
+   (rule `comorphism_arity`). Result type is `embedded resource`.
+
+The closed-set built-in function calls of §3.8 retain their existing
+arity-checked rules; only qualified names dispatch through the
+institution registry.
+
 ---
 
 ## 6. Evaluation Semantics
@@ -573,6 +850,15 @@ For a typed pattern `ClassName(?var) { prop1: ?a, prop2: ?b }`:
 2. For each matching resource, bind `?var` to the resource's IRI
 3. For each property pattern, bind the variable to the resource's property value
 4. If the property is missing on the resource, the pattern does not match that resource (the variable is unbound for that resource)
+
+**Value equality for equi-joins.** When the evaluator joins two
+patterns on a shared variable, two bound values are considered equal
+under the same rules as the `=` operator, with one cross-type
+exception: `Value::ResourceRef(iri)` and `Value::String(s)` compare
+equal when `iri.as_str() == s`. This bridges resources cross-referenced
+via typed `ResourceRef` properties against resources whose IRI
+appears as a `String`-typed property value (e.g. when the layer
+encodes some references as raw strings).
 
 ### 6.2 NOT EXISTS
 
@@ -683,6 +969,102 @@ Queries without negation (no `NOT EXISTS`, no negated patterns) are monotonic �
 
 Queries using `NOT EXISTS` or negated MATCH patterns (`NOT ClassName(...)`) are not monotonic — adding facts can decrease the result set. The evaluator tracks which queries use negation so that non-monotonic queries can be flagged for full re-evaluation on layer changes.
 
+### 6.12 FIBER evaluation — transient overlay
+
+`FIBER` clauses are processed in textual order interleaved with `MATCH`
+clauses. For each surviving binding produced by preceding clauses:
+
+1. Resolve the institution (via `USING INSTITUTION` alias or inline
+   IRI) to a registered `FiberReasoner` (D10).
+2. Construct the query resource: `is_a = [query_class_iri]`, with each
+   `param` evaluated against the binding and stored as a property
+   value under the corresponding Property IRI (short-name params
+   resolved through the query class's `requires`/`recommends`; full-IRI
+   params passed through verbatim).
+3. Invoke `FiberReasoner::query(&resource, ctx)`.
+4. Attach the response resource to a **query-scoped transient overlay
+   layer** sitting on top of the evaluation layer chain. The overlay
+   is private to the current query and is discarded when evaluation
+   ends. The response resource's IRI is synthesized as
+   `urn:eigenius:query:gen:<query-hash>:fiber:<clause-ordinal>:<binding-ordinal>`,
+   deterministic within one query but never persisted.
+5. Bind `?var` to that response IRI.
+
+Subsequent clauses — including `MATCH ?var { ... }` decomposition —
+see the response via normal layer iteration, reusing EigenQL's existing
+pattern-match semantics. The overlay reuses the existing layer
+machinery rather than introducing a parallel "bound-to-embedded-
+resource" code path in the pattern matcher.
+
+**Stratification.** Each FIBER clause forms its own evaluation step.
+The total per-query order is:
+
+```
+(MATCH | FIBER)+  →  WHERE  →  GROUP BY  →  RETURN  →  ORDER BY  →  LIMIT/OFFSET/DISTINCT
+```
+
+Within `(MATCH | FIBER)+`, clauses are processed left to right and a
+`FIBER` clause may consume any variable bound by a preceding `MATCH`
+or `FIBER`. Forward references are caught at type check.
+
+**Dispatch frequency.** Fiber dispatches happen **once per binding in
+the current candidate set**. Callers who care about dispatch cost
+should constrain the candidate set upstream via `MATCH`.
+
+**Memoization is not supported in v1.** Two identical `FIBER` clauses
+with identical parameters dispatch twice. Future work: integrate with
+the trace store so repeated fiber dispatches are cached by
+`(institution, query class, param hash)` and recovered on subsequent
+evaluations.
+
+**Error handling.** A fiber dispatch that returns `Err` aborts the
+whole query with that error surfaced as the query's error message.
+Per-binding fallbacks (e.g. "filter out bindings whose fiber query
+failed") are not supported — predictability over cleverness.
+
+### 6.13 Institution function-call evaluation
+
+Expressions of the form `ns:local(args...)` dispatch through the
+institution registry. For each evaluated call:
+
+1. Construct the IRI string `ns:local` (or treat the qualified name
+   as a full IRI if it parses as one).
+2. Look up the IRI in `InstitutionRegistry::classify`.
+3. Dispatch:
+
+   - **Decide predicate** (`Some(DecidePredicate)`):
+     a. Resolve the declaring institution via
+        `InstitutionRegistry::institution_for_decide`.
+     b. Call `reasoner.decide(&iri, &arg_values, &exec_ctx)`.
+     c. Map the three-valued `DecResult` to a boolean: `Holds → true`,
+        `Fails → false`, `Undecidable → false`. The
+        `Undecidable → false` choice is **WHERE-semantics-first**: a
+        decide call in a `WHERE` should default to filtering out
+        rather than passing through. Three-valued semantics in
+        downstream logic require either a richer wrapping or a
+        `FIBER` clause.
+
+   - **Comorphism** (`Some(Comorphism)`):
+     a. Verify exactly one argument was passed; otherwise raise
+        `comorphism_arity` error.
+     b. Resolve the declaring institution via
+        `InstitutionRegistry::institution_for_comorphism`.
+     c. Convert the argument to a `Resource`: if it evaluated to
+        `Value::Embedded(r)`, use the embedded resource directly;
+        otherwise wrap the scalar in an embedded resource carrying a
+        single `urn:eigenius:core:value` property.
+     d. Call `reasoner.translate(&iri, &source_resource, &exec_ctx)`.
+     e. Wrap the returned resource as `Value::Embedded(...)`.
+
+   - **Unrecognised** (`None`): fall through to builtin function
+     dispatch. Since builtins do not recognise qualified IRIs, the
+     dispatch fails with evaluation error `unknown function: ns:local`.
+
+This evaluation requires an institution registry to be available in
+the runtime. Calls invoked through `execute(program, layer)` (no
+runtime) raise the same `unknown function` error because the
+classification step has nothing to look up against.
+
 ---
 
 ## 7. Error Format
@@ -692,18 +1074,23 @@ Query errors are reported as structured objects:
 ```typescript
 interface QueryError {
   position: { line: number; column: number } | null;
-  phase: 'lexer' | 'parser' | 'type_check' | 'evaluation';
+  phase: 'lexer' | 'parser' | 'type_check' | 'stratification' | 'evaluation';
   rule: string;
   message: string;
 }
 ```
 
 Error phases:
-- **lexer** — unrecognized token, unterminated string
-- **parser** — syntax error, unexpected token
-- **type_check** — type mismatch, unbound variable, invalid property reference, aggregate without GROUP BY
-- **stratification** — negation cycle in DEFINE rules
-- **evaluation** — runtime errors (division by zero, invalid date parse, fixpoint non-convergence)
+- **lexer** — unrecognized token, unterminated string, invalid escape
+- **parser** — syntax error, unexpected token, malformed clause
+- **type_check** — type mismatch, unbound variable, invalid property reference, aggregate without GROUP BY, FIBER schema violation (see §5.7–5.9 for rule names)
+- **stratification** — negation cycle in DEFINE rules (§6.9)
+- **evaluation** — runtime errors (division by zero, invalid date parse, missing institution registry, fiber dispatch failure, unknown qualified-name function, comorphism arity)
+
+Each error carries a `rule` identifier (e.g. `unbound_variable`,
+`fiber_missing_required_param`, `using_unresolved`,
+`comorphism_arity`) so consumers can react programmatically without
+parsing the human-readable `message`.
 
 ---
 
@@ -929,6 +1316,17 @@ RETURN [] {
 | Recursive rules | DEFINE with self-reference, seminaive fixpoint evaluation | Standard Datalog; enables transitive closure and derived relations |
 | Negated patterns | `NOT ClassName(...)` in MATCH, with stratification checking | Stratified negation prevents paradoxes; well-understood theory |
 | Monotonicity tracking | Queries with negation flagged as non-monotonic | Enables correct cache invalidation on layer changes |
+| FIBER clause placement | Top-level query only; not in DEFINE bodies | Keeps derived relations pure and stratifiable; institution dispatch is an orchestration concern, not a fixpoint participant |
+| FIBER overlay model | Response resources attached to a transient overlay layer; subsequent MATCH iterates layers normally | Reuses existing layer machinery rather than special-casing FIBER-bound variables in the pattern matcher |
+| Full-IRI FIBER params | Bypass class-scope validation (open-world) | Consistent with §3.4's treatment of full-IRI property references in MATCH; clients can pass extra info the institution opted into |
+| FIBER memoization | Not in v1 — every binding triggers a fresh dispatch | Predictable cost model; future trace-store integration tracked separately |
+| FIBER dispatch order | Textual order, interleaved with MATCH | Forward references caught at type check; lets queries stage results from one institution into the next |
+| Decide-result Undecidable mapping | Maps to `false` in expression position | WHERE-semantics-first: filter out by default. Three-valued semantics needs richer wrapping or a FIBER clause |
+| Comorphism arity | Exactly one source argument | Comorphisms are unary by construction — one source resource → one translated resource. Multi-arg cases pre-package into an embedded resource |
+| Qualified-name unrecognised IRIs | Evaluation error `unknown function`, not type error | Allows late registration of institutions and gives the same diagnostic shape as misspelt builtins |
+| Shared `InstitutionRegistry::classify` | One classification table for both ESL compile-time and EigenQL evaluate-time dispatch | Single source of truth — ESL and EigenQL never disagree about which IRIs are decide vs. comorphism |
+| `**` associativity | Left in current parser (`(a**b)**c`) | Implementation pragmatism; convention is right-associative — users should parenthesise stacked exponents |
+| `IN` / `LIKE` RHS | Any `additive_expr` (not restricted to array / string literal) | Allows variables and computed values; rejected types fail at evaluation |
 
 ---
 
@@ -1048,232 +1446,3 @@ evolve without breaking consumers that treat responses as opaque
 documents. Client code that drives from the class's property list,
 rather than from hardcoded IRIs, continues to work across both models.
 
----
-
-## Appendix B. `FIBER` clause — dispatching to institutions from EigenQL
-
-Closes [issue #10](https://github.com/eigenius/eigenius/issues/10).
-
-EigenQL's MATCH traverses **structural** relationships in the knowledge
-graph. The `FIBER` clause lets a query **dispatch** to a registered
-institution's fiber reasoner (D10) and join the response back into the
-binding set. This turns composed questions like "find all refinements
-whose institution says they have converged" into a single declarative
-query instead of client-side orchestration.
-
-### B.1 Syntax
-
-Two new constructs:
-
-```ebnf
-using_institution  ::= 'USING' 'INSTITUTION' STRING 'AS' IDENTIFIER
-fiber_clause       ::= 'FIBER' institution_ref ':' query_class_ref
-                       '{' param_list '}' 'AS' variable
-institution_ref    ::= IDENTIFIER | STRING   // alias (via USING INSTITUTION) or inline IRI
-query_class_ref    ::= IDENTIFIER | STRING   // short name resolved via the institution's
-                                             //   declared query_types, or a full IRI
-param_list         ::= param (',' param)*
-param              ::= name ':' expression   // same shape as RETURN items
-```
-
-The top-level query grammar grows to allow multiple MATCH/FIBER clauses
-interleaved, and to allow `USING INSTITUTION` alongside `USING`:
-
-```ebnf
-query       ::= (using_clause | using_institution)*
-                clause+
-                where_clause? group_by_clause? return_clause?
-                order_by_clause? limit_clause? offset_clause? 'DISTINCT'?
-
-clause      ::= match_clause | fiber_clause
-```
-
-### B.2 Examples
-
-**With alias** (institution used twice):
-
-```
-USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
-
-MATCH Refinement(?m) { latest_delta: ?d, target: ?t }
-FIBER  ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
-FIBER  ord:TrendQuery        { window: 10,    delta: ?d }         AS ?trend
-MATCH  ?conv  { "urn:eigenius:test:wasm:converged":  ?c }
-MATCH  ?trend { "urn:eigenius:test:wasm:direction":  ?dir }
-WHERE  ?c = true AND ?dir = "down"
-RETURN [] { m: ?m, t: ?t }
-```
-
-**Inline IRI** (one-shot):
-
-```
-MATCH Refinement(?m) { latest_delta: ?d }
-FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
-      { tolerance: 0.01, latest_delta: ?d } AS ?conv
-MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
-WHERE ?c = true
-RETURN [] { m: ?m }
-```
-
-**Mixed param names** (required short name + recommended short name + full-IRI pass-through):
-
-```
-FIBER ord:ConvergenceQuery {
-    tolerance: 0.01,                             # short name in `requires`: must be present
-    latest_delta: ?d,                            # short name in `requires`: must be present
-    window_hint: 50,                             # short name in `recommends`: optional
-    "urn:example:client:correlation_id": ?cid,   # full IRI: pass-through, no scope check
-} AS ?conv
-```
-
-The first two are in the query class's `requires` list and must be
-supplied. The third is in `recommends` — an extra hint the class
-knows about but doesn't demand. The fourth is outside the class
-scope entirely; it's included in the query resource as-is and the
-institution may use it or ignore it. Typos in the short-name
-positions are caught because they don't resolve in the class's
-declared property set.
-
-### B.3 Evaluation — transient overlay
-
-For each surviving binding after all preceding clauses:
-
-1. Resolve the institution (via alias or inline IRI) to a registered
-   `FiberReasoner`.
-2. Construct the query resource: `is_a = [query_class_iri]`, with each
-   `param` evaluated against the binding and set as a property on the
-   resource under the corresponding Property IRI.
-3. Invoke `FiberReasoner::query(&resource, ctx)`.
-4. Attach the response resource to a **query-scoped transient overlay
-   layer** sitting on top of the evaluation layer chain. The overlay is
-   private to the current query and is discarded when evaluation ends.
-5. Bind `?var` to the response resource's IRI.
-
-Subsequent clauses — including `MATCH ?var { … }` decomposition — see
-the response via normal layer iteration, reusing EigenQL's existing
-pattern-match semantics. Nothing special-cases FIBER-bound variables
-downstream.
-
-Rationale: the overlay reuses the existing layer machinery rather than
-introducing a parallel "bound-to-embedded-resource" code path in the
-pattern matcher. The tradeoff is that fiber responses need synthesized
-IRIs — the evaluator coins them under
-`urn:eigenius:query:gen:<query-hash>:fiber:<clause-ordinal>:<binding-ordinal>`,
-deterministic within one query but never persisted.
-
-### B.4 Stratification
-
-Each FIBER clause forms its own stratum. The total evaluation order:
-
-```
-(MATCH | FIBER)+   →   WHERE   →   GROUP BY   →   RETURN   →   ORDER BY   →   LIMIT/OFFSET/DISTINCT
-```
-
-Within the (MATCH | FIBER) sequence, clauses are processed in textual
-order. A FIBER clause may reference any variable bound by a preceding
-MATCH or FIBER clause. Forward references are an error caught at type
-check.
-
-Fiber dispatches happen **once per binding in the current candidate
-set**. Callers who care about dispatch cost should constrain the
-binding set upstream via MATCH; see §B.7 on memoization.
-
-### B.5 Type checking
-
-1. **`USING INSTITUTION "iri" AS alias`.** The IRI must resolve to a
-   resource in the layer chain whose `is_a` includes
-   `urn:eigenius:institution:Institution`. The alias must not collide
-   with a class alias from `USING` or a variable name used elsewhere
-   in the query.
-
-2. **`FIBER inst_ref : QueryClass { params } AS ?var`.**
-   - `inst_ref` is an alias (must be declared) or an inline IRI
-     (must resolve to a registered institution as in 1).
-   - `QueryClass` is a short name or full IRI. It must appear in the
-     institution's declared `urn:eigenius:institution:query_types`.
-   - **Short-name scope.** Short names resolve against the union of
-     the query class's `urn:eigenius:core:requires` and
-     `urn:eigenius:core:recommends` property lists. These are the
-     Properties the class declares as meaningful; a short name that
-     doesn't resolve is an error (this is what catches typos like
-     `tolerence` for `tolerance`).
-   - **Required-property coverage.** Every Property IRI in the query
-     class's `urn:eigenius:core:requires` list must have a matching
-     entry in `params` — supplied by short name, by full IRI, or in
-     whatever form the binding-time expression produces. `recommends`
-     properties are optional (same semantics as the general ontology
-     type system).
-   - **Full-IRI params** (quoted-string names) are pass-through: they
-     are included in the query resource sent to the institution
-     without scope validation. The user takes responsibility for the
-     semantic, same as §3.4's treatment of full-IRI property
-     references in MATCH. The open-world type system permits
-     resources to carry properties beyond their declared class —
-     FIBER params follow the same rule.
-   - **Param expression types.** Each param expression's inferred
-     type must match the declared Property `data_type` on the
-     institution's query class. Lenient v1: if the type checker
-     can't infer an expression's type, skip the check (runtime will
-     catch genuine mismatches).
-   - **Variable binding.** `?var` must not shadow an existing variable.
-
-3. **Subsequent `MATCH ?var { … }`.** Standard MATCH type rules.
-   Because the response class is not declared on the query class
-   (yet — see §B.8), untyped pattern matches on `?var` use only full
-   IRI property references. Short-name dot-paths on `?var` are not
-   available in v1.
-
-### B.6 Error handling
-
-A fiber dispatch that returns `Err` aborts the whole query with that
-error surfaced as the query's error message. Per-binding fallbacks
-(e.g. "filter out bindings whose fiber query failed") are not
-supported — predictability beats cleverness.
-
-### B.7 Memoization
-
-**Not in v1.** Fiber queries are evaluated fresh for every binding.
-Two identical `FIBER` clauses with identical parameters inside the
-same query dispatch twice. This is documented behaviour, not an
-oversight.
-
-Future work: integrate with D6.x trace store so repeated fiber
-dispatches are cached by (institution, query class, param hash) and
-recovered from the trace on subsequent evaluations. Tracked as a
-successor to #10.
-
-### B.8 Relationship to D10
-
-The FIBER clause is the EigenQL surface of D10's `FiberReasoner::query`
-protocol. The institution's declared
-`urn:eigenius:institution:query_types` (a list of Class IRIs) defines
-which `QueryClass` names FIBER accepts.
-
-**Future enhancement (not v1):** each institution query class could
-declare a `response_class` property whose value is a Class resource
-listing the response's Properties. When present, the type checker
-would validate dot-paths on FIBER result variables (§B.5.3), and the
-response would be usable as if it were a typed resource from the
-layer. Scoped out of this issue.
-
-### B.9 Changes elsewhere in this spec
-
-- **§3.1 Top-level grammar.** Update `query` and `match_part` to
-  permit multiple MATCH/FIBER clauses with optional `USING INSTITUTION`.
-- **§3.3 USING clause.** Add a subsection on `USING INSTITUTION` with
-  the alias semantics above.
-- **§3.X FIBER clause.** New section mirroring the grammar and
-  pointing at this appendix.
-- **§5.X FIBER type rules.** New subsection mirroring §B.5.
-- **§6.1 Pattern matching — IRI equality.** Value equality used in
-  equi-joins must treat `Value::ResourceRef(iri)` and `Value::String(s)`
-  as equal when `iri.as_str() == s`. This closes a latent bug in the
-  current evaluator where resources cross-referenced via `ResourceRef`
-  don't join against resources indexed by `String`-typed IRI.
-- **§6.X FIBER evaluation.** New subsection mirroring §B.3/§B.4.
-- **§7 Decisions log.** Add entries for the clause placement, the
-  overlay approach, "full-IRI params bypass class-scope validation
-  (open-world)", and "no memoization in v1".
-
-The specific section numbers shift; the appendix is the canonical
-reference while those inserts settle.

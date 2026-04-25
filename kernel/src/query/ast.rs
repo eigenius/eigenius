@@ -23,7 +23,7 @@ pub struct RuleDefinition {
 ///
 /// Clauses preserve textual order so FIBER dispatches can consume
 /// bindings from preceding MATCH/FIBER clauses and subsequent patterns
-/// can consume bindings produced by FIBER — see D2 Appendix B.
+/// can consume bindings produced by FIBER — see D2 §3.5, §6.12.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchPart {
     pub using: Vec<Iri>,
@@ -57,7 +57,7 @@ pub enum Clause {
     /// separating them into multiple MATCH clauses is equivalent
     /// (equi-join over shared variables).
     Pattern(Pattern),
-    /// A FIBER dispatch to a registered institution. See D2 Appendix B.
+    /// A FIBER dispatch to a registered institution. See D2 §3.5.
     Fiber(FiberClause),
 }
 
@@ -69,7 +69,7 @@ pub struct InstitutionAlias {
     pub alias: String,
 }
 
-/// A FIBER clause. Per D2 Appendix B: dispatches to a registered
+/// A FIBER clause. Per D2 §3.5: dispatches to a registered
 /// institution's fiber reasoner with a typed query resource built from
 /// `params`, binds the response resource to `binding` so subsequent
 /// MATCH clauses can decompose it.
