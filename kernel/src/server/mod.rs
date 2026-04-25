@@ -32,6 +32,8 @@ pub mod proto {
     tonic::include_proto!("eigenius.v1");
 }
 
+pub mod topology;
+
 use proto::eigenius_kernel_server::{EigeniusKernel, EigeniusKernelServer};
 use proto::*;
 
@@ -1632,7 +1634,23 @@ impl EigeniusKernel for EigeniusService {
             error: String::new(),
         }))
     }
+
+    async fn layer_topology(
+        &self,
+        request: Request<LayerTopologyRequest>,
+    ) -> Result<Response<LayerTopologyResponse>, Status> {
+        let req = request.into_inner();
+        let layer = self.resolve_read_layer(&req.root_layer).await?;
+        let topo = topology::walk(&layer, req.max_depth, req.include_resources);
+        Ok(Response::new(topo))
+    }
 }
+
+// `NotebookService` is defined in the proto and generates Rust server
+// stubs here, but the kernel does not implement it — the orchestrator
+// implements `NotebookService` in TypeScript (D22 §3.2 / §4) and proxies
+// to `EigeniusKernel.LayerTopology` above. The Rust stubs exist for
+// future symmetry / testability and incur no compile-time obligation.
 
 /// Convert a `TaskRecord` to the gRPC `TaskInfo` view.
 fn task_record_to_info(record: crate::task::TaskRecord) -> TaskInfo {
