@@ -1,0 +1,4 @@
+site_name: My Guides
+   docs_dir: docs/guides
+   theme:
+     name: material

@@ -164,7 +164,7 @@ impl Parser {
     /// DEFINE bodies (`allow_fiber = false`) get exactly one MATCH
     /// clause and no FIBER — fiber queries are orchestrator-scoped,
     /// relation rules are pure. Top-level queries (`allow_fiber = true`)
-    /// may interleave multiple MATCH and FIBER clauses per D2 Appendix B.
+    /// may interleave multiple MATCH and FIBER clauses per D2 §3.1.
     fn parse_match_part(&mut self, allow_fiber: bool) -> Result<MatchPart, QueryError> {
         let mut using = Vec::new();
         let mut using_institutions = Vec::new();
@@ -1192,7 +1192,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
-    // #10 — FIBER clause + USING INSTITUTION (D2 Appendix B)
+    // #10 — FIBER clause + USING INSTITUTION (D2 §3.3.1, §3.5)
     // -----------------------------------------------------------------
 
     #[test]

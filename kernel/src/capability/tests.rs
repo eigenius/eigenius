@@ -502,7 +502,7 @@ fn wasm_institution_can_validate_repeatedly() {
 }
 
 // ---------------------------------------------------------------------------
-// #10 — EigenQL FIBER clause end-to-end (D2 Appendix B)
+// #10 — EigenQL FIBER clause end-to-end (D2 §3.5, §6.12)
 // ---------------------------------------------------------------------------
 
 /// Build a layer containing:

@@ -245,7 +245,7 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// FIBER-clause checks (D2 Appendix B §B.5)
+// FIBER-clause checks (D2 §5.8)
 // ---------------------------------------------------------------------------
 
 fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError>) {
