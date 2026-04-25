@@ -46,7 +46,7 @@ The SDK is the foundation: a TypeScript client for the Eigenius platform that an
 │  Notebook app — TypeScript + React (browser)    │
 │  - CodeMirror 6 cell editors                    │
 │  - Cell execution UI (manual MVP)               │
-│  - TanStack Table, Observable Plot, D3, …       │
+│  - Fluent UI v9 (DataGrid, Charts, layout)      │
 │  - Custom JSON notebook format                  │
 └────────────────────────┬────────────────────────┘
                          │  Connect-RPC over HTTP/1.1
@@ -764,10 +764,10 @@ notebooks/
 │   │   │   ├── eigenql-mode.ts   # CodeMirror language support
 │   │   │   └── esl-mode.ts
 │   │   └── output/
-│   │       ├── ResultTable.tsx           # TanStack Table
-│   │       ├── ResourceInspector.tsx     # typed resource view
-│   │       ├── ResultPlot.tsx            # Observable Plot wrapper
-│   │       ├── LayerStackView.tsx        # plain JSX layer-chain view (MVP)
+│   │       ├── ResultTable.tsx           # Fluent DataGrid (driven by Property metadata)
+│   │       ├── ResourceInspector.tsx     # typed resource view (Fluent Card + DescriptionList)
+│   │       ├── ResultPlot.tsx            # @fluentui/react-charts wrapper (Phase 5)
+│   │       ├── LayerStackView.tsx        # custom JSX over Fluent primitives (MVP)
 │   │       ├── LayerTopologyGraph.tsx    # @xyflow/react full-topology graph (Phase 5)
 │   │       └── TraceTree.tsx             # D3 hierarchy wrapper (Phase 5)
 │   ├── state/
@@ -895,7 +895,7 @@ These are lexical-only — no semantic completion in the MVP. Adding completion 
 
 Cell outputs are rendered by type-discriminated renderers in `src/components/output/`. The MVP needs:
 
-- **`ResultTable`** — TanStack Table v8 with sortable columns, filterable rows, virtualised rows for large result sets. Auto-detects column types from the first row.
+- **`ResultTable`** — Fluent UI v9 `DataGrid` with sortable columns, selectable rows, and built-in virtualisation. Wraps an Eigenius `ResultSet`: column definitions are derived from the synthesized Property resources (D2 Appendix A), which carry both `short_name` (column header) and `data_type` (column type — drives sort comparator, default formatter, alignment). The synthesized Property metadata is the single source of truth; we do not type-sniff from values. Row IRIs come from the row resources themselves; cell values from the row's IRI-keyed properties, projected back to short-names via the Property table.
 - **`ResourceInspector`** — table-like view of an Eigon resource: `@id`, `is_a`, then properties grouped by IRI. Embedded resources expand inline. IRI values are clickable (open inspector for that IRI).
 - **`LayerStackView`** — plain JSX/CSS layer-chain visualisation. Renders the layer parent chain as a vertical stack of boxes, each labeled with its IRI prefix and per-class/per-property/per-resource/per-institution counts (extracted from a `Topology` value or computed via `eigen.layerTopology()` with `includeResources: false`). Click a box to drill into that layer's contents via the existing `ResourceInspector`. ~80 lines of React with no new dependencies; full intra-layer graph rendering is a Phase 5 concern (see §7).
 - **`TraceTree`** — D3-hierarchy-based renderer for program execution traces. Reads the optional `trace` field of a `RunResult` (returned by `eigen.run()` whenever the kernel has a trace store configured) and renders the tree of expression evaluations and IO-component dispatches as an interactive collapsible hierarchy. Each node shows the expression form, the result type, and component-dispatch metadata where applicable.
@@ -910,8 +910,8 @@ Cell outputs are rendered by type-discriminated renderers in `src/components/out
 
 Phase 5 adds:
 
-- **`ResultPlot`** — Observable Plot wrapper for general-purpose charts (bar, line, scatter, etc.) over arbitrary tabular data.
-- Additional D3-bespoke components for visualisations that don't fit Plot's grammar.
+- **`ResultPlot`** — `@fluentui/react-charts` wrapper for general-purpose charts (line, bar, vertical-bar, area, donut, sparkline, etc.) over arbitrary tabular data. Fluent's chart components are themed consistently with the rest of the notebook UI and inherit accessibility / colour-vision treatments.
+- Additional D3-bespoke components only when Fluent's chart catalogue can't express what we need (rare for analytical visualisations; the `LayerTopologyGraph` Phase 5 component still uses `@xyflow/react` because Fluent has no graph component).
 
 ### 6.8 TypeScript cell sandbox
 
@@ -930,7 +930,7 @@ This sandbox is **trusted** — TS cells run with full access to the page's Java
 
 The MVP ships with four render targets:
 
-- **Tables** — `ResultTable` (TanStack Table) for any `ResultSet`.
+- **Tables** — `ResultTable` (Fluent UI `DataGrid`) for any `ResultSet`.
 - **Resource inspectors** — `ResourceInspector` for any typed `Resource`.
 - **Layer stack** — `LayerStackView` (plain JSX/CSS) renders the layer parent chain as a navigable stack of boxes with counts (X classes, Y properties, Z resources, N institutions per layer) and click-to-inspect drilling. No graph library; the layer-chain model is best communicated as exactly what it is — a chain of immutable parent pointers — and the boxes-and-arrows shape conveys that immediately. The full intra-layer relationship graph (classes, properties, requires/recommends edges, etc.) is a Phase 5 deliverable.
   ```typescript
@@ -947,15 +947,15 @@ The MVP ships with four render targets:
 
 Phase 5 adds:
 
-- **Charts** — Observable Plot (`@observablehq/plot`):
+- **Charts** — `@fluentui/react-charts` (Fluent UI's chart catalogue):
   ```typescript
-  return Plot.plot({
-    marks: [Plot.barY(rows, { x: "name", y: "count" })]
-  });
+  import { LineChart } from "@fluentui/react-charts";
+  return <LineChart data={chartData} />;
   ```
-- Additional D3-bespoke components for visualisations that don't fit Plot's grammar.
+  Themed via the Fluent `FluentProvider` shared by the rest of the notebook. Available chart types: line, vertical-bar, horizontal-bar, area, donut, sparkline, gauge, heatmap. Built on D3 internally; renders SVG.
+- Additional D3-bespoke components for visualisations that don't fit Fluent's chart catalogue (rare for analytical needs; reserved as the escape hatch).
 
-D3 itself is the fallback for one-off visualisations the higher-level libraries don't cover.
+D3 is the fallback for the one-off cases. The full intra-layer topology graph (Phase 5) sits outside Fluent's component set entirely and uses `@xyflow/react` per §6.7.
 
 ### 6.10 Build and serve
 
@@ -1092,6 +1092,41 @@ Run time target: ~3 minutes total. Parallelisable across browsers (Chromium for 
 - **Cross-browser coverage on every test** — Chromium-only for the bulk; Firefox + WebKit only on the golden e2e. Cross-browser bugs are rare for our React + standard-DOM use case.
 - **Accessibility testing** — `@axe-core/playwright` is the right tool when this becomes a priority; deferred until the notebook reaches an audience that needs it.
 
+### 6.13 Design system — Fluent UI v9
+
+The notebook's UI shell, layout primitives, form controls, tables, and charts come from **[Fluent UI v9](https://react.fluentui.dev/)** (`@fluentui/react-components` for the design system; `@fluentui/react-charts` for charts). Used wherever Fluent has a fit-for-purpose component. The few places it doesn't:
+
+- **Cell editor** — CodeMirror 6 (Fluent has no code editor).
+- **Full intra-layer topology graph (Phase 5)** — `@xyflow/react` (Fluent has no node-edge graph component).
+- **`LayerStackView`** — custom JSX/CSS (boxes-and-arrows over the parent chain). Built using Fluent primitives (`Card`, `Body1`, `Caption1`, etc.) so it visually matches the rest of the UI.
+- **`TraceTree`** — D3-hierarchy-based custom component. Fluent's `Tree` is generic and tree-shaped data fits, but the trace tree wants per-node metadata badges (epistemic category, IO dispatch markers) that the generic Tree doesn't accommodate cleanly. May revisit as Fluent evolves.
+
+**Why Fluent specifically:**
+
+- Coherent design system across UI shell, tables, charts, and form controls — no hand-stitching of disparate libraries.
+- Accessibility built in (ARIA, keyboard navigation, screen-reader labels) by default.
+- Dark-mode support free via `webDarkTheme` paired with the `FluentProvider` at the React root.
+- Active Microsoft engineering investment; large component catalogue; production-tested.
+- MIT licensed — clean alongside Eigenius's Apache 2.0.
+
+**Catalogue mapping** for the components the notebook uses or will use:
+
+| Notebook concept | Fluent component(s) |
+|---|---|
+| App shell / cell wrapper / panels | `Card`, `Body1`, `Title3`, `Subtitle2` |
+| Cell toolbar / Run buttons | `Toolbar`, `Button`, `MenuButton` |
+| Tables (`ResultTable`) | `DataGrid`, `DataGridHeader`, `DataGridBody`, `DataGridRow`, `DataGridCell` |
+| Charts (`ResultPlot`, Phase 5) | `LineChart`, `VerticalBarChart`, `AreaChart`, `DonutChart`, `Sparkline`, etc. from `@fluentui/react-charts` |
+| Inputs (Phase 4 cell-creation UI) | `Field`, `Input`, `Dropdown`, `Combobox` |
+| Resource inspector | `Card` + `DescriptionList` (`Body1`/`Body2` rows) |
+| Notifications / errors | `MessageBar`, `Toast` |
+| Tabs / multi-notebook UI (Phase 6+) | `TabList`, `Tab` |
+| Theme toggle | `useFluentTheme` hook + manual switch between `webLightTheme` and `webDarkTheme` |
+
+**Bundle size note**: `@fluentui/react-components` is ~500KB minified (significantly larger than TanStack Table alone), but the unified design system replaces several smaller libraries (TanStack Table + Recharts/Plot wrapper + custom CSS). Net delta is moderate; tree-shaking via Fluent v9's per-component imports keeps unused components out of the bundle.
+
+**Theming**: a single `<FluentProvider theme={webLightTheme}>` (or `webDarkTheme`) wraps the React tree. Custom theme tokens for Eigenius-specific accents (epistemic-category colours, layer-chain badges) layered on top via Fluent's design tokens API.
+
 ---
 
 ## 7. Phasing
@@ -1130,7 +1165,7 @@ Six phases, each with deliverables and acceptance criteria.
 - "Run cell" buttons on ESL/EigenQL cells.
 - ESL execution path: compile + load (declarations) or compile + load + run (programs).
 - EigenQL execution path: query against current layer.
-- TanStack Table rendering for `ResultSet` outputs.
+- Fluent UI `DataGrid` rendering for `ResultSet` outputs (per §6.13).
 - Resource inspector for `Resource` outputs.
 - "Run all" toolbar action.
 
@@ -1160,12 +1195,12 @@ Now lighter, since the high-impact custom visualisations (layer-stack, trace) sh
 **Deliverables:**
 
 - **Full intra-layer topology graph** — a richer `LayerTopologyGraph` component that renders the *full* topology returned by `eigen.layerTopology({ includeResources: true })`: classes, properties, institutions, plus all the edge kinds (`is_a`, `subclass_of`, `requires`, `recommends`, `property_ref`, `institution_declares`). Recommended library: [**`@xyflow/react`**](https://reactflow.dev/) (formerly react-flow) — React-native, ~80KB, MIT-licensed, designed for DAG/flow-style graphs which match Eigenius's resource graph shape. Cytoscape.js was considered and demoted in favour of react-flow on the grounds of better React integration, smaller bundle, and right-sized capability for our typical graph scale (4–15 layers, 50–200 classes).
-- Observable Plot integration for general chart cells (bar, line, scatter, density, etc.).
+- `@fluentui/react-charts` integration for general chart cells (line, bar, area, donut, sparkline, etc.).
 - Sample cells in the patent notebook demonstrating chart usage and the full-topology graph — e.g., a distribution of confidence scores across analysis fields, plus a graph view of `is_a` relationships across the patent ontology.
 - Documentation patterns for "how to drop down to D3 when Plot or react-flow doesn't fit."
 - Polishing of the MVP visualisations based on feedback: `LayerStackView` styling refinements, `TraceTree` interaction (collapse/expand, search, jump-to-source).
 
-**Acceptance:** the patent notebook gains (a) a chart cell rendering distribution data via Observable Plot, and (b) a full-topology cell rendering the patent-ontology class graph via `@xyflow/react`. User-facing patterns for arbitrary D3 visualisations are documented in the notebook user guide.
+**Acceptance:** the patent notebook gains (a) a chart cell rendering distribution data via `@fluentui/react-charts`, and (b) a full-topology cell rendering the patent-ontology class graph via `@xyflow/react`. User-facing patterns for arbitrary D3 visualisations are documented in the notebook user guide.
 
 ### Phase 6 — Reactivity + polish (~4–6 weeks)
 
@@ -1256,8 +1291,9 @@ Out of scope for the MVP. Most early users will have a small handful of notebook
 | Build tool? | Vite | Standard for React+TS; works under Deno via npm interop; well-maintained |
 | Cell editor? | CodeMirror 6 | Modular, lightweight (~200KB), good React binding, custom language modes well-supported |
 | State management? | Zustand | Right complexity tier for the MVP; small, modern, hooks-native |
-| Plot library? | Observable Plot | Cleanest declarative grammar; same authors as D3; good TypeScript types |
-| Table library? | TanStack Table | Headless, virtualisable, sortable, filterable, no licensing tier |
+| UI design system? | Fluent UI v9 (`@fluentui/react-components`) | Single coherent system across shell / tables / charts / inputs; accessibility built in; dark mode free; MIT-licensed; production-tested. ~500KB but replaces several smaller libraries (TanStack Table + chart wrapper + custom CSS); tree-shakeable per-component imports |
+| Plot library? | `@fluentui/react-charts` | Themed consistently with the rest of the UI; D3 internally; Fluent's accessibility / colour-vision treatments. Observable Plot considered but rejected to keep design-system unity |
+| Table library? | Fluent UI `DataGrid` | Themed consistently; column definitions driven by ResultSet's synthesized Property metadata (`short_name` for headers, `data_type` for column types); built-in virtualisation; accessibility-first. TanStack Table considered but rejected to keep design-system unity |
 | Layer-stack visualisation (MVP)? | Plain JSX/CSS — `LayerStackView` boxes-and-arrows view of the parent chain | Layer chain is linear and best communicated as exactly that; no graph library needed for the MVP scope; ~80 lines of React |
 | Full intra-layer topology graph (Phase 5)? | `@xyflow/react` (react-flow) | React-native, ~80KB, MIT, designed for DAG/flow-shape graphs which fit our resource graph well; better React DX and smaller bundle than Cytoscape.js for our scale (4–15 layers, 50–200 classes); Cytoscape considered and demoted |
 | Trace-tree library (MVP)? | D3 hierarchy | Trace visualisation is core to understanding program execution and surfacing the four epistemic categories; in scope for the MVP, auto-rendered whenever `eigen.run()` returns a trace |
@@ -1333,7 +1369,7 @@ Additional files for Phase 5 (full intra-layer topology graph + chart cells):
 | Path | Purpose |
 |---|---|
 | `notebooks/src/components/output/LayerTopologyGraph.tsx` | `@xyflow/react`-based full-topology graph |
-| `notebooks/src/components/output/ResultPlot.tsx` | Observable Plot wrapper for chart cells |
+| `notebooks/src/components/output/ResultPlot.tsx` | `@fluentui/react-charts` wrapper for chart cells |
 
 ---
 
@@ -1346,8 +1382,8 @@ Additional files for Phase 5 (full intra-layer topology graph + chart cells):
 - [D6b — Reasoning trace schema](d6b-reasoning-trace-schema.md)
 - [D7 — ESL surface syntax](d7-esl-surface-syntax.md)
 - [Connect-RPC](https://connectrpc.com/) — protocol spec, documentation
-- [Observable Plot](https://observablehq.com/plot) — chart library
-- [TanStack Table](https://tanstack.com/table) — headless table
+- [Fluent UI React v9](https://react.fluentui.dev/) — design system (UI shell, layout, `DataGrid`, inputs)
+- [`@fluentui/react-charts`](https://github.com/microsoft/fluentui/tree/master/packages/charts/react-charts) — chart catalogue paired with Fluent v9
 - [CodeMirror 6](https://codemirror.net/) — editor
 - [`@xyflow/react`](https://reactflow.dev/) (formerly react-flow) — graph rendering for the Phase 5 full intra-layer topology
 - [Playwright](https://playwright.dev) — browser test automation
