@@ -81,6 +81,18 @@ export class KernelClient {
   }
 
   /**
+   * Raw Connect client for direct request/response passthrough. The
+   * higher-level methods on this class adapt the kernel's wire types
+   * into JS-friendly shapes (e.g. `query()` returns `Uint8Array[]`
+   * extracted from the result document); the orchestrator's notebook
+   * passthrough wants the unmodified request/response, so it uses
+   * this accessor instead.
+   */
+  get raw(): ReturnType<typeof createClient<typeof EigeniusKernel>> {
+    return this.client;
+  }
+
+  /**
    * Load resources into the kernel's working layer.
    */
   async load(

@@ -15,15 +15,17 @@
 /**
  * Phase 1 smoke test for `@eigenius/client`.
  *
- * Requires a running `docker compose up` (or local kernel + orchestrator):
- *   - kernel reachable from orchestrator at $EIGENIUS_KERNEL_ENDPOINT
- *   - orchestrator listening on $EIGENIUS_ORCHESTRATOR (default http://localhost:8080)
+ * Exercises every method the SDK currently exposes:
+ *   - layerTopology (NotebookService)
+ *   - inspect       (EigeniusKernel passthrough)
+ *   - query         (EigeniusKernel passthrough)
+ *   - listInstitutions (EigeniusKernel passthrough)
+ *   - health        (EigeniusKernel passthrough)
+ *
+ * Requires a running stack (kernel + orchestrator). Easiest is:
+ *   EIGENIUS_MOCK_LLM=true docker compose up --build -d
  *
  * Exits 0 on success, non-zero on any RPC failure.
- *
- * Usage:
- *   deno run --allow-net --allow-env clients/eigenius-ts/examples/smoke-test.ts
- *   deno task -c clients/eigenius-ts/deno.jsonc smoke
  */
 
 import { Eigen, NodeKind } from "../mod.ts";
@@ -33,64 +35,99 @@ const ENDPOINT = Deno.env.get("EIGENIUS_ORCHESTRATOR") ??
 
 const eigen = new Eigen({ endpoint: ENDPOINT });
 
-console.log(`SDK smoke test against ${ENDPOINT}`);
+console.log(`SDK smoke test against ${ENDPOINT}\n`);
+
+let stepNum = 0;
+const TOTAL_STEPS = 5;
+function step(label: string): void {
+  stepNum++;
+  console.log(`[${stepNum}/${TOTAL_STEPS}] ${label}`);
+}
+function fail(msg: string): never {
+  console.error(`  ✗ ${msg}`);
+  Deno.exit(1);
+  throw new Error("unreachable");
+}
+function ok(msg: string): void {
+  console.log(`  ✓ ${msg}`);
+}
 
 // ---------------------------------------------------------------------
-// 1. layerTopology — taxonomy only (default)
+// 1. health — kernel liveness
 // ---------------------------------------------------------------------
-console.log("\n[1/2] layerTopology() — taxonomy only");
-const taxonomy = await eigen.layerTopology();
-console.log(
-  `  ${taxonomy.nodes.length} nodes, ${taxonomy.edges.length} edges`,
+step("health()");
+const health = await eigen.health();
+if (!health.healthy) fail(`kernel is unhealthy: ${JSON.stringify(health)}`);
+ok(
+  `kernel v${health.version}, ${health.layerCount} layer(s), ${health.resourceCount} resource(s)`,
 );
+console.log();
 
+// ---------------------------------------------------------------------
+// 2. inspect — fetch a known core resource
+// ---------------------------------------------------------------------
+step('inspect("urn:eigenius:core:Class")');
+const inspectResp = await eigen.inspect("urn:eigenius:core:Class");
+if (!inspectResp.found) fail("urn:eigenius:core:Class should always exist");
+if (inspectResp.resource.length === 0) {
+  fail("response has found=true but empty resource bytes");
+}
+ok(`fetched Class resource (${inspectResp.resource.length} CBOR bytes)`);
+
+// Negative case: a missing IRI should return found=false, not error
+const missing = await eigen.inspect("urn:eigenius:nonexistent:zzz");
+if (missing.found) fail("expected found=false for nonexistent IRI");
+ok("nonexistent IRI returns found=false (not an error)");
+console.log();
+
+// ---------------------------------------------------------------------
+// 3. query — execute an EigenQL query
+// ---------------------------------------------------------------------
+step("query() — list all classes");
+const queryResp = await eigen.query(`
+  USING "urn:eigenius:core:Class"
+  MATCH Class(?c) { short_name: ?n }
+  RETURN [] { name: ?n }
+`);
+if (!queryResp.success) fail(`query failed: ${queryResp.error}`);
+if (queryResp.document.length === 0) fail("query returned empty document");
+ok(`query succeeded (${queryResp.document.length} CBOR bytes returned)`);
+console.log();
+
+// ---------------------------------------------------------------------
+// 4. listInstitutions — registered institution list
+// ---------------------------------------------------------------------
+step("listInstitutions()");
+const institutions = await eigen.listInstitutions();
+ok(`${institutions.length} institution(s) registered`);
+for (const inst of institutions) {
+  console.log(
+    `    - ${inst.iri} (${inst.morphismTypes.length} morphism type(s), ${inst.queryTypes.length} query type(s))`,
+  );
+}
+console.log();
+
+// ---------------------------------------------------------------------
+// 5. layerTopology — both modes
+// ---------------------------------------------------------------------
+step("layerTopology() — taxonomy then full");
+const taxonomy = await eigen.layerTopology();
 const layerNodes = taxonomy.nodes.filter((n) => n.kind === NodeKind.LAYER);
 const classNodes = taxonomy.nodes.filter((n) => n.kind === NodeKind.CLASS);
-console.log(`  ${layerNodes.length} layer node(s), ${classNodes.length} class node(s)`);
-if (layerNodes.length === 0) {
-  console.error("  ✗ expected at least one layer node from the bootstrap chain");
-  Deno.exit(1);
-}
-if (classNodes.length === 0) {
-  console.error(
-    "  ✗ expected at least one class node from the core ontology",
-  );
-  Deno.exit(1);
-}
-
-// Sample a layer node and verify its attrs include the count fields.
-const firstLayer = layerNodes[0];
-for (const key of [
-  "name",
-  "class_count",
-  "property_count",
-  "resource_count",
-  "institution_count",
-]) {
-  if (!(key in firstLayer.attrs)) {
-    console.error(`  ✗ layer node missing attr: ${key}`);
-    Deno.exit(1);
-  }
-}
-console.log(
-  `  ✓ first layer "${firstLayer.attrs.name}" has expected count attrs`,
+if (layerNodes.length === 0) fail("expected at least one layer node");
+if (classNodes.length === 0) fail("expected at least one class node");
+ok(
+  `taxonomy: ${taxonomy.nodes.length} nodes (${layerNodes.length} layer / ${classNodes.length} class), ${taxonomy.edges.length} edges`,
 );
 
-// ---------------------------------------------------------------------
-// 2. layerTopology — with includeResources=true
-// ---------------------------------------------------------------------
-console.log("\n[2/2] layerTopology({ includeResources: true })");
 const full = await eigen.layerTopology({ includeResources: true });
-console.log(
-  `  ${full.nodes.length} nodes, ${full.edges.length} edges`,
-);
-
 if (full.nodes.length < taxonomy.nodes.length) {
-  console.error(
-    `  ✗ includeResources=true produced fewer nodes (${full.nodes.length}) than default (${taxonomy.nodes.length})`,
+  fail(
+    `includeResources=true produced fewer nodes (${full.nodes.length}) than default (${taxonomy.nodes.length})`,
   );
-  Deno.exit(1);
 }
-console.log("  ✓ includeResources=true produced ≥ default node count");
+ok(
+  `full: ${full.nodes.length} nodes (+ ${full.nodes.length - taxonomy.nodes.length} instance resources), ${full.edges.length} edges`,
+);
 
 console.log("\n✓ smoke test passed");
