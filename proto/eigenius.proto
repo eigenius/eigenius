@@ -71,6 +71,13 @@ service EigeniusKernel {
   // transitions to Cancelling; a fully-async evaluator (9b-iii.4)
   // picks this up between IO dispatches and unwinds.
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Walk the layer chain and return a graph (nodes + edges) suitable
+  // for the notebook's layer-stack visualisation (D22 §4.2). The
+  // shape is renderer-agnostic — both the MVP `LayerStackView` (plain
+  // JSX boxes-and-arrows) and the Phase 5 full-topology graph
+  // (`@xyflow/react`) consume the same response.
+  rpc LayerTopology(LayerTopologyRequest) returns (LayerTopologyResponse);
 }
 
 // --- Load ---
@@ -345,4 +352,81 @@ message ValidationError {
   string rule = 3;
   string message = 4;
   string severity = 5;
+}
+
+// --- LayerTopology (D22 §4.2) ---
+
+message LayerTopologyRequest {
+  // Optional hex-encoded LayerId to root the walk at a specific layer
+  // instead of the session's active top (D21 §3.6 convention). Empty =
+  // active top.
+  string root_layer = 1;
+
+  // Maximum walk depth, counted in parent-pointer hops from `root_layer`.
+  // 0 (the default) means unlimited; the walker traverses the full chain.
+  uint32 max_depth = 2;
+
+  // When true, the walker emits a node per resource (any class). When
+  // false (the default), only Class / Property / Institution resources
+  // become nodes; ordinary instance resources are aggregated into per-
+  // layer counts in the layer node's `attrs`. The MVP `LayerStackView`
+  // sets this false; the Phase 5 full-topology graph sets it true.
+  bool include_resources = 3;
+}
+
+message LayerTopologyResponse {
+  repeated TopologyNode nodes = 1;
+  repeated TopologyEdge edges = 2;
+}
+
+message TopologyNode {
+  // For LAYER nodes: hex-encoded LayerId. For everything else: the IRI.
+  string id = 1;
+  NodeKind kind = 2;
+  // Short label for the renderer. For Class / Property / Institution:
+  // the resource's `core:short_name` if present, else the local IRI tail.
+  // For LAYER: the layer's `name` (per `Layer::name()`).
+  string label = 3;
+  // Free-form metadata for the renderer. For LAYER nodes: includes
+  // `class_count`, `property_count`, `resource_count`, `institution_count`
+  // when `include_resources=false`. For Class / Property: may include
+  // `description`, `data_type` (for Property), etc.
+  map<string, string> attrs = 4;
+}
+
+enum NodeKind {
+  NODE_KIND_UNSPECIFIED = 0;
+  NODE_KIND_LAYER = 1;
+  NODE_KIND_CLASS = 2;
+  NODE_KIND_PROPERTY = 3;
+  NODE_KIND_RESOURCE = 4;
+  NODE_KIND_INSTITUTION = 5;
+}
+
+message TopologyEdge {
+  string source = 1;        // node id
+  string target = 2;        // node id
+  EdgeKind kind = 3;
+  map<string, string> attrs = 4;
+}
+
+enum EdgeKind {
+  EDGE_KIND_UNSPECIFIED = 0;
+  EDGE_KIND_PARENT_LAYER = 1;       // child layer → parent layer
+  EDGE_KIND_IS_A = 2;               // resource → class
+  EDGE_KIND_SUBCLASS_OF = 3;        // class → parent class
+  EDGE_KIND_REQUIRES = 4;           // class → required property
+  EDGE_KIND_RECOMMENDS = 5;         // class → recommended property
+  EDGE_KIND_PROPERTY_REF = 6;       // property → referenced class (via class_types)
+  EDGE_KIND_INSTITUTION_DECLARES = 7; // institution → declared class
+}
+
+// --- NotebookService (D22 §3.2) ---
+
+// Browser-facing service. Initially contains only `LayerTopology` as a
+// thin proxy over the kernel. Future browser-specific RPCs that don't
+// fit the kernel's machine-to-machine surface will join this service
+// without touching `EigeniusKernel`.
+service NotebookService {
+  rpc LayerTopology(LayerTopologyRequest) returns (LayerTopologyResponse);
 }
