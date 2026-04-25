@@ -468,10 +468,10 @@ because EigonClass never unfolds to expose a negative occurrence.
 
 ## 15. References
 
-- `references/nanoda_lib/src/inductive.rs` — positivity checking
+- [nanoda_lib `src/inductive.rs`](https://github.com/ammkrn/nanoda_lib/blob/main/src/inductive.rs) — positivity checking
   (lines 666-787), recursor derivation (lines 922-1311), iota reduction
   (lines 1137-1170)
-- `references/type_checking_in_lean4/src/declarations/inductive.md` —
+- [*Type Checking in Lean 4*, Inductive Types](https://ammkrn.github.io/type_checking_in_lean4/declarations/inductive.html) —
   Lean 4 inductive type specification
 - `docs/design/d11-codata-streams.md` — precedent for adding type forms
   to the Mini-TT kernel
