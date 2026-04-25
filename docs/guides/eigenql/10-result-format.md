@@ -85,14 +85,16 @@ RETURN [Prediction] {
 
 Produces (conceptually) four resources:
 
+Eigon-JSON uses full property IRIs as keys; `@id` is the only reserved short key. This convention is inherited from [JSON-AD](https://docs.atomicdata.dev/), the JSON serialization of Atomic Data from which Eigon-JSON descends ([D1 §1.1–1.2](../../design/d1-eigon-serialization-format.md)).
+
 **Property 1: `name` column**
 
 ```json
 {
     "@id": "urn:eigenius:query:gen:3f7a…:row:name",
-    "is_a": ["urn:eigenius:core:Property"],
-    "short_name": "name",
-    "data_type": "urn:eigenius:core:string"
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
 }
 ```
 
@@ -105,34 +107,34 @@ Same shape, different IRI and short name.
 ```json
 {
     "@id": "urn:eigenius:query:gen:3f7a…:row_class",
-    "is_a": ["urn:eigenius:core:Class"],
-    "short_name": "ResultRow",
-    "subclass_of": ["urn:eigenius:example:Prediction"],
-    "requires": [
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "ResultRow",
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:example:Prediction"],
+    "urn:eigenius:core:requires": [
         "urn:eigenius:query:gen:3f7a…:row:name",
         "urn:eigenius:query:gen:3f7a…:row:breed"
     ]
 }
 ```
 
-The row class inherits from the classes named in `RETURN [Prediction]` via `subclass_of` and requires each result property.
+The row class inherits from the classes named in `RETURN [Prediction]` via `urn:eigenius:core:subclass_of` and requires each result property.
 
 **ResultSet**
 
 ```json
 {
     "@id": "urn:eigenius:query:gen:3f7a…:result",
-    "is_a": ["urn:eigenius:query:ResultSet"],
-    "result_class": "urn:eigenius:query:gen:3f7a…:row_class",
-    "row_count": 2,
-    "rows": [
+    "urn:eigenius:core:is_a": ["urn:eigenius:query:ResultSet"],
+    "urn:eigenius:query:result_class": "urn:eigenius:query:gen:3f7a…:row_class",
+    "urn:eigenius:query:row_count": 2,
+    "urn:eigenius:query:rows": [
         {
-            "is_a": ["urn:eigenius:query:gen:3f7a…:row_class"],
+            "urn:eigenius:core:is_a": ["urn:eigenius:query:gen:3f7a…:row_class"],
             "urn:eigenius:query:gen:3f7a…:row:name": "Rex",
             "urn:eigenius:query:gen:3f7a…:row:breed": "German Shepherd"
         },
         {
-            "is_a": ["urn:eigenius:query:gen:3f7a…:row_class"],
+            "urn:eigenius:core:is_a": ["urn:eigenius:query:gen:3f7a…:row_class"],
             "urn:eigenius:query:gen:3f7a…:row:name": "Buddy",
             "urn:eigenius:query:gen:3f7a…:row:breed": "Golden Retriever"
         }
@@ -170,9 +172,9 @@ The minimal match-only result:
 ```json
 {
     "@id": "urn:eigenius:query:gen:3f7a…:result",
-    "is_a": ["urn:eigenius:query:ResultSet"],
-    "matched": true,
-    "row_count": 5
+    "urn:eigenius:core:is_a": ["urn:eigenius:query:ResultSet"],
+    "urn:eigenius:query:matched": true,
+    "urn:eigenius:query:row_count": 5
 }
 ```
 
