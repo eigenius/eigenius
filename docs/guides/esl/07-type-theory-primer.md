@@ -96,6 +96,8 @@ Codata is what makes infinite streams, transducers, and resumable processes repr
 
 ## 7.6. Sized types — termination and productivity by typing
 
+Sized types in Eigenius are inspired by the design Andreas Abel pioneered in [**Agda**](https://agda.readthedocs.io/en/latest/language/sized-types.html) and prototyped in [**MiniAgda**](https://hackage.haskell.org/package/MiniAgda). The original treatment appears in Abel's paper *MiniAgda: Integrating Sized and Dependent Types* (2010); the implementation is documented at [github.com/andreasabel/MiniAgda](https://github.com/andreasabel/MiniAgda). The kernel's [`sized_rigid.rs`](../../../kernel/src/nbe/sized_rigid.rs) is a direct port of MiniAgda's `TreeShapedOrder.hs`, and the dual-solver pattern (Warshall for meta-variables + TSO for rigid hypotheses) follows MiniAgda's `TCM.hs`.
+
 The kernel has first-class support for **size variables** — a separate kind from `Set`/`Type(n)`:
 
 ```rust
@@ -104,7 +106,7 @@ Exp::SizeInf                   // ∞ — the largest size
 Exp::SizedPi { patt, upper, body }  // bounded binder { j < upper } → body
 ```
 
-Sizes form a partial order. `SizedPi { j < i }. body(j)` says "for any size `j` strictly less than `i`, the body has type `body(j)`". When you supply `j`, the kernel verifies `j < i` — a hypothesis tracked via the **TSO rigid-hypothesis solver** ([D19 §3](../../design/d19-inductive-types.md)).
+Sizes form a partial order. `SizedPi { j < i }. body(j)` says "for any size `j` strictly less than `i`, the body has type `body(j)`". When you supply `j`, the kernel verifies `j < i` — a hypothesis tracked via the **TSO** (Tree-Shaped Order) rigid-hypothesis solver, the data structure ported from MiniAgda ([D19 §3](../../design/d19-inductive-types.md)).
 
 This is the foundation of:
 
@@ -173,6 +175,9 @@ These two are the only kernel `Val` constructs that depend on layer state. Every
 - [`kernel/src/nbe/term.rs`](../../../kernel/src/nbe/term.rs) and [`kernel/src/nbe/val.rs`](../../../kernel/src/nbe/val.rs): the AST shapes for the kernel's terms and values.
 - [nanoda_lib](https://github.com/ammkrn/nanoda_lib) — Chris Bailey's Lean 4 kernel implementation in Rust, which influenced the inductive-type design. The same library Eigenius integrates as the Lean institution checker (see [`lean-4-as-institution.md` §8.1](../../design/lean-4-as-institution.md)).
 - [*Type Checking in Lean 4*](https://ammkrn.github.io/type_checking_in_lean4/) — the design notes for Lean's kernel, accompanying nanoda_lib. Useful background on universe checking, positivity, and recursor derivation.
+- Abel, A. (2010). [**MiniAgda: Integrating Sized and Dependent Types**](https://arxiv.org/abs/1012.4896). In *Workshop on Partiality and Recursion in Interactive Theorem Provers (PAR 2010)*, EPTCS 43, pp. 14–28. <https://doi.org/10.4204/EPTCS.43.2>. The foundational paper for the kernel's sized-types treatment — bounded size binders, strict-inequality hypotheses, sized inductives and codata for termination and productivity by typing.
+- [**MiniAgda**](https://github.com/andreasabel/MiniAgda) (Andreas Abel) — the prototype implementation accompanying the paper. The kernel's [`sized_rigid.rs`](../../../kernel/src/nbe/sized_rigid.rs) is a direct port of MiniAgda's `TreeShapedOrder.hs`, and the dual-solver pattern (Warshall for meta-variables + TSO for rigid hypotheses) follows MiniAgda's `TCM.hs`. Available on [Hackage](https://hackage.haskell.org/package/MiniAgda).
+- [**Agda — Sized Types**](https://agda.readthedocs.io/en/latest/language/sized-types.html) — the production-language documentation for the same machinery in Agda. Useful background for the *user-facing* shape of sized inductives and codata, with pedagogical examples.
 
 ---
 
