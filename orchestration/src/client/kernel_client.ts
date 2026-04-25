@@ -30,6 +30,8 @@ import {
   type HealthResponse,
   InspectRequestSchema,
   type InspectResponse,
+  LayerTopologyRequestSchema,
+  type LayerTopologyResponse,
   LoadRequestSchema,
   type LoadResponse,
   QueryRequestSchema,
@@ -45,6 +47,7 @@ import {
 export type {
   HealthResponse,
   InspectResponse,
+  LayerTopologyResponse,
   LoadResponse,
   ReflectResponse,
   RunProgramResponse,
@@ -176,6 +179,30 @@ export class KernelClient {
   async health(): Promise<HealthResponse> {
     return await this.client.health(
       create(HealthRequestSchema, {}),
+    );
+  }
+
+  /**
+   * Walk the layer chain and return a topology graph (D22 §4.2). The
+   * orchestrator's NotebookService.LayerTopology proxies to this.
+   *
+   * @param rootLayer  Optional hex LayerId; empty = active top.
+   * @param maxDepth   0 = unlimited (default).
+   * @param includeResources When true, emits a node per Resource (any class).
+   *   When false (default), only Class / Property / Institution become nodes;
+   *   ordinary instances are aggregated into per-layer counts.
+   */
+  async layerTopology(
+    rootLayer = "",
+    maxDepth = 0,
+    includeResources = false,
+  ): Promise<LayerTopologyResponse> {
+    return await this.client.layerTopology(
+      create(LayerTopologyRequestSchema, {
+        rootLayer,
+        maxDepth,
+        includeResources,
+      }),
     );
   }
 }

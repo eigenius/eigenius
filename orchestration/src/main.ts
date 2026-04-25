@@ -91,8 +91,8 @@ function main() {
     `Registered components: ${components.listComponents().join(", ")}`,
   );
 
-  // Start the orchestrator server (gRPC + health)
-  startServer(components, ORCHESTRATOR_PORT, wasm);
+  // Start the orchestrator server (gRPC + NotebookService + health)
+  startServer(components, client, ORCHESTRATOR_PORT, wasm);
 }
 
 main();

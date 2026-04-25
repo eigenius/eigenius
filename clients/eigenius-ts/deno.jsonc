@@ -1,0 +1,46 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// @eigenius/client — TypeScript SDK for the Eigenius platform.
+//
+// Browser-side and Deno-side consumers; uses Connect-Web transport
+// against the orchestrator's NotebookService and EigeniusKernel routes.
+// See D22 §5.
+
+{
+  "name": "@eigenius/client",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "tasks": {
+    "smoke": "deno run --allow-net --allow-env examples/smoke-test.ts",
+    "lint": "deno lint",
+    "fmt": "deno fmt --check"
+  },
+  "imports": {
+    "@bufbuild/protobuf": "npm:@bufbuild/protobuf@^2",
+    "@connectrpc/connect": "npm:@connectrpc/connect@^2",
+    "@connectrpc/connect-web": "npm:@connectrpc/connect-web@^2"
+  },
+  "lint": {
+    "exclude": ["generated/"]
+  },
+  "fmt": {
+    "exclude": ["generated/"]
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}
