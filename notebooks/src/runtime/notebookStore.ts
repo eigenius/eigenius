@@ -15,16 +15,23 @@
 /**
  * Notebook runtime state — Zustand store (D22 §6.4).
  *
- * Tracks per-cell run state, per-cell output, and the active layer
- * the session has committed to. The store is *runtime-only*: cell
- * sources stay in the parsed `NotebookJson` (Phase 4 will lift them
- * into the store too, once cells are editable). Outputs are not
- * persisted across reloads; running a cell re-derives them.
+ * As of Phase 4a the store owns the notebook's editable contents (cells
+ * and meta) in addition to per-cell run state, outputs, and the active
+ * layer. The on-disk JSON is the transport — it gets parsed once on load
+ * and serialised on save; everything in between lives here.
+ *
+ * Outputs are not persisted across reloads; running a cell re-derives them.
  */
 
 import { create } from "zustand";
 import type { Eigen } from "@eigenius/client";
-import type { CellJson } from "../persistence/notebook-format";
+import type {
+  CellJson,
+  CellType,
+  NotebookJson,
+  NotebookMetaJson,
+} from "../persistence/notebook-format";
+import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
 
 export type CellRunState = "idle" | "running" | "done" | "error";
 
@@ -61,29 +68,72 @@ export type CellOutput =
   };
 
 export interface NotebookState {
+  // ---- Document ----
+  meta: NotebookMetaJson;
+  cells: readonly CellJson[];
+
+  // ---- Runtime ----
   cellStates: ReadonlyMap<string, CellRunState>;
   cellOutputs: ReadonlyMap<string, CellOutput>;
   /**
    * Hex `LayerId` of the most-recently-committed layer in this session,
-   * or `null` if no ESL cell has been loaded yet. The kernel returns
-   * each new layer ID on Load; we track it here so subsequent Inspect /
-   * Query calls can pin reads to the expected top.
+   * or `null` if no ESL cell has been loaded yet. Display-only — queries
+   * rely on the orchestrator's session active top, not on this value
+   * (D21 §3.6).
    */
   activeLayer: string | null;
 
+  // ---- Run actions ----
   runCell: (eigen: Eigen, cell: CellJson) => Promise<void>;
-  runAll: (eigen: Eigen, cells: readonly CellJson[]) => Promise<void>;
+  runAll: (eigen: Eigen) => Promise<void>;
   resetOutputs: () => void;
+
+  // ---- Document actions (Phase 4a) ----
+  loadNotebook: (json: NotebookJson) => void;
+  exportNotebook: () => NotebookJson;
+  updateMeta: (partial: Partial<NotebookMetaJson>) => void;
+  updateCellSource: (cellId: string, source: string) => void;
+  insertCell: (afterCellId: string | null, type: CellType) => string;
+  deleteCell: (cellId: string) => void;
+  moveCell: (cellId: string, direction: "up" | "down") => void;
 }
 
 function copyMap<K, V>(map: ReadonlyMap<K, V>): Map<K, V> {
   return new Map(map);
 }
 
+function newCellId(): string {
+  // crypto.randomUUID is available in all modern browsers + Deno.
+  return crypto.randomUUID();
+}
+
+function defaultSourceFor(type: CellType): string {
+  switch (type) {
+    case "markdown":
+      return "# New cell\n\nWrite Markdown here.";
+    case "esl":
+      return "// ESL declarations or program. Click Run to compile + commit.\n";
+    case "eigenql":
+      return "// EigenQL query. Run against the active layer chain.\n\n";
+    case "typescript":
+      return "// TypeScript orchestration cell (Phase 4b sandbox).\n";
+  }
+}
+
+const EMPTY_NOTEBOOK: { meta: NotebookMetaJson; cells: readonly CellJson[] } = {
+  meta: {},
+  cells: [],
+};
+
 export const useNotebookStore = create<NotebookState>((set, get) => ({
+  meta: EMPTY_NOTEBOOK.meta,
+  cells: EMPTY_NOTEBOOK.cells,
+
   cellStates: new Map(),
   cellOutputs: new Map(),
   activeLayer: null,
+
+  // ---- Run actions ----
 
   async runCell(eigen, cell) {
     const setState = (state: CellRunState) => {
@@ -102,12 +152,8 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       const output = await executeCell(eigen, cell);
       setOutput(output);
       // Loads update the active layer for display purposes only — the
-      // notebook does NOT pin downstream queries to this layer ID.
-      // Reading at an explicit layer requires a persistent backend
-      // (D21 §3.6); the docker stack runs without one. The orchestrator
-      // holds a single gRPC connection to the kernel, so the kernel's
-      // session active top advances naturally as cells commit, and
-      // queries with empty `at_layer` see the latest state.
+      // notebook does NOT pin downstream queries to this layer ID
+      // (in-memory backend can't resolve explicit layer IDs).
       if (output.kind === "load" && output.layerId) {
         set({ activeLayer: output.layerId });
       }
@@ -119,8 +165,8 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     }
   },
 
-  async runAll(eigen, cells) {
-    for (const cell of cells) {
+  async runAll(eigen) {
+    for (const cell of get().cells) {
       // Markdown cells have nothing to run — render-only.
       if (cell.type === "markdown") continue;
       await get().runCell(eigen, cell);
@@ -140,7 +186,88 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       activeLayer: null,
     });
   },
+
+  // ---- Document actions ----
+
+  loadNotebook(json) {
+    set({
+      meta: json.meta ?? {},
+      cells: json.cells,
+      // Reset all runtime state when a new notebook loads.
+      cellStates: new Map(),
+      cellOutputs: new Map(),
+      activeLayer: null,
+    });
+  },
+
+  exportNotebook() {
+    const { meta, cells } = get();
+    return {
+      format_version: CURRENT_FORMAT_VERSION,
+      meta,
+      cells: cells.map((c) => ({ id: c.id, type: c.type, source: c.source })),
+    };
+  },
+
+  updateMeta(partial) {
+    set((prev) => ({ meta: { ...prev.meta, ...partial } }));
+  },
+
+  updateCellSource(cellId, source) {
+    set((prev) => ({
+      cells: prev.cells.map((c) => c.id === cellId ? { ...c, source } : c),
+    }));
+  },
+
+  insertCell(afterCellId, type) {
+    const id = newCellId();
+    const newCell: CellJson = {
+      id,
+      type,
+      source: defaultSourceFor(type),
+    };
+    set((prev) => {
+      if (afterCellId === null) {
+        return { cells: [newCell, ...prev.cells] };
+      }
+      const idx = prev.cells.findIndex((c) => c.id === afterCellId);
+      if (idx < 0) {
+        // Unknown anchor — append at the end rather than silently failing.
+        return { cells: [...prev.cells, newCell] };
+      }
+      const next = prev.cells.slice();
+      next.splice(idx + 1, 0, newCell);
+      return { cells: next };
+    });
+    return id;
+  },
+
+  deleteCell(cellId) {
+    set((prev) => ({
+      cells: prev.cells.filter((c) => c.id !== cellId),
+      cellStates: dropKey(prev.cellStates, cellId),
+      cellOutputs: dropKey(prev.cellOutputs, cellId),
+    }));
+  },
+
+  moveCell(cellId, direction) {
+    set((prev) => {
+      const idx = prev.cells.findIndex((c) => c.id === cellId);
+      if (idx < 0) return {};
+      const target = direction === "up" ? idx - 1 : idx + 1;
+      if (target < 0 || target >= prev.cells.length) return {};
+      const next = prev.cells.slice();
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return { cells: next };
+    });
+  },
 }));
+
+function dropKey<K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> {
+  const next = copyMap(map);
+  next.delete(key);
+  return next;
+}
 
 /**
  * Dispatch a cell's source against the active session, returning a
@@ -176,9 +303,6 @@ async function executeCell(
       };
     }
     case "eigenql": {
-      // Empty atLayer = orchestrator's session active top (which the
-      // gRPC connection keeps in sync as preceding cells commit). Do
-      // not pass an explicit layer ID here — see runCell comment.
       const resp = await eigen.query(cell.source);
       if (!resp.success) {
         return {
@@ -189,11 +313,10 @@ async function executeCell(
       return { kind: "resultset", document: resp.document };
     }
     case "typescript": {
-      // Phase 4 wires up sandboxed TS execution (D22 §6.8). For Phase
-      // 3 we surface a clear stub instead of a silent no-op.
+      // Phase 4b wires up sandboxed TS execution (D22 §6.8).
       return {
         kind: "error",
-        message: "TypeScript cell execution is a Phase 4 deliverable.",
+        message: "TypeScript cell execution is a Phase 4b deliverable.",
       };
     }
     case "markdown":
