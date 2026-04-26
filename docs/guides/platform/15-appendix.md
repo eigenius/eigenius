@@ -1,6 +1,6 @@
-# 13. Appendix
+# 15. Appendix
 
-## 13.1. Environment variables
+## 15.1. Environment variables
 
 | Variable | Default | Used by | Effect |
 |---|---|---|---|
@@ -14,7 +14,7 @@
 
 CLI commands also accept `--endpoint <url>` as an alternative to setting an env var; the flag takes precedence.
 
-## 13.2. File and directory locations
+## 15.2. File and directory locations
 
 | Location | Contents |
 |---|---|
@@ -26,14 +26,14 @@ CLI commands also accept `--endpoint <url>` as an alternative to setting an env 
 | `~/.cache/deno/` | Deno-cached TypeScript dependencies |
 | `<rocksdb-path>/` (e.g. `/var/lib/eigenius`) | Persisted state when `serve --db` is used |
 
-## 13.3. Default ports
+## 15.3. Default ports
 
 | Port | Service | Configuration |
 |---|---|---|
 | 50051 | Kernel gRPC | `eigenius serve --port <N>` |
 | 8080 | Orchestrator HTTP | `EIGENIUS_ORCHESTRATOR_PORT=<N>` |
 
-## 13.4. The four embedded ontology layers
+## 15.4. The four embedded ontology layers
 
 Loaded at every kernel startup; their parent-pointer chain forms the bootstrap:
 
@@ -46,7 +46,7 @@ Loaded at every kernel startup; their parent-pointer chain forms the bootstrap:
 
 When `serve --db <path>` is used, a SHA-256 manifest of these is written on first start and verified on subsequent starts (drift refusal — see [chapter 6](06-database-management.md) §6.3).
 
-## 13.5. Source index — implementation files referenced in this guide
+## 15.5. Source index — implementation files referenced in this guide
 
 ### CLI
 
@@ -108,7 +108,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 - [`justfile`](../../../justfile) — task recipes (`build`, `test`, `check`, `up`, `serve`, etc.)
 
-## 13.6. Related documents
+## 15.6. Related documents
 
 - [**ESL user guide**](../esl/README.md) — the surface language for ontologies and programs
 - [**EigenQL user guide**](../eigenql/README.md) — the query language
@@ -125,7 +125,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 The full design-document set lives in [`docs/design/`](../../design/).
 
-## 13.7. Phase status
+## 15.7. Phase status
 
 The platform is currently complete through Phase 11e (see top-level [README.md](../../../README.md)):
 

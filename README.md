@@ -25,9 +25,9 @@ For most users, the notebook is the most accessible way to use the platform. It 
 
 If you have the docker stack up (`docker compose up -d`), the notebook is already there — it's bundled into the orchestrator image at build time and serves alongside the RPC paths on the same origin. Open the URL above and the patent-analysis demo loads on first mount; click **Run all** and watch ESL compile + commit a layer, EigenQL produce a result table, and the program-run cell drive the kernel through a two-step LLM pipeline (`CompleteJson` → structured patent analysis, `CompleteText` → plain-language summary) with the resulting brief and an interactive trace tree rendered side-by-side.
 
-See **[chapter 14 — Notebook](docs/guides/platform/14-notebook.md)** for the full reference.
+See **[chapter 13 — Notebook](docs/guides/platform/13-notebook.md)** for the full reference.
 
-The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/)) is usable programmatically from any TypeScript runtime — see **[chapter 15 — TypeScript SDK](docs/guides/platform/15-typescript-sdk.md)**.
+The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/)) is usable programmatically from any TypeScript runtime — see **[chapter 14 — TypeScript SDK](docs/guides/platform/14-typescript-sdk.md)**.
 
 ## User guides
 
