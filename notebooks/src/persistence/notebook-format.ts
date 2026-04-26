@@ -28,7 +28,8 @@ export type CellType =
   | "esl"
   | "eigenql"
   | "typescript"
-  | "program-run";
+  | "program-run"
+  | "chart";
 
 /** Source-bearing cell types (markdown, esl, eigenql, typescript). */
 export interface SourceCellJson {
@@ -54,7 +55,44 @@ export interface ProgramRunCellJson {
   input_iris: string[];
 }
 
-export type CellJson = SourceCellJson | ProgramRunCellJson;
+/**
+ * Supported chart kinds for `ChartCellJson` (Phase 5d). Each maps to
+ * a Fluent `@fluentui/react-charts` component; the executor pivots
+ * the EigenQL ResultSet into the shape that component expects.
+ */
+export type ChartKind =
+  | "grouped-bar"  // GroupedVerticalBarChart
+  | "vertical-bar" // VerticalBarChart
+  | "horizontal-bar" // HorizontalBarChart
+  | "donut"        // DonutChart
+  | "line"         // LineChart
+  | "area";        // AreaChart
+
+/**
+ * Chart cell (Phase 5d) — runs an EigenQL query and renders the
+ * result as a Fluent chart. Form-based; no TypeScript required for
+ * the common "chart this query" case.
+ *
+ * `x_column`, `y_column`, and `series_column` reference the short-
+ * names from the query's `RETURN` clause. Single-axis charts
+ * (donut) use `x_column` for the legend label and `y_column` for
+ * the slice value; line/bar charts use `x_column` for the x-axis
+ * and `y_column` for the y-axis. `series_column` is optional and
+ * pivots the rows into one series per distinct value in that column
+ * — required for `grouped-bar`, ignored by `donut`.
+ */
+export interface ChartCellJson {
+  id: string;
+  type: "chart";
+  query: string;
+  chart_kind: ChartKind;
+  x_column: string;
+  y_column: string;
+  series_column?: string;
+  title?: string;
+}
+
+export type CellJson = SourceCellJson | ProgramRunCellJson | ChartCellJson;
 
 export interface NotebookMetaJson {
   title?: string;
@@ -131,6 +169,59 @@ function parseCell(value: unknown, index: number): CellJson {
     }
     return { id, type, program_iri, input_iris };
   }
+  if (type === "chart") {
+    const query = obj.query;
+    const chart_kind = obj.chart_kind;
+    const x_column = obj.x_column;
+    const y_column = obj.y_column;
+    const series_column = obj.series_column;
+    const title = obj.title;
+    if (typeof query !== "string") {
+      throw new Error(`notebook: cells[${index}].query must be a string`);
+    }
+    if (
+      chart_kind !== "grouped-bar" &&
+      chart_kind !== "vertical-bar" &&
+      chart_kind !== "horizontal-bar" &&
+      chart_kind !== "donut" &&
+      chart_kind !== "line" &&
+      chart_kind !== "area"
+    ) {
+      throw new Error(
+        `notebook: cells[${index}].chart_kind must be one of grouped-bar|vertical-bar|horizontal-bar|donut|line|area`,
+      );
+    }
+    if (typeof x_column !== "string") {
+      throw new Error(
+        `notebook: cells[${index}].x_column must be a string`,
+      );
+    }
+    if (typeof y_column !== "string") {
+      throw new Error(
+        `notebook: cells[${index}].y_column must be a string`,
+      );
+    }
+    if (series_column !== undefined && typeof series_column !== "string") {
+      throw new Error(
+        `notebook: cells[${index}].series_column must be a string when present`,
+      );
+    }
+    if (title !== undefined && typeof title !== "string") {
+      throw new Error(
+        `notebook: cells[${index}].title must be a string when present`,
+      );
+    }
+    return {
+      id,
+      type,
+      query,
+      chart_kind,
+      x_column,
+      y_column,
+      ...(series_column !== undefined ? { series_column } : {}),
+      ...(title !== undefined ? { title } : {}),
+    };
+  }
   if (
     type !== "markdown" &&
     type !== "esl" &&
@@ -138,7 +229,7 @@ function parseCell(value: unknown, index: number): CellJson {
     type !== "typescript"
   ) {
     throw new Error(
-      `notebook: cells[${index}].type must be one of markdown|esl|eigenql|typescript|program-run`,
+      `notebook: cells[${index}].type must be one of markdown|esl|eigenql|typescript|program-run|chart`,
     );
   }
   const source = obj.source;

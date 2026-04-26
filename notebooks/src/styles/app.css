@@ -64,3 +64,15 @@ body {
   background: var(--colorNeutralBackground3, #f5f5f5);
   font-weight: 600;
 }
+
+/*
+ * @fluentui/react-charts 9.3.x ships its callout content root with
+ * `overflow: hidden` and an implicit grid height that's just slightly
+ * shorter than the y-value typography (`subtitle2Stronger`), which
+ * clips the descender of digits like 0/3/9. Loosen the clip and add
+ * a hair of vertical padding so the number renders fully.
+ */
+.fui-cart__calloutContentRoot {
+  overflow: visible !important;
+  padding: 4px 0;
+}

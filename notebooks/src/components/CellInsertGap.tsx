@@ -112,6 +112,7 @@ export function CellInsertGap({ afterCellId }: CellInsertGapProps) {
               <MenuItem onClick={() => insert("program-run")}>
                 Program run
               </MenuItem>
+              <MenuItem onClick={() => insert("chart")}>Chart</MenuItem>
             </MenuList>
           </MenuPopover>
         </Menu>

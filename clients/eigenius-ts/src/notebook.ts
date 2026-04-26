@@ -71,6 +71,7 @@ const CELL_TYPE_IRI: Record<CellType, string> = {
   eigenql: `${NB_NS}:eigenql`,
   typescript: `${NB_NS}:typescript`,
   "program-run": `${NB_NS}:program-run`,
+  chart: `${NB_NS}:chart`,
 };
 
 const IRI_TO_CELL_TYPE: Record<string, CellType> = {
@@ -79,10 +80,17 @@ const IRI_TO_CELL_TYPE: Record<string, CellType> = {
   [`${NB_NS}:eigenql`]: "eigenql",
   [`${NB_NS}:typescript`]: "typescript",
   [`${NB_NS}:program-run`]: "program-run",
+  [`${NB_NS}:chart`]: "chart",
 };
 
 const PROGRAM_IRI_PROP = `${NB_NS}:program_iri`;
 const INPUT_IRIS_PROP = `${NB_NS}:input_iris`;
+const CHART_QUERY_PROP = `${NB_NS}:chart_query`;
+const CHART_KIND_PROP = `${NB_NS}:chart_kind`;
+const CHART_X_COLUMN_PROP = `${NB_NS}:chart_x_column`;
+const CHART_Y_COLUMN_PROP = `${NB_NS}:chart_y_column`;
+const CHART_SERIES_COLUMN_PROP = `${NB_NS}:chart_series_column`;
+const CHART_TITLE_PROP = `${NB_NS}:chart_title`;
 
 // Mirror of NotebookJson / CellJson in notebooks/src/persistence/notebook-format.ts.
 // The SDK keeps its own copy so it doesn't depend on the notebook UI package.
@@ -92,7 +100,16 @@ export type CellType =
   | "esl"
   | "eigenql"
   | "typescript"
-  | "program-run";
+  | "program-run"
+  | "chart";
+
+export type ChartKind =
+  | "grouped-bar"
+  | "vertical-bar"
+  | "horizontal-bar"
+  | "donut"
+  | "line"
+  | "area";
 
 export interface SourceCellJson {
   /** UUID assigned by the editor — NOT used in the cell's content-addressed IRI. */
@@ -108,7 +125,18 @@ export interface ProgramRunCellJson {
   input_iris: string[];
 }
 
-export type CellJson = SourceCellJson | ProgramRunCellJson;
+export interface ChartCellJson {
+  id: string;
+  type: "chart";
+  query: string;
+  chart_kind: ChartKind;
+  x_column: string;
+  y_column: string;
+  series_column?: string;
+  title?: string;
+}
+
+export type CellJson = SourceCellJson | ProgramRunCellJson | ChartCellJson;
 
 export interface NotebookMetaJson {
   title?: string;
@@ -233,6 +261,23 @@ export function resourcesToNotebookJson(
         input_iris: asStringArray(cell[INPUT_IRIS_PROP]),
       };
     }
+    if (cellType === "chart") {
+      const seriesRaw = cell[CHART_SERIES_COLUMN_PROP];
+      const titleRaw = cell[CHART_TITLE_PROP];
+      const chartKind = String(
+        cell[CHART_KIND_PROP] ?? "vertical-bar",
+      ) as ChartKind;
+      return {
+        id,
+        type: cellType,
+        query: String(cell[CHART_QUERY_PROP] ?? ""),
+        chart_kind: chartKind,
+        x_column: String(cell[CHART_X_COLUMN_PROP] ?? ""),
+        y_column: String(cell[CHART_Y_COLUMN_PROP] ?? ""),
+        ...(typeof seriesRaw === "string" ? { series_column: seriesRaw } : {}),
+        ...(typeof titleRaw === "string" ? { title: titleRaw } : {}),
+      };
+    }
     return {
       id,
       type: cellType,
@@ -270,13 +315,28 @@ async function cellIri(cell: CellJson): Promise<string> {
   // Canonical hash input — fixed key order per cell shape.
   // Source-bearing cells: { cell_type, source }
   // Program-run cells:    { cell_type, program_iri, input_iris }
-  const canonical = cell.type === "program-run"
-    ? JSON.stringify({
+  // Chart cells:          { cell_type, query, chart_kind, x_column,
+  //                         y_column, series_column, title }
+  let canonical: string;
+  if (cell.type === "program-run") {
+    canonical = JSON.stringify({
       cell_type: cell.type,
       program_iri: cell.program_iri,
       input_iris: cell.input_iris,
-    })
-    : JSON.stringify({ cell_type: cell.type, source: cell.source });
+    });
+  } else if (cell.type === "chart") {
+    canonical = JSON.stringify({
+      cell_type: cell.type,
+      query: cell.query,
+      chart_kind: cell.chart_kind,
+      x_column: cell.x_column,
+      y_column: cell.y_column,
+      series_column: cell.series_column ?? null,
+      title: cell.title ?? null,
+    });
+  } else {
+    canonical = JSON.stringify({ cell_type: cell.type, source: cell.source });
+  }
   const hash = await sha256Hex(canonical);
   return `${NB_NS}:cell:${hash}`;
 }
@@ -315,12 +375,26 @@ function makeCellResource(iri: string, cell: CellJson): EigonResource {
     "@id": iri,
     [IS_A]: [CELL_CLASS],
     [DESCRIPTION]: `${cell.type} cell`,
-    [SHORT_NAME]: iri.slice(`${NB_NS}:cell:`.length, `${NB_NS}:cell:`.length + 12),
+    [SHORT_NAME]: iri.slice(
+      `${NB_NS}:cell:`.length,
+      `${NB_NS}:cell:`.length + 12,
+    ),
     [CELL_TYPE_PROP]: CELL_TYPE_IRI[cell.type],
   };
   if (cell.type === "program-run") {
     base[PROGRAM_IRI_PROP] = cell.program_iri;
     base[INPUT_IRIS_PROP] = cell.input_iris;
+  } else if (cell.type === "chart") {
+    base[CHART_QUERY_PROP] = cell.query;
+    base[CHART_KIND_PROP] = cell.chart_kind;
+    base[CHART_X_COLUMN_PROP] = cell.x_column;
+    base[CHART_Y_COLUMN_PROP] = cell.y_column;
+    if (cell.series_column !== undefined) {
+      base[CHART_SERIES_COLUMN_PROP] = cell.series_column;
+    }
+    if (cell.title !== undefined) {
+      base[CHART_TITLE_PROP] = cell.title;
+    }
   } else {
     base[SOURCE_PROP] = cell.source;
   }

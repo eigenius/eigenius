@@ -42,9 +42,10 @@ function languageExtension(cellType: CellType): Extension[] {
     case "typescript":
       return [javascript({ jsx: false, typescript: true })];
     case "program-run":
-      // The CodeMirror editor isn't used for program-run cells (they
-      // render via ProgramRunCellEditor instead) — but to keep this
-      // switch exhaustive, return an empty extension list.
+    case "chart":
+      // The CodeMirror editor isn't used for program-run / chart
+      // cells (they render via their own form-based editors) — but
+      // to keep this switch exhaustive, return an empty extension list.
       return [];
   }
 }

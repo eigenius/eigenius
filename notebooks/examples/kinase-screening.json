@@ -11,7 +11,7 @@
     {
       "id": "a1b2c3d4-e5f6-4a78-9b0c-d1e2f3a4b5c6",
       "type": "markdown",
-      "source": "# Kinase Inhibitor Screening\n\nA small, **flat** drug-discovery dataset modelled after the assay-replicate scenario in [life-science-requirements.md §3](../../docs/design/life-science-requirements.md). Six compounds run against four kinase targets (CDK2 / CDK4 / CDK6 / EGFR) on three assay protocols (Kinase-Glo / ADP-Glo / TR-FRET), 24 IC₅₀ measurements with 95% confidence intervals.\n\n## What this notebook is for\n\n- **Today** it loads the ontology + data (cells 2–4) and queries them (cells 5–6). The query results render as Fluent DataGrids — rich enough to inspect manually, sufficient to verify the data is shaped correctly.\n- **In Phase 5** it gains chart cells (`@fluentui/react-charts`) for the IC₅₀ selectivity matrix, the protocol-throughput timeline, the scaffold distribution donut, and an `@xyflow/react` topology graph of `Compound ↔ AssayResult ↔ Target` relationships. The data is already shaped for those cells; the renderers are what's missing.\n\n## Why this scenario\n\nReal screening data has the shape `(compound, target, protocol) → (IC₅₀, CI, replicates, date, QC flag)` — naturally relational, naturally numeric, naturally time-stamped. Each chart type Fluent ships maps to a question a screening scientist actually asks:\n\n| Chart type | Question it answers |\n| --- | --- |\n| Bar (grouped) | Which compounds are most selective for CDK2 vs. EGFR? |\n| Bar with error bars | What are the 95% CIs on each IC₅₀? |\n| Donut | What fraction of QC-passing results came from each protocol? |\n| Line (cumulative) | Throughput per protocol over the screening campaign |\n| `xyflow` graph | The Compound ↔ Target ↔ Protocol relational structure |\n\nNo institutions, no fiber morphisms, no comorphisms — just typed resources with property references. ESL declares everything; the same query surface (EigenQL) drives every chart.\n"
+      "source": "# Kinase Inhibitor Screening\n\nA small, **flat** drug-discovery dataset modelled after the assay-replicate scenario in [life-science-requirements.md §3](../../docs/design/life-science-requirements.md). Six compounds run against four kinase targets (CDK2 / CDK4 / CDK6 / EGFR) on three assay protocols (Kinase-Glo / ADP-Glo / TR-FRET), 24 IC₅₀ measurements with 95% confidence intervals.\n\n## Notebook structure\n\n1. **Cells 2–4 — ontology + data.** ESL declares the four classes (`Compound`, `Target`, `AssayProtocol`, `AssayResult`) and instantiates 6 compounds, 4 targets, 3 protocols, and 24 results.\n2. **Cells 5–6 — EigenQL.** Selectivity matrix and QC-by-protocol breakdown rendered as Fluent DataGrids.\n3. **Cells 7–12 — charts.** One cell per Fluent chart kind (grouped-bar, donut, vertical-bar, horizontal-bar, line, area). Each is authored as a form-based **chart cell** — an EigenQL query plus axis bindings; no TypeScript scaffolding required.\n4. **Cell 13 — topology graph.** `@xyflow/react` rendering of the assay namespace's class/property graph, served by the kernel's layer-topology API.\n\n## Why this scenario\n\nReal screening data has the shape `(compound, target, protocol) → (IC₅₀, CI, replicates, date, QC flag)` — naturally relational, naturally numeric, naturally time-stamped. Each chart kind Fluent ships maps to a question a screening scientist actually asks:\n\n| Chart kind | Question it answers |\n| --- | --- |\n| Grouped bar | How does each compound's IC₅₀ profile compare across the four targets? |\n| Donut | What fraction of measurements passed QC? |\n| Vertical bar | Which target is most consistently inhibited (mean IC₅₀)? |\n| Horizontal bar | How do compounds rank by molecular weight? |\n| Line | What does each compound's selectivity curve across CDK targets look like? |\n| Area | How do the four scaffold families compare across CDK targets? |\n| `xyflow` graph | What's the structural shape of the assay ontology? |\n\nNo institutions, no fiber morphisms, no comorphisms — just typed resources with property references. ESL declares everything; the same query surface (EigenQL) drives every chart.\n"
     },
     {
       "id": "b2c3d4e5-f6a7-4b89-ac01-2e3f4a5b6c7d",
@@ -40,13 +40,60 @@
     },
     {
       "id": "071a8b9c-d0e1-4f34-9156-7d8e9f012345",
-      "type": "typescript",
-      "source": "// IC50 selectivity profile — grouped bar chart. One group per\n// compound; one bar per target within each group; bar height is\n// IC50 in nM (lower = more potent). The CDK-selective compounds\n// (EIG_0042, EIG_0117, EIG_0291, etc.) show short bars on their\n// preferred target and tall bars on EGFR; the EGFR-selective\n// EIG_0203 shows the inverse.\n//\n// `nb.rows(document)` decodes the ResultSet CBOR into plain objects\n// keyed by short_name; the cell then pivots into the\n// GroupedVerticalBarChartData shape.\n\nconst resp = await eigen.query(`\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:compound\":         ?c,\n    \"urn:eigenius:demo:assay:target\":           ?t,\n    \"urn:eigenius:demo:assay:ic50_nm\":          ?ic50,\n    \"urn:eigenius:demo:assay:passed_qc\":        ?qc\n},\n?c { \"urn:eigenius:demo:assay:compound_id\": ?compound_id },\n?t { \"urn:eigenius:demo:assay:target_name\": ?target_name }\nWHERE ?qc = true\nRETURN [] {\n    compound: ?compound_id,\n    target:   ?target_name,\n    ic50_nm:  ?ic50\n}\n`);\n\nconst rows = nb.rows(resp.document);\n\n// Pivot rows → groups keyed by compound, with a series entry per target.\nconst targetColors = {\n  CDK2: \"#5b88c5\",\n  CDK4: \"#37a172\",\n  CDK6: \"#a45fa1\",\n  EGFR: \"#cf6f1e\",\n};\nconst byCompound = new Map();\nfor (const row of rows) {\n  const c = String(row.compound);\n  if (!byCompound.has(c)) byCompound.set(c, []);\n  byCompound.get(c).push({\n    key: String(row.target),\n    legend: String(row.target),\n    data: Number(row.ic50_nm),\n    color: targetColors[String(row.target)],\n  });\n}\nconst data = Array.from(byCompound.entries())\n  .sort(([a], [b]) => a.localeCompare(b))\n  .map(([name, series]) => ({ name, series }));\n\nconsole.log(`charting ${rows.length} measurements across ${data.length} compounds`);\n\nreturn h(charts.GroupedVerticalBarChart, {\n  data,\n  height: 320,\n  width: 800,\n  yAxisTitle: \"IC₅₀ (nM)\",\n  xAxisTitle: \"Compound\",\n  chartTitle: \"IC₅₀ selectivity profile\",\n});\n"
+      "type": "chart",
+      "query": "// IC50 selectivity profile — grouped bar chart. One group per\n// compound; one bar per target within each group; bar height is\n// IC50 in nM (lower = more potent). CDK-selective compounds show\n// short bars on their preferred target and tall bars on EGFR; the\n// EGFR-selective EIG_0203 shows the inverse.\n\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:compound\":   ?c,\n    \"urn:eigenius:demo:assay:target\":     ?t,\n    \"urn:eigenius:demo:assay:ic50_nm\":    ?ic50,\n    \"urn:eigenius:demo:assay:passed_qc\":  ?qc\n},\n?c { \"urn:eigenius:demo:assay:compound_id\": ?compound_id },\n?t { \"urn:eigenius:demo:assay:target_name\": ?target_name }\nWHERE ?qc = true\nRETURN [] {\n    compound: ?compound_id,\n    target:   ?target_name,\n    ic50_nm:  ?ic50\n}\nORDER BY ?compound_id\n",
+      "chart_kind": "grouped-bar",
+      "x_column": "compound",
+      "y_column": "ic50_nm",
+      "series_column": "target",
+      "title": "IC₅₀ selectivity profile (nM)"
     },
     {
       "id": "182b9c0d-e1f2-4045-9267-8e9f01234567",
-      "type": "typescript",
-      "source": "// QC pass / fail breakdown across all 24 results. Donut showing how\n// the QC failures concentrate on the very-weak EGFR off-target\n// measurements (which run on the TR-FRET protocol — the next chart\n// would slice further by protocol).\n\nconst resp = await eigen.query(`\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:passed_qc\": ?qc\n}\nRETURN [] {\n    qc: ?qc\n}\n`);\n\nconst rows = nb.rows(resp.document);\nconst pass = rows.filter((r) => r.qc === true).length;\nconst fail = rows.length - pass;\n\nreturn h(charts.DonutChart, {\n  data: {\n    chartTitle: \"QC pass rate\",\n    chartData: [\n      { legend: \"Passed\", data: pass, color: \"#37a172\" },\n      { legend: \"Failed\", data: fail, color: \"#cf6f1e\" },\n    ],\n  },\n  innerRadius: 55,\n  height: 220,\n  width: 220,\n  valueInsideDonut: pass + fail,\n});\n"
+      "type": "chart",
+      "query": "// QC pass / fail breakdown across all 24 results. Donut showing how\n// QC failures concentrate on the very-weak EGFR off-target\n// measurements (which all run on the TR-FRET protocol).\n\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:passed_qc\": ?qc\n}\nGROUP BY ?qc\nRETURN [] {\n    status: ?qc,\n    count:  COUNT(?r)\n}\n",
+      "chart_kind": "donut",
+      "x_column": "status",
+      "y_column": "count",
+      "title": "QC pass rate"
+    },
+    {
+      "id": "384d1e2f-3a4b-4c6d-9e8f-90a1b2c3d4e5",
+      "type": "chart",
+      "query": "// Mean IC50 per target across QC-passing measurements. Vertical-bar\n// chart — single series, one bar per target. CDK targets cluster at\n// low IC50 (most compounds are CDK-active); EGFR averages much\n// higher because only EIG_0203 hits it.\n\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:target\":     ?t,\n    \"urn:eigenius:demo:assay:ic50_nm\":    ?ic50,\n    \"urn:eigenius:demo:assay:passed_qc\":  ?qc\n},\n?t { \"urn:eigenius:demo:assay:target_name\": ?target_name }\nWHERE ?qc = true\nGROUP BY ?target_name\nRETURN [] {\n    target:    ?target_name,\n    mean_ic50: AVG(?ic50)\n}\nORDER BY ?target_name\n",
+      "chart_kind": "vertical-bar",
+      "x_column": "target",
+      "y_column": "mean_ic50",
+      "title": "Mean IC₅₀ per target (nM, QC-passing only)"
+    },
+    {
+      "id": "495e2f30-4a5b-4c7d-9e9f-01b2c3d4e5f6",
+      "type": "chart",
+      "query": "// Compounds ranked by molecular weight. Horizontal-bar chart — bar\n// labels along the y-axis, bar length is MW in g/mol. Sorted\n// descending so the heaviest scaffold (quinazoline) tops the list.\n\nUSING \"urn:eigenius:demo:assay:Compound\"\nMATCH Compound(?c) {\n    \"urn:eigenius:demo:assay:compound_id\":      ?compound_id,\n    \"urn:eigenius:demo:assay:molecular_weight\": ?mw\n}\nRETURN [] {\n    compound: ?compound_id,\n    mw:       ?mw\n}\nORDER BY ?mw DESC\n",
+      "chart_kind": "horizontal-bar",
+      "x_column": "compound",
+      "y_column": "mw",
+      "title": "Compound molecular weight (g/mol)"
+    },
+    {
+      "id": "506f3041-5b6c-4d8e-9f01-2c3d4e5f0612",
+      "type": "chart",
+      "query": "// IC50 trajectory across CDK targets, one line per compound. Lines\n// that stay flat-and-low (EIG_0291) indicate pan-CDK activity; lines\n// with deep notches (EIG_0042 at CDK2, EIG_0117 at CDK4) flag\n// selectivity. EGFR is excluded so the CDK story isn't crushed by\n// the off-target IC50 scale.\n\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:compound\":   ?c,\n    \"urn:eigenius:demo:assay:target\":     ?t,\n    \"urn:eigenius:demo:assay:ic50_nm\":    ?ic50,\n    \"urn:eigenius:demo:assay:passed_qc\":  ?qc\n},\n?c { \"urn:eigenius:demo:assay:compound_id\": ?compound_id },\n?t { \"urn:eigenius:demo:assay:target_name\":   ?target_name,\n     \"urn:eigenius:demo:assay:target_family\": ?fam }\nWHERE ?qc = true AND ?fam = \"CDK\"\nRETURN [] {\n    compound: ?compound_id,\n    target:   ?target_name,\n    ic50_nm:  ?ic50\n}\nORDER BY ?compound_id, ?target_name\n",
+      "chart_kind": "line",
+      "x_column": "target",
+      "y_column": "ic50_nm",
+      "series_column": "compound",
+      "title": "IC₅₀ across CDK targets, by compound"
+    },
+    {
+      "id": "61703a52-6c7d-4e9f-9012-3d4e5f061234",
+      "type": "chart",
+      "query": "// Mean IC50 by scaffold class across CDK targets — area chart with\n// one series per scaffold (pyrimidine / indazole / quinazoline /\n// pyrazolopyrimidine). Reveals which scaffold family is most potent\n// on which kinase. Pyrazolopyrimidine (EIG_0291) traces a near-flat\n// pan-CDK profile; quinazoline (EIG_0203) sits well above the others\n// across all CDKs.\n\nUSING \"urn:eigenius:demo:assay:AssayResult\"\nMATCH AssayResult(?r) {\n    \"urn:eigenius:demo:assay:compound\":   ?c,\n    \"urn:eigenius:demo:assay:target\":     ?t,\n    \"urn:eigenius:demo:assay:ic50_nm\":    ?ic50,\n    \"urn:eigenius:demo:assay:passed_qc\":  ?qc\n},\n?c { \"urn:eigenius:demo:assay:scaffold_class\": ?scaffold },\n?t { \"urn:eigenius:demo:assay:target_name\":   ?target_name,\n     \"urn:eigenius:demo:assay:target_family\": ?fam }\nWHERE ?qc = true AND ?fam = \"CDK\"\nGROUP BY ?scaffold, ?target_name\nRETURN [] {\n    scaffold:  ?scaffold,\n    target:    ?target_name,\n    mean_ic50: AVG(?ic50)\n}\nORDER BY ?scaffold, ?target_name\n",
+      "chart_kind": "area",
+      "x_column": "target",
+      "y_column": "mean_ic50",
+      "series_column": "scaffold",
+      "title": "Mean IC₅₀ by scaffold class across CDK targets"
     },
     {
       "id": "293c0d1e-f203-4156-a378-9f0123456789",
@@ -56,7 +103,7 @@
     {
       "id": "1234abcd-5678-4ef0-9012-345678901234",
       "type": "markdown",
-      "source": "## What's still on the Phase 5 roadmap\n\n- **Vertical-bar with error bars** — drive the error whiskers from `ci_low_nm` / `ci_high_nm`. Adds another chart cell against the same selectivity-matrix query.\n- **Line / area chart** — measurement_date vs. cumulative throughput per protocol, demonstrating Fluent's time-series shape.\n- **Phase 5d: form-based chart cells** ([#32](https://github.com/eigenius/eigenius/issues/32)) — replace the TypeScript scaffolding around `h(charts.X, …)` with a structured chart-cell type that just takes an EigenQL query + chart kind + axis selectors.\n- **Phase 5c polish** — expand/collapse on `LayerStackView` boxes (drill into a layer), hover details on `TraceTree` `ComponentTrace` nodes, etc.\n"
+      "source": "## What's still on the Phase 5 roadmap\n\n- **Vertical-bar with error bars** — drive the error whiskers from `ci_low_nm` / `ci_high_nm`. Needs a chart-cell extension to pass per-row error bounds; today's chart cell only takes (x, y, series).\n- **Line / area chart** — measurement_date vs. cumulative throughput per protocol, demonstrating Fluent's time-series shape. The chart cell already supports `line`/`area`; just needs a query that produces the series.\n"
     }
   ]
 }
