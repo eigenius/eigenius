@@ -31,6 +31,7 @@ import type { CellType } from "../persistence/notebook-format";
 import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 import { CodeMirrorEditor } from "./editors/CodeMirrorEditor";
+import { ChartCellEditor } from "./cells/ChartCell";
 import { MarkdownCell } from "./cells/MarkdownCell";
 import { ProgramRunCellEditor } from "./cells/ProgramRunCell";
 import { CellOutputView } from "./output/CellOutputView";
@@ -73,6 +74,7 @@ const useStyles = makeStyles({
   indexEigenql: { background: tokens.colorPaletteGreenForeground2 },
   indexTypescript: { background: tokens.colorPaletteMarigoldForeground2 },
   indexProgramRun: { background: tokens.colorPalettePurpleForeground2 },
+  indexChart: { background: tokens.colorPaletteRedForeground2 },
   spacer: {
     flex: 1,
   },
@@ -94,6 +96,7 @@ const RUNNABLE: Record<CellType, boolean> = {
   eigenql: true,
   typescript: true,
   "program-run": true,
+  chart: true,
 };
 
 const TYPE_LABEL: Record<CellType, string> = {
@@ -102,20 +105,22 @@ const TYPE_LABEL: Record<CellType, string> = {
   eigenql: "EigenQL",
   typescript: "TypeScript",
   "program-run": "Program run",
+  chart: "Chart",
 };
 
 function indexCircleClass(
   styles: ReturnType<typeof useStyles>,
   type: CellType,
 ): string {
-  const colorClass = {
+  const colorClass: Record<CellType, string> = {
     markdown: styles.indexMarkdown,
     esl: styles.indexEsl,
     eigenql: styles.indexEigenql,
     typescript: styles.indexTypescript,
     "program-run": styles.indexProgramRun,
-  }[type];
-  return `${styles.indexCircle} ${colorClass}`;
+    chart: styles.indexChart,
+  };
+  return `${styles.indexCircle} ${colorClass[type]}`;
 }
 
 /**
@@ -207,6 +212,8 @@ export function Cell({ cellId }: CellProps) {
           ? <MarkdownCell source={cell.source} onChange={onSourceChange} />
           : cell.type === "program-run"
           ? <ProgramRunCellEditor cellId={cell.id} cell={cell} />
+          : cell.type === "chart"
+          ? <ChartCellEditor cellId={cell.id} cell={cell} />
           : (
             <CodeMirrorEditor
               source={cell.source}

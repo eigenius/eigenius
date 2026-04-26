@@ -37,6 +37,8 @@ import type { Eigen } from "@eigenius/client";
 import type {
   CellJson,
   CellType,
+  ChartCellJson,
+  ChartKind,
   NotebookJson,
   NotebookMetaJson,
 } from "../persistence/notebook-format";
@@ -188,6 +190,11 @@ export interface NotebookState {
     cellId: string,
     partial: { program_iri?: string; input_iris?: string[] },
   ) => void;
+  /** Update fields on a chart cell (no-op for other cell types). */
+  updateChartCell: (
+    cellId: string,
+    partial: Partial<Omit<ChartCellJson, "id" | "type">>,
+  ) => void;
 }
 
 function copyMap<K, V>(map: ReadonlyMap<K, V>): Map<K, V> {
@@ -200,7 +207,7 @@ function newCellId(): string {
 }
 
 function defaultSourceFor(
-  type: Exclude<CellType, "program-run">,
+  type: Exclude<CellType, "program-run" | "chart">,
 ): string {
   switch (type) {
     case "markdown":
@@ -322,8 +329,10 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   updateCellSource(cellId, source) {
     set((prev) => ({
       cells: prev.cells.map((c) => {
-        // program-run cells have no `source` field — silently ignore.
-        if (c.id !== cellId || c.type === "program-run") return c;
+        // program-run / chart cells have no `source` field — silently ignore.
+        if (c.id !== cellId || c.type === "program-run" || c.type === "chart") {
+          return c;
+        }
         return { ...c, source };
       }),
     }));
@@ -331,9 +340,21 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
   insertCell(afterCellId, type) {
     const id = newCellId();
-    const newCell: CellJson = type === "program-run"
-      ? { id, type, program_iri: "", input_iris: [] }
-      : { id, type, source: defaultSourceFor(type) };
+    let newCell: CellJson;
+    if (type === "program-run") {
+      newCell = { id, type, program_iri: "", input_iris: [] };
+    } else if (type === "chart") {
+      newCell = {
+        id,
+        type,
+        query: "// EigenQL query — RETURN the columns you want to chart.\n\n",
+        chart_kind: "vertical-bar",
+        x_column: "",
+        y_column: "",
+      };
+    } else {
+      newCell = { id, type, source: defaultSourceFor(type) };
+    }
     set((prev) => {
       if (afterCellId === null) {
         return { cells: [newCell, ...prev.cells] };
@@ -354,6 +375,15 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     set((prev) => ({
       cells: prev.cells.map((c) => {
         if (c.id !== cellId || c.type !== "program-run") return c;
+        return { ...c, ...partial };
+      }),
+    }));
+  },
+
+  updateChartCell(cellId, partial) {
+    set((prev) => ({
+      cells: prev.cells.map((c) => {
+        if (c.id !== cellId || c.type !== "chart") return c;
         return { ...c, ...partial };
       }),
     }));
@@ -393,6 +423,18 @@ function serializeCell(c: CellJson): CellJson {
       type: c.type,
       program_iri: c.program_iri,
       input_iris: [...c.input_iris],
+    };
+  }
+  if (c.type === "chart") {
+    return {
+      id: c.id,
+      type: c.type,
+      query: c.query,
+      chart_kind: c.chart_kind,
+      x_column: c.x_column,
+      y_column: c.y_column,
+      ...(c.series_column !== undefined ? { series_column: c.series_column } : {}),
+      ...(c.title !== undefined ? { title: c.title } : {}),
     };
   }
   return { id: c.id, type: c.type, source: c.source };
@@ -446,6 +488,8 @@ async function executeCell(
       return executeTypeScriptCell(eigen, cell.source, previousOutputs);
     case "program-run":
       return executeProgramRunCell(eigen, cell.program_iri, cell.input_iris);
+    case "chart":
+      return executeChartCell(eigen, cell);
     case "markdown":
       // Should never reach here — runAll skips markdown, and the
       // per-cell Run button is hidden on markdown cells.
@@ -501,6 +545,263 @@ async function executeProgramRunCell(
     }
   }
   return { kind: "program-run", programIri: trimmedProgram, results };
+}
+
+/**
+ * Phase 5d — chart cell dispatch. Runs the cell's EigenQL query,
+ * decodes the ResultSet, pivots into the shape Fluent's chart
+ * components expect, and returns a React element via the `kind: "value"`
+ * output path. The auto-renderer mounts it directly.
+ */
+async function executeChartCell(
+  eigen: Eigen,
+  cell: ChartCellJson,
+): Promise<CellOutput> {
+  const trimmedQuery = cell.query.trim();
+  if (trimmedQuery.length === 0) {
+    return { kind: "error", message: "chart query is empty" };
+  }
+  if (cell.x_column.trim().length === 0 || cell.y_column.trim().length === 0) {
+    return {
+      kind: "error",
+      message: "chart x_column and y_column are required",
+    };
+  }
+  const resp = await eigen.query(trimmedQuery);
+  if (!resp.success) {
+    return {
+      kind: "error",
+      message: resp.error || "chart query failed (no error message)",
+    };
+  }
+  const rows = sandboxHelpers.rows(resp.document);
+  if (rows.length === 0) {
+    return { kind: "error", message: "query returned no rows to chart" };
+  }
+  const firstRow = rows[0] as Record<string, unknown>;
+  if (!(cell.x_column in firstRow)) {
+    return {
+      kind: "error",
+      message: `x_column "${cell.x_column}" not found in query results (available: ${
+        Object.keys(firstRow).join(", ")
+      })`,
+    };
+  }
+  if (!(cell.y_column in firstRow)) {
+    return {
+      kind: "error",
+      message: `y_column "${cell.y_column}" not found in query results (available: ${
+        Object.keys(firstRow).join(", ")
+      })`,
+    };
+  }
+  if (
+    cell.series_column !== undefined &&
+    cell.series_column.length > 0 &&
+    !(cell.series_column in firstRow)
+  ) {
+    return {
+      kind: "error",
+      message:
+        `series_column "${cell.series_column}" not found in query results`,
+    };
+  }
+  const element = renderChart(cell.chart_kind, rows, {
+    x: cell.x_column,
+    y: cell.y_column,
+    series: cell.series_column,
+    title: cell.title,
+  });
+  return { kind: "value", value: element, log: [] };
+}
+
+interface ChartShape {
+  x: string;
+  y: string;
+  series?: string;
+  title?: string;
+}
+
+function renderChart(
+  kind: ChartKind,
+  rows: Record<string, unknown>[],
+  shape: ChartShape,
+): React.ReactElement {
+  const title = shape.title;
+  const palette = [
+    "#5b88c5", "#37a172", "#cf6f1e", "#a45fa1",
+    "#c93434", "#3aa3a8", "#b3a02f", "#7e57c2",
+  ];
+  const colorOf = (seriesKey: string, idx: number): string =>
+    palette[Math.abs(hashString(seriesKey)) % palette.length] ?? palette[idx % palette.length];
+
+  switch (kind) {
+    case "donut": {
+      const chartData = rows.map((r, i) => ({
+        legend: String(r[shape.x] ?? `slice ${i}`),
+        data: Number(r[shape.y]) || 0,
+        color: colorOf(String(r[shape.x] ?? i), i),
+      }));
+      const total = chartData.reduce((s, d) => s + d.data, 0);
+      return React.createElement(DonutChart, {
+        data: { chartTitle: title, chartData },
+        innerRadius: 55,
+        height: 240,
+        width: 240,
+        valueInsideDonut: total,
+      });
+    }
+    case "grouped-bar": {
+      // Group by x; series_column (if present) splits each group.
+      const grouped = new Map<string, { key: string; legend: string; data: number; color: string }[]>();
+      for (const r of rows) {
+        const groupName = String(r[shape.x] ?? "");
+        const seriesKey = shape.series && shape.series.length > 0
+          ? String(r[shape.series] ?? "")
+          : shape.y;
+        if (!grouped.has(groupName)) grouped.set(groupName, []);
+        grouped.get(groupName)!.push({
+          key: seriesKey,
+          legend: seriesKey,
+          data: Number(r[shape.y]) || 0,
+          color: colorOf(seriesKey, grouped.get(groupName)!.length),
+        });
+      }
+      const data = Array.from(grouped.entries()).map(([name, series]) => ({
+        name,
+        series,
+      }));
+      return React.createElement(GroupedVerticalBarChart, {
+        data,
+        chartTitle: title,
+        height: 320,
+        width: 800,
+      });
+    }
+    case "vertical-bar": {
+      const chartData = rows.map((r, i) => ({
+        x: String(r[shape.x] ?? `point ${i}`),
+        y: Number(r[shape.y]) || 0,
+        legend: String(r[shape.x] ?? ""),
+        color: colorOf(String(r[shape.x] ?? i), i),
+      }));
+      return React.createElement(VerticalBarChart, {
+        data: chartData,
+        chartTitle: title,
+        height: 320,
+        width: 800,
+      });
+    }
+    case "horizontal-bar": {
+      const yMax = Math.max(
+        ...rows.map((r) => Number(r[shape.y]) || 0),
+        1,
+      );
+      const data = rows.map((r, i) => ({
+        chartData: [{
+          legend: String(r[shape.x] ?? `point ${i}`),
+          horizontalBarChartdata: {
+            x: Number(r[shape.y]) || 0,
+            y: yMax,
+          },
+          color: colorOf(String(r[shape.x] ?? i), i),
+        }],
+      }));
+      return React.createElement(HorizontalBarChart, { data });
+    }
+    case "line":
+    case "area": {
+      // Fluent's LineChart / AreaChart only support numeric or Date
+      // x-axes — string values would yield a broken d3 scale (axis
+      // ticks render, points don't). For categorical x, build an
+      // index map (label → 0,1,2,...) preserving encounter order so
+      // the EigenQL `ORDER BY` controls the layout.
+      const xCategoryIndex = new Map<string, number>();
+      const isCategoricalX = !rows.every((r) => {
+        const v = r[shape.x];
+        return typeof v === "number" || isDateLike(v);
+      });
+
+      const seriesMap = new Map<
+        string,
+        { x: number | Date; y: number; xAxisCalloutData?: string }[]
+      >();
+      for (const r of rows) {
+        const seriesKey = shape.series && shape.series.length > 0
+          ? String(r[shape.series] ?? "")
+          : shape.y;
+        if (!seriesMap.has(seriesKey)) seriesMap.set(seriesKey, []);
+        const xv = r[shape.x];
+        let x: number | Date;
+        let xAxisCalloutData: string | undefined;
+        if (isCategoricalX) {
+          const label = String(xv ?? "");
+          if (!xCategoryIndex.has(label)) {
+            xCategoryIndex.set(label, xCategoryIndex.size);
+          }
+          x = xCategoryIndex.get(label)!;
+          // Show the original label in the hover callout instead of
+          // the numeric index we plot against.
+          xAxisCalloutData = label;
+        } else if (isDateLike(xv)) {
+          x = new Date(String(xv));
+        } else {
+          x = Number(xv);
+        }
+        seriesMap.get(seriesKey)!.push({
+          x,
+          y: Number(r[shape.y]) || 0,
+          ...(xAxisCalloutData !== undefined ? { xAxisCalloutData } : {}),
+        });
+      }
+      const lineChartData = Array.from(seriesMap.entries()).map(
+        ([legend, data], i) => ({
+          legend,
+          data,
+          color: colorOf(legend, i),
+        }),
+      );
+      const Component = kind === "area" ? AreaChart : LineChart;
+      const extraProps: Record<string, unknown> = {};
+      if (isCategoricalX) {
+        // Fluent's LineChart / AreaChart auto-pick a numeric x-axis
+        // when x is a number. We pin `tickValues` to the integer
+        // indices we assigned and use `xAxis.tickText` to label each
+        // index with the original category — matching Fluent's
+        // documented "tick labels at tickValues positions" pattern.
+        const labels = Array.from(xCategoryIndex.keys());
+        extraProps.tickValues = labels.map((_, i) => i);
+        extraProps.xAxis = { tickText: labels };
+      }
+      if (kind === "line") {
+        // Per-line callout instead of the default stacked one — keeps
+        // the popover compact and shows only the hovered series.
+        // (AreaChart hard-codes the stacked callout internally; the
+        // prop is a no-op there.)
+        extraProps.isCalloutForStack = false;
+      }
+      return React.createElement(Component, {
+        data: { chartTitle: title, lineChartData },
+        height: 320,
+        width: 800,
+        ...extraProps,
+      });
+    }
+  }
+}
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+\-]\d{2}:\d{2})?)?$/;
+
+function isDateLike(v: unknown): v is string {
+  return typeof v === "string" && ISO_DATE_RE.test(v);
 }
 
 /**

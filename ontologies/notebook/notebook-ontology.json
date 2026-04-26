@@ -21,7 +21,7 @@
   {
     "@id": "urn:eigenius:notebook:Cell",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris` instead.",
+    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris`; chart cells carry `chart_query` + `chart_kind` + `chart_x_column` + `chart_y_column` (+ optional `chart_series_column` / `chart_title`).",
     "urn:eigenius:core:short_name": "Cell",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
@@ -32,13 +32,19 @@
     "urn:eigenius:core:recommends": [
       "urn:eigenius:notebook:source",
       "urn:eigenius:notebook:program_iri",
-      "urn:eigenius:notebook:input_iris"
+      "urn:eigenius:notebook:input_iris",
+      "urn:eigenius:notebook:chart_query",
+      "urn:eigenius:notebook:chart_kind",
+      "urn:eigenius:notebook:chart_x_column",
+      "urn:eigenius:notebook:chart_y_column",
+      "urn:eigenius:notebook:chart_series_column",
+      "urn:eigenius:notebook:chart_title"
     ]
   },
   {
     "@id": "urn:eigenius:notebook:CellType",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "The type of a notebook Cell. The four instances (markdown, esl, eigenql, typescript) form the closed set permitted by the cell_type property's allows_only constraint.",
+    "urn:eigenius:core:description": "The type of a notebook Cell. The instances (markdown, esl, eigenql, typescript, program-run, chart) form the closed set permitted by the cell_type property's allows_only constraint.",
     "urn:eigenius:core:short_name": "CellType",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
@@ -118,7 +124,8 @@
       "urn:eigenius:notebook:esl",
       "urn:eigenius:notebook:eigenql",
       "urn:eigenius:notebook:typescript",
-      "urn:eigenius:notebook:program-run"
+      "urn:eigenius:notebook:program-run",
+      "urn:eigenius:notebook:chart"
     ],
     "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
   },
@@ -161,6 +168,12 @@
     "urn:eigenius:core:description": "Program-run cell. Invokes a program (program_iri) against one or more inputs (input_iris) via runProgramByIri; renders typed output + trace tree per input.",
     "urn:eigenius:core:short_name": "program-run"
   },
+  {
+    "@id": "urn:eigenius:notebook:chart",
+    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:description": "Chart cell (Phase 5d). Form-based: runs an EigenQL query (chart_query) and renders the ResultSet as a Fluent chart of the configured kind (chart_kind) using chart_x_column / chart_y_column (and optional chart_series_column) to pivot rows.",
+    "urn:eigenius:core:short_name": "chart"
+  },
 
   {
     "@id": "urn:eigenius:notebook:program_iri",
@@ -177,6 +190,55 @@
     "urn:eigenius:core:short_name": "input_iris",
     "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
     "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+
+  {
+    "@id": "urn:eigenius:notebook:chart_query",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "EigenQL query a chart cell evaluates; the ResultSet is decoded and pivoted according to chart_kind / chart_x_column / chart_y_column / chart_series_column.",
+    "urn:eigenius:core:short_name": "chart_query",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:chart_kind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Fluent chart kind to render. One of: grouped-bar, vertical-bar, horizontal-bar, donut, line, area.",
+    "urn:eigenius:core:short_name": "chart_kind",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:chart_x_column",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Short-name of the RETURN column to use as the chart x-axis (or, for donut charts, the slice label).",
+    "urn:eigenius:core:short_name": "chart_x_column",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:chart_y_column",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Short-name of the RETURN column to use as the chart y-axis (or, for donut charts, the slice value).",
+    "urn:eigenius:core:short_name": "chart_y_column",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:chart_series_column",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional short-name of the RETURN column to pivot rows into one series per distinct value. Required for grouped-bar; supported by line/area; ignored by donut and single-series bar charts.",
+    "urn:eigenius:core:short_name": "chart_series_column",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:chart_title",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional human-readable title displayed above the rendered chart.",
+    "urn:eigenius:core:short_name": "chart_title",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
   }
 ]
