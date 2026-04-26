@@ -13,14 +13,16 @@
 // limitations under the License.
 
 /**
- * Phase 1 smoke test for `@eigenius/client`.
+ * Smoke test for `@eigenius/client` (Phase 1 + Phase 3a).
  *
  * Exercises every method the SDK currently exposes:
  *   - layerTopology (NotebookService)
- *   - inspect       (EigeniusKernel passthrough)
- *   - query         (EigeniusKernel passthrough)
+ *   - inspect          (EigeniusKernel passthrough)
+ *   - query            (EigeniusKernel passthrough)
  *   - listInstitutions (EigeniusKernel passthrough)
- *   - health        (EigeniusKernel passthrough)
+ *   - health           (EigeniusKernel passthrough)
+ *   - load             (EigeniusKernel passthrough — Phase 3a)
+ *   - validateProgram  (EigeniusKernel passthrough — Phase 3a)
  *
  * Requires a running stack (kernel + orchestrator). Easiest is:
  *   EIGENIUS_MOCK_LLM=true docker compose up --build -d
@@ -38,7 +40,7 @@ const eigen = new Eigen({ endpoint: ENDPOINT });
 console.log(`SDK smoke test against ${ENDPOINT}\n`);
 
 let stepNum = 0;
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 7;
 function step(label: string): void {
   stepNum++;
   console.log(`[${stepNum}/${TOTAL_STEPS}] ${label}`);
@@ -129,5 +131,60 @@ if (full.nodes.length < taxonomy.nodes.length) {
 ok(
   `full: ${full.nodes.length} nodes (+ ${full.nodes.length - taxonomy.nodes.length} instance resources), ${full.edges.length} edges`,
 );
+
+// ---------------------------------------------------------------------
+// 6. load — compile + commit a small ESL ontology
+// ---------------------------------------------------------------------
+step("load() — small ESL ontology");
+const SMOKE_ESL = `
+namespace smoke = "urn:eigenius:smoke";
+namespace core  = "urn:eigenius:core";
+
+class smoke:Widget {
+    description = "A widget the smoke test loads.";
+    requires smoke:label;
+}
+
+property smoke:label : core:string {
+    description = "Human-readable widget label.";
+}
+`;
+const loadResp = await eigen.load(SMOKE_ESL);
+if (!loadResp.success) {
+  fail(
+    `load failed: ${loadResp.errors.map((e) => e.message).join("; ")}`,
+  );
+}
+if (!loadResp.layerId) fail("load succeeded but returned empty layerId");
+ok(
+  `loaded ${loadResp.resourceCount} resource(s) → layer ${
+    loadResp.layerId.slice(0, 12)
+  }…`,
+);
+console.log();
+
+// ---------------------------------------------------------------------
+// 7. validateProgram — check a tiny ESL program against the layer chain
+// ---------------------------------------------------------------------
+step("validateProgram() — identity program over Widget");
+const SMOKE_PROGRAM = `
+namespace smoke = "urn:eigenius:smoke";
+
+program smoke:identity_widget : smoke:Widget -> smoke:Widget {
+    input
+}
+`;
+const validateResp = await eigen.validateProgram(SMOKE_PROGRAM);
+if (!validateResp.valid) {
+  fail(
+    `validateProgram failed: ${
+      validateResp.errors.map((e) => e.message).join("; ")
+    }`,
+  );
+}
+ok(
+  `program validated as ${validateResp.programType || "(no type returned)"}`,
+);
+console.log();
 
 console.log("\n✓ smoke test passed");

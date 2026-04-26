@@ -39,9 +39,16 @@ import {
   type LayerTopologyResponse,
   LayerTopologyRequestSchema,
   ListInstitutionsRequestSchema,
+  type LoadResponse,
+  LoadRequestSchema,
   NotebookService,
   type QueryResponse,
   QueryRequestSchema,
+  type RunProgramResponse,
+  RunProgramRequestSchema,
+  type ValidateProgramResponse,
+  ValidateProgramRequestSchema,
+  type ValidationError,
 } from "../generated/eigenius_pb.ts";
 
 // Re-export wire types so consumers don't have to reach into generated/.
@@ -50,8 +57,20 @@ export type {
   InspectResponse,
   InstitutionInfo,
   LayerTopologyResponse,
+  LoadResponse,
   QueryResponse,
+  RunProgramResponse,
+  ValidateProgramResponse,
+  ValidationError,
 };
+
+const TEXT_ENCODER = new TextEncoder();
+
+/** Content type accepted by `Eigen.load` / `runProgram` / `validateProgram`. */
+export type SourceContentType =
+  | "application/x-esl"
+  | "application/eigon+json"
+  | "application/cbor";
 
 export interface EigenOptions {
   /** Orchestrator endpoint, e.g. `"http://localhost:8080"`. Required. */
@@ -106,6 +125,35 @@ export interface QueryOptions {
    * omitted = the orchestrator's session active top.
    */
   atLayer?: string;
+}
+
+export interface LoadOptions {
+  /**
+   * Wire format of `source`. ESL source is `application/x-esl`; an
+   * Eigon-JSON document is `application/eigon+json`; CBOR is
+   * `application/cbor`. The kernel compiles ESL inline when it sees
+   * an esl-flavoured content type.
+   */
+  contentType?: SourceContentType;
+
+  /**
+   * Commit the resulting layer on success (default true). When false,
+   * the kernel validates the resources against the active layer chain
+   * and reports errors but does not extend the chain.
+   */
+  autoCommit?: boolean;
+}
+
+export interface RunProgramOptions {
+  /**
+   * Wire format used for *both* `program` and `input`. The current
+   * `RunProgramRequest` proto carries a single content type for both
+   * fields (Phase 3 limitation — see D22 §7); pass the same format for
+   * both. Phase 3b adds per-field content types and an IRI-based
+   * `RunProgramByIri` RPC so callers can run an already-loaded program
+   * against an already-loaded input.
+   */
+  contentType?: SourceContentType;
 }
 
 export class Eigen {
@@ -201,6 +249,92 @@ export class Eigen {
       create(ListInstitutionsRequestSchema, {}),
     );
     return response.institutions;
+  }
+
+  /**
+   * Load resources into the kernel's active layer chain.
+   *
+   * `source` is either ESL source text (default) or an Eigon-JSON
+   * document. The kernel compiles ESL inline when it sees an
+   * esl-flavoured content type. On success with `autoCommit` (the
+   * default), the new layer ID is returned in `LoadResponse.layerId`
+   * and becomes the new session top; subsequent reads in the same
+   * session see the loaded resources.
+   *
+   * Strings are UTF-8 encoded; pass a `Uint8Array` directly for CBOR.
+   */
+  async load(
+    source: string | Uint8Array,
+    options: LoadOptions = {},
+  ): Promise<LoadResponse> {
+    const contentType = options.contentType ?? "application/x-esl";
+    const bytes = typeof source === "string"
+      ? TEXT_ENCODER.encode(source)
+      : source;
+    return await this.kernel.load(
+      create(LoadRequestSchema, {
+        resources: bytes,
+        contentType,
+        autoCommit: options.autoCommit ?? true,
+      }),
+    );
+  }
+
+  /**
+   * Type-check a program against the active layer chain.
+   *
+   * The program is sent inline (no IRI lookup); the kernel validates
+   * stratification, totality, and component-argument shapes and
+   * returns any structured ValidationErrors.
+   */
+  async validateProgram(
+    program: string | Uint8Array,
+    options: { contentType?: SourceContentType } = {},
+  ): Promise<ValidateProgramResponse> {
+    const contentType = options.contentType ?? "application/x-esl";
+    const bytes = typeof program === "string"
+      ? TEXT_ENCODER.encode(program)
+      : program;
+    return await this.kernel.validateProgram(
+      create(ValidateProgramRequestSchema, {
+        program: bytes,
+        contentType,
+      }),
+    );
+  }
+
+  /**
+   * Execute a program with input data.
+   *
+   * Both `program` and `input` are sent inline. Returns the program's
+   * output resource as CBOR plus, when the kernel has a trace store
+   * configured, the IRI of the recorded ProgramTrace. Run-time errors
+   * surface as a non-zero `errors` array; the response is structured
+   * (no Connect-RPC exception) so callers can render error tables.
+   */
+  async runProgram(
+    program: string | Uint8Array,
+    input: string | Uint8Array,
+    options: RunProgramOptions = {},
+  ): Promise<RunProgramResponse> {
+    const programBytes = typeof program === "string"
+      ? TEXT_ENCODER.encode(program)
+      : program;
+    const inputBytes = typeof input === "string"
+      ? TEXT_ENCODER.encode(input)
+      : input;
+    // RunProgramRequest carries a single content_type covering both
+    // fields. Phase 3b adds per-field content types (and an IRI-based
+    // RunProgramByIri) so callers can mix ESL programs with Eigon-JSON
+    // inputs naturally.
+    const contentType = options.contentType ?? "application/x-esl";
+    return await this.kernel.runProgram(
+      create(RunProgramRequestSchema, {
+        program: programBytes,
+        input: inputBytes,
+        contentType,
+      }),
+    );
   }
 
   /**

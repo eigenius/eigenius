@@ -9,17 +9,24 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
     "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/lang-markdown": "^6.3.0",
     "@codemirror/language": "^6.10.3",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.34.1",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-web": "^2.1.1",
+    "@eigenius/client": "file:../clients/eigenius-ts",
     "@fluentui/react-components": "^9.55.0",
+    "@fluentui/react-icons": "^2.0.325",
     "@uiw/react-codemirror": "^4.23.5",
+    "cbor-x": "^1.6.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
-    "remark-gfm": "^4.0.0"
+    "remark-gfm": "^4.0.0",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",

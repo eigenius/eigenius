@@ -18,14 +18,19 @@ import {
 } from "@fluentui/react-components";
 import { Notebook } from "./components/Notebook";
 import { parseNotebook } from "./persistence/notebook-format";
+import { EigenProvider } from "./runtime/EigenProvider";
 import patentDemo from "../examples/patent-analysis.json";
 
 /**
- * Phase 2 — static viewer.
+ * Phase 3 — manual execution.
  *
  * Hardcodes the patent-analysis demo at the React root so `vite dev`
  * renders something on first load. Phase 4 replaces this with a file
  * picker (open from disk) + new-notebook flows.
+ *
+ * The `EigenProvider` resolves the orchestrator endpoint from
+ * `VITE_EIGENIUS_ORCHESTRATOR` or the page origin (Vite dev server
+ * proxies `/eigenius.v1.*` to localhost:8080 — see vite.config.ts).
  */
 export function App() {
   // parseNotebook validates the shape; throws on malformed data.
@@ -33,7 +38,9 @@ export function App() {
 
   return (
     <FluentProvider theme={webLightTheme}>
-      <Notebook notebook={notebook} />
+      <EigenProvider>
+        <Notebook notebook={notebook} />
+      </EigenProvider>
     </FluentProvider>
   );
 }

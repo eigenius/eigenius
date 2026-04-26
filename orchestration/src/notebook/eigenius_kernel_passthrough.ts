@@ -55,11 +55,17 @@ export function registerEigeniusKernelPassthrough(
     listInstitutions: (req) => kernel.raw.listInstitutions(req),
     health: (req) => kernel.raw.health(req),
 
+    // Phase 3 (cell execution): the browser sends ESL source bytes
+    // with content_type "application/x-esl" or Eigon-JSON bytes with
+    // "application/eigon+json"; the kernel handles compilation as part
+    // of Load. validateProgram and runProgram round-trip the same way,
+    // wrapping the resource the browser already has in hand.
+    load: (req) => kernel.raw.load(req),
+    validateProgram: (req) => kernel.raw.validateProgram(req),
+    runProgram: (req) => kernel.raw.runProgram(req),
+
     // Methods deferred until the relevant notebook phase needs them:
     //
-    //   load            — Phase 3 (cell execution / file upload)
-    //   validateProgram — Phase 3
-    //   runProgram      — Phase 3 (with trace integration)
     //   reflect         — not in notebook critical path
     //   fiberQuery      — Phase 3 (FIBER cell type)
     //   discoverMorphisms — out of MVP scope

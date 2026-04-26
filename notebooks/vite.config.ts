@@ -35,5 +35,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Proxy Connect-RPC traffic to the orchestrator so the browser
+    // hits a single origin (D22 §6.10). The two services we currently
+    // talk to are EigeniusKernel and NotebookService; both are mounted
+    // under their fully-qualified proto package on the orchestrator.
+    proxy: {
+      "/eigenius.v1.EigeniusKernel": "http://localhost:8080",
+      "/eigenius.v1.NotebookService": "http://localhost:8080",
+    },
   },
 });
