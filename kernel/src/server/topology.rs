@@ -128,7 +128,13 @@ fn walk_layer(
         let id = iri.as_str().to_string();
         if seen_node_ids.insert(id.clone()) {
             let label = node_label(resource, iri);
-            let attrs = resource_attrs(resource);
+            let mut attrs = resource_attrs(resource);
+            // Attribute the node to the layer that introduced it so
+            // clients can filter "what's in this layer" without
+            // re-querying. Walker visits head-down with a seen-set,
+            // so each resource is attributed to whichever layer first
+            // declared it in the chain.
+            attrs.insert("layer_id".to_string(), layer_id.clone());
             nodes.push(proto::TopologyNode {
                 id: id.clone(),
                 kind: kind as i32,

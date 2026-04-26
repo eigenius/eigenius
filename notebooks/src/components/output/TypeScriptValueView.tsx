@@ -43,7 +43,9 @@ import {
 import { LayerStackView } from "./LayerStackView";
 import { ResourceInspector } from "./ResourceInspector";
 import { ResultTable } from "./ResultTable";
+import { TopologyGraphView } from "./TopologyGraphView";
 import { TraceTreePanel } from "./TraceTreePanel";
+import { NodeKind } from "@eigenius/client";
 
 const useStyles = makeStyles({
   log: {
@@ -143,18 +145,31 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
   const obj = value as Record<string, unknown>;
 
   // LayerTopologyResponse: { nodes: TopologyNode[], edges: TopologyEdge[] }
+  // Layer-only chains render as the linear stack; richer responses
+  // (containing Class / Property / Resource / Institution nodes)
+  // render as the full xyflow topology graph.
   if (
     Array.isArray(obj.nodes) &&
     Array.isArray(obj.edges) &&
     looksLikeTopologyNode(obj.nodes[0])
   ) {
-    return (
-      <LayerStackView
-        // The duck-typed cast keeps the public component strictly typed.
-        // deno-lint-ignore no-explicit-any
-        topology={value as any}
-      />
+    const hasNonLayerNodes = obj.nodes.some(
+      (n) => looksLikeTopologyNode(n) && (n as { kind: number }).kind !== NodeKind.LAYER,
     );
+    return hasNonLayerNodes
+      ? (
+        <TopologyGraphView
+          // The duck-typed cast keeps the public component strictly typed.
+          // deno-lint-ignore no-explicit-any
+          topology={value as any}
+        />
+      )
+      : (
+        <LayerStackView
+          // deno-lint-ignore no-explicit-any
+          topology={value as any}
+        />
+      );
   }
 
   // QueryResponse: { success, document, ... }
