@@ -38,6 +38,8 @@ import type { KernelClient } from "../client/kernel_client.ts";
 import type { WasmAddon } from "./loadAddon.ts";
 import type { WasmComponentRegistry } from "./registry.ts";
 import { decodeResource, encodeResource } from "./cbor.ts";
+import * as log from "../observability/mod.ts";
+import { operation } from "../observability/mod.ts";
 
 export interface HostBridgeDeps {
   addon: WasmAddon;
@@ -131,6 +133,10 @@ export function createWasmComponentHandler(
   return async ({ input, argument }) => {
     const handle = wasmRegistry.getHandle(componentIri);
     if (handle === undefined) {
+      log.warn(operation.WASM_DISPATCH, "WASM component handle missing", {
+        component_iri: componentIri,
+        error_kind: "handle_missing",
+      });
       throw new Error(
         `WASM component handle missing for ${componentIri} — registry out of sync`,
       );
@@ -138,15 +144,39 @@ export function createWasmComponentHandler(
 
     const inputBytes = encodeResource(input);
     const argumentBytes = encodeResource(argument);
+    const startTime = performance.now();
 
-    const outputBytes = await addon.executeComponent(
-      handle,
-      inputBytes,
-      argumentBytes,
-      bridge.dispatch,
-      bridge.resolve,
-      bridge.query,
-    );
+    log.debug(operation.WASM_DISPATCH, "WASM component dispatch starting", {
+      component_iri: componentIri,
+      input_bytes: inputBytes.length,
+      argument_bytes: argumentBytes.length,
+    });
+
+    let outputBytes;
+    try {
+      outputBytes = await addon.executeComponent(
+        handle,
+        inputBytes,
+        argumentBytes,
+        bridge.dispatch,
+        bridge.resolve,
+        bridge.query,
+      );
+    } catch (e) {
+      log.warn(operation.WASM_DISPATCH, "WASM component dispatch failed", {
+        component_iri: componentIri,
+        error_kind: "execution_failed",
+        error_message: e instanceof Error ? e.message : String(e),
+        latency_ms: Math.round(performance.now() - startTime),
+      });
+      throw e;
+    }
+
+    log.debug(operation.WASM_DISPATCH, "WASM component dispatch completed", {
+      component_iri: componentIri,
+      output_bytes: outputBytes.length,
+      latency_ms: Math.round(performance.now() - startTime),
+    });
 
     return { output: decodeResource(outputBytes) };
   };

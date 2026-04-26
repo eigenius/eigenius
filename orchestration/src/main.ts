@@ -34,6 +34,8 @@ import {
   createCompleteJsonHandler,
   createMockCompleteJsonHandler,
 } from "./components/complete_json.ts";
+import * as log from "./observability/mod.ts";
+import { operation } from "./observability/mod.ts";
 import { ProgramExecutor } from "./program/executor.ts";
 import { startServer } from "./server/mod.ts";
 import { tryLoadWasmAddon } from "./wasm/loadAddon.ts";
@@ -48,15 +50,26 @@ const ORCHESTRATOR_PORT = parseInt(
 const USE_MOCK_LLM = Deno.env.get("EIGENIUS_MOCK_LLM") === "true";
 
 function main() {
-  console.log(`Eigenius Orchestration Layer starting...`);
-  console.log(`Kernel endpoint: ${KERNEL_ENDPOINT}`);
+  // Install the structured-logging subscriber before anything else
+  // emits an event. Reads `EIGENIUS_LOG_LEVEL` and
+  // `EIGENIUS_LOG_FORMAT` from env (same envelope as the kernel).
+  log.init();
+
+  log.info(operation.SERVER_START, "Eigenius orchestration layer starting", {
+    kernel_endpoint: KERNEL_ENDPOINT,
+    mock_llm: USE_MOCK_LLM,
+  });
 
   const client = new KernelClient(KERNEL_ENDPOINT);
   const components = new ComponentRegistry();
 
   // Register LLM components
   if (USE_MOCK_LLM) {
-    console.log("Using mock LLM handlers (EIGENIUS_MOCK_LLM=true)");
+    log.info(
+      operation.COMPONENT_REGISTER,
+      "registered LLM components in mock mode",
+      { mock_llm: true },
+    );
     components.register(COMPLETE_TEXT_IRI, createMockCompleteTextHandler());
     components.register(COMPLETE_JSON_IRI, createMockCompleteJsonHandler());
   } else {
@@ -77,18 +90,29 @@ function main() {
         wasmRegistry,
         kernel: client,
       });
-      console.log("WASM IO components: enabled (native addon loaded)");
+      log.info(
+        operation.WASM_ADDON_LOAD,
+        "WASM IO components enabled (native addon loaded)",
+        { enabled: true },
+      );
       return { addon, wasmRegistry, bridge };
     })()
     : undefined;
   if (!wasm) {
-    console.log(
-      "WASM IO components: disabled (addon not loaded — RegisterWasmComponent will fail)",
+    log.warn(
+      operation.WASM_ADDON_LOAD,
+      "WASM IO components disabled (addon not loaded; RegisterWasmComponent will fail)",
+      { enabled: false },
     );
   }
 
-  console.log(
-    `Registered components: ${components.listComponents().join(", ")}`,
+  log.info(
+    operation.SERVER_START,
+    "component registry initialised",
+    {
+      count: components.listComponents().length,
+      components: components.listComponents(),
+    },
   );
 
   // Start the orchestrator server (gRPC + NotebookService + health)

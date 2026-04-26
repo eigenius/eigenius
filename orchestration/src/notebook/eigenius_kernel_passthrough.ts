@@ -36,6 +36,7 @@
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import { EigeniusKernel } from "../gen/eigenius_pb.ts";
 import { KernelClient } from "../client/kernel_client.ts";
+import { operation, withRpcGuard } from "../observability/mod.ts";
 
 export interface EigeniusKernelPassthroughDeps {
   kernel: KernelClient;
@@ -50,25 +51,29 @@ export interface EigeniusKernelPassthroughDeps {
  * encoded into a `grpc-message` header — connect-web in the browser
  * can't decode that and surfaces a generic "[internal] HTTP 400".
  */
-async function proxy<Req, Resp>(
+function proxy<Req, Resp>(
+  op: string,
   call: (req: Req) => Promise<Resp>,
   req: Req,
 ): Promise<Resp> {
-  try {
-    return await call(req);
-  } catch (err) {
-    if (err instanceof ConnectError) {
-      // Re-throw as a brand-new ConnectError so the universal handler
-      // sees a Connect-native error and encodes it in the inbound
-      // protocol's format (Connect / gRPC-Web / gRPC). We drop
-      // `details` because received errors carry IncomingDetail and
-      // outgoing errors expect OutgoingDetail; preserving them would
-      // require schema lookups we don't have here.
-      throw new ConnectError(err.rawMessage, err.code);
+  return withRpcGuard(op, async (mark) => {
+    try {
+      return await call(req);
+    } catch (err) {
+      mark.fail("kernel_passthrough_failed");
+      if (err instanceof ConnectError) {
+        // Re-throw as a brand-new ConnectError so the universal handler
+        // sees a Connect-native error and encodes it in the inbound
+        // protocol's format (Connect / gRPC-Web / gRPC). We drop
+        // `details` because received errors carry IncomingDetail and
+        // outgoing errors expect OutgoingDetail; preserving them would
+        // require schema lookups we don't have here.
+        throw new ConnectError(err.rawMessage, err.code);
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ConnectError(message, Code.Internal);
     }
-    const message = err instanceof Error ? err.message : String(err);
-    throw new ConnectError(message, Code.Internal);
-  }
+  });
 }
 
 export function registerEigeniusKernelPassthrough(
@@ -80,20 +85,48 @@ export function registerEigeniusKernelPassthrough(
   router.service(EigeniusKernel, {
     // Read-only methods exposed in the MVP. Each is a thin call
     // through to the kernel; no orchestrator-side processing.
-    inspect: (req) => proxy(kernel.raw.inspect, req),
-    query: (req) => proxy(kernel.raw.query, req),
-    listInstitutions: (req) => proxy(kernel.raw.listInstitutions, req),
-    health: (req) => proxy(kernel.raw.health, req),
+    inspect: (req) =>
+      proxy(operation.KERNEL_PASSTHROUGH_INSPECT, kernel.raw.inspect, req),
+    query: (req) =>
+      proxy(operation.KERNEL_PASSTHROUGH_QUERY, kernel.raw.query, req),
+    listInstitutions: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_LIST_INSTITUTIONS,
+        kernel.raw.listInstitutions,
+        req,
+      ),
+    health: (req) =>
+      proxy(operation.KERNEL_PASSTHROUGH_HEALTH, kernel.raw.health, req),
 
     // Phase 3 (cell execution): the browser sends ESL source bytes
     // with content_type "application/x-esl" or Eigon-JSON bytes with
     // "application/eigon+json"; the kernel handles compilation as part
     // of Load. validateProgram and runProgram round-trip the same way,
     // wrapping the resource the browser already has in hand.
-    load: (req) => proxy(kernel.raw.load, req),
-    validateProgram: (req) => proxy(kernel.raw.validateProgram, req),
-    runProgram: (req) => proxy(kernel.raw.runProgram, req),
-    runProgramByIri: (req) => proxy(kernel.raw.runProgramByIri, req),
+    load: (req) =>
+      proxy(operation.KERNEL_PASSTHROUGH_LOAD, kernel.raw.load, req),
+    validateProgram: (req) =>
+      proxy(
+        // No dedicated passthrough op constant for validate_program —
+        // run_program_by_iri is the same shape (kernel passthrough),
+        // so we group them under one name. Switch to a dedicated
+        // constant if the dashboards want to distinguish.
+        operation.KERNEL_PASSTHROUGH_RUN_PROGRAM_BY_IRI,
+        kernel.raw.validateProgram,
+        req,
+      ),
+    runProgram: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_RUN_PROGRAM_BY_IRI,
+        kernel.raw.runProgram,
+        req,
+      ),
+    runProgramByIri: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_RUN_PROGRAM_BY_IRI,
+        kernel.raw.runProgramByIri,
+        req,
+      ),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path
