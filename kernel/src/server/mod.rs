@@ -19,6 +19,7 @@
 
 use crate::bootstrap;
 use crate::context::ExecutionContext;
+use crate::observability::{field, operation, RpcGuard};
 use crate::ontology::{eigon_cbor, eigon_json, Iri, Resource};
 use crate::program::component::ComponentRegistry;
 use crate::program::expr;
@@ -148,7 +149,13 @@ pub async fn resume_sweep(
     let records = match inputs.task_store.list_tasks(&session_id) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("resume sweep: list_tasks failed: {e}");
+            tracing::warn!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::ERROR_KIND } = "list_tasks_failed",
+                { field::SESSION_ID } = ?session_id,
+                { field::ERROR_MESSAGE } = %e,
+                "resume sweep: list_tasks failed"
+            );
             return;
         }
     };
@@ -168,9 +175,12 @@ pub async fn resume_sweep(
         .in_progress
         .store(true, Ordering::SeqCst);
     inputs.resume_state.remaining.store(total, Ordering::SeqCst);
-    eprintln!(
-        "Resuming {total} task(s) from the persistent store (max_parallel={}, max_attempts={})",
-        config.max_parallel, config.max_attempts
+    tracing::info!(
+        { field::OPERATION } = operation::TASK_RESUME,
+        { field::COUNT } = total,
+        max_parallel = config.max_parallel,
+        max_attempts = config.max_attempts,
+        "resuming tasks from persistent store"
     );
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(config.max_parallel));
@@ -207,7 +217,10 @@ pub async fn resume_sweep(
         .resume_state
         .in_progress
         .store(false, Ordering::SeqCst);
-    eprintln!("Resume sweep complete.");
+    tracing::info!(
+        { field::OPERATION } = operation::TASK_RESUME,
+        "resume sweep complete"
+    );
 }
 
 /// Rehydrate a single task: resolve program + input in the pinned
@@ -226,10 +239,12 @@ async fn resume_one_task(
     let layer = match backend.load_chain_from(&record.layer_head) {
         Ok(Some(l)) => l,
         _ => {
-            eprintln!(
-                "resume: task {}: pinned layer {} not in store; marking Failed",
-                record.task_id,
-                hex::encode(record.layer_head.0)
+            tracing::warn!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::ERROR_KIND } = "pinned_layer_missing",
+                { field::TASK_ID } = ?record.task_id,
+                { field::LAYER_ID } = %hex::encode(record.layer_head.0),
+                "task pinned layer not in store; marking Failed"
             );
             record.status = TaskStatus::Failed;
             record.updated_at = now_millis();
@@ -245,9 +260,12 @@ async fn resume_one_task(
     {
         Some(p) => p,
         None => {
-            eprintln!(
-                "resume: task {}: program '{}' not found at pinned head",
-                record.task_id, record.program_iri
+            tracing::warn!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::ERROR_KIND } = "program_missing",
+                { field::TASK_ID } = ?record.task_id,
+                { field::PROGRAM_IRI } = %record.program_iri,
+                "task program not found at pinned head"
             );
             record.status = TaskStatus::Failed;
             record.updated_at = now_millis();
@@ -291,13 +309,25 @@ async fn resume_one_task(
             record.status = TaskStatus::Completed;
         }
         Err(e) => {
-            eprintln!("resume: task {} failed: {e}", task_id);
+            tracing::warn!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::ERROR_KIND } = "execution_failed",
+                { field::TASK_ID } = ?task_id,
+                { field::ERROR_MESSAGE } = %e,
+                "resumed task failed during execution"
+            );
             record.status = TaskStatus::Failed;
         }
     }
     record.updated_at = now_millis();
     if let Err(e) = task_store.put_task(&record) {
-        eprintln!("resume: failed to update task {}: {e}", task_id);
+        tracing::warn!(
+            { field::OPERATION } = operation::TASK_RESUME,
+            { field::ERROR_KIND } = "task_record_update_failed",
+            { field::TASK_ID } = ?task_id,
+            { field::ERROR_MESSAGE } = %e,
+            "failed to update task record after resume"
+        );
     }
 }
 
@@ -531,6 +561,13 @@ impl EigeniusService {
     fn persist_layer_if_backend(&self, layer: &crate::layer::Layer) -> Option<ValidationError> {
         let backend = self.backend.as_ref()?;
         if let Err(e) = backend.store_layer(layer) {
+            tracing::warn!(
+                { field::OPERATION } = operation::LAYER_COMMIT,
+                { field::ERROR_KIND } = "persist_layer_failed",
+                { field::LAYER_ID } = %layer.id(),
+                { field::ERROR_MESSAGE } = %e,
+                "failed to persist layer to backend"
+            );
             return Some(ValidationError {
                 resource_iri: String::new(),
                 property_iri: String::new(),
@@ -540,6 +577,13 @@ impl EigeniusService {
             });
         }
         if let Err(e) = backend.set_head(layer.id()) {
+            tracing::warn!(
+                { field::OPERATION } = operation::LAYER_COMMIT,
+                { field::ERROR_KIND } = "persist_head_failed",
+                { field::LAYER_ID } = %layer.id(),
+                { field::ERROR_MESSAGE } = %e,
+                "failed to advance persisted head"
+            );
             return Some(ValidationError {
                 resource_iri: String::new(),
                 property_iri: String::new(),
@@ -548,6 +592,12 @@ impl EigeniusService {
                 severity: "error".to_string(),
             });
         }
+        tracing::debug!(
+            { field::OPERATION } = operation::LAYER_COMMIT,
+            { field::LAYER_ID } = %layer.id(),
+            persisted = true,
+            "layer persisted to backend and head advanced"
+        );
         None
     }
 
@@ -615,7 +665,11 @@ impl EigeniusService {
             });
         }
         for w in &scan_result.report.warnings {
-            eprintln!("  {w}");
+            tracing::warn!(
+                { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                "wasm scan warning: {}",
+                w
+            );
         }
 
         // Forward IO WASM components to the orchestrator and register a
@@ -625,11 +679,13 @@ impl EigeniusService {
         for pending in scan_result.pending_io_components {
             match self.register_io_wasm(&pending).await {
                 Ok(remote) => {
-                    new_registry.register(pending.resource_iri.clone(), remote);
-                    eprintln!(
-                        "  Registered IO WASM component: {} (orchestrator-hosted)",
-                        pending.resource_iri
+                    tracing::info!(
+                        { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                        { field::COMPONENT_IRI } = %pending.resource_iri,
+                        host = "orchestrator",
+                        "registered IO WASM component"
                     );
+                    new_registry.register(pending.resource_iri.clone(), remote);
                     any_kernel_component_added = true;
                 }
                 Err(e) => {
@@ -644,10 +700,13 @@ impl EigeniusService {
             }
         }
 
-        if !scan_result.report.components_registered.is_empty() {
-            for iri in &scan_result.report.components_registered {
-                eprintln!("  Registered WASM component: {iri}");
-            }
+        for iri in &scan_result.report.components_registered {
+            tracing::info!(
+                { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                { field::COMPONENT_IRI } = %iri,
+                host = "kernel",
+                "registered WASM component"
+            );
         }
 
         if any_kernel_component_added {
@@ -666,9 +725,11 @@ impl EigeniusService {
                 let iri = reasoner.institution_iri().as_str().to_string();
                 match institutions.register(Box::new(reasoner)) {
                     Ok(declared) => {
-                        eprintln!(
-                            "  Registered WASM institution: {iri} (+{} declared classes)",
-                            declared.len()
+                        tracing::info!(
+                            { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                            { field::INSTITUTION_IRI } = %iri,
+                            { field::COUNT } = declared.len(),
+                            "registered WASM institution"
                         );
                         published_resources.extend(declared);
                     }
@@ -722,8 +783,14 @@ impl EigeniusService {
         for pending in scan_result.pending_io_components {
             match self.register_io_wasm(&pending).await {
                 Ok(remote) => {
+                    tracing::info!(
+                        { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                        { field::COMPONENT_IRI } = %pending.resource_iri,
+                        host = "orchestrator",
+                        rehydrated = true,
+                        "rehydrated IO WASM component"
+                    );
                     new_registry.register(pending.resource_iri.clone(), remote);
-                    eprintln!("  Rehydrated IO WASM component: {}", pending.resource_iri);
                     any_kernel_component_added = true;
                 }
                 Err(e) => {
@@ -756,7 +823,12 @@ impl EigeniusService {
                         severity: "error".to_string(),
                     });
                 } else {
-                    eprintln!("  Rehydrated WASM institution: {iri}");
+                    tracing::info!(
+                        { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                        { field::INSTITUTION_IRI } = %iri,
+                        rehydrated = true,
+                        "rehydrated WASM institution"
+                    );
                 }
             }
         }
@@ -1023,7 +1095,12 @@ impl EigeniusService {
             let mut ctx = self.context.write().await;
             // Add ProgramTrace
             if let Err(e) = ctx.add_resource(trace_resource) {
-                eprintln!("warning: failed to add ProgramTrace: {e}");
+                tracing::warn!(
+                    { field::OPERATION } = operation::PROGRAM_RUN,
+                    { field::ERROR_KIND } = "trace_add_failed",
+                    { field::ERROR_MESSAGE } = %e,
+                    "failed to add ProgramTrace resource to layer"
+                );
             }
             // Add each IO ComponentTrace as a resource
             for ct in &dispatched_traces {
@@ -1038,12 +1115,23 @@ impl EigeniusService {
                     // logs but doesn't fail the RunProgram call — the output
                     // is still valid, the trace just isn't durable.
                     if let Some(err) = self.persist_layer_if_backend(&layer) {
-                        eprintln!("warning: failed to persist trace layer: {}", err.message);
+                        tracing::warn!(
+                            { field::OPERATION } = operation::LAYER_COMMIT,
+                            { field::ERROR_KIND } = "trace_persist_failed",
+                            { field::LAYER_ID } = %layer.id(),
+                            { field::ERROR_MESSAGE } = %err.message,
+                            "failed to persist trace layer (output still returned)"
+                        );
                     }
                     Some(layer.id().clone())
                 }
                 Err(e) => {
-                    eprintln!("warning: trace layer commit failed: {e}");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::LAYER_COMMIT,
+                        { field::ERROR_KIND } = "trace_commit_failed",
+                        { field::ERROR_MESSAGE } = %e,
+                        "trace layer commit failed (output still returned)"
+                    );
                     None
                 }
             }
@@ -1059,7 +1147,13 @@ impl EigeniusService {
                 rec.result_layer_head = result_layer_head;
                 rec.updated_at = now_millis();
                 if let Err(e) = store.put_task(&rec) {
-                    eprintln!("warning: failed to update task record: {e}");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::TASK_CHECKPOINT,
+                        { field::ERROR_KIND } = "task_record_update_failed",
+                        { field::TASK_ID } = ?tc.task_id,
+                        { field::ERROR_MESSAGE } = %e,
+                        "failed to update task record after run completion"
+                    );
                 }
             }
         }
@@ -1078,7 +1172,14 @@ impl EigeniusService {
 #[tonic::async_trait]
 impl EigeniusKernel for EigeniusService {
     async fn load(&self, request: Request<LoadRequest>) -> Result<Response<LoadResponse>, Status> {
+        let mut guard = RpcGuard::start(operation::RPC_LOAD);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_LOAD,
+            { field::CONTENT_TYPE } = %req.content_type,
+            { field::SIZE_BYTES } = req.resources.len(),
+            "load payload"
+        );
         let resources = Self::parse_resources(&req.resources, &req.content_type)?;
         let count = resources.len() as u32;
 
@@ -1095,6 +1196,12 @@ impl EigeniusKernel for EigeniusService {
             match ctx.commit("loaded") {
                 Ok(layer) => {
                     layer_id = layer.id().to_string();
+                    tracing::info!(
+                        { field::OPERATION } = operation::LAYER_COMMIT,
+                        { field::LAYER_ID } = %layer_id,
+                        { field::COUNT } = count,
+                        "layer committed"
+                    );
                     drop(ctx);
                     if let Some(err) = self.persist_layer_if_backend(&layer) {
                         errors.push(err);
@@ -1142,7 +1249,46 @@ impl EigeniusKernel for EigeniusService {
                         }
                     }
                 }
+                Err(crate::context::ContextError::ValidationFailed(verrs)) => {
+                    // Per-error logging — each rule violation gets its
+                    // own warn-level event so dashboards can group on
+                    // `error_kind` (the rule's debug label) without
+                    // having to parse a flattened blob.
+                    for ve in &verrs {
+                        tracing::warn!(
+                            { field::OPERATION } = operation::VALIDATE_RESOURCE,
+                            { field::ERROR_KIND } = ?ve.rule,
+                            { field::RESOURCE_IRI } = ve.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                            { field::PROPERTY_IRI } = ve.property.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                            { field::ERROR_MESSAGE } = %ve.message,
+                            "validation error"
+                        );
+                    }
+                    for ve in verrs {
+                        errors.push(ValidationError {
+                            resource_iri: ve
+                                .resource_id
+                                .as_ref()
+                                .map(|i| i.as_str().to_string())
+                                .unwrap_or_default(),
+                            property_iri: ve
+                                .property
+                                .as_ref()
+                                .map(|i| i.as_str().to_string())
+                                .unwrap_or_default(),
+                            rule: format!("{:?}", ve.rule),
+                            message: ve.message,
+                            severity: "error".to_string(),
+                        });
+                    }
+                }
                 Err(e) => {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::LAYER_COMMIT,
+                        { field::ERROR_KIND } = "commit_failed",
+                        { field::ERROR_MESSAGE } = %e,
+                        "layer commit failed"
+                    );
                     errors.push(ValidationError {
                         resource_iri: String::new(),
                         property_iri: String::new(),
@@ -1154,19 +1300,34 @@ impl EigeniusKernel for EigeniusService {
             }
         }
 
-        Ok(Response::new(LoadResponse {
+        let response = LoadResponse {
             success: errors.is_empty(),
             errors,
             layer_id,
             resource_count: count,
-        }))
+        };
+        if !response.success {
+            guard.fail("validation_failed");
+            tracing::warn!(
+                { field::OPERATION } = operation::RPC_LOAD,
+                { field::COUNT } = response.errors.len(),
+                "load completed with errors"
+            );
+        }
+        Ok(Response::new(response))
     }
 
     async fn inspect(
         &self,
         request: Request<InspectRequest>,
     ) -> Result<Response<InspectResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_INSPECT);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_INSPECT,
+            { field::RESOURCE_IRI } = %req.iri,
+            "inspect target"
+        );
         let iri = Iri::parse(&req.iri)
             .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
 
@@ -1187,7 +1348,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<QueryRequest>,
     ) -> Result<Response<QueryResponse>, Status> {
+        let mut guard = RpcGuard::start(operation::RPC_QUERY);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_QUERY,
+            { field::SIZE_BYTES } = req.eigenql.len(),
+            "query payload"
+        );
         let layer = self.resolve_read_layer(&req.at_layer).await?;
         let ctx = self.context.read().await;
         let institutions = self.institutions.read().await;
@@ -1201,6 +1368,13 @@ impl EigeniusKernel for EigeniusService {
             Ok(doc) => doc,
             Err(errors) => {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
+                guard.fail("query_failed");
+                tracing::warn!(
+                    { field::OPERATION } = operation::QUERY_EVALUATE,
+                    { field::COUNT } = errors.len(),
+                    { field::ERROR_MESSAGE } = %msgs.join("; "),
+                    "query failed"
+                );
                 return Ok(Response::new(QueryResponse {
                     success: false,
                     document: Vec::new(),
@@ -1222,6 +1396,7 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<ValidateProgramRequest>,
     ) -> Result<Response<ValidateProgramResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_VALIDATE_PROGRAM);
         let req = request.into_inner();
         let resources = Self::parse_resources(&req.program, &req.content_type)?;
         let program = resources
@@ -1292,6 +1467,12 @@ impl EigeniusKernel for EigeniusService {
                 }
 
                 if template_errors.is_empty() {
+                    tracing::debug!(
+                        { field::OPERATION } = operation::PROGRAM_TYPE_CHECK,
+                        program_iri = program.id().map(|i| i.as_str()).unwrap_or(""),
+                        program_type = ?typ,
+                        "program type-check succeeded"
+                    );
                     Ok(Response::new(ValidateProgramResponse {
                         valid: true,
                         errors: Vec::new(),
@@ -1323,7 +1504,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<RunProgramRequest>,
     ) -> Result<Response<RunProgramResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_RUN_PROGRAM);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_RUN_PROGRAM,
+            { field::CONTENT_TYPE } = %req.content_type,
+            "run_program payload"
+        );
         let program_resources = Self::parse_resources(&req.program, &req.content_type)?;
         let program = program_resources
             .into_iter()
@@ -1343,7 +1530,14 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<RunProgramByIriRequest>,
     ) -> Result<Response<RunProgramResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_RUN_PROGRAM_BY_IRI);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_RUN_PROGRAM_BY_IRI,
+            { field::PROGRAM_IRI } = %req.program_iri,
+            { field::RESOURCE_IRI } = %req.input_iri,
+            "run_program_by_iri target"
+        );
         if req.program_iri.is_empty() {
             return Err(Status::invalid_argument("program_iri is required"));
         }
@@ -1377,6 +1571,7 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<ReflectRequest>,
     ) -> Result<Response<ReflectResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_REFLECT);
         let req = request.into_inner();
         let resources = Self::parse_resources(&req.trace, &req.content_type)?;
 
@@ -1420,6 +1615,10 @@ impl EigeniusKernel for EigeniusService {
         &self,
         _request: Request<HealthRequest>,
     ) -> Result<Response<HealthResponse>, Status> {
+        // Guard fires at debug level — invisible at the default
+        // `info` filter, so frequent probes don't add log noise but
+        // remain inspectable when debugging readiness/liveness.
+        let _guard = RpcGuard::start(operation::RPC_HEALTH);
         let ctx = self.context.read().await;
         let all = ctx.head().all_resources();
 
@@ -1443,7 +1642,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<FiberQueryRequest>,
     ) -> Result<Response<FiberQueryResponse>, Status> {
+        let mut guard = RpcGuard::start(operation::RPC_FIBER_QUERY);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_FIBER_QUERY,
+            { field::INSTITUTION_IRI } = %req.institution_iri,
+            "fiber_query target"
+        );
         let inst_iri = Iri::parse(&req.institution_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
 
@@ -1465,11 +1670,14 @@ impl EigeniusKernel for EigeniusService {
                 result: Self::serialize_resource(&result),
                 error: String::new(),
             })),
-            Err(e) => Ok(Response::new(FiberQueryResponse {
-                success: false,
-                result: Vec::new(),
-                error: format!("{e}"),
-            })),
+            Err(e) => {
+                guard.fail("fiber_query_failed");
+                Ok(Response::new(FiberQueryResponse {
+                    success: false,
+                    result: Vec::new(),
+                    error: format!("{e}"),
+                }))
+            }
         }
     }
 
@@ -1477,7 +1685,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<DiscoverMorphismsRequest>,
     ) -> Result<Response<DiscoverMorphismsResponse>, Status> {
+        let mut guard = RpcGuard::start(operation::RPC_DISCOVER_MORPHISMS);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_DISCOVER_MORPHISMS,
+            { field::INSTITUTION_IRI } = %req.institution_iri,
+            "discover_morphisms target"
+        );
         let inst_iri = Iri::parse(&req.institution_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
 
@@ -1503,11 +1717,14 @@ impl EigeniusKernel for EigeniusService {
                     error: String::new(),
                 }))
             }
-            Err(e) => Ok(Response::new(DiscoverMorphismsResponse {
-                success: false,
-                morphisms: Vec::new(),
-                error: format!("{e}"),
-            })),
+            Err(e) => {
+                guard.fail("discover_morphisms_failed");
+                Ok(Response::new(DiscoverMorphismsResponse {
+                    success: false,
+                    morphisms: Vec::new(),
+                    error: format!("{e}"),
+                }))
+            }
         }
     }
 
@@ -1515,6 +1732,7 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<ListInstitutionsRequest>,
     ) -> Result<Response<ListInstitutionsResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_LIST_INSTITUTIONS);
         // `at_layer` is accepted but currently has no effect —
         // institutions live in a kernel-global runtime registry, not
         // in the layer chain. If Phase 14 ever introduces per-session
@@ -1553,7 +1771,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<GetSchemaRequest>,
     ) -> Result<Response<GetSchemaResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_GET_SCHEMA);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_GET_SCHEMA,
+            { field::CLASS_IRI } = %req.class_iri,
+            "get_schema target"
+        );
         let class_iri = Iri::parse(&req.class_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
 
@@ -1576,6 +1800,7 @@ impl EigeniusKernel for EigeniusService {
         &self,
         _request: Request<ListTasksRequest>,
     ) -> Result<Response<ListTasksResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_LIST_TASKS);
         let tasks = match &self.task_store {
             Some(store) => {
                 let session_id = self.session.read().await.session_id;
@@ -1595,7 +1820,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<GetTaskStatusRequest>,
     ) -> Result<Response<GetTaskStatusResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_GET_TASK_STATUS);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_GET_TASK_STATUS,
+            { field::TASK_ID } = %req.task_id,
+            "get_task_status target"
+        );
         let store = match &self.task_store {
             Some(s) => s,
             None => {
@@ -1625,7 +1856,13 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<CancelTaskRequest>,
     ) -> Result<Response<CancelTaskResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_CANCEL_TASK);
         let req = request.into_inner();
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_CANCEL_TASK,
+            { field::TASK_ID } = %req.task_id,
+            "cancel_task target"
+        );
         let store = match &self.task_store {
             Some(s) => s,
             None => {
@@ -1687,9 +1924,17 @@ impl EigeniusKernel for EigeniusService {
         &self,
         request: Request<LayerTopologyRequest>,
     ) -> Result<Response<LayerTopologyResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_LAYER_TOPOLOGY);
         let req = request.into_inner();
         let layer = self.resolve_read_layer(&req.root_layer).await?;
         let topo = topology::walk(&layer, req.max_depth, req.include_resources);
+        tracing::debug!(
+            { field::OPERATION } = operation::RPC_LAYER_TOPOLOGY,
+            include_resources = req.include_resources,
+            nodes = topo.nodes.len(),
+            edges = topo.edges.len(),
+            "layer_topology computed"
+        );
         Ok(Response::new(topo))
     }
 }
@@ -1751,29 +1996,50 @@ pub async fn start_server(
     let mut orchestrator_client: Option<crate::program::remote::SharedOrchestratorClient> = None;
 
     if let Some(endpoint) = orchestrator_endpoint {
-        println!("Connecting to orchestrator at {endpoint}...");
+        tracing::info!(
+            { field::OPERATION } = operation::SERVER_START,
+            endpoint = %endpoint,
+            "connecting to orchestrator"
+        );
         match crate::program::remote::connect_orchestrator(endpoint, REMOTE_COMPONENTS).await {
             Ok((client, components)) => {
                 for (iri, component) in components {
-                    println!("  Registered remote component: {iri}");
+                    tracing::info!(
+                        { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                        { field::COMPONENT_IRI } = %iri,
+                        host = "orchestrator",
+                        "registered remote component"
+                    );
                     registry.register(iri, component);
                 }
                 orchestrator_client = Some(client);
             }
             Err(e) => {
-                eprintln!("Warning: failed to connect to orchestrator: {e}");
-                eprintln!("  IO components will not be available");
+                tracing::warn!(
+                    { field::OPERATION } = operation::SERVER_START,
+                    { field::ERROR_KIND } = "orchestrator_connect_failed",
+                    { field::ERROR_MESSAGE } = %e,
+                    "failed to connect to orchestrator; IO components will not be available"
+                );
             }
         }
     }
 
     let (mut service, is_persistent) = match backend {
         Some(b) => {
-            println!("Persistent backend attached; using SEED-or-RESUME bootstrap (D13).");
+            tracing::info!(
+                { field::OPERATION } = operation::SERVER_START,
+                mode = "persistent",
+                "persistent backend attached; using SEED-or-RESUME bootstrap (D13)"
+            );
             (EigeniusService::with_persistent_backend(registry, b)?, true)
         }
         None => {
-            println!("In-memory mode (no --db). All state lost on exit.");
+            tracing::info!(
+                { field::OPERATION } = operation::SERVER_START,
+                mode = "in-memory",
+                "in-memory mode (no --db); all state lost on exit"
+            );
             (EigeniusService::with_components(registry)?, false)
         }
     };
@@ -1787,9 +2053,12 @@ pub async fn start_server(
     if is_persistent {
         let errors = service.rehydrate_wasm_from_chain().await;
         for e in errors {
-            eprintln!(
-                "warning: WASM rehydrate: [{}] {}",
-                e.resource_iri, e.message
+            tracing::warn!(
+                { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                { field::ERROR_KIND } = "rehydrate_failed",
+                { field::RESOURCE_IRI } = %e.resource_iri,
+                { field::ERROR_MESSAGE } = %e.message,
+                "WASM rehydrate produced an error"
             );
         }
     }
@@ -1809,7 +2078,11 @@ pub async fn start_server(
         ));
     }
 
-    println!("Eigenius gRPC server listening on {addr}");
+    tracing::info!(
+        { field::OPERATION } = operation::SERVER_START,
+        addr = %addr,
+        "gRPC server listening"
+    );
 
     // Raise gRPC message size limits to 128 MB to accommodate WASM component
     // binaries (which are base64-encoded and can be multiple MB).

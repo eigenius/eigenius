@@ -20,6 +20,7 @@
 
 use crate::context::{ExecutionContext, ExecutionMode};
 use crate::layer::{Layer, LayerBuilder};
+use crate::observability::{field, operation};
 use crate::ontology::eigon_json;
 use crate::validation::Validator;
 use std::fmt;
@@ -73,6 +74,7 @@ fn load_layer(
 ) -> Result<Arc<Layer>, BootstrapError> {
     let resources = eigon_json::parse_document(json).map_err(BootstrapError::Parse)?;
 
+    let resource_count = resources.len();
     let mut builder = LayerBuilder::new(name, parent);
     for resource in resources {
         builder
@@ -84,8 +86,22 @@ fn load_layer(
     let validator = Validator::new(&layer);
     let errors = validator.validate();
     if !errors.is_empty() {
+        tracing::warn!(
+            { field::OPERATION } = operation::BOOTSTRAP_LOAD,
+            layer_name = %name,
+            { field::COUNT } = errors.len(),
+            "embedded ontology validation produced errors"
+        );
         return Err(BootstrapError::CoreOntologyInvalid(errors));
     }
+
+    tracing::debug!(
+        { field::OPERATION } = operation::BOOTSTRAP_LOAD,
+        layer_name = %name,
+        { field::LAYER_ID } = %layer.id(),
+        { field::COUNT } = resource_count,
+        "bootstrap layer loaded"
+    );
 
     Ok(layer)
 }

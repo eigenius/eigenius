@@ -279,6 +279,12 @@ enum DbCommands {
 
 #[tokio::main]
 async fn main() {
+    // Install the structured-logging subscriber before anything else
+    // so initialization events from the kernel land in the configured
+    // format. Read `RUST_LOG` for level filter, `EIGENIUS_LOG_FORMAT`
+    // for `json` vs `pretty` (defaults: pretty on TTY, json otherwise).
+    eigenius_kernel::observability::init();
+
     let cli = Cli::parse();
 
     // Remote mode: delegate to gRPC client

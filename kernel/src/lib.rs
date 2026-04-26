@@ -31,6 +31,7 @@ pub mod esl;
 pub mod institution;
 pub mod layer;
 pub mod nbe;
+pub mod observability;
 pub mod ontology;
 pub mod program;
 pub mod query;

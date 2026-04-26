@@ -68,6 +68,7 @@ use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Clos, Neut, Val};
+use crate::observability::{field, operation};
 use crate::ontology::iri::Iri;
 use crate::program::component::ComponentRegistry;
 use crate::program::trace::{ComponentTrace, Trace, TraceStore};
@@ -394,7 +395,12 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                     match r.get(prop) {
                         Some(val) => Ok(resource_value_to_val(val)),
                         None => {
-                            eprintln!("warning: property {prop} not found on resource");
+                            tracing::warn!(
+                                { field::OPERATION } = operation::NBE_EVAL,
+                                { field::ERROR_KIND } = "property_missing",
+                                { field::PROPERTY_IRI } = %prop,
+                                "property not found on resource during eval; returning Unit"
+                            );
                             Ok(Val::Unit)
                         }
                     }
@@ -409,12 +415,21 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                             return eval_ctx(body, &corecord_rho, ctx);
                         }
                     }
-                    eprintln!("warning: observation '{obs_name}' not found in corecord");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::NBE_EVAL,
+                        { field::ERROR_KIND } = "observation_missing",
+                        observation = %obs_name,
+                        "observation not found in corecord during eval; returning Unit"
+                    );
                     Ok(Val::Unit)
                 }
                 Val::Nt(n) => Ok(Val::Nt(Neut::PropAccess(Box::new(n), prop.clone()))),
                 _other => {
-                    eprintln!("warning: property access on non-resource value");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::NBE_EVAL,
+                        { field::ERROR_KIND } = "property_access_non_resource",
+                        "property access on non-resource value during eval; returning Unit"
+                    );
                     Ok(Val::Unit)
                 }
             }
@@ -712,7 +727,12 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
                     let result = match r.get(prop) {
                         Some(val) => resource_value_to_val(val),
                         None => {
-                            eprintln!("warning: property {prop} not found on resource");
+                            tracing::warn!(
+                                { field::OPERATION } = operation::NBE_EVAL,
+                                { field::ERROR_KIND } = "property_missing",
+                                { field::PROPERTY_IRI } = %prop,
+                                "property not found on resource during eval; returning Unit"
+                            );
                             Val::Unit
                         }
                     };
@@ -731,7 +751,12 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
                             return eval_traced(body, &corecord_rho, ctx);
                         }
                     }
-                    eprintln!("warning: observation '{obs_name}' not found in corecord");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::NBE_EVAL,
+                        { field::ERROR_KIND } = "observation_missing",
+                        observation = %obs_name,
+                        "observation not found in corecord during eval; returning Unit"
+                    );
                     Ok((Val::Unit, None))
                 }
                 Val::Nt(n) => Ok((
@@ -742,7 +767,11 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
                     }),
                 )),
                 _other => {
-                    eprintln!("warning: property access on non-resource value");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::NBE_EVAL,
+                        { field::ERROR_KIND } = "property_access_non_resource",
+                        "property access on non-resource value during eval; returning Unit"
+                    );
                     Ok((Val::Unit, None))
                 }
             }
@@ -1294,7 +1323,13 @@ fn dispatch_component(
                     ) {
                         Ok(converted) => converted,
                         Err(e) => {
-                            eprintln!("convert_json_to_resource failed: {e}");
+                            tracing::warn!(
+                                { field::OPERATION } = operation::CAPABILITY_DISPATCH,
+                                { field::ERROR_KIND } = "json_to_resource_failed",
+                                { field::COMPONENT_IRI } = %component_iri,
+                                { field::ERROR_MESSAGE } = %e,
+                                "convert_json_to_resource failed; falling back to raw output"
+                            );
                             result.output.clone()
                         }
                     }
@@ -1358,7 +1393,13 @@ fn dispatch_component(
                             Some((*step, output_bytes)),
                             checkpoint.as_ref(),
                         ) {
-                            eprintln!("task commit_step failed: {e}");
+                            tracing::warn!(
+                                { field::OPERATION } = operation::TASK_CHECKPOINT,
+                                { field::ERROR_KIND } = "commit_step_failed",
+                                { field::TASK_ID } = ?tc.task_id,
+                                { field::ERROR_MESSAGE } = %e,
+                                "task commit_step failed"
+                            );
                         }
                     }
                 }
@@ -1370,7 +1411,13 @@ fn dispatch_component(
                 Ok(Val::ResourceVal(Box::new(output)))
             }
             Err(e) => {
-                eprintln!("component dispatch failed: {e}");
+                tracing::warn!(
+                    { field::OPERATION } = operation::CAPABILITY_DISPATCH,
+                    { field::ERROR_KIND } = "dispatch_failed",
+                    { field::COMPONENT_IRI } = %component_iri,
+                    { field::ERROR_MESSAGE } = %e,
+                    "IO component dispatch failed; returning empty resource"
+                );
                 // Return empty resource instead of panicking
                 Ok(Val::ResourceVal(Box::new(
                     crate::ontology::resource::Resource::new_embedded(),
@@ -1408,7 +1455,13 @@ fn dispatch_component(
                 Ok(Val::ResourceVal(Box::new(output)))
             }
             Err(e) => {
-                eprintln!("pure component dispatch failed: {e}");
+                tracing::warn!(
+                    { field::OPERATION } = operation::CAPABILITY_DISPATCH,
+                    { field::ERROR_KIND } = "pure_dispatch_failed",
+                    { field::COMPONENT_IRI } = %component_iri,
+                    { field::ERROR_MESSAGE } = %e,
+                    "pure component dispatch failed; returning empty resource"
+                );
                 Ok(Val::ResourceVal(Box::new(
                     crate::ontology::resource::Resource::new_embedded(),
                 )))
@@ -1522,7 +1575,13 @@ fn resolve_component_schemas(
                             return Some((table, schema_class_iri));
                         }
                         Err(e) => {
-                            eprintln!("schema generation failed for {class_iri_str}: {e}");
+                            tracing::warn!(
+                                { field::OPERATION } = operation::CAPABILITY_DISPATCH,
+                                { field::ERROR_KIND } = "schema_generation_failed",
+                                { field::CLASS_IRI } = %class_iri_str,
+                                { field::ERROR_MESSAGE } = %e,
+                                "schema generation failed for class"
+                            );
                         }
                     }
                 }
@@ -1569,7 +1628,12 @@ fn dispatch_fiber_query(
     match reasoner.query(&query_resource, &exec_ctx) {
         Ok(result) => Ok(Val::ResourceVal(Box::new(result))),
         Err(e) => {
-            eprintln!("warning: fiber query failed: {e}");
+            tracing::warn!(
+                { field::OPERATION } = operation::INSTITUTION_DISPATCH,
+                { field::ERROR_KIND } = "fiber_query_failed",
+                { field::ERROR_MESSAGE } = %e,
+                "fiber query failed; returning the input query verbatim"
+            );
             Ok(query_val.clone())
         }
     }

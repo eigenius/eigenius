@@ -27,6 +27,7 @@ pub mod stratify;
 pub mod type_check;
 
 use crate::layer::Layer;
+use crate::observability::{field, operation};
 use crate::ontology::resource::Resource;
 use document::QueryFingerprint;
 use error::QueryError;
@@ -70,6 +71,13 @@ pub fn execute_with(
     // 5. Evaluate — row resources with synthesized Property IRIs
     let fp = QueryFingerprint::of(program_str);
     let rows = evaluate::evaluate(&program, layer, &fp, runtime).map_err(|e| vec![e])?;
+
+    tracing::debug!(
+        { field::OPERATION } = operation::QUERY_EVALUATE,
+        { field::COUNT } = rows.len(),
+        { field::SIZE_BYTES } = program_str.len(),
+        "EigenQL query evaluated"
+    );
 
     // 6. Wrap into a self-describing document (Appendix A).
     Ok(document::wrap(&program.query, program_str, rows))
