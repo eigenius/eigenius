@@ -102,7 +102,9 @@ const CASES: Array<{ name: string; value: Obj }> = [
 Deno.test("cbor-x ↔ ciborium round-trip via WASM echo", async (t) => {
   const addon = tryLoadWasmAddon();
   if (!addon) {
-    console.warn("Skipping: native addon not built (run `deno task build:addon`)");
+    console.warn(
+      "Skipping: native addon not built (run `deno task build:addon`)",
+    );
     return;
   }
 
@@ -128,7 +130,9 @@ Deno.test("cbor-x ↔ ciborium round-trip via WASM echo", async (t) => {
         assertEquals(
           result.output,
           value,
-          `round-trip mismatch for '${name}': got ${JSON.stringify(result.output)}`,
+          `round-trip mismatch for '${name}': got ${
+            JSON.stringify(result.output)
+          }`,
         );
       });
     }

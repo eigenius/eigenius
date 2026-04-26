@@ -25,8 +25,8 @@
  * static root and refusing anything that escapes it.
  */
 
-import { contentType } from "jsr:@std/media-types@^1/content-type";
-import { extname, join, resolve, SEPARATOR } from "jsr:@std/path@^1";
+import { contentType } from "@std/media-types/content-type";
+import { extname, join, resolve, SEPARATOR } from "@std/path";
 
 const NOTEBOOK_PREFIX = "/notebooks";
 

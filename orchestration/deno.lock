@@ -717,6 +717,9 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",
+      "jsr:@std/encoding@1",
+      "jsr:@std/media-types@1",
+      "jsr:@std/path@1",
       "npm:@ai-sdk/anthropic@latest",
       "npm:@bufbuild/protobuf@2",
       "npm:@bufbuild/protoc-gen-es@^2.11.0",

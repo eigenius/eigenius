@@ -1351,36 +1351,27 @@ impl EigeniusKernel for EigeniusService {
             return Err(Status::invalid_argument("input_iri is required"));
         }
 
-        let program_iri = Iri::parse(&req.program_iri).map_err(|e| {
-            Status::invalid_argument(format!("invalid program_iri: {e}"))
-        })?;
-        let input_iri = Iri::parse(&req.input_iri).map_err(|e| {
-            Status::invalid_argument(format!("invalid input_iri: {e}"))
-        })?;
+        let program_iri = Iri::parse(&req.program_iri)
+            .map_err(|e| Status::invalid_argument(format!("invalid program_iri: {e}")))?;
+        let input_iri = Iri::parse(&req.input_iri)
+            .map_err(|e| Status::invalid_argument(format!("invalid input_iri: {e}")))?;
 
         let layer = self.resolve_read_layer(&req.at_layer).await?;
         let program = layer
             .resolve(&program_iri)
             .ok_or_else(|| {
-                Status::not_found(format!(
-                    "program resource not found: {}",
-                    req.program_iri
-                ))
+                Status::not_found(format!("program resource not found: {}", req.program_iri))
             })?
             .clone();
         let input = layer
             .resolve(&input_iri)
             .ok_or_else(|| {
-                Status::not_found(format!(
-                    "input resource not found: {}",
-                    req.input_iri
-                ))
+                Status::not_found(format!("input resource not found: {}", req.input_iri))
             })?
             .clone();
 
         self.execute_program(program, input).await
     }
-
 
     async fn reflect(
         &self,
