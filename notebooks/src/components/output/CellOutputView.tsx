@@ -24,6 +24,7 @@ import {
 import type { CellOutput } from "../../runtime/notebookStore";
 import { ResourceInspector } from "./ResourceInspector";
 import { ResultTable } from "./ResultTable";
+import { TypeScriptValueView } from "./TypeScriptValueView";
 
 const useStyles = makeStyles({
   root: {
@@ -111,6 +112,9 @@ function renderBody(
           traceIri={output.traceIri}
         />
       );
+
+    case "value":
+      return <TypeScriptValueView value={output.value} log={output.log} />;
 
     case "error":
       return (

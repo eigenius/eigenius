@@ -35,7 +35,7 @@ import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
 
 export type CellRunState = "idle" | "running" | "done" | "error";
 
-/** Discriminated union over the renderable shapes Phase 3 produces. */
+/** Discriminated union over the renderable shapes the runtime produces. */
 export type CellOutput =
   | {
     kind: "load";
@@ -61,6 +61,17 @@ export type CellOutput =
     resource: Uint8Array;
     /** Optional trace IRI when the kernel has a trace store configured. */
     traceIri?: string;
+  }
+  | {
+    /**
+     * Phase 4b — TypeScript-cell return value. The auto-renderer
+     * (`TypeScriptValueView`) dispatches on the runtime type:
+     * Resource / ResultSet / RunResult / DOM node / object / primitive.
+     * Console output captured during execution is included for surface.
+     */
+    kind: "value";
+    value: unknown;
+    log: readonly string[];
   }
   | {
     kind: "error";
@@ -149,7 +160,19 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
     setState("running");
     try {
-      const output = await executeCell(eigen, cell);
+      // Snapshot the predecessor outputs at run time so TS cells can
+      // refer to them via `previousOutputs[cellId]` (D22 §6.8).
+      const { cells, cellOutputs } = get();
+      const cellIndex = cells.findIndex((c) => c.id === cell.id);
+      const previousOutputs: Record<string, CellOutput> = {};
+      if (cellIndex > 0) {
+        for (const prev of cells.slice(0, cellIndex)) {
+          const out = cellOutputs.get(prev.id);
+          if (out) previousOutputs[prev.id] = out;
+        }
+      }
+
+      const output = await executeCell(eigen, cell, previousOutputs);
       setOutput(output);
       // Loads update the active layer for display purposes only — the
       // notebook does NOT pin downstream queries to this layer ID
@@ -279,6 +302,7 @@ function dropKey<K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> {
 async function executeCell(
   eigen: Eigen,
   cell: CellJson,
+  previousOutputs: Record<string, CellOutput>,
 ): Promise<CellOutput> {
   switch (cell.type) {
     case "esl": {
@@ -312,17 +336,85 @@ async function executeCell(
       }
       return { kind: "resultset", document: resp.document };
     }
-    case "typescript": {
-      // Phase 4b wires up sandboxed TS execution (D22 §6.8).
-      return {
-        kind: "error",
-        message: "TypeScript cell execution is a Phase 4b deliverable.",
-      };
-    }
+    case "typescript":
+      return executeTypeScriptCell(eigen, cell.source, previousOutputs);
     case "markdown":
       // Should never reach here — runAll skips markdown, and the
       // per-cell Run button is hidden on markdown cells.
       return { kind: "error", message: "markdown cells do not execute" };
+  }
+}
+
+/**
+ * TypeScript cell sandbox (D22 §6.8). Compiles `source` as the body of
+ * an async IIFE with `eigen` and `previousOutputs` in scope, captures
+ * `console.log/info/warn/error`, and returns the IIFE's resolved value
+ * as a `kind: "value"` CellOutput for the auto-renderer.
+ *
+ * Trusted execution — the cell runs with full page-context access.
+ * Multi-user notebooks (post-MVP) will need an iframe or Web Worker
+ * sandbox; for single-user authoring, this is acceptable.
+ */
+async function executeTypeScriptCell(
+  eigen: Eigen,
+  source: string,
+  previousOutputs: Record<string, CellOutput>,
+): Promise<CellOutput> {
+  const log: string[] = [];
+  const capturedConsole = {
+    log: (...args: unknown[]) => log.push(args.map(formatConsoleArg).join(" ")),
+    info: (...args: unknown[]) => log.push(args.map(formatConsoleArg).join(" ")),
+    warn: (...args: unknown[]) =>
+      log.push(`[warn] ${args.map(formatConsoleArg).join(" ")}`),
+    error: (...args: unknown[]) =>
+      log.push(`[error] ${args.map(formatConsoleArg).join(" ")}`),
+  };
+
+  // The IIFE wrapping lets users either `return value` explicitly or
+  // simply have the last statement be an expression — though only an
+  // explicit return surfaces it (we can't run the source through a
+  // compiler here without dragging one in). Document accordingly.
+  const wrapped = `return (async () => {\n${source}\n})();`;
+  let fn: (
+    eigen: Eigen,
+    previousOutputs: Record<string, CellOutput>,
+    console: typeof capturedConsole,
+  ) => Promise<unknown>;
+  try {
+    fn = new Function("eigen", "previousOutputs", "console", wrapped) as (
+      eigen: Eigen,
+      previousOutputs: Record<string, CellOutput>,
+      console: typeof capturedConsole,
+    ) => Promise<unknown>;
+  } catch (err) {
+    return {
+      kind: "error",
+      message: `TS cell parse error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+
+  try {
+    const value = await fn(eigen, previousOutputs, capturedConsole);
+    return { kind: "value", value, log };
+  } catch (err) {
+    return {
+      kind: "error",
+      message: `${err instanceof Error ? err.message : String(err)}${
+        log.length > 0 ? "\n\nconsole:\n" + log.join("\n") : ""
+      }`,
+    };
+  }
+}
+
+function formatConsoleArg(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  if (arg instanceof Error) return arg.message;
+  try {
+    return JSON.stringify(arg);
+  } catch {
+    return String(arg);
   }
 }
 
