@@ -222,7 +222,7 @@ function defaultSourceFor(
 }
 
 const EMPTY_NOTEBOOK: { meta: NotebookMetaJson; cells: readonly CellJson[] } = {
-  meta: {},
+  meta: { title: "Untitled notebook" },
   cells: [],
 };
 
@@ -304,7 +304,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
   loadNotebook(json) {
     set({
-      meta: json.meta ?? {},
+      meta: json.meta,
       cells: json.cells,
       // Reset all runtime state when a new notebook loads.
       cellStates: new Map(),
