@@ -32,6 +32,8 @@ import {
   ArrowExport16Regular,
   ArrowImport16Regular,
   ArrowReset20Regular,
+  ChevronDoubleDown16Regular,
+  ChevronDoubleRight16Regular,
   Dismiss20Regular,
   Edit16Regular,
   FolderOpen16Regular,
@@ -141,8 +143,16 @@ export function Notebook() {
   const loadNotebook = useNotebookStore((s) => s.loadNotebook);
   const runAll = useNotebookStore((s) => s.runAll);
   const resetOutputs = useNotebookStore((s) => s.resetOutputs);
+  const setAllCellsCollapsed = useNotebookStore(
+    (s) => s.setAllCellsCollapsed,
+  );
   const anyRunning = useNotebookStore((s) =>
     Array.from(s.cellStates.values()).some((st) => st === "running")
+  );
+  // True when at least one cell is currently expanded (the default for
+  // unset entries). Drives the smart toggle on the toolbar button.
+  const anyExpanded = useNotebookStore((s) =>
+    s.cells.some((c) => !(s.cellCollapsed.get(c.id) ?? false))
   );
 
   const [publish, setPublish] = useState<PublishState>({ kind: "idle" });
@@ -322,6 +332,17 @@ export function Notebook() {
                 Export…
               </Button>
             </Tooltip>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={anyExpanded
+                ? <ChevronDoubleRight16Regular />
+                : <ChevronDoubleDown16Regular />}
+              disabled={cells.length === 0}
+              onClick={() => setAllCellsCollapsed(anyExpanded)}
+            >
+              {anyExpanded ? "Collapse all" : "Expand all"}
+            </Button>
             <Button
               size="small"
               appearance="subtle"

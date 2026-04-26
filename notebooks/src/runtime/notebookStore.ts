@@ -165,17 +165,40 @@ export interface NotebookState {
   cellStates: ReadonlyMap<string, CellRunState>;
   cellOutputs: ReadonlyMap<string, CellOutput>;
   /**
+   * Per-cell collapsed flag. Ephemeral (not persisted to the notebook
+   * JSON) — collapsed/expanded is a per-session view preference, not
+   * document content. Default for any cell not in the map is
+   * "expanded" (false).
+   */
+  cellCollapsed: ReadonlyMap<string, boolean>;
+  /**
    * Hex `LayerId` of the most-recently-committed layer in this session,
    * or `null` if no ESL cell has been loaded yet. Display-only — queries
    * rely on the orchestrator's session active top, not on this value
    * (D21 §3.6).
    */
   activeLayer: string | null;
+  /**
+   * ID of the cell most recently executed by `runCell` / `runFromCell` /
+   * `runToCell`. Cells *after* this one in source order render a
+   * subdued "stale" hint — the user re-ran something earlier, so any
+   * output below it might be out of date with respect to the kernel
+   * layer chain. Cleared on document load / reset / move / delete.
+   */
+  lastRunCellId: string | null;
 
   // ---- Run actions ----
   runCell: (eigen: Eigen, cell: CellJson) => Promise<void>;
   runAll: (eigen: Eigen) => Promise<void>;
+  /** Run this cell, then every subsequent runnable cell in source order. */
+  runFromCell: (eigen: Eigen, cellId: string) => Promise<void>;
+  /** Run every runnable cell from the top through this cell, inclusive. */
+  runToCell: (eigen: Eigen, cellId: string) => Promise<void>;
   resetOutputs: () => void;
+  /** Toggle the collapsed/expanded state of a single cell. */
+  toggleCellCollapsed: (cellId: string) => void;
+  /** Set every cell's collapsed flag to the given value. */
+  setAllCellsCollapsed: (collapsed: boolean) => void;
 
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
@@ -232,7 +255,9 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
   cellStates: new Map(),
   cellOutputs: new Map(),
+  cellCollapsed: new Map(),
   activeLayer: null,
+  lastRunCellId: null,
 
   // ---- Run actions ----
 
@@ -275,28 +300,59 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       const message = err instanceof Error ? err.message : String(err);
       setOutput({ kind: "error", message });
       setState("error");
+    } finally {
+      // Mark this cell as the most-recently-run regardless of outcome —
+      // any execution may have side-effected the kernel layer chain,
+      // so cells below it are now "potentially stale" and should
+      // surface that to the user.
+      set({ lastRunCellId: cell.id });
     }
   },
 
   async runAll(eigen) {
-    for (const cell of get().cells) {
-      // Markdown cells have nothing to run — render-only.
-      if (cell.type === "markdown") continue;
-      await get().runCell(eigen, cell);
-      const finalState = get().cellStates.get(cell.id);
-      if (finalState === "error") {
-        // §6.3: halt on the first failing cell. The user sees the error
-        // inline on the failed cell and can fix + resume manually.
-        break;
-      }
-    }
+    await runRange(get, eigen, 0, get().cells.length - 1);
+  },
+
+  async runFromCell(eigen, cellId) {
+    const { cells } = get();
+    const startIndex = cells.findIndex((c) => c.id === cellId);
+    if (startIndex < 0) return;
+    await runRange(get, eigen, startIndex, cells.length - 1);
+  },
+
+  async runToCell(eigen, cellId) {
+    const { cells } = get();
+    const endIndex = cells.findIndex((c) => c.id === cellId);
+    if (endIndex < 0) return;
+    await runRange(get, eigen, 0, endIndex);
   },
 
   resetOutputs() {
+    // Clears execution state only — leaves view preferences
+    // (cellCollapsed) untouched, since they're not derived from
+    // running anything.
     set({
       cellStates: new Map(),
       cellOutputs: new Map(),
       activeLayer: null,
+      lastRunCellId: null,
+    });
+  },
+
+  toggleCellCollapsed(cellId) {
+    set((prev) => {
+      const next = copyMap(prev.cellCollapsed);
+      const current = next.get(cellId) ?? false;
+      next.set(cellId, !current);
+      return { cellCollapsed: next };
+    });
+  },
+
+  setAllCellsCollapsed(collapsed) {
+    set((prev) => {
+      const next = new Map<string, boolean>();
+      for (const cell of prev.cells) next.set(cell.id, collapsed);
+      return { cellCollapsed: next };
     });
   },
 
@@ -309,7 +365,9 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       // Reset all runtime state when a new notebook loads.
       cellStates: new Map(),
       cellOutputs: new Map(),
+      cellCollapsed: new Map(),
       activeLayer: null,
+      lastRunCellId: null,
     });
   },
 
@@ -394,6 +452,10 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       cells: prev.cells.filter((c) => c.id !== cellId),
       cellStates: dropKey(prev.cellStates, cellId),
       cellOutputs: dropKey(prev.cellOutputs, cellId),
+      cellCollapsed: dropKey(prev.cellCollapsed, cellId),
+      // The stale-cascade marker no longer makes sense if the cell it
+      // pointed at is gone.
+      lastRunCellId: prev.lastRunCellId === cellId ? null : prev.lastRunCellId,
     }));
   },
 
@@ -405,7 +467,9 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       if (target < 0 || target >= prev.cells.length) return {};
       const next = prev.cells.slice();
       [next[idx], next[target]] = [next[target], next[idx]];
-      return { cells: next };
+      // Cell positions changed; the stale marker references a position
+      // that may no longer reflect the user's mental model. Clear it.
+      return { cells: next, lastRunCellId: null };
     });
   },
 }));
@@ -447,6 +511,35 @@ function serializeCell(c: CellJson): CellJson {
  * "this didn't work" results are returned as `kind: "error"` so the
  * UI renders a structured error panel rather than a stack trace.
  */
+/**
+ * Run every runnable cell in `[startIndex, endIndex]` (inclusive) in
+ * source order, halting on the first error. Markdown cells are
+ * skipped. Used by `runAll` / `runFromCell` / `runToCell`.
+ *
+ * Each underlying `runCell` updates `lastRunCellId` in its own
+ * `finally`, so by the time this returns, `lastRunCellId` already
+ * points at the last cell actually executed.
+ */
+async function runRange(
+  get: () => NotebookState,
+  eigen: Eigen,
+  startIndex: number,
+  endIndex: number,
+): Promise<void> {
+  const cells = get().cells;
+  const lo = Math.max(0, startIndex);
+  const hi = Math.min(cells.length - 1, endIndex);
+  for (let i = lo; i <= hi; i++) {
+    const cell = cells[i];
+    if (cell.type === "markdown") continue;
+    await get().runCell(eigen, cell);
+    if (get().cellStates.get(cell.id) === "error") {
+      // Halt on first failing cell — see Phase 4a §6.3.
+      break;
+    }
+  }
+}
+
 async function executeCell(
   eigen: Eigen,
   cell: CellJson,
