@@ -18,12 +18,21 @@ import {
   Card,
   Caption1,
   makeStyles,
+  Menu,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+  SplitButton,
   Spinner,
   tokens,
+  Tooltip,
 } from "@fluentui/react-components";
 import {
   ArrowDown16Regular,
   ArrowUp16Regular,
+  ChevronDown16Regular,
+  ChevronRight16Regular,
   Delete16Regular,
   Play16Regular,
 } from "@fluentui/react-icons";
@@ -77,6 +86,11 @@ const useStyles = makeStyles({
   indexChart: { background: tokens.colorPaletteRedForeground2 },
   spacer: {
     flex: 1,
+  },
+  staleHint: {
+    color: tokens.colorPaletteDarkOrangeForeground1,
+    fontStyle: "italic",
+    cursor: "default",
   },
   rightCluster: {
     display: "flex",
@@ -139,11 +153,22 @@ export function Cell({ cellId }: CellProps) {
     (s) => s.cellStates.get(cellId) ?? "idle",
   );
   const output = useNotebookStore((s) => s.cellOutputs.get(cellId));
+  const lastRunIndex = useNotebookStore((s) => {
+    if (!s.lastRunCellId) return -1;
+    return s.cells.findIndex((c) => c.id === s.lastRunCellId);
+  });
+  const anyRunning = useNotebookStore((s) =>
+    Array.from(s.cellStates.values()).some((st) => st === "running")
+  );
+  const collapsed = useNotebookStore((s) => s.cellCollapsed.get(cellId) ?? false);
 
   const runCell = useNotebookStore((s) => s.runCell);
+  const runFromCell = useNotebookStore((s) => s.runFromCell);
+  const runToCell = useNotebookStore((s) => s.runToCell);
   const updateCellSource = useNotebookStore((s) => s.updateCellSource);
   const deleteCell = useNotebookStore((s) => s.deleteCell);
   const moveCell = useNotebookStore((s) => s.moveCell);
+  const toggleCellCollapsed = useNotebookStore((s) => s.toggleCellCollapsed);
 
   const onSourceChange = useCallback(
     (value: string) => updateCellSource(cellId, value),
@@ -154,10 +179,30 @@ export function Cell({ cellId }: CellProps) {
 
   const runnable = RUNNABLE[cell.type];
   const isRunning = runState === "running";
+  // "Stale": an *upstream* cell ran more recently than this one.
+  // Concretely: this cell is positioned AFTER the most-recently-run
+  // cell, AND has its own output to be stale about (state === "done"
+  // or "error"). Idle cells and currently-running cells aren't stale,
+  // and non-runnable types (markdown) never participate.
+  const isStale = runnable &&
+    lastRunIndex >= 0 &&
+    cellIndex > lastRunIndex &&
+    (runState === "done" || runState === "error");
 
   return (
     <Card className={styles.card} appearance="filled-alternative">
       <div className={styles.toolbar}>
+        <Button
+          size="small"
+          appearance="subtle"
+          icon={collapsed
+            ? <ChevronRight16Regular />
+            : <ChevronDown16Regular />}
+          aria-label={collapsed ? "Expand cell" : "Collapse cell"}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand cell" : "Collapse cell"}
+          onClick={() => toggleCellCollapsed(cellId)}
+        />
         <span
           className={indexCircleClass(styles, cell.type)}
           aria-label={`Cell ${cellIndex + 1}`}
@@ -167,17 +212,64 @@ export function Cell({ cellId }: CellProps) {
         </span>
         <Caption1 className={styles.typeBadge}>{TYPE_LABEL[cell.type]}</Caption1>
         {runnable && (
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={isRunning ? <Spinner size="tiny" /> : <Play16Regular />}
-            disabled={isRunning}
-            onClick={() => {
-              void runCell(eigen, cell);
-            }}
+          <Menu positioning="below-start">
+            <MenuTrigger disableButtonEnhancement>
+              {(triggerProps) => (
+                <SplitButton
+                  size="small"
+                  appearance="subtle"
+                  icon={isRunning
+                    ? <Spinner size="tiny" />
+                    : <Play16Regular />}
+                  disabled={isRunning || anyRunning}
+                  menuButton={triggerProps}
+                  primaryActionButton={{
+                    onClick: () => {
+                      void runCell(eigen, cell);
+                    },
+                  }}
+                >
+                  Run
+                </SplitButton>
+              )}
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem
+                  icon={<Play16Regular />}
+                  onClick={() => {
+                    void runCell(eigen, cell);
+                  }}
+                >
+                  Run
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    void runFromCell(eigen, cellId);
+                  }}
+                >
+                  Run from here…
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    void runToCell(eigen, cellId);
+                  }}
+                >
+                  Run to here…
+                </MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        )}
+        {isStale && (
+          <Tooltip
+            content={`Cell ${
+              lastRunIndex + 1
+            } ran more recently. This cell may need to be re-run.`}
+            relationship="description"
           >
-            Run
-          </Button>
+            <Caption1 className={styles.staleHint}>stale</Caption1>
+          </Tooltip>
         )}
         <div className={styles.spacer} />
         <div className={styles.rightCluster}>
@@ -207,23 +299,25 @@ export function Cell({ cellId }: CellProps) {
           />
         </div>
       </div>
-      <div className={styles.body}>
-        {cell.type === "markdown"
-          ? <MarkdownCell source={cell.source} onChange={onSourceChange} />
-          : cell.type === "program-run"
-          ? <ProgramRunCellEditor cellId={cell.id} cell={cell} />
-          : cell.type === "chart"
-          ? <ChartCellEditor cellId={cell.id} cell={cell} />
-          : (
-            <CodeMirrorEditor
-              source={cell.source}
-              cellType={cell.type}
-              readOnly={false}
-              onChange={onSourceChange}
-            />
-          )}
-        {output && <CellOutputView output={output} />}
-      </div>
+      {!collapsed && (
+        <div className={styles.body}>
+          {cell.type === "markdown"
+            ? <MarkdownCell source={cell.source} onChange={onSourceChange} />
+            : cell.type === "program-run"
+            ? <ProgramRunCellEditor cellId={cell.id} cell={cell} />
+            : cell.type === "chart"
+            ? <ChartCellEditor cellId={cell.id} cell={cell} />
+            : (
+              <CodeMirrorEditor
+                source={cell.source}
+                cellType={cell.type}
+                readOnly={false}
+                onChange={onSourceChange}
+              />
+            )}
+          {output && <CellOutputView output={output} />}
+        </div>
+      )}
     </Card>
   );
 }
