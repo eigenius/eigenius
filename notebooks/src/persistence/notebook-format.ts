@@ -95,7 +95,14 @@ export interface ChartCellJson {
 export type CellJson = SourceCellJson | ProgramRunCellJson | ChartCellJson;
 
 export interface NotebookMetaJson {
-  title?: string;
+  /**
+   * Required, non-empty notebook title. Surfaced as the queryable
+   * `urn:eigenius:notebook:title` property on publish — Phase 6
+   * promoted this from optional to required so the published-notebook
+   * search dialog can rely on it without OPTIONAL-pattern semantics
+   * in EigenQL (see issue #33).
+   */
+  title: string;
   /**
    * Short description of what the notebook does. Surfaced as a queryable
    * `urn:eigenius:notebook:description` property when the notebook is
@@ -135,7 +142,13 @@ export function parseNotebook(value: unknown): NotebookJson {
       `notebook: format_version ${formatVersion} is newer than this client supports (${CURRENT_FORMAT_VERSION})`,
     );
   }
-  const meta = (obj.meta ?? {}) as NotebookMetaJson;
+  const metaRaw = (obj.meta ?? {}) as Record<string, unknown>;
+  if (typeof metaRaw.title !== "string" || metaRaw.title.trim().length === 0) {
+    throw new Error(
+      "notebook: meta.title is required and must be a non-empty string",
+    );
+  }
+  const meta = metaRaw as unknown as NotebookMetaJson;
   const cellsRaw = obj.cells;
   if (!Array.isArray(cellsRaw)) {
     throw new Error("notebook: `cells` must be an array");

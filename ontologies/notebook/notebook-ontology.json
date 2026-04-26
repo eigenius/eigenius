@@ -9,10 +9,10 @@
       "urn:eigenius:core:description",
       "urn:eigenius:core:short_name",
       "urn:eigenius:notebook:format_version",
+      "urn:eigenius:notebook:title",
       "urn:eigenius:notebook:cells"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:notebook:title",
       "urn:eigenius:notebook:created",
       "urn:eigenius:notebook:modified",
       "urn:eigenius:notebook:eigenius_version"

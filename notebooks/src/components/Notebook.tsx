@@ -18,37 +18,79 @@ import {
   Caption1,
   Input,
   makeStyles,
+  mergeClasses,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Spinner,
   Subtitle1,
+  Tooltip,
   tokens,
 } from "@fluentui/react-components";
 import {
+  ArrowExport16Regular,
+  ArrowImport16Regular,
   ArrowReset20Regular,
-  DocumentArrowDown16Regular,
+  Dismiss20Regular,
+  Edit16Regular,
   FolderOpen16Regular,
   GlobeArrowUp20Regular,
+  Pin16Regular,
+  PinOff16Regular,
   PlayMultiple16Regular,
 } from "@fluentui/react-icons";
 import { parseNotebook } from "../persistence/notebook-format";
 import { Cell } from "./Cell";
 import { CellInsertGap } from "./CellInsertGap";
+import { EditMetadataDialog } from "./dialogs/EditMetadataDialog";
+import { OpenPublishedDialog } from "./dialogs/OpenPublishedDialog";
 import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 
 const useStyles = makeStyles({
-  root: {
-    maxWidth: "880px",
-    margin: "0 auto",
-    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalL}`,
+  // Pinned mode (default): outer is a full-viewport flex column.
+  // The header is fixed-height at top; the cell list is the only
+  // scroll surface. Unpinned mode: outer collapses to natural height
+  // and the page body scrolls (the original Phase 4 behaviour).
+  rootPinned: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100vh",
+    overflow: "hidden",
+  },
+  rootUnpinned: {
+    display: "block",
   },
   header: {
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalS,
-    marginBottom: tokens.spacingVerticalL,
+    flexShrink: 0,
+    background: tokens.colorNeutralBackground1,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+  },
+  headerInner: {
+    maxWidth: "880px",
+    margin: "0 auto",
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+  },
+  cellsScroll: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+  },
+  cellsScrollUnpinned: {
+    overflow: "visible",
+  },
+  cellsInner: {
+    maxWidth: "880px",
+    margin: "0 auto",
+    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalL}`,
   },
   titleRow: {
     display: "flex",
@@ -58,6 +100,10 @@ const useStyles = makeStyles({
   titleInput: {
     flex: 1,
     maxWidth: "560px",
+  },
+  description: {
+    color: tokens.colorNeutralForeground3,
+    whiteSpace: "pre-wrap",
   },
   toolbar: {
     display: "flex",
@@ -101,6 +147,9 @@ export function Notebook() {
 
   const [publish, setPublish] = useState<PublishState>({ kind: "idle" });
   const [loadError, setLoadError] = useState<LoadError>({ kind: "idle" });
+  const [pinned, setPinned] = useState(true);
+  const [openDialogOpen, setOpenDialogOpen] = useState(false);
+  const [editMetaOpen, setEditMetaOpen] = useState(false);
   const isPublishing = publish.kind === "publishing";
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -111,7 +160,7 @@ export function Notebook() {
     // Update the in-memory state so the displayed timestamp matches the file.
     updateMeta({ modified: json.meta.modified });
 
-    const slug = (json.meta.title ?? "notebook")
+    const slug = (json.meta.title || "notebook")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "") || "notebook";
@@ -183,9 +232,10 @@ export function Notebook() {
   };
 
   const modified = meta.modified ? `modified ${meta.modified}` : "";
+  const titleEmpty = meta.title.trim().length === 0;
 
   return (
-    <div className={styles.root}>
+    <div className={pinned ? styles.rootPinned : styles.rootUnpinned}>
       <input
         ref={fileInputRef}
         type="file"
@@ -194,114 +244,217 @@ export function Notebook() {
         onChange={onFilePicked}
       />
       <div className={styles.header}>
-        <div className={styles.titleRow}>
-          <Subtitle1 as="h1" style={{ minWidth: "fit-content" }}>
-            Notebook:
-          </Subtitle1>
-          <Input
-            className={styles.titleInput}
-            size="medium"
-            placeholder="Untitled notebook"
-            value={meta.title ?? ""}
-            onChange={(_e, data) => updateMeta({ title: data.value })}
-          />
+        <div className={styles.headerInner}>
+          <div className={styles.titleRow}>
+            <Subtitle1 as="h1" style={{ minWidth: "fit-content" }}>
+              Notebook:
+            </Subtitle1>
+            <Input
+              className={styles.titleInput}
+              size="medium"
+              placeholder="Untitled notebook"
+              required
+              value={meta.title}
+              onChange={(_e, data) => updateMeta({ title: data.value })}
+            />
+            <Tooltip content="Edit notebook metadata" relationship="label">
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<Edit16Regular />}
+                aria-label="Edit notebook metadata"
+                onClick={() => setEditMetaOpen(true)}
+              />
+            </Tooltip>
+            <Tooltip
+              content={pinned ? "Unpin header (whole page scrolls)" : "Pin header to top"}
+              relationship="label"
+            >
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={pinned ? <Pin16Regular /> : <PinOff16Regular />}
+                aria-label={pinned ? "Unpin header" : "Pin header"}
+                aria-pressed={pinned}
+                onClick={() => setPinned((p) => !p)}
+              />
+            </Tooltip>
+          </div>
+          {meta.description && (
+            <Caption1 className={styles.description}>
+              {meta.description}
+            </Caption1>
+          )}
+          <div className={styles.toolbar}>
+            <Caption1 className={styles.meta}>
+              {cells.length} cell{cells.length === 1 ? "" : "s"}
+              {modified ? ` · ${modified}` : ""}
+            </Caption1>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<FolderOpen16Regular />}
+              disabled={anyRunning || isPublishing}
+              onClick={() => setOpenDialogOpen(true)}
+            >
+              Open…
+            </Button>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<ArrowImport16Regular />}
+              disabled={anyRunning || isPublishing}
+              onClick={onOpenClick}
+            >
+              Import…
+            </Button>
+            <Tooltip
+              content={titleEmpty ? "Set a title before exporting" : "Download the notebook as a JSON file"}
+              relationship="label"
+            >
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowExport16Regular />}
+                disabled={anyRunning || isPublishing || titleEmpty}
+                onClick={onSave}
+              >
+                Export…
+              </Button>
+            </Tooltip>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<ArrowReset20Regular />}
+              disabled={anyRunning || isPublishing}
+              onClick={() => resetOutputs()}
+            >
+              Reset
+            </Button>
+            <Tooltip
+              content={titleEmpty ? "Set a title before publishing" : "Publish the notebook into the active layer chain"}
+              relationship="label"
+            >
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={isPublishing ? <Spinner size="tiny" /> : <GlobeArrowUp20Regular />}
+                disabled={anyRunning || isPublishing || titleEmpty}
+                onClick={() => {
+                  void onPublish();
+                }}
+              >
+                Publish
+              </Button>
+            </Tooltip>
+            <Button
+              size="small"
+              appearance="primary"
+              icon={<PlayMultiple16Regular />}
+              disabled={anyRunning || isPublishing}
+              onClick={() => {
+                void runAll(eigen);
+              }}
+            >
+              Run all
+            </Button>
+          </div>
+          {loadError.kind === "error" && (
+            <MessageBar intent="error">
+              <MessageBarBody>
+                <MessageBarTitle>Could not load notebook</MessageBarTitle>
+                <div>{loadError.message}</div>
+              </MessageBarBody>
+              <MessageBarActions
+                containerAction={
+                  <Button
+                    appearance="transparent"
+                    icon={<Dismiss20Regular />}
+                    aria-label="Dismiss"
+                    onClick={() => setLoadError({ kind: "idle" })}
+                  />
+                }
+              />
+            </MessageBar>
+          )}
+          {publish.kind === "success" && (
+            <MessageBar intent="success">
+              <MessageBarBody>
+                <MessageBarTitle>Notebook published</MessageBarTitle>
+                <div>
+                  {publish.cellCount} cell{publish.cellCount === 1 ? "" : "s"} ·
+                  {" "}
+                  <span className={styles.iri}>{publish.notebookIri}</span>
+                </div>
+              </MessageBarBody>
+              <MessageBarActions
+                containerAction={
+                  <Button
+                    appearance="transparent"
+                    icon={<Dismiss20Regular />}
+                    aria-label="Dismiss"
+                    onClick={() => setPublish({ kind: "idle" })}
+                  />
+                }
+              />
+            </MessageBar>
+          )}
+          {publish.kind === "error" && (
+            <MessageBar intent="error">
+              <MessageBarBody>
+                <MessageBarTitle>Publish failed</MessageBarTitle>
+                <div className={styles.iri}>{publish.message}</div>
+              </MessageBarBody>
+              <MessageBarActions
+                containerAction={
+                  <Button
+                    appearance="transparent"
+                    icon={<Dismiss20Regular />}
+                    aria-label="Dismiss"
+                    onClick={() => setPublish({ kind: "idle" })}
+                  />
+                }
+              />
+            </MessageBar>
+          )}
         </div>
-        <div className={styles.toolbar}>
-          <Caption1 className={styles.meta}>
-            {cells.length} cell{cells.length === 1 ? "" : "s"}
-            {modified ? ` · ${modified}` : ""}
-          </Caption1>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<FolderOpen16Regular />}
-            disabled={anyRunning || isPublishing}
-            onClick={onOpenClick}
-          >
-            Open…
-          </Button>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<DocumentArrowDown16Regular />}
-            disabled={anyRunning || isPublishing}
-            onClick={onSave}
-          >
-            Save
-          </Button>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<ArrowReset20Regular />}
-            disabled={anyRunning || isPublishing}
-            onClick={() => resetOutputs()}
-          >
-            Reset
-          </Button>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={isPublishing ? <Spinner size="tiny" /> : <GlobeArrowUp20Regular />}
-            disabled={anyRunning || isPublishing}
-            onClick={() => {
-              void onPublish();
-            }}
-          >
-            Publish
-          </Button>
-          <Button
-            size="small"
-            appearance="primary"
-            icon={<PlayMultiple16Regular />}
-            disabled={anyRunning || isPublishing}
-            onClick={() => {
-              void runAll(eigen);
-            }}
-          >
-            Run all
-          </Button>
-        </div>
-        {loadError.kind === "error" && (
-          <MessageBar intent="error">
-            <MessageBarBody>
-              <MessageBarTitle>Could not load notebook</MessageBarTitle>
-              <div>{loadError.message}</div>
-            </MessageBarBody>
-          </MessageBar>
-        )}
-        {publish.kind === "success" && (
-          <MessageBar intent="success">
-            <MessageBarBody>
-              <MessageBarTitle>Notebook published</MessageBarTitle>
-              <div>
-                {publish.cellCount} cell{publish.cellCount === 1 ? "" : "s"} ·
-                {" "}
-                <span className={styles.iri}>{publish.notebookIri}</span>
-              </div>
-            </MessageBarBody>
-          </MessageBar>
-        )}
-        {publish.kind === "error" && (
-          <MessageBar intent="error">
-            <MessageBarBody>
-              <MessageBarTitle>Publish failed</MessageBarTitle>
-              <div className={styles.iri}>{publish.message}</div>
-            </MessageBarBody>
-          </MessageBar>
-        )}
       </div>
-      <CellInsertGap afterCellId={null} />
-      {cells.map((cell) => (
-        <div key={cell.id}>
-          <Cell cellId={cell.id} />
-          <CellInsertGap afterCellId={cell.id} />
+      <div
+        className={mergeClasses(
+          styles.cellsScroll,
+          !pinned && styles.cellsScrollUnpinned,
+        )}
+      >
+        <div className={styles.cellsInner}>
+          <CellInsertGap afterCellId={null} />
+          {cells.map((cell) => (
+            <div key={cell.id}>
+              <Cell cellId={cell.id} />
+              <CellInsertGap afterCellId={cell.id} />
+            </div>
+          ))}
+          {cells.length === 0 && (
+            <Caption1>
+              Empty notebook. Hover the line above to insert your first cell.
+            </Caption1>
+          )}
         </div>
-      ))}
-      {cells.length === 0 && (
-        <Caption1>
-          Empty notebook. Hover the line above to insert your first cell.
-        </Caption1>
-      )}
+      </div>
+      <OpenPublishedDialog
+        open={openDialogOpen}
+        onOpenChange={setOpenDialogOpen}
+        onPicked={(json) => {
+          loadNotebook(json);
+          setLoadError({ kind: "idle" });
+          setPublish({ kind: "idle" });
+        }}
+      />
+      <EditMetadataDialog
+        open={editMetaOpen}
+        onOpenChange={setEditMetaOpen}
+        meta={meta}
+        onSave={(next) => updateMeta(next)}
+      />
     </div>
   );
 }

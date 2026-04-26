@@ -139,7 +139,13 @@ export interface ChartCellJson {
 export type CellJson = SourceCellJson | ProgramRunCellJson | ChartCellJson;
 
 export interface NotebookMetaJson {
-  title?: string;
+  /**
+   * Required, non-empty notebook title. Phase 6 promoted this from
+   * optional to required so the published-notebook search dialog can
+   * filter on it via a single EigenQL query without OPTIONAL-pattern
+   * semantics in the kernel (issue #33).
+   */
+  title: string;
   description?: string;
   created?: string;
   modified?: string;
@@ -190,7 +196,12 @@ export async function notebookJsonToResources(
   // Notebook IRI hashes the structural form (excludes timestamps).
   const nbIri = await notebookIri(notebook, cellIris);
 
-  const meta = notebook.meta ?? {};
+  const meta = notebook.meta;
+  if (typeof meta?.title !== "string" || meta.title.trim().length === 0) {
+    throw new Error(
+      "notebook: meta.title is required and must be a non-empty string",
+    );
+  }
   const notebookResource: EigonResource = {
     "@id": nbIri,
     [IS_A]: [NOTEBOOK_CLASS],
@@ -198,9 +209,9 @@ export async function notebookJsonToResources(
       "Notebook published via @eigenius/client.",
     [SHORT_NAME]: nbIri.slice(`${NB_NS}:`.length, `${NB_NS}:`.length + 12),
     [FORMAT_VERSION_PROP]: notebook.format_version,
+    [TITLE_PROP]: meta.title,
     [CELLS_PROP]: cellIris,
   };
-  if (meta.title) notebookResource[TITLE_PROP] = meta.title;
   if (meta.description) notebookResource[DESCRIPTION_PROP] = meta.description;
   if (meta.created) notebookResource[CREATED_PROP] = meta.created;
   if (meta.modified) notebookResource[MODIFIED_PROP] = meta.modified;
@@ -285,9 +296,12 @@ export function resourcesToNotebookJson(
     };
   });
 
-  const meta: NotebookMetaJson = {};
-  const title = notebook[TITLE_PROP];
-  if (typeof title === "string") meta.title = title;
+  const titleRaw = notebook[TITLE_PROP];
+  const meta: NotebookMetaJson = {
+    title: typeof titleRaw === "string" && titleRaw.length > 0
+      ? titleRaw
+      : "Untitled notebook",
+  };
   const description = notebook[DESCRIPTION_PROP];
   if (typeof description === "string") meta.description = description;
   const created = notebook[CREATED_PROP];

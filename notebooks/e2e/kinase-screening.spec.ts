@@ -55,7 +55,7 @@ test("kinase-screening: open → run all → six chart cells render", async ({ p
   ).toBeVisible({ timeout: 10_000 });
 
   // 2. Open the kinase-screening notebook through the hidden file
-  //    input wired to the toolbar's "Open…" button.
+  //    input wired to the toolbar's "Import…" button.
   await page.locator('input[type="file"]').setInputFiles(KINASE_PATH);
 
   // 3. Title swaps — confirms the file was parsed and loaded.
