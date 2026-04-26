@@ -191,7 +191,7 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
     if (!openLayer) return true;
     return topology.nodes.some(
       (n) =>
-        n.kind === NodeKind.Resource && n.attrs?.layer_id === openLayer.id,
+        n.kind === NodeKind.RESOURCE && n.attrs?.layer_id === openLayer.id,
     );
   }, [openLayer, topology]);
   const openLayerNeedsRichFetch = useMemo(() => {

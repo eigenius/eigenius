@@ -47,6 +47,7 @@ import {
   Input,
   makeStyles,
   mergeClasses,
+  shorthands,
   Spinner,
   tokens,
 } from "@fluentui/react-components";
@@ -89,14 +90,14 @@ const useStyles = makeStyles({
     flexDirection: "column",
     gap: tokens.spacingVerticalXS,
     padding: tokens.spacingVerticalM,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     background: tokens.colorNeutralBackground1,
     cursor: "pointer",
     textAlign: "left",
     transition: "border-color 100ms ease, background 100ms ease",
     ":hover": {
-      borderColor: tokens.colorNeutralStroke1,
+      ...shorthands.borderColor(tokens.colorNeutralStroke1),
       background: tokens.colorNeutralBackground1Hover,
     },
     ":focus-visible": {
@@ -105,10 +106,10 @@ const useStyles = makeStyles({
     },
   },
   cardSelected: {
-    borderColor: tokens.colorBrandStroke1,
+    ...shorthands.borderColor(tokens.colorBrandStroke1),
     background: tokens.colorBrandBackground2,
     ":hover": {
-      borderColor: tokens.colorBrandStroke1,
+      ...shorthands.borderColor(tokens.colorBrandStroke1),
       background: tokens.colorBrandBackground2Hover,
     },
   },

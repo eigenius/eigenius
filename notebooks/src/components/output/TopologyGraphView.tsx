@@ -308,9 +308,15 @@ function buildGraph(
   topology: LayerTopologyResponse,
   hideParentLayerEdges: boolean,
 ): BuiltGraph {
+  // Drop edges whose source or target isn't in the node set — xyflow
+  // silently skips rendering them, but they'd otherwise inflate the
+  // displayed "N edges" count and mislead the user. Common cause:
+  // upstream filter (e.g., the kinase notebook's namespace prefix
+  // scope) prunes target nodes but leaves edges that point at them.
+  const nodeIds = new Set(topology.nodes.map((n) => n.id));
   const visibleEdges = topology.edges.filter((e) => {
     if (hideParentLayerEdges && e.kind === EdgeKind.PARENT_LAYER) return false;
-    return true;
+    return nodeIds.has(e.source) && nodeIds.has(e.target);
   });
 
   const xnodes: Node[] = topology.nodes.map((n) => buildNode(n));

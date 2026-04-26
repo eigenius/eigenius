@@ -39,7 +39,7 @@ Three task-first guides, grounded in the implementation:
 
 Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
 
-## Current Status: Phases 0–11e Complete
+## Current Status: Phases 0–11e + D22 Notebook & SDK Complete
 
 The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
 
@@ -71,7 +71,7 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Declare cross-institution `Comorphism` translations as first-class ontology resources, invocable from program bodies and from EigenQL (Phase 11d, 11e.1, 11e.2)
 - Dispatch qualified-name function calls (`cap:predicate(...)`, `cap:translate(...)`) through a single institution-classification table shared by ESL and EigenQL (Phase 11e)
 - Run locally via three terminals or Docker Compose
-- Drive the platform from a React notebook (cells: markdown, ESL, EigenQL, TypeScript, program-run; auto-rendered outputs; layer-stack and trace-tree visualisations; content-addressed publish-to-layer; bundled into the orchestrator image and served at `/notebooks/`)
+- Drive the platform from a React notebook (six cell types: markdown, ESL, EigenQL, TypeScript, program-run, and form-based chart cells covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area; auto-rendered outputs; layer-stack and per-layer topology graph visualisations; cell-order Run / Run-from-here / Run-to-here with stale markers; collapse/expand; content-addressed publish-to-layer with a queryable Open dialog; bundled into the orchestrator image and served at `/notebooks/`)
 - Use the same kernel from any TypeScript runtime via `@eigenius/client` — a typed SDK over the Connect-RPC surface (browser, Deno, Node)
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
@@ -156,7 +156,7 @@ ontologies/      Ontology definitions
   institution/     Institution ontology (FiberReasoner registration, fiber structure)
   notebook/        Notebook ontology (Notebook + Cell + CellType — backs `Publish` from the UI)
   examples/        Example ontologies and programs
-notebooks/       React notebook SPA (Phase 4 MVP) — bundled into the orchestrator image
+notebooks/       React notebook SPA (D22 — six cell types incl. charts, layer/topology graphs, publish-to-layer) — bundled into the orchestrator image
 clients/
   eigenius-ts/     `@eigenius/client` — TypeScript SDK that wraps the orchestrator's RPC surface
 docs/design/     Design documents (D1–D22)
