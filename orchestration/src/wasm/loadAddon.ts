@@ -24,6 +24,8 @@
  */
 
 import { createRequire } from "node:module";
+import * as log from "../observability/mod.ts";
+import { operation } from "../observability/mod.ts";
 
 export interface WasmAddon {
   loadComponent(
@@ -86,9 +88,10 @@ export function tryLoadWasmAddon(): WasmAddon | null {
   try {
     return loadWasmAddon();
   } catch (e) {
-    console.warn(
-      `[wasm] native addon unavailable: ${(e as Error).message.split("\n")[0]}`,
-    );
+    log.warn(operation.WASM_ADDON_LOAD, "native addon unavailable", {
+      error_kind: "addon_load_failed",
+      error_message: (e as Error).message.split("\n")[0],
+    });
     return null;
   }
 }

@@ -26,6 +26,8 @@
 import { createConnectRouter } from "@connectrpc/connect";
 import { ComponentRegistry } from "../components/registry.ts";
 import { KernelClient } from "../client/kernel_client.ts";
+import * as log from "../observability/mod.ts";
+import { operation } from "../observability/mod.ts";
 import {
   type ComponentExecutorDeps,
   registerComponentExecutor,
@@ -100,34 +102,25 @@ export function startServer(
       const response = await handleConnectRequest(router, req);
       if (response) return response;
     } catch (e) {
-      console.error(
-        `Connect handler threw: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      log.error(operation.COMPONENT_DISPATCH, "Connect handler threw", {
+        error_kind: "connect_handler_panic",
+        error_message: e instanceof Error ? e.message : String(e),
+      });
     }
 
     return new Response("Not Found", { status: 404 });
   });
 
-  console.log(`Orchestrator server listening on port ${port}`);
-  console.log(
-    `  Connect: ComponentExecutor (kernel → orchestrator IO dispatch)`,
-  );
-  console.log(
-    `  Connect: NotebookService    (browser → orchestrator → kernel)`,
-  );
-  console.log(
-    `  Connect: EigeniusKernel     (browser → orchestrator → kernel passthrough)`,
-  );
-  console.log(`  HTTP:    GET /health`);
-  if (notebookStatic) {
-    console.log(
-      `  HTTP:    GET /notebooks/* → ${notebookStaticDir} (notebook SPA)`,
-    );
-  } else {
-    console.log(
-      `  HTTP:    /notebooks/* (disabled — set EIGENIUS_NOTEBOOK_STATIC)`,
-    );
-  }
+  log.info(operation.SERVER_START, "orchestrator server listening", {
+    port,
+    services: [
+      "ComponentExecutor",
+      "NotebookService",
+      "EigeniusKernel(passthrough)",
+    ],
+    health_endpoint: "/health",
+    notebook_static: notebookStatic ? notebookStaticDir : null,
+  });
 }
 
 /**

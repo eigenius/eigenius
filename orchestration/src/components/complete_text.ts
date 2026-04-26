@@ -24,6 +24,8 @@
 
 import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
+import * as log from "../observability/mod.ts";
+import { operation } from "../observability/mod.ts";
 import type {
   ComponentHandler,
   ComponentInput,
@@ -115,15 +117,43 @@ export function createCompleteTextHandler(): ComponentHandler {
     const prompt = formatPrompt(userPrompt, req.input);
     const startTime = Date.now();
 
-    const result = await generateText({
-      model: anthropic(model),
-      system: systemPrompt,
-      prompt,
-      temperature,
-      maxOutputTokens: maxTokens,
+    log.debug(operation.LLM_COMPLETE_TEXT, "LLM call starting", {
+      provider: "anthropic",
+      model,
+      prompt_chars: prompt.length,
     });
 
+    let result;
+    try {
+      result = await generateText({
+        model: anthropic(model),
+        system: systemPrompt,
+        prompt,
+        temperature,
+        maxOutputTokens: maxTokens,
+      });
+    } catch (e) {
+      log.warn(operation.LLM_COMPLETE_TEXT, "LLM call failed", {
+        provider: "anthropic",
+        model,
+        error_kind: "provider_error",
+        error_message: e instanceof Error ? e.message : String(e),
+        latency_ms: Date.now() - startTime,
+      });
+      throw e;
+    }
+
     const latencyMs = Date.now() - startTime;
+
+    log.info(operation.LLM_COMPLETE_TEXT, "LLM call completed", {
+      provider: "anthropic",
+      model,
+      prompt_tokens: result.usage.inputTokens ?? 0,
+      completion_tokens: result.usage.outputTokens ?? 0,
+      token_count: (result.usage.inputTokens ?? 0) +
+        (result.usage.outputTokens ?? 0),
+      latency_ms: latencyMs,
+    });
 
     const metrics: ComponentMetrics = {
       provider: "anthropic",

@@ -32,6 +32,7 @@ import {
   NotebookService,
 } from "../gen/eigenius_pb.ts";
 import { KernelClient } from "../client/kernel_client.ts";
+import { operation, withRpcGuard } from "../observability/mod.ts";
 
 export interface NotebookServiceDeps {
   kernel: KernelClient;
@@ -52,18 +53,25 @@ export function registerNotebookService(
   const { kernel } = deps;
 
   router.service(NotebookService, {
-    async layerTopology(
+    layerTopology(
       req: LayerTopologyRequest,
     ): Promise<LayerTopologyResponse> {
-      // Thin proxy. The kernel does the actual walking; the orchestrator
-      // adds nothing to the response. Future browser-specific shaping
-      // (e.g. attaching display preferences from a notebook session)
-      // would happen here.
-      return await kernel.layerTopology(
-        req.rootLayer,
-        req.maxDepth,
-        req.includeResources,
-      );
+      return withRpcGuard(operation.NOTEBOOK_LAYER_TOPOLOGY, async (mark) => {
+        try {
+          // Thin proxy. The kernel does the actual walking; the orchestrator
+          // adds nothing to the response. Future browser-specific shaping
+          // (e.g. attaching display preferences from a notebook session)
+          // would happen here.
+          return await kernel.layerTopology(
+            req.rootLayer,
+            req.maxDepth,
+            req.includeResources,
+          );
+        } catch (e) {
+          mark.fail("kernel_proxy_failed");
+          throw e;
+        }
+      });
     },
   });
 }

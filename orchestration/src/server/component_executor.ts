@@ -46,6 +46,8 @@ import {
   type HostBridge,
 } from "../wasm/hostBridge.ts";
 import type { WasmAddon } from "../wasm/loadAddon.ts";
+import * as log from "../observability/mod.ts";
+import { operation, withRpcGuard } from "../observability/mod.ts";
 
 const TEXT_DECODER = new TextDecoder();
 
@@ -69,107 +71,126 @@ export function registerComponentExecutor(
   const { registry, wasm } = deps;
 
   router.service(ComponentExecutor, {
-    async execute(req: ComponentRequest) {
-      const componentIri = req.componentIri;
+    execute(req: ComponentRequest) {
+      return withRpcGuard(operation.COMPONENT_DISPATCH, async (mark) => {
+        const componentIri = req.componentIri;
 
-      if (!registry.has(componentIri)) {
-        return create(ComponentResponseSchema, {
-          success: false,
-          error: `No handler registered for component: ${componentIri}`,
-        });
-      }
-
-      try {
-        // Decode input and argument from bytes (Eigon-JSON)
-        const inputJson = TEXT_DECODER.decode(req.input);
-        const argumentJson = TEXT_DECODER.decode(req.argument);
-
-        const input = inputJson ? JSON.parse(inputJson) : {};
-        const argument = argumentJson ? JSON.parse(argumentJson) : {};
-
-        const result = await registry.execute(componentIri, {
-          input,
-          argument,
-        });
-
-        // Encode output back to Eigon-JSON bytes
-        const outputBytes = new TextEncoder().encode(
-          JSON.stringify(result.output),
-        );
-
-        const response = create(ComponentResponseSchema, {
-          success: true,
-          output: outputBytes,
-        });
-
-        if (result.metrics) {
-          response.metrics = create(ComponentMetricsSchema, {
-            provider: result.metrics.provider,
-            model: result.metrics.model,
-            promptTokens: BigInt(result.metrics.promptTokens),
-            completionTokens: BigInt(result.metrics.completionTokens),
-            latencyMs: BigInt(result.metrics.latencyMs),
+        if (!registry.has(componentIri)) {
+          mark.fail("unknown_component");
+          return create(ComponentResponseSchema, {
+            success: false,
+            error: `No handler registered for component: ${componentIri}`,
           });
         }
 
-        return response;
-      } catch (e) {
-        return create(ComponentResponseSchema, {
-          success: false,
-          error: `Component execution failed: ${(e as Error).message}`,
-        });
-      }
+        try {
+          // Decode input and argument from bytes (Eigon-JSON)
+          const inputJson = TEXT_DECODER.decode(req.input);
+          const argumentJson = TEXT_DECODER.decode(req.argument);
+
+          const input = inputJson ? JSON.parse(inputJson) : {};
+          const argument = argumentJson ? JSON.parse(argumentJson) : {};
+
+          const result = await registry.execute(componentIri, {
+            input,
+            argument,
+          });
+
+          // Encode output back to Eigon-JSON bytes
+          const outputBytes = new TextEncoder().encode(
+            JSON.stringify(result.output),
+          );
+
+          const response = create(ComponentResponseSchema, {
+            success: true,
+            output: outputBytes,
+          });
+
+          if (result.metrics) {
+            response.metrics = create(ComponentMetricsSchema, {
+              provider: result.metrics.provider,
+              model: result.metrics.model,
+              promptTokens: BigInt(result.metrics.promptTokens),
+              completionTokens: BigInt(result.metrics.completionTokens),
+              latencyMs: BigInt(result.metrics.latencyMs),
+            });
+          }
+
+          return response;
+        } catch (e) {
+          mark.fail("dispatch_failed");
+          return create(ComponentResponseSchema, {
+            success: false,
+            error: `Component execution failed: ${(e as Error).message}`,
+          });
+        }
+      });
     },
 
-    async registerWasmComponent(req: RegisterWasmComponentRequest) {
-      if (!wasm) {
-        return create(RegisterWasmComponentResponseSchema, {
-          success: false,
-          error:
-            "orchestrator WASM support is disabled (native addon not loaded — " +
-            "build orchestration/native)",
-        });
-      }
+    registerWasmComponent(req: RegisterWasmComponentRequest) {
+      return withRpcGuard(operation.WASM_COMPONENT_REGISTER, async (mark) => {
+        if (!wasm) {
+          mark.fail("wasm_disabled");
+          return create(RegisterWasmComponentResponseSchema, {
+            success: false,
+            error:
+              "orchestrator WASM support is disabled (native addon not loaded — " +
+              "build orchestration/native)",
+          });
+        }
 
-      const { addon, wasmRegistry, bridge } = wasm;
-      const componentIri = req.componentIri;
+        const { addon, wasmRegistry, bridge } = wasm;
+        const componentIri = req.componentIri;
 
-      if (!componentIri) {
-        return create(RegisterWasmComponentResponseSchema, {
-          success: false,
-          error: "component_iri is required",
-        });
-      }
-      if (!req.wasmBinary || req.wasmBinary.length === 0) {
-        return create(RegisterWasmComponentResponseSchema, {
-          success: false,
-          error: "wasm_binary is required",
-        });
-      }
+        if (!componentIri) {
+          mark.fail("missing_component_iri");
+          return create(RegisterWasmComponentResponseSchema, {
+            success: false,
+            error: "component_iri is required",
+          });
+        }
+        if (!req.wasmBinary || req.wasmBinary.length === 0) {
+          mark.fail("missing_wasm_binary");
+          return create(RegisterWasmComponentResponseSchema, {
+            success: false,
+            error: "wasm_binary is required",
+          });
+        }
 
-      try {
-        await wasmRegistry.register(componentIri, req.wasmBinary, {
-          fuelLimit: Number(req.fuelLimit ?? 0n),
-          memoryLimitPages: Number(req.memoryLimitPages ?? 0n),
-        });
+        try {
+          await wasmRegistry.register(componentIri, req.wasmBinary, {
+            fuelLimit: Number(req.fuelLimit ?? 0n),
+            memoryLimitPages: Number(req.memoryLimitPages ?? 0n),
+          });
 
-        registry.register(
-          componentIri,
-          createWasmComponentHandler(componentIri, {
-            addon,
-            wasmRegistry,
-            bridge,
-          }),
-        );
+          registry.register(
+            componentIri,
+            createWasmComponentHandler(componentIri, {
+              addon,
+              wasmRegistry,
+              bridge,
+            }),
+          );
 
-        console.log(`[wasm] registered ${componentIri}`);
-        return create(RegisterWasmComponentResponseSchema, { success: true });
-      } catch (e) {
-        return create(RegisterWasmComponentResponseSchema, {
-          success: false,
-          error: `WASM registration failed: ${(e as Error).message}`,
-        });
-      }
+          log.info(
+            operation.WASM_COMPONENT_REGISTER,
+            "registered WASM IO component",
+            {
+              component_iri: componentIri,
+              size_bytes: req.wasmBinary.length,
+            },
+          );
+          return create(RegisterWasmComponentResponseSchema, {
+            success: true,
+          });
+        } catch (e) {
+          mark.fail("registration_failed");
+          return create(RegisterWasmComponentResponseSchema, {
+            success: false,
+            error: `WASM registration failed: ${(e as Error).message}`,
+          });
+        }
+      });
     },
   });
 }

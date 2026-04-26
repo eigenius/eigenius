@@ -30,6 +30,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { KernelClient } from "../client/kernel_client.ts";
+import * as log from "../observability/mod.ts";
+import { operation } from "../observability/mod.ts";
 
 /**
  * Create and configure the Eigenius MCP server.
@@ -191,5 +193,7 @@ export function createMcpServer(client: KernelClient): McpServer {
 export async function startStdioServer(server: McpServer): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("MCP server (stdio) connected");
+  log.info(operation.MCP_SERVER_START, "MCP server connected", {
+    transport: "stdio",
+  });
 }
