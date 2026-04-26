@@ -1,0 +1,372 @@
+% =============================================================
+% Eigenius — additional references not yet cited
+%
+% Companion to eigenius.bib. These are foundational works the
+% Eigenius system relies on (or is in direct conceptual dialogue
+% with) but which are not yet referenced from any design doc,
+% paper, or guide. Adding them here gives a single place to draw
+% from when the relevant design doc / paper section gets the
+% bibliography pass it deserves.
+%
+% Same key convention as eigenius.bib: lowercase, descriptive,
+% short.
+% =============================================================
+
+
+% --- Type theory foundations (gap: Martin-Löf, CIC, inductive
+%     families). Currently cited: minitt, nbe, lean4, agda, idris;
+%     foundational predecessors below.
+
+@book{martinlof1984,
+  author    = {Martin-L{\"o}f, Per},
+  title     = {Intuitionistic Type Theory},
+  publisher = {Bibliopolis},
+  address   = {Naples},
+  year      = {1984},
+  note      = {Notes by Giovanni Sambin of a series of lectures
+               given in Padua, June 1980}
+}
+
+@inproceedings{coquand-paulin1990,
+  author    = {Coquand, Thierry and Paulin-Mohring, Christine},
+  title     = {Inductively defined types},
+  booktitle = {COLOG-88: International Conference on Computer Logic},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {417},
+  pages     = {50--66},
+  publisher = {Springer},
+  year      = {1990}
+}
+
+@article{dybjer1994,
+  author  = {Dybjer, Peter},
+  title   = {Inductive families},
+  journal = {Formal Aspects of Computing},
+  volume  = {6},
+  number  = {4},
+  pages   = {440--465},
+  year    = {1994}
+}
+
+
+% --- Sized types and copatterns (D19, Phase 11b) ----------------
+
+@inproceedings{abel2010miniagda,
+  author    = {Abel, Andreas},
+  title     = {{MiniAgda}: Integrating sized and dependent types},
+  booktitle = {Workshop on Partiality and Recursion in Interactive
+               Theorem Provers (PAR 2010)},
+  series    = {EPTCS},
+  volume    = {43},
+  pages     = {14--28},
+  year      = {2010}
+}
+
+@inproceedings{abel-pientka2013,
+  author    = {Abel, Andreas and Pientka, Brigitte},
+  title     = {Wellfounded recursion with copatterns: A unified
+               approach to termination and productivity},
+  booktitle = {ICFP 2013: 18th {ACM SIGPLAN} International
+               Conference on Functional Programming},
+  pages     = {185--196},
+  publisher = {ACM},
+  year      = {2013}
+}
+
+
+% --- Codata, coalgebras, categorical foundations (D11) ----------
+
+@phdthesis{hagino1987,
+  author = {Hagino, Tatsuya},
+  title  = {A Categorical Programming Language},
+  school = {University of Edinburgh},
+  year   = {1987}
+}
+
+@book{jacobs2017,
+  author    = {Jacobs, Bart},
+  title     = {Introduction to Coalgebra: Towards Mathematics of
+               States and Observation},
+  series    = {Cambridge Tracts in Theoretical Computer Science},
+  publisher = {Cambridge University Press},
+  year      = {2017}
+}
+
+@book{maclane1998,
+  author    = {Mac~Lane, Saunders},
+  title     = {Categories for the Working Mathematician},
+  edition   = {2nd},
+  series    = {Graduate Texts in Mathematics},
+  volume    = {5},
+  publisher = {Springer},
+  year      = {1998}
+}
+
+
+% --- Datalog foundations (EigenQL, D2) ---------------------------
+
+@article{ceri-gottlob-tanca1989,
+  author  = {Ceri, Stefano and Gottlob, Georg and Tanca, Letizia},
+  title   = {What you always wanted to know about {Datalog}
+             (and never dared to ask)},
+  journal = {{IEEE} Transactions on Knowledge and Data Engineering},
+  volume  = {1},
+  number  = {1},
+  pages   = {146--166},
+  year    = {1989}
+}
+
+@incollection{apt-blair-walker1988,
+  author    = {Apt, Krzysztof R. and Blair, Howard A. and
+               Walker, Adrian},
+  title     = {Towards a theory of declarative knowledge},
+  booktitle = {Foundations of Deductive Databases and Logic Programming},
+  editor    = {Minker, Jack},
+  pages     = {89--148},
+  publisher = {Morgan Kaufmann},
+  year      = {1988}
+}
+
+@incollection{bancilhon1986,
+  author    = {Bancilhon, Fran{\c c}ois},
+  title     = {Naive evaluation of recursively defined relations},
+  booktitle = {On Knowledge Base Management Systems: Integrating
+               Artificial Intelligence and Database Technologies},
+  editor    = {Brodie, Michael L. and Mylopoulos, John},
+  pages     = {165--178},
+  publisher = {Springer},
+  year      = {1986}
+}
+
+
+% --- Graph query languages (comparison points for EigenQL) ------
+
+@techreport{sparql,
+  author      = {Harris, Steve and Seaborne, Andy},
+  title       = {{SPARQL 1.1} Query Language},
+  institution = {{W3C}},
+  type        = {{W3C} Recommendation},
+  year        = {2013},
+  url         = {https://www.w3.org/TR/sparql11-query/}
+}
+
+@inproceedings{cypher2018,
+  author    = {Francis, Nadime and Green, Alastair and Guagliardo, Paolo and
+               Libkin, Leonid and Lindaaker, Tobias and Marsault, Victor and
+               Plantikow, Stefan and Rydberg, Mats and
+               Selmer, Petra and Taylor, Andr{\'e}s},
+  title     = {{Cypher}: An evolving query language for property graphs},
+  booktitle = {SIGMOD 2018: International Conference on Management of Data},
+  pages     = {1433--1445},
+  publisher = {ACM},
+  year      = {2018}
+}
+
+@misc{graphql,
+  author = {{GraphQL Foundation}},
+  title  = {{GraphQL}: A query language for {APIs}},
+  year   = {2018--2026},
+  url    = {https://spec.graphql.org/}
+}
+
+@misc{gql2024,
+  author = {{ISO/IEC}},
+  title  = {{ISO/IEC} 39075:2024 Information technology ---
+            Database languages --- {GQL}},
+  year   = {2024},
+  url    = {https://www.iso.org/standard/76120.html}
+}
+
+
+% --- Linked data formats and schemas -----------------------------
+
+@techreport{jsonld,
+  author      = {Sporny, Manu and Longley, Dave and Kellogg, Gregg and
+                 Lanthaler, Markus and Champin, Pierre-Antoine and
+                 Lindstr{\"o}m, Niklas},
+  title       = {{JSON-LD} 1.1: A {JSON}-based Serialization for Linked Data},
+  institution = {{W3C}},
+  type        = {{W3C} Recommendation},
+  year        = {2020},
+  url         = {https://www.w3.org/TR/json-ld11/}
+}
+
+@misc{schemaorg,
+  author = {{Schema.org}},
+  title  = {{Schema.org} vocabulary},
+  year   = {2011--2026},
+  url    = {https://schema.org/}
+}
+
+
+% --- Knowledge representation / ontology engineering -------------
+
+@book{baader2003dlh,
+  editor    = {Baader, Franz and Calvanese, Diego and McGuinness, Deborah L. and
+               Nardi, Daniele and Patel-Schneider, Peter F.},
+  title     = {The Description Logic Handbook: Theory, Implementation,
+               and Applications},
+  edition   = {2nd},
+  publisher = {Cambridge University Press},
+  year      = {2007},
+  note      = {First edition 2003}
+}
+
+@article{gruber1995,
+  author  = {Gruber, Thomas R.},
+  title   = {Toward principles for the design of ontologies used
+             for knowledge sharing},
+  journal = {International Journal of Human-Computer Studies},
+  volume  = {43},
+  number  = {5--6},
+  pages   = {907--928},
+  year    = {1995}
+}
+
+@book{arp-smith-spear2015,
+  author    = {Arp, Robert and Smith, Barry and Spear, Andrew D.},
+  title     = {Building Ontologies with Basic Formal Ontology},
+  publisher = {MIT Press},
+  year      = {2015}
+}
+
+
+% --- Provenance theory (D6b, complements W3C PROV-O) ------------
+
+@article{moreau2010,
+  author  = {Moreau, Luc},
+  title   = {The foundations for provenance on the {Web}},
+  journal = {Foundations and Trends in {Web} Science},
+  volume  = {2},
+  number  = {2--3},
+  pages   = {99--241},
+  year    = {2010}
+}
+
+
+% --- LLMs: transformers, hallucination, retrieval-augmented gen --
+%     (manifesto / vision argue from these; should be cited from there)
+
+@inproceedings{vaswani2017,
+  author    = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and
+               Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N. and
+               Kaiser, {\L}ukasz and Polosukhin, Illia},
+  title     = {Attention is all you need},
+  booktitle = {NeurIPS 2017: 31st Conference on Neural
+               Information Processing Systems},
+  pages     = {5998--6008},
+  year      = {2017}
+}
+
+@article{ji2023hallucination,
+  author  = {Ji, Ziwei and Lee, Nayeon and Frieske, Rita and
+             Yu, Tiezheng and Su, Dan and Xu, Yan and Ishii, Etsuko and
+             Bang, Ye Jin and Madotto, Andrea and Fung, Pascale},
+  title   = {Survey of hallucination in natural language generation},
+  journal = {{ACM} Computing Surveys},
+  volume  = {55},
+  number  = {12},
+  pages   = {1--38},
+  year    = {2023},
+  doi     = {10.1145/3571730}
+}
+
+@inproceedings{lewis2020rag,
+  author    = {Lewis, Patrick and Perez, Ethan and Piktus, Aleksandra and
+               Petroni, Fabio and Karpukhin, Vladimir and Goyal, Naman and
+               K{\"u}ttler, Heinrich and Lewis, Mike and Yih, Wen-tau and
+               Rockt{\"a}schel, Tim and Riedel, Sebastian and Kiela, Douwe},
+  title     = {Retrieval-augmented generation for knowledge-intensive
+               {NLP} tasks},
+  booktitle = {NeurIPS 2020: 34th Conference on Neural Information
+               Processing Systems},
+  year      = {2020}
+}
+
+
+% --- Workflow systems (alongside the cited cwl) -----------------
+
+@article{ditommaso2017nextflow,
+  author  = {Di Tommaso, Paolo and Chatzou, Maria and
+             Floden, Evan W. and Barja, Pablo Prieto and
+             Palumbo, Emilio and Notredame, Cedric},
+  title   = {{Nextflow} enables reproducible computational workflows},
+  journal = {Nature Biotechnology},
+  volume  = {35},
+  number  = {4},
+  pages   = {316--319},
+  year    = {2017}
+}
+
+@article{koester2012snakemake,
+  author  = {K{\"o}ster, Johannes and Rahmann, Sven},
+  title   = {{Snakemake} --- a scalable bioinformatics workflow engine},
+  journal = {Bioinformatics},
+  volume  = {28},
+  number  = {19},
+  pages   = {2520--2522},
+  year    = {2012}
+}
+
+
+% --- WebAssembly: foundational paper + W3C spec -----------------
+
+@inproceedings{haas2017wasm,
+  author    = {Haas, Andreas and Rossberg, Andreas and Schuff, Derek L. and
+               Titzer, Ben L. and Holman, Michael and Gohman, Dan and
+               Wagner, Luke and Zakai, Alon and Bastien, JF},
+  title     = {Bringing the {Web} up to speed with {WebAssembly}},
+  booktitle = {PLDI 2017: 38th {ACM SIGPLAN} Conference on Programming
+               Language Design and Implementation},
+  pages     = {185--200},
+  publisher = {ACM},
+  year      = {2017}
+}
+
+@techreport{wasm-spec,
+  author      = {Rossberg, Andreas},
+  title       = {{WebAssembly} Core Specification},
+  institution = {{W3C}},
+  type        = {{W3C} Recommendation},
+  year        = {2019},
+  url         = {https://www.w3.org/TR/wasm-core-1/}
+}
+
+
+% --- SMT solvers (Phase 11c institution-registered decisions) ---
+
+@inproceedings{demoura2008z3,
+  author    = {de~Moura, Leonardo and Bj{\o}rner, Nikolaj},
+  title     = {{Z3}: An efficient {SMT} solver},
+  booktitle = {TACAS 2008: Tools and Algorithms for the
+               Construction and Analysis of Systems},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4963},
+  pages     = {337--340},
+  publisher = {Springer},
+  year      = {2008}
+}
+
+@misc{smtlib,
+  author = {Barrett, Clark and Fontaine, Pascal and Tinelli, Cesare},
+  title  = {The {SMT-LIB} Standard: Version 2.6},
+  year   = {2017},
+  url    = {https://smt-lib.org/}
+}
+
+
+% --- gRPC and Connect-RPC wire protocols (D5) -------------------
+
+@misc{grpc,
+  author = {{Google}},
+  title  = {{gRPC}: A high-performance, open-source universal {RPC} framework},
+  note   = {Cloud Native Computing Foundation graduated project},
+  url    = {https://grpc.io/}
+}
+
+@misc{connect-rpc,
+  author = {{Buf Technologies}},
+  title  = {{Connect}: Simple, reliable, interoperable {RPC}},
+  note   = {Software},
+  url    = {https://connectrpc.com/}
+}
