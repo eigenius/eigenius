@@ -73,9 +73,7 @@ const RUNNABLE: Record<CellType, boolean> = {
   markdown: false,
   esl: true,
   eigenql: true,
-  // TypeScript cell execution is a Phase 4b deliverable; the button
-  // stays hidden until the sandbox lands.
-  typescript: false,
+  typescript: true,
 };
 
 const TYPE_LABEL: Record<CellType, string> = {
