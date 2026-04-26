@@ -26,17 +26,28 @@ For frontier research in quantum physics, life sciences, materials science, and 
 
 ---
 
+## Start here — the notebook
+
+For most users, the notebook is the most accessible way to use the platform. A React SPA bundled into the orchestrator image and served at `http://localhost:8080/notebooks/` once `docker compose up -d` is running. Cells (markdown, ESL, EigenQL, TypeScript, program-run) drive the kernel; outputs auto-render as typed inspectors, result tables, layer-stack diagrams, and program-trace trees.
+
+<p align="center">
+  <img src="assets/eigenius_notebook_ux.png" alt="The Eigenius notebook — top of the patent-analysis demo" width="900">
+</p>
+
+→ **[Platform guide chapter 14 — Notebook](platform/14-notebook.md)** for the full reference.
+→ **[Platform guide chapter 15 — TypeScript SDK](platform/15-typescript-sdk.md)** if you want to drive the kernel programmatically with the same `Eigen` class the notebook uses.
+
 ## User guides
 
 Three task-first guides, grounded in the implementation. Every claim links to the kernel module, CLI command, example crate, or test that implements it.
 
 ### [Platform user guide →](platform/README.md)
 
-How to install, run, manage, and extend the platform: the CLI, the kernel server, the orchestrator, RocksDB persistence, WASM components and institutions, deployment via Docker Compose or Azure ContainerApps.
+How to install, run, manage, and extend the platform: the CLI, the kernel server, the orchestrator, RocksDB persistence, WASM components and institutions, deployment via Docker Compose or Azure ContainerApps, the notebook UX, the TypeScript SDK.
 
-**Thirteen chapters covering**: installation, build/test workflow, CLI reference (every `eigenius` subcommand), running locally (three-terminal model + Docker Compose), database management (`serve --db`, drift refusal, exports), the orchestrator (LLM dispatch + MCP server), three end-to-end demo walkthroughs, building WASM components (pure / read / IO levels), building WASM institutions, deployment, troubleshooting, environment-variable and source-file index.
+**Fifteen chapters covering**: installation, build/test workflow, CLI reference (every `eigenius` subcommand), running locally (three-terminal model + Docker Compose), database management (`serve --db`, drift refusal, exports), the orchestrator (LLM dispatch + MCP server), three end-to-end demo walkthroughs, building WASM components (pure / read / IO levels), building WASM institutions, deployment, troubleshooting, environment-variable and source-file index, the React notebook (cell types + file format + publish-to-layer + the patent demo), the TypeScript SDK (`@eigenius/client` API + worked examples).
 
-Most important chapters: **[4. CLI reference](platform/04-cli-reference.md)** for everyday operations and **[9. Building WASM components](platform/09-wasm-components.md)** + **[10. Building WASM institutions](platform/10-wasm-institutions.md)** for extending the kernel.
+Most important chapters: **[14. Notebook](platform/14-notebook.md)** + **[15. TypeScript SDK](platform/15-typescript-sdk.md)** for the typical first-touch UX, **[4. CLI reference](platform/04-cli-reference.md)** for everyday CLI operations, and **[9. Building WASM components](platform/09-wasm-components.md)** + **[10. Building WASM institutions](platform/10-wasm-institutions.md)** for extending the kernel.
 
 ### [ESL — Eigenius Surface Language →](esl/README.md)
 
@@ -58,7 +69,7 @@ The **platform** guide is operational — it covers everything *around* writing 
 
 ESL **computes**; EigenQL **retrieves and filters**. They share the same kernel primitives — most importantly the institution capability classification, which means the same qualified-name IRI dispatches identically from both languages ([ESL §9.8](esl/09-institutions.md), [EigenQL §8](eigenql/08-institutions.md)).
 
-If you're new to the platform: start with [platform chapters 1, 2, 5](platform/01-introduction.md) (orientation, install, run locally), then [ESL chapters 1, 6](esl/01-introduction.md) and [EigenQL chapters 1, 2](eigenql/01-introduction.md). That's enough to install the system, write small ontologies, declare resources, and query them.
+If you're new to the platform: start with [platform chapter 14](platform/14-notebook.md) (the notebook UX) — it's the lowest-friction first touch. Then read [platform chapters 1, 2, 5](platform/01-introduction.md) for orientation, install, and the kernel/orchestrator topology under the notebook, and dip into [ESL chapters 1, 6](esl/01-introduction.md) + [EigenQL chapters 1, 2](eigenql/01-introduction.md) when you want to write your own ontologies, programs, and queries.
 
 ## Beyond the guides
 
@@ -69,7 +80,8 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D18 Ontology-as-types resolution](../design/d18-ontology-as-types-resolution.md) — the bridge mechanism explained in ESL chapter 6
 - [D19 Inductive and sized types](../design/d19-inductive-types.md) — type theory underpinning ESL `data`/`codata` declarations
 - [D10 Grothendieck institution protocol](../design/d10-grothendieck-institution-protocol.md) — institution mechanism dispatched in both guides
+- [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 14 + 15
 
-The full set (D1–D21 plus standalone notes including the [Lean 4 as institution](../design/lean-4-as-institution.md) integration plan) lives at [`docs/design/`](../design/).
+The full set (D1–D22 plus standalone notes including the [Lean 4 as institution](../design/lean-4-as-institution.md) integration plan) lives at [`docs/design/`](../design/).
 
 Source code: [github.com/eigenius/eigenius](https://github.com/eigenius/eigenius).
