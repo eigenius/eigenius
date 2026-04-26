@@ -1,0 +1,520 @@
+% =============================================================
+% Eigenius — consolidated bibliography
+%
+% Single source of truth for all external references cited by:
+%   - the LaTeX papers (docs/papers/)
+%   - the design documents (docs/design/)
+%   - the user guides (docs/guides/)
+%
+% Citation keys preserve the names used in the existing in-paper
+% \bibitem entries so existing \cite{...} calls continue to work
+% verbatim. New entries (collected from the design docs and user
+% guides) follow the same lowercase-key convention.
+%
+% Organisation: papers and books grouped by topic; tools / runtimes
+% / standards each in their own block.
+% =============================================================
+
+
+% --- Type theory: Mini-TT, NbE, Lean, Agda, Idris ----------------
+
+@incollection{minitt,
+  author    = {Coquand, Thierry and Kinoshita, Yoshiki and
+               Nordstr{\"o}m, Bengt and Takeyama, Makoto},
+  title     = {A simple type-theoretic language: {Mini-TT}},
+  booktitle = {From Semantics to Computer Science:
+               Essays in Honour of {Gilles~Kahn}},
+  editor    = {Bertot, Yves and Huet, G{\'e}rard and
+               L{\'e}vy, Jean-Jacques and Plotkin, Gordon},
+  pages     = {139--164},
+  publisher = {Cambridge University Press},
+  year      = {2009}
+}
+
+@inproceedings{nbe,
+  author    = {Abel, Andreas and Coquand, Thierry and Dybjer, Peter},
+  title     = {Normalization by evaluation for {Martin-L{\"o}f}
+               type theory with typed equality judgements},
+  booktitle = {LICS 2007: 22nd Annual {IEEE} Symposium on
+               Logic in Computer Science},
+  pages     = {3--12},
+  publisher = {IEEE},
+  year      = {2007}
+}
+
+@inproceedings{lean4,
+  author    = {de~Moura, Leonardo and Ullrich, Sebastian},
+  title     = {The {Lean~4} theorem prover and programming language},
+  booktitle = {CADE-28: 28th International Conference on
+               Automated Deduction},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {12699},
+  pages     = {625--635},
+  publisher = {Springer},
+  year      = {2021}
+}
+
+@inproceedings{agda,
+  author    = {Norell, Ulf},
+  title     = {Dependently typed programming in {Agda}},
+  booktitle = {Advanced Functional Programming, AFP 2008},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {5832},
+  pages     = {230--266},
+  publisher = {Springer},
+  year      = {2009}
+}
+
+@inproceedings{idris,
+  author    = {Brady, Edwin},
+  title     = {{Idris~2}: Quantitative type theory in practice},
+  booktitle = {ECOOP 2021: 35th European Conference on
+               Object-Oriented Programming},
+  series    = {LIPIcs},
+  volume    = {194},
+  year      = {2021}
+}
+
+@misc{carneiro2024,
+  author       = {Carneiro, Mario},
+  title        = {{Lean4Lean}: Verifying a Typechecker for {Lean},
+                  in {Lean}},
+  year         = {2024},
+  eprint       = {2403.14064},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LO},
+  url          = {https://arxiv.org/abs/2403.14064}
+}
+
+
+% --- Coinduction, interaction, IO --------------------------------
+
+@inproceedings{basold2016,
+  author    = {Basold, Henning and Geuvers, Herman},
+  title     = {Type theory based on dependent inductive
+               and coinductive types},
+  booktitle = {LICS 2016: 31st Annual {ACM/IEEE} Symposium on
+               Logic in Computer Science},
+  pages     = {327--336},
+  publisher = {ACM},
+  year      = {2016}
+}
+
+@incollection{hancock-setzer2000,
+  author    = {Hancock, Peter and Setzer, Anton},
+  title     = {Interactive programs in dependent type theory},
+  booktitle = {Computer Science Logic, CSL 2000},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1862},
+  pages     = {317--331},
+  publisher = {Springer},
+  year      = {2000}
+}
+
+@article{xia2020,
+  author    = {Xia, Li-yao and Zakowski, Yannick and He, Paul and
+               Hur, Chung-Kil and Malecha, Gregory and
+               Pierce, Benjamin C. and Zdancewic, Steve},
+  title     = {Interaction trees: Representing recursive and
+               impure programs in {Coq}},
+  journal   = {Proceedings of the {ACM} on Programming Languages},
+  volume    = {4},
+  number    = {POPL},
+  articleno = {51},
+  year      = {2020},
+  doi       = {10.1145/3371119}
+}
+
+
+% --- Logic, institutions, and algebraic specification ------------
+
+@article{goguen1992,
+  author  = {Goguen, Joseph A. and Burstall, Rod M.},
+  title   = {Institutions: Abstract model theory for
+             specification and programming},
+  journal = {Journal of the {ACM}},
+  volume  = {39},
+  number  = {1},
+  pages   = {95--146},
+  year    = {1992}
+}
+
+@article{diaconescu2002,
+  author  = {Diaconescu, R{\u a}zvan},
+  title   = {{Grothendieck} institutions},
+  journal = {Applied Categorical Structures},
+  volume  = {10},
+  number  = {4},
+  pages   = {383--402},
+  year    = {2002}
+}
+
+@book{diaconescu2008,
+  author    = {Diaconescu, R{\u a}zvan},
+  title     = {Institution-independent Model Theory},
+  publisher = {Birkh{\"a}user},
+  address   = {Basel},
+  year      = {2008}
+}
+
+@inproceedings{mossakowski2007hets,
+  author    = {Mossakowski, Till and Maeder, Christian and
+               L{\"u}ttich, Klaus},
+  title     = {The heterogeneous tool set, {Hets}},
+  booktitle = {TACAS 2007: Tools and Algorithms for the
+               Construction and Analysis of Systems},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4424},
+  pages     = {519--522},
+  publisher = {Springer},
+  year      = {2007}
+}
+
+@incollection{meseguer1989,
+  author    = {Meseguer, Jos{\'e}},
+  title     = {General logics},
+  booktitle = {Logic Colloquium~'87},
+  editor    = {Ebbinghaus, H.-D. and Fernandez-Prida, J. and
+               Garrido, M. and Lascar, D. and Artalejo, M.~R.},
+  series    = {Studies in Logic and the Foundations of Mathematics},
+  volume    = {129},
+  pages     = {275--329},
+  publisher = {Elsevier},
+  year      = {1989}
+}
+
+@book{cafeobj,
+  author    = {Diaconescu, R{\u a}zvan and Futatsugi, Kokichi},
+  title     = {{CafeOBJ Report}},
+  series    = {AMAST Series in Computing},
+  volume    = {6},
+  publisher = {World Scientific},
+  year      = {1998}
+}
+
+@techreport{ontoiop,
+  author      = {{Object Management Group}},
+  title       = {Distributed Ontology, Modeling and Specification
+                 Language ({DOL}), Version 1.0},
+  institution = {OMG},
+  number      = {formal/2018-08-01},
+  year        = {2018}
+}
+
+@article{spivak2012,
+  author  = {Spivak, David I.},
+  title   = {Functorial data migration},
+  journal = {Information and Computation},
+  volume  = {217},
+  pages   = {31--51},
+  year    = {2012}
+}
+
+
+% --- Neuro-symbolic AI -------------------------------------------
+
+@inproceedings{deepproblog,
+  author    = {Manhaeve, Robin and Duman{\v c}i{\'c}, Sebastijan and
+               Kimmig, Angelika and Demeester, Thomas and
+               De~Raedt, Luc},
+  title     = {{DeepProbLog}: Neural probabilistic logic programming},
+  booktitle = {NeurIPS 2018: 32nd Conference on Neural
+               Information Processing Systems},
+  year      = {2018}
+}
+
+@inproceedings{neurasp,
+  author    = {Yang, Zhun and Ishay, Adam and Lee, Joohyung},
+  title     = {{NeurASP}: Embracing neural networks into
+               answer set programming},
+  booktitle = {IJCAI 2020: 29th International Joint Conference on
+               Artificial Intelligence},
+  year      = {2020}
+}
+
+@article{ltn,
+  author  = {Badreddine, Samy and Garcez, Artur d'Avila and
+             Serafini, Luciano and Spranger, Michael},
+  title   = {Logic tensor networks},
+  journal = {Artificial Intelligence},
+  volume  = {303},
+  year    = {2022}
+}
+
+
+% --- Databases ---------------------------------------------------
+
+@book{alice,
+  author    = {Abiteboul, Serge and Hull, Richard and Vianu, Victor},
+  title     = {Foundations of Databases},
+  publisher = {Addison-Wesley},
+  year      = {1995}
+}
+
+
+% --- Web, RDF, knowledge representation --------------------------
+
+@techreport{rdf,
+  author      = {Cyganiak, Richard and Wood, David and
+                 Lanthaler, Markus},
+  title       = {{RDF~1.1} Concepts and Abstract Syntax},
+  institution = {{W3C}},
+  type        = {{W3C} Recommendation},
+  year        = {2014},
+  url         = {https://www.w3.org/TR/rdf11-concepts/}
+}
+
+@techreport{owl,
+  author      = {Hitzler, Pascal and Kr{\"o}tzsch, Markus and
+                 Parsia, Bijan and Patel-Schneider, Peter F. and
+                 Rudolph, Sebastian},
+  title       = {{OWL~2} Web Ontology Language Primer},
+  institution = {{W3C}},
+  type        = {{W3C} Recommendation},
+  year        = {2012},
+  url         = {https://www.w3.org/TR/owl2-primer/}
+}
+
+@misc{atomicdata,
+  author = {Meindertsma, Joep},
+  title  = {{Atomic Data}: A modular specification for
+            sharing, modifying and modeling graph data},
+  year   = {2020--2026},
+  note   = {{W3C} Community Group Specification},
+  url    = {https://docs.atomicdata.dev/}
+}
+
+@techreport{prov,
+  author      = {Groth, Paul and Moreau, Luc},
+  title       = {{PROV-Overview}},
+  institution = {{W3C}},
+  type        = {{W3C} Working Group Note},
+  year        = {2013},
+  url         = {https://www.w3.org/TR/prov-overview/}
+}
+
+@misc{cwl,
+  author = {Amstutz, Peter and others},
+  title  = {Common Workflow Language, v1.2},
+  year   = {2022},
+  url    = {https://www.commonwl.org/}
+}
+
+
+% --- LLM application frameworks ----------------------------------
+
+@misc{langchain,
+  author = {Chase, Harrison},
+  title  = {{LangChain}},
+  year   = {2023},
+  url    = {https://langchain.com/}
+}
+
+@misc{llamaindex,
+  author = {Liu, Jerry},
+  title  = {{LlamaIndex}},
+  year   = {2023},
+  url    = {https://llamaindex.ai/}
+}
+
+@misc{semantickernel,
+  author = {{Microsoft}},
+  title  = {{Semantic Kernel}},
+  year   = {2023},
+  url    = {https://github.com/microsoft/semantic-kernel}
+}
+
+
+% --- IETF RFCs ---------------------------------------------------
+
+@techreport{rfc8949,
+  author      = {Bormann, Carsten and Hoffman, Paul},
+  title       = {Concise Binary Object Representation ({CBOR})},
+  institution = {{IETF}},
+  number      = {RFC 8949},
+  type        = {Request for Comments},
+  year        = {2020},
+  url         = {https://www.rfc-editor.org/rfc/rfc8949}
+}
+
+@techreport{rfc3987,
+  author      = {Duerst, Martin and Suignard, Michel},
+  title       = {Internationalized Resource Identifiers ({IRIs})},
+  institution = {{IETF}},
+  number      = {RFC 3987},
+  type        = {Request for Comments},
+  year        = {2005},
+  url         = {https://www.rfc-editor.org/rfc/rfc3987}
+}
+
+@techreport{rfc8141,
+  author      = {Saint-Andre, Peter and Klensin, John},
+  title       = {Uniform Resource Names ({URNs})},
+  institution = {{IETF}},
+  number      = {RFC 8141},
+  type        = {Request for Comments},
+  year        = {2017},
+  url         = {https://www.rfc-editor.org/rfc/rfc8141}
+}
+
+@techreport{rfc2046,
+  author      = {Freed, Ned and Borenstein, Nathaniel S.},
+  title       = {Multipurpose {Internet} Mail Extensions ({MIME})
+                 Part Two: Media Types},
+  institution = {{IETF}},
+  number      = {RFC 2046},
+  type        = {Request for Comments},
+  year        = {1996},
+  url         = {https://www.rfc-editor.org/rfc/rfc2046}
+}
+
+@techreport{rfc4122,
+  author      = {Leach, Paul and Mealling, Michael and Salz, Rich},
+  title       = {A Universally Unique IDentifier ({UUID}) {URN} Namespace},
+  institution = {{IETF}},
+  number      = {RFC 4122},
+  type        = {Request for Comments},
+  year        = {2005},
+  url         = {https://www.rfc-editor.org/rfc/rfc4122}
+}
+
+@techreport{rfc8785,
+  author      = {Rundgren, Anders and Jordan, Bret and Erdtman, Samuel},
+  title       = {{JSON} Canonicalization Scheme ({JCS})},
+  institution = {{IETF}},
+  number      = {RFC 8785},
+  type        = {Request for Comments},
+  year        = {2020},
+  url         = {https://www.rfc-editor.org/rfc/rfc8785}
+}
+
+
+% --- WebAssembly Component Model and tooling ---------------------
+
+@misc{wasm-component-model,
+  author = {{Bytecode Alliance}},
+  title  = {{WebAssembly} Component Model},
+  year   = {2023--2026},
+  url    = {https://component-model.bytecodealliance.org/}
+}
+
+@misc{wit,
+  author = {{Bytecode Alliance}},
+  title  = {{WIT} ({WebAssembly Interface Type}) Specification},
+  year   = {2023--2026},
+  url    = {https://component-model.bytecodealliance.org/design/wit.html}
+}
+
+@misc{wit-bindgen,
+  author = {{Bytecode Alliance}},
+  title  = {{wit-bindgen}: Component model bindings generator},
+  year   = {2023--2026},
+  note   = {Software},
+  url    = {https://github.com/bytecodealliance/wit-bindgen}
+}
+
+@misc{wasmtime,
+  author = {{Bytecode Alliance}},
+  title  = {{Wasmtime}: A standalone runtime for {WebAssembly}},
+  note   = {Software},
+  url    = {https://wasmtime.dev/}
+}
+
+@misc{cargo-component,
+  author = {{Bytecode Alliance}},
+  title  = {{cargo-component}: A {Cargo} subcommand for
+            building {WebAssembly} components},
+  note   = {Software},
+  url    = {https://github.com/bytecodealliance/cargo-component}
+}
+
+
+% --- Storage backends and runtime infrastructure -----------------
+
+@misc{rocksdb,
+  author = {{Facebook Open Source}},
+  title  = {{RocksDB}: A persistent key-value store for fast storage},
+  note   = {Software},
+  url    = {https://rocksdb.org/}
+}
+
+@misc{tikv,
+  author = {{TiKV Authors}},
+  title  = {{TiKV}: A distributed transactional key-value database},
+  note   = {Software, {Cloud Native Computing Foundation}},
+  url    = {https://tikv.org/}
+}
+
+@misc{deno,
+  author = {{Deno Land Inc.}},
+  title  = {{Deno}: A modern runtime for {JavaScript} and {TypeScript}},
+  note   = {Software},
+  url    = {https://deno.com/}
+}
+
+@misc{dapr,
+  author = {{Dapr Authors}},
+  title  = {{Dapr}: Distributed Application Runtime},
+  note   = {{Cloud Native Computing Foundation} graduated project},
+  url    = {https://dapr.io/}
+}
+
+@misc{vercel-ai-sdk,
+  author = {{Vercel}},
+  title  = {{Vercel AI SDK}},
+  note   = {Software},
+  url    = {https://sdk.vercel.ai/}
+}
+
+@misc{cbor-x,
+  author = {Loup, Kris},
+  title  = {{cbor-x}: {CBOR} encoder/decoder for {JavaScript}},
+  note   = {Software (npm package)},
+  url    = {https://www.npmjs.com/package/cbor-x}
+}
+
+
+% --- Lean ecosystem: external checkers ---------------------------
+
+@misc{nanoda_lib,
+  author = {Bailey, Chris},
+  title  = {{nanoda\_lib}: A {Lean~4} term checker library in {Rust}},
+  note   = {Software},
+  url    = {https://github.com/ammkrn/nanoda_lib}
+}
+
+@misc{type_checking_in_lean4,
+  author = {Bailey, Chris},
+  title  = {Type Checking in {Lean~4}},
+  note   = {Specification book},
+  url    = {https://ammkrn.github.io/type_checking_in_lean4/}
+}
+
+@misc{lean4export,
+  author = {{The Lean Prover Community}},
+  title  = {{lean4export}: Reference exporter for the {Lean~4}
+            kernel export format},
+  note   = {Software},
+  url    = {https://github.com/leanprover/lean4export}
+}
+
+@misc{lean4lean,
+  author = {Carneiro, Mario},
+  title  = {{Lean4Lean}: A type checker for {Lean~4}, written in {Lean~4}},
+  note   = {Software; companion to \cite{carneiro2024}},
+  url    = {https://github.com/digama0/lean4lean}
+}
+
+@misc{trepplein,
+  author = {Ebner, Gabriel},
+  title  = {{trepplein}: A type checker for {Lean~3}, written in {Scala}},
+  note   = {Software (historical reference for Lean~3)},
+  url    = {https://github.com/gebner/trepplein}
+}
+
+@misc{trepplein4,
+  author = {Gadgil, Siddhartha},
+  title  = {{trepplein4}: A type checker for {Lean~4} export format},
+  note   = {Software},
+  url    = {https://siddhartha-gadgil.github.io/trepplein4/}
+}
