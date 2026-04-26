@@ -33,7 +33,7 @@
  * `trace` field → split panel with TraceTree.
  */
 
-import { useEffect, useRef } from "react";
+import { isValidElement, useEffect, useRef } from "react";
 import {
   Body1,
   Caption1,
@@ -116,6 +116,12 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
         {value === null ? "null" : "no return value"}
       </Caption1>
     );
+  }
+
+  // React element — mount directly. This is the path Phase 5a chart
+  // cells use: `return h(charts.GroupedVerticalBarChart, { … })`.
+  if (isValidElement(value)) {
+    return <>{value}</>;
   }
 
   // DOM node — mount directly via a small adapter component.
