@@ -32,6 +32,7 @@ import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 import { CodeMirrorEditor } from "./editors/CodeMirrorEditor";
 import { MarkdownCell } from "./cells/MarkdownCell";
+import { ProgramRunCellEditor } from "./cells/ProgramRunCell";
 import { CellOutputView } from "./output/CellOutputView";
 
 const useStyles = makeStyles({
@@ -54,6 +55,24 @@ const useStyles = makeStyles({
     textTransform: "uppercase",
     letterSpacing: "0.04em",
   },
+  indexCircle: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "22px",
+    height: "22px",
+    borderRadius: tokens.borderRadiusCircular,
+    color: tokens.colorNeutralForegroundOnBrand,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    fontVariantNumeric: "tabular-nums",
+    flexShrink: 0,
+  },
+  indexMarkdown: { background: tokens.colorPaletteBeigeForeground2 },
+  indexEsl: { background: tokens.colorPaletteBlueForeground2 },
+  indexEigenql: { background: tokens.colorPaletteGreenForeground2 },
+  indexTypescript: { background: tokens.colorPaletteMarigoldForeground2 },
+  indexProgramRun: { background: tokens.colorPalettePurpleForeground2 },
   spacer: {
     flex: 1,
   },
@@ -74,6 +93,7 @@ const RUNNABLE: Record<CellType, boolean> = {
   esl: true,
   eigenql: true,
   typescript: true,
+  "program-run": true,
 };
 
 const TYPE_LABEL: Record<CellType, string> = {
@@ -81,7 +101,22 @@ const TYPE_LABEL: Record<CellType, string> = {
   esl: "ESL",
   eigenql: "EigenQL",
   typescript: "TypeScript",
+  "program-run": "Program run",
 };
+
+function indexCircleClass(
+  styles: ReturnType<typeof useStyles>,
+  type: CellType,
+): string {
+  const colorClass = {
+    markdown: styles.indexMarkdown,
+    esl: styles.indexEsl,
+    eigenql: styles.indexEigenql,
+    typescript: styles.indexTypescript,
+    "program-run": styles.indexProgramRun,
+  }[type];
+  return `${styles.indexCircle} ${colorClass}`;
+}
 
 /**
  * Generic cell wrapper — Fluent `Card` shell with a toolbar (type
@@ -92,6 +127,9 @@ export function Cell({ cellId }: CellProps) {
   const styles = useStyles();
   const eigen = useEigen();
   const cell = useNotebookStore((s) => s.cells.find((c) => c.id === cellId));
+  const cellIndex = useNotebookStore(
+    (s) => s.cells.findIndex((c) => c.id === cellId),
+  );
   const runState = useNotebookStore(
     (s) => s.cellStates.get(cellId) ?? "idle",
   );
@@ -115,6 +153,13 @@ export function Cell({ cellId }: CellProps) {
   return (
     <Card className={styles.card} appearance="filled-alternative">
       <div className={styles.toolbar}>
+        <span
+          className={indexCircleClass(styles, cell.type)}
+          aria-label={`Cell ${cellIndex + 1}`}
+          title={`Cell ${cellIndex + 1}`}
+        >
+          {cellIndex + 1}
+        </span>
         <Caption1 className={styles.typeBadge}>{TYPE_LABEL[cell.type]}</Caption1>
         {runnable && (
           <Button
@@ -160,6 +205,8 @@ export function Cell({ cellId }: CellProps) {
       <div className={styles.body}>
         {cell.type === "markdown"
           ? <MarkdownCell source={cell.source} onChange={onSourceChange} />
+          : cell.type === "program-run"
+          ? <ProgramRunCellEditor cellId={cell.id} cell={cell} />
           : (
             <CodeMirrorEditor
               source={cell.source}

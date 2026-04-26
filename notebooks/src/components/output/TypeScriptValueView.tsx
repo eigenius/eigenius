@@ -40,8 +40,10 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
+import { LayerStackView } from "./LayerStackView";
 import { ResourceInspector } from "./ResourceInspector";
 import { ResultTable } from "./ResultTable";
+import { TraceTreePanel } from "./TraceTreePanel";
 
 const useStyles = makeStyles({
   log: {
@@ -55,6 +57,17 @@ const useStyles = makeStyles({
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     color: tokens.colorNeutralForeground2,
+  },
+  splitPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+  },
+  panelLabel: {
+    color: tokens.colorNeutralForeground3,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    fontSize: tokens.fontSizeBase100,
   },
   status: {
     display: "flex",
@@ -123,6 +136,21 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
   // Object/array shape detection — duck-typed against the SDK responses.
   const obj = value as Record<string, unknown>;
 
+  // LayerTopologyResponse: { nodes: TopologyNode[], edges: TopologyEdge[] }
+  if (
+    Array.isArray(obj.nodes) &&
+    Array.isArray(obj.edges) &&
+    looksLikeTopologyNode(obj.nodes[0])
+  ) {
+    return (
+      <LayerStackView
+        // The duck-typed cast keeps the public component strictly typed.
+        // deno-lint-ignore no-explicit-any
+        topology={value as any}
+      />
+    );
+  }
+
   // QueryResponse: { success, document, ... }
   if (
     obj.document instanceof Uint8Array &&
@@ -144,12 +172,48 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
     typeof obj.success === "boolean"
   ) {
     if (obj.success === false) {
-      return <Body1>program failed</Body1>;
+      const errs = Array.isArray(obj.errors) ? obj.errors : [];
+      const lines = errs
+        .map((e) => {
+          if (!e || typeof e !== "object") return String(e);
+          const er = e as Record<string, unknown>;
+          const rule = typeof er.rule === "string" && er.rule.length > 0
+            ? `[${er.rule}] `
+            : "";
+          const msg = typeof er.message === "string" ? er.message : "";
+          return `${rule}${msg}`;
+        })
+        .filter((s) => s.length > 0);
+      return (
+        <div>
+          <Body1>Program failed</Body1>
+          {lines.length > 0 && (
+            <pre className={styles.jsonPre}>{lines.join("\n")}</pre>
+          )}
+        </div>
+      );
     }
     const traceIri = typeof obj.traceIri === "string" && obj.traceIri.length > 0
       ? obj.traceIri
       : undefined;
-    return <ResourceInspector resource={obj.output} traceIri={traceIri} />;
+    // When the kernel produced a trace, render typed output + trace
+    // tree side-by-side (vertically stacked here for readability inside
+    // the cell card; D22 §6.7).
+    if (traceIri) {
+      return (
+        <div className={styles.splitPanel}>
+          <div>
+            <Caption1 className={styles.panelLabel}>output</Caption1>
+            <ResourceInspector resource={obj.output} traceIri={traceIri} />
+          </div>
+          <div>
+            <Caption1 className={styles.panelLabel}>trace</Caption1>
+            <TraceTreePanel traceIri={traceIri} />
+          </div>
+        </div>
+      );
+    }
+    return <ResourceInspector resource={obj.output} />;
   }
 
   // InspectResponse: { found: boolean, resource: Uint8Array }
@@ -190,6 +254,14 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
   return (
     <pre className={styles.jsonPre}>{safeJsonStringify(value)}</pre>
   );
+}
+
+function looksLikeTopologyNode(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const n = value as Record<string, unknown>;
+  return typeof n.id === "string" &&
+    typeof n.label === "string" &&
+    typeof n.kind === "number";
 }
 
 function formatPrimitive(value: unknown): string {

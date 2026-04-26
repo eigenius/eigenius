@@ -35,7 +35,7 @@ export {
   type TopologyNode,
 } from "./generated/eigenius_pb.ts";
 
-// Notebook publishing (D22 Phase 3.5).
+// Notebook publishing (D22 Phase 3.5 / 4d).
 export {
   type CellJson,
   type CellType,
@@ -43,6 +43,8 @@ export {
   type NotebookJson,
   type NotebookMetaJson,
   notebookJsonToResources,
+  type ProgramRunCellJson,
   type PublishOutput,
   resourcesToNotebookJson,
+  type SourceCellJson,
 } from "./src/notebook.ts";

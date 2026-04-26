@@ -74,9 +74,27 @@ export type CellOutput =
     log: readonly string[];
   }
   | {
+    /**
+     * Phase 4d — program-run cell output. One result per input IRI;
+     * single result renders as ResourceInspector + TraceTreePanel,
+     * multiple as a results table.
+     */
+    kind: "program-run";
+    programIri: string;
+    results: readonly ProgramRunResult[];
+  }
+  | {
     kind: "error";
     message: string;
   };
+
+export interface ProgramRunResult {
+  inputIri: string;
+  success: boolean;
+  output?: Uint8Array;
+  traceIri?: string;
+  errorMessage?: string;
+}
 
 export interface NotebookState {
   // ---- Document ----
@@ -107,6 +125,11 @@ export interface NotebookState {
   insertCell: (afterCellId: string | null, type: CellType) => string;
   deleteCell: (cellId: string) => void;
   moveCell: (cellId: string, direction: "up" | "down") => void;
+  /** Update fields on a program-run cell (no-op for other cell types). */
+  updateProgramRunCell: (
+    cellId: string,
+    partial: { program_iri?: string; input_iris?: string[] },
+  ) => void;
 }
 
 function copyMap<K, V>(map: ReadonlyMap<K, V>): Map<K, V> {
@@ -118,7 +141,9 @@ function newCellId(): string {
   return crypto.randomUUID();
 }
 
-function defaultSourceFor(type: CellType): string {
+function defaultSourceFor(
+  type: Exclude<CellType, "program-run">,
+): string {
   switch (type) {
     case "markdown":
       return "# New cell\n\nWrite Markdown here.";
@@ -228,7 +253,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     return {
       format_version: CURRENT_FORMAT_VERSION,
       meta,
-      cells: cells.map((c) => ({ id: c.id, type: c.type, source: c.source })),
+      cells: cells.map(serializeCell),
     };
   },
 
@@ -238,17 +263,19 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
   updateCellSource(cellId, source) {
     set((prev) => ({
-      cells: prev.cells.map((c) => c.id === cellId ? { ...c, source } : c),
+      cells: prev.cells.map((c) => {
+        // program-run cells have no `source` field — silently ignore.
+        if (c.id !== cellId || c.type === "program-run") return c;
+        return { ...c, source };
+      }),
     }));
   },
 
   insertCell(afterCellId, type) {
     const id = newCellId();
-    const newCell: CellJson = {
-      id,
-      type,
-      source: defaultSourceFor(type),
-    };
+    const newCell: CellJson = type === "program-run"
+      ? { id, type, program_iri: "", input_iris: [] }
+      : { id, type, source: defaultSourceFor(type) };
     set((prev) => {
       if (afterCellId === null) {
         return { cells: [newCell, ...prev.cells] };
@@ -263,6 +290,15 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       return { cells: next };
     });
     return id;
+  },
+
+  updateProgramRunCell(cellId, partial) {
+    set((prev) => ({
+      cells: prev.cells.map((c) => {
+        if (c.id !== cellId || c.type !== "program-run") return c;
+        return { ...c, ...partial };
+      }),
+    }));
   },
 
   deleteCell(cellId) {
@@ -290,6 +326,18 @@ function dropKey<K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> {
   const next = copyMap(map);
   next.delete(key);
   return next;
+}
+
+function serializeCell(c: CellJson): CellJson {
+  if (c.type === "program-run") {
+    return {
+      id: c.id,
+      type: c.type,
+      program_iri: c.program_iri,
+      input_iris: [...c.input_iris],
+    };
+  }
+  return { id: c.id, type: c.type, source: c.source };
 }
 
 /**
@@ -338,11 +386,63 @@ async function executeCell(
     }
     case "typescript":
       return executeTypeScriptCell(eigen, cell.source, previousOutputs);
+    case "program-run":
+      return executeProgramRunCell(eigen, cell.program_iri, cell.input_iris);
     case "markdown":
       // Should never reach here — runAll skips markdown, and the
       // per-cell Run button is hidden on markdown cells.
       return { kind: "error", message: "markdown cells do not execute" };
   }
+}
+
+/**
+ * Phase 4d — program-run dispatch. Calls `runProgramByIri` once per
+ * input IRI. Per-input failures are captured into the result row's
+ * `errorMessage` rather than failing the whole cell, so a batch with
+ * one bad input still renders the others.
+ */
+async function executeProgramRunCell(
+  eigen: Eigen,
+  programIri: string,
+  inputIris: readonly string[],
+): Promise<CellOutput> {
+  const trimmedProgram = programIri.trim();
+  if (trimmedProgram.length === 0) {
+    return { kind: "error", message: "program IRI is empty" };
+  }
+  const validInputs = inputIris.map((s) => s.trim()).filter((s) => s.length > 0);
+  if (validInputs.length === 0) {
+    return { kind: "error", message: "no input IRIs provided" };
+  }
+
+  const results: ProgramRunResult[] = [];
+  for (const inputIri of validInputs) {
+    try {
+      const resp = await eigen.runProgramByIri(trimmedProgram, inputIri);
+      if (!resp.success) {
+        results.push({
+          inputIri,
+          success: false,
+          errorMessage: resp.errors.map((e) => e.message).join("; ") ||
+            "program failed (no error message)",
+        });
+      } else {
+        results.push({
+          inputIri,
+          success: true,
+          output: resp.output,
+          traceIri: resp.traceIri || undefined,
+        });
+      }
+    } catch (err) {
+      results.push({
+        inputIri,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return { kind: "program-run", programIri: trimmedProgram, results };
 }
 
 /**

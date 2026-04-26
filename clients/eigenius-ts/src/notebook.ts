@@ -70,6 +70,7 @@ const CELL_TYPE_IRI: Record<CellType, string> = {
   esl: `${NB_NS}:esl`,
   eigenql: `${NB_NS}:eigenql`,
   typescript: `${NB_NS}:typescript`,
+  "program-run": `${NB_NS}:program-run`,
 };
 
 const IRI_TO_CELL_TYPE: Record<string, CellType> = {
@@ -77,19 +78,37 @@ const IRI_TO_CELL_TYPE: Record<string, CellType> = {
   [`${NB_NS}:esl`]: "esl",
   [`${NB_NS}:eigenql`]: "eigenql",
   [`${NB_NS}:typescript`]: "typescript",
+  [`${NB_NS}:program-run`]: "program-run",
 };
+
+const PROGRAM_IRI_PROP = `${NB_NS}:program_iri`;
+const INPUT_IRIS_PROP = `${NB_NS}:input_iris`;
 
 // Mirror of NotebookJson / CellJson in notebooks/src/persistence/notebook-format.ts.
 // The SDK keeps its own copy so it doesn't depend on the notebook UI package.
 
-export type CellType = "markdown" | "esl" | "eigenql" | "typescript";
+export type CellType =
+  | "markdown"
+  | "esl"
+  | "eigenql"
+  | "typescript"
+  | "program-run";
 
-export interface CellJson {
+export interface SourceCellJson {
   /** UUID assigned by the editor — NOT used in the cell's content-addressed IRI. */
   id: string;
-  type: CellType;
+  type: "markdown" | "esl" | "eigenql" | "typescript";
   source: string;
 }
+
+export interface ProgramRunCellJson {
+  id: string;
+  type: "program-run";
+  program_iri: string;
+  input_iris: string[];
+}
+
+export type CellJson = SourceCellJson | ProgramRunCellJson;
 
 export interface NotebookMetaJson {
   title?: string;
@@ -133,10 +152,10 @@ export async function notebookJsonToResources(
   const cellResources = new Map<string, EigonResource>();
 
   for (const cell of notebook.cells) {
-    const iri = await cellIri(cell.type, cell.source);
+    const iri = await cellIri(cell);
     cellIris.push(iri);
     if (!cellResources.has(iri)) {
-      cellResources.set(iri, makeCellResource(iri, cell.type, cell.source));
+      cellResources.set(iri, makeCellResource(iri, cell));
     }
   }
 
@@ -204,9 +223,21 @@ export function resourcesToNotebookJson(
     }
     const typeIri = String(cell[CELL_TYPE_PROP] ?? "");
     const cellType = IRI_TO_CELL_TYPE[typeIri] ?? "markdown";
-    const source = String(cell[SOURCE_PROP] ?? "");
     // Reconstruct a UUID from the IRI tail so re-saving is round-trippable.
-    return { id: `nb-${index}-${iri.slice(-12)}`, type: cellType, source };
+    const id = `nb-${index}-${iri.slice(-12)}`;
+    if (cellType === "program-run") {
+      return {
+        id,
+        type: cellType,
+        program_iri: String(cell[PROGRAM_IRI_PROP] ?? ""),
+        input_iris: asStringArray(cell[INPUT_IRIS_PROP]),
+      };
+    }
+    return {
+      id,
+      type: cellType,
+      source: String(cell[SOURCE_PROP] ?? ""),
+    };
   });
 
   const meta: NotebookMetaJson = {};
@@ -235,9 +266,17 @@ export function resourcesToNotebookJson(
 // IRI computation
 // ---------------------------------------------------------------------------
 
-async function cellIri(type: CellType, source: string): Promise<string> {
-  // Fixed key order: cell_type before source.
-  const canonical = JSON.stringify({ cell_type: type, source });
+async function cellIri(cell: CellJson): Promise<string> {
+  // Canonical hash input — fixed key order per cell shape.
+  // Source-bearing cells: { cell_type, source }
+  // Program-run cells:    { cell_type, program_iri, input_iris }
+  const canonical = cell.type === "program-run"
+    ? JSON.stringify({
+      cell_type: cell.type,
+      program_iri: cell.program_iri,
+      input_iris: cell.input_iris,
+    })
+    : JSON.stringify({ cell_type: cell.type, source: cell.source });
   const hash = await sha256Hex(canonical);
   return `${NB_NS}:cell:${hash}`;
 }
@@ -271,19 +310,21 @@ async function sha256Hex(input: string): Promise<string> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeCellResource(
-  iri: string,
-  type: CellType,
-  source: string,
-): EigonResource {
-  return {
+function makeCellResource(iri: string, cell: CellJson): EigonResource {
+  const base: EigonResource = {
     "@id": iri,
     [IS_A]: [CELL_CLASS],
-    [DESCRIPTION]: `${type} cell`,
+    [DESCRIPTION]: `${cell.type} cell`,
     [SHORT_NAME]: iri.slice(`${NB_NS}:cell:`.length, `${NB_NS}:cell:`.length + 12),
-    [CELL_TYPE_PROP]: CELL_TYPE_IRI[type],
-    [SOURCE_PROP]: source,
+    [CELL_TYPE_PROP]: CELL_TYPE_IRI[cell.type],
   };
+  if (cell.type === "program-run") {
+    base[PROGRAM_IRI_PROP] = cell.program_iri;
+    base[INPUT_IRIS_PROP] = cell.input_iris;
+  } else {
+    base[SOURCE_PROP] = cell.source;
+  }
+  return base;
 }
 
 function asStringArray(value: unknown): string[] {

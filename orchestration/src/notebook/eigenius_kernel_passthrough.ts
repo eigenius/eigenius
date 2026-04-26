@@ -33,12 +33,42 @@
  * methods that already exist there).
  */
 
-import type { ConnectRouter } from "@connectrpc/connect";
+import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import { EigeniusKernel } from "../gen/eigenius_pb.ts";
 import { KernelClient } from "../client/kernel_client.ts";
 
 export interface EigeniusKernelPassthroughDeps {
   kernel: KernelClient;
+}
+
+/**
+ * Wrap a kernel passthrough call so any error thrown by the kernel
+ * (typically a gRPC status from the kernel's tonic server) is
+ * rethrown as a fresh `ConnectError`. Without this, the connect-node
+ * grpcTransport's wrapped error leaks through the universal handler
+ * with `content-type: application/grpc` and the actual message URL-
+ * encoded into a `grpc-message` header — connect-web in the browser
+ * can't decode that and surfaces a generic "[internal] HTTP 400".
+ */
+async function proxy<Req, Resp>(
+  call: (req: Req) => Promise<Resp>,
+  req: Req,
+): Promise<Resp> {
+  try {
+    return await call(req);
+  } catch (err) {
+    if (err instanceof ConnectError) {
+      // Re-throw as a brand-new ConnectError so the universal handler
+      // sees a Connect-native error and encodes it in the inbound
+      // protocol's format (Connect / gRPC-Web / gRPC). We drop
+      // `details` because received errors carry IncomingDetail and
+      // outgoing errors expect OutgoingDetail; preserving them would
+      // require schema lookups we don't have here.
+      throw new ConnectError(err.rawMessage, err.code);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ConnectError(message, Code.Internal);
+  }
 }
 
 export function registerEigeniusKernelPassthrough(
@@ -50,19 +80,20 @@ export function registerEigeniusKernelPassthrough(
   router.service(EigeniusKernel, {
     // Read-only methods exposed in the MVP. Each is a thin call
     // through to the kernel; no orchestrator-side processing.
-    inspect: (req) => kernel.raw.inspect(req),
-    query: (req) => kernel.raw.query(req),
-    listInstitutions: (req) => kernel.raw.listInstitutions(req),
-    health: (req) => kernel.raw.health(req),
+    inspect: (req) => proxy(kernel.raw.inspect, req),
+    query: (req) => proxy(kernel.raw.query, req),
+    listInstitutions: (req) => proxy(kernel.raw.listInstitutions, req),
+    health: (req) => proxy(kernel.raw.health, req),
 
     // Phase 3 (cell execution): the browser sends ESL source bytes
     // with content_type "application/x-esl" or Eigon-JSON bytes with
     // "application/eigon+json"; the kernel handles compilation as part
     // of Load. validateProgram and runProgram round-trip the same way,
     // wrapping the resource the browser already has in hand.
-    load: (req) => kernel.raw.load(req),
-    validateProgram: (req) => kernel.raw.validateProgram(req),
-    runProgram: (req) => kernel.raw.runProgram(req),
+    load: (req) => proxy(kernel.raw.load, req),
+    validateProgram: (req) => proxy(kernel.raw.validateProgram, req),
+    runProgram: (req) => proxy(kernel.raw.runProgram, req),
+    runProgramByIri: (req) => proxy(kernel.raw.runProgramByIri, req),
 
     // Methods deferred until the relevant notebook phase needs them:
     //

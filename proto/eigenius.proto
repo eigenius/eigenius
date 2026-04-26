@@ -40,6 +40,15 @@ service EigeniusKernel {
   // Execute a program with input data.
   rpc RunProgram(RunProgramRequest) returns (RunProgramResponse);
 
+  // Execute a program already loaded into the active layer chain,
+  // identified by IRI, against an input also identified by IRI. Avoids
+  // the single-content_type limitation of `RunProgram` (where program
+  // and input must share an encoding) and matches the natural notebook
+  // flow: the user has already loaded the program (typically as ESL)
+  // and the input (typically as Eigon-JSON), and now wants to run one
+  // against the other without re-shipping bytes.
+  rpc RunProgramByIri(RunProgramByIriRequest) returns (RunProgramResponse);
+
   // Record a reasoning trace.
   rpc Reflect(ReflectRequest) returns (ReflectResponse);
 
@@ -160,6 +169,16 @@ message RunProgramResponse {
   string task_id = 5;           // Task UUID (D21). Empty string if no
                                 // persistent backend — the task is ephemeral
                                 // and cannot be looked up via GetTaskStatus.
+}
+
+// --- RunProgramByIri ---
+
+message RunProgramByIriRequest {
+  string program_iri = 1;       // IRI of a program resource in the active layer chain
+  string input_iri = 2;         // IRI of the input resource in the active layer chain
+  // Optional hex-encoded LayerId to pin both reads to a specific layer
+  // instead of the session's active top (D21 §3.6). Empty = active top.
+  string at_layer = 3;
 }
 
 // --- Reflect ---
