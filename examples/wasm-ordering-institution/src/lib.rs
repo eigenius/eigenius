@@ -99,12 +99,25 @@ impl Guest for OrderingInstitution {
             ]),
         );
 
+        // Declare the properties referenced from the `requires` lists
+        // above so the kernel's class-definition validator
+        // (eigenius#26) can resolve them. The kernel commits these
+        // alongside the morphism + query classes when the institution
+        // is installed.
+        let structural_properties = vec![
+            property(SOURCE, "source", "Source endpoint of a refinement.", "urn:eigenius:core:resource"),
+            property(TARGET, "target", "Target endpoint of a refinement.", "urn:eigenius:core:resource"),
+            property(DELTA, "delta", "Magnitude of the refinement step.", "urn:eigenius:core:float"),
+            property(TOLERANCE, "tolerance", "Convergence tolerance threshold.", "urn:eigenius:core:float"),
+            property(LATEST_DELTA, "latest_delta", "Most recent observed delta to compare against the tolerance.", "urn:eigenius:core:float"),
+        ];
+
         let decl = FiberDeclaration {
             institution_iri: INSTITUTION_IRI.into(),
             name: "WASM Ordering Institution".into(),
             morphism_types: vec![refinement],
             query_types: vec![query_class],
-            structural_properties: vec![],
+            structural_properties,
         };
 
         decl.into_resource().to_cbor()
@@ -167,6 +180,19 @@ fn extract_number(resource: &Resource, property: &str) -> Option<f64> {
         Value::Integer(i) => Some(*i as f64),
         _ => None,
     }
+}
+
+/// Build a `core:Property` resource declaration for `iri` with the given
+/// short-name, description, and data-type. Used to declare the
+/// properties referenced from this institution's morphism / query
+/// `requires` lists so the kernel can resolve them at validation time.
+fn property(iri: &str, short_name: &str, description: &str, data_type: &str) -> Resource {
+    let mut r = Resource::with_id(iri);
+    r.set_is_a(["urn:eigenius:core:Property"]);
+    r.set("urn:eigenius:core:short_name", Value::String(short_name.into()));
+    r.set("urn:eigenius:core:description", Value::String(description.into()));
+    r.set("urn:eigenius:core:data_type", Value::String(data_type.into()));
+    r
 }
 
 export!(OrderingInstitution);

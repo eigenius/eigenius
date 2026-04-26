@@ -210,17 +210,21 @@ impl<'a> Parser<'a> {
 
     // --- Class ---
 
-    /// `class ex:Dog : ex:Animal { ... }`
+    /// `class ex:Dog : ex:Animal { ... }` or, for multiple parents,
+    /// `class ex:HybridCell : ex:Cell, ex:Visualisable { ... }`
+    /// (eigenius#29). The colon + class list is optional; an empty
+    /// list means the class has no superclasses authored at the
+    /// header. Body-level `subclass_of` items extend the same set.
     fn parse_class(&mut self) -> Result<ClassDecl, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Class)?;
         let name = self.parse_qualified_name()?;
 
-        let parent = if self.at(&TokenKind::Colon) {
+        let parents = if self.at(&TokenKind::Colon) {
             self.advance();
-            Some(self.parse_qualified_name()?)
+            self.parse_qualified_name_list()?
         } else {
-            None
+            Vec::new()
         };
 
         self.expect(&TokenKind::LBrace)?;
@@ -232,7 +236,7 @@ impl<'a> Parser<'a> {
 
         Ok(ClassDecl {
             name,
-            parent,
+            parents,
             body,
             pos,
         })
@@ -429,13 +433,15 @@ impl<'a> Parser<'a> {
 
     // --- Resource ---
 
-    /// `resource ex:rex : ex:Dog { ... }`
+    /// `resource ex:rex : ex:Dog { ... }` or
+    /// `resource ex:rex : ex:Dog, ex:Pet { ... }` for multi-class
+    /// resources (eigenius#29).
     fn parse_resource(&mut self) -> Result<ResourceDecl, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Resource)?;
         let name = self.parse_qualified_name()?;
         self.expect(&TokenKind::Colon)?;
-        let class = self.parse_qualified_name()?;
+        let classes = self.parse_qualified_name_list()?;
 
         self.expect(&TokenKind::LBrace)?;
         let mut body = Vec::new();
@@ -446,7 +452,7 @@ impl<'a> Parser<'a> {
 
         Ok(ResourceDecl {
             name,
-            class,
+            classes,
             body,
             pos,
         })
@@ -1508,7 +1514,7 @@ mod tests {
             Declaration::Class(c) => {
                 assert_eq!(c.name.name, "Document");
                 assert_eq!(c.name.namespace.as_deref(), Some("ex"));
-                assert!(c.parent.is_none());
+                assert!(c.parents.is_empty());
                 assert_eq!(c.body.len(), 3);
             }
             _ => panic!("expected class"),
@@ -1528,7 +1534,27 @@ mod tests {
         .unwrap();
         match &file.declarations[0] {
             Declaration::Class(c) => {
-                assert_eq!(c.parent.as_ref().unwrap().name, "Animal");
+                assert_eq!(c.parents.len(), 1);
+                assert_eq!(c.parents[0].name, "Animal");
+            }
+            _ => panic!("expected class"),
+        }
+    }
+
+    #[test]
+    fn class_with_multiple_parents() {
+        let file = parse_str(
+            r#"
+            class ex:HybridCell : ex:Cell, ex:Visualisable {
+                description = "A hybrid cell.";
+            }
+        "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Class(c) => {
+                let names: Vec<&str> = c.parents.iter().map(|p| p.name.as_str()).collect();
+                assert_eq!(names, vec!["Cell", "Visualisable"]);
             }
             _ => panic!("expected class"),
         }
@@ -1592,7 +1618,8 @@ mod tests {
         match &file.declarations[0] {
             Declaration::Resource(r) => {
                 assert_eq!(r.name.name, "rex");
-                assert_eq!(r.class.name, "Dog");
+                assert_eq!(r.classes.len(), 1);
+                assert_eq!(r.classes[0].name, "Dog");
                 assert_eq!(r.body.len(), 2);
             }
             _ => panic!("expected resource"),

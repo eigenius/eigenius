@@ -48,6 +48,13 @@ pub enum ValidationRule {
     ConditionalRequirement,
     InstitutionValidation,
     UniverseStratificationViolation,
+    /// A class or property declaration references an IRI that doesn't
+    /// resolve to a resource of the expected kind in the layer chain.
+    /// Examples: `requires` referencing a missing `core:Property`,
+    /// `class_types` referencing a missing `core:Class`, `data_type`
+    /// referencing a missing `core:DataType`, `subclass_of` referencing
+    /// a missing `core:Class`. See eigenius#26.
+    UnresolvedClassReference,
 }
 
 impl fmt::Display for ValidationError {
@@ -197,6 +204,16 @@ impl<'a> Validator<'a> {
 
         // Rule 13: Universe stratification (D6b §7, Phase 10b)
         errors.extend(self.check_universe_stratification(resource, &res_id));
+
+        // Rule 14: Class-definition reference integrity (eigenius#26).
+        // Verify that `requires` / `recommends` / `subclass_of` /
+        // `class_types` / `data_type` IRIs declared by Class and
+        // Property resources actually resolve to resources of the
+        // expected kind in the layer chain. Forward references within
+        // the same load batch are fine — by the time we run, the new
+        // layer is fully assembled and `self.layer.resolve()` walks it
+        // along with its parents.
+        errors.extend(self.check_class_definition_references(resource, &res_id));
 
         errors
     }
@@ -753,6 +770,119 @@ impl<'a> Validator<'a> {
         }
     }
 
+    /// Rule 14: Class-definition reference integrity (eigenius#26).
+    ///
+    /// For Class resources, every IRI in `requires` / `recommends` must
+    /// resolve to a `core:Property` and every IRI in `subclass_of` must
+    /// resolve to a `core:Class`. For Property resources, every IRI in
+    /// `class_types` must resolve to a `core:Class` and `data_type` (if
+    /// present) must resolve to a `core:DataType`.
+    ///
+    /// Without this, a typo in `requires patent:innovation_category`
+    /// (vs `invention_category`) commits cleanly and only fails much
+    /// later at instance validation or program execution time, far
+    /// from the offending declaration.
+    fn check_class_definition_references(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let is_class = resource.is_instance_of(&iri(wk::CLASS));
+        let is_property = resource.is_instance_of(&iri(wk::PROPERTY));
+        if !is_class && !is_property {
+            return errors;
+        }
+
+        if is_class {
+            self.check_array_refs(
+                resource,
+                ReferenceCheck::REQUIRES_PROPERTY,
+                res_id,
+                &mut errors,
+            );
+            self.check_array_refs(
+                resource,
+                ReferenceCheck::RECOMMENDS_PROPERTY,
+                res_id,
+                &mut errors,
+            );
+            self.check_array_refs(
+                resource,
+                ReferenceCheck::SUBCLASS_OF_CLASS,
+                res_id,
+                &mut errors,
+            );
+        }
+
+        if is_property {
+            self.check_array_refs(
+                resource,
+                ReferenceCheck::CLASS_TYPES_CLASS,
+                res_id,
+                &mut errors,
+            );
+            // `data_type` is a single resource ref (not an array).
+            if let Some(value) = resource.get(&iri(wk::DATA_TYPE_PROP)) {
+                if let Some(target) = value_as_iri(value) {
+                    self.check_resolves_to(&target, ReferenceCheck::DATA_TYPE, res_id, &mut errors);
+                }
+            }
+        }
+        errors
+    }
+
+    /// Walk an array-valued reference field on `resource` and verify
+    /// every element resolves to a resource of the expected class.
+    fn check_array_refs(
+        &self,
+        resource: &Resource,
+        check: ReferenceCheck<'static>,
+        res_id: &Option<Iri>,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        let Some(value) = resource.get(&iri(check.field_iri)) else {
+            return;
+        };
+        for target in value.as_iri_array() {
+            self.check_resolves_to(&target, check, res_id, errors);
+        }
+    }
+
+    /// Verify a single referenced IRI resolves to a resource of the
+    /// expected class. Reports unresolved or wrong-kind references
+    /// against `ValidationRule::UnresolvedClassReference`.
+    fn check_resolves_to(
+        &self,
+        target: &Iri,
+        check: ReferenceCheck<'_>,
+        res_id: &Option<Iri>,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        let expected_class = iri(check.expected_class_iri);
+        match self.layer.resolve(target) {
+            Some(target_resource) if target_resource.is_instance_of(&expected_class) => {}
+            Some(_) => errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(iri(check.field_iri)),
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{}: '{target}' resolves to a resource that is not an instance of {}",
+                    check.field_label, check.expected_class_label,
+                ),
+            }),
+            None => errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(iri(check.field_iri)),
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{}: '{target}' does not resolve to any resource in the layer chain",
+                    check.field_label,
+                ),
+            }),
+        }
+    }
+
     /// Rule 13: Universe stratification (D6b §7).
     ///
     /// A resource at universe level N may only reference resources at
@@ -868,6 +998,68 @@ fn is_valid_uuid(s: &str) -> bool {
 /// Helper: parse a well-known constant into an Iri.
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("well-known IRI constants must be valid")
+}
+
+/// Helper: extract a single resource-IRI from a Value. Accepts both
+/// `Value::ResourceRef` (canonical) and `Value::String` (the JSON
+/// parser stores all strings as `Value::String` — `data_type` is
+/// frequently authored as a bare string in source ontologies).
+fn value_as_iri(value: &Value) -> Option<Iri> {
+    match value {
+        Value::ResourceRef(i) => Some(i.clone()),
+        Value::String(s) => Iri::parse(s).ok(),
+        _ => None,
+    }
+}
+
+/// Bundle of "what we're checking" for the class-definition reference
+/// validation pass (rule 14, eigenius#26). One value per field/expected-
+/// class pair; the constants below cover the five sites the validator
+/// inspects.
+#[derive(Copy, Clone)]
+struct ReferenceCheck<'a> {
+    /// Field IRI on the source resource (e.g. `core:requires`).
+    field_iri: &'a str,
+    /// Human label for the field used in error messages (e.g. `requires`).
+    field_label: &'a str,
+    /// Class IRI the referenced resource must be an instance of
+    /// (e.g. `core:Property`).
+    expected_class_iri: &'a str,
+    /// Human label for the expected class (e.g. `core:Property`).
+    expected_class_label: &'a str,
+}
+
+impl ReferenceCheck<'static> {
+    const REQUIRES_PROPERTY: Self = Self {
+        field_iri: wk::REQUIRES,
+        field_label: "requires",
+        expected_class_iri: wk::PROPERTY,
+        expected_class_label: "core:Property",
+    };
+    const RECOMMENDS_PROPERTY: Self = Self {
+        field_iri: wk::RECOMMENDS,
+        field_label: "recommends",
+        expected_class_iri: wk::PROPERTY,
+        expected_class_label: "core:Property",
+    };
+    const SUBCLASS_OF_CLASS: Self = Self {
+        field_iri: wk::PARENT_CLASSES,
+        field_label: "subclass_of",
+        expected_class_iri: wk::CLASS,
+        expected_class_label: "core:Class",
+    };
+    const CLASS_TYPES_CLASS: Self = Self {
+        field_iri: wk::CLASS_TYPES,
+        field_label: "class_types",
+        expected_class_iri: wk::CLASS,
+        expected_class_label: "core:Class",
+    };
+    const DATA_TYPE: Self = Self {
+        field_iri: wk::DATA_TYPE_PROP,
+        field_label: "data_type",
+        expected_class_iri: wk::DATA_TYPE,
+        expected_class_label: "core:DataType",
+    };
 }
 
 #[cfg(test)]
@@ -1699,6 +1891,207 @@ mod tests {
             missing_errors.len() >= 3,
             "ProgramTrace missing 3 required fields should have >= 3 errors, got {}: {missing_errors:?}",
             missing_errors.len()
+        );
+    }
+
+    // --- eigenius#26: class-definition reference integrity ---
+
+    /// A class that `requires` an IRI with no matching Property
+    /// declaration anywhere in the chain must fail validation rather
+    /// than commit cleanly.
+    #[test]
+    fn class_requires_unresolved_property_is_rejected() {
+        let core = build_core_layer();
+        let mut top = LayerBuilder::new("test", Some(core));
+
+        // Class declaring a requires reference to a property that
+        // doesn't exist (typo / forgotten-declaration scenario).
+        let bad_class = make_resource(
+            "urn:eigenius:test:Foo",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("Foo".into())),
+                (wk::DESCRIPTION, Value::String("Test class.".into())),
+                (
+                    wk::REQUIRES,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:test:totally_made_up_property".into(),
+                    )]),
+                ),
+            ],
+        );
+        top.add_resource(bad_class).unwrap();
+        let layer = Arc::new(top.build());
+
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let dangling: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("totally_made_up_property")
+            })
+            .collect();
+        assert_eq!(
+            dangling.len(),
+            1,
+            "expected exactly one UnresolvedClassReference for the missing property; got {errors:?}"
+        );
+    }
+
+    /// Same class, but the referenced property is declared in the
+    /// same load batch — must validate cleanly.
+    #[test]
+    fn class_requires_same_batch_property_is_accepted() {
+        let core = build_core_layer();
+        let mut top = LayerBuilder::new("test", Some(core));
+
+        let prop = make_resource(
+            "urn:eigenius:test:my_prop",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::PROPERTY.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("my_prop".into())),
+                (wk::DESCRIPTION, Value::String("A test property.".into())),
+                (
+                    wk::DATA_TYPE_PROP,
+                    Value::String("urn:eigenius:core:string".into()),
+                ),
+            ],
+        );
+        let class = make_resource(
+            "urn:eigenius:test:Foo",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("Foo".into())),
+                (wk::DESCRIPTION, Value::String("Test class.".into())),
+                (
+                    wk::REQUIRES,
+                    Value::Array(vec![Value::String("urn:eigenius:test:my_prop".into())]),
+                ),
+            ],
+        );
+        top.add_resource(prop).unwrap();
+        top.add_resource(class).unwrap();
+        let layer = Arc::new(top.build());
+
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let dangling: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UnresolvedClassReference)
+            .collect();
+        assert!(
+            dangling.is_empty(),
+            "valid forward-reference should not surface UnresolvedClassReference; got {dangling:?}"
+        );
+    }
+
+    /// A property whose `data_type` doesn't resolve must fail.
+    #[test]
+    fn property_data_type_unresolved_is_rejected() {
+        let core = build_core_layer();
+        let mut top = LayerBuilder::new("test", Some(core));
+
+        let bad_prop = make_resource(
+            "urn:eigenius:test:my_prop",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::PROPERTY.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("my_prop".into())),
+                (wk::DESCRIPTION, Value::String("Bad prop.".into())),
+                (
+                    wk::DATA_TYPE_PROP,
+                    Value::String("urn:eigenius:test:not_a_real_type".into()),
+                ),
+            ],
+        );
+        top.add_resource(bad_prop).unwrap();
+        let layer = Arc::new(top.build());
+
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let dangling: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("not_a_real_type")
+            })
+            .collect();
+        assert_eq!(
+            dangling.len(),
+            1,
+            "expected exactly one UnresolvedClassReference for the missing data_type; got {errors:?}"
+        );
+    }
+
+    /// A property's `class_types` referencing a non-Class fails.
+    #[test]
+    fn property_class_types_pointing_at_non_class_is_rejected() {
+        let core = build_core_layer();
+        let mut top = LayerBuilder::new("test", Some(core));
+
+        // A non-Class resource (just an instance of `core:Class`'s
+        // base — actually use core:DataType, which is a Class but its
+        // *instances* aren't classes themselves).
+        let instance = make_resource(
+            "urn:eigenius:test:not_a_class",
+            vec![
+                // is_a a DataType, NOT a Class.
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::DATA_TYPE.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("not_a_class".into())),
+                (wk::DESCRIPTION, Value::String("placeholder".into())),
+            ],
+        );
+        let bad_prop = make_resource(
+            "urn:eigenius:test:my_prop",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::PROPERTY.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("my_prop".into())),
+                (wk::DESCRIPTION, Value::String("Bad prop.".into())),
+                (
+                    wk::DATA_TYPE_PROP,
+                    Value::String("urn:eigenius:core:resource".into()),
+                ),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::String("urn:eigenius:test:not_a_class".into())]),
+                ),
+            ],
+        );
+        top.add_resource(instance).unwrap();
+        top.add_resource(bad_prop).unwrap();
+        let layer = Arc::new(top.build());
+
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let dangling: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("not_a_class")
+            })
+            .collect();
+        assert_eq!(
+            dangling.len(),
+            1,
+            "expected one UnresolvedClassReference for class_types pointing at a non-Class; got {errors:?}"
         );
     }
 }
