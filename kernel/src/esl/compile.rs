@@ -548,13 +548,13 @@ impl Compiler {
             Value::String(class.name.name.clone()),
         );
 
-        // subclass_of
-        if let Some(parent) = &class.parent {
-            let parent_iri = self.resolve(parent)?;
-            r.set(
-                iri("urn:eigenius:core:subclass_of"),
-                Value::Array(vec![Value::String(parent_iri)]),
-            );
+        // subclass_of — accumulate from BOTH the header form
+        // (`class X : A, B { … }`) AND any in-body `subclass_of A, B;`
+        // items. Both authoring styles compose into one array
+        // (eigenius#29).
+        let mut subclass_of: Vec<Value> = Vec::new();
+        for parent in &class.parents {
+            subclass_of.push(Value::String(self.resolve(parent)?));
         }
 
         for item in &class.body {
@@ -580,6 +580,13 @@ impl Compiler {
                     r.set(iri("urn:eigenius:core:recommends"), Value::Array(iris?));
                 }
             }
+        }
+
+        if !subclass_of.is_empty() {
+            r.set(
+                iri("urn:eigenius:core:subclass_of"),
+                Value::Array(subclass_of),
+            );
         }
 
         stamp_declared(&mut r);
@@ -686,11 +693,16 @@ impl Compiler {
         let id = self.resolve_iri(&res.name)?;
         let mut r = Resource::new(id);
 
-        let class_iri = self.resolve(&res.class)?;
-        r.set(
-            iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::String(class_iri)]),
-        );
+        // is_a is the (one or more) classes from the resource header.
+        // Multi-class resources (eigenius#29) emit every class into
+        // the array, so they participate in the requires/recommends
+        // sets of all of them.
+        let class_iris: Result<Vec<Value>, _> = res
+            .classes
+            .iter()
+            .map(|c| self.resolve(c).map(Value::String))
+            .collect();
+        r.set(iri("urn:eigenius:core:is_a"), Value::Array(class_iris?));
 
         for field in &res.body {
             let prop_iri = self.resolve_iri(&field.property)?;
@@ -1456,6 +1468,90 @@ mod tests {
             .unwrap()
             .as_iri_array();
         assert_eq!(parent[0].as_str(), "urn:eigenius:example:Animal");
+    }
+
+    // --- eigenius#29: multi-parent class header + multi-class resources ---
+
+    #[test]
+    fn compile_class_with_multiple_parents_in_header() {
+        // The colon list accepts more than one class. Both end up in
+        // the emitted `core:subclass_of` array, in source order.
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            class ex:HybridCell : ex:Cell, ex:Visualisable {
+                description = "A hybrid cell.";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let parents: Vec<String> = r
+            .get(&iri("urn:eigenius:core:subclass_of"))
+            .unwrap()
+            .as_iri_array()
+            .iter()
+            .map(|i| i.as_str().to_string())
+            .collect();
+        assert_eq!(
+            parents,
+            vec![
+                "urn:eigenius:example:Cell".to_string(),
+                "urn:eigenius:example:Visualisable".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn compile_resource_with_multiple_classes() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            resource ex:rex : ex:Dog, ex:Pet {
+                ex:name = "Rex";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let is_a: Vec<String> = r
+            .get(&iri("urn:eigenius:core:is_a"))
+            .unwrap()
+            .as_iri_array()
+            .iter()
+            .map(|i| i.as_str().to_string())
+            .collect();
+        // `stamp_declared` appends `reflection:DeclaredResource`; only
+        // assert that BOTH author-declared classes survived in source
+        // order at the front of the array.
+        assert!(is_a.len() >= 2);
+        assert_eq!(is_a[0], "urn:eigenius:example:Dog");
+        assert_eq!(is_a[1], "urn:eigenius:example:Pet");
+    }
+
+    #[test]
+    fn compile_resource_with_single_class_unchanged() {
+        // Backwards-compatibility: the single-class form is still
+        // valid and produces a one-element is_a array (plus the
+        // reflection:DeclaredResource tag stamped by `stamp_declared`).
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            resource ex:rex : ex:Dog {
+                ex:name = "Rex";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let is_a: Vec<String> = r
+            .get(&iri("urn:eigenius:core:is_a"))
+            .unwrap()
+            .as_iri_array()
+            .iter()
+            .map(|i| i.as_str().to_string())
+            .collect();
+        assert!(is_a.first().map(|s| s.as_str()) == Some("urn:eigenius:example:Dog"));
     }
 
     #[test]

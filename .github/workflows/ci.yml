@@ -47,12 +47,38 @@ jobs:
       # `--all-targets`, including test binaries) and `cargo test` need
       # the fixtures present, so this has to come before either.
       - name: Install cargo-component
-        run: cargo install --locked cargo-component@^0.21
+        # `cargo install` was the dominant cost of the pipeline (~12 min
+        # of recompilation on every run). The cargo cache step above
+        # restores `~/.cargo/bin/cargo-component` and the `.crates.toml`
+        # / `.crates2.json` metadata that lets cargo know it owns the
+        # binary; if those are intact AND match the pinned version
+        # range, skip the install entirely. Otherwise rebuild.
+        run: |
+          if command -v cargo-component >/dev/null \
+              && cargo-component --version 2>/dev/null | grep -q "cargo-component 0\.21\."; then
+            echo "cargo-component already installed: $(cargo-component --version)"
+          else
+            cargo install --locked --force cargo-component@^0.21
+          fi
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown wasm32-wasip1
 
+      # The WASM fixtures only change when their source trees change.
+      # Cache the built `.wasm` artifacts under `kernel/tests/fixtures/`
+      # keyed on a hash of every input that can affect the output:
+      # the example crate sources, the shared SDK they link against,
+      # the WIT bindings, and the cargo-component pin. Drops a ~5min
+      # `cargo component build` step on cache-hit runs.
+      - name: Cache WASM fixtures
+        id: wasm-fixtures-cache
+        uses: actions/cache@v4
+        with:
+          path: kernel/tests/fixtures
+          key: ${{ runner.os }}-wasm-fixtures-cc0.21-${{ hashFiles('examples/wasm-doc-validator/**', 'examples/wasm-ordering-institution/**', 'sdk/wasm-sdk/**', 'wit/**') }}
+
       - name: Build WASM fixtures
+        if: steps.wasm-fixtures-cache.outputs.cache-hit != 'true'
         # Each example is its own workspace; build from inside the
         # crate dir, then copy the artifact into the kernel's
         # gitignored fixtures directory.

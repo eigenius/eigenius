@@ -25,7 +25,9 @@ use crate::query::lexer::{Token, TokenKind};
 /// Parse an EigenQL program from a token stream.
 pub fn parse(tokens: Vec<Token>) -> Result<Program, QueryError> {
     let mut parser = Parser::new(tokens);
-    parser.parse_program()
+    let program = parser.parse_program()?;
+    parser.expect_eof()?;
+    Ok(program)
 }
 
 struct Parser {
@@ -80,6 +82,26 @@ impl Parser {
 
     fn at_any(&self, kinds: &[TokenKind]) -> bool {
         kinds.contains(self.peek())
+    }
+
+    /// Verify all tokens have been consumed. Called from the top-level
+    /// `parse` entry point after `parse_program` returns. Without this,
+    /// typos in trailing clauses (`ORDR BY`, `LIMT 5`, raw garbage)
+    /// silently terminate the query before the typo and the user sees
+    /// a successful partial parse — see eigenius#27.
+    fn expect_eof(&self) -> Result<(), QueryError> {
+        if self.peek() == &TokenKind::Eof {
+            return Ok(());
+        }
+        let unexpected = self.peek();
+        let suggestion = trailing_keyword_typo_hint(unexpected);
+        let msg = match suggestion {
+            Some(kw) => {
+                format!("unexpected token after query body: {unexpected:?} — did you mean `{kw}`?")
+            }
+            None => format!("unexpected token after query body: {unexpected:?}"),
+        };
+        Err(QueryError::parser(self.position(), msg))
     }
 
     // --- Top-level ---
@@ -972,6 +994,66 @@ impl Parser {
     }
 }
 
+/// Suggest a trailing-clause keyword if the unexpected token is a
+/// near-miss for one of `ORDER` / `LIMIT` / `OFFSET` / `DISTINCT`. The
+/// lexer turns these typos into `Ident`s; we only consider that case.
+/// Returns the suggested keyword (uppercase) or `None` if the token
+/// isn't an identifier or none of the keywords are within Levenshtein
+/// distance 2.
+fn trailing_keyword_typo_hint(tok: &TokenKind) -> Option<&'static str> {
+    let candidate = match tok {
+        TokenKind::Identifier(s) => s.to_ascii_uppercase(),
+        _ => return None,
+    };
+    const KEYWORDS: &[&str] = &["ORDER", "LIMIT", "OFFSET", "DISTINCT"];
+    let max_dist = match candidate.len() {
+        0..=4 => 1,
+        _ => 2,
+    };
+    KEYWORDS
+        .iter()
+        .copied()
+        .filter_map(|kw| {
+            let d = levenshtein(&candidate, kw);
+            if d == 0 || d > max_dist {
+                None
+            } else {
+                Some((d, kw))
+            }
+        })
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, kw)| kw)
+}
+
+/// Plain Levenshtein distance — only used for typo hints in parser
+/// errors, so the O(m·n) cost on tiny strings is fine.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let (m, n) = (a_chars.len(), b_chars.len());
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0usize; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1323,5 +1405,70 @@ mod tests {
         // without any MATCH/FIBER errors.
         let err = parse_str(r#"WHERE ?x = 1"#);
         assert!(err.is_err());
+    }
+
+    // --- eigenius#27: trailing junk after RETURN ---
+
+    #[test]
+    fn trailing_typo_after_return_errors_with_hint() {
+        let err = parse_str(
+            r#"USING "urn:eigenius:core:Class"
+            MATCH Class(?c) { short_name: ?n }
+            RETURN [] { name: ?n }
+            ORDR BY ?n"#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("ORDR"),
+            "expected the offending token in the error: {msg}"
+        );
+        assert!(
+            msg.contains("ORDER"),
+            "expected the typo hint to mention ORDER: {msg}"
+        );
+    }
+
+    #[test]
+    fn trailing_limit_typo_errors_with_hint() {
+        let err = parse_str(
+            r#"USING "urn:eigenius:core:Class"
+            MATCH Class(?c) { short_name: ?n }
+            RETURN [] { name: ?n }
+            LIMT 5"#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("LIMT"));
+        assert!(msg.contains("LIMIT"));
+    }
+
+    #[test]
+    fn trailing_garbage_after_return_errors() {
+        let err = parse_str(
+            r#"USING "urn:eigenius:core:Class"
+            MATCH Class(?c) { short_name: ?n }
+            RETURN [] { name: ?n }
+            ZZZZZZ"#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("ZZZZZZ"),
+            "expected the unrecognized token to surface verbatim: {msg}"
+        );
+    }
+
+    #[test]
+    fn legitimate_trailing_clauses_still_parse() {
+        // Sanity: the EOF check shouldn't break valid trailing clauses.
+        parse_str(
+            r#"USING "urn:eigenius:core:Class"
+            MATCH Class(?c) { short_name: ?n }
+            RETURN [] { name: ?n }
+            ORDER BY ?n
+            LIMIT 5"#,
+        )
+        .unwrap();
     }
 }

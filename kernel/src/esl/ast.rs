@@ -53,11 +53,15 @@ pub enum Declaration {
     Data(DataDecl),
 }
 
-/// `class ex:Dog : ex:Animal { ... }`
+/// `class ex:Dog : ex:Animal { ... }` or
+/// `class ex:HybridCell : ex:Cell, ex:Visualisable { ... }` for the
+/// multi-parent header form (eigenius#29). Both this list and any
+/// in-body `subclass_of A, B;` items contribute to the emitted
+/// `core:subclass_of` array.
 #[derive(Debug)]
 pub struct ClassDecl {
     pub name: QualifiedName,
-    pub parent: Option<QualifiedName>,
+    pub parents: Vec<QualifiedName>,
     pub body: Vec<ClassItem>,
     pub pos: Position,
 }
@@ -95,11 +99,13 @@ pub enum PropertyItem {
     ElementType(QualifiedName),
 }
 
-/// `resource ex:rex : ex:Dog { ... }`
+/// `resource ex:rex : ex:Dog { ... }` or `resource ex:rex : ex:Dog, ex:Pet { ... }`.
+/// At least one class is required; a comma-separated list expresses
+/// multi-class instances (eigenius#29).
 #[derive(Debug)]
 pub struct ResourceDecl {
     pub name: QualifiedName,
-    pub class: QualifiedName,
+    pub classes: Vec<QualifiedName>,
     pub body: Vec<ResourceField>,
     pub pos: Position,
 }
