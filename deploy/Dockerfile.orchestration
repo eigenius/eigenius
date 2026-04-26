@@ -1,19 +1,42 @@
-# Eigenius Orchestration Layer — Deno runtime
+# Eigenius Orchestration Layer — Deno runtime + bundled notebook SPA
 #
-# Runs the TypeScript orchestration layer that handles program execution,
-# LLM adapters, and the MCP server surface.
+# Multi-stage build:
+#   1. notebook-builder  — Node 20 + npm, builds the notebooks SPA via `vite build`
+#   2. final             — Deno runtime serving the orchestrator's RPC surface
+#                          and the static notebook bundle from /notebooks/*
 
+# --- Stage 1: build the notebooks SPA -----------------------------------------
+FROM node:22-alpine AS notebook-builder
+
+WORKDIR /build
+
+# The SDK is a `file:` dependency of notebooks/, so npm needs both trees to
+# resolve the workspace symlink.
+COPY clients/eigenius-ts/ clients/eigenius-ts/
+COPY notebooks/ notebooks/
+
+WORKDIR /build/notebooks
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+RUN npm run build
+# Output: /build/notebooks/dist/
+
+# --- Stage 2: orchestrator runtime --------------------------------------------
 FROM denoland/deno:latest
 
 WORKDIR /app
 
-# Copy config and cache dependencies
+# Cache Deno deps from the source layout.
 COPY orchestration/deno.json ./
 COPY orchestration/src/ src/
 RUN deno cache src/main.ts
 
+# Bundle the notebook SPA into the image. The static-file route (D22 §6.10)
+# reads EIGENIUS_NOTEBOOK_STATIC at runtime and serves /notebooks/* from it.
+COPY --from=notebook-builder /build/notebooks/dist/ /app/notebooks/
+
 ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
+ENV EIGENIUS_NOTEBOOK_STATIC=/app/notebooks
 
 EXPOSE 8080
 
-CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-sys=hostname", "src/main.ts"]
+CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-sys=hostname", "--allow-read=/app/notebooks", "src/main.ts"]

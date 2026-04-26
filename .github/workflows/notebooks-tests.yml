@@ -1,0 +1,94 @@
+name: Notebooks E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "notebooks/**"
+      - "clients/eigenius-ts/**"
+      - "orchestration/**"
+      - "kernel/**"
+      - "proto/**"
+      - "ontologies/**"
+      - "deploy/Dockerfile.kernel"
+      - "deploy/Dockerfile.orchestration"
+      - "docker-compose.yml"
+      - ".github/workflows/notebooks-tests.yml"
+  push:
+    branches: [main]
+
+jobs:
+  e2e:
+    name: Playwright golden flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: notebooks/package-lock.json
+
+      - name: Install notebook dependencies
+        working-directory: notebooks
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        working-directory: notebooks
+        run: npx playwright install --with-deps chromium
+
+      # Bring the stack up with the notebook SPA bundled into the
+      # orchestrator image. EIGENIUS_MOCK_LLM=true means CompleteText /
+      # CompleteJson dispatches return canned responses — keeps the
+      # golden flow deterministic and free of API-key requirements.
+      - name: Start docker stack
+        env:
+          EIGENIUS_MOCK_LLM: "true"
+        run: |
+          docker compose up -d --build kernel orchestrator
+          # Wait for the orchestrator to be healthy + serving notebook SPA.
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/health >/dev/null \
+              && curl -sf http://localhost:8080/notebooks/ >/dev/null; then
+              echo "stack ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:8080/health || (docker compose logs && exit 1)
+
+      - name: Run Playwright e2e
+        working-directory: notebooks
+        env:
+          E2E_BASE_URL: http://localhost:8080
+          CI: "true"
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: notebooks/playwright-report/
+          retention-days: 7
+
+      - name: Upload docker logs on failure
+        if: failure()
+        run: docker compose logs --no-color > docker-logs.txt && true
+        continue-on-error: true
+
+      - name: Upload docker logs artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: docker-logs.txt
+          retention-days: 7
+
+      - name: Stop docker stack
+        if: always()
+        run: docker compose down -v
