@@ -25,7 +25,7 @@
  * Click-to-inspect drilldown is a Phase 4c+ enhancement.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Body1Strong,
   Button,
@@ -37,6 +37,7 @@ import {
   DialogTitle,
   DialogTrigger,
   makeStyles,
+  Spinner,
   tokens,
 } from "@fluentui/react-components";
 import { Dismiss20Regular, Share20Regular } from "@fluentui/react-icons";
@@ -47,6 +48,7 @@ import {
   type TopologyEdge,
   type TopologyNode,
 } from "@eigenius/client";
+import { useEigen } from "../../runtime/EigenProvider";
 import { TopologyGraphView } from "./TopologyGraphView";
 
 const useStyles = makeStyles({
@@ -109,6 +111,18 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontStyle: "italic",
   },
+  loadingPanel: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+    padding: tokens.spacingVerticalS,
+    color: tokens.colorNeutralForeground3,
+  },
+  errorMessage: {
+    color: tokens.colorPaletteRedForeground1,
+    fontFamily: tokens.fontFamilyMonospace,
+    padding: tokens.spacingVerticalS,
+  },
   layerHeaderRow: {
     display: "flex",
     alignItems: "center",
@@ -163,23 +177,72 @@ export interface LayerStackViewProps {
 
 export function LayerStackView({ topology }: LayerStackViewProps) {
   const styles = useStyles();
+  const eigen = useEigen();
   const stack = useMemo(() => orderLayersHeadFirst(topology), [topology]);
   const [openLayer, setOpenLayer] = useState<TopologyNode | null>(null);
+
+  // The summary topology is fetched cheaply (`includeResources: false`),
+  // so instance-resource nodes are absent — only their *count* is on
+  // the layer node. When the user opens the per-layer drilldown for a
+  // layer whose resource count > 0, we lazily refetch with
+  // `includeResources: true` so the graph matches what the count
+  // promised.
+  const summaryHasResourcesForOpenLayer = useMemo(() => {
+    if (!openLayer) return true;
+    return topology.nodes.some(
+      (n) =>
+        n.kind === NodeKind.Resource && n.attrs?.layer_id === openLayer.id,
+    );
+  }, [openLayer, topology]);
+  const openLayerNeedsRichFetch = useMemo(() => {
+    if (!openLayer) return false;
+    const counts = readCounts(openLayer);
+    return (counts.resources ?? 0) > 0 && !summaryHasResourcesForOpenLayer;
+  }, [openLayer, summaryHasResourcesForOpenLayer]);
+
+  const [richTopology, setRichTopology] = useState<LayerTopologyResponse | null>(
+    null,
+  );
+  const [richError, setRichError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openLayerNeedsRichFetch) {
+      setRichTopology(null);
+      setRichError(null);
+      return;
+    }
+    let cancelled = false;
+    setRichTopology(null);
+    setRichError(null);
+    eigen.layerTopology({ includeResources: true })
+      .then((t) => {
+        if (!cancelled) setRichTopology(t);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setRichError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eigen, openLayerNeedsRichFetch, openLayer?.id]);
 
   // Build the per-layer subgraph when a layer is selected. The kernel
   // tags each non-LAYER node with `attrs.layer_id` (the layer that
   // first declared it); we filter the full topology client-side.
   const layerSubgraph = useMemo<LayerTopologyResponse | null>(() => {
     if (!openLayer) return null;
+    const source = openLayerNeedsRichFetch ? richTopology : topology;
+    if (!source) return null;
     const layerId = openLayer.id;
     const keepNode = (n: TopologyNode): boolean => {
       if (n.id === layerId) return true; // include the layer node itself
       if (n.kind === NodeKind.LAYER) return false; // drop other layers
       return n.attrs?.layer_id === layerId;
     };
-    const nodes = topology.nodes.filter(keepNode);
+    const nodes = source.nodes.filter(keepNode);
     const ids = new Set(nodes.map((n) => n.id));
-    const edges = topology.edges.filter(
+    const edges = source.edges.filter(
       (e) =>
         // Drop parent_layer edges (only one layer in this view) and
         // any edge whose endpoints aren't in the filtered set.
@@ -187,11 +250,11 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
         ids.has(e.target),
     );
     return {
-      ...topology,
+      ...source,
       nodes,
       edges,
     } as LayerTopologyResponse;
-  }, [openLayer, topology]);
+  }, [openLayer, openLayerNeedsRichFetch, richTopology, topology]);
 
   if (stack.length === 0) {
     return (
@@ -248,7 +311,20 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
             </DialogTitle>
             <DialogContent className={styles.fullScreenContent}>
               <div className={styles.fullScreenGraph}>
-                {layerSubgraph && layerSubgraph.nodes.length > 1
+                {openLayerNeedsRichFetch && !richTopology && !richError
+                  ? (
+                    <div className={styles.loadingPanel}>
+                      <Spinner size="tiny" />
+                      <Caption1>fetching layer resources…</Caption1>
+                    </div>
+                  )
+                  : richError
+                  ? (
+                    <Caption1 className={styles.errorMessage}>
+                      Failed to fetch layer resources: {richError}
+                    </Caption1>
+                  )
+                  : layerSubgraph && layerSubgraph.nodes.length > 1
                   ? (
                     <TopologyGraphView
                       topology={layerSubgraph}
