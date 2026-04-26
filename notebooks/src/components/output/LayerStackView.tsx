@@ -25,13 +25,21 @@
  * Click-to-inspect drilldown is a Phase 4c+ enhancement.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Body1Strong,
+  Button,
   Caption1,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  DialogTrigger,
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
+import { Dismiss20Regular, Share20Regular } from "@fluentui/react-icons";
 import {
   EdgeKind,
   type LayerTopologyResponse,
@@ -39,6 +47,7 @@ import {
   type TopologyEdge,
   type TopologyNode,
 } from "@eigenius/client";
+import { TopologyGraphView } from "./TopologyGraphView";
 
 const useStyles = makeStyles({
   root: {
@@ -100,6 +109,52 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontStyle: "italic",
   },
+  layerHeaderRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalS,
+  },
+  fullScreenSurface: {
+    width: "95vw",
+    maxWidth: "none",
+    height: "92vh",
+    display: "flex",
+    flexDirection: "column",
+    position: "relative",
+  },
+  fullScreenClose: {
+    position: "absolute",
+    top: tokens.spacingVerticalS,
+    right: tokens.spacingHorizontalS,
+    zIndex: 1,
+  },
+  fullScreenBody: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  fullScreenContent: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
+  },
+  fullScreenGraph: {
+    width: "100%",
+    height: "100%",
+    minHeight: "70vh",
+  },
+  dialogTitle: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+  dialogTitleSummary: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightRegular,
+  },
 });
 
 export interface LayerStackViewProps {
@@ -109,6 +164,34 @@ export interface LayerStackViewProps {
 export function LayerStackView({ topology }: LayerStackViewProps) {
   const styles = useStyles();
   const stack = useMemo(() => orderLayersHeadFirst(topology), [topology]);
+  const [openLayer, setOpenLayer] = useState<TopologyNode | null>(null);
+
+  // Build the per-layer subgraph when a layer is selected. The kernel
+  // tags each non-LAYER node with `attrs.layer_id` (the layer that
+  // first declared it); we filter the full topology client-side.
+  const layerSubgraph = useMemo<LayerTopologyResponse | null>(() => {
+    if (!openLayer) return null;
+    const layerId = openLayer.id;
+    const keepNode = (n: TopologyNode): boolean => {
+      if (n.id === layerId) return true; // include the layer node itself
+      if (n.kind === NodeKind.LAYER) return false; // drop other layers
+      return n.attrs?.layer_id === layerId;
+    };
+    const nodes = topology.nodes.filter(keepNode);
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = topology.edges.filter(
+      (e) =>
+        // Drop parent_layer edges (only one layer in this view) and
+        // any edge whose endpoints aren't in the filtered set.
+        e.kind !== EdgeKind.PARENT_LAYER && ids.has(e.source) &&
+        ids.has(e.target),
+    );
+    return {
+      ...topology,
+      nodes,
+      edges,
+    } as LayerTopologyResponse;
+  }, [openLayer, topology]);
 
   if (stack.length === 0) {
     return (
@@ -126,9 +209,64 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
           layer={layer}
           isRoot={idx === stack.length - 1}
           isLast={idx === stack.length - 1}
+          onOpenGraph={() => setOpenLayer(layer)}
           styles={styles}
         />
       ))}
+      <Dialog
+        open={openLayer !== null}
+        onOpenChange={(_e, data) => {
+          if (!data.open) setOpenLayer(null);
+        }}
+        modalType="non-modal"
+      >
+        <DialogSurface className={styles.fullScreenSurface}>
+          <DialogTrigger disableButtonEnhancement>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<Dismiss20Regular />}
+              aria-label="Close"
+              className={styles.fullScreenClose}
+            />
+          </DialogTrigger>
+          <DialogBody className={styles.fullScreenBody}>
+            {/* action={null} suppresses Fluent's default close-button
+                in the title's action slot — we use the absolutely-
+                positioned X above so it stays anchored when the
+                title grows to two lines. */}
+            <DialogTitle action={null}>
+              <div className={styles.dialogTitle}>
+                <span>
+                  Layer · {openLayer?.label || "(unnamed layer)"}
+                </span>
+                <span className={styles.dialogTitleSummary}>
+                  {layerSubgraph?.nodes.length ?? 0} nodes · {layerSubgraph
+                    ?.edges.length ?? 0} edges
+                </span>
+              </div>
+            </DialogTitle>
+            <DialogContent className={styles.fullScreenContent}>
+              <div className={styles.fullScreenGraph}>
+                {layerSubgraph && layerSubgraph.nodes.length > 1
+                  ? (
+                    <TopologyGraphView
+                      topology={layerSubgraph}
+                      title={`Layer · ${openLayer?.label}`}
+                    />
+                  )
+                  : (
+                    <Caption1 className={styles.empty}>
+                      This layer added no class / property / institution /
+                      resource nodes — only its layer marker. Nothing to
+                      graph.
+                    </Caption1>
+                  )}
+              </div>
+            </DialogContent>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 }
@@ -137,11 +275,16 @@ interface LayerBoxProps {
   layer: TopologyNode;
   isRoot: boolean;
   isLast: boolean;
+  onOpenGraph: () => void;
   styles: ReturnType<typeof useStyles>;
 }
 
-function LayerBox({ layer, isRoot, isLast, styles }: LayerBoxProps) {
+function LayerBox(
+  { layer, isRoot, isLast, onOpenGraph, styles }: LayerBoxProps,
+) {
   const counts = readCounts(layer);
+  const hasContent = (counts.classes ?? 0) + (counts.properties ?? 0) +
+      (counts.institutions ?? 0) + (counts.resources ?? 0) > 0;
   return (
     <>
       <div
@@ -149,9 +292,21 @@ function LayerBox({ layer, isRoot, isLast, styles }: LayerBoxProps) {
           isRoot ? styles.rootLayerCard : ""
         }`.trim()}
       >
-        <div className={styles.label}>
-          <Body1Strong>{layer.label || "(unnamed layer)"}</Body1Strong>
-          <span className={styles.layerId}>{layer.id.slice(0, 12)}…</span>
+        <div className={styles.layerHeaderRow}>
+          <div className={styles.label}>
+            <Body1Strong>{layer.label || "(unnamed layer)"}</Body1Strong>
+            <span className={styles.layerId}>{layer.id.slice(0, 12)}…</span>
+          </div>
+          {hasContent && (
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<Share20Regular />}
+              title="Open this layer's topology graph"
+              aria-label="Open this layer's topology graph"
+              onClick={onOpenGraph}
+            />
+          )}
         </div>
         <div className={styles.counts}>
           <CountBadge label="classes" value={counts.classes} styles={styles} />
