@@ -109,9 +109,15 @@ export function startServer(
   });
 
   console.log(`Orchestrator server listening on port ${port}`);
-  console.log(`  Connect: ComponentExecutor (kernel → orchestrator IO dispatch)`);
-  console.log(`  Connect: NotebookService    (browser → orchestrator → kernel)`);
-  console.log(`  Connect: EigeniusKernel     (browser → orchestrator → kernel passthrough)`);
+  console.log(
+    `  Connect: ComponentExecutor (kernel → orchestrator IO dispatch)`,
+  );
+  console.log(
+    `  Connect: NotebookService    (browser → orchestrator → kernel)`,
+  );
+  console.log(
+    `  Connect: EigeniusKernel     (browser → orchestrator → kernel passthrough)`,
+  );
   console.log(`  HTTP:    GET /health`);
   if (notebookStatic) {
     console.log(

@@ -35,7 +35,7 @@
  */
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
+import { encodeBase64 } from "@std/encoding/base64";
 import { KernelClient } from "../src/client/kernel_client.ts";
 import { decodeResource } from "../src/wasm/cbor.ts";
 
@@ -53,11 +53,13 @@ const ORCH_ENTRY = new URL("./orchestration/src/main.ts", REPO_ROOT).pathname;
 
 /** Skip the test with a clear message if a prerequisite is missing. */
 async function checkPrerequisites(): Promise<string | null> {
-  for (const [label, path] of [
-    ["kernel binary (run `cargo build`)", KERNEL_BIN],
-    ["native addon (run `deno task build:addon`)", ADDON_JS],
-    ["wasm-http-shout fixture", FIXTURE],
-  ]) {
+  for (
+    const [label, path] of [
+      ["kernel binary (run `cargo build`)", KERNEL_BIN],
+      ["native addon (run `deno task build:addon`)", ADDON_JS],
+      ["wasm-http-shout fixture", FIXTURE],
+    ]
+  ) {
     try {
       await Deno.stat(path);
     } catch {
@@ -264,7 +266,9 @@ Deno.test({
       const runResp = await client.runProgram(programJson, inputJson);
       assert(
         runResp.success,
-        `runProgram failed: ${JSON.stringify(runResp.errors.map((e) => e.message))}`,
+        `runProgram failed: ${
+          JSON.stringify(runResp.errors.map((e) => e.message))
+        }`,
       );
 
       // RunProgram returns output as Eigon-CBOR (see kernel server

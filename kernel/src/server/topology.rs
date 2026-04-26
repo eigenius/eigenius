@@ -370,11 +370,8 @@ mod tests {
     ///         instance `rex` (is_a Dog)
     fn build_chain() -> Arc<crate::layer::Layer> {
         let mut root = LayerBuilder::new("root", None);
-        root.add_resource(make_class_resource(
-            "urn:eigenius:example:Animal",
-            "Animal",
-        ))
-        .unwrap();
+        root.add_resource(make_class_resource("urn:eigenius:example:Animal", "Animal"))
+            .unwrap();
         root.add_resource(make_property_resource(
             "urn:eigenius:example:name",
             "name",
@@ -412,11 +409,8 @@ mod tests {
         // 2 layer nodes + Class Animal + Property name + Class Dog = 5 nodes.
         // Instance `rex` is excluded (include_resources=false).
         assert_eq!(topo.nodes.len(), 5, "nodes: {:?}", topo.nodes);
-        let kinds: std::collections::BTreeMap<String, i32> = topo
-            .nodes
-            .iter()
-            .map(|n| (n.id.clone(), n.kind))
-            .collect();
+        let kinds: std::collections::BTreeMap<String, i32> =
+            topo.nodes.iter().map(|n| (n.id.clone(), n.kind)).collect();
         assert_eq!(
             kinds.get("urn:eigenius:example:Animal"),
             Some(&(proto::NodeKind::Class as i32))
@@ -454,17 +448,19 @@ mod tests {
             "parent_layer edge missing"
         );
         assert!(
-            topo.edges.iter().any(|e| e.kind
-                == proto::EdgeKind::SubclassOf as i32
-                && e.source == "urn:eigenius:example:Dog"
-                && e.target == "urn:eigenius:example:Animal"),
+            topo.edges
+                .iter()
+                .any(|e| e.kind == proto::EdgeKind::SubclassOf as i32
+                    && e.source == "urn:eigenius:example:Dog"
+                    && e.target == "urn:eigenius:example:Animal"),
             "subclass_of edge missing"
         );
         assert!(
-            topo.edges.iter().any(|e| e.kind
-                == proto::EdgeKind::Requires as i32
-                && e.source == "urn:eigenius:example:Dog"
-                && e.target == "urn:eigenius:example:name"),
+            topo.edges
+                .iter()
+                .any(|e| e.kind == proto::EdgeKind::Requires as i32
+                    && e.source == "urn:eigenius:example:Dog"
+                    && e.target == "urn:eigenius:example:name"),
             "requires edge missing"
         );
     }
@@ -477,16 +473,16 @@ mod tests {
         // Same as above + the `rex` instance node + its is_a edge.
         assert_eq!(topo.nodes.len(), 6, "nodes: {:?}", topo.nodes);
         assert!(
-            topo.nodes
-                .iter()
-                .any(|n| n.id == "urn:eigenius:example:rex"
-                    && n.kind == proto::NodeKind::Resource as i32),
+            topo.nodes.iter().any(|n| n.id == "urn:eigenius:example:rex"
+                && n.kind == proto::NodeKind::Resource as i32),
             "rex resource node missing"
         );
         assert!(
-            topo.edges.iter().any(|e| e.kind == proto::EdgeKind::IsA as i32
-                && e.source == "urn:eigenius:example:rex"
-                && e.target == "urn:eigenius:example:Dog"),
+            topo.edges
+                .iter()
+                .any(|e| e.kind == proto::EdgeKind::IsA as i32
+                    && e.source == "urn:eigenius:example:rex"
+                    && e.target == "urn:eigenius:example:Dog"),
             "is_a edge from rex to Dog missing"
         );
     }
@@ -506,11 +502,17 @@ mod tests {
             .collect();
         assert_eq!(layer_nodes.len(), 1, "only the top layer should be walked");
         assert!(
-            !topo.nodes.iter().any(|n| n.id == "urn:eigenius:example:Animal"),
+            !topo
+                .nodes
+                .iter()
+                .any(|n| n.id == "urn:eigenius:example:Animal"),
             "parent-layer Class Animal should not appear"
         );
         assert!(
-            !topo.edges.iter().any(|e| e.kind == proto::EdgeKind::ParentLayer as i32),
+            !topo
+                .edges
+                .iter()
+                .any(|e| e.kind == proto::EdgeKind::ParentLayer as i32),
             "parent_layer edge should not be emitted at max_depth=1"
         );
     }

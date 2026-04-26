@@ -66,8 +66,7 @@ function parseArgument(argument: Record<string, any>): {
   return {
     userPrompt,
     systemPrompt,
-    outputSchema:
-      typeof outputSchema === "object" ? outputSchema : undefined,
+    outputSchema: typeof outputSchema === "object" ? outputSchema : undefined,
     model: params["urn:eigenius:program:request:model"] ?? DEFAULTS.model,
     temperature: params["urn:eigenius:program:request:temperature"] ??
       DEFAULTS.temperature,
@@ -101,14 +100,22 @@ function formatPrompt(template: string, input: Record<string, any>): string {
  */
 export function createCompleteJsonHandler(): ComponentHandler {
   return async (req: ComponentInput): Promise<ComponentOutput> => {
-    const { userPrompt, systemPrompt, outputSchema, model, temperature, maxTokens } =
-      parseArgument(req.argument);
+    const {
+      userPrompt,
+      systemPrompt,
+      outputSchema,
+      model,
+      temperature,
+      maxTokens,
+    } = parseArgument(req.argument);
 
     const prompt = formatPrompt(userPrompt, req.input);
     const startTime = Date.now();
 
     if (!outputSchema) {
-      throw new Error("CompleteJson requires output_schema in component argument");
+      throw new Error(
+        "CompleteJson requires output_schema in component argument",
+      );
     }
 
     const result = await generateObject({

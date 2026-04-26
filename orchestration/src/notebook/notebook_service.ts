@@ -52,7 +52,9 @@ export function registerNotebookService(
   const { kernel } = deps;
 
   router.service(NotebookService, {
-    async layerTopology(req: LayerTopologyRequest): Promise<LayerTopologyResponse> {
+    async layerTopology(
+      req: LayerTopologyRequest,
+    ): Promise<LayerTopologyResponse> {
       // Thin proxy. The kernel does the actual walking; the orchestrator
       // adds nothing to the response. Future browser-specific shaping
       // (e.g. attaching display preferences from a notebook session)

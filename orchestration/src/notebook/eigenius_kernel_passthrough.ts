@@ -94,7 +94,6 @@ export function registerEigeniusKernelPassthrough(
     validateProgram: (req) => proxy(kernel.raw.validateProgram, req),
     runProgram: (req) => proxy(kernel.raw.runProgram, req),
     runProgramByIri: (req) => proxy(kernel.raw.runProgramByIri, req),
-
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path
