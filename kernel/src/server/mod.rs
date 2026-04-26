@@ -827,6 +827,251 @@ impl EigeniusService {
             Arc::clone(client),
         )))
     }
+
+    /// Shared execution path for `RunProgram` and `RunProgramByIri`.
+    ///
+    /// Both RPCs end up here once they have a resolved program +
+    /// input Resource. This method handles task allocation (D21 §3.1),
+    /// NbE evaluation in IO mode, ProgramTrace assembly, derived-output
+    /// stamping (D6b §6), and trace-layer commit.
+    async fn execute_program(
+        &self,
+        program: Resource,
+        input: Resource,
+    ) -> Result<Response<RunProgramResponse>, Status> {
+        // D21 §3.1: allocate a task for this invocation. When a task
+        // store is attached (persistent backend), the record is
+        // persisted on entry and again on completion so a mid-flight
+        // crash leaves a recoverable `Running` record for the resume
+        // sweep. The evaluator routes IO dispatches through a
+        // TaskContext so repeated calls with the same input each
+        // occupy their own step_seq slot (D21 §3.2).
+        let (task_context, task_id_str, layer_head, session_id) = match &self.task_store {
+            Some(store) => {
+                let session_id = self.session.read().await.session_id;
+                let task_id = uuid::Uuid::new_v4();
+                let layer_head = {
+                    let ctx = self.context.read().await;
+                    ctx.head().id().clone()
+                };
+                let program_iri = program
+                    .id()
+                    .map(|i| i.as_str().to_string())
+                    .unwrap_or_default();
+                let input_iri = input
+                    .id()
+                    .map(|i| i.as_str().to_string())
+                    .unwrap_or_default();
+                let record = crate::task::TaskRecord::new_running(
+                    session_id,
+                    task_id,
+                    program_iri,
+                    input_iri,
+                    layer_head.clone(),
+                    now_millis(),
+                );
+                if let Err(e) = store.put_task(&record) {
+                    return Err(Status::internal(format!("failed to persist task: {e}")));
+                }
+                let tc = Arc::new(crate::task::TaskContext::new(
+                    session_id,
+                    task_id,
+                    Arc::clone(store),
+                ));
+                (Some(tc), task_id.to_string(), Some(layer_head), session_id)
+            }
+            None => (None, String::new(), None, uuid::Uuid::nil()),
+        };
+
+        // Execute via NbE in IO mode
+        let started_at_ms = now_millis();
+        let exec_result = {
+            let ctx = self.context.read().await;
+            let components = Arc::clone(&*self.components.read().await);
+            // Pass an empty institution registry — the pre-Phase-9b-iii
+            // RunProgram path already did this; fiber queries go
+            // through the FiberQuery RPC, not through program
+            // dispatch. Preserves existing behaviour.
+            match crate::program::eval_io::execute_program_nbe_with_institutions(
+                &program,
+                &input,
+                Arc::clone(ctx.head()),
+                components,
+                Arc::new(crate::institution::InstitutionRegistry::new()),
+                Some(Arc::clone(&self.trace_store)),
+                task_context.clone(),
+            ) {
+                Ok(result) => result,
+                Err(e) => {
+                    // Record the failure if we have a task store.
+                    if let (Some(store), Some(head)) = (&self.task_store, layer_head.as_ref()) {
+                        if let Some(tid) = task_context.as_ref().map(|tc| tc.task_id) {
+                            let mut rec = crate::task::TaskRecord::new_running(
+                                session_id,
+                                tid,
+                                String::new(),
+                                String::new(),
+                                head.clone(),
+                                now_millis(),
+                            );
+                            rec.status = crate::task::TaskStatus::Failed;
+                            rec.updated_at = now_millis();
+                            let _ = store.put_task(&rec);
+                        }
+                    }
+                    return Ok(Response::new(RunProgramResponse {
+                        success: false,
+                        output: Vec::new(),
+                        errors: vec![ValidationError {
+                            resource_iri: String::new(),
+                            property_iri: String::new(),
+                            rule: "execution".to_string(),
+                            message: format!("{e}"),
+                            severity: "error".to_string(),
+                        }],
+                        trace_iri: String::new(),
+                        task_id: task_id_str.clone(),
+                    }));
+                }
+            }
+        };
+
+        let completed_at_ms = now_millis();
+        let mut output = exec_result.output;
+        let dispatched_traces = exec_result.dispatched_traces;
+        let root_trace = exec_result.root_trace;
+
+        // Compute metrics from the tree-structured trace (preferred) or
+        // flat dispatched_traces list (fallback).
+        let metrics = crate::program::trace::ProgramMetrics::from_trace(&root_trace);
+        let total_tokens = metrics.total_tokens;
+        let executed_steps = metrics.executed_steps;
+
+        // Build ProgramTrace with all required fields (D6b §2)
+        let trace_iri_str = format!("urn:eigenius:trace:exec-{}", uuid::Uuid::new_v4());
+
+        // Attach DerivedResource epistemic stamp to the output (D6b §6, Phase 10b Step 4)
+        {
+            use crate::ontology::well_known as wk;
+            let is_a_iri = Iri::parse("urn:eigenius:core:is_a").unwrap();
+            let mut types = match output.get(&is_a_iri) {
+                Some(crate::ontology::resource::Value::Array(arr)) => arr.clone(),
+                _ => Vec::new(),
+            };
+            types.push(crate::ontology::resource::Value::String(
+                wk::DERIVED_RESOURCE.to_string(),
+            ));
+            output.set(is_a_iri, crate::ontology::resource::Value::Array(types));
+            output.set(
+                Iri::parse(wk::DERIVATION).unwrap(),
+                crate::ontology::resource::Value::String(trace_iri_str.clone()),
+            );
+            output.set(
+                Iri::parse(wk::EPISTEMIC_STATUS).unwrap(),
+                crate::ontology::resource::Value::String(wk::EPISTEMIC_DERIVED.to_string()),
+            );
+        }
+
+        let mut trace_resource = Resource::new(Iri::parse(&trace_iri_str).unwrap());
+        trace_resource.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(
+                    "urn:eigenius:reflection:ProgramTrace".to_string(),
+                ),
+            ]),
+        );
+        if let Some(prog_id) = program.id() {
+            trace_resource.set(
+                Iri::parse("urn:eigenius:reflection:program").unwrap(),
+                crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
+            );
+        }
+        // Required: trace_tree — serialized tree-structured trace
+        if let Some(ref trace) = root_trace {
+            let trace_tree = crate::program::trace::trace_to_resource(trace);
+            trace_resource.set(
+                Iri::parse("urn:eigenius:reflection:trace_tree").unwrap(),
+                crate::ontology::resource::Value::Embedded(Box::new(trace_tree)),
+            );
+        }
+        // Required: started_at, completed_at (ISO 8601)
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:started_at").unwrap(),
+            crate::ontology::resource::Value::String(millis_to_iso8601(started_at_ms)),
+        );
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:completed_at").unwrap(),
+            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
+        );
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:total_tokens").unwrap(),
+            crate::ontology::resource::Value::Integer(total_tokens),
+        );
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:executed_steps").unwrap(),
+            crate::ontology::resource::Value::Integer(executed_steps),
+        );
+        // Recommended: universe_level = 0 (traces about domain resources)
+        trace_resource.set(
+            Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
+            crate::ontology::resource::Value::Integer(0),
+        );
+
+        // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
+        let result_layer_head = {
+            let mut ctx = self.context.write().await;
+            // Add ProgramTrace
+            if let Err(e) = ctx.add_resource(trace_resource) {
+                eprintln!("warning: failed to add ProgramTrace: {e}");
+            }
+            // Add each IO ComponentTrace as a resource
+            for ct in &dispatched_traces {
+                let ct_resource = crate::program::trace::trace_to_resource(
+                    &crate::program::trace::Trace::Component(ct.clone()),
+                );
+                let _ = ctx.add_resource(ct_resource);
+            }
+            match ctx.commit("trace") {
+                Ok(layer) => {
+                    // Best-effort persist of the trace layer. A failure here
+                    // logs but doesn't fail the RunProgram call — the output
+                    // is still valid, the trace just isn't durable.
+                    if let Some(err) = self.persist_layer_if_backend(&layer) {
+                        eprintln!("warning: failed to persist trace layer: {}", err.message);
+                    }
+                    Some(layer.id().clone())
+                }
+                Err(e) => {
+                    eprintln!("warning: trace layer commit failed: {e}");
+                    None
+                }
+            }
+        };
+
+        // Mark the task Completed and record its result_layer_head so
+        // clients that polled via GetTaskStatus can resolve it (D21
+        // §3.7). `result_layer_head` is the trace layer committed
+        // above — the program's observable outputs.
+        if let (Some(store), Some(tc)) = (&self.task_store, task_context.as_ref()) {
+            if let Ok(Some(mut rec)) = store.get_task(&tc.session_id, &tc.task_id) {
+                rec.status = crate::task::TaskStatus::Completed;
+                rec.result_layer_head = result_layer_head;
+                rec.updated_at = now_millis();
+                if let Err(e) = store.put_task(&rec) {
+                    eprintln!("warning: failed to update task record: {e}");
+                }
+            }
+        }
+
+        Ok(Response::new(RunProgramResponse {
+            success: true,
+            output: Self::serialize_resource(&output),
+            errors: Vec::new(),
+            trace_iri: trace_iri_str,
+            task_id: task_id_str,
+        }))
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -1091,239 +1336,51 @@ impl EigeniusKernel for EigeniusService {
             .next()
             .ok_or_else(|| Status::invalid_argument("no input resource"))?;
 
-        // D21 §3.1: allocate a task for this invocation. When a task
-        // store is attached (persistent backend), the record is
-        // persisted on entry and again on completion so a mid-flight
-        // crash leaves a recoverable `Running` record for the resume
-        // sweep. The evaluator routes IO dispatches through a
-        // TaskContext so repeated calls with the same input each
-        // occupy their own step_seq slot (D21 §3.2).
-        let (task_context, task_id_str, layer_head, session_id) = match &self.task_store {
-            Some(store) => {
-                let session_id = self.session.read().await.session_id;
-                let task_id = uuid::Uuid::new_v4();
-                let layer_head = {
-                    let ctx = self.context.read().await;
-                    ctx.head().id().clone()
-                };
-                let program_iri = program
-                    .id()
-                    .map(|i| i.as_str().to_string())
-                    .unwrap_or_default();
-                let input_iri = input
-                    .id()
-                    .map(|i| i.as_str().to_string())
-                    .unwrap_or_default();
-                let record = crate::task::TaskRecord::new_running(
-                    session_id,
-                    task_id,
-                    program_iri,
-                    input_iri,
-                    layer_head.clone(),
-                    now_millis(),
-                );
-                if let Err(e) = store.put_task(&record) {
-                    return Err(Status::internal(format!("failed to persist task: {e}")));
-                }
-                let tc = Arc::new(crate::task::TaskContext::new(
-                    session_id,
-                    task_id,
-                    Arc::clone(store),
-                ));
-                (Some(tc), task_id.to_string(), Some(layer_head), session_id)
-            }
-            None => (None, String::new(), None, uuid::Uuid::nil()),
-        };
-
-        // Execute via NbE in IO mode
-        let started_at_ms = now_millis();
-        let exec_result = {
-            let ctx = self.context.read().await;
-            let components = Arc::clone(&*self.components.read().await);
-            // Pass an empty institution registry — the pre-Phase-9b-iii
-            // RunProgram path already did this; fiber queries go
-            // through the FiberQuery RPC, not through program
-            // dispatch. Preserves existing behaviour.
-            match crate::program::eval_io::execute_program_nbe_with_institutions(
-                &program,
-                &input,
-                Arc::clone(ctx.head()),
-                components,
-                Arc::new(crate::institution::InstitutionRegistry::new()),
-                Some(Arc::clone(&self.trace_store)),
-                task_context.clone(),
-            ) {
-                Ok(result) => result,
-                Err(e) => {
-                    // Record the failure if we have a task store.
-                    if let (Some(store), Some(head)) = (&self.task_store, layer_head.as_ref()) {
-                        if let Some(tid) = task_context.as_ref().map(|tc| tc.task_id) {
-                            let mut rec = crate::task::TaskRecord::new_running(
-                                session_id,
-                                tid,
-                                String::new(),
-                                String::new(),
-                                head.clone(),
-                                now_millis(),
-                            );
-                            rec.status = crate::task::TaskStatus::Failed;
-                            rec.updated_at = now_millis();
-                            let _ = store.put_task(&rec);
-                        }
-                    }
-                    return Ok(Response::new(RunProgramResponse {
-                        success: false,
-                        output: Vec::new(),
-                        errors: vec![ValidationError {
-                            resource_iri: String::new(),
-                            property_iri: String::new(),
-                            rule: "execution".to_string(),
-                            message: format!("{e}"),
-                            severity: "error".to_string(),
-                        }],
-                        trace_iri: String::new(),
-                        task_id: task_id_str.clone(),
-                    }));
-                }
-            }
-        };
-
-        let completed_at_ms = now_millis();
-        let mut output = exec_result.output;
-        let dispatched_traces = exec_result.dispatched_traces;
-        let root_trace = exec_result.root_trace;
-
-        // Compute metrics from the tree-structured trace (preferred) or
-        // flat dispatched_traces list (fallback).
-        let metrics = crate::program::trace::ProgramMetrics::from_trace(&root_trace);
-        let total_tokens = metrics.total_tokens;
-        let executed_steps = metrics.executed_steps;
-
-        // Build ProgramTrace with all required fields (D6b §2)
-        let trace_iri_str = format!("urn:eigenius:trace:exec-{}", uuid::Uuid::new_v4());
-
-        // Attach DerivedResource epistemic stamp to the output (D6b §6, Phase 10b Step 4)
-        {
-            use crate::ontology::well_known as wk;
-            let is_a_iri = Iri::parse("urn:eigenius:core:is_a").unwrap();
-            let mut types = match output.get(&is_a_iri) {
-                Some(crate::ontology::resource::Value::Array(arr)) => arr.clone(),
-                _ => Vec::new(),
-            };
-            types.push(crate::ontology::resource::Value::String(
-                wk::DERIVED_RESOURCE.to_string(),
-            ));
-            output.set(is_a_iri, crate::ontology::resource::Value::Array(types));
-            output.set(
-                Iri::parse(wk::DERIVATION).unwrap(),
-                crate::ontology::resource::Value::String(trace_iri_str.clone()),
-            );
-            output.set(
-                Iri::parse(wk::EPISTEMIC_STATUS).unwrap(),
-                crate::ontology::resource::Value::String(wk::EPISTEMIC_DERIVED.to_string()),
-            );
-        }
-
-        let mut trace_resource = Resource::new(Iri::parse(&trace_iri_str).unwrap());
-        trace_resource.set(
-            Iri::parse("urn:eigenius:core:is_a").unwrap(),
-            crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    "urn:eigenius:reflection:ProgramTrace".to_string(),
-                ),
-            ]),
-        );
-        if let Some(prog_id) = program.id() {
-            trace_resource.set(
-                Iri::parse("urn:eigenius:reflection:program").unwrap(),
-                crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
-            );
-        }
-        // Required: trace_tree — serialized tree-structured trace
-        if let Some(ref trace) = root_trace {
-            let trace_tree = crate::program::trace::trace_to_resource(trace);
-            trace_resource.set(
-                Iri::parse("urn:eigenius:reflection:trace_tree").unwrap(),
-                crate::ontology::resource::Value::Embedded(Box::new(trace_tree)),
-            );
-        }
-        // Required: started_at, completed_at (ISO 8601)
-        trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:started_at").unwrap(),
-            crate::ontology::resource::Value::String(millis_to_iso8601(started_at_ms)),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:completed_at").unwrap(),
-            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:total_tokens").unwrap(),
-            crate::ontology::resource::Value::Integer(total_tokens),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:executed_steps").unwrap(),
-            crate::ontology::resource::Value::Integer(executed_steps),
-        );
-        // Recommended: universe_level = 0 (traces about domain resources)
-        trace_resource.set(
-            Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
-            crate::ontology::resource::Value::Integer(0),
-        );
-
-        // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
-        let result_layer_head = {
-            let mut ctx = self.context.write().await;
-            // Add ProgramTrace
-            if let Err(e) = ctx.add_resource(trace_resource) {
-                eprintln!("warning: failed to add ProgramTrace: {e}");
-            }
-            // Add each IO ComponentTrace as a resource
-            for ct in &dispatched_traces {
-                let ct_resource = crate::program::trace::trace_to_resource(
-                    &crate::program::trace::Trace::Component(ct.clone()),
-                );
-                let _ = ctx.add_resource(ct_resource);
-            }
-            match ctx.commit("trace") {
-                Ok(layer) => {
-                    // Best-effort persist of the trace layer. A failure here
-                    // logs but doesn't fail the RunProgram call — the output
-                    // is still valid, the trace just isn't durable.
-                    if let Some(err) = self.persist_layer_if_backend(&layer) {
-                        eprintln!("warning: failed to persist trace layer: {}", err.message);
-                    }
-                    Some(layer.id().clone())
-                }
-                Err(e) => {
-                    eprintln!("warning: trace layer commit failed: {e}");
-                    None
-                }
-            }
-        };
-
-        // Mark the task Completed and record its result_layer_head so
-        // clients that polled via GetTaskStatus can resolve it (D21
-        // §3.7). `result_layer_head` is the trace layer committed
-        // above — the program's observable outputs.
-        if let (Some(store), Some(tc)) = (&self.task_store, task_context.as_ref()) {
-            if let Ok(Some(mut rec)) = store.get_task(&tc.session_id, &tc.task_id) {
-                rec.status = crate::task::TaskStatus::Completed;
-                rec.result_layer_head = result_layer_head;
-                rec.updated_at = now_millis();
-                if let Err(e) = store.put_task(&rec) {
-                    eprintln!("warning: failed to update task record: {e}");
-                }
-            }
-        }
-
-        Ok(Response::new(RunProgramResponse {
-            success: true,
-            output: Self::serialize_resource(&output),
-            errors: Vec::new(),
-            trace_iri: trace_iri_str,
-            task_id: task_id_str,
-        }))
+        self.execute_program(program, input).await
     }
+
+    async fn run_program_by_iri(
+        &self,
+        request: Request<RunProgramByIriRequest>,
+    ) -> Result<Response<RunProgramResponse>, Status> {
+        let req = request.into_inner();
+        if req.program_iri.is_empty() {
+            return Err(Status::invalid_argument("program_iri is required"));
+        }
+        if req.input_iri.is_empty() {
+            return Err(Status::invalid_argument("input_iri is required"));
+        }
+
+        let program_iri = Iri::parse(&req.program_iri).map_err(|e| {
+            Status::invalid_argument(format!("invalid program_iri: {e}"))
+        })?;
+        let input_iri = Iri::parse(&req.input_iri).map_err(|e| {
+            Status::invalid_argument(format!("invalid input_iri: {e}"))
+        })?;
+
+        let layer = self.resolve_read_layer(&req.at_layer).await?;
+        let program = layer
+            .resolve(&program_iri)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "program resource not found: {}",
+                    req.program_iri
+                ))
+            })?
+            .clone();
+        let input = layer
+            .resolve(&input_iri)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "input resource not found: {}",
+                    req.input_iri
+                ))
+            })?
+            .clone();
+
+        self.execute_program(program, input).await
+    }
+
 
     async fn reflect(
         &self,

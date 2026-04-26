@@ -13,6 +13,10 @@
 // limitations under the License.
 
 import {
+  Accordion,
+  AccordionHeader,
+  AccordionItem,
+  AccordionPanel,
   Body1,
   Caption1,
   makeStyles,
@@ -22,6 +26,8 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import type { CellOutput } from "../../runtime/notebookStore";
+import { LayerStackPanel } from "./LayerStackPanel";
+import { ProgramRunOutputView } from "./ProgramRunOutputView";
 import { ResourceInspector } from "./ResourceInspector";
 import { ResultTable } from "./ResultTable";
 import { TypeScriptValueView } from "./TypeScriptValueView";
@@ -41,6 +47,12 @@ const useStyles = makeStyles({
   meta: {
     color: tokens.colorNeutralForeground3,
     fontFamily: tokens.fontFamilyMonospace,
+  },
+  // The accordion header bundles its own padding; trim it so the
+  // expandable "View layer stack" affordance sits flush with the load
+  // summary above it.
+  stackAccordion: {
+    marginTop: tokens.spacingVerticalXS,
   },
   errorPre: {
     fontFamily: tokens.fontFamilyMonospace,
@@ -71,18 +83,28 @@ function renderBody(
   switch (output.kind) {
     case "load":
       return (
-        <div className={styles.loadStatus}>
-          <Body1>
-            Loaded {output.resourceCount} resource
-            {output.resourceCount === 1 ? "" : "s"}
-          </Body1>
-          <Caption1 className={styles.meta}>
-            layer = {output.layerId}
-          </Caption1>
-          {output.warnings.length > 0 && (
-            <Caption1>{output.warnings.length} warning(s)</Caption1>
-          )}
-        </div>
+        <>
+          <div className={styles.loadStatus}>
+            <Body1>
+              Loaded {output.resourceCount} resource
+              {output.resourceCount === 1 ? "" : "s"}
+            </Body1>
+            <Caption1 className={styles.meta}>
+              layer = {output.layerId}
+            </Caption1>
+            {output.warnings.length > 0 && (
+              <Caption1>{output.warnings.length} warning(s)</Caption1>
+            )}
+          </div>
+          <Accordion collapsible className={styles.stackAccordion}>
+            <AccordionItem value="stack">
+              <AccordionHeader size="small">View layer stack</AccordionHeader>
+              <AccordionPanel>
+                <LayerStackPanel />
+              </AccordionPanel>
+            </AccordionItem>
+          </Accordion>
+        </>
       );
 
     case "validate":
@@ -115,6 +137,14 @@ function renderBody(
 
     case "value":
       return <TypeScriptValueView value={output.value} log={output.log} />;
+
+    case "program-run":
+      return (
+        <ProgramRunOutputView
+          programIri={output.programIri}
+          results={output.results}
+        />
+      );
 
     case "error":
       return (

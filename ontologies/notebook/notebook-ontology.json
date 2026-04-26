@@ -21,14 +21,18 @@
   {
     "@id": "urn:eigenius:notebook:Cell",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over `cell_type` + `source`), so identical cells across notebooks share a single resource.",
+    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris` instead.",
     "urn:eigenius:core:short_name": "Cell",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
       "urn:eigenius:core:description",
       "urn:eigenius:core:short_name",
-      "urn:eigenius:notebook:cell_type",
-      "urn:eigenius:notebook:source"
+      "urn:eigenius:notebook:cell_type"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:notebook:source",
+      "urn:eigenius:notebook:program_iri",
+      "urn:eigenius:notebook:input_iris"
     ]
   },
   {
@@ -113,7 +117,8 @@
       "urn:eigenius:notebook:markdown",
       "urn:eigenius:notebook:esl",
       "urn:eigenius:notebook:eigenql",
-      "urn:eigenius:notebook:typescript"
+      "urn:eigenius:notebook:typescript",
+      "urn:eigenius:notebook:program-run"
     ],
     "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
   },
@@ -149,5 +154,29 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
     "urn:eigenius:core:description": "TypeScript orchestration cell. Executes in the browser sandbox with the SDK in scope (Phase 4).",
     "urn:eigenius:core:short_name": "typescript"
+  },
+  {
+    "@id": "urn:eigenius:notebook:program-run",
+    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:description": "Program-run cell. Invokes a program (program_iri) against one or more inputs (input_iris) via runProgramByIri; renders typed output + trace tree per input.",
+    "urn:eigenius:core:short_name": "program-run"
+  },
+
+  {
+    "@id": "urn:eigenius:notebook:program_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the program a program-run cell invokes.",
+    "urn:eigenius:core:short_name": "program_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:input_iris",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of input IRIs a program-run cell invokes its program against. One result row per input.",
+    "urn:eigenius:core:short_name": "input_iris",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
   }
 ]

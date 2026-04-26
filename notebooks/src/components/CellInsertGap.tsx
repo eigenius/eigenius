@@ -109,6 +109,9 @@ export function CellInsertGap({ afterCellId }: CellInsertGapProps) {
               <MenuItem onClick={() => insert("typescript")}>
                 TypeScript
               </MenuItem>
+              <MenuItem onClick={() => insert("program-run")}>
+                Program run
+              </MenuItem>
             </MenuList>
           </MenuPopover>
         </Menu>

@@ -46,6 +46,7 @@ import {
   QueryRequestSchema,
   type RunProgramResponse,
   RunProgramRequestSchema,
+  RunProgramByIriRequestSchema,
   type ValidateProgramResponse,
   ValidateProgramRequestSchema,
   type ValidationError,
@@ -339,6 +340,35 @@ export class Eigen {
         program: programBytes,
         input: inputBytes,
         contentType,
+      }),
+    );
+  }
+
+  /**
+   * Execute a program already loaded into the active layer chain,
+   * identified by IRI, against an input also identified by IRI.
+   *
+   * Avoids the single-content_type limitation of `runProgram` (where
+   * program and input must share an encoding) and matches the natural
+   * notebook flow: a previous ESL cell loaded the program; another
+   * load brought in the input as Eigon-JSON; this call runs one
+   * against the other without re-shipping bytes.
+   *
+   * On success, the kernel commits a trace layer and returns its
+   * `traceIri`. The notebook's auto-renderer dispatches a
+   * `RunProgramResponse` with a non-empty `traceIri` to a split panel
+   * showing both the typed output and the program-trace tree.
+   */
+  async runProgramByIri(
+    programIri: string,
+    inputIri: string,
+    options: { atLayer?: string } = {},
+  ): Promise<RunProgramResponse> {
+    return await this.kernel.runProgramByIri(
+      create(RunProgramByIriRequestSchema, {
+        programIri,
+        inputIri,
+        atLayer: options.atLayer ?? "",
       }),
     );
   }

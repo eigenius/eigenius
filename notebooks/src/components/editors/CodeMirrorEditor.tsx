@@ -41,6 +41,11 @@ function languageExtension(cellType: CellType): Extension[] {
       return [eigenqlLanguage];
     case "typescript":
       return [javascript({ jsx: false, typescript: true })];
+    case "program-run":
+      // The CodeMirror editor isn't used for program-run cells (they
+      // render via ProgramRunCellEditor instead) — but to keep this
+      // switch exhaustive, return an empty extension list.
+      return [];
   }
 }
 
@@ -64,13 +69,18 @@ export function CodeMirrorEditor(props: CodeMirrorEditorProps) {
     EditorView.lineWrapping,
   ];
 
+  // Line numbers help in code cells (ESL / EigenQL / TypeScript) where
+  // the kernel reports errors with line/column positions; suppressed
+  // for prose markdown.
+  const showLineNumbers = cellType !== "markdown";
+
   return (
     <CodeMirror
       value={source}
       readOnly={readOnly}
       editable={!readOnly}
       basicSetup={{
-        lineNumbers: false,
+        lineNumbers: showLineNumbers,
         foldGutter: false,
         highlightActiveLine: !readOnly,
         highlightActiveLineGutter: false,
