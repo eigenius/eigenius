@@ -15,6 +15,15 @@ WORKDIR /build
 COPY clients/eigenius-ts/ clients/eigenius-ts/
 COPY notebooks/ notebooks/
 
+# Install the SDK's own deps first so the workspace symlink in
+# notebooks/node_modules/@eigenius/client → clients/eigenius-ts has a
+# resolvable node_modules tree. Without this, tsc -b inside the SPA
+# build follows imports into the SDK source and can't find
+# @bufbuild/protobuf / @connectrpc/connect-web (no hoisted node_modules
+# is reachable by walking up from clients/eigenius-ts/src/).
+WORKDIR /build/clients/eigenius-ts
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
+
 WORKDIR /build/notebooks
 RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
 RUN npm run build
