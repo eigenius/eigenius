@@ -28,6 +28,13 @@
       "npm:@bufbuild/protobuf@2",
       "npm:@connectrpc/connect-web@2",
       "npm:@connectrpc/connect@2"
-    ]
+    ],
+    "packageJson": {
+      "dependencies": [
+        "npm:@bufbuild/protobuf@2",
+        "npm:@connectrpc/connect-web@2",
+        "npm:@connectrpc/connect@2"
+      ]
+    }
   }
 }

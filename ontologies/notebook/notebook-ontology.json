@@ -1,0 +1,153 @@
+[
+  {
+    "@id": "urn:eigenius:notebook:Notebook",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An Eigenius notebook — an ordered sequence of Cell resources with metadata. Notebook IRIs are content-addressed (sha-256 over the canonical structural form): identical content yields an identical IRI.",
+    "urn:eigenius:core:short_name": "Notebook",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:notebook:format_version",
+      "urn:eigenius:notebook:cells"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:notebook:title",
+      "urn:eigenius:notebook:created",
+      "urn:eigenius:notebook:modified",
+      "urn:eigenius:notebook:eigenius_version"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:notebook:Cell",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over `cell_type` + `source`), so identical cells across notebooks share a single resource.",
+    "urn:eigenius:core:short_name": "Cell",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:notebook:cell_type",
+      "urn:eigenius:notebook:source"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:notebook:CellType",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "The type of a notebook Cell. The four instances (markdown, esl, eigenql, typescript) form the closed set permitted by the cell_type property's allows_only constraint.",
+    "urn:eigenius:core:short_name": "CellType",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:notebook:format_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Notebook file format version (currently 1). Bumped on breaking changes to the notebook structure.",
+    "urn:eigenius:core:short_name": "format_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:title",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Human-readable notebook title. Queryable for search/index UIs.",
+    "urn:eigenius:core:short_name": "title",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:description",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Short description of what the notebook does. Queryable for search/index UIs.",
+    "urn:eigenius:core:short_name": "description",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:created",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "ISO 8601 creation timestamp. Excluded from the content-addressed Notebook IRI hash so that re-saving identical content does not change identity.",
+    "urn:eigenius:core:short_name": "created",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:modified",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "ISO 8601 last-modified timestamp. Excluded from the content-addressed Notebook IRI hash.",
+    "urn:eigenius:core:short_name": "modified",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:eigenius_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Eigenius platform version when the notebook was last saved. Excluded from the content-addressed Notebook IRI hash.",
+    "urn:eigenius:core:short_name": "eigenius_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:cells",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of Cell resources composing the notebook. Order is preserved by array position.",
+    "urn:eigenius:core:short_name": "cells",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:notebook:Cell"],
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:cell_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The type of this Cell — one of the four CellType resources. Restricted by allows_only to ensure new cell types require an explicit ontology update.",
+    "urn:eigenius:core:short_name": "cell_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:notebook:markdown",
+      "urn:eigenius:notebook:esl",
+      "urn:eigenius:notebook:eigenql",
+      "urn:eigenius:notebook:typescript"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+  {
+    "@id": "urn:eigenius:notebook:source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Source text of the cell. The cell's content-addressed IRI hashes (cell_type, source) — so changing the source mints a new Cell resource.",
+    "urn:eigenius:core:short_name": "source",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+  },
+
+  {
+    "@id": "urn:eigenius:notebook:markdown",
+    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:description": "Markdown render-only cell. Renders as Github-flavoured Markdown; does not execute.",
+    "urn:eigenius:core:short_name": "markdown"
+  },
+  {
+    "@id": "urn:eigenius:notebook:esl",
+    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:description": "ESL declaration / program cell. Run via eigen.load() — the kernel compiles ESL and commits a new layer.",
+    "urn:eigenius:core:short_name": "esl"
+  },
+  {
+    "@id": "urn:eigenius:notebook:eigenql",
+    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:description": "EigenQL query cell. Run via eigen.query() against the active layer chain; output renders in a Fluent DataGrid.",
+    "urn:eigenius:core:short_name": "eigenql"
+  },
+  {
+    "@id": "urn:eigenius:notebook:typescript",
+    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:description": "TypeScript orchestration cell. Executes in the browser sandbox with the SDK in scope (Phase 4).",
+    "urn:eigenius:core:short_name": "typescript"
+  }
+]

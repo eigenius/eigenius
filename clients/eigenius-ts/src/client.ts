@@ -72,6 +72,12 @@ export type SourceContentType =
   | "application/eigon+json"
   | "application/cbor";
 
+import {
+  type NotebookJson,
+  notebookJsonToResources,
+  type PublishOutput,
+} from "./notebook.ts";
+
 export interface EigenOptions {
   /** Orchestrator endpoint, e.g. `"http://localhost:8080"`. Required. */
   endpoint: string;
@@ -343,5 +349,33 @@ export class Eigen {
    */
   async health(): Promise<HealthResponse> {
     return await this.kernel.health(create(HealthRequestSchema, {}));
+  }
+
+  // ------------------------------------------------------------------
+  // Notebook publishing (D22 Phase 3.5)
+  // ------------------------------------------------------------------
+
+  /**
+   * Translate a NotebookJson into Notebook + Cell resources and load
+   * them into the active layer chain.
+   *
+   * The IRIs are content-addressed (see `src/notebook.ts`), so
+   * publishing the same notebook twice is idempotent — the second load
+   * sees the resources already in the chain and produces no new layer
+   * (or an empty-delta layer, depending on backend semantics).
+   *
+   * Requires the notebook ontology
+   * (`ontologies/notebook/notebook-ontology.json`) to be loaded first;
+   * `eigen.load(notebookOntologyJson)` is idempotent the same way.
+   */
+  async publishNotebook(
+    notebook: NotebookJson,
+  ): Promise<{ publish: PublishOutput; load: LoadResponse }> {
+    const publish = await notebookJsonToResources(notebook);
+    const load = await this.load(JSON.stringify(publish.resources), {
+      contentType: "application/eigon+json",
+      autoCommit: true,
+    });
+    return { publish, load };
   }
 }

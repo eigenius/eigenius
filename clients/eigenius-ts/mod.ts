@@ -19,6 +19,9 @@ export {
   Eigen,
   type EigenOptions,
   type LayerTopologyOptions,
+  type LoadOptions,
+  type RunProgramOptions,
+  type SourceContentType,
 } from "./src/client.ts";
 
 // Re-export the topology message + enum types so consumers don't need
@@ -31,3 +34,15 @@ export {
   type TopologyEdge,
   type TopologyNode,
 } from "./generated/eigenius_pb.ts";
+
+// Notebook publishing (D22 Phase 3.5).
+export {
+  type CellJson,
+  type CellType,
+  type EigonResource,
+  type NotebookJson,
+  type NotebookMetaJson,
+  notebookJsonToResources,
+  type PublishOutput,
+  resourcesToNotebookJson,
+} from "./src/notebook.ts";
