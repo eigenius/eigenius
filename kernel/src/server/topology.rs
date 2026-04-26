@@ -141,10 +141,16 @@ fn walk_layer(
                 label,
                 attrs,
             });
+            // Emit resource edges only on first sighting — gating
+            // alongside the node dedup. Without this, when the same
+            // class/property resource appears in N layers (e.g. the
+            // user re-ran an ESL cell N times, stacking N near-
+            // identical layers), the walker would emit each edge N
+            // times. Head-down traversal means the edges come from
+            // the topmost (most-specific) version of the resource,
+            // matching what the validator/resolver sees.
+            emit_resource_edges(resource, iri, kind, edges);
         }
-
-        // Edges originating at this resource.
-        emit_resource_edges(resource, iri, kind, edges);
     }
 
     // Walk parent. The parent_layer edge is only emitted when we
@@ -555,5 +561,51 @@ mod tests {
         );
         // The top-layer (first-walked) version wins.
         assert_eq!(foo_nodes[0].label, "FooV2");
+    }
+
+    #[test]
+    fn deduplicates_edges_when_same_resource_in_multiple_layers() {
+        // Repeatedly stacking the "same" schema (e.g., user re-runs an
+        // ESL cell, creating multiple near-identical layers) must not
+        // multiply emitted edges. Two layers with the same Class →
+        // requires Property pair should yield one edge, not two.
+        let mut root = LayerBuilder::new("root", None);
+        root.add_resource(make_property_resource(
+            "urn:example:name",
+            "name",
+            "urn:eigenius:core:string",
+        ))
+        .unwrap();
+        let mut foo = make_class_resource("urn:example:Foo", "Foo");
+        foo.set(
+            iri(wk::REQUIRES),
+            Value::Array(vec![Value::String("urn:example:name".to_string())]),
+        );
+        root.add_resource(foo.clone()).unwrap();
+        let root_layer = Arc::new(root.build());
+
+        // The same schema, again, in a child layer. Without edge
+        // dedup the walker would emit each requires/recommends/
+        // property_ref twice.
+        let mut top = LayerBuilder::new("top", Some(root_layer));
+        top.add_resource(foo).unwrap();
+        let layer = Arc::new(top.build());
+
+        let topo = walk(&layer, 0, false);
+        let requires_edges: Vec<_> = topo
+            .edges
+            .iter()
+            .filter(|e| {
+                e.kind == proto::EdgeKind::Requires as i32
+                    && e.source == "urn:example:Foo"
+                    && e.target == "urn:example:name"
+            })
+            .collect();
+        assert_eq!(
+            requires_edges.len(),
+            1,
+            "expected exactly one Foo → name requires edge despite the resource appearing in two layers; got {:?}",
+            requires_edges
+        );
     }
 }

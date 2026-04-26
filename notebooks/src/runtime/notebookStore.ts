@@ -715,6 +715,43 @@ interface ChartShape {
   title?: string;
 }
 
+/**
+ * Wrap a Fluent chart element with our own title heading. Necessary
+ * because `CartesianChart` (parent of bar / line / area / horizontal-
+ * bar) only consumes `chartTitle` for the aria description — it never
+ * renders the title visually. Donut, being non-cartesian, draws its
+ * own centered title and bypasses this wrapper.
+ */
+function withTitle(
+  title: string | undefined,
+  chartElement: React.ReactElement,
+): React.ReactElement {
+  if (!title || title.length === 0) return chartElement;
+  return React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "8px",
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          fontSize: "14px",
+          fontWeight: 600,
+          textAlign: "center",
+        },
+      },
+      title,
+    ),
+    chartElement,
+  );
+}
+
 function renderChart(
   kind: ChartKind,
   rows: Record<string, unknown>[],
@@ -736,13 +773,19 @@ function renderChart(
         color: colorOf(String(r[shape.x] ?? i), i),
       }));
       const total = chartData.reduce((s, d) => s + d.data, 0);
-      return React.createElement(DonutChart, {
-        data: { chartTitle: title, chartData },
-        innerRadius: 55,
-        height: 240,
-        width: 240,
-        valueInsideDonut: total,
-      });
+      // Drop DonutChart's built-in `chartTitle` slot — we render the
+      // title via `withTitle` like the other kinds for visual
+      // consistency. Passing both would double-title the chart.
+      return withTitle(
+        title,
+        React.createElement(DonutChart, {
+          data: { chartData },
+          innerRadius: 55,
+          height: 240,
+          width: 240,
+          valueInsideDonut: total,
+        }),
+      );
     }
     case "grouped-bar": {
       // Group by x; series_column (if present) splits each group.
@@ -764,12 +807,15 @@ function renderChart(
         name,
         series,
       }));
-      return React.createElement(GroupedVerticalBarChart, {
-        data,
-        chartTitle: title,
-        height: 320,
-        width: 800,
-      });
+      return withTitle(
+        title,
+        React.createElement(GroupedVerticalBarChart, {
+          data,
+          chartTitle: title,
+          height: 320,
+          width: 800,
+        }),
+      );
     }
     case "vertical-bar": {
       const chartData = rows.map((r, i) => ({
@@ -778,12 +824,15 @@ function renderChart(
         legend: String(r[shape.x] ?? ""),
         color: colorOf(String(r[shape.x] ?? i), i),
       }));
-      return React.createElement(VerticalBarChart, {
-        data: chartData,
-        chartTitle: title,
-        height: 320,
-        width: 800,
-      });
+      return withTitle(
+        title,
+        React.createElement(VerticalBarChart, {
+          data: chartData,
+          chartTitle: title,
+          height: 320,
+          width: 800,
+        }),
+      );
     }
     case "horizontal-bar": {
       const yMax = Math.max(
@@ -800,7 +849,7 @@ function renderChart(
           color: colorOf(String(r[shape.x] ?? i), i),
         }],
       }));
-      return React.createElement(HorizontalBarChart, { data });
+      return withTitle(title, React.createElement(HorizontalBarChart, { data }));
     }
     case "line":
     case "area": {
@@ -873,12 +922,15 @@ function renderChart(
         // prop is a no-op there.)
         extraProps.isCalloutForStack = false;
       }
-      return React.createElement(Component, {
-        data: { chartTitle: title, lineChartData },
-        height: 320,
-        width: 800,
-        ...extraProps,
-      });
+      return withTitle(
+        title,
+        React.createElement(Component, {
+          data: { chartTitle: title, lineChartData },
+          height: 320,
+          width: 800,
+          ...extraProps,
+        }),
+      );
     }
   }
 }

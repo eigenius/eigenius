@@ -86,6 +86,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 9b | Codata + Streams | ✓ | Resumable execution, coinductive streams, concurrent tasks |
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
 | 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓, 11d ✓, 11e.1 ✓, 11e.2 ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class, ESL + EigenQL institution-capability surface |
+| D22 | Notebook & TypeScript SDK | ✓ | React notebook SPA + `@eigenius/client` SDK, served by the orchestrator at `/notebooks/`; six cell types incl. form-based charts; content-addressed publish-to-layer |
 | 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
@@ -687,6 +688,36 @@ The phase decomposes into two milestones that are separately reviewable:
 - `docs/design/life-science-requirements.md` §16 (required extensions), §18 (prioritization), §19 (sequencing)
 - `docs/design/lean-4-as-institution.md` — nanoda reference, especially Appendix A
 - D19 (`docs/design/d19-inductive-types.md`) — Inductive Types + Sized Types in Mini-TT
+
+---
+
+## Phase D22 — Notebook UX and TypeScript SDK ✓
+
+**Goal:** Deliver a low-friction interactive surface on top of the kernel — a React single-page notebook served at `/notebooks/` and a typed `@eigenius/client` SDK consumable from any browser / Deno / Node runtime. Both are operational today and ship inside the orchestrator Docker image.
+
+**Status:** Complete. Tracked outside the main 0–15 sequence because it's a parallel UX/SDK track rather than a kernel-capability phase; placed here in the document for chronological orientation. Internal sub-phases (per [D22](d22-notebook-and-typescript-sdk.md) §7):
+
+- **Phase 1 — SDK foundation ✓** — `Eigen` class wraps Connect-RPC; `inspect`, `query`, `load`, `runProgram`, `runProgramByIri`, `layerTopology`, `publishNotebook`. Connect codegen wired; smoke test in `clients/eigenius-ts/examples/smoke-test.ts`.
+- **Phase 2 — Static viewer ✓** — read-only notebook rendering with the four MVP cell types.
+- **Phase 3 — Manual execution ✓** — Run / Run all / Reset, per-cell run states, output panels.
+- **Phase 4 — Authoring (the MVP) ✓** — full editing UX, file Open / Save, the program-run cell, layer-stack and trace-tree visualisations, multi-stage `Dockerfile.orchestration` so the SPA serves alongside the RPC paths at `http://localhost:8080/notebooks/`.
+- **Phase 5 — Visualisation ✓** — `@fluentui/react-charts` integration via TS-cell sandbox helpers (5a), `@xyflow/react` topology graph with per-layer drilldown (5b), and a dedicated form-based **chart cell** type covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area kinds (5d). The `kinase-screening` notebook exercises every chart kind plus the topology graph.
+- **Phase 6 — Reactivity + polish ✓** — sticky header with Pin toggle, file IO renamed Import / Export, dedicated **Open published notebook** dialog backed by EigenQL search, dismissable header MessageBars, mandatory `notebook:title` (ontology + SDK + UI guards), per-cell collapse/expand + global Expand/Collapse all, edit-metadata dialog with description editing, on-demand resource fetch for the per-layer topology graph. Reactivity: `Run` per cell becomes a `SplitButton` with `Run` / `Run from here…` / `Run to here…`; subdued cell-order **stale** marker tracks `lastRunCellId` honestly without pretending to model TS-to-TS dataflow (the explicit DAG approach was rejected because it can't see kernel-layer side effects — see [eigenius#33](https://github.com/eigenius/eigenius/issues/33) for the proper EigenQL `OPTIONAL` follow-on).
+- **Cross-cutting fixes during the polish round:** topology walker edge dedup on first sighting (was emitting each schema edge once per layer, blowing up the displayed edge count); chart titles wrapped externally for the cartesian + horizontal-bar + donut kinds for visual consistency (Fluent's `CartesianChart` `chartTitle` prop is aria-only).
+
+### Phase D22 — Deliverables
+
+- `clients/eigenius-ts/` — `@eigenius/client` package + `Eigen` class + content-addressed publish translator.
+- `notebooks/` — Vite + React + TypeScript SPA. Cell types: `markdown`, `esl`, `eigenql`, `typescript`, `program-run`, `chart`. Auto-renderers for ResultSet, Resource, ProgramTrace, LayerStack, Topology, raw values.
+- `ontologies/notebook/notebook-ontology.json` — `Notebook`, `Cell`, `CellType` classes; baked into the kernel as the 5th bootstrap layer so publish succeeds without first registering anything.
+- `deploy/Dockerfile.orchestration` — multi-stage build that compiles the SPA and serves it from `EIGENIUS_NOTEBOOK_STATIC=/app/notebooks` at `/notebooks/*`.
+- Two Playwright e2e tests: `patent-demo.spec.ts` (the LLM-free critical path through the patent demo) and `kinase-screening.spec.ts` (chart-cell regression coverage across all six kinds).
+
+### Phase D22 — References
+
+- [D22 — Notebook UX and TypeScript SDK](d22-notebook-and-typescript-sdk.md) — full spec including the Eigon-CBOR ↔ TypeScript marshalling rules
+- [Platform guide chapter 13 — Notebook](../guides/platform/13-notebook.md)
+- [Platform guide chapter 14 — TypeScript SDK](../guides/platform/14-typescript-sdk.md)
 
 ---
 
