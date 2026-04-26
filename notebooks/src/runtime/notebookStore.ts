@@ -24,6 +24,15 @@
  */
 
 import { create } from "zustand";
+import * as React from "react";
+import {
+  AreaChart,
+  DonutChart,
+  GroupedVerticalBarChart,
+  HorizontalBarChart,
+  LineChart,
+  VerticalBarChart,
+} from "@fluentui/react-charts";
 import type { Eigen } from "@eigenius/client";
 import type {
   CellJson,
@@ -32,6 +41,55 @@ import type {
   NotebookMetaJson,
 } from "../persistence/notebook-format";
 import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
+import { decodeResultDocument } from "./resultDocument";
+
+/**
+ * Curated chart namespace exposed to TS-cell sandboxes (Phase 5a).
+ * `eigen.runProgramByIri(...)` returns data; the cell shapes it; the
+ * cell returns `React.createElement(charts.GroupedVerticalBarChart, …)`
+ * (or via the `h` shortcut) and the auto-renderer mounts it directly.
+ *
+ * Keep this list short — the chart catalogue is large, but exposing a
+ * few common shapes is enough for the typical "chart this query" flow.
+ */
+const sandboxCharts = {
+  AreaChart,
+  DonutChart,
+  GroupedVerticalBarChart,
+  HorizontalBarChart,
+  LineChart,
+  VerticalBarChart,
+} as const;
+
+type SandboxCharts = typeof sandboxCharts;
+
+/**
+ * Helpers exposed to TS-cell sandboxes for shaping query results into
+ * chart-friendly forms. The `rows` decoder turns a `QueryResponse.document`
+ * (Eigon-CBOR ResultSet) into an array of plain objects keyed by the
+ * `RETURN` short-names — eliminates the need to walk the CBOR document
+ * by hand inside the cell.
+ */
+const sandboxHelpers = {
+  /**
+   * Decode an Eigon-CBOR ResultSet document into plain row objects
+   * keyed by the column's short-name (the synthesized Property's
+   * `core:short_name`). Convenient for piping query results straight
+   * into chart props.
+   */
+  rows(document: Uint8Array): Record<string, unknown>[] {
+    const decoded = decodeResultDocument(document);
+    return decoded.rows.map((row) => {
+      const out: Record<string, unknown> = {};
+      for (const col of decoded.columns) {
+        out[col.shortName] = row.values.get(col.iri);
+      }
+      return out;
+    });
+  },
+} as const;
+
+type SandboxHelpers = typeof sandboxHelpers;
 
 export type CellRunState = "idle" | "running" | "done" | "error";
 
@@ -474,18 +532,35 @@ async function executeTypeScriptCell(
   // simply have the last statement be an expression — though only an
   // explicit return surfaces it (we can't run the source through a
   // compiler here without dragging one in). Document accordingly.
+  //
+  // Phase 5a: `React`, `h` (alias for React.createElement),
+  // `charts` (a curated @fluentui/react-charts namespace), and
+  // `nb` (notebook helpers — `nb.rows(document)` decodes a ResultSet
+  // CBOR into plain objects) are also in scope. A cell can return a
+  // React element (e.g. `h(charts.GroupedVerticalBarChart, { data })`)
+  // and the auto-renderer mounts it directly.
   const wrapped = `return (async () => {\n${source}\n})();`;
-  let fn: (
+  type SandboxFn = (
     eigen: Eigen,
     previousOutputs: Record<string, CellOutput>,
     console: typeof capturedConsole,
+    React: typeof import("react"),
+    h: typeof React.createElement,
+    charts: SandboxCharts,
+    nb: SandboxHelpers,
   ) => Promise<unknown>;
+  let fn: SandboxFn;
   try {
-    fn = new Function("eigen", "previousOutputs", "console", wrapped) as (
-      eigen: Eigen,
-      previousOutputs: Record<string, CellOutput>,
-      console: typeof capturedConsole,
-    ) => Promise<unknown>;
+    fn = new Function(
+      "eigen",
+      "previousOutputs",
+      "console",
+      "React",
+      "h",
+      "charts",
+      "nb",
+      wrapped,
+    ) as SandboxFn;
   } catch (err) {
     return {
       kind: "error",
@@ -496,7 +571,15 @@ async function executeTypeScriptCell(
   }
 
   try {
-    const value = await fn(eigen, previousOutputs, capturedConsole);
+    const value = await fn(
+      eigen,
+      previousOutputs,
+      capturedConsole,
+      React,
+      React.createElement,
+      sandboxCharts,
+      sandboxHelpers,
+    );
     return { kind: "value", value, log };
   } catch (err) {
     return {
