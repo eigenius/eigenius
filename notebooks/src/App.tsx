@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { useEffect } from "react";
 import {
   FluentProvider,
   webLightTheme,
@@ -19,27 +20,33 @@ import {
 import { Notebook } from "./components/Notebook";
 import { parseNotebook } from "./persistence/notebook-format";
 import { EigenProvider } from "./runtime/EigenProvider";
+import { useNotebookStore } from "./runtime/notebookStore";
 import patentDemo from "../examples/patent-analysis.json";
 
 /**
- * Phase 3 — manual execution.
+ * Phase 4a — authoring.
  *
- * Hardcodes the patent-analysis demo at the React root so `vite dev`
- * renders something on first load. Phase 4 replaces this with a file
- * picker (open from disk) + new-notebook flows.
- *
- * The `EigenProvider` resolves the orchestrator endpoint from
- * `VITE_EIGENIUS_ORCHESTRATOR` or the page origin (Vite dev server
- * proxies `/eigenius.v1.*` to localhost:8080 — see vite.config.ts).
+ * On first mount the patent-analysis demo is loaded into the store so
+ * `vite dev` renders something on first open. Subsequent loads come from
+ * the Open… file picker in the Notebook toolbar.
  */
 export function App() {
-  // parseNotebook validates the shape; throws on malformed data.
-  const notebook = parseNotebook(patentDemo);
+  const loadNotebook = useNotebookStore((s) => s.loadNotebook);
+  const cellCount = useNotebookStore((s) => s.cells.length);
+
+  useEffect(() => {
+    if (cellCount === 0) {
+      loadNotebook(parseNotebook(patentDemo));
+    }
+    // Empty deps — only the very first mount seeds the demo. After that
+    // the user is in control via Open… / Save.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <FluentProvider theme={webLightTheme}>
       <EigenProvider>
-        <Notebook notebook={notebook} />
+        <Notebook />
       </EigenProvider>
     </FluentProvider>
   );

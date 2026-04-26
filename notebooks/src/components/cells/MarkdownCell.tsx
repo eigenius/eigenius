@@ -12,24 +12,65 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { useState } from "react";
+import { Button, makeStyles, tokens } from "@fluentui/react-components";
+import { Edit16Regular, Eye16Regular } from "@fluentui/react-icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CodeMirrorEditor } from "../editors/CodeMirrorEditor";
+
+const useStyles = makeStyles({
+  root: {
+    position: "relative",
+  },
+  toggle: {
+    position: "absolute",
+    top: tokens.spacingVerticalXS,
+    right: tokens.spacingHorizontalXS,
+    zIndex: 1,
+  },
+});
 
 export interface MarkdownCellProps {
   source: string;
+  onChange: (value: string) => void;
 }
 
 /**
- * Markdown cell — Phase 2 read-only rendering.
+ * Markdown cell — Jupyter-style edit/render toggle.
  *
- * In Phase 4 this gains an "edit" toggle (CodeMirror-backed editing of
- * the raw markdown source) and a "preview" view. For now we just
- * render the prose.
+ * Defaults to rendered view; the small Edit toggle in the corner swaps
+ * to a CodeMirror source editor. Edits flow through `onChange` to the
+ * store on every keystroke.
  */
-export function MarkdownCell({ source }: MarkdownCellProps) {
+export function MarkdownCell({ source, onChange }: MarkdownCellProps) {
+  const styles = useStyles();
+  const [editing, setEditing] = useState(false);
+
   return (
-    <div className="markdown-cell">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+    <div className={styles.root}>
+      <Button
+        size="small"
+        appearance="subtle"
+        className={styles.toggle}
+        icon={editing ? <Eye16Regular /> : <Edit16Regular />}
+        title={editing ? "Render" : "Edit source"}
+        onClick={() => setEditing((v) => !v)}
+      />
+      {editing
+        ? (
+          <CodeMirrorEditor
+            source={source}
+            cellType="markdown"
+            readOnly={false}
+            onChange={onChange}
+          />
+        )
+        : (
+          <div className="markdown-cell">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+          </div>
+        )}
     </div>
   );
 }
