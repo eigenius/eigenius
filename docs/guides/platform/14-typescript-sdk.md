@@ -1,10 +1,10 @@
-# 15. TypeScript SDK — `@eigenius/client`
+# 14. TypeScript SDK — `@eigenius/client`
 
-The TypeScript SDK at [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) wraps the orchestrator's two Connect-RPC services in a single typed `Eigen` class. It is the same SDK the notebook uses ([chapter 14](14-notebook.md)); you can use it from any TypeScript runtime that speaks Connect-RPC — Deno scripts, browser apps, Node.js servers — to drive the kernel programmatically.
+The TypeScript SDK at [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) wraps the orchestrator's two Connect-RPC services in a single typed `Eigen` class. It is the same SDK the notebook uses ([chapter 13](13-notebook.md)); you can use it from any TypeScript runtime that speaks Connect-RPC — Deno scripts, browser apps, Node.js servers — to drive the kernel programmatically.
 
 Per [D22 §5](../../design/d22-notebook-and-typescript-sdk.md).
 
-## 15.1. What it covers
+## 14.1. What it covers
 
 The `Eigen` class exposes everything the notebook MVP needs. All methods are async; all responses are protobuf message objects (camelCased fields).
 
@@ -25,7 +25,7 @@ The SDK also exports the underlying request/response types (`LoadResponse`, `Que
 
 Source: [`clients/eigenius-ts/src/client.ts`](../../../clients/eigenius-ts/src/client.ts) (the `Eigen` class), [`clients/eigenius-ts/src/notebook.ts`](../../../clients/eigenius-ts/src/notebook.ts) (notebook-publish translator), [`clients/eigenius-ts/mod.ts`](../../../clients/eigenius-ts/mod.ts) (public exports).
 
-## 15.2. Construction
+## 14.2. Construction
 
 ```typescript
 import { Eigen } from "@eigenius/client";
@@ -46,7 +46,7 @@ const eigen = new Eigen({ endpoint: "http://localhost:8080" });
 | `fetch` | no | Override the global `fetch` (Deno tests, custom interceptors) |
 | `bearerToken` | no | Currently unused; the hook for token auth without an API change later (D22 §8.3) |
 
-## 15.3. Five-line examples
+## 14.3. Five-line examples
 
 ### Liveness + inspect
 
@@ -123,15 +123,15 @@ console.log(`notebook IRI: ${publish.notebookIri}`);
 console.log(`${publish.cellIris.length} cell IRI(s) in the published layer ${load.layerId}`);
 ```
 
-Identical content yields the same `notebookIri` (content-addressed). See [chapter 14 §14.5](14-notebook.md#145-publish-to-layer).
+Identical content yields the same `notebookIri` (content-addressed). See [chapter 13 §13.5](13-notebook.md#135-publish-to-layer).
 
-## 15.4. Error handling
+## 14.4. Error handling
 
 Most methods return structured response objects with `success: bool` and an `errors: ValidationError[]` array — non-RPC failures (validation, parse, etc.) come back this way and the call doesn't throw.
 
 Connect-RPC errors (network failures, kernel-side gRPC `Status` errors that the orchestrator translates) throw `ConnectError` (from `@connectrpc/connect`). The orchestrator's passthrough explicitly re-wraps kernel gRPC errors so the inbound Connect protocol carries the actual message — without this, browser callers see `[internal] HTTP 400` with the real message URL-encoded into a `grpc-message` header. See [`orchestration/src/notebook/eigenius_kernel_passthrough.ts`](../../../orchestration/src/notebook/eigenius_kernel_passthrough.ts).
 
-## 15.5. Layout and dependencies
+## 14.5. Layout and dependencies
 
 ```
 clients/eigenius-ts/
@@ -151,7 +151,7 @@ clients/eigenius-ts/
 
 Runtime deps: `@bufbuild/protobuf@^2`, `@connectrpc/connect@^2`, `@connectrpc/connect-web@^2`. The notebook consumes the SDK as a `file:../clients/eigenius-ts` workspace dep; once the SDK stabilises, npm publication via `dnt` (Deno-to-Node) will follow.
 
-## 15.6. Regenerating the proto stubs
+## 14.6. Regenerating the proto stubs
 
 The buf pipeline lives at the repo root ([`buf.yaml`](../../../buf.yaml) + [`buf.gen.yaml`](../../../buf.gen.yaml)). The SDK's `generated/` is one of two output targets (the other being the orchestrator's `src/gen/`). Regenerate after any change to [`proto/eigenius.proto`](../../../proto/eigenius.proto):
 
@@ -161,7 +161,7 @@ npx --yes @bufbuild/buf generate
 
 Buf is pinned at v2; both targets emit `protoc-gen-es target=ts`, which produces idiomatic Connect-Web TypeScript stubs.
 
-## 15.7. Smoke test
+## 14.7. Smoke test
 
 The smoke test at [`clients/eigenius-ts/examples/smoke-test.ts`](../../../clients/eigenius-ts/examples/smoke-test.ts) hits every RPC against a live stack:
 
@@ -173,12 +173,12 @@ deno run --allow-net --allow-env examples/smoke-test.ts
 
 Output is a 7-step transcript: `health → inspect → query → listInstitutions → layerTopology (taxonomy + full) → load → validateProgram`. This is the SDK's Phase 1 acceptance criterion (D22 §5.7).
 
-## 15.8. Design references
+## 14.8. Design references
 
 - [**D22** — Notebook UX and TypeScript SDK](../../design/d22-notebook-and-typescript-sdk.md) — full SDK + notebook spec, including the layer-topology data shape and the planned post-MVP additions
 - [**D5** — gRPC API specification](../../design/d5-grpc-api-specification.md) — the underlying RPC surface (the SDK is a thin wrapper)
-- [**chapter 14** — Notebook](14-notebook.md) — the SDK's largest consumer
+- [**chapter 13** — Notebook](13-notebook.md) — the SDK's largest consumer
 
 ---
 
-Next: **[Appendix →](13-appendix.md)** (note that the appendix predates these chapters; treat 14 + 15 as additions to the original 13-chapter set).
+Next: **[15. Appendix →](15-appendix.md)**

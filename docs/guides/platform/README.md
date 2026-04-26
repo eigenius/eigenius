@@ -6,12 +6,12 @@ The guide is grounded in the implementation in [`cli/`](../../../cli/), [`kernel
 
 ## How to read this guide
 
-If you're new: read chapters 1–5 sequentially, then jump to **[chapter 14 — Notebook](14-notebook.md)** for the most accessible UX. After that, the guide is a reference — jump to the chapter for the question you have.
+If you're new: read chapters 1–5 sequentially, then jump to **[chapter 13 — Notebook](13-notebook.md)** for the most accessible UX. After that, the guide is a reference — jump to the chapter for the question you have.
 
 The most-used reference chapters are:
 
-- **[14. Notebook](14-notebook.md)** — the React notebook UX, served by the orchestrator at `http://localhost:8080/notebooks/`
-- **[15. TypeScript SDK](15-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
+- **[13. Notebook](13-notebook.md)** — the React notebook UX, served by the orchestrator at `http://localhost:8080/notebooks/`
+- **[14. TypeScript SDK](14-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
 - **[4. CLI reference](04-cli-reference.md)** — every `eigenius` subcommand
 - **[6. Database management](06-database-management.md)** — durable mode, exports, backups
 - **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the extension surface
@@ -42,11 +42,11 @@ The most-used reference chapters are:
 
 12. **[Troubleshooting and FAQ](12-troubleshooting.md)** — common build / runtime / connection issues.
 
-13. **[Appendix](13-appendix.md)** — environment variables, file locations, source index, related documents.
+13. **[Notebook](13-notebook.md)** — the React SPA the orchestrator serves at `/notebooks/`. Cell types (markdown / esl / eigenql / typescript / program-run / chart), the file format, publish-to-layer, the patent-analysis and kinase-screening demos, where the source lives.
 
-14. **[Notebook](14-notebook.md)** — the React SPA the orchestrator serves at `/notebooks/`. Cell types (markdown / esl / eigenql / typescript / program-run), the file format, publish-to-layer, the patent-analysis demo, where the source lives.
+14. **[TypeScript SDK](14-typescript-sdk.md)** — `@eigenius/client` and the `Eigen` class. The SDK that powers the notebook, also usable from your own code. Five-line examples for inspect / query / load / runProgramByIri / layerTopology / publishNotebook.
 
-15. **[TypeScript SDK](15-typescript-sdk.md)** — `@eigenius/client` and the `Eigen` class. The SDK that powers the notebook, also usable from your own code. Five-line examples for inspect / query / load / runProgramByIri / layerTopology / publishNotebook.
+15. **[Appendix](15-appendix.md)** — environment variables, file locations, source index, related documents.
 
 ## Related documents
 

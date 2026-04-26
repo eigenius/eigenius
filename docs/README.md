@@ -12,13 +12,13 @@ This directory holds all written documentation for the Eigenius platform. It is 
 
 Three guides, grounded in the implementation:
 
-- **[Platform user guide](guides/platform/README.md)** — installing, running, managing, and extending the platform; the CLI; the kernel server; the orchestrator; persistence; WASM components and institutions; deployment; **the React notebook UX** (chapter 14); **the `@eigenius/client` TypeScript SDK** (chapter 15).
+- **[Platform user guide](guides/platform/README.md)** — installing, running, managing, and extending the platform; the CLI; the kernel server; the orchestrator; persistence; WASM components and institutions; deployment; **the React notebook UX** (chapter 13); **the `@eigenius/client` TypeScript SDK** (chapter 14).
 - **[ESL — Eigenius Surface Language](guides/esl/README.md)** — the surface syntax for declaring ontologies and writing typed programs.
 - **[EigenQL — query language](guides/eigenql/README.md)** — the read-only query language over the layered Eigon knowledge graph.
 
 The guides are task-first. They link into source for every claim about behaviour.
 
-For most users, the notebook is the lowest-friction first touch — it's the React SPA bundled into the orchestrator image and served at `http://localhost:8080/notebooks/`. See [platform chapter 14](guides/platform/14-notebook.md) and the screenshot in [`guides/assets/eigenius_notebook_ux.png`](guides/assets/eigenius_notebook_ux.png).
+For most users, the notebook is the lowest-friction first touch — it's the React SPA bundled into the orchestrator image and served at `http://localhost:8080/notebooks/`. See [platform chapter 13](guides/platform/13-notebook.md) and the screenshot in [`guides/assets/eigenius_notebook_ux.png`](guides/assets/eigenius_notebook_ux.png).
 
 ## [Design documents →](design/README.md)
 
@@ -42,6 +42,6 @@ Not built into the documentation site; build with a standard `pdflatex` toolchai
 
 ## How to navigate
 
-- **New to the platform?** Start with the [notebook chapter](guides/platform/14-notebook.md) — the lowest-friction first touch — then read the [platform user guide](guides/platform/README.md) for installation, build, and operational reference, and dip into the [ESL](guides/esl/README.md) and [EigenQL](guides/eigenql/README.md) guides when you need to write your own ontologies, programs, and queries.
+- **New to the platform?** Start with the [notebook chapter](guides/platform/13-notebook.md) — the lowest-friction first touch — then read the [platform user guide](guides/platform/README.md) for installation, build, and operational reference, and dip into the [ESL](guides/esl/README.md) and [EigenQL](guides/eigenql/README.md) guides when you need to write your own ontologies, programs, and queries.
 - **Want to understand a design decision?** Check the design document for the relevant subsystem ([design/](design/README.md)).
 - **Working on the implementation?** Both — design docs for the spec, guides for the user-facing behaviour, source comments for the implementation detail.

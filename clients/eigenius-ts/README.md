@@ -2,7 +2,7 @@
 
 TypeScript SDK for the Eigenius platform. Wraps the orchestrator's `EigeniusKernel` and `NotebookService` Connect-RPC surfaces in a single typed `Eigen` class. Targets browser, Deno, and Node consumers; the [notebook UI](../../notebooks/) consumes it as a `file:` workspace dep, and the same code runs from a Deno script or any Node app.
 
-Per [D22 §5](../../docs/design/d22-notebook-and-typescript-sdk.md). The user-facing reference is **[platform guide chapter 15](../../docs/guides/platform/15-typescript-sdk.md)** — read that first; this README is the package-shape companion.
+Per [D22 §5](../../docs/design/d22-notebook-and-typescript-sdk.md). The user-facing reference is **[platform guide chapter 14](../../docs/guides/platform/14-typescript-sdk.md)** — read that first; this README is the package-shape companion.
 
 ## Layout
 
@@ -63,7 +63,7 @@ The `Eigen` class wraps:
 
 Plus notebook-format types and translators (`NotebookJson`, `CellJson`, `notebookJsonToResources`, `resourcesToNotebookJson`).
 
-Worked examples for each method live in [platform chapter 15 §15.3](../../docs/guides/platform/15-typescript-sdk.md#153-five-line-examples).
+Worked examples for each method live in [platform chapter 14 §14.3](../../docs/guides/platform/14-typescript-sdk.md#143-five-line-examples).
 
 ## Smoke test
 
@@ -98,5 +98,5 @@ The SDK is feature-complete for the notebook MVP (D22 phases 1–4d):
 
 - [**D22** — Notebook UX and TypeScript SDK](../../docs/design/d22-notebook-and-typescript-sdk.md) — full spec (SDK + notebook)
 - [**D5** — gRPC API specification](../../docs/design/d5-grpc-api-specification.md) — the underlying RPC surface
-- [**Platform guide chapter 14** — Notebook](../../docs/guides/platform/14-notebook.md) — the SDK's largest consumer
-- [**Platform guide chapter 15** — TypeScript SDK](../../docs/guides/platform/15-typescript-sdk.md) — the user-facing reference
+- [**Platform guide chapter 13** — Notebook](../../docs/guides/platform/13-notebook.md) — the SDK's largest consumer
+- [**Platform guide chapter 14** — TypeScript SDK](../../docs/guides/platform/14-typescript-sdk.md) — the user-facing reference
