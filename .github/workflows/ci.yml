@@ -39,13 +39,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets
-
-      # Build the WASM example components — `kernel/src/capability/tests.rs`
+      # Build the WASM example components first — `kernel/src/capability/tests.rs`
       # `include_bytes!`s the resulting `.wasm` files from
-      # `kernel/tests/fixtures/`. The fixtures are gitignored (binary
-      # artifacts), so CI has to rebuild them before `cargo test`.
+      # `kernel/tests/fixtures/`. Both clippy (which compiles
+      # `--all-targets`, including test binaries) and `cargo test` need
+      # the fixtures present, so this has to come before either.
       - name: Install cargo-component
         run: cargo install --locked cargo-component@^0.21
 
@@ -62,6 +60,9 @@ jobs:
           mkdir -p kernel/tests/fixtures
           cp examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm kernel/tests/fixtures/
           cp examples/wasm-ordering-institution/target/wasm32-unknown-unknown/debug/eigenius_wasm_ordering_institution.wasm kernel/tests/fixtures/
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
 
       - name: Run tests
         run: cargo test --workspace
