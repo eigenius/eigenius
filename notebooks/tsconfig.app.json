@@ -19,7 +19,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@eigenius/client": ["../clients/eigenius-ts/mod.ts"]
+      "@eigenius/client": ["./node_modules/@eigenius/client/mod.ts"]
     }
   },
   "include": ["src"]

@@ -1,0 +1,16 @@
+{
+  "name": "@eigenius/client",
+  "version": "0.0.1",
+  "description": "TypeScript SDK for the Eigenius platform.",
+  "type": "module",
+  "main": "./mod.ts",
+  "types": "./mod.ts",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2",
+    "@connectrpc/connect": "^2",
+    "@connectrpc/connect-web": "^2"
+  }
+}

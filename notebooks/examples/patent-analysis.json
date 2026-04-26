@@ -3,14 +3,14 @@
   "meta": {
     "title": "Patent Analysis — Attention Is All You Need",
     "created": "2026-04-20T10:00:00Z",
-    "modified": "2026-04-24T14:00:00Z",
+    "modified": "2026-04-25T14:00:00Z",
     "eigenius_version": "0.1.0"
   },
   "cells": [
     {
       "id": "5b1d6e1a-3f9a-4d8e-b7e4-2c0c0a8a1f01",
       "type": "markdown",
-      "source": "# Patent Analysis — *Attention Is All You Need*\n\nThis notebook walks through analysing the **Transformer** patent\n(`US10452978B2`, Vaswani et al., Google LLC, 2018) using the Eigenius\nplatform.\n\n## What we'll do\n\n1. **Define** an ontology of patent claims and structured analyses (ESL).\n2. **Query** the knowledge graph for related patents in the\n   neural-network domain (EigenQL).\n3. **Orchestrate** the analysis pipeline from TypeScript: load the\n   patent resource, run the `analyze_patent` program, and inspect the\n   structured brief.\n\n> The pipeline calls a `CompleteJson` LLM completion to extract\n> categories, innovations, and limitations, then a `CompleteText`\n> completion to write a plain-language summary suitable for a\n> non-specialist audience.\n\n| Step | Component | Output type |\n| ---- | --------- | ----------- |\n| 1 | `CompleteJson` | `patent:PatentAnalysis` |\n| 2 | `CompleteText` | `core:string` |\n| 3 | `Construct`    | `patent:PatentBrief` |\n"
+      "source": "# Patent Analysis — *Attention Is All You Need*\n\nThis notebook walks through analysing the **Transformer** patent\n(`US10452978B2`, Vaswani et al., Google LLC, 2018) using the Eigenius\nplatform.\n\n## What we'll do\n\n1. **Define** an ontology of patent claims and structured analyses (ESL).\n2. **Query** the loaded ontology to confirm the patent classes resolve\n   in the active layer chain (EigenQL).\n3. **Orchestrate** the analysis pipeline from TypeScript: load the\n   patent input, run the `analyze_patent` program, and inspect the\n   structured brief.\n\n> The pipeline calls a `CompleteJson` LLM completion to extract\n> categories, innovations, and limitations, then a `CompleteText`\n> completion to write a plain-language summary suitable for a\n> non-specialist audience.\n\n| Step | Component | Output type |\n| ---- | --------- | ----------- |\n| 1 | `CompleteJson` | `patent:PatentAnalysis` |\n| 2 | `CompleteText` | `core:string` |\n| 3 | `Construct`    | `patent:PatentBrief` |\n\n*Phase 3 — manual execution.* Click **Run** on the ESL cell first to\nload the ontology, then **Run** on the EigenQL cell to query it.\nTypeScript cells become executable in Phase 4.\n"
     },
     {
       "id": "2a4b9c5d-7e1f-4b2c-9a3d-5e8f1c2b3d40",
@@ -20,12 +20,17 @@
     {
       "id": "9c1e2d3f-4a5b-46c7-8d9e-0f1a2b3c4d50",
       "type": "eigenql",
-      "source": "-- Find all patent claims in the neural-network technical domain,\n-- joined with their structured analyses, ordered by filing date.\n\nUSING INSTITUTION <urn:eigenius:demo:patent> AS patent\n\nMATCH ?claim FROM patent:PatentClaim\n    FIBER ?analysis FROM patent:PatentAnalysis\nWHERE ?analysis.patent:technical_domain LIKE \"%neural%\"\n  AND ?claim.patent:filing_date >= DATE(\"2015-01-01\")\nRETURN\n    ?claim.patent:patent_number AS patent_id,\n    ?claim.patent:title         AS title,\n    ?claim.patent:assignee      AS assignee,\n    ?analysis.patent:invention_category AS category,\n    LENGTH(?analysis.patent:key_innovations) AS innovation_count\nORDER BY ?claim.patent:filing_date DESC\nLIMIT 25;\n"
+      "source": "// List every Class in the active layer chain — including the patent\n// classes loaded by the ESL cell above. Run the ESL cell first; this\n// query then surfaces patent:PatentClaim, patent:PatentAnalysis, and\n// patent:PatentBrief alongside the core ontology classes.\n\nUSING \"urn:eigenius:core:Class\"\n\nMATCH Class(?c) {\n    short_name: ?n\n}\nRETURN [] {\n    name: ?n,\n    iri:  ?c\n}\nORDER BY ?n\n"
+    },
+    {
+      "id": "8d2f3a91-6c4b-4f8e-a103-7e9b2d4c5f60",
+      "type": "eigenql",
+      "source": "// All resources in the patent namespace, regardless of class.\n// `MATCH ?r {}` binds ?r to every resource in scope; the WHERE filters\n// by IRI prefix using SQL-style LIKE (% matches any sequence).\n\nMATCH ?r {}\nWHERE ?r LIKE \"urn:eigenius:demo:patent:%\"\nRETURN [] {\n    iri: ?r\n}\nORDER BY ?r\n"
     },
     {
       "id": "7f8e9d0c-1b2a-43d4-95e6-c7d8e9f0a1b2",
       "type": "typescript",
-      "source": "// Phase 4 SDK usage: load the patent resource, run the analysis,\n// inspect the resulting brief.\n\nimport { Eigenius } from \"@eigenius/client\";\n\nconst client = new Eigenius({ baseUrl: \"http://localhost:8787\" });\n\n// 1. Load the input resource into the active layer.\nconst patent = await client.resources.load(\n  \"./demo/patent/transformer-patent.json\",\n);\n\n// 2. Run the analyze_patent program against the loaded resource.\nconst brief = await client.programs.run(\n  \"urn:eigenius:demo:patent:analyze_patent\",\n  { input: patent.id },\n);\n\n// 3. Render the structured brief as a notebook table.\nconsole.log(\"Summary:\\n\", brief[\"urn:eigenius:demo:patent:summary\"]);\n\nconst analysis = brief[\"urn:eigenius:demo:patent:analysis\"];\nconsole.table({\n  category:    analysis[\"urn:eigenius:demo:patent:invention_category\"],\n  domain:      analysis[\"urn:eigenius:demo:patent:technical_domain\"],\n  innovations: analysis[\"urn:eigenius:demo:patent:key_innovations\"].length,\n});\n"
+      "source": "// Phase 4 SDK usage (preview): load the input resource, run the\n// analysis program, render the resulting brief.\n//\n// TypeScript cells execute in Phase 4 once the sandbox lands\n// (D22 §6.8). For now this cell is render-only.\n\nimport { Eigen } from \"@eigenius/client\";\n\nconst eigen = new Eigen({ endpoint: window.location.origin });\n\n// 1. Load the patent input as Eigon-JSON.\nconst inputJson = await fetch(\"/demo/patent/transformer-patent.json\")\n  .then((r) => r.text());\nawait eigen.load(inputJson, { contentType: \"application/eigon+json\" });\n\n// 2. Run analyze_patent against the loaded input.\nconst result = await eigen.runProgram(\n  cells.esl.source,                 // program: ESL source from cell above\n  inputJson,                        // input: same Eigon-JSON\n);\n\n// 3. The auto-renderer dispatches RunResult to ResourceInspector +\n//    TraceTree side-by-side (Phase 4 §6.7).\nreturn result;\n"
     }
   ]
 }
