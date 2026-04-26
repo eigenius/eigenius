@@ -15,11 +15,25 @@ The platform maintains four epistemic categories: **declared** knowledge (human 
 > is to close those quality gaps rather aggressively. Feel free
 > to submit issues in the discussion forum or directly as issue.
 
+## The notebook — start here
+
+For most users, the notebook is the most accessible way to use the platform. It is a React SPA the orchestrator serves at `http://localhost:8080/notebooks/`; cells run ESL, EigenQL, TypeScript, and program invocations against the live kernel; outputs auto-render as typed inspectors, result tables, layer-stack diagrams, and program-trace trees.
+
+<p align="center">
+  <img src="docs/guides/assets/eigenius_notebook_ux.png" alt="The Eigenius notebook — top of the patent-analysis demo" width="900">
+</p>
+
+If you have the docker stack up (`docker compose up -d`), the notebook is already there — it's bundled into the orchestrator image at build time and serves alongside the RPC paths on the same origin. Open the URL above and the patent-analysis demo loads on first mount; click **Run all** and watch ESL compile + commit a layer, EigenQL produce a result table, and the program-run cell drive the kernel through a two-step LLM pipeline (`CompleteJson` → structured patent analysis, `CompleteText` → plain-language summary) with the resulting brief and an interactive trace tree rendered side-by-side.
+
+See **[chapter 14 — Notebook](docs/guides/platform/14-notebook.md)** for the full reference.
+
+The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/)) is usable programmatically from any TypeScript runtime — see **[chapter 15 — TypeScript SDK](docs/guides/platform/15-typescript-sdk.md)**.
+
 ## User guides
 
 Three task-first guides, grounded in the implementation:
 
-- **[Platform user guide](docs/guides/platform/README.md)** — thirteen chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, building WASM components and institutions, deployment.
+- **[Platform user guide](docs/guides/platform/README.md)** — fifteen chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, building WASM components and institutions, deployment, **the notebook UX**, **the TypeScript SDK**.
 - **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
 - **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch, stratification, and the result-document format.
 
@@ -57,6 +71,8 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Declare cross-institution `Comorphism` translations as first-class ontology resources, invocable from program bodies and from EigenQL (Phase 11d, 11e.1, 11e.2)
 - Dispatch qualified-name function calls (`cap:predicate(...)`, `cap:translate(...)`) through a single institution-classification table shared by ESL and EigenQL (Phase 11e)
 - Run locally via three terminals or Docker Compose
+- Drive the platform from a React notebook (cells: markdown, ESL, EigenQL, TypeScript, program-run; auto-rendered outputs; layer-stack and trace-tree visualisations; content-addressed publish-to-layer; bundled into the orchestrator image and served at `/notebooks/`)
+- Use the same kernel from any TypeScript runtime via `@eigenius/client` — a typed SDK over the Connect-RPC surface (browser, Deno, Node)
 
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
 
@@ -136,11 +152,17 @@ cli/             Command-line interface (load, validate, query, run, serve, task
 ontologies/      Ontology definitions
   core/            Core ontology (core-ontology.json) — self-describing bootstrap
   program/         Program ontology (program-ontology.json) — expression classes, components
+  reflection/      Reflection ontology (reasoning traces, derivation, epistemic status)
+  institution/     Institution ontology (FiberReasoner registration, fiber structure)
+  notebook/        Notebook ontology (Notebook + Cell + CellType — backs `Publish` from the UI)
   examples/        Example ontologies and programs
-docs/design/     Design documents (D1–D21)
+notebooks/       React notebook SPA (Phase 4 MVP) — bundled into the orchestrator image
+clients/
+  eigenius-ts/     `@eigenius/client` — TypeScript SDK that wraps the orchestrator's RPC surface
+docs/design/     Design documents (D1–D22)
 deploy/          Azure ContainerApps deployment (Dockerfiles, Bicep IaC)
 proto/           gRPC protobuf definitions
-orchestration/   Deno/TypeScript orchestration layer
+orchestration/   Deno/TypeScript orchestration layer (LLM dispatch, MCP server, notebook static-file route)
 demo/            End-to-end demo scripts
 ```
 
@@ -409,6 +431,7 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` layer-chain resolution, `CheckCtx`, inference-mode rules |
 | [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized termination via bounded binders, self-referential parameterised codata, productivity by typing |
 | [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |
+| [D22: Notebook UX and TypeScript SDK](docs/design/d22-notebook-and-typescript-sdk.md) | The React notebook, the `Eigen` SDK, the notebook ontology, content-addressed publish |
 | [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 | [Lean 4 as Institution](docs/design/lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |

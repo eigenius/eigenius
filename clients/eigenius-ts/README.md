@@ -1,44 +1,102 @@
 # `@eigenius/client`
 
-TypeScript SDK for the Eigenius platform. Wraps the orchestrator's `EigeniusKernel` and `NotebookService` Connect surfaces in a single typed `Eigen` class. Targets browser and Deno consumers; npm publication via `dnt` will follow once the SDK stabilises.
+TypeScript SDK for the Eigenius platform. Wraps the orchestrator's `EigeniusKernel` and `NotebookService` Connect-RPC surfaces in a single typed `Eigen` class. Targets browser, Deno, and Node consumers; the [notebook UI](../../notebooks/) consumes it as a `file:` workspace dep, and the same code runs from a Deno script or any Node app.
 
-Per [D22 §5](../../docs/design/d22-notebook-and-typescript-sdk.md).
+Per [D22 §5](../../docs/design/d22-notebook-and-typescript-sdk.md). The user-facing reference is **[platform guide chapter 15](../../docs/guides/platform/15-typescript-sdk.md)** — read that first; this README is the package-shape companion.
 
 ## Layout
 
 ```
 clients/eigenius-ts/
-├── deno.jsonc               # Deno project config
-├── mod.ts                   # public API exports
+├── deno.jsonc            # Deno project config (npm: + jsr: imports)
+├── package.json          # npm package shape (name, exports, deps)
+├── mod.ts                # public API exports
 ├── src/
-│   ├── client.ts            # Eigen class — main entry point
-│   └── topology.ts          # Topology / TopologyNode / TopologyEdge re-exports
-├── generated/               # buf-generated Connect stubs (do not edit)
+│   ├── client.ts         # Eigen class — main entry point
+│   └── notebook.ts       # NotebookJson <-> Resource[] translator (content-addressed IRIs)
+├── generated/            # buf-generated Connect stubs (do not edit)
+│   └── eigenius_pb.ts
 └── examples/
-    └── smoke-test.ts        # Phase 1 acceptance — exercises every exposed RPC
+    ├── smoke-test.ts     # exercises every RPC against a live stack
+    ├── publish-test.ts   # publishNotebook end-to-end
+    └── error-test.ts     # demonstrates the orchestrator's gRPC→Connect error translation
 ```
 
 ## Quick use
 
 ```typescript
-import { Eigen } from "jsr:@eigenius/client";  // future JSR target
-// or, for now, while developing locally:
-// import { Eigen } from "../../clients/eigenius-ts/mod.ts";
+import { Eigen } from "@eigenius/client";
 
 const eigen = new Eigen({ endpoint: "http://localhost:8080" });
 
+// Liveness
+const h = await eigen.health();
+
+// Walk the layer chain
 const topo = await eigen.layerTopology();
 console.log(`${topo.nodes.length} nodes, ${topo.edges.length} edges`);
+
+// Compile + commit ESL
+const { layerId } = await eigen.load(`namespace ex = "urn:eigenius:demo:ex"; ...`);
+
+// Run a program already in the chain by IRI
+const result = await eigen.runProgramByIri(
+  "urn:eigenius:demo:patent:analyze_patent",
+  "urn:eigenius:demo:patent:US10452978B2",
+);
 ```
+
+The `Eigen` class wraps:
+
+| Method | RPC |
+|---|---|
+| `health` | `EigeniusKernel.Health` |
+| `inspect` | `EigeniusKernel.Inspect` |
+| `query` | `EigeniusKernel.Query` |
+| `load` | `EigeniusKernel.Load` |
+| `validateProgram` | `EigeniusKernel.ValidateProgram` |
+| `runProgram` | `EigeniusKernel.RunProgram` |
+| `runProgramByIri` | `EigeniusKernel.RunProgramByIri` |
+| `listInstitutions` | `EigeniusKernel.ListInstitutions` |
+| `layerTopology` | `NotebookService.LayerTopology` |
+| `publishNotebook` | translator → `EigeniusKernel.Load` |
+
+Plus notebook-format types and translators (`NotebookJson`, `CellJson`, `notebookJsonToResources`, `resourcesToNotebookJson`).
+
+Worked examples for each method live in [platform chapter 15 §15.3](../../docs/guides/platform/15-typescript-sdk.md#153-five-line-examples).
+
+## Smoke test
+
+```bash
+cd clients/eigenius-ts
+deno run --allow-net --allow-env examples/smoke-test.ts
+```
+
+Expects an orchestrator at `http://localhost:8080`; override with `EIGENIUS_ORCHESTRATOR=...`. Output is a 7-step transcript exercising every public method (`health` → `inspect` → `query` → `listInstitutions` → `layerTopology` → `load` → `validateProgram`).
 
 ## Regenerating stubs
 
-The buf pipeline lives at the repository root (`buf.yaml` + `buf.gen.yaml`). The SDK's `generated/` directory is one of buf's output targets, so regeneration is the same as for the orchestrator:
+The buf pipeline lives at the repo root ([`buf.yaml`](../../buf.yaml) + [`buf.gen.yaml`](../../buf.gen.yaml)). The SDK's `generated/` is one of two output targets (the other being the orchestrator's `src/gen/`). Regenerate after any change to [`proto/eigenius.proto`](../../proto/eigenius.proto):
 
 ```bash
-just generate
+npx --yes @bufbuild/buf generate
 ```
 
 ## Status
 
-Phase 1 (per D22): `layerTopology` only. The Eigen class will grow to wrap `inspect`, `query`, `load`, `compile`, `run`, `listInstitutions` (which all already exist on `EigeniusKernel`) plus future browser-specific methods on `NotebookService` as Phase 2–4 progresses.
+The SDK is feature-complete for the notebook MVP (D22 phases 1–4d):
+
+- ✅ All EigeniusKernel + NotebookService methods needed by the notebook
+- ✅ `RunProgramByIri` for the natural "one program × N inputs" pattern
+- ✅ Notebook-publish translator with content-addressed IRIs (Cell + Notebook)
+- ✅ Error translation: orchestrator re-wraps kernel gRPC errors as Connect errors so messages decode cleanly in browsers (otherwise they'd surface as `[internal] HTTP 400`)
+- ⏳ npm publication via `dnt` (Deno-to-Node) — once the SDK stabilises
+- ⏳ Typed `Resource` / `ResultSet` wrappers per D22 §5.4 — currently consumers decode CBOR ad-hoc; see [`notebooks/src/runtime/resultDocument.ts`](../../notebooks/src/runtime/resultDocument.ts) for a worked example
+- ⏳ `RunProgramByIri` per-field content types (proto currently uses one `content_type` for both program and input — workaround: load both first, then call by IRI)
+
+## Design references
+
+- [**D22** — Notebook UX and TypeScript SDK](../../docs/design/d22-notebook-and-typescript-sdk.md) — full spec (SDK + notebook)
+- [**D5** — gRPC API specification](../../docs/design/d5-grpc-api-specification.md) — the underlying RPC surface
+- [**Platform guide chapter 14** — Notebook](../../docs/guides/platform/14-notebook.md) — the SDK's largest consumer
+- [**Platform guide chapter 15** — TypeScript SDK](../../docs/guides/platform/15-typescript-sdk.md) — the user-facing reference
