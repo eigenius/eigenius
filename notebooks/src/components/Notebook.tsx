@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { useState } from "react";
 import {
   Button,
   Caption1,
   makeStyles,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  Spinner,
   Subtitle1,
   tokens,
 } from "@fluentui/react-components";
 import {
   ArrowReset20Regular,
+  GlobeArrowUp20Regular,
   PlayMultiple16Regular,
 } from "@fluentui/react-icons";
 import type { NotebookJson } from "../persistence/notebook-format";
@@ -50,11 +56,22 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     flex: 1,
   },
+  iri: {
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    wordBreak: "break-all",
+  },
 });
 
 export interface NotebookProps {
   notebook: NotebookJson;
 }
+
+type PublishState =
+  | { kind: "idle" }
+  | { kind: "publishing" }
+  | { kind: "success"; notebookIri: string; cellCount: number }
+  | { kind: "error"; message: string };
 
 export function Notebook({ notebook }: NotebookProps) {
   const styles = useStyles();
@@ -64,6 +81,34 @@ export function Notebook({ notebook }: NotebookProps) {
   const anyRunning = useNotebookStore((s) =>
     Array.from(s.cellStates.values()).some((st) => st === "running")
   );
+
+  const [publish, setPublish] = useState<PublishState>({ kind: "idle" });
+  const isPublishing = publish.kind === "publishing";
+
+  const onPublish = async () => {
+    setPublish({ kind: "publishing" });
+    try {
+      const { publish: result, load } = await eigen.publishNotebook(notebook);
+      if (!load.success) {
+        setPublish({
+          kind: "error",
+          message: load.errors.map((e) => e.message).join("; ") ||
+            "publish failed (no error message)",
+        });
+        return;
+      }
+      setPublish({
+        kind: "success",
+        notebookIri: result.notebookIri,
+        cellCount: result.cellIris.length,
+      });
+    } catch (err) {
+      setPublish({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
 
   const title = notebook.meta.title ?? "Untitled notebook";
   const modified = notebook.meta.modified
@@ -83,16 +128,27 @@ export function Notebook({ notebook }: NotebookProps) {
             size="small"
             appearance="subtle"
             icon={<ArrowReset20Regular />}
-            disabled={anyRunning}
+            disabled={anyRunning || isPublishing}
             onClick={() => resetOutputs()}
           >
             Reset
           </Button>
           <Button
             size="small"
+            appearance="subtle"
+            icon={isPublishing ? <Spinner size="tiny" /> : <GlobeArrowUp20Regular />}
+            disabled={anyRunning || isPublishing}
+            onClick={() => {
+              void onPublish();
+            }}
+          >
+            Publish
+          </Button>
+          <Button
+            size="small"
             appearance="primary"
             icon={<PlayMultiple16Regular />}
-            disabled={anyRunning}
+            disabled={anyRunning || isPublishing}
             onClick={() => {
               void runAll(eigen, notebook.cells);
             }}
@@ -100,6 +156,26 @@ export function Notebook({ notebook }: NotebookProps) {
             Run all
           </Button>
         </div>
+        {publish.kind === "success" && (
+          <MessageBar intent="success">
+            <MessageBarBody>
+              <MessageBarTitle>Notebook published</MessageBarTitle>
+              <div>
+                {publish.cellCount} cell{publish.cellCount === 1 ? "" : "s"} ·
+                {" "}
+                <span className={styles.iri}>{publish.notebookIri}</span>
+              </div>
+            </MessageBarBody>
+          </MessageBar>
+        )}
+        {publish.kind === "error" && (
+          <MessageBar intent="error">
+            <MessageBarBody>
+              <MessageBarTitle>Publish failed</MessageBarTitle>
+              <div className={styles.iri}>{publish.message}</div>
+            </MessageBarBody>
+          </MessageBar>
+        )}
       </div>
       {notebook.cells.map((cell) => <Cell key={cell.id} cell={cell} />)}
     </div>

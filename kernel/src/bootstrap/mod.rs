@@ -92,9 +92,9 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads four ontology layers: core → program → reflection → institution.
+/// Loads five ontology layers: core → program → reflection → institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
-/// institution layer as head.
+/// notebook layer as head.
 pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
     let core = load_layer(
         "core",
@@ -120,8 +120,14 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
         Some(reflection),
     )?;
 
+    let notebook = load_layer(
+        "notebook",
+        include_str!("../../../ontologies/notebook/notebook-ontology.json"),
+        Some(institution),
+    )?;
+
     Ok(ExecutionContext::new(
-        institution,
+        notebook,
         "working",
         ExecutionMode::ReadWrite,
     ))
@@ -155,7 +161,7 @@ pub fn bootstrap_persistent(
 
 const SEED_MANIFEST_KEY: &str = "seed_manifest_v1";
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 4] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 5] {
     [
         (
             "core",
@@ -172,6 +178,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 4] {
         (
             "institution",
             include_str!("../../../ontologies/institution/institution-ontology.json"),
+        ),
+        (
+            "notebook",
+            include_str!("../../../ontologies/notebook/notebook-ontology.json"),
         ),
     ]
 }
@@ -272,12 +282,13 @@ mod tests {
     #[test]
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
-        // Head is the institution layer (on top of reflection, program, core)
+        // Head is the notebook layer
+        // (on top of institution → reflection → program → core)
         assert!(!ctx.head().is_root());
-        // Reflection layer (parent of institution)
-        let reflection = ctx.head().parent().unwrap();
+        let institution = ctx.head().parent().unwrap();
+        assert!(!institution.is_root());
+        let reflection = institution.parent().unwrap();
         assert!(!reflection.is_root());
-        // Program layer (parent of reflection)
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
         // Core layer (parent of program) should be root

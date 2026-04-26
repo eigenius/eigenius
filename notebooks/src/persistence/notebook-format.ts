@@ -35,6 +35,12 @@ export interface CellJson {
 
 export interface NotebookMetaJson {
   title?: string;
+  /**
+   * Short description of what the notebook does. Surfaced as a queryable
+   * `urn:eigenius:notebook:description` property when the notebook is
+   * published to a layer (Phase 3.5).
+   */
+  description?: string;
   /** ISO 8601 — set by the editor on save. */
   created?: string;
   /** ISO 8601 — set by the editor on every save. */
