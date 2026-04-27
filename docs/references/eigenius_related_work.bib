@@ -55,18 +55,18 @@
                ontology used as a peer to {BFO} and {DOLCE}.}
 }
 
-@article{borgo-mizoguchi2014,
+@article{borgo-mizoguchi2009,
   author  = {Borgo, Stefano and Mizoguchi, Riichiro},
   title   = {A formal ontological perspective on the behaviors and functions
              of technical artifacts},
   journal = {AI EDAM (Artificial Intelligence for Engineering Design,
              Analysis and Manufacturing)},
-  volume  = {28},
-  number  = {3},
-  pages   = {223--240},
+  volume  = {23},
+  number  = {1},
+  pages   = {3--21},
   publisher = {Cambridge University Press},
-  year    = {2014},
-  doi     = {10.1017/S0890060414000122},
+  year    = {2009},
+  doi     = {10.1017/S0890060409000079},
   note    = {Uses {DOLCE} to give a uniform formal account of artifact
              behavior vs. function — a long-standing source of
              miscommunication in engineering design.}
@@ -118,9 +118,9 @@
 % Tahar et al.) and collaborators.
 % -----------------------------------------------------------------------------
 
-@article{ahmed-hasan-systems-biology,
-  author  = {Ahmed, Adnan and Hasan, Osman and Tahar, Sofi{\`e}ne and
-             Awwad, Falah},
+@article{rashid-hasan-systems-biology,
+  author  = {Rashid, Adnan and Hasan, Osman and Siddique, Umair and
+             Tahar, Sofi{\`e}ne},
   title   = {Formal reasoning about systems biology using theorem proving},
   journal = {PLOS ONE},
   volume  = {12},
@@ -192,15 +192,15 @@
 % Knowledge graphs and formal reasoning in chemistry
 % -----------------------------------------------------------------------------
 
-@article{bai2023marie-bert,
-  author  = {Bai, Jiaru and Lai, Lukas and Mosbach, Sebastian and
-             Akroyd, Jethro and Krdzavac, Nenad B. and Kraft, Markus},
-  title   = {{Marie} and {BERT}: A knowledge graph embedding based question
+@article{zhou2023marie-bert,
+  author  = {Zhou, Xiaochi and Zhang, Shaocong and Agarwal, Mehal and
+             Akroyd, Jethro and Mosbach, Sebastian and Kraft, Markus},
+  title   = {{Marie} and {BERT}---{A} knowledge graph embedding based question
              answering system for chemistry},
   journal = {ACS Omega},
   volume  = {8},
-  number  = {37},
-  pages   = {33640--33655},
+  number  = {36},
+  pages   = {33039--33057},
   year    = {2023},
   doi     = {10.1021/acsomega.3c05114},
   note    = {Combines hybrid knowledge graph embeddings with {BERT}-based
@@ -294,19 +294,18 @@
                   foundations and the univalence axiom.}
 }
 
-@misc{dhott2025,
-  author       = {Ma, Lin},
-  title        = {{DHoTT}: A Temporal Extension of Homotopy Type Theory for
-                  Semantic Drift},
-  year         = {2025},
-  eprint       = {2506.09671},
+@misc{poernomo2025dhott,
+  author        = {Poernomo, Iman},
+  title         = {{DHoTT}: A Temporal Extension of Homotopy Type Theory
+                   for Semantic Drift},
+  year          = {2025},
+  eprint        = {2506.09671},
   archivePrefix = {arXiv},
-  primaryClass = {cs.LO},
-  url          = {https://arxiv.org/abs/2506.09671},
-  note         = {Indexes types by a context-time parameter so they may
-                  deform, rupture, and reassemble — supports formal
-                  reasoning about semantic evolution and discontinuity.
-                  Authorship to be verified against the arXiv listing.}
+  primaryClass  = {cs.LO},
+  url           = {https://arxiv.org/abs/2506.09671},
+  note          = {Indexes types by a context-time parameter so they may
+                   deform, rupture, and reassemble — supports formal
+                   reasoning about semantic evolution and discontinuity.}
 }
 
 @phdthesis{weaver-bicubical-dtt,
@@ -337,8 +336,8 @@
 % Onto-axiomatic method, state formalization, and integrative methodology
 % -----------------------------------------------------------------------------
 
-@article{wang2025state-formalization,
-  author  = {Wang, others},
+@article{qiu2025state-formalization,
+  author  = {Qiu, others},
   title   = {Research on a general state formalization method from the
              perspective of logic},
   journal = {Mathematics ({MDPI})},
@@ -349,7 +348,9 @@
   doi     = {10.3390/math13203324},
   note    = {Proposes a unified axiomatization of states as interpretations
              of formulas across first-order, higher-order, and infinitary
-             logics. Authorship to be verified.}
+             logics. Full author list per Crossref starts with Qiu;
+             complete attribution should be filled in from the {MDPI} page
+             before any citation use.}
 }
 
 @misc{sowa-signs-processes,
@@ -367,16 +368,134 @@
 
 
 % -----------------------------------------------------------------------------
+% Institutions applied to systems / software engineering
+%
+% The Knapp/Mossakowski/Roggenbach line at Augsburg/Magdeburg/Swansea uses
+% institutions and Grothendieck institutions to compose semantics of
+% heterogeneous UML diagram types and link them to verification backends.
+% -----------------------------------------------------------------------------
+
+@inproceedings{knapp-uml-state-machines2015,
+  author    = {Knapp, Alexander and Mossakowski, Till and
+               Roggenbach, Markus and Glauer, Martin},
+  title     = {An institution for simple {UML} state machines},
+  booktitle = {FASE 2015: Fundamental Approaches to Software Engineering},
+  editor    = {Egyed, Alexander and Schaefer, Ina},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {9033},
+  pages     = {3--18},
+  publisher = {Springer},
+  year      = {2015},
+  doi       = {10.1007/978-3-662-46675-9_1}
+}
+
+@incollection{knapp-institutional-framework-uml2015,
+  author    = {Knapp, Alexander and Mossakowski, Till and Roggenbach, Markus},
+  title     = {Towards an institutional framework for heterogeneous formal
+               development in {UML} --- A position paper},
+  booktitle = {Software, Services, and Systems: Essays Dedicated to Martin
+               Wirsing on the Occasion of His Retirement from the Chair of
+               Programming and Software Engineering},
+  editor    = {De~Nicola, Rocco and Hennicker, Rolf},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {8950},
+  pages     = {215--230},
+  publisher = {Springer},
+  year      = {2015},
+  doi       = {10.1007/978-3-319-15545-6_15}
+}
+
+
+% -----------------------------------------------------------------------------
+% Institutions in physics and the philosophy of science
+%
+% The Halvorson/Glymour debate around the semantic view of theories is the
+% locus where institution-theoretic and category-theoretic accounts of
+% scientific theories meet contemporary philosophy of science. Darrigol's
+% modular-structure paper is the closest precursor on the physics side.
+% -----------------------------------------------------------------------------
+
+@article{halvorson2012,
+  author  = {Halvorson, Hans},
+  title   = {What scientific theories could not be},
+  journal = {Philosophy of Science},
+  volume  = {79},
+  number  = {2},
+  pages   = {183--206},
+  year    = {2012},
+  doi     = {10.1086/664745},
+  note    = {Critique of the strict semantic view of scientific theories;
+             starts the debate that motivates institution- and
+             category-theoretic accounts.}
+}
+
+@article{glymour2013-theoretical-equivalence,
+  author  = {Glymour, Clark},
+  title   = {Theoretical equivalence and the semantic view of theories},
+  journal = {Philosophy of Science},
+  volume  = {80},
+  number  = {2},
+  pages   = {286--297},
+  year    = {2013},
+  doi     = {10.1086/670261},
+  note    = {Response to Halvorson 2012. The user's reading list links
+             this title to an institution-theoretic treatment with quantum
+             cosmology examples; the title matches Glymour's paper exactly,
+             but Glymour's paper itself does not use institutions --- it
+             defends the semantic view via De Bouvere's criteria. The
+             institution-theoretic angle on this debate is in Halvorson
+             \& Tsementzis, "Categories of Scientific Theories" (2017).}
+}
+
+@article{darrigol2008-modular,
+  author  = {Darrigol, Olivier},
+  title   = {The modular structure of physical theories},
+  journal = {Synthese},
+  volume  = {162},
+  number  = {2},
+  pages   = {195--223},
+  year    = {2008},
+  doi     = {10.1007/s11229-007-9181-x},
+  note    = {Argues that mature physical theories decompose into modules
+             with stable interfaces --- the philosophical analogue of the
+             colimit-style composition that institutions formalize.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Institutions for ontology engineering / Information Flow Framework
+% -----------------------------------------------------------------------------
+
+@misc{kent-iff2011,
+  author        = {Kent, Robert E.},
+  title         = {The {Information Flow Framework}: A descriptive category
+                   metatheory},
+  year          = {2011},
+  eprint        = {1108.4133},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LO},
+  url           = {https://arxiv.org/abs/1108.4133},
+  note          = {Structural metatheory for the {IEEE P1600.1 Standard
+                   Upper Ontology (SUO)} project; uses institutions and
+                   their morphisms as the upper-metalevel axiomatization
+                   for semantic integration of ontologies.}
+}
+
+
+% -----------------------------------------------------------------------------
 % Epistemology of formal proof
 % -----------------------------------------------------------------------------
 
-@article{hamami-ontological-purity,
-  author  = {Hamami, Yacin},
+@article{martinot2024ontological-purity,
+  author  = {Martinot, Robin},
   title   = {Ontological purity for formal proofs},
   journal = {The Review of Symbolic Logic},
+  volume  = {17},
+  number  = {2},
+  pages   = {395--434},
   publisher = {Cambridge University Press},
   year    = {2024},
-  doi     = {10.1017/S1755020324000017},
+  doi     = {10.1017/S1755020323000333},
   note    = {Develops a graded notion of ontological purity for formal
              proofs, including a notion of "secondary purity" for proofs
              that use surrogate content via formal interpretations.
