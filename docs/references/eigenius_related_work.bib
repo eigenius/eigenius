@@ -1,0 +1,385 @@
+% =============================================================================
+% eigenius_related_work.bib
+%
+% Contemporary related work in applied formal reasoning for science and
+% engineering. Companion to:
+%
+%   eigenius.bib           — actually cited by Eigenius papers/docs/guides
+%   eigenius_additional.bib — system depends on but does not yet cite
+%   eigenius_precursors.bib — philosophical / methodological lineage
+%
+% This file collects the references identified during the bibliographic
+% review of "docs/references/Formal Methods in Scientific Reasoning.md".
+% They cover ongoing efforts to apply formal ontologies, higher-order logic,
+% type theory, and knowledge graphs to scientific and engineering domains —
+% i.e. the contemporary landscape against which Eigenius positions itself.
+%
+% Where authorship or precise venue could not be determined unambiguously
+% from the source survey, entries carry a `note` field flagging the
+% provenance so a future bibliographic pass can verify them.
+%
+% Same key convention as the other three files: lowercase, descriptive,
+% short.
+% =============================================================================
+
+
+% -----------------------------------------------------------------------------
+% Foundational ontologies for science
+%
+% Eigenius's typed-layer architecture is a peer of these top-level ontology
+% efforts. Note: arp-smith-spear2015 (BFO textbook), gruber1995, and
+% obofoundry2007 are already in eigenius_additional.bib / precursors.bib.
+% -----------------------------------------------------------------------------
+
+@techreport{masolo2003dolce,
+  author      = {Masolo, Claudio and Borgo, Stefano and Gangemi, Aldo and
+                 Guarino, Nicola and Oltramari, Alessandro},
+  title       = {{WonderWeb} Deliverable {D18}: Ontology Library},
+  institution = {{Laboratory For Applied Ontology (ISTC-CNR)}},
+  year        = {2003},
+  note        = {Foundational specification of {DOLCE} (Descriptive Ontology
+                 for Linguistic and Cognitive Engineering).},
+  url         = {http://wonderweb.man.ac.uk/deliverables/D18.shtml}
+}
+
+@incollection{herre2010gfo,
+  author    = {Herre, Heinrich},
+  title     = {General Formal Ontology ({GFO}): A foundational ontology for
+               conceptual modelling},
+  booktitle = {Theory and Applications of Ontology: Computer Applications},
+  editor    = {Poli, Roberto and Healy, Michael and Kameas, Achilles},
+  pages     = {297--345},
+  publisher = {Springer},
+  year      = {2010},
+  note      = {Specification of {GFO}, an integrative axiomatic top-level
+               ontology used as a peer to {BFO} and {DOLCE}.}
+}
+
+@article{borgo-mizoguchi2014,
+  author  = {Borgo, Stefano and Mizoguchi, Riichiro},
+  title   = {A formal ontological perspective on the behaviors and functions
+             of technical artifacts},
+  journal = {AI EDAM (Artificial Intelligence for Engineering Design,
+             Analysis and Manufacturing)},
+  volume  = {28},
+  number  = {3},
+  pages   = {223--240},
+  publisher = {Cambridge University Press},
+  year    = {2014},
+  doi     = {10.1017/S0890060414000122},
+  note    = {Uses {DOLCE} to give a uniform formal account of artifact
+             behavior vs. function — a long-standing source of
+             miscommunication in engineering design.}
+}
+
+@article{garbacz-engineering-functions,
+  author  = {Garbacz, Pawe{\l} and others},
+  title   = {Towards a formal ontology of engineering functions, behaviours,
+             and capabilities},
+  journal = {Semantic Web Journal},
+  note    = {Submission swj3188; surveys formalizations of engineering
+             function/behaviour/capability and proposes a unifying ontology.},
+  url     = {https://www.semantic-web-journal.net/system/files/swj3188.pdf}
+}
+
+@article{smith2012classifying-processes,
+  author  = {Smith, Barry},
+  title   = {Classifying processes: An essay in applied ontology},
+  journal = {Ratio (new series)},
+  volume  = {25},
+  number  = {4},
+  pages   = {463--488},
+  year    = {2012},
+  doi     = {10.1111/j.1467-9329.2012.00557.x},
+  note    = {Articulates the {BFO} treatment of occurrents (processes) and
+             their classification.}
+}
+
+@article{ontology-of-physics-for-biology,
+  author  = {Cook, Daniel L. and Bookstein, Fred L. and Gennari, John H.},
+  title   = {Physical properties of biological entities: An introduction
+             to the {Ontology} of {Physics} for {Biology}},
+  journal = {PLOS ONE},
+  volume  = {6},
+  number  = {12},
+  year    = {2011},
+  pages   = {e28708},
+  doi     = {10.1371/journal.pone.0028708},
+  note    = {Specification of {OPB}, which extends {BFO} with energy-bearing
+             biophysical entities and quantitative dependencies.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Higher-order logic applied to the natural sciences
+%
+% Theorem-proving-based formalization of biology, physics, and synthetic
+% biology in HOL Light / HOL4. Active research line at Concordia (Hasan,
+% Tahar et al.) and collaborators.
+% -----------------------------------------------------------------------------
+
+@article{ahmed-hasan-systems-biology,
+  author  = {Ahmed, Adnan and Hasan, Osman and Tahar, Sofi{\`e}ne and
+             Awwad, Falah},
+  title   = {Formal reasoning about systems biology using theorem proving},
+  journal = {PLOS ONE},
+  volume  = {12},
+  number  = {7},
+  pages   = {e0180179},
+  year    = {2017},
+  doi     = {10.1371/journal.pone.0180179},
+  note    = {Formalizes Zsyntax in {HOL4} / {HOL Light} for the verification
+             of molecular pathways and biological networks.}
+}
+
+@inproceedings{khan-afshar-complex-vectors,
+  author    = {Khan-Afshar, Sanaz and Siddique, Umair and
+               Mahmoud, Muhammad Yasir and Hasan, Osman and
+               Tahar, Sofi{\`e}ne},
+  title     = {Formalization of complex vectors in higher-order logic},
+  booktitle = {CICM 2014: International Conference on Intelligent
+               Computer Mathematics},
+  series    = {Lecture Notes in Artificial Intelligence},
+  volume    = {8543},
+  pages     = {123--137},
+  publisher = {Springer},
+  year      = {2014},
+  note      = {{HOL Light} formalization of complex vector analysis used
+               to verify foundational laws of electromagnetism.}
+}
+
+@phdthesis{siddique2015thesis,
+  author = {Siddique, Umair},
+  title  = {Formal Analysis of Fractional Order Systems in Higher-Order Logic},
+  school = {Concordia University},
+  year   = {2015},
+  note   = {Develops a {HOL Light} library for fractional-order systems and
+            applies it to engineering analysis.}
+}
+
+@article{rashid-laplace-fourier,
+  author  = {Rashid, Adnan and Hasan, Osman},
+  title   = {Formalization of {Laplace} and {Fourier} transforms in
+             higher-order logic for the analysis of synthetic biology
+             genetic circuits},
+  journal = {Theoretical Computer Science (or related)},
+  note    = {Frequency-domain analysis of synthetic genetic circuits
+             carried out in {HOL Light}; exact venue should be confirmed.
+             Source: cited by the survey at PMC5495343.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Quantum logic — historical foundation
+% -----------------------------------------------------------------------------
+
+@article{birkhoff-vonneumann1936,
+  author  = {Birkhoff, Garrett and von Neumann, John},
+  title   = {The logic of quantum mechanics},
+  journal = {Annals of Mathematics},
+  volume  = {37},
+  number  = {4},
+  pages   = {823--843},
+  year    = {1936},
+  doi     = {10.2307/1968621},
+  note    = {Founding paper of quantum logic; introduces the orthomodular
+             lattice structure of quantum events as an alternative to
+             classical Boolean algebra.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Knowledge graphs and formal reasoning in chemistry
+% -----------------------------------------------------------------------------
+
+@article{bai2023marie-bert,
+  author  = {Bai, Jiaru and Lai, Lukas and Mosbach, Sebastian and
+             Akroyd, Jethro and Krdzavac, Nenad B. and Kraft, Markus},
+  title   = {{Marie} and {BERT}: A knowledge graph embedding based question
+             answering system for chemistry},
+  journal = {ACS Omega},
+  volume  = {8},
+  number  = {37},
+  pages   = {33640--33655},
+  year    = {2023},
+  doi     = {10.1021/acsomega.3c05114},
+  note    = {Combines hybrid knowledge graph embeddings with {BERT}-based
+             entity linking to answer multihop chemistry questions over
+             {OntoSpecies} / {OntoMOPs}.}
+}
+
+@inproceedings{fca-process-ontologies,
+  author    = {Tutcher, Jonathan},
+  title     = {A {Formal Concept Analysis}-based method for developing
+               process ontologies, applied to chemical engineering},
+  booktitle = {Proceedings of an industrial-ontology workshop},
+  year      = {2014},
+  note      = {Uses {FCA} to derive class hierarchies for chemical engineering
+               processes and integrates them with {ISO 15926} / {SUMO}.
+               Exact venue per ResearchGate publication 271505148.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Engineering ontologies and Product Lifecycle Management
+% -----------------------------------------------------------------------------
+
+@techreport{psrl-nist,
+  author      = {Patil, Lalit and Dutta, Debasish and Sriram, Ram D.},
+  title       = {Ontology Formalization of Product Semantics for Product
+                 Lifecycle Management},
+  institution = {{National Institute of Standards and Technology}},
+  number      = {NISTIR 7274},
+  year        = {2005},
+  url         = {https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir7274.pdf},
+  note        = {Defines the {Product Semantic Representation Language}
+                 ({PSRL}), a description-logic-based formalism for
+                 application-independent product semantics in {PLM}.}
+}
+
+@article{ontology-based-plm-polimi,
+  author  = {{Polimi authors}},
+  title   = {Ontology-based product lifecycle management: Insights from a
+             proof-of-concept implementation},
+  journal = {IEEE Access},
+  year    = {2025},
+  note    = {Demonstrates ontology-driven {PLM} in an Engineer-to-Order
+             setting; combines linked-data infrastructure with
+             description-logic reasoning. Authorship per Polimi
+             repository entry; exact attribution should be verified.}
+}
+
+@misc{model-management-syseng-kg,
+  author       = {Anonymous},
+  title        = {Model management to support systems engineering workflows
+                  using ontology-based knowledge graphs},
+  year         = {2025},
+  eprint       = {2512.09596},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.SE},
+  url          = {https://arxiv.org/abs/2512.09596},
+  note         = {Uses the Ontology Modelling Language ({OML}) to relate
+                  systems engineering processes to artifacts via a
+                  knowledge graph; supports versioning and reasoning.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Homotopy Type Theory and its directed / dynamic extensions
+%
+% Note: hottbook2013 is in eigenius_precursors.bib.
+% -----------------------------------------------------------------------------
+
+@article{awodey-warren2009,
+  author  = {Awodey, Steve and Warren, Michael A.},
+  title   = {Homotopy theoretic models of identity types},
+  journal = {Mathematical Proceedings of the Cambridge Philosophical Society},
+  volume  = {146},
+  number  = {1},
+  pages   = {45--55},
+  year    = {2009},
+  doi     = {10.1017/S0305004108001783},
+  note    = {Establishes the homotopy-theoretic interpretation of
+             Martin-L{\"o}f identity types — a precursor to the univalent
+             foundations program.}
+}
+
+@misc{voevodsky2014univalent,
+  author       = {Voevodsky, Vladimir},
+  title        = {The Origins and Motivations of Univalent Foundations},
+  year         = {2014},
+  howpublished = {The Institute Letter, {Institute for Advanced Study}},
+  url          = {https://www.ias.edu/ideas/2014/voevodsky-origins},
+  note         = {Voevodsky's own account of the genesis of univalent
+                  foundations and the univalence axiom.}
+}
+
+@misc{dhott2025,
+  author       = {Ma, Lin},
+  title        = {{DHoTT}: A Temporal Extension of Homotopy Type Theory for
+                  Semantic Drift},
+  year         = {2025},
+  eprint       = {2506.09671},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LO},
+  url          = {https://arxiv.org/abs/2506.09671},
+  note         = {Indexes types by a context-time parameter so they may
+                  deform, rupture, and reassemble — supports formal
+                  reasoning about semantic evolution and discontinuity.
+                  Authorship to be verified against the arXiv listing.}
+}
+
+@phdthesis{weaver-bicubical-dtt,
+  author = {Weaver, Matthew Z.},
+  title  = {Bicubical Directed Type Theory},
+  school = {Princeton University},
+  year   = {2024},
+  url    = {https://dataspace.princeton.edu/handle/88435/dsp017s75dg778},
+  note   = {Generalizes groupoid-style {HoTT} to a directed setting with
+            morphisms — a foundation for type-theoretic reasoning over
+            directed processes.}
+}
+
+@article{genetic-code-hott,
+  author  = {Anonymous},
+  title   = {Exploring the genetic code: A Homotopy Type Theory approach to
+             uncovering embedded information},
+  journal = {Preprint},
+  year    = {2024},
+  note    = {Analyzes codon relationships and nucleotide permutations in a
+             3D lattice model under {HoTT}; surfaces structure suggestive
+             of layered molecular language. ResearchGate publication
+             380075492; authorship to be verified.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Onto-axiomatic method, state formalization, and integrative methodology
+% -----------------------------------------------------------------------------
+
+@article{wang2025state-formalization,
+  author  = {Wang, others},
+  title   = {Research on a general state formalization method from the
+             perspective of logic},
+  journal = {Mathematics ({MDPI})},
+  volume  = {13},
+  number  = {20},
+  pages   = {3324},
+  year    = {2025},
+  doi     = {10.3390/math13203324},
+  note    = {Proposes a unified axiomatization of states as interpretations
+             of formulas across first-order, higher-order, and infinitary
+             logics. Authorship to be verified.}
+}
+
+@misc{sowa-signs-processes,
+  author       = {Sowa, John F.},
+  title        = {Signs, Processes, and Language Games: Foundations for
+                  Ontology},
+  year         = {2010},
+  howpublished = {Online manuscript, jfsowa.com},
+  url          = {http://www.jfsowa.com/pubs/signproc.htm},
+  note         = {Sowa's foundational essay arguing that ontology must
+                  account for signs, processes, and language games — a
+                  framing closely related to Eigenius's typed-layer view
+                  of scientific knowledge.}
+}
+
+
+% -----------------------------------------------------------------------------
+% Epistemology of formal proof
+% -----------------------------------------------------------------------------
+
+@article{hamami-ontological-purity,
+  author  = {Hamami, Yacin},
+  title   = {Ontological purity for formal proofs},
+  journal = {The Review of Symbolic Logic},
+  publisher = {Cambridge University Press},
+  year    = {2024},
+  doi     = {10.1017/S1755020324000017},
+  note    = {Develops a graded notion of ontological purity for formal
+             proofs, including a notion of "secondary purity" for proofs
+             that use surrogate content via formal interpretations.
+             Directly relevant to evaluating cross-layer reasoning in
+             Eigenius.}
+}
