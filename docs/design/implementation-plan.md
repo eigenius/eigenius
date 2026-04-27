@@ -797,8 +797,8 @@ The phase decomposes into two milestones that are separately reviewable:
 - **14a — Topology / content split (~1 week).** In-memory DAG of `LayerId → parent[s]`, branch heads, named refs. Resource content moves to a cache keyed by `(LayerId, IRI)`. Naïve top-down lookup walks the topology and falls through to the storage backend on cache miss; correctness first, performance later.
 - **14b — Per-head shadowing index (~1.5 weeks).** Persistent `IRI → highest_defining_layer` index per branch head, maintained incrementally on commit (same atomic write batch as the layer itself). Bloom-filter front end for negative answers. Reduces lookup from O(depth) probes to one. Time-travel queries reconstruct an "as-of-L" view via per-named-head checkpoints + on-demand rewind.
 - **14c — Two-pool cache + eviction (~1 week).** Active-head pool (entries that are currently the top per the active head's shadowing index) vs. historical pool (entries shadowed in every active head, only reachable via time-travel or trace dereferences). ARC inside each pool; historical pool evicted first under memory pressure.
-- **14d — DAG branching primitive (~1.5 weeks).** Storage layout supports multiple head pointers per DB rooted in a common ancestor. Branch creation, naming, listing. No merging yet — branches diverge but cannot fuse (Phase 15).
-- **14e — Multi-session writes (~1 week).** N concurrent kernel instances, each pinned to a branch. Cross-branch writes refused at the storage layer; cross-branch reads allowed (any committed layer is readable from any session). Session-to-branch binding established at startup.
+- **14d — `commit_layer` + `update_branch` with CAS (~1.5 weeks).** The two stateless write primitives that anchor the lattice. `commit_layer(parent, content)` appends an immutable layer to the DAG; `update_branch(branch, expected_old, new_head)` advances a branch ref via CAS with a `FastForward | NeedsWitnessedMerge` outcome (trivial merge ships in 14e). Pin is just a parameter; no kernel-side `Session`, `PromotionService`, or scratch-chain abstraction — clients (CLI / notebook / task runner / SDK) orchestrate. D21's `TaskRecord.layer_head` is already the per-task pin and needs no structural change.
+- **14e — Trivial merge in `update_branch` + branch read surface (~2 weeks).** Extend `update_branch` with the `TrivialMerge` outcome: when the caller's chain and the branch's current head modify disjoint sets of IRIs since their lowest common ancestor, the kernel produces a multi-parent merge layer automatically and CAS-updates the branch to point at it. Witnessed merges (real conflicts) still return `NeedsWitnessedMerge` for Phase 15 to handle. Also lands `BranchManager` read/list/delete surface, the `auto-*` naming convention for client-saved divergent chains, and a small additive `outcome: BranchUpdateOutcome` field on D21's `TaskRecord` so users can see whether a task fast-forwarded, trivially merged, or needs witnessed-merge resolution. The trivial-merge case handles the majority of real-world divergence in dev workflows; without it Phase 14 ships with a sharp usability cliff for any concurrent activity.
 - **14f — Reachability-based GC (~2 weeks).** Mark-and-sweep over the resource graph. Roots: pinned branch heads, active sessions, resources referenced by reflection-ontology traces, verified-knowledge claims. Background task with backpressure; configurable triggers (size threshold, idle interval).
 - **14g — Branch pruning (~1 week).** `eigenius db prune <branch>` removes a branch from the topology; GC sweeps anything reachable only through it. Rejects pruning of branches with active sessions.
 - **14h — Indexed resource access for queries (~1.5 weeks).** Wire the existing SPO/POS/OPS indexes from `storage/indexing/` through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes an indexed lookup against the storage backend instead of a full BTreeMap scan. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap.
@@ -821,29 +821,29 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ---
 
-## Phase 15 — Layer Reconciliation
+## Phase 15 — Witnessed Layer Reconciliation
 
-**Goal:** Now that branches exist as first-class structures (Phase 14), this phase asks: when can we *prove* that two of them can be unified? Reconciliation is proved — a valid merge requires a `Comorphism` witness per Phase 11d — rather than declared.
+**Goal:** Resolve the residual class of divergence that Phase 14's trivial merge cannot — *witnessed* merges, where two branches modify the same IRI in incompatible ways and reconciliation requires a `Comorphism` witness per Phase 11d to specify the resolution. Trivial merges (disjoint-IRI contributions) already auto-resolve in Phase 14e; Phase 15 closes the loop on the cases that genuinely need translation.
 
-**Duration estimate:** 4–6 weeks.
+**Duration estimate:** 3–5 weeks (smaller than the original Phase 15 scope because trivial merge moved to Phase 14e).
 
-**Prerequisites:** Phase 11d (`Comorphism` class), Phase 14 (DAG branching, multi-session, storage architecture).
+**Prerequisites:** Phase 11d (`Comorphism` class), Phase 14e (`update_branch` returning `NeedsWitnessedMerge` is the entry point Phase 15 hooks into).
 
-**Motivation:** D13 §8 (migration) and §11 (multi-session) converge on the same primitive. Two branches that have diverged need a comorphism proof to fuse. Phase 14 gave us the structural primitive (multiple branches, multi-session); Phase 15 gives the semantic operation (merge with witness). The category-theoretic vocabulary from D10 (layers form a category, morphisms between layers are structure-preserving mappings, comorphisms translate between institutional views) is the right lens — merge is essentially a colimit construction up to comorphism equivalence.
+**Motivation:** Phase 14e's `update_branch` returns `NeedsWitnessedMerge { current_head, conflicting_iris }` whenever two branches modify the same IRI in incompatible ways. Pre-Phase-15 the only escape is to save the would-be-merged chain as a sibling branch (an `auto-*` ref) and live with the divergence. Phase 15 turns that residual case into "supply a comorphism witness; the kernel produces a witnessed merge layer." This is the operation that makes the lattice fully consolidatable for cross-cutting ontology evolution. The category-theoretic vocabulary from D10 (layers as a category, comorphisms as institutional view translations) gives the precise semantics — the witnessed merge is a colimit in the layer category up to comorphism equivalence.
 
 ### Phase 15 — Deliverables
 
-- **Merge command:** `eigenius db merge <branch-a> <branch-b> --witness <comorphism>` — requires a `Comorphism` resource as witness; refuses to merge if none exists or the witness fails validation. Produces a new layer that supersedes both branches.
-- **Conflict detection:** when two branches define incompatible values for the same resource, the merge surfaces the conflict and the comorphism witness specifies the resolution. If no resolution exists, the merge fails with the conflict set surfaced for manual handling.
-- **Ontology migration as a degenerate merge:** replace D13's v1 drift-refusal with a `migrate` command that takes a `Comorphism` resource and rewrites persisted resources across the layer boundary. Implementation-wise, a migration is a "merge" with one branch being a single-resource diff.
-- **Merge layer identity:** the merge-resulting layer is a colimit-style construction in the layer category; properly identified, named, and recorded so subsequent merges have a well-defined common ancestor.
-- **Real-world test surface:** since Phase 14 ships before merge exists, users may already have lots of branches by the time Phase 15 lands. The merge implementation has to handle multi-ancestor cases on real, in-the-wild branch DAGs — not just freshly-created two-branch toy cases.
-- **D20 — design doc.** The category-theoretic vocabulary actually pays off here because the merge operation needs precise semantics.
+- **Witnessed merge command:** `eigenius db merge <branch-a> <branch-b> --witness <comorphism>` — requires a `Comorphism` resource that resolves the conflicting IRIs from a `NeedsWitnessedMerge` outcome. Produces a multi-parent merge layer; CAS-updates the target branch to point at it.
+- **Programmatic surface:** an `update_branch` variant or paired RPC that accepts a witness directly, so clients hitting `NeedsWitnessedMerge` can immediately retry with a witness rather than going through the CLI command.
+- **Ontology migration as a degenerate witnessed merge:** replace D13's v1 drift-refusal with a `migrate` command that takes a `Comorphism` and rewrites persisted resources across a layer boundary. Implementation-wise, a migration is a witnessed merge with one branch being a single-resource diff.
+- **Merge layer identity:** the witnessed merge layer is content-addressed like any other; common-ancestor invariants are preserved so subsequent merges have a well-defined LCA.
+- **Real-world test surface:** since Phase 14 ships first, users may already have lots of `auto-*` branches by the time Phase 15 lands. The witnessed merge has to handle multi-ancestor cases on real, in-the-wild branch DAGs — not just freshly-created two-branch toy cases.
+- **D20 — design doc.** The category-theoretic vocabulary actually pays off here because the witnessed merge operation needs precise semantics.
 
 ### Phase 15 — Key design questions
 
-- **Common ancestor invariant:** lowest common ancestor in the DAG, or something stronger?
-- **Conflict resolution policy:** when conflicts exist and the comorphism doesn't resolve them, fail or fall through to a manual resolution step?
+- **Witness sufficiency:** does a single `Comorphism` resource suffice to resolve a multi-IRI conflict, or do we need a per-IRI witness map?
+- **Witness composition:** if branches A and B were each previously merged via different comorphisms, does merging A with B compose the witnesses?
 - **Merge layer validation:** runs through `validate_with_institutions` (Phase 12a) or treated as a special case?
 - **Active WASM institutions during merge:** institutions re-register against the merged layer as in D13's RESUME path?
 
