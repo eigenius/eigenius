@@ -295,7 +295,11 @@ def lookup_doi(doi: str) -> Optional[dict]:
         return None
     title = (msg.get("title") or [""])[0]
     year = None
-    for k in ("issued", "published-print", "published-online", "created"):
+    # Prefer published-print over issued: Crossref's `issued` is the
+    # earliest known publication date, which for journal articles is
+    # often the online date. The conventional citation year is the
+    # print year, so we look there first.
+    for k in ("published-print", "published", "issued", "published-online", "created"):
         parts = (msg.get(k) or {}).get("date-parts")
         if parts and parts[0]:
             year = parts[0][0]
