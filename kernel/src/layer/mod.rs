@@ -20,6 +20,18 @@
 //!
 //! A `Layer` is immutable once built. Use `LayerBuilder` to accumulate
 //! resources and produce an immutable `Layer` via `build()`.
+//!
+//! Phase 14 (D23) introduces a topology / content split: `LayerHandle` and
+//! `LayerTopology` (see [`handle`]) describe the DAG without holding any
+//! resources, while resource content goes through a `ResourceCache` (see
+//! [`cache`]). 14a-i ships those types as pure additions; integration with
+//! the legacy `Layer` chain lands in 14a-ii / 14a-iii.
+
+mod cache;
+mod handle;
+
+pub use cache::{CacheStats, MemoryResourceCache, ResourceCache, ResourceKey};
+pub use handle::{ChainIter, LayerHandle, LayerTopology};
 
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
