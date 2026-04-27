@@ -63,6 +63,12 @@ The read-only query language over the layered Eigon knowledge graph. Pattern mat
 
 **Twelve chapters covering**: lexical structure; clause-by-clause program structure (`USING`, `MATCH`, `WHERE`, `FIBER`, `RETURN`, `GROUP BY`, etc.); pattern matching against typed and untyped resources; the expression sublanguage; FIBER clauses (institution dispatch with transient overlay); decide predicates and comorphisms in expression position; stratification rules for recursion + negation; the result-document format; error messages.
 
+### [References →](references/README.md)
+
+A consolidated bibliography for the platform — what we cite, what we depend on, what came before us, and what we share contemporary ground with. Generated from the BibTeX files in [`docs/references/`](../references/) by `scripts/bib-to-md.py`.
+
+**Four lists covering**: cited references (used in design docs / papers / guides), foundational works the system relies on, philosophical and methodological precursors (MKM, Suppes structuralism, formal ontologies in science, the reproducibility movement), and contemporary related work (institution theory in physics and engineering, HOL for the natural sciences, HoTT and its extensions, the epistemology of formal proof). Companion tooling: `scripts/verify-citations.py` cross-checks each entry against Crossref / arXiv / live URLs.
+
 ## How the guides relate
 
 The **platform** guide is operational — it covers everything *around* writing ESL/EigenQL: installing, running, managing data, deploying, building WASM extensions. The **ESL** and **EigenQL** guides are surface-language references — they cover what you write *into* the system.
