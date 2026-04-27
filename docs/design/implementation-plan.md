@@ -651,7 +651,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - `FiberReasoner::translate(comorphism_iri, source, ctx) -> Result<Resource, _>` method with default error. Mirrors Phase 11c's `decide` pattern.
 - `Exp::InstitutionInvoke { comorphism_iri, source }` kernel AST node with eval arm dispatching via `EvalCtx`'s institution registry. Without a registry, produces a passthrough neutral — analogous to Phase 11c's undecidable fallback. Readback not added (the expression evaluates or produces a neutral; normal form readback isn't required for this variant yet).
 - 6 new tests: comorphism dispatch-table population (both IRI and procedure IRI), translate dispatch, default-translate-UnknownType error, eval-through-registry, no-registry-passthrough, unknown-comorphism-error.
-- **Explicit non-goals shipped as-is:** no ESL surface syntax for `InstitutionInvoke`; no comorphism composition (ρ₁ ∘ ρ₂); no backward translation; no typed translation signatures. All additive; Phase 14 reconciliation can invoke translate via Rust directly without any of these.
+- **Explicit non-goals shipped as-is:** no ESL surface syntax for `InstitutionInvoke`; no comorphism composition (ρ₁ ∘ ρ₂); no backward translation; no typed translation signatures. All additive; Phase 15 reconciliation can invoke translate via Rust directly without any of these.
 
 ### Phase 11e.1 — ESL surface for institution capabilities — ✓
 
@@ -782,42 +782,115 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ---
 
-## Phase 14 — Layer Reconciliation and Multi-Session
+## Phase 14 — Out-of-Core Layer Architecture
 
-**Goal:** Generalise layer extension from "append-only single-writer chain" to "branch-and-merge across sessions." A DB may receive concurrent writes from multiple kernel instances; ontology migrations produce divergent branches that must eventually merge. Reconciliation is proved — a valid merge requires a `Comorphism` witness per Phase 11d — rather than declared.
+**Goal:** Decouple layer topology from resource content so the kernel's working set is bounded by cache size rather than graph size. Generalise the layer model from a single chain to a DAG with branches, multi-session writes, and lifecycle operations (GC, pruning). Read-side query path becomes index-driven through the storage backend; result-set processing remains in memory (operator-level spill is Phase 16).
 
-**Duration estimate:** 4–6 weeks.
+**Duration estimate:** ~10 weeks.
 
-**Prerequisites:** Phase 9a (durable state), Phase 11d (`Comorphism` class).
+**Prerequisites:** Phase 9a (durable state — backend already persists everything that needs to be on disk), Phase 12 (worked examples — gives realistic graph-size workloads to validate the cache and index design under).
 
-**Motivation:** D13 §8 (migration) and §11 (multi-session) converge on the same primitive. Two sessions produce two layer-chain branches; merging them requires a comorphism proof that they can fuse. The category-theoretic vocabulary from D10 (layers form a category, morphisms between layers are structure-preserving mappings, comorphisms translate between institutional views) is the right lens.
+**Motivation:** Today the layer chain is `Arc<Layer>` with full BTreeMap content held in memory; queries iterate against those BTreeMaps. The model breaks once graph size exceeds RAM, and degrades long before that for long-lived databases. Branching shares the same root cause: multiple active heads multiply the in-memory footprint linearly. Bundling the storage rework with the DAG primitive avoids building single-chain caching machinery only to retrofit it for branches later. Merging — the *semantic* operation that fuses two branches with a comorphism witness — is genuinely separable and lives in Phase 15.
 
-### Phase 14 — Deliverables
+### Phase 14 — Sub-milestones
 
-- **Layer-chain branching:** the storage layout supports multiple head pointers per DB, each a divergent chain rooted in a common ancestor.
-- **Ontology migration as reconciliation:** replace D13's v1 drift-refusal with a `migrate` command that takes a `Comorphism` resource and rewrites persisted resources across the layer boundary.
-- **Multi-session operation:** `eigenius serve --db <path>` can be one of N concurrent instances sharing a DB. Each instance writes to its own branch; writes to others' branches are forbidden without a merge.
-- **Merge command:** `eigenius db merge <branch-a> <branch-b>` — requires a comorphism witness; refuses to merge if none exists or the witness fails validation. Produces a new layer that supersedes both branches.
-- **Conflict detection:** when two branches define incompatible values for the same resource, the merge surfaces the conflict and requires the comorphism witness to specify the resolution.
-- See D20 (to be written).
+- **14a — Topology / content split (~1 week).** In-memory DAG of `LayerId → parent[s]`, branch heads, named refs. Resource content moves to a cache keyed by `(LayerId, IRI)`. Naïve top-down lookup walks the topology and falls through to the storage backend on cache miss; correctness first, performance later.
+- **14b — Per-head shadowing index (~1.5 weeks).** Persistent `IRI → highest_defining_layer` index per branch head, maintained incrementally on commit (same atomic write batch as the layer itself). Bloom-filter front end for negative answers. Reduces lookup from O(depth) probes to one. Time-travel queries reconstruct an "as-of-L" view via per-named-head checkpoints + on-demand rewind.
+- **14c — Two-pool cache + eviction (~1 week).** Active-head pool (entries that are currently the top per the active head's shadowing index) vs. historical pool (entries shadowed in every active head, only reachable via time-travel or trace dereferences). ARC inside each pool; historical pool evicted first under memory pressure.
+- **14d — DAG branching primitive (~1.5 weeks).** Storage layout supports multiple head pointers per DB rooted in a common ancestor. Branch creation, naming, listing. No merging yet — branches diverge but cannot fuse (Phase 15).
+- **14e — Multi-session writes (~1 week).** N concurrent kernel instances, each pinned to a branch. Cross-branch writes refused at the storage layer; cross-branch reads allowed (any committed layer is readable from any session). Session-to-branch binding established at startup.
+- **14f — Reachability-based GC (~2 weeks).** Mark-and-sweep over the resource graph. Roots: pinned branch heads, active sessions, resources referenced by reflection-ontology traces, verified-knowledge claims. Background task with backpressure; configurable triggers (size threshold, idle interval).
+- **14g — Branch pruning (~1 week).** `eigenius db prune <branch>` removes a branch from the topology; GC sweeps anything reachable only through it. Rejects pruning of branches with active sessions.
+- **14h — Indexed resource access for queries (~1.5 weeks).** Wire the existing SPO/POS/OPS indexes from `storage/indexing/` through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes an indexed lookup against the storage backend instead of a full BTreeMap scan. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap.
 
 ### Phase 14 — Key design questions
 
-- How are branch heads identified and named? Content hash, user label, both?
-- What's the invariant for "the common ancestor"? Lowest common ancestor in the layer DAG, or something stronger?
-- How does the kernel enforce that a session's writes stay on its branch? Check-on-commit against the head it was started at.
-- What happens to active WASM institutions during a merge? Most likely: institutions re-register against the merged layer as in D13's RESUME path.
+- **Working-set bound:** fixed LRU size, adaptive (hit-rate-aware), or eviction-policy-as-config?
+- **Trace pinning:** does an active reflection-ontology trace pin its referenced resources from GC? Default instinct: yes — the epistemic guarantee depends on the chain being readable. Implies traces have explicit lifetime / expiration policy.
+- **Migration vs. shadowing:** when an ontology migration rewrites resources via comorphism (Phase 15), does the new resource shadow the old, or supersede it? Different GC semantics either way.
+- **Branch identity:** content hash, user label, both? Answers propagate to Phase 15's merge command.
+- **Time-travel checkpoint cadence:** checkpoint at every named head only, or at fixed intervals? Storage cost vs. rewind cost trade-off.
+- **Index regeneration on merge:** Phase 15's merge creates a new layer; its shadowing index has to be computed. Incremental from parents or full rebuild?
 
 ### Phase 14 — References
 
+- D13 §8, §11 — drift-refusal and single-session boundary this phase generalises
+- D21 §3.6 — `--at-layer` queries (the time-travel surface that constrains the checkpoint scheme)
+- `storage/indexing/` — existing SPO/POS/OPS index implementation Phase 14h plugs into
+- D23 (to be written) — Out-of-Core Layer Architecture
+
+---
+
+## Phase 15 — Layer Reconciliation
+
+**Goal:** Now that branches exist as first-class structures (Phase 14), this phase asks: when can we *prove* that two of them can be unified? Reconciliation is proved — a valid merge requires a `Comorphism` witness per Phase 11d — rather than declared.
+
+**Duration estimate:** 4–6 weeks.
+
+**Prerequisites:** Phase 11d (`Comorphism` class), Phase 14 (DAG branching, multi-session, storage architecture).
+
+**Motivation:** D13 §8 (migration) and §11 (multi-session) converge on the same primitive. Two branches that have diverged need a comorphism proof to fuse. Phase 14 gave us the structural primitive (multiple branches, multi-session); Phase 15 gives the semantic operation (merge with witness). The category-theoretic vocabulary from D10 (layers form a category, morphisms between layers are structure-preserving mappings, comorphisms translate between institutional views) is the right lens — merge is essentially a colimit construction up to comorphism equivalence.
+
+### Phase 15 — Deliverables
+
+- **Merge command:** `eigenius db merge <branch-a> <branch-b> --witness <comorphism>` — requires a `Comorphism` resource as witness; refuses to merge if none exists or the witness fails validation. Produces a new layer that supersedes both branches.
+- **Conflict detection:** when two branches define incompatible values for the same resource, the merge surfaces the conflict and the comorphism witness specifies the resolution. If no resolution exists, the merge fails with the conflict set surfaced for manual handling.
+- **Ontology migration as a degenerate merge:** replace D13's v1 drift-refusal with a `migrate` command that takes a `Comorphism` resource and rewrites persisted resources across the layer boundary. Implementation-wise, a migration is a "merge" with one branch being a single-resource diff.
+- **Merge layer identity:** the merge-resulting layer is a colimit-style construction in the layer category; properly identified, named, and recorded so subsequent merges have a well-defined common ancestor.
+- **Real-world test surface:** since Phase 14 ships before merge exists, users may already have lots of branches by the time Phase 15 lands. The merge implementation has to handle multi-ancestor cases on real, in-the-wild branch DAGs — not just freshly-created two-branch toy cases.
+- **D20 — design doc.** The category-theoretic vocabulary actually pays off here because the merge operation needs precise semantics.
+
+### Phase 15 — Key design questions
+
+- **Common ancestor invariant:** lowest common ancestor in the DAG, or something stronger?
+- **Conflict resolution policy:** when conflicts exist and the comorphism doesn't resolve them, fail or fall through to a manual resolution step?
+- **Merge layer validation:** runs through `validate_with_institutions` (Phase 12a) or treated as a special case?
+- **Active WASM institutions during merge:** institutions re-register against the merged layer as in D13's RESUME path?
+
+### Phase 15 — References
+
 - D10 — Grothendieck institutions, comorphisms, the category-theoretic vocabulary
-- D13 §8, §11 — drift-refusal and single-session boundary this phase supersedes
+- D13 §8, §11 — drift-refusal and single-session boundary
 - `docs/design/life-science-requirements.md` §11 (cross-institution claims) — consumer of Comorphism class
 - D20 (to be written) — Layer Reconciliation via Comorphisms
 
 ---
 
-## Phase 15 — Specialty Institutions
+## Phase 16 — Out-of-Core Query Execution
+
+**Goal:** EigenQL operators (hash join, sort, group-by) become memory-bounded, spilling intermediate result sets to disk via a buffer-pool abstraction over the storage backend. After Phase 14, the read path is indexed and cached; after Phase 16, the operator pipeline tolerates result sets larger than memory.
+
+**Duration estimate:** 4–6 weeks.
+
+**Prerequisites:** Phase 14 (storage backend abstractions and indexed reads). Independent of Phase 15.
+
+**Motivation:** Phase 14 reduces the working set on the read side; Phase 16 closes the remaining gap on the operator side. Without it, queries that build large hash tables (joins on multi-million-row sources) or sort large result sets (`ORDER BY` over 10M+ rows) will OOM at operator time even though the backing store is happy. The gap is real but not user-blocking until the first OOM — typical workloads continue working after Phase 14.
+
+### Phase 16 — Deliverables
+
+- **Buffer pool over the storage backend:** memory-bounded byte-buffer pool that operators allocate from; pool spills to disk via the same RocksDB instance the layer store uses.
+- **Hash join with spill:** partitioned hashing, spill to disk when partition exceeds memory budget, recursive partitioning if a single partition is still too large.
+- **External sort:** classic external merge sort for `ORDER BY` and sort-merge joins on result sets larger than memory.
+- **Group-by accumulator:** spillable group-by hash table with per-group state spilled to disk.
+- **Cost-model awareness:** the EigenQL planner considers spill cost when ordering joins and choosing operators. Doesn't have to be sophisticated — a simple cardinality estimator + spill-aware cost is sufficient.
+- **Memory budget configuration:** per-query memory budget (default and override), with a process-wide cap that prevents a single query from starving others.
+
+### Phase 16 — Key design questions
+
+- **Spill granularity:** per-operator spill files (clean per-operator lifecycle) or shared spill region (better space utilisation)?
+- **Concurrent queries:** memory budget per query or per session? Buffer pool global or per-session?
+- **Spill encoding:** CBOR (matches Eigon-JSON, debuggable) or a tighter format (smaller, faster)?
+- **Garbage on cancel:** how do we ensure spilled files are cleaned up if a query is cancelled or a session crashes mid-query? Resume sweep covers tasks; queries need the same.
+
+### Phase 16 — References
+
+- `kernel/src/query/` — current evaluator (full rewrite of the operator layer)
+- D2 — EigenQL specification (operators are unchanged at the surface; semantics preserved)
+- D24 (to be written) — Out-of-Core Query Execution
+
+---
+
+## Phase 17 — Specialty Institutions
 
 **Goal:** Proof-assistant and solver institutions extend the platform's reach. Lean 4 is the canonical first example. Others (SMT solvers like Z3, possibly Coq, possibly TLA+) follow the same pattern with their own fiber reasoners.
 
@@ -827,20 +900,20 @@ The phase decomposes into two milestones that are separately reviewable:
 
 **Drives:** `docs/design/lean-4-as-institution.md` (existing sketch).
 
-### Phase 15 — Deliverables (per institution)
+### Phase 17 — Deliverables (per institution)
 
 - **Fiber declaration:** morphism types the institution understands (for Lean: proofs, reductions, elaborations), query types it answers (e.g., "is this proposition provable?").
 - **Reasoner implementation:** WASM-hosted for Lean-in-WASM if feasible; subprocess-hosted via nanoda_lib integration as a practical first cut.
 - **Comorphism specifications:** per Phase 11d/12, how Lean's natural numbers relate to Mini-TT's Nat, how Lean's Prop relates to Mini-TT's Type(0), etc. Many small comorphisms.
 - **Worked example:** a life-science or engineering claim proved in Lean, with the proof registered as a verified morphism on a class.
 
-### Phase 15 — Open questions (carried from `lean-4-as-institution.md`)
+### Phase 17 — Open questions (carried from `lean-4-as-institution.md`)
 
 - `verified_in` witness extension (§16.4 / `lean-4-as-institution.md` open question 9) — deferred until a consumer requests it.
 - Hosting model: WASM (sandboxed, matches other institutions) vs. subprocess (matches Lean's normal operating model, avoids wasm-lean complexity). Decision pending empirical data on both options.
 - Trust policy for Lean proofs: how much of the Lean environment is "ambient trust" vs. reproducible per-proof?
 
-### Phase 15 — References
+### Phase 17 — References
 
 - `docs/design/lean-4-as-institution.md` — extended sketch, nanoda_lib as reference
 - `docs/design/life-science-requirements.md` §16.4 — verified_in witness extension
@@ -874,15 +947,17 @@ The following design documents must be written and reviewed before the phase tha
 | D17 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 8 | 6–8 pages |
 | D18 | **Ontology-as-Types Resolution** | **COMPLETED** — `docs/design/d18-ontology-as-types-resolution.md`. `find_sigma_field` walks the layer chain through `resolve_class_type` instead of silently collapsing `EigonClass` to `Val::Set`. Introduces `CheckCtx` (bundling `rho`/`gamma`/optional layer/per-check type cache) threaded through all checker entrypoints. Adds inference-mode rules for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq`. Rejects no-layer EigonClass resolution explicitly rather than returning a weakened type. Closes the #12 high-priority correctness hazards. Prerequisite for most of D19. | Phase 10a | Done |
 | D19 | **Inductive Types in Mini-TT** | **DRAFT** — `docs/design/d19-inductive-types.md`. Single (non-mutual, non-nested) strictly-positive inductive types + sized types (#16). Declaration form, positivity checker, recursor/eliminator derivation, iota-reduction, sized termination for inductive/coinductive interaction. Deferred: mutual (#20), nested (#21), indexed families (#22). | Phase 11b | Draft |
-| D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Branching head pointers, common-ancestor invariants, comorphism witnesses as merge proofs, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Multi-session operation built on the same primitive. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 14 | 12–16 pages |
+| D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Common-ancestor invariants, comorphism witnesses as merge proofs, conflict resolution via the witness, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Builds on the DAG primitive that lands in Phase 14. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 15 | 12–16 pages |
 | D21 | **Task Traces and Checkpointing** | **COMPLETED** — `docs/design/d21-task-traces-and-checkpointing.md`. Per-task positional `(session_id, task_id, step_seq)` trace keys replace the Phase-9a content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state atomically via `write_batch`. `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs + `at_layer` on read RPCs. Startup resume sweep (`ResumeConfig`, `ResumeState`) rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks with bounded parallelism. Single hardwired session (`Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion. | Phase 9b-iii | Done |
+| D23 | **Out-of-Core Layer Architecture** | Topology / content split, per-head shadowing index, two-pool ARC cache, time-travel checkpoint scheme, DAG branching primitive, multi-session writes, reachability-based GC with trace pinning, branch pruning, indexed resource access for queries. The structural rework that lifts the kernel's working-set bound from "graph size" to "cache size." | Phase 14 | 12–16 pages |
+| D24 | **Out-of-Core Query Execution** | Buffer-pool abstraction over the storage backend, hash join with spill, external sort, spillable group-by accumulators, spill-aware cost model, per-query memory budget. The operator-side rewrite that lets EigenQL handle result sets larger than memory. Builds on D23's storage abstractions. | Phase 16 | 8–10 pages |
 
 **Reference documents** (analysis rather than specification):
 
 | File | Purpose |
 |------|---------|
 | `docs/design/life-science-requirements.md` | Systematic audit of life-science representation needs. Drives the Phase 10–12 sequencing and is the source of record for which kernel extensions each shape requires. |
-| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 15. |
+| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 17. |
 
 ---
 

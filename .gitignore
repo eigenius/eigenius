@@ -10,7 +10,7 @@ node_modules/
 /docs/pdf
 
 # Reference material
-/reference
+/references
 
 # Deno
 orchestration/node_modules/
