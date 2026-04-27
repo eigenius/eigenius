@@ -31,11 +31,12 @@ The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/
 
 ## User guides
 
-Three task-first guides, grounded in the implementation:
+Three task-first guides plus a consolidated bibliography, all grounded in the implementation:
 
 - **[Platform user guide](docs/guides/platform/README.md)** — fifteen chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, building WASM components and institutions, deployment, **the notebook UX**, **the TypeScript SDK**.
 - **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
 - **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch, stratification, and the result-document format.
+- **[References](docs/guides/references/README.md)** — consolidated bibliography for the platform: works actually cited in design docs / papers / guides, foundational works the system relies on, philosophical and methodological precursors, and contemporary related work. Generated from the BibTeX files in [`docs/references/`](docs/references/) by `scripts/bib-to-md.py`; verified against Crossref / arXiv / live URLs by `scripts/verify-citations.py`.
 
 Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
 
