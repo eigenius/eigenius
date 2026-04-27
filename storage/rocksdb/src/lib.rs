@@ -18,19 +18,31 @@
 //! persistent ordered key-value store. Key encoding follows D4.
 //!
 //! Key scheme:
-//!   layer:<layer_id_hex>:meta         → Layer metadata (CBOR)
 //!   layer:<layer_id_hex>:res:<iri>    → Resource (CBOR)
 //!   chain:<layer_id_hex>              → Parent layer ID hex (or empty)
 //!   head                              → Current head layer ID hex
+//!   topo:<layer_id_hex>               → LayerHandle (CBOR, Phase 14a-ii)
+//!   trace:<key_hex>                   → ComponentTrace (CBOR)
+//!   meta:<key>                        → Generic metadata KV
 
 use async_trait::async_trait;
-use eigenius_kernel::layer::{Layer, LayerBuilder, LayerId};
+use eigenius_kernel::layer::{Layer, LayerBuilder, LayerHandle, LayerId, LayerTopology};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::storage::{LayerStore, ResourceStore, StorageError};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const TOPO_PREFIX: &str = "topo:";
+
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 /// RocksDB-backed storage.
 pub struct RocksStore {
@@ -176,46 +188,57 @@ impl RocksStore {
         Ok(resources)
     }
 
-    /// Store layer metadata.
-    fn store_layer_meta(
-        &self,
-        layer_id: &LayerId,
-        name: &str,
-        parent_id: Option<&LayerId>,
-    ) -> Result<(), StorageError> {
-        let key = format!("layer:{}:meta", hex::encode(layer_id.0));
-        let meta = serde_json::json!({
-            "name": name,
-            "parent_id": parent_id.map(|p| hex::encode(p.0)),
-        });
-        let value = serde_json::to_vec(&meta)
-            .map_err(|e| StorageError::Internal(format!("meta serialize error: {e}")))?;
-        self.db
-            .put(key.as_bytes(), value)
-            .map_err(|e| StorageError::Internal(format!("failed to store meta: {e}")))
-    }
-
-    /// Load layer metadata.
+    /// Load layer metadata (name + first parent) for a known layer.
+    ///
+    /// Reads the canonical CBOR `topo:<id>` entry. There is no legacy
+    /// fallback — pre-Phase-14 DBs are not supported; recovery is to drop
+    /// the DB and re-load from source files.
     fn load_layer_meta(
         &self,
         layer_id: &LayerId,
     ) -> Result<(String, Option<LayerId>), StorageError> {
-        let key = format!("layer:{}:meta", hex::encode(layer_id.0));
+        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
         let bytes = self
             .db
-            .get(key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("failed to load meta: {e}")))?
+            .get(topo_key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("failed to load topo entry: {e}")))?
             .ok_or_else(|| StorageError::NotFound(format!("layer {}", hex::encode(layer_id.0))))?;
+        let handle: LayerHandle = ciborium::from_reader(bytes.as_slice())
+            .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+        Ok((handle.name, handle.parents.into_iter().next()))
+    }
 
-        let meta: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|e| StorageError::Internal(format!("meta parse error: {e}")))?;
+    /// Write a `topo:<id>` entry containing the LayerHandle. Phase 14a-ii.
+    fn put_topology_entry(&self, handle: &LayerHandle) -> Result<(), StorageError> {
+        let key = format!("{TOPO_PREFIX}{}", hex::encode(handle.id.0));
+        let mut bytes = Vec::new();
+        ciborium::into_writer(handle, &mut bytes)
+            .map_err(|e| StorageError::Internal(format!("encode LayerHandle: {e}")))?;
+        self.db
+            .put(key.as_bytes(), bytes)
+            .map_err(|e| StorageError::Internal(format!("put topology entry: {e}")))
+    }
 
-        let name = meta["name"].as_str().unwrap_or("unknown").to_string();
-        let parent_id = meta["parent_id"]
-            .as_str()
-            .and_then(|s| hex_to_layer_id(s).ok());
-
-        Ok((name, parent_id))
+    /// Read all `topo:<id>` entries into an in-memory `LayerTopology`. Returns
+    /// an empty topology if no entries exist (caller decides whether to
+    /// migrate from the legacy `chain:` layout).
+    fn read_topology_entries(&self) -> Result<LayerTopology, StorageError> {
+        let mut topology = LayerTopology::new();
+        let iter = self.db.prefix_iterator(TOPO_PREFIX.as_bytes());
+        for item in iter {
+            let (key, value) =
+                item.map_err(|e| StorageError::Internal(format!("topology iter: {e}")))?;
+            let key_str = std::str::from_utf8(&key)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 topo key: {e}")))?;
+            // Prefix iterator may overshoot — trim.
+            if !key_str.starts_with(TOPO_PREFIX) {
+                break;
+            }
+            let handle: LayerHandle = ciborium::from_reader(value.as_ref())
+                .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+            topology.insert_layer(handle);
+        }
+        Ok(topology)
     }
 }
 
@@ -240,107 +263,66 @@ impl TraceStore for RocksStore {
     }
 }
 
-/// Serialize a ComponentTrace to JSON bytes for storage.
-fn serialize_component_trace(trace: &ComponentTrace) -> Result<Vec<u8>, StorageError> {
-    let output_json = eigenius_kernel::ontology::eigon_json::serialize_resource(&trace.output);
-    let mut obj = serde_json::Map::new();
-    obj.insert(
-        "component".into(),
-        serde_json::Value::String(trace.component.clone()),
-    );
-    obj.insert(
-        "input_hash".into(),
-        serde_json::Value::String(hex::encode(trace.input_hash)),
-    );
-    if let Some(ah) = &trace.argument_hash {
-        obj.insert(
-            "argument_hash".into(),
-            serde_json::Value::String(hex::encode(ah)),
-        );
-    }
-    obj.insert("output".into(), output_json);
-    obj.insert("cached".into(), serde_json::Value::Bool(trace.cached));
-    if let Some(m) = &trace.metrics {
-        let mut metrics = serde_json::Map::new();
-        metrics.insert(
-            "provider".into(),
-            serde_json::Value::String(m.provider.clone()),
-        );
-        metrics.insert("model".into(), serde_json::Value::String(m.model.clone()));
-        metrics.insert(
-            "prompt_tokens".into(),
-            serde_json::Value::Number(m.prompt_tokens.into()),
-        );
-        metrics.insert(
-            "completion_tokens".into(),
-            serde_json::Value::Number(m.completion_tokens.into()),
-        );
-        metrics.insert(
-            "latency_ms".into(),
-            serde_json::Value::Number(m.latency_ms.into()),
-        );
-        obj.insert("metrics".into(), serde_json::Value::Object(metrics));
-    }
-    serde_json::to_vec(&serde_json::Value::Object(obj))
-        .map_err(|e| StorageError::Internal(format!("serialize trace: {e}")))
+/// CBOR-serializable wrapper for ComponentTrace storage. The `output` is
+/// pre-encoded as canonical CBOR bytes using `eigon_cbor::serialize_resource`
+/// (the same encoding used for `layer:<id>:res:<iri>` entries) so we don't
+/// need a generic serde impl on `Resource`.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct StoredTrace {
+    component: String,
+    input_hash: [u8; 32],
+    argument_hash: Option<[u8; 32]>,
+    output_cbor: Vec<u8>,
+    metrics: Option<StoredMetrics>,
 }
 
-/// Deserialize a ComponentTrace from JSON bytes.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct StoredMetrics {
+    provider: String,
+    model: String,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    latency_ms: i64,
+}
+
+/// Serialize a ComponentTrace to CBOR bytes for storage.
+fn serialize_component_trace(trace: &ComponentTrace) -> Result<Vec<u8>, StorageError> {
+    let stored = StoredTrace {
+        component: trace.component.clone(),
+        input_hash: trace.input_hash,
+        argument_hash: trace.argument_hash,
+        output_cbor: eigon_cbor::serialize_resource(&trace.output),
+        metrics: trace.metrics.as_ref().map(|m| StoredMetrics {
+            provider: m.provider.clone(),
+            model: m.model.clone(),
+            prompt_tokens: m.prompt_tokens,
+            completion_tokens: m.completion_tokens,
+            latency_ms: m.latency_ms,
+        }),
+    };
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&stored, &mut bytes)
+        .map_err(|e| StorageError::Internal(format!("serialize trace: {e}")))?;
+    Ok(bytes)
+}
+
+/// Deserialize a ComponentTrace from CBOR bytes.
 fn deserialize_component_trace(bytes: &[u8]) -> Result<ComponentTrace, StorageError> {
-    let obj: serde_json::Value = serde_json::from_slice(bytes)
+    let stored: StoredTrace = ciborium::from_reader(bytes)
         .map_err(|e| StorageError::Internal(format!("deserialize trace: {e}")))?;
-
-    let component = obj["component"]
-        .as_str()
-        .ok_or_else(|| StorageError::Internal("missing component".into()))?
-        .to_string();
-
-    let input_hash_hex = obj["input_hash"]
-        .as_str()
-        .ok_or_else(|| StorageError::Internal("missing input_hash".into()))?;
-    let input_hash_bytes = hex::decode(input_hash_hex)
-        .map_err(|e| StorageError::Internal(format!("invalid input_hash: {e}")))?;
-    let mut input_hash = [0u8; 32];
-    if input_hash_bytes.len() == 32 {
-        input_hash.copy_from_slice(&input_hash_bytes);
-    }
-
-    let argument_hash = obj
-        .get("argument_hash")
-        .and_then(|v| v.as_str())
-        .and_then(|s| hex::decode(s).ok())
-        .and_then(|b| {
-            if b.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&b);
-                Some(arr)
-            } else {
-                None
-            }
-        });
-
-    let output_json = obj["output"].to_string();
-    let output = eigenius_kernel::ontology::eigon_json::parse_embedded(&output_json)
-        .or_else(|_| {
-            eigenius_kernel::ontology::eigon_json::parse_document(&output_json)
-                .map(|mut v| v.pop().unwrap_or_else(Resource::new_embedded))
-        })
+    let output = eigon_cbor::parse_resource(&stored.output_cbor)
         .map_err(|e| StorageError::Internal(format!("parse trace output: {e}")))?;
-
-    let metrics = obj.get("metrics").and_then(|m| {
-        Some(ComponentMetrics {
-            provider: m["provider"].as_str()?.to_string(),
-            model: m["model"].as_str()?.to_string(),
-            prompt_tokens: m["prompt_tokens"].as_i64()?,
-            completion_tokens: m["completion_tokens"].as_i64()?,
-            latency_ms: m["latency_ms"].as_i64()?,
-        })
+    let metrics = stored.metrics.map(|m| ComponentMetrics {
+        provider: m.provider,
+        model: m.model,
+        prompt_tokens: m.prompt_tokens,
+        completion_tokens: m.completion_tokens,
+        latency_ms: m.latency_ms,
     });
-
     Ok(ComponentTrace {
-        component,
-        input_hash,
-        argument_hash,
+        component: stored.component,
+        input_hash: stored.input_hash,
+        argument_hash: stored.argument_hash,
         output,
         cached: false, // When loaded from storage, it will be marked cached by the caller
         metrics,
@@ -367,8 +349,17 @@ impl LayerStore for RocksStore {
         let id = layer.id().clone();
         let parent_id = layer.parent().map(|p| p.id().clone());
 
-        // Store metadata
-        self.store_layer_meta(&id, layer.name(), parent_id.as_ref())?;
+        // Phase 14a-ii: write the canonical CBOR topology entry. Carries
+        // name, parents, resource_count, created_at — supersedes the
+        // pre-Phase-14 JSON `layer:<id>:meta` write.
+        let handle = LayerHandle {
+            id: id.clone(),
+            parents: parent_id.clone().into_iter().collect(),
+            name: layer.name().to_string(),
+            resource_count: layer.resources().len() as u64,
+            created_at: now_millis(),
+        };
+        self.put_topology_entry(&handle)?;
 
         // Store each resource as CBOR
         for (iri, resource) in layer.resources() {
@@ -515,7 +506,18 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         let id = layer.id().clone();
         let parent_id = layer.parent().map(|p| p.id().clone());
 
-        self.store_layer_meta(&id, layer.name(), parent_id.as_ref())?;
+        // Phase 14a-ii: canonical CBOR topology entry replaces the legacy
+        // JSON `layer:<id>:meta` write. Carries name, parents,
+        // resource_count, created_at.
+        let handle = LayerHandle {
+            id: id.clone(),
+            parents: parent_id.clone().into_iter().collect(),
+            name: layer.name().to_string(),
+            resource_count: layer.resources().len() as u64,
+            created_at: now_millis(),
+        };
+        self.put_topology_entry(&handle)?;
+
         for (iri, resource) in layer.resources() {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
             let value = eigon_cbor::serialize_resource(resource);
@@ -525,6 +527,10 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         }
         self.set_chain(&id, parent_id.as_ref())?;
         Ok(id)
+    }
+
+    fn load_topology(&self) -> Result<LayerTopology, StorageError> {
+        self.read_topology_entries()
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
@@ -880,6 +886,114 @@ mod tests {
             Some("LLM output")
         );
     }
+
+    // --- Phase 14a-ii: topology storage tests ---
+    //
+    // Wrapped in a sub-module so the `use PersistentBackend` import doesn't
+    // leak into the parent test module — both `LayerStore` and
+    // `PersistentBackend` define `store_layer`, and bringing both into the
+    // same scope creates method-resolution ambiguity on the older async tests.
+    mod topology_tests {
+        use super::*;
+        use eigenius_kernel::storage::PersistentBackend as PB;
+
+        #[test]
+        fn topology_round_trip_via_store_layer() {
+            // PB::store_layer must populate `topo:<id>` so load_topology returns
+            // the layer's handle.
+            let (store, _dir) = open_temp_store();
+
+            let mut builder = LayerBuilder::new("root", None);
+            builder
+                .add_resource(make_resource("urn:eigenius:core:A", vec![]))
+                .unwrap();
+            let layer = Arc::new(builder.build());
+            let id = layer.id().clone();
+
+            PB::store_layer(&store, &layer).unwrap();
+
+            let topology = PB::load_topology(&store).unwrap();
+            assert_eq!(topology.layer_count(), 1);
+            let handle = topology.get_layer(&id).expect("handle present");
+            assert_eq!(handle.name, "root");
+            assert!(handle.is_root());
+            assert_eq!(handle.resource_count, 1);
+            // created_at was populated via now_millis() on commit (non-sentinel).
+            assert!(handle.created_at > 0);
+        }
+
+        #[test]
+        fn topology_walk_chain_after_multiple_commits() {
+            let (store, _dir) = open_temp_store();
+
+            let mut root_builder = LayerBuilder::new("root", None);
+            root_builder
+                .add_resource(make_resource("urn:eigenius:core:A", vec![]))
+                .unwrap();
+            let root = Arc::new(root_builder.build());
+            let root_id = root.id().clone();
+
+            let mut child_builder = LayerBuilder::new("child", Some(Arc::clone(&root)));
+            child_builder
+                .add_resource(make_resource("urn:eigenius:example:B", vec![]))
+                .unwrap();
+            let child = Arc::new(child_builder.build());
+            let child_id = child.id().clone();
+
+            PB::store_layer(&store, &root).unwrap();
+            PB::store_layer(&store, &child).unwrap();
+
+            let topology = PB::load_topology(&store).unwrap();
+            assert_eq!(topology.layer_count(), 2);
+
+            // Walk from child should yield [child, root].
+            let walked: Vec<&str> = topology
+                .walk_chain(&child_id)
+                .map(|h| h.name.as_str())
+                .collect();
+            assert_eq!(walked, vec!["child", "root"]);
+
+            // Walk from root yields just [root].
+            let walked_root: Vec<&str> = topology
+                .walk_chain(&root_id)
+                .map(|h| h.name.as_str())
+                .collect();
+            assert_eq!(walked_root, vec!["root"]);
+        }
+
+        #[test]
+        fn topology_persists_across_reopen() {
+            let dir = TempDir::new().unwrap();
+            let layer_id;
+
+            // Write via PersistentBackend; close.
+            {
+                let store = RocksStore::open(dir.path()).unwrap();
+                let mut builder = LayerBuilder::new("persisted", None);
+                builder
+                    .add_resource(make_resource("urn:eigenius:core:X", vec![]))
+                    .unwrap();
+                let layer = Arc::new(builder.build());
+                layer_id = layer.id().clone();
+                PB::store_layer(&store, &layer).unwrap();
+            }
+
+            // Reopen; topology entry must be there without re-storing.
+            {
+                let store = RocksStore::open(dir.path()).unwrap();
+                let topology = PB::load_topology(&store).unwrap();
+                assert_eq!(topology.layer_count(), 1);
+                assert!(topology.get_layer(&layer_id).is_some());
+            }
+        }
+
+        #[test]
+        fn topology_load_from_empty_db_is_empty() {
+            let (store, _dir) = open_temp_store();
+            let topology = PB::load_topology(&store).unwrap();
+            assert_eq!(topology.layer_count(), 0);
+        }
+    } // mod topology_tests
 
     #[tokio::test]
     async fn trace_store_persists_across_reopen() {

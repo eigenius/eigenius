@@ -842,6 +842,7 @@ name = "eigenius-storage-rocksdb"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ciborium",
  "eigenius-kernel",
  "hex",
  "rocksdb",

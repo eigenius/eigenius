@@ -17,7 +17,7 @@
 //! Storage backends implement these traits. Phase 0 uses the in-memory
 //! backend; SQLite and TiKV come in later phases.
 
-use crate::layer::{Layer, LayerId};
+use crate::layer::{Layer, LayerId, LayerTopology};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use async_trait::async_trait;
@@ -99,9 +99,23 @@ pub trait PersistentBackend: Send + Sync + 'static {
     /// the target layer is absent from the store.
     fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError>;
 
-    /// Store a layer (metadata + resources + chain pointer). Idempotent
-    /// by layer id (content-addressed).
+    /// Store a layer (metadata + resources + chain pointer + topology
+    /// handle). Idempotent by layer id (content-addressed).
+    ///
+    /// Phase 14a-ii adds a `topo:<id>` entry per stored layer alongside the
+    /// existing `layer:` and `chain:` entries; `load_topology` (below) reads
+    /// those back. The topology entry is purely metadata — small fixed-size
+    /// `LayerHandle` carrying id, parents, name, resource_count, and creation
+    /// time.
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError>;
+
+    /// Load the in-memory layer topology — every known layer's `LayerHandle`,
+    /// keyed by `LayerId`, ready for in-memory walks via `walk_chain` etc.
+    ///
+    /// No migration from earlier layouts is supported: a DB written by a
+    /// pre-Phase-14 kernel must be re-built from source files. Returns an
+    /// empty topology for an empty DB.
+    fn load_topology(&self) -> Result<LayerTopology, StorageError>;
 
     /// Generic metadata key-value store. Used for the seed manifest
     /// (D13 §4.2) and for future configuration that shouldn't live in

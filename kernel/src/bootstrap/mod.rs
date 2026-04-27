@@ -154,9 +154,10 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
 /// Two paths:
 ///
 /// - **SEED** (empty backend): run the normal in-memory bootstrap,
-///   then commit each of the four embedded ontology layers to the
+///   then commit each of the five embedded ontology layers
+///   (core → program → reflection → institution → notebook) to the
 ///   backend in parent→child order, record the seed manifest, and
-///   point the head at the institution layer.
+///   point the head at the notebook layer.
 /// - **RESUME** (backend has a head): verify the stored seed manifest
 ///   matches the current embedded ontologies' SHA-256 hashes; if it
 ///   does, rehydrate the layer chain from the backend. If it doesn't,
