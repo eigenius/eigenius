@@ -409,6 +409,8 @@ pub trait CheckpointStore {
 
 ### 5.7 GarbageCollector
 
+GC operates in one of two modes per the §11.1 decision: **topology-DAG reachability** (default) preserves all layers transitively reachable through parent pointers; **content-tree reachability** (`db gc --keep-from <layer>`) drops everything outside the chosen retention window. Both share the sweep mechanism.
+
 ```rust
 pub struct GCRoots {
     pub branch_heads: Vec<LayerId>,
@@ -420,7 +422,17 @@ pub struct GCRoots {
     pub verified_pins: Vec<ResourceKey>,
 }
 
+pub enum GCMode {
+    /// Default: walk parents in the topology DAG from every root; everything
+    /// transitively reachable is preserved.
+    TopologyDAG,
+    /// Aggressive compaction: walk only the content tree of `keep_from`;
+    /// drop all layers older than it. Loses time-travel below `keep_from`.
+    ContentTree { keep_from: LayerId },
+}
+
 pub struct GCConfig {
+    pub mode: GCMode,                  // default GCMode::TopologyDAG
     pub min_idle_seconds: u64,         // default 600 — wait for activity to settle
     pub size_threshold_bytes: u64,     // default 1 GiB — don't run on small DBs
     pub max_runtime_seconds: u64,      // default 300 — bound a single pass
@@ -441,13 +453,20 @@ pub trait GarbageCollector {
 }
 ```
 
-**Algorithm (mark-and-sweep):**
+**Algorithm (mark-and-sweep, topology-DAG mode):**
 
 1. **Mark phase:** from `roots.branch_heads`, walk parents in the topology DAG, building a `reachable_layers: HashSet<LayerId>`. Add `roots.session_pins` (each active session contributes both its `pinned_layer` and `scratch_head` if any). For each `ResourceKey` in `trace_pins` and `verified_pins`, walk back from the referenced layer.
 2. **For each layer L not in `reachable_layers`:** the layer itself is collectible. Schedule layer drop. This includes scratch chains from sessions that have closed without promoting, and sibling branches that have been deleted but never pruned.
 3. **For each (L, X) where L is reachable but X is shadowed in every reachable head:** the resource is collectible. Schedule resource drop.
 4. **Sweep:** write tombstones in a single batched RocksDB transaction. Update affected shadowing indexes to remove dropped entries. Notify the cache to evict via `ResourceCache::evict_layer`.
 5. **Compaction:** RocksDB compaction reclaims tombstoned space asynchronously.
+
+**Algorithm (content-tree mode, `--keep-from <layer>`):**
+
+1. **Mark phase:** walk the content tree of `keep_from` — for each IRI defined or shadowed-up-to that layer, mark its defining layer as reachable. Also mark `keep_from`'s descendants (everything reachable through branches that have moved past `keep_from`). Trace pins and verified-knowledge pins are still respected (a pin can keep an older layer alive even in this mode).
+2. Steps 2–5 as above.
+
+The content-tree mode is invoked manually via the CLI; it is never triggered by the background scheduler. Users who run it accept the loss of time-travel queries to layers older than `keep_from`.
 
 **Cancellation:** the GC pass is a Tokio task; cancellation drops the in-flight sweep transaction and leaves the DB in its pre-sweep state. The `completed: false` stat distinguishes timeout from full completion.
 
@@ -616,7 +635,8 @@ eigenius db branch create <name> [--from <branch>]   # convenience wrapper aroun
 eigenius db branch delete <name>
 eigenius db divergence list                # auto-named branches from clients that hit NeedsWitnessedMerge
 eigenius db prune <name> [--force]
-eigenius db gc [--max-runtime <secs>]
+eigenius db gc [--max-runtime <secs>]                 # topology-DAG mode (default per §11.1)
+eigenius db gc --keep-from <layer-id>                  # content-tree mode: drop layers older than <layer-id>
 eigenius db cache-stats
 ```
 
@@ -723,24 +743,18 @@ Cross-cutting tests:
 
 ## 11. Open questions and Phase 15 dependency
 
-### 11.1 GC reachability model: topology-DAG vs. content-tree (load-bearing)
+### 11.1 GC reachability model: topology-DAG default + explicit content-tree escape valve
 
-The Irmin/Tezos GC follow-up (§13.6) surfaced a design choice that D23's current §5.7 silently makes one way without acknowledging the alternative. Worth flagging explicitly because it shapes both the GC algorithm and the "what time-travel can I do?" user-facing guarantee.
+**Decision (2026-04-27):** Phase 14 ships **topology-DAG reachability as the default** GC model. The content-tree alternative (Irmin/Tezos style) is exposed as an explicit `eigenius db gc --keep-from <layer>` operation for users who want to compact aggressively after experimentation.
 
 | Approach | What's reachable | What's preserved | Cost |
 |---|---|---|---|
-| **Topology-DAG reachability (§5.7 default)** | Walk parents in the layer DAG from every branch head + session pin + trace pin. Every layer transitively reachable through `parents` is preserved. | Full time-travel anywhere along any branch's history, indefinitely. | Storage grows monotonically with history; long-running DBs accumulate "shadowed-but-still-pinned-via-parents" layers forever. |
-| **Content-tree reachability (Irmin/Tezos)** | Walk only the *content tree* of each chosen GC-root commit. Parent references between commits are *not* followed. | Time-travel within an explicit "keep window" of recent layers; layers older than the window are dropped wholesale. | Bounded storage; configurable retention; loss of deep historical queries. |
+| **Topology-DAG (default)** | Walk parents in the layer DAG from every branch head + session pin + trace pin. Every layer transitively reachable through `parents` is preserved. | Full time-travel anywhere along any branch's history, indefinitely. | Storage grows monotonically with history; long-running DBs accumulate "shadowed-but-still-pinned-via-parents" layers forever. Bounded only by trace pins / verified claims / branch refs going stale. |
+| **Content-tree (explicit `--keep-from <layer>`)** | Walk only the *content tree* of the chosen layer. Parent references between commits are *not* followed. Layers older than `<layer>` are dropped wholesale. | Time-travel within the explicit retention window. | Aggressive compaction; loss of deep historical queries. |
 
-D23 currently picks the first model implicitly. The implications:
+**Why this is right for Eigenius:** the epistemic model frames derived results as replayable. A trace recorded "input was IRI X at L_pin" — for replay to work, X at L_pin has to remain reachable. Under topology-DAG that's automatic (the layer is preserved by virtue of being an ancestor of any reachable head). Under content-tree it would require explicit trace-pin roots, with all the bookkeeping fragility that implies. Topology-DAG aligns with our default semantics; content-tree is the user's deliberate choice when they want to reclaim disk after experimentation, accepting the loss of historical depth.
 
-- Our trace pinning (§5.7) and verified-knowledge pinning are exactly the mechanisms that prevent unbounded growth under topology-DAG reachability — the *only* layers that drop are ones with no branch ref, no trace reference, and no verified-knowledge reference anywhere in the system. This works as long as those root sets stay bounded.
-- Irmin/Tezos chose content-tree because their workload (blockchain node) genuinely doesn't need queries against deep history — only the recent active state matters.
-- Eigenius's epistemic model leans the other way: a derived result that references an old layer should remain replayable. That's the topology-DAG model.
-
-**Recommendation: keep topology-DAG as the default; expose Irmin's content-tree mode as an explicit `db gc --keep-from <layer>` operation for users who need to compact aggressively.** This adds a CLI surface but doesn't change the default behaviour. The `--keep-from` operation drops all layers not in the chosen window, preserving only their content-tree roots. Useful for reclaiming disk after experimentation, or for archive-style "snapshot the current state and drop everything else" workflows.
-
-This decision is not yet locked in. Open for discussion.
+**Implementation impact (Phase 14f):** the GC mark phase walks the topology DAG from `GCRoots.branch_heads + session_pins`, plus follows resource references from `trace_pins` and `verified_pins`. The `--keep-from <layer>` mode invokes a different mark phase: walk only the chosen layer's content tree (resources defined or shadowed-up-to that layer), drop everything else. Both share the sweep mechanism.
 
 ### 11.2 Phase 15 dependency: witnessed merge unblocks the residual case
 
