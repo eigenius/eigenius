@@ -25,10 +25,10 @@
 //! topology walk + cache fall-through correct without the cache having to
 //! understand shadowing — that's the shadowing index's job (§5.2 / 14b).
 
-use crate::layer::LayerId;
+use crate::layer::{BloomFilter, LayerId};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
-use crate::storage::{ResourceBackend, StorageError};
+use crate::storage::{PersistentBackend, ResourceBackend, StorageError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
@@ -214,6 +214,111 @@ impl ResourceBackend for MemoryResourceBackend {
     }
 }
 
+// --- BloomCache (D23 §5.2) ---
+
+/// Bounded cache of per-layer shadowing blooms (D23 §5.2). Mirrors
+/// `ResourceCache`'s shape, with the difference that miss handling is
+/// encapsulated: `get_or_load` falls through to the cache's backing
+/// `PersistentBackend` and inserts the loaded bloom before returning. The
+/// `Layer::resolve` path treats the cache as a single-call surface and
+/// never sees the backend for bloom purposes.
+///
+/// Phase 14b ships an unbounded `MemoryBloomCache`. Bounded ARC-style
+/// eviction follows the same lifecycle as `ResourceCache`'s 14c work.
+pub trait BloomCache: Send + Sync {
+    /// Get the bloom for `layer`, fetching from the backend on miss.
+    /// Returns `None` only if the backend reports no bloom for the
+    /// layer (e.g., a layer that predates Phase 14b — should not occur
+    /// in fresh DBs).
+    fn get_or_load(&self, layer: &LayerId) -> Result<Option<Arc<BloomFilter>>, StorageError>;
+
+    /// Drop all entries for a layer. Called by GC when a layer is
+    /// swept and by branch pruning.
+    fn evict_layer(&self, layer: &LayerId);
+
+    /// Cache counters. Implementations may report zeros for fields
+    /// they don't track.
+    fn stats(&self) -> CacheStats;
+}
+
+/// Naïve unbounded bloom cache. Holds every fetched bloom forever
+/// until `evict_layer` removes it. Bounded eviction lands with 14c.
+pub struct MemoryBloomCache {
+    inner: RwLock<MemoryBloomCacheState>,
+    backend: Arc<dyn PersistentBackend>,
+}
+
+struct MemoryBloomCacheState {
+    entries: BTreeMap<LayerId, Arc<BloomFilter>>,
+    hits: u64,
+    misses: u64,
+}
+
+impl MemoryBloomCache {
+    pub fn new(backend: Arc<dyn PersistentBackend>) -> Self {
+        Self {
+            inner: RwLock::new(MemoryBloomCacheState {
+                entries: BTreeMap::new(),
+                hits: 0,
+                misses: 0,
+            }),
+            backend,
+        }
+    }
+}
+
+impl BloomCache for MemoryBloomCache {
+    fn get_or_load(&self, layer: &LayerId) -> Result<Option<Arc<BloomFilter>>, StorageError> {
+        // Fast path: hit under the read lock.
+        {
+            let state = self.inner.read().expect("MemoryBloomCache poisoned");
+            if let Some(b) = state.entries.get(layer).cloned() {
+                // Drop the read lock before bumping the hit counter — the
+                // counter goes through a separate write acquire below.
+                drop(state);
+                let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
+                state.hits = state.hits.saturating_add(1);
+                return Ok(Some(b));
+            }
+        }
+
+        // Miss: fetch from the backend, insert, return.
+        let bloom = match self.backend.load_bloom(layer)? {
+            Some(b) => b,
+            None => {
+                let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
+                state.misses = state.misses.saturating_add(1);
+                return Ok(None);
+            }
+        };
+        let arc = Arc::new(bloom);
+        let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
+        // Concurrent miss may have already inserted; keep the existing
+        // entry to maintain Arc identity for any other holders.
+        let stored = state
+            .entries
+            .entry(layer.clone())
+            .or_insert_with(|| Arc::clone(&arc))
+            .clone();
+        state.misses = state.misses.saturating_add(1);
+        Ok(Some(stored))
+    }
+
+    fn evict_layer(&self, layer: &LayerId) {
+        let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
+        state.entries.remove(layer);
+    }
+
+    fn stats(&self) -> CacheStats {
+        let state = self.inner.read().expect("MemoryBloomCache poisoned");
+        CacheStats {
+            entries: state.entries.len() as u64,
+            hits: state.hits,
+            misses: state.misses,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +407,107 @@ mod tests {
         assert_eq!(Arc::strong_count(&resource), 3);
         drop(got);
         assert_eq!(Arc::strong_count(&resource), 2);
+    }
+
+    // --- BloomCache tests ---
+
+    use crate::layer::{BloomFilter, LayerBuilder};
+    use crate::ontology::resource::Value;
+    use crate::storage::memory::MemoryPersistentBackend;
+
+    fn small_layer(
+        name: &str,
+        parent: Option<Arc<crate::layer::Layer>>,
+    ) -> Arc<crate::layer::Layer> {
+        let mut builder = LayerBuilder::new(name, parent);
+        let mut r = Resource::new(iri("urn:eigenius:test:r"));
+        r.set(iri("urn:eigenius:test:p"), Value::String("v".into()));
+        builder.add_resource(r).unwrap();
+        Arc::new(builder.build(
+            Arc::new(MemoryResourceCache::new()),
+            Arc::new(MemoryResourceBackend::new()),
+        ))
+    }
+
+    #[test]
+    fn bloom_cache_get_or_load_hits_and_misses() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let layer = small_layer("test", None);
+        backend.store_layer(&layer).unwrap();
+
+        let cache = MemoryBloomCache::new(Arc::clone(&backend));
+
+        // First get is a miss against the cache; loads from backend.
+        let bloom1 = cache
+            .get_or_load(layer.id())
+            .unwrap()
+            .expect("bloom present in backend");
+        assert_eq!(cache.stats().entries, 1);
+        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats().hits, 0);
+
+        // Second get is a cache hit; same Arc returned.
+        let bloom2 = cache.get_or_load(layer.id()).unwrap().expect("hit");
+        assert_eq!(cache.stats().hits, 1);
+        assert!(Arc::ptr_eq(&bloom1, &bloom2));
+    }
+
+    #[test]
+    fn bloom_cache_returns_none_when_backend_has_no_bloom() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let cache = MemoryBloomCache::new(backend);
+        // No layer stored — load_bloom returns None.
+        let bogus = LayerId([7u8; 32]);
+        assert!(cache.get_or_load(&bogus).unwrap().is_none());
+        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats().entries, 0);
+    }
+
+    #[test]
+    fn bloom_cache_evict_drops_entry() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let layer = small_layer("test", None);
+        backend.store_layer(&layer).unwrap();
+
+        let cache = MemoryBloomCache::new(Arc::clone(&backend));
+        let _ = cache.get_or_load(layer.id()).unwrap();
+        assert_eq!(cache.stats().entries, 1);
+
+        cache.evict_layer(layer.id());
+        assert_eq!(cache.stats().entries, 0);
+
+        // Next get reloads from backend (counts as miss).
+        let _ = cache.get_or_load(layer.id()).unwrap();
+        assert_eq!(cache.stats().misses, 2);
+    }
+
+    #[test]
+    fn bloom_cache_uses_loaded_bloom_for_might_contain() {
+        // End-to-end: store a layer with known IRIs, fetch the bloom via
+        // the cache, query it. Verifies the bloom round-trips intact
+        // through the backend (PB::store_bloom / PB::load_bloom path).
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let mut builder = LayerBuilder::new("test", None);
+        for i in 0..50 {
+            let mut r = Resource::new(iri(&format!("urn:eigenius:test:r{i}")));
+            r.set(iri("urn:eigenius:test:p"), Value::Integer(i));
+            builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(builder.build(
+            Arc::new(MemoryResourceCache::new()),
+            Arc::new(MemoryResourceBackend::new()),
+        ));
+        backend.store_layer(&layer).unwrap();
+
+        let cache = MemoryBloomCache::new(Arc::clone(&backend));
+        let bloom = cache.get_or_load(layer.id()).unwrap().expect("present");
+
+        // No false negatives for the inserted IRIs.
+        for i in 0..50 {
+            assert!(bloom.might_contain(&iri(&format!("urn:eigenius:test:r{i}"))));
+        }
+        // And the loaded bloom matches what we'd build directly.
+        let expected = BloomFilter::for_iris(layer.defined_iris());
+        assert_eq!(*bloom, expected);
     }
 }

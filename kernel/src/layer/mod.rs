@@ -27,11 +27,14 @@
 //! [`cache`]). 14a-i ships those types as pure additions; integration with
 //! the legacy `Layer` chain lands in 14a-ii / 14a-iii.
 
+mod bloom;
 mod cache;
 mod handle;
 
+pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{
-    CacheStats, MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
+    BloomCache, CacheStats, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
+    ResourceCache, ResourceKey,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 

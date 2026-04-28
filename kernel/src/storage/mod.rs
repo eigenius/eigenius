@@ -25,6 +25,9 @@ use std::fmt;
 #[allow(unused_imports)]
 use std::sync::Arc;
 
+#[cfg(test)]
+pub(crate) mod memory;
+
 /// Sync, single-resource read surface for `Layer`.
 ///
 /// `PersistentBackend` is a supertrait, so every persistent backend
@@ -219,6 +222,30 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// Borrow the trace store view of this backend. Lets the server
     /// route `ComponentTrace` reads/writes through the same storage.
     fn as_trace_store(&self) -> &(dyn crate::program::trace::TraceStore + Send + Sync);
+
+    /// Read a layer's persisted shadowing bloom (D23 §5.2). Returns
+    /// `None` if no bloom was persisted — a layer written by an
+    /// older kernel build, or any layer for which `store_layer`
+    /// hasn't run since the bloom was added.
+    ///
+    /// Phase 14b: `store_layer` writes the bloom atomically alongside
+    /// the layer's other entries; `BloomCache::get_or_load` reads it
+    /// here on cache miss. Sync surface to match `get_head` /
+    /// `set_head` and the rest of the hot-path read API.
+    fn load_bloom(
+        &self,
+        layer: &LayerId,
+    ) -> Result<Option<crate::layer::BloomFilter>, StorageError>;
+
+    /// Persist a bloom for `layer`. Used by tests and by migrations
+    /// that retroactively populate blooms; production commit goes
+    /// through `store_layer` which writes the bloom in the same
+    /// atomic batch as the layer's other entries.
+    fn store_bloom(
+        &self,
+        layer: &LayerId,
+        bloom: &crate::layer::BloomFilter,
+    ) -> Result<(), StorageError>;
 }
 
 /// A single operation inside a `write_batch` call.

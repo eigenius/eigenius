@@ -28,7 +28,7 @@
 use async_trait::async_trait;
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
-use eigenius_kernel::layer::{Layer, LayerHandle, LayerId, LayerTopology};
+use eigenius_kernel::layer::{BloomFilter, Layer, LayerHandle, LayerId, LayerTopology};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const TOPO_PREFIX: &str = "topo:";
+const BLOOM_PREFIX: &str = "bloom:";
 
 fn now_millis() -> i64 {
     SystemTime::now()
@@ -566,15 +567,16 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
-        // The LayerStore impl is async but its body is purely synchronous
-        // RocksDB work; re-implement synchronously here to avoid
-        // blocking-in-async cases. Matches D13 §5 "commit-through" design.
+        // Per D23 §6.3, a layer commit must atomically write the topology
+        // entry, the per-layer bloom (Phase 14b), every `layer:<id>:res:`
+        // entry, and the chain pointer. We bundle them into one
+        // `WriteBatch`; RocksDB guarantees atomicity across the batch so a
+        // partial commit is impossible. (The pre-14b code used individual
+        // `put` calls and relied on commit ordering — fine in practice but
+        // not what the spec promises.)
         let id = layer.id().clone();
         let parent_id = layer.parent().map(|p| p.id().clone());
 
-        // Phase 14a-ii: canonical CBOR topology entry replaces the legacy
-        // JSON `layer:<id>:meta` write. Carries name, parents,
-        // resource_count, created_at.
         let handle = LayerHandle {
             id: id.clone(),
             parents: parent_id.clone().into_iter().collect(),
@@ -582,16 +584,41 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
         };
-        self.put_topology_entry(&handle)?;
+        let bloom = BloomFilter::for_iris(layer.defined_iris());
+
+        // Encode CBOR payloads outside the batch — encoding is CPU work
+        // and can fail; no point holding the batch while computing.
+        let mut handle_bytes = Vec::new();
+        ciborium::into_writer(&handle, &mut handle_bytes)
+            .map_err(|e| StorageError::Internal(format!("encode LayerHandle: {e}")))?;
+        let mut bloom_bytes = Vec::new();
+        ciborium::into_writer(&bloom, &mut bloom_bytes)
+            .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
+
+        let mut batch = rocksdb::WriteBatch::default();
+
+        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
+        batch.put(topo_key.as_bytes(), &handle_bytes);
+
+        let bloom_key = format!("{BLOOM_PREFIX}{}", hex::encode(id.0));
+        batch.put(bloom_key.as_bytes(), &bloom_bytes);
 
         for (iri, resource) in layer.iter_resources() {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
             let value = eigon_cbor::serialize_resource(&resource);
-            self.db
-                .put(key.as_bytes(), value)
-                .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
+            batch.put(key.as_bytes(), value);
         }
-        self.set_chain(&id, parent_id.as_ref())?;
+
+        let chain_key = format!("chain:{}", hex::encode(id.0));
+        let chain_value = match parent_id.as_ref() {
+            Some(pid) => hex::encode(pid.0),
+            None => String::new(),
+        };
+        batch.put(chain_key.as_bytes(), chain_value.as_bytes());
+
+        self.db
+            .write(batch)
+            .map_err(|e| StorageError::Internal(format!("store_layer batch: {e}")))?;
         Ok(id)
     }
 
@@ -660,6 +687,29 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
 
     fn as_trace_store(&self) -> &(dyn eigenius_kernel::program::trace::TraceStore + Send + Sync) {
         self
+    }
+
+    fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
+        let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let bloom: BloomFilter = ciborium::from_reader(bytes.as_slice())
+                    .map_err(|e| StorageError::Internal(format!("decode BloomFilter: {e}")))?;
+                Ok(Some(bloom))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("load_bloom: {e}"))),
+        }
+    }
+
+    fn store_bloom(&self, layer: &LayerId, bloom: &BloomFilter) -> Result<(), StorageError> {
+        let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
+        let mut bytes = Vec::new();
+        ciborium::into_writer(bloom, &mut bytes)
+            .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
+        self.db
+            .put(key.as_bytes(), bytes)
+            .map_err(|e| StorageError::Internal(format!("store_bloom: {e}")))
     }
 }
 
@@ -1501,6 +1551,101 @@ mod tests {
             assert_eq!(info_root.head, root_id);
             let names_root: Vec<&str> = info_root.handles.iter().map(|h| h.name.as_str()).collect();
             assert_eq!(names_root, vec!["root"]);
+        }
+
+        /// Phase 14b: `store_layer` writes a `bloom:<id>` entry and
+        /// `load_bloom` reads it back. Round-trips through CBOR via
+        /// `ciborium`. Verified by reconstructing the same bloom from the
+        /// original IRI set and asserting structural equality, plus
+        /// confirming `might_contain` agrees on every inserted IRI.
+        #[test]
+        fn bloom_round_trip_via_store_layer() {
+            use eigenius_kernel::layer::BloomFilter;
+
+            let (store, _dir) = open_temp_store();
+
+            let mut builder = LayerBuilder::new("bloom_layer", None);
+            for i in 0..200 {
+                builder
+                    .add_resource(make_resource(&format!("urn:eigenius:test:r{i}"), vec![]))
+                    .unwrap();
+            }
+            let layer = Arc::new(builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let id = layer.id().clone();
+            let original_iris = layer.defined_iris().clone();
+
+            PB::store_layer(&store, &layer).unwrap();
+
+            let loaded = PB::load_bloom(&store, &id).unwrap().expect("bloom present");
+            let expected = BloomFilter::for_iris(&original_iris);
+            assert_eq!(
+                loaded, expected,
+                "bloom must survive CBOR round-trip intact"
+            );
+            for iri_h in &original_iris {
+                assert!(loaded.might_contain(iri_h));
+            }
+        }
+
+        /// Bloom + topology + content + chain must all be visible after
+        /// `store_layer`. This validates the D23 §6.3 atomic-commit
+        /// contract — the new `WriteBatch` shape applies them as one
+        /// commit; nothing should land partially.
+        #[test]
+        fn store_layer_writes_all_keys_atomically() {
+            let (store, _dir) = open_temp_store();
+
+            let mut builder = LayerBuilder::new("atomic", None);
+            builder
+                .add_resource(make_resource("urn:eigenius:test:a", vec![]))
+                .unwrap();
+            let layer = Arc::new(builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let id = layer.id().clone();
+
+            PB::store_layer(&store, &layer).unwrap();
+
+            // Topology entry present.
+            let topology = PB::load_topology(&store).unwrap();
+            assert!(topology.get_layer(&id).is_some());
+            // Bloom present.
+            assert!(PB::load_bloom(&store, &id).unwrap().is_some());
+            // Resource present.
+            assert!(
+                ResourceBackend::load_resource(&store, &id, &iri("urn:eigenius:test:a")).is_some()
+            );
+            // Chain entry present (root layer — empty parent).
+            let info = PB::load_chain_from(&store, &id).unwrap().expect("chain");
+            assert_eq!(info.handles.len(), 1);
+            assert!(info.handles[0].is_root());
+        }
+
+        /// `store_bloom` standalone path (separate from `store_layer`'s
+        /// commit batch). Useful for migrations and tests.
+        #[test]
+        fn store_bloom_standalone_round_trip() {
+            use eigenius_kernel::layer::BloomFilter;
+            use std::collections::BTreeSet;
+
+            let (store, _dir) = open_temp_store();
+            let layer_id = LayerId([13u8; 32]);
+
+            // No bloom yet.
+            assert!(PB::load_bloom(&store, &layer_id).unwrap().is_none());
+
+            let iris: BTreeSet<_> = (0..50)
+                .map(|i| iri(&format!("urn:eigenius:test:s{i}")))
+                .collect();
+            let bloom = BloomFilter::for_iris(&iris);
+            PB::store_bloom(&store, &layer_id, &bloom).unwrap();
+
+            let loaded = PB::load_bloom(&store, &layer_id).unwrap().expect("present");
+            assert_eq!(loaded, bloom);
         }
     } // mod cbor_coverage_tests
 
