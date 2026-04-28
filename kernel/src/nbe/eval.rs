@@ -349,60 +349,30 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         // source institution's ExportFormat procedure, apply the
         // transformation Component, reify a target-class resource via
         // the target institution's ImportFormat procedure. The
-        // post-translation validation invariant (D14 §9.3 step 5) is
-        // wired in M7 alongside AutoOnLoad QueryClass dispatch.
+        // post-translation validation invariant (D14 §9.3 step 5)
+        // runs as part of [`try_d14_institution_invoke`].
         //
-        // Falls back to the legacy `FiberReasoner::translate` path
-        // when the D14 index/runtime aren't attached or the comorphism
-        // isn't found there — this keeps Phase-11d-vintage tests
-        // green while M5–M8 retire the legacy. M8 deletes the
-        // fallback.
+        // When the evaluator has no D14 backing attached (bare Pure
+        // mode used during type-check / conversion), the call reduces
+        // to a passthrough neutral so the conversion checker can
+        // compare two `InstitutionInvoke`s structurally. When the
+        // backing IS attached but the comorphism cannot be resolved,
+        // the dispatch surfaces a typed error.
         Exp::InstitutionInvoke {
             comorphism_iri,
             source,
         } => {
             let source_val = ev(source)?;
-
-            if let Some(translated) = try_d14_institution_invoke(comorphism_iri, &source_val, ctx)?
-            {
-                return Ok(translated);
-            }
-
-            // ─── Legacy fallback ──────────────────────────────────────
-            let Some(institutions) = ctx.institutions() else {
+            if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
                 return Ok(Val::Nt(Neut::Gen(
                     usize::MAX,
                     format!("__institution_invoke_no_registry:{comorphism_iri}"),
                 )));
-            };
-            let Some(reasoner) = institutions.institution_for_comorphism(comorphism_iri) else {
-                return Err(EvalError::InvalidCaseTarget(format!(
-                    "no institution declared comorphism `{comorphism_iri}`"
-                )));
-            };
-            let source_resource = match val_to_resource_value(&source_val) {
-                crate::ontology::resource::Value::Embedded(r) => *r,
-                other => {
-                    let mut r = crate::ontology::resource::Resource::new_embedded();
-                    r.set(
-                        Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
-                        other,
-                    );
-                    r
-                }
-            };
-            let head = ctx.layer().cloned().unwrap_or_else(|| {
-                Arc::new(crate::layer::LayerBuilder::new("__invoke_empty_layer__", None).build())
-            });
-            let exec_ctx = crate::context::ExecutionContext::new(
-                head,
-                "__invoke__",
-                crate::context::ExecutionMode::ReadOnly,
-            );
-            match reasoner.translate(comorphism_iri, &source_resource, &exec_ctx) {
-                Ok(translated) => Ok(Val::ResourceVal(Box::new(translated))),
-                Err(e) => Err(EvalError::InvalidCaseTarget(format!(
-                    "comorphism `{comorphism_iri}` translate failed: {e}"
+            }
+            match try_d14_institution_invoke(comorphism_iri, &source_val, ctx)? {
+                Some(translated) => Ok(translated),
+                None => Err(EvalError::InvalidCaseTarget(format!(
+                    "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
                 ))),
             }
         }
@@ -1869,12 +1839,13 @@ fn resource_payload(
 /// Kernel-hardcoded scalar constraints (MinValue/MaxValue/…) fold
 /// to `Holds` or `Fails` based on the structural check. Institution-
 /// dispatched constraints (`Constraint::Institution { iri, args }`)
-/// consult `ctx.institutions()` if present: when an institution is
-/// registered for `iri`, arguments are evaluated and marshalled via
-/// [`val_to_resource_value`], then passed to
-/// [`FiberReasoner::decide`]. Without a registry (bare `Pure` eval),
-/// institution-dispatched constraints return `Undecidable` so
-/// downstream reducers can leave them as passthrough neutrals.
+/// resolve the IRI as a Decidable QueryClass via the D14 institution
+/// index; arguments are marshalled via [`val_to_resource_value`] onto
+/// the synthetic input resource and the call dispatches through
+/// `Institution::query` (D14 §9.2). Without an attached index/runtime
+/// or a matching Decidable QueryClass, the constraint reduces to
+/// `Undecidable` so downstream reducers leave it as a passthrough
+/// neutral.
 fn decide_constraint(
     constraint: &crate::nbe::term::Constraint,
     val: &Val,
@@ -1935,40 +1906,14 @@ fn decide_constraint(
             _ => false,
         })),
         Constraint::Institution { iri, args } => {
-            // Try the D14 dispatch path first: if a Decidable
-            // QueryClass declares this constraint IRI, marshal the
-            // args into a synthetic input resource and dispatch via
-            // the institution runtime (D14 §9.2).
-            if let Some(result) = try_d14_decide(iri, args, rho, ctx)? {
-                return Ok(result);
-            }
-
-            // ─── Legacy fallback ──────────────────────────────────
-            let Some(institutions) = ctx.institutions() else {
-                return Ok(DecResult::Undecidable);
-            };
-            let Some(reasoner) = institutions.get(iri) else {
-                return Ok(DecResult::Undecidable);
-            };
-            let arg_values: Result<Vec<_>, EvalError> = args
-                .iter()
-                .map(|a| eval_ctx(a, rho, ctx).map(|v| val_to_resource_value(&v)))
-                .collect();
-            let arg_values = arg_values?;
-            let head = ctx.layer().cloned().unwrap_or_else(|| {
-                Arc::new(crate::layer::LayerBuilder::new("__decide_empty_layer__", None).build())
-            });
-            let exec_ctx = crate::context::ExecutionContext::new(
-                head,
-                "__decide__",
-                crate::context::ExecutionMode::ReadOnly,
-            );
-            match reasoner.decide(iri, &arg_values, &exec_ctx) {
-                Ok(result) => Ok(result),
-                Err(e) => Err(EvalError::InvalidCaseTarget(format!(
-                    "institution `{iri}` decide failed: {e}"
-                ))),
-            }
+            // D14 §9.2 dispatch: a Decidable QueryClass declares the
+            // constraint IRI; args are marshalled onto a synthetic
+            // input resource and the call goes through the institution
+            // runtime. When no index/runtime is attached or no
+            // Decidable QueryClass matches the IRI, the constraint
+            // reduces to Undecidable so downstream reducers leave it
+            // as a passthrough neutral.
+            try_d14_decide(iri, args, rho, ctx).map(|opt| opt.unwrap_or(DecResult::Undecidable))
         }
     }
 }
@@ -1979,12 +1924,13 @@ fn decide_constraint(
 /// - `Ok(Some(_))` if the D14 index has a Decidable QueryClass
 ///   declaring the constraint IRI and the dispatch ran end-to-end.
 /// - `Ok(None)` if either the index or runtime is unattached, or the
-///   constraint IRI doesn't resolve to a Decidable QueryClass — the
-///   caller falls back to the legacy `FiberReasoner::decide` path.
+///   constraint IRI doesn't resolve to a Decidable QueryClass. The
+///   caller folds this to `DecResult::Undecidable` so reducers leave
+///   the constraint as a passthrough neutral.
 /// - `Err(_)` if the index *did* find the QueryClass but a downstream
 ///   step failed (missing institution, bad Verdict shape, etc.). A
 ///   configured-but-broken QueryClass is a structural error and not a
-///   reason to silently fall back.
+///   reason to silently fold to Undecidable.
 fn try_d14_decide(
     iri: &Iri,
     args: &[Exp],
