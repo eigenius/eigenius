@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Grothendieck Institution Protocol.
+//! Institution support — both the legacy Phase-11d trait surface
+//! (`FiberReasoner` etc., kept for now while the new D14 implementation
+//! lands milestone-by-milestone) and the new D14 derived registry
+//! (`registry::InstitutionIndex`).
 //!
-//! Domain-specific reasoning systems (institutions) register with the kernel,
-//! declare their fiber structure (morphism types, query types, structural
-//! properties), and participate in validation and reasoning.
-//!
-//! See design document D10 for the full specification.
+//! See design document D14 for the canonical specification. The legacy
+//! types in this module file are removed in M3 once D14's `Institution`
+//! trait + dispatch model take over.
 
 pub mod comorphism;
 pub mod error;
+pub mod registry;
 
 use crate::context::ExecutionContext;
 use crate::institution::error::{InstitutionError, MorphismValidation};
