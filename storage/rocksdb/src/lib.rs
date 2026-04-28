@@ -919,30 +919,9 @@ mod tests {
         assert!(head.resolve(&iri("urn:eigenius:example:Dog")).is_some());
     }
 
-    #[tokio::test]
-    async fn core_ontology_round_trip() {
-        let (store, _dir) = open_temp_store();
-
-        // Load core ontology, store as a layer, reload, verify
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let resources = eigon_json::parse_document(core_json).unwrap();
-        let count = resources.len();
-
-        let mut builder = LayerBuilder::new("core", None);
-        for r in resources {
-            builder.add_resource(r).unwrap();
-        }
-        let layer = builder.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        );
-        let id = layer.id().clone();
-
-        store.store_layer(&layer).await.unwrap();
-        let loaded = store.load_layer(&id).await.unwrap();
-
-        assert_eq!(loaded.iter_resources().count(), count);
-    }
+    // Replaced by `cbor_coverage_tests::core_ontology_field_level_equality`,
+    // which checks every property survives the round-trip rather than just
+    // resource count.
 
     #[tokio::test]
     async fn trace_store_round_trip() {
@@ -1115,6 +1094,415 @@ mod tests {
             assert_eq!(topology.layer_count(), 0);
         }
     } // mod topology_tests
+
+    // --- CBOR-coverage tests for the persistent backend ---
+    //
+    // Wrapped in a sub-module so the `use PersistentBackend` import doesn't
+    // collide with the older `LayerStore::store_layer` async tests above.
+    mod cbor_coverage_tests {
+        use super::*;
+        use eigenius_kernel::storage::PersistentBackend as PB;
+        use eigenius_kernel::storage::{BatchOp, ChainInfo};
+
+        /// All wire-typed `Value` variants survive `store_layer` →
+        /// `load_resource` through CBOR with structural equality. Variants
+        /// excluded here (`ResourceRef`, `Json`) are in-memory convenience
+        /// shapes that normalize to the wire-typed form on round-trip; their
+        /// behavior is pinned by `value_variants_round_trip_normalizations`
+        /// below.
+        #[test]
+        fn value_variants_round_trip() {
+            let (store, _dir) = open_temp_store();
+
+            let mut inner = Resource::new_embedded();
+            inner.set(
+                iri("urn:eigenius:test:city"),
+                Value::String("Berlin".into()),
+            );
+
+            let mut r = Resource::new(iri("urn:eigenius:test:variants"));
+            r.set(iri("urn:eigenius:test:s"), Value::String("hello".into()));
+            r.set(iri("urn:eigenius:test:i"), Value::Integer(-12345));
+            r.set(iri("urn:eigenius:test:f"), Value::Float(1.234567890123));
+            r.set(iri("urn:eigenius:test:b"), Value::Boolean(true));
+            r.set(
+                iri("urn:eigenius:test:emb"),
+                Value::Embedded(Box::new(inner)),
+            );
+            r.set(
+                iri("urn:eigenius:test:arr"),
+                Value::Array(vec![
+                    Value::Integer(1),
+                    Value::String("two".into()),
+                    Value::Boolean(false),
+                ]),
+            );
+            r.set(
+                iri("urn:eigenius:test:nested_arr"),
+                Value::Array(vec![Value::Array(vec![Value::Integer(42)])]),
+            );
+
+            let original = r.clone();
+            let mut builder = LayerBuilder::new("variants", None);
+            builder.add_resource(r).unwrap();
+            let layer = Arc::new(builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let layer_id = layer.id().clone();
+
+            PB::store_layer(&store, &layer).unwrap();
+
+            // Read directly via the ResourceBackend surface (not load_layer,
+            // which warms a cache — we want the on-disk CBOR decode path).
+            let loaded = ResourceBackend::load_resource(
+                &store,
+                &layer_id,
+                &iri("urn:eigenius:test:variants"),
+            )
+            .expect("resource present");
+
+            // Resource derives PartialEq: full structural equality.
+            assert_eq!(loaded, original);
+        }
+
+        /// Pins the intentional CBOR normalizations: `ResourceRef` and `Json`
+        /// are in-memory convenience variants that the wire layer collapses
+        /// into wire-typed forms (`String` / `Integer` / `Bool` / etc.). The
+        /// String-vs-ResourceRef discrimination happens at validation time
+        /// based on the property's declared `data_type`. If this test starts
+        /// failing, the CBOR layer has changed its typing contract and that
+        /// needs a deliberate decision (and content-addressing implications),
+        /// not a silent drift.
+        #[test]
+        fn value_variants_round_trip_normalizations() {
+            let (store, _dir) = open_temp_store();
+
+            let mut r = Resource::new(iri("urn:eigenius:test:lossy"));
+            r.set(
+                iri("urn:eigenius:test:ref"),
+                Value::ResourceRef(iri("urn:eigenius:test:other")),
+            );
+            r.set(
+                iri("urn:eigenius:test:json_str"),
+                Value::Json(serde_json::Value::String("hi".into())),
+            );
+            r.set(
+                iri("urn:eigenius:test:json_num"),
+                Value::Json(serde_json::Value::Number(7i64.into())),
+            );
+
+            let mut builder = LayerBuilder::new("lossy", None);
+            builder.add_resource(r).unwrap();
+            let layer = Arc::new(builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let layer_id = layer.id().clone();
+            PB::store_layer(&store, &layer).unwrap();
+
+            let loaded =
+                ResourceBackend::load_resource(&store, &layer_id, &iri("urn:eigenius:test:lossy"))
+                    .expect("resource present");
+
+            // ResourceRef → String (same wire bytes; discrimination at
+            // validation time using the property's data_type).
+            assert_eq!(
+                loaded.get(&iri("urn:eigenius:test:ref")),
+                Some(&Value::String("urn:eigenius:test:other".into()))
+            );
+            // Json(String) → String, Json(Number) → Integer.
+            assert_eq!(
+                loaded.get(&iri("urn:eigenius:test:json_str")),
+                Some(&Value::String("hi".into()))
+            );
+            assert_eq!(
+                loaded.get(&iri("urn:eigenius:test:json_num")),
+                Some(&Value::Integer(7))
+            );
+        }
+
+        /// Every resource in the core ontology must round-trip with full
+        /// structural equality, not just preserved count. Catches any
+        /// encoder/decoder regression that drops or mangles fields.
+        #[test]
+        fn core_ontology_field_level_equality() {
+            let (store, _dir) = open_temp_store();
+            let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+            let resources = eigon_json::parse_document(core_json).unwrap();
+
+            let mut originals: std::collections::BTreeMap<Iri, Resource> =
+                std::collections::BTreeMap::new();
+            for r in &resources {
+                originals.insert(r.id().expect("core resource has @id").clone(), r.clone());
+            }
+
+            let mut builder = LayerBuilder::new("core", None);
+            for r in resources {
+                builder.add_resource(r).unwrap();
+            }
+            let layer = Arc::new(builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let id = layer.id().clone();
+
+            PB::store_layer(&store, &layer).unwrap();
+
+            // Read each one back through the backend and compare.
+            for (iri, original) in &originals {
+                let loaded = ResourceBackend::load_resource(&store, &id, iri)
+                    .unwrap_or_else(|| panic!("missing core resource {iri}"));
+                assert_eq!(&loaded, original, "round-trip mismatch for {iri}");
+            }
+
+            // And nothing extra appeared.
+            let loaded_iris = ResourceBackend::list_layer_iris(&store, &id).unwrap();
+            assert_eq!(
+                loaded_iris,
+                originals
+                    .keys()
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>()
+            );
+        }
+
+        /// `build_chain` against the live `RocksStore` backend with a fresh
+        /// cache: every `resolve` must hit the backend's CBOR-decode path,
+        /// since the cache starts empty. This is the path that production
+        /// uses but no existing test exercises end-to-end.
+        #[test]
+        fn chain_resolve_with_cold_cache() {
+            let (store, _dir) = open_temp_store();
+            let store_arc: Arc<RocksStore> = Arc::new(store);
+
+            // Build root with one resource.
+            let mut root_builder = LayerBuilder::new("root", None);
+            root_builder
+                .add_resource(make_resource(
+                    "urn:eigenius:core:Class",
+                    vec![(
+                        "urn:eigenius:core:description",
+                        Value::String("class".into()),
+                    )],
+                ))
+                .unwrap();
+            let root = Arc::new(root_builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+
+            // Build child with another resource.
+            let mut child_builder = LayerBuilder::new("domain", Some(Arc::clone(&root)));
+            child_builder
+                .add_resource(make_resource(
+                    "urn:eigenius:example:Dog",
+                    vec![("urn:eigenius:core:description", Value::String("dog".into()))],
+                ))
+                .unwrap();
+            let child = Arc::new(child_builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let child_id = child.id().clone();
+
+            PB::store_layer(&*store_arc, &root).unwrap();
+            PB::store_layer(&*store_arc, &child).unwrap();
+            store_arc.set_head(&child_id).unwrap();
+
+            // Drop the original layer Arcs so their throwaway caches go away.
+            drop(root);
+            drop(child);
+
+            // Reconstruct the chain pointing at the live RocksStore — fresh
+            // cache, real backend.
+            let info = PB::load_chain(&*store_arc).unwrap().expect("chain present");
+            let cache: Arc<dyn eigenius_kernel::layer::ResourceCache> =
+                Arc::new(eigenius_kernel::layer::MemoryResourceCache::new());
+            let backend: Arc<dyn ResourceBackend> = Arc::clone(&store_arc) as _;
+            let head = eigenius_kernel::layer::build_chain(info, Arc::clone(&cache), backend);
+
+            // Cache is empty: this resolve must traverse the parent chain and
+            // decode CBOR from RocksDB.
+            let class = head
+                .resolve(&iri("urn:eigenius:core:Class"))
+                .expect("Class resolves through cold cache");
+            assert_eq!(
+                class
+                    .get(&iri("urn:eigenius:core:description"))
+                    .and_then(|v| v.as_str()),
+                Some("class")
+            );
+
+            let dog = head
+                .resolve(&iri("urn:eigenius:example:Dog"))
+                .expect("Dog resolves through cold cache");
+            assert_eq!(
+                dog.get(&iri("urn:eigenius:core:description"))
+                    .and_then(|v| v.as_str()),
+                Some("dog")
+            );
+
+            // Cache should now have populated entries (proving misses fell
+            // through to the backend rather than silently failing).
+            assert!(cache.stats().entries >= 2);
+        }
+
+        /// `meta:` key/value surface — `put_meta`/`get_meta`/`delete_meta`/
+        /// `list_meta_prefix`. This is the substrate D21 task storage runs on,
+        /// previously untested at the `PersistentBackend` level.
+        #[test]
+        fn meta_kv_round_trip() {
+            let (store, _dir) = open_temp_store();
+
+            assert!(PB::get_meta(&store, "absent").unwrap().is_none());
+
+            PB::put_meta(&store, "session:abc", b"value-abc").unwrap();
+            PB::put_meta(&store, "session:def", b"value-def").unwrap();
+            PB::put_meta(&store, "other:xyz", b"value-xyz").unwrap();
+
+            assert_eq!(
+                PB::get_meta(&store, "session:abc").unwrap().as_deref(),
+                Some(b"value-abc".as_ref())
+            );
+            assert_eq!(
+                PB::get_meta(&store, "session:def").unwrap().as_deref(),
+                Some(b"value-def".as_ref())
+            );
+
+            // list_meta_prefix scopes correctly.
+            let session_keys = PB::list_meta_prefix(&store, "session:").unwrap();
+            let mut session_sorted = session_keys.clone();
+            session_sorted.sort();
+            assert_eq!(session_sorted, vec!["session:abc", "session:def"]);
+
+            // delete_meta on present key removes it.
+            PB::delete_meta(&store, "session:abc").unwrap();
+            assert!(PB::get_meta(&store, "session:abc").unwrap().is_none());
+
+            // delete_meta on absent key is a no-op (per trait contract).
+            PB::delete_meta(&store, "session:never_existed").unwrap();
+
+            // Other prefix unaffected.
+            assert_eq!(
+                PB::get_meta(&store, "other:xyz").unwrap().as_deref(),
+                Some(b"value-xyz".as_ref())
+            );
+        }
+
+        /// `write_batch` must apply every operation. Per D21 §8 step
+        /// atomicity, this is the single-commit primitive task steps use;
+        /// correctness here is structural.
+        #[test]
+        fn write_batch_applies_all_ops() {
+            let (store, _dir) = open_temp_store();
+
+            // Pre-populate one key so we can verify a delete inside the batch.
+            PB::put_meta(&store, "to_delete", b"old").unwrap();
+
+            let ops = vec![
+                BatchOp::PutMeta {
+                    key: "k1".into(),
+                    value: b"v1".to_vec(),
+                },
+                BatchOp::PutMeta {
+                    key: "k2".into(),
+                    value: b"v2".to_vec(),
+                },
+                BatchOp::DeleteMeta {
+                    key: "to_delete".into(),
+                },
+                BatchOp::PutMeta {
+                    key: "k3".into(),
+                    value: b"v3".to_vec(),
+                },
+            ];
+            PB::write_batch(&store, &ops).unwrap();
+
+            assert_eq!(
+                PB::get_meta(&store, "k1").unwrap().as_deref(),
+                Some(b"v1".as_ref())
+            );
+            assert_eq!(
+                PB::get_meta(&store, "k2").unwrap().as_deref(),
+                Some(b"v2".as_ref())
+            );
+            assert_eq!(
+                PB::get_meta(&store, "k3").unwrap().as_deref(),
+                Some(b"v3".as_ref())
+            );
+            assert!(PB::get_meta(&store, "to_delete").unwrap().is_none());
+        }
+
+        /// `load_chain_from(head_id)` walks from an arbitrary layer, not
+        /// just the persisted head. Critical for `at_layer` reads and task
+        /// resume that pin specific heads. Multi-head test: two children
+        /// off one parent must each rebuild the correct chain.
+        #[test]
+        fn load_chain_from_specific_head() {
+            let (store, _dir) = open_temp_store();
+
+            let mut root_b = LayerBuilder::new("root", None);
+            root_b
+                .add_resource(make_resource("urn:eigenius:core:R", vec![]))
+                .unwrap();
+            let root = Arc::new(root_b.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let root_id = root.id().clone();
+
+            // Two distinct children off the same root — distinct because
+            // they define different IRIs.
+            let mut a_b = LayerBuilder::new("child_a", Some(Arc::clone(&root)));
+            a_b.add_resource(make_resource("urn:eigenius:example:A", vec![]))
+                .unwrap();
+            let child_a = Arc::new(a_b.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let a_id = child_a.id().clone();
+
+            let mut b_b = LayerBuilder::new("child_b", Some(Arc::clone(&root)));
+            b_b.add_resource(make_resource("urn:eigenius:example:B", vec![]))
+                .unwrap();
+            let child_b = Arc::new(b_b.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
+            let b_id = child_b.id().clone();
+
+            PB::store_layer(&store, &root).unwrap();
+            PB::store_layer(&store, &child_a).unwrap();
+            PB::store_layer(&store, &child_b).unwrap();
+            // Note: no `set_head` — load_chain_from must not depend on it.
+
+            let info_a: ChainInfo = PB::load_chain_from(&store, &a_id)
+                .unwrap()
+                .expect("chain for a");
+            assert_eq!(info_a.head, a_id);
+            let names_a: Vec<&str> = info_a.handles.iter().map(|h| h.name.as_str()).collect();
+            assert_eq!(names_a, vec!["root", "child_a"]);
+            assert!(info_a.defined_iris_per_layer.contains_key(&root_id));
+            assert!(info_a.defined_iris_per_layer.contains_key(&a_id));
+
+            let info_b: ChainInfo = PB::load_chain_from(&store, &b_id)
+                .unwrap()
+                .expect("chain for b");
+            assert_eq!(info_b.head, b_id);
+            let names_b: Vec<&str> = info_b.handles.iter().map(|h| h.name.as_str()).collect();
+            assert_eq!(names_b, vec!["root", "child_b"]);
+            assert!(info_b.defined_iris_per_layer.contains_key(&b_id));
+
+            // Asking for the root alone yields a one-element chain.
+            let info_root: ChainInfo = PB::load_chain_from(&store, &root_id)
+                .unwrap()
+                .expect("chain for root");
+            assert_eq!(info_root.head, root_id);
+            let names_root: Vec<&str> = info_root.handles.iter().map(|h| h.name.as_str()).collect();
+            assert_eq!(names_root, vec!["root"]);
+        }
+    } // mod cbor_coverage_tests
 
     #[tokio::test]
     async fn trace_store_persists_across_reopen() {
