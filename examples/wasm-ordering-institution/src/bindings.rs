@@ -307,6 +307,12 @@ pub mod eigenius {
             use super::super::super::_rt;
             /// A CBOR-encoded Eigon resource.
             pub type ResourceData = _rt::Vec<u8>;
+            /// A CBOR-encoded Mini-TT typed value (D14 §11). Distinct from
+            /// `resource-data` even though the wire form is the same: a typed
+            /// value inhabits a Mini-TT type (primitive, tuple, inductive,
+            /// codata) and is the payload exchanged between the source-side
+            /// extract, the Component middle, and the target-side reify.
+            pub type TypedValue = _rt::Vec<u8>;
             /// An IRI string.
             pub type Iri = _rt::String;
             /// Result of a component execution.
@@ -601,26 +607,26 @@ pub(crate) use __export_eigenius_institution_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 856] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xcd\x05\x01A\x02\x01\
-A\x1b\x01B\x06\x01p}\x04\0\x0dresource-data\x03\0\0\x01s\x04\0\x03iri\x03\0\x02\x01\
-r\x01\x06output\x01\x04\0\x10component-result\x03\0\x04\x03\0\x1eeigenius:compon\
-ent/types@0.1.0\x05\0\x02\x03\0\0\x0dresource-data\x03\0\x0dresource-data\x03\0\x01\
-\x02\x03\0\0\x03iri\x03\0\x03iri\x03\0\x03\x01B\x02\x01m\x03\x05valid\x07invalid\
-\x0bundecidable\x04\0\x11validation-result\x03\0\0\x03\0*eigenius:component/inst\
-itution-types@0.1.0\x05\x05\x02\x03\0\x01\x11validation-result\x03\0\x11validati\
-on-result\x03\0\x06\x01B\x07\x02\x03\x02\x01\x01\x04\0\x0dresource-data\x03\0\0\x02\
-\x03\x02\x01\x03\x04\0\x03iri\x03\0\x02\x01k\x01\x01@\x01\x03iri\x03\0\x04\x04\0\
-\x07resolve\x01\x05\x03\0$eigenius:component/read-access@0.1.0\x05\x08\x01B\x06\x02\
-\x03\x02\x01\x01\x04\0\x0dresource-data\x03\0\0\x01p\x01\x01j\x01\x02\x01s\x01@\x01\
-\x07eigenqls\0\x03\x04\0\x05query\x01\x04\x03\0%eigenius:component/query-access@\
-0.1.0\x05\x09\x01@\0\0\x02\x04\0\x11fiber-declaration\x01\x0a\x01j\x01\x02\x01s\x01\
-@\x01\x01q\x02\0\x0b\x04\0\x05query\x01\x0c\x01o\x02\x07s\x01j\x01\x0d\x01s\x01@\
-\x01\x08morphism\x02\0\x0e\x04\0\x11validate-morphism\x01\x0f\x01p\x02\x01j\x01\x10\
-\x01s\x01@\x01\x09resources\x10\0\x11\x04\0\x12discover-morphisms\x01\x12\x04\0-\
-eigenius:component/eigenius-institution@0.1.0\x04\0\x0b\x1a\x01\0\x14eigenius-in\
-stitution\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.\
-227.1\x10wit-bindgen-rust\x060.41.0";
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 876] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xe1\x05\x01A\x02\x01\
+A\x1b\x01B\x08\x01p}\x04\0\x0dresource-data\x03\0\0\x01p}\x04\0\x0btyped-value\x03\
+\0\x02\x01s\x04\0\x03iri\x03\0\x04\x01r\x01\x06output\x01\x04\0\x10component-res\
+ult\x03\0\x06\x03\0\x1eeigenius:component/types@0.1.0\x05\0\x02\x03\0\0\x0dresou\
+rce-data\x03\0\x0dresource-data\x03\0\x01\x02\x03\0\0\x03iri\x03\0\x03iri\x03\0\x03\
+\x01B\x02\x01m\x03\x05valid\x07invalid\x0bundecidable\x04\0\x11validation-result\
+\x03\0\0\x03\0*eigenius:component/institution-types@0.1.0\x05\x05\x02\x03\0\x01\x11\
+validation-result\x03\0\x11validation-result\x03\0\x06\x01B\x07\x02\x03\x02\x01\x01\
+\x04\0\x0dresource-data\x03\0\0\x02\x03\x02\x01\x03\x04\0\x03iri\x03\0\x02\x01k\x01\
+\x01@\x01\x03iri\x03\0\x04\x04\0\x07resolve\x01\x05\x03\0$eigenius:component/rea\
+d-access@0.1.0\x05\x08\x01B\x06\x02\x03\x02\x01\x01\x04\0\x0dresource-data\x03\0\
+\0\x01p\x01\x01j\x01\x02\x01s\x01@\x01\x07eigenqls\0\x03\x04\0\x05query\x01\x04\x03\
+\0%eigenius:component/query-access@0.1.0\x05\x09\x01@\0\0\x02\x04\0\x11fiber-dec\
+laration\x01\x0a\x01j\x01\x02\x01s\x01@\x01\x01q\x02\0\x0b\x04\0\x05query\x01\x0c\
+\x01o\x02\x07s\x01j\x01\x0d\x01s\x01@\x01\x08morphism\x02\0\x0e\x04\0\x11validat\
+e-morphism\x01\x0f\x01p\x02\x01j\x01\x10\x01s\x01@\x01\x09resources\x10\0\x11\x04\
+\0\x12discover-morphisms\x01\x12\x04\0-eigenius:component/eigenius-institution@0\
+.1.0\x04\0\x0b\x1a\x01\0\x14eigenius-institution\x03\0\0\0G\x09producers\x01\x0c\
+processed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {
