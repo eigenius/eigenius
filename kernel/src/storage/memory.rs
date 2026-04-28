@@ -181,10 +181,16 @@ impl PersistentBackend for MemoryPersistentBackend {
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
         let id = layer.id().clone();
-        let parent_id = layer.parent().map(|p| p.id().clone());
+        // 14e: persist all topological parents in the LayerHandle so
+        // multi-parent merge layers round-trip correctly. The legacy
+        // single-parent `chain` map below stores `parents.first()` as
+        // the canonical parent for chain-walk reconstruction —
+        // consistent with `Layer::parent()` semantics.
+        let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
+        let canonical_parent = all_parents.first().cloned();
         let handle = LayerHandle {
             id: id.clone(),
-            parents: parent_id.clone().into_iter().collect(),
+            parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
@@ -195,7 +201,7 @@ impl PersistentBackend for MemoryPersistentBackend {
 
         let mut state = self.inner.write().expect("poisoned");
         state.topology.insert(id.clone(), handle);
-        state.chain.insert(id.clone(), parent_id);
+        state.chain.insert(id.clone(), canonical_parent);
         for (iri, resource) in layer.iter_resources() {
             state
                 .resources

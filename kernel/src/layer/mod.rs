@@ -91,25 +91,42 @@ impl fmt::Display for LayerId {
 
 /// An immutable layer in the chain.
 ///
-/// **Phase 14a-iii / 14b structure**: holds metadata (id, name, parent pointer,
-/// the set of IRIs defined in this specific layer) and a `LayerStorage`
-/// bundle (resource cache + backend + per-layer shadowing bloom cache). It
-/// does NOT hold full resource content; resource bodies are fetched lazily
-/// via the cache, falling through to the backend on miss.
+/// **Phase 14a-iii / 14b / 14e structure**: holds metadata (id, name,
+/// topological parents, the set of IRIs defined in this specific layer)
+/// and a `LayerStorage` bundle (resource cache + backend + per-layer
+/// shadowing bloom cache). It does NOT hold full resource content;
+/// resource bodies are fetched lazily via the cache, falling through to
+/// the backend on miss.
 ///
-/// The `parent: Option<Arc<Layer>>` chain is preserved as a transitional
-/// shape — chain walking still happens via `resolve` iterating through
-/// parent pointers. The bloom filter (Phase 14b) lets `resolve` skip layers
-/// that cannot define `iri` without consulting the cache or backend.
+/// **Multi-parent topology (Phase 14e).** `parents: Vec<Arc<Layer>>`
+/// supports trivial-merge layers with N parents (each parent being a
+/// merged head). The chain-walk parent (used by `resolve`'s recursion)
+/// is `parents.first()`; non-first parents stay reachable via the
+/// topology DAG (`LayerHandle.parents`) for GC, traceability, and
+/// time-travel. The merge layer's content is the union of contributions
+/// since the LCA, so resolve never needs N-way recursion — anything
+/// touched on any merged side is in the merge layer's own
+/// `defined_iris`; anything older than LCA is reachable via `parents[0]`.
+///
+/// **Why `parents.first()` is sufficient for chain walking.** A trivial
+/// merge layer's `defined_iris` is the union of all merged sides'
+/// post-LCA contributions. Resolve at the merge: if `iri` is in the
+/// merge's bloom, hit the merge's content; otherwise recurse to
+/// `parents[0]`, which reaches LCA → root. Any IRI older than LCA is
+/// found there, regardless of which parent we picked.
 ///
 /// Cloning a Layer is cheap: it clones a `LayerStorage` (a few atomic
 /// increments on the bundled Arcs) and shallow-copies the metadata. The
-/// parent Arc is shared.
+/// parent Arcs are shared.
 #[derive(Clone)]
 pub struct Layer {
     id: LayerId,
     name: String,
-    parent: Option<Arc<Layer>>,
+    /// Topological parents. Empty for the root layer; one entry for
+    /// every Phase-14d-and-prior layer; multiple entries for
+    /// Phase-14e trivial-merge layers. `parent()` returns
+    /// `parents.first()` for chain-walk recursion.
+    parents: Vec<Arc<Layer>>,
     /// IRIs defined in this layer specifically (not transitively from parents).
     /// Bounded by per-layer resource count. Used by `iter_resources`,
     /// validation, and similar paths that need an exact answer for "what
@@ -128,7 +145,10 @@ impl fmt::Debug for Layer {
         f.debug_struct("Layer")
             .field("id", &self.id)
             .field("name", &self.name)
-            .field("parent_id", &self.parent.as_ref().map(|p| &p.id))
+            .field(
+                "parent_ids",
+                &self.parents.iter().map(|p| &p.id).collect::<Vec<_>>(),
+            )
             .field("defined_iri_count", &self.defined_iris.len())
             .finish()
     }
@@ -137,11 +157,9 @@ impl fmt::Debug for Layer {
 impl Layer {
     /// Construct a Layer from already-stored content. Used by storage
     /// backends when reconstructing a chain — caller passes the metadata
-    /// (handle), parent pointer, the set of IRIs this layer defines (typically
-    /// gathered via a `layer:<id>:res:` prefix scan), and the storage bundle
-    /// for lazy reads. No resource content is loaded eagerly; the bloom is
-    /// loaded on first `resolve` through this layer (or never, if the layer
-    /// is skipped by an ancestor's bloom).
+    /// (handle), parent pointer (single-parent path; for multi-parent
+    /// merge layers, see `from_handle_multi`), the set of IRIs this
+    /// layer defines, and the storage bundle for lazy reads.
     pub fn from_handle(
         handle: LayerHandle,
         parent: Option<Arc<Layer>>,
@@ -151,7 +169,27 @@ impl Layer {
         Self {
             id: handle.id,
             name: handle.name,
-            parent,
+            parents: parent.into_iter().collect(),
+            defined_iris,
+            storage,
+        }
+    }
+
+    /// Construct a Layer with `N` topological parents (Phase 14e
+    /// trivial-merge case). The parents must be supplied in the
+    /// canonical order they appear in `LayerHandle.parents` — that
+    /// order is part of the layer's identity (see
+    /// `LayerBuilder::compute_layer_id`).
+    pub fn from_handle_multi(
+        handle: LayerHandle,
+        parents: Vec<Arc<Layer>>,
+        defined_iris: BTreeSet<Iri>,
+        storage: LayerStorage,
+    ) -> Self {
+        Self {
+            id: handle.id,
+            name: handle.name,
+            parents,
             defined_iris,
             storage,
         }
@@ -167,14 +205,28 @@ impl Layer {
         &self.name
     }
 
-    /// Returns the parent layer, if any.
+    /// Returns the chain-walk parent layer (`parents.first()`), if any.
+    /// For multi-parent merge layers (Phase 14e), this is the first
+    /// merged head — the merge layer's content is self-sufficient for
+    /// post-LCA IRIs, so resolve recursion via the first parent
+    /// reaches everything older. For pre-merge layers (single-parent),
+    /// this is the only parent.
     pub fn parent(&self) -> Option<&Arc<Layer>> {
-        self.parent.as_ref()
+        self.parents.first()
     }
 
-    /// Returns true if this is the root layer (no parent).
+    /// Returns all topological parents. Empty for the root layer; one
+    /// entry for single-parent layers; multiple entries for trivial-merge
+    /// layers (Phase 14e). Multi-aware callers (GC reachability,
+    /// `db log --all`, merge-history inspection) should use this; the
+    /// chain-walk path uses `parent()`.
+    pub fn parents(&self) -> &[Arc<Layer>] {
+        &self.parents
+    }
+
+    /// Returns true if this is the root layer (no parents).
     pub fn is_root(&self) -> bool {
-        self.parent.is_none()
+        self.parents.is_empty()
     }
 
     /// Returns the set of IRIs defined directly in this layer (not parents).
@@ -255,7 +307,7 @@ impl Layer {
                     return Some(r);
                 }
             }
-            current = layer.parent.as_deref();
+            current = layer.parents.first().map(|p| p.as_ref());
         }
         None
     }
@@ -267,7 +319,7 @@ impl Layer {
         if let Some(r) = self.get_resource(iri) {
             results.push(r);
         }
-        if let Some(parent) = &self.parent {
+        if let Some(parent) = self.parents.first() {
             results.extend(parent.resolve_all(iri));
         }
         results
@@ -297,7 +349,7 @@ impl Layer {
                     }
                 }
             }
-            current = layer.parent.as_deref();
+            current = layer.parents.first().map(|p| p.as_ref());
         }
         buf.into_iter()
     }
@@ -330,23 +382,39 @@ impl std::error::Error for LayerError {}
 
 /// Builder for constructing an immutable `Layer`.
 ///
-/// Accumulates resources, then `build()` computes the content-addressed
-/// `LayerId` and produces an immutable `Layer`.
+/// Accumulates resources, then `build()` computes the content-and-parent-
+/// addressed `LayerId` and produces an immutable `Layer`. Phase 14e:
+/// supports N parents for trivial-merge layers via
+/// `LayerBuilder::with_parents`.
 pub struct LayerBuilder {
     name: String,
     resources: BTreeMap<Iri, Resource>,
-    parent: Option<Arc<Layer>>,
+    parents: Vec<Arc<Layer>>,
 }
 
 impl LayerBuilder {
     /// Create a new builder.
     ///
     /// If `parent` is `None`, this builds a root layer (core ontology).
+    /// For multi-parent merge layers, use `with_parents` instead.
     pub fn new(name: &str, parent: Option<Arc<Layer>>) -> Self {
         Self {
             name: name.to_string(),
             resources: BTreeMap::new(),
-            parent,
+            parents: parent.into_iter().collect(),
+        }
+    }
+
+    /// Create a builder for a trivial-merge layer with N parents
+    /// (Phase 14e). The order of `parents` is part of the layer's
+    /// identity — it's hashed into the `LayerId`. Callers should sort
+    /// by `LayerId` for canonical ordering when no other order is
+    /// natural; `merge_independent_heads` does this automatically.
+    pub fn with_parents(name: &str, parents: Vec<Arc<Layer>>) -> Self {
+        Self {
+            name: name.to_string(),
+            resources: BTreeMap::new(),
+            parents,
         }
     }
 
@@ -358,7 +426,7 @@ impl LayerBuilder {
     pub fn add_resource(&mut self, resource: Resource) -> Result<(), LayerError> {
         let iri = resource.id().ok_or(LayerError::MissingId)?.clone();
 
-        if iri.is_core() && self.parent.is_some() {
+        if iri.is_core() && !self.parents.is_empty() {
             return Err(LayerError::CoreNamespaceViolation { iri });
         }
 
@@ -415,17 +483,39 @@ impl LayerBuilder {
         Layer {
             id,
             name: self.name,
-            parent: self.parent,
+            parents: self.parents,
             defined_iris,
             storage,
         }
     }
 
+    /// Compute the content-and-parent-addressed `LayerId`.
+    ///
+    /// **Phase 14e**: parent IDs are hashed into the layer ID alongside
+    /// the resource content. This was a pre-existing latent bug that
+    /// trivial merge would have exposed: two layers with identical
+    /// content but different parents would collide on `LayerId`, and
+    /// `put_topology_entry` would overwrite the first's parents with the
+    /// second's. With parents in the hash, distinct positions in the
+    /// DAG always produce distinct ids.
+    ///
+    /// **Hash domain.** Parent IDs first (in the order supplied to the
+    /// builder — that order is part of the layer's identity), then
+    /// resource content in IRI-sorted order. Same SHA-256 algorithm.
+    /// Pre-14e DBs that still contain content-only-hashed layers must
+    /// be rebuilt; recovery is `rm -rf <db>` + reload.
     fn compute_layer_id(&self) -> LayerId {
         let mut hasher = Sha256::new();
 
-        // Hash each resource's CBOR deterministic encoding in IRI order
-        // (BTreeMap guarantees sorted iteration)
+        // Domain-separator + parent count, so a layer with no parents and
+        // the same resource set as one with parents can never collide.
+        hasher.update(b"layer:v2:");
+        hasher.update((self.parents.len() as u64).to_le_bytes());
+        for parent in &self.parents {
+            hasher.update(parent.id().0);
+        }
+
+        // Resource content in IRI-sorted order (BTreeMap iteration).
         for (iri, resource) in &self.resources {
             hasher.update(iri.as_str().as_bytes());
             hasher.update(crate::ontology::eigon_cbor::canonicalize(resource));

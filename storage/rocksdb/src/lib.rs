@@ -329,14 +329,17 @@ fn hex_to_layer_id(hex_str: &str) -> Result<LayerId, StorageError> {
 impl LayerStore for RocksStore {
     async fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
         let id = layer.id().clone();
-        let parent_id = layer.parent().map(|p| p.id().clone());
+        // 14e: persist all topological parents in the LayerHandle so
+        // multi-parent merge layers round-trip correctly. The legacy
+        // `chain:<id>` map below stores `parents.first()` as the
+        // canonical parent for chain-walk reconstruction — consistent
+        // with `Layer::parent()` semantics.
+        let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
+        let canonical_parent = all_parents.first().cloned();
 
-        // Phase 14a-ii: write the canonical CBOR topology entry. Carries
-        // name, parents, resource_count, created_at — supersedes the
-        // pre-Phase-14 JSON `layer:<id>:meta` write.
         let handle = LayerHandle {
             id: id.clone(),
-            parents: parent_id.clone().into_iter().collect(),
+            parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
@@ -352,8 +355,9 @@ impl LayerStore for RocksStore {
                 .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
         }
 
-        // Store chain pointer
-        self.set_chain(&id, parent_id.as_ref())?;
+        // Store chain pointer (canonical parent only — full multi-parent
+        // record is in the topology entry above).
+        self.set_chain(&id, canonical_parent.as_ref())?;
 
         Ok(id)
     }
@@ -571,11 +575,17 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         // `put` calls and relied on commit ordering — fine in practice but
         // not what the spec promises.)
         let id = layer.id().clone();
-        let parent_id = layer.parent().map(|p| p.id().clone());
+        // 14e: persist all topological parents in the LayerHandle so
+        // multi-parent merge layers round-trip correctly. The
+        // `chain:<id>` key below stores `parents.first()` as the
+        // canonical parent for chain-walk reconstruction — consistent
+        // with `Layer::parent()` semantics.
+        let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
+        let canonical_parent = all_parents.first().cloned();
 
         let handle = LayerHandle {
             id: id.clone(),
-            parents: parent_id.clone().into_iter().collect(),
+            parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
@@ -606,7 +616,7 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         }
 
         let chain_key = format!("chain:{}", hex::encode(id.0));
-        let chain_value = match parent_id.as_ref() {
+        let chain_value = match canonical_parent.as_ref() {
             Some(pid) => hex::encode(pid.0),
             None => String::new(),
         };

@@ -39,10 +39,11 @@
 //! v1 workloads have one or two active branches at a time. Easy to
 //! shard later if profiling demands it.
 
-use crate::layer::{Layer, LayerBuilder, LayerError, LayerId, LayerStorage};
+use crate::layer::{Layer, LayerBuilder, LayerError, LayerId, LayerStorage, LayerTopology};
 use crate::ontology::iri::Iri;
 use crate::storage::{PersistentBackend, StorageError};
 use crate::validation::{ValidationError, Validator};
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 /// Branch-name validation: matches `[A-Za-z0-9_-]+` per D23 §5.5.
@@ -204,9 +205,14 @@ pub fn commit_layer(
 ///
 /// `expected_old_head = None` creates a new branch (fails if one
 /// already exists with that name). Returns the outcome describing what
-/// happened: `FastForward` on a clean CAS, `NeedsWitnessedMerge` on
-/// divergence (14d empties `conflicting_iris`; 14e populates it), or
-/// `TrivialMerge` once 14e ships.
+/// happened: `FastForward` on a clean CAS, `TrivialMerge` if the
+/// branch's actual head and `new_head` modify disjoint IRIs since their
+/// LCA (Phase 14e), or `NeedsWitnessedMerge` on genuine conflict.
+///
+/// **Storage parameter.** The trivial-merge path needs a `LayerStorage`
+/// to construct the merge layer (cache + bloom + backend bundle). The
+/// FastForward and StrictFastForward paths don't use it; pass any
+/// valid storage (typically `LayerStorage::with_persistent(backend)`).
 ///
 /// **Concurrency.** Acquires a process-wide branch mutex so concurrent
 /// `update_branch` calls serialise. The caller's task runtime can be
@@ -217,6 +223,7 @@ pub fn update_branch(
     expected_old_head: Option<LayerId>,
     new_head: LayerId,
     policy: ConflictPolicy,
+    storage: LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<UpdateOutcome, BranchUpdateError> {
     if !is_valid_branch_name(name) {
@@ -238,7 +245,8 @@ pub fn update_branch(
         return Ok(UpdateOutcome::FastForward);
     }
 
-    // Divergence — actual ≠ expected.
+    // Divergence — actual ≠ expected. The branch is somewhere other
+    // than where the caller started from.
     match policy {
         ConflictPolicy::StrictFastForward => Err(BranchUpdateError::StrictFastForwardViolation {
             branch: name.to_string(),
@@ -246,22 +254,425 @@ pub fn update_branch(
             actual,
         }),
         ConflictPolicy::AllowTrivial => {
-            // 14e fills in trivial-merge resolution and populates
-            // `conflicting_iris`. For 14d we surface the divergence
-            // unconditionally as NeedsWitnessedMerge; the caller can
-            // see `current_head` differs from `expected_old_head` and
-            // react.
-            // No branch exists but expected was Some — caller's
-            // expectation is stale (someone deleted the branch). Return
-            // a sentinel zero LayerId; same shape as a resolved-vs-empty
-            // case will land in 14e.
-            let current_head = actual.unwrap_or(LayerId([0u8; 32]));
-            Ok(UpdateOutcome::NeedsWitnessedMerge {
-                current_head,
-                conflicting_iris: Vec::new(),
-            })
+            // If the branch was deleted (actual is None), trivial
+            // merge has nothing to merge against — surface as a
+            // witnessed-merge requirement.
+            let actual_head = match actual {
+                Some(h) => h,
+                None => {
+                    return Ok(UpdateOutcome::NeedsWitnessedMerge {
+                        current_head: LayerId([0u8; 32]),
+                        conflicting_iris: Vec::new(),
+                    });
+                }
+            };
+            // Attempt N=2 trivial merge between branch's actual head
+            // and the caller's new_head.
+            match merge_independent_heads(vec![actual_head.clone(), new_head], storage, backend) {
+                Ok(MergeOutcome::Merged { merge_layer }) => {
+                    // CAS the branch to the merge layer.
+                    backend
+                        .put_branch(name, merge_layer.id())
+                        .map_err(BranchUpdateError::Storage)?;
+                    Ok(UpdateOutcome::TrivialMerge {
+                        merge_layer: merge_layer.id().clone(),
+                    })
+                }
+                Ok(MergeOutcome::Conflict { conflicting_iris }) => {
+                    Ok(UpdateOutcome::NeedsWitnessedMerge {
+                        current_head: actual_head,
+                        conflicting_iris,
+                    })
+                }
+                Err(MergeError::Storage(e)) => Err(BranchUpdateError::Storage(e)),
+                Err(MergeError::InvalidHeads(msg)) => Err(BranchUpdateError::Storage(
+                    StorageError::Internal(format!("merge during update_branch: {msg}")),
+                )),
+                Err(MergeError::Validation(v)) => {
+                    Err(BranchUpdateError::Storage(StorageError::Internal(format!(
+                        "merge layer failed validation ({} errors)",
+                        v.len()
+                    ))))
+                }
+            }
         }
     }
+}
+
+// --- Topology analysis (Phase 14e-ii): LCA + change-set computation ---
+
+/// Lowest common ancestor of N heads in the layer DAG.
+///
+/// Returns `None` only if `heads` is empty or if any head is unknown to
+/// the topology. Otherwise returns the deepest layer that is an
+/// ancestor of every head. Because every layer in an Eigenius DB
+/// descends from the bootstrap chain (core → program → reflection →
+/// institution → notebook), the LCA always exists for any pair of
+/// known layers — there's no "disjoint DAGs" edge case to worry about.
+///
+/// **Algorithm.** Standard multi-source BFS over `LayerHandle.parents`.
+/// For each head, BFS from it collecting its ancestor set. The LCA is
+/// the layer that:
+/// 1. appears in every head's ancestor set (common ancestor), and
+/// 2. has no descendant in that intersection (lowest).
+///
+/// Operates over the in-memory `LayerTopology` snapshot rather than
+/// streaming through `PersistentBackend` calls, which is fine because
+/// the topology is bounded by layer count (typically 10²–10⁴) and lives
+/// entirely in RAM per Phase 14a.
+///
+/// `heads` may include the same id multiple times (e.g., a head merged
+/// with itself); duplicates are deduplicated. A single-head input
+/// returns that head unchanged.
+pub fn find_lca(heads: &[LayerId], topology: &LayerTopology) -> Option<LayerId> {
+    let unique: BTreeSet<&LayerId> = heads.iter().collect();
+    if unique.is_empty() {
+        return None;
+    }
+    if unique.len() == 1 {
+        // LCA of a single head is the head itself, but only if it's in
+        // the topology — otherwise None per the trait contract.
+        let only = *unique.iter().next().unwrap();
+        return topology.get_layer(only).map(|_| only.clone());
+    }
+
+    // Compute each head's ancestor set (including the head itself).
+    let mut ancestor_sets: Vec<BTreeSet<LayerId>> = Vec::with_capacity(unique.len());
+    for head in &unique {
+        let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+        let mut queue: VecDeque<LayerId> = VecDeque::new();
+        queue.push_back((*head).clone());
+        while let Some(id) = queue.pop_front() {
+            if !visited.insert(id.clone()) {
+                continue;
+            }
+            // Walk parents via topology. Unknown layers terminate that path.
+            if let Some(handle) = topology.get_layer(&id) {
+                for parent in &handle.parents {
+                    queue.push_back(parent.clone());
+                }
+            }
+        }
+        // If a head wasn't in the topology its ancestor set is empty.
+        if visited.is_empty() {
+            return None;
+        }
+        ancestor_sets.push(visited);
+    }
+
+    // Common ancestors = intersection of all heads' ancestor sets.
+    let mut common = ancestor_sets.swap_remove(0);
+    for other in &ancestor_sets {
+        common = common.intersection(other).cloned().collect();
+    }
+    if common.is_empty() {
+        // Per the bootstrap-chain invariant this shouldn't happen for
+        // layers persisted via the kernel's normal bootstrap path.
+        // Defensive: return None rather than picking a non-LCA.
+        return None;
+    }
+
+    // Lowest = the deepest common ancestor = the one that descends from
+    // every other common ancestor. Equivalently: the candidate whose
+    // own ancestor set (walking parents up to the root) contains every
+    // other common ancestor.
+    //
+    // For a chain root → a → b: commons are {b, a, root}; b descends
+    // from a and root, so b's ancestor set is {b, a, root} which
+    // contains all commons → b is the LCA.
+    for candidate in &common {
+        let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+        let mut queue: VecDeque<LayerId> = VecDeque::new();
+        queue.push_back(candidate.clone());
+        while let Some(id) = queue.pop_front() {
+            if !visited.insert(id.clone()) {
+                continue;
+            }
+            if let Some(handle) = topology.get_layer(&id) {
+                for parent in &handle.parents {
+                    queue.push_back(parent.clone());
+                }
+            }
+        }
+        // `candidate` is the LCA iff every other common ancestor is in
+        // its ancestor set (i.e., candidate is a descendant of each).
+        if common.iter().all(|c| visited.contains(c)) {
+            return Some(candidate.clone());
+        }
+    }
+    None
+}
+
+/// For each IRI touched between `head` and `ancestor` (exclusive of
+/// `ancestor`), the topmost layer in `[head, ancestor)` that defines
+/// it.
+///
+/// This is the data structure trivial-merge needs: the keys give the
+/// touched-IRI set (used for the pairwise-disjoint check), and the
+/// values give the source layer to load the top-of-stack resource
+/// from when constructing the merge content.
+///
+/// **Algorithm.** Top-down BFS from `head`, walking `topology.parents`,
+/// terminating each path when it reaches `ancestor`. At each visited
+/// layer, fetch its `defined_iris` via `list_layer_iris`; for each
+/// IRI not yet seen, record the current layer as its source. Because
+/// the BFS is roughly head→root order (top-down), the first layer to
+/// define an IRI is the topmost one in `[head, ancestor)`, which is
+/// exactly the resolve-equivalent value at the head.
+///
+/// Multi-parent merge layers (Phase 14e) along the walk contribute all
+/// their parents into the BFS frontier — this correctly captures every
+/// IRI touched in the divergence region regardless of merge structure.
+///
+/// Returns `Ok(empty_map)` if `head == ancestor`. Returns
+/// `Err(StorageError)` if listing IRIs from the backend fails.
+pub fn iri_sources_since(
+    head: &LayerId,
+    ancestor: &LayerId,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<std::collections::BTreeMap<Iri, LayerId>, StorageError> {
+    use crate::storage::ResourceBackend;
+
+    let mut sources: std::collections::BTreeMap<Iri, LayerId> = std::collections::BTreeMap::new();
+    if head == ancestor {
+        return Ok(sources);
+    }
+
+    // BFS in roughly head→root order. BFS doesn't strictly preserve
+    // depth ordering when multi-parent merges are present, so we tag
+    // each enqueued layer with its discovery depth and let the first
+    // (lowest-depth) sighting of an IRI win.
+    let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+    let mut queue: VecDeque<(LayerId, u32)> = VecDeque::new();
+    queue.push_back((head.clone(), 0));
+
+    // Track each IRI's first-seen depth so deeper sightings don't
+    // overwrite shallower (topmost) ones.
+    let mut iri_depth: std::collections::BTreeMap<Iri, u32> = std::collections::BTreeMap::new();
+
+    while let Some((id, depth)) = queue.pop_front() {
+        if !visited.insert(id.clone()) {
+            continue;
+        }
+        if id == *ancestor {
+            // Stop at the ancestor — its IRIs are not "since" itself.
+            continue;
+        }
+        let layer_iris = ResourceBackend::list_layer_iris(backend, &id)?;
+        for iri in layer_iris {
+            // Only insert if we haven't seen this IRI at a shallower
+            // (i.e., topologically more recent) depth.
+            let existing = iri_depth.get(&iri).copied();
+            if existing.is_none_or(|d| depth < d) {
+                iri_depth.insert(iri.clone(), depth);
+                sources.insert(iri, id.clone());
+            }
+        }
+        if let Some(handle) = topology.get_layer(&id) {
+            for parent in &handle.parents {
+                if !visited.contains(parent) {
+                    queue.push_back((parent.clone(), depth + 1));
+                }
+            }
+        }
+    }
+
+    Ok(sources)
+}
+
+// --- Trivial merge (Phase 14e-iii) ---
+
+/// Outcome of `merge_independent_heads`.
+#[derive(Debug)]
+pub enum MergeOutcome {
+    /// All heads' contributions since their LCA are pairwise disjoint;
+    /// the kernel built and persisted a multi-parent layer with
+    /// `parents = heads` (sorted) and content = union of contributions.
+    Merged { merge_layer: Arc<Layer> },
+    /// Two or more heads modify the same IRI(s) since their LCA;
+    /// reconciliation requires Phase 15 witnessed merge.
+    Conflict { conflicting_iris: Vec<Iri> },
+}
+
+/// Errors from `merge_independent_heads`.
+#[derive(Debug)]
+pub enum MergeError {
+    /// `heads` was empty, contained an unknown LayerId, or has no LCA.
+    InvalidHeads(String),
+    /// Backend reported an error during the topology load, IRI listing,
+    /// resource fetch, or merge-layer commit.
+    Storage(StorageError),
+    /// The merge layer was constructed but failed validation against
+    /// its parent chain. Should not happen for trivial merges over
+    /// already-validated heads, but surfaces if a corrupted source
+    /// layer slips through.
+    Validation(Vec<ValidationError>),
+}
+
+impl std::fmt::Display for MergeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MergeError::InvalidHeads(msg) => write!(f, "invalid heads: {msg}"),
+            MergeError::Storage(e) => write!(f, "storage error: {e}"),
+            MergeError::Validation(errs) => {
+                writeln!(f, "merge layer failed validation ({} errors):", errs.len())?;
+                for e in errs {
+                    writeln!(f, "  {e}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for MergeError {}
+
+/// N-way trivial merge of independent heads.
+///
+/// For each head, computes the IRIs it touched since the common LCA
+/// and the layer that defines each IRI's top-of-stack value. If the
+/// touched-IRI sets are pairwise disjoint, builds a multi-parent merge
+/// layer whose:
+///
+/// - `parents` are the input `heads` sorted by `LayerId` (canonical
+///   order — the order is part of the layer's identity per
+///   `LayerBuilder::compute_layer_id`)
+/// - `defined_iris` is the union of contributions from all heads
+/// - per-IRI value comes from the topmost layer in the contributing
+///   head's chain that defines it
+///
+/// On non-disjoint contributions, returns `Conflict { conflicting_iris }`
+/// with the union of all IRI conflicts; the caller resolves via
+/// Phase 15 witnessed merge.
+///
+/// **Single-head input** is a no-op: returns `Merged` wrapping the
+/// single head loaded as a `Layer` (no new commit).
+///
+/// **Layer construction.** Uses `commit_layer` internally so the merge
+/// layer is validated and persisted through the same atomic write
+/// batch as any other commit.
+pub fn merge_independent_heads(
+    heads: Vec<LayerId>,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<MergeOutcome, MergeError> {
+    use crate::storage::ResourceBackend;
+
+    if heads.is_empty() {
+        return Err(MergeError::InvalidHeads("heads cannot be empty".into()));
+    }
+
+    // Canonical head ordering — affects merge LayerId.
+    let mut heads = heads;
+    heads.sort();
+    heads.dedup();
+
+    let topology = backend.load_topology().map_err(MergeError::Storage)?;
+
+    // Validate all heads exist in the topology.
+    for h in &heads {
+        if topology.get_layer(h).is_none() {
+            return Err(MergeError::InvalidHeads(format!(
+                "head not found in topology: {h}"
+            )));
+        }
+    }
+
+    // Single-head: nothing to merge. Reconstruct the Layer and return
+    // it so callers get a uniform `Merged { merge_layer }` outcome.
+    if heads.len() == 1 {
+        let head_id = &heads[0];
+        let info = backend
+            .load_chain_from(head_id)
+            .map_err(MergeError::Storage)?
+            .ok_or_else(|| {
+                MergeError::InvalidHeads(format!("could not load chain for head {head_id}"))
+            })?;
+        let layer = crate::layer::build_chain(info, storage);
+        return Ok(MergeOutcome::Merged { merge_layer: layer });
+    }
+
+    // Compute LCA. Per the bootstrap-chain invariant, this should always
+    // exist for layers persisted via the kernel.
+    let lca = find_lca(&heads, &topology).ok_or_else(|| {
+        MergeError::InvalidHeads("no common ancestor found — heads belong to disjoint DAGs".into())
+    })?;
+
+    // For each head, compute its IRI → source-layer map.
+    let mut per_head_sources: Vec<std::collections::BTreeMap<Iri, LayerId>> =
+        Vec::with_capacity(heads.len());
+    for head in &heads {
+        let sources =
+            iri_sources_since(head, &lca, &topology, backend).map_err(MergeError::Storage)?;
+        per_head_sources.push(sources);
+    }
+
+    // Pairwise-disjoint check. Conflicts = IRIs touched by ≥ 2 heads.
+    let mut iri_to_head_count: std::collections::BTreeMap<&Iri, u32> =
+        std::collections::BTreeMap::new();
+    for sources in &per_head_sources {
+        for iri in sources.keys() {
+            *iri_to_head_count.entry(iri).or_insert(0) += 1;
+        }
+    }
+    let conflicts: Vec<Iri> = iri_to_head_count
+        .iter()
+        .filter_map(|(iri, count)| {
+            if *count >= 2 {
+                Some((*iri).clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    if !conflicts.is_empty() {
+        return Ok(MergeOutcome::Conflict {
+            conflicting_iris: conflicts,
+        });
+    }
+
+    // Build the merge layer. Parents = sorted heads (already sorted).
+    // The parent Arcs need to be loaded as Layers; reuse LayerStorage's
+    // resolve path via build_chain on each head, then assemble the
+    // merge with `with_parents`.
+    let mut parent_layers: Vec<Arc<Layer>> = Vec::with_capacity(heads.len());
+    for head in &heads {
+        let info = backend
+            .load_chain_from(head)
+            .map_err(MergeError::Storage)?
+            .ok_or_else(|| {
+                MergeError::InvalidHeads(format!("could not load chain for head {head}"))
+            })?;
+        let layer = crate::layer::build_chain(info, storage.clone());
+        parent_layers.push(layer);
+    }
+
+    let mut builder = LayerBuilder::with_parents("merge", parent_layers);
+    for sources in &per_head_sources {
+        for (iri, source_layer_id) in sources {
+            let resource = ResourceBackend::load_resource(backend, source_layer_id, iri)
+                .ok_or_else(|| {
+                    MergeError::Storage(StorageError::NotFound(format!(
+                        "resource {iri} expected at layer {source_layer_id} during merge"
+                    )))
+                })?;
+            // CoreNamespaceViolation cannot trigger here: merges have
+            // parents (non-root), and core IRIs would have been
+            // rejected when the source layer was originally committed.
+            builder
+                .add_resource(resource)
+                .expect("builder accepts resource (non-root merge layer)");
+        }
+    }
+
+    let merge_layer = commit_layer(builder, storage, backend).map_err(|e| match e {
+        CommitError::Validation(v) => MergeError::Validation(v),
+        CommitError::Storage(s) => MergeError::Storage(s),
+        CommitError::Layer(_) => unreachable!("builder errors handled above"),
+    })?;
+
+    Ok(MergeOutcome::Merged { merge_layer })
 }
 
 #[cfg(test)]
@@ -290,19 +701,19 @@ mod tests {
     fn commit_root(
         backend: &dyn PersistentBackend,
         name: &str,
-        storage: LayerStorage,
+        storage: &LayerStorage,
     ) -> Arc<Layer> {
         let mut b = LayerBuilder::new(name, None);
         b.add_resource(make_resource("urn:eigenius:core:r"))
             .unwrap();
-        commit_layer(b, storage, backend).unwrap()
+        commit_layer(b, storage.clone(), backend).unwrap()
     }
 
     #[test]
     fn commit_layer_persists_via_store_layer() {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
-        let layer = commit_root(&backend, "root", storage);
+        let layer = commit_root(&backend, "root", &storage);
 
         // Layer is in the topology + bloom + resources.
         let topo = backend.load_topology().unwrap();
@@ -317,7 +728,7 @@ mod tests {
     fn commit_layer_does_not_touch_branches() {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
-        let _layer = commit_root(&backend, "root", storage);
+        let _layer = commit_root(&backend, "root", &storage);
 
         // No branch was advanced by `commit_layer`. Branches are an
         // orthogonal surface.
@@ -328,7 +739,7 @@ mod tests {
     fn update_branch_creates_new_branch() {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
-        let layer = commit_root(&backend, "root", storage);
+        let layer = commit_root(&backend, "root", &storage);
 
         // Creating a new branch: expected_old_head = None.
         let outcome = update_branch(
@@ -336,6 +747,7 @@ mod tests {
             None,
             layer.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
@@ -351,7 +763,7 @@ mod tests {
     fn update_branch_fast_forward() {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", storage.clone());
+        let root = commit_root(&backend, "root", &storage);
 
         // Initial branch creation.
         update_branch(
@@ -359,6 +771,7 @@ mod tests {
             None,
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
@@ -368,13 +781,14 @@ mod tests {
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer(child_b, storage, &backend).unwrap();
+        let child = commit_layer(child_b, storage.clone(), &backend).unwrap();
 
         let outcome = update_branch(
             "main",
             Some(root.id().clone()),
             child.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
@@ -385,11 +799,14 @@ mod tests {
         );
     }
 
+    /// 14e: when divergent heads touch the SAME IRI with different
+    /// values, trivial merge can't reconcile and `update_branch` returns
+    /// `NeedsWitnessedMerge` with `conflicting_iris` populated.
     #[test]
-    fn update_branch_divergence_returns_needs_witnessed_merge() {
+    fn update_branch_conflict_returns_needs_witnessed_merge() {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", storage.clone());
+        let root = commit_root(&backend, "root", &storage);
 
         // Branch starts at root.
         update_branch(
@@ -397,20 +814,31 @@ mod tests {
             None,
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
 
-        // Two diverging children off root.
+        // Two diverging children both touching the SAME IRI with
+        // different values — this is the conflict case.
+        let conflict_iri = "urn:eigenius:example:contested";
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
-        a_b.add_resource(make_resource("urn:eigenius:example:a"))
-            .unwrap();
+        let mut r_a = Resource::new(iri(conflict_iri));
+        r_a.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("from a".into()),
+        );
+        a_b.add_resource(r_a).unwrap();
         let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
-        b_b.add_resource(make_resource("urn:eigenius:example:b"))
-            .unwrap();
-        let b = commit_layer(b_b, storage, &backend).unwrap();
+        let mut r_b = Resource::new(iri(conflict_iri));
+        r_b.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("from b".into()),
+        );
+        b_b.add_resource(r_b).unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
 
         // Advance branch to `a`.
         update_branch(
@@ -418,17 +846,19 @@ mod tests {
             Some(root.id().clone()),
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
 
-        // Now try to advance to `b` claiming root was the parent — branch
-        // moved to `a`, so this is divergence.
+        // Now try to advance to `b` claiming root was the parent —
+        // branch moved to `a` and they conflict on the same IRI.
         let outcome = update_branch(
             "main",
             Some(root.id().clone()),
             b.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
@@ -438,8 +868,8 @@ mod tests {
                 conflicting_iris,
             } => {
                 assert_eq!(current_head, *a.id());
-                // 14d leaves this empty; 14e fills it in.
-                assert!(conflicting_iris.is_empty());
+                // 14e populates the conflicts.
+                assert_eq!(conflicting_iris, vec![iri(conflict_iri)]);
             }
             other => panic!("expected NeedsWitnessedMerge, got {other:?}"),
         }
@@ -448,17 +878,383 @@ mod tests {
         assert_eq!(backend.get_branch("main").unwrap(), Some(a.id().clone()));
     }
 
+    /// 14e: when divergent heads touch DISJOINT IRIs, trivial merge
+    /// auto-resolves and `update_branch` returns `TrivialMerge` with
+    /// the merge layer's id; the branch advances to the merge.
     #[test]
-    fn update_branch_strict_fast_forward_rejects_divergence() {
+    fn update_branch_disjoint_divergence_trivial_merges() {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", storage.clone());
+        let root = commit_root(&backend, "root", &storage);
 
         update_branch(
             "main",
             None,
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        // Two diverging children touching disjoint IRIs.
+        let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        a_b.add_resource(make_resource("urn:eigenius:example:a"))
+            .unwrap();
+        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+
+        let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
+        b_b.add_resource(make_resource("urn:eigenius:example:b"))
+            .unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+
+        update_branch(
+            "main",
+            Some(root.id().clone()),
+            a.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        let outcome = update_branch(
+            "main",
+            Some(root.id().clone()),
+            b.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+        let merge_id = match outcome {
+            UpdateOutcome::TrivialMerge { merge_layer } => merge_layer,
+            other => panic!("expected TrivialMerge, got {other:?}"),
+        };
+
+        // Branch points at the merge layer (not a or b).
+        assert_eq!(backend.get_branch("main").unwrap(), Some(merge_id.clone()));
+        assert!(merge_id != *a.id() && merge_id != *b.id());
+
+        // Topology records the merge as having both heads as parents.
+        let topo = backend.load_topology().unwrap();
+        let merge_handle = topo.get_layer(&merge_id).expect("merge in topology");
+        assert_eq!(merge_handle.parents.len(), 2);
+        assert!(merge_handle.parents.contains(a.id()));
+        assert!(merge_handle.parents.contains(b.id()));
+    }
+
+    // --- 14e-ii: find_lca + iri_sources_since primitives ---
+
+    #[test]
+    fn find_lca_single_parent_chain() {
+        // root → a → b → c. LCA(b, c) = b. LCA(a, c) = a. LCA(c, c) = c.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        ab.add_resource(make_resource("urn:eigenius:example:a"))
+            .unwrap();
+        let a = commit_layer(ab, storage.clone(), &backend).unwrap();
+
+        let mut bb = LayerBuilder::new("b", Some(Arc::clone(&a)));
+        bb.add_resource(make_resource("urn:eigenius:example:b"))
+            .unwrap();
+        let b = commit_layer(bb, storage.clone(), &backend).unwrap();
+
+        let mut cb = LayerBuilder::new("c", Some(Arc::clone(&b)));
+        cb.add_resource(make_resource("urn:eigenius:example:c"))
+            .unwrap();
+        let c = commit_layer(cb, storage.clone(), &backend).unwrap();
+
+        let topo = backend.load_topology().unwrap();
+        assert_eq!(
+            find_lca(&[b.id().clone(), c.id().clone()], &topo),
+            Some(b.id().clone())
+        );
+        assert_eq!(
+            find_lca(&[a.id().clone(), c.id().clone()], &topo),
+            Some(a.id().clone())
+        );
+        assert_eq!(find_lca(&[c.id().clone()], &topo), Some(c.id().clone()));
+    }
+
+    #[test]
+    fn find_lca_diverging_branches() {
+        // root → a, root → b. LCA(a, b) = root.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        ab.add_resource(make_resource("urn:eigenius:example:a"))
+            .unwrap();
+        let a = commit_layer(ab, storage.clone(), &backend).unwrap();
+
+        let mut bb = LayerBuilder::new("b", Some(Arc::clone(&root)));
+        bb.add_resource(make_resource("urn:eigenius:example:b"))
+            .unwrap();
+        let b = commit_layer(bb, storage.clone(), &backend).unwrap();
+
+        let topo = backend.load_topology().unwrap();
+        assert_eq!(
+            find_lca(&[a.id().clone(), b.id().clone()], &topo),
+            Some(root.id().clone())
+        );
+    }
+
+    #[test]
+    fn find_lca_n_way_returns_deepest_common() {
+        // root → a → x; root → a → y; root → a → z. LCA = a.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        ab.add_resource(make_resource("urn:eigenius:example:a"))
+            .unwrap();
+        let a = commit_layer(ab, storage.clone(), &backend).unwrap();
+
+        let mut leaves = Vec::new();
+        for tag in ["x", "y", "z"] {
+            let mut lb = LayerBuilder::new(tag, Some(Arc::clone(&a)));
+            lb.add_resource(make_resource(&format!("urn:eigenius:example:{tag}")))
+                .unwrap();
+            leaves.push(commit_layer(lb, storage.clone(), &backend).unwrap());
+        }
+
+        let heads: Vec<LayerId> = leaves.iter().map(|l| l.id().clone()).collect();
+        let topo = backend.load_topology().unwrap();
+        assert_eq!(find_lca(&heads, &topo), Some(a.id().clone()));
+    }
+
+    #[test]
+    fn iri_sources_since_walks_diverged_chain() {
+        // root → mid (defines :m) → tip (defines :t). LCA = root, head = tip.
+        // Sources should map :m → mid and :t → tip.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut mid_b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
+        mid_b
+            .add_resource(make_resource("urn:eigenius:example:m"))
+            .unwrap();
+        let mid = commit_layer(mid_b, storage.clone(), &backend).unwrap();
+
+        let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
+        tip_b
+            .add_resource(make_resource("urn:eigenius:example:t"))
+            .unwrap();
+        let tip = commit_layer(tip_b, storage.clone(), &backend).unwrap();
+
+        let topo = backend.load_topology().unwrap();
+        let sources = iri_sources_since(tip.id(), root.id(), &topo, &backend).unwrap();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources.get(&iri("urn:eigenius:example:m")), Some(mid.id()));
+        assert_eq!(sources.get(&iri("urn:eigenius:example:t")), Some(tip.id()));
+    }
+
+    #[test]
+    fn iri_sources_since_topmost_wins_on_redefinition() {
+        // mid defines :x. tip redefines :x. Source for :x = tip.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut mid_b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
+        let mut r = Resource::new(iri("urn:eigenius:example:x"));
+        r.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("v1".into()),
+        );
+        mid_b.add_resource(r).unwrap();
+        let mid = commit_layer(mid_b, storage.clone(), &backend).unwrap();
+
+        let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
+        let mut r2 = Resource::new(iri("urn:eigenius:example:x"));
+        r2.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("v2".into()),
+        );
+        tip_b.add_resource(r2).unwrap();
+        let tip = commit_layer(tip_b, storage.clone(), &backend).unwrap();
+
+        let topo = backend.load_topology().unwrap();
+        let sources = iri_sources_since(tip.id(), root.id(), &topo, &backend).unwrap();
+        assert_eq!(sources.get(&iri("urn:eigenius:example:x")), Some(tip.id()));
+    }
+
+    // --- 14e-iii: merge_independent_heads ---
+
+    #[test]
+    fn merge_independent_heads_three_way_disjoint() {
+        // The user's case: three task results, each touching a distinct
+        // IRI, consolidated into a single layer with three parents.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut heads = Vec::new();
+        for tag in ["task1", "task2", "task3"] {
+            let mut b = LayerBuilder::new(tag, Some(Arc::clone(&root)));
+            b.add_resource(make_resource(&format!("urn:eigenius:result:{tag}")))
+                .unwrap();
+            heads.push(commit_layer(b, storage.clone(), &backend).unwrap());
+        }
+        let head_ids: Vec<LayerId> = heads.iter().map(|h| h.id().clone()).collect();
+
+        let outcome = merge_independent_heads(head_ids.clone(), storage.clone(), &backend).unwrap();
+        let merge = match outcome {
+            MergeOutcome::Merged { merge_layer } => merge_layer,
+            MergeOutcome::Conflict { conflicting_iris } => {
+                panic!("expected Merged, got Conflict({conflicting_iris:?})")
+            }
+        };
+
+        // Merge has 3 parents (sorted), 3 IRIs of contributions.
+        assert_eq!(merge.parents().len(), 3);
+        let merge_handle = backend
+            .load_topology()
+            .unwrap()
+            .get_layer(merge.id())
+            .cloned()
+            .unwrap();
+        for h in &head_ids {
+            assert!(merge_handle.parents.contains(h));
+        }
+        for tag in ["task1", "task2", "task3"] {
+            assert!(merge
+                .defined_iris()
+                .contains(&iri(&format!("urn:eigenius:result:{tag}"))));
+        }
+    }
+
+    #[test]
+    fn merge_independent_heads_conflict_reports_iris() {
+        // Two heads both touching the same IRI with different values →
+        // Conflict, not Merged.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let conflict_iri = "urn:eigenius:example:contested";
+        let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        let mut r_a = Resource::new(iri(conflict_iri));
+        r_a.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("a".into()),
+        );
+        a_b.add_resource(r_a).unwrap();
+        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+
+        let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
+        let mut r_b = Resource::new(iri(conflict_iri));
+        r_b.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("b".into()),
+        );
+        b_b.add_resource(r_b).unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+
+        let outcome = merge_independent_heads(
+            vec![a.id().clone(), b.id().clone()],
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+        match outcome {
+            MergeOutcome::Conflict { conflicting_iris } => {
+                assert_eq!(conflicting_iris, vec![iri(conflict_iri)]);
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_independent_heads_single_head_is_noop() {
+        // Single head should return Merged wrapping that head — no
+        // new commit.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let outcome =
+            merge_independent_heads(vec![root.id().clone()], storage.clone(), &backend).unwrap();
+        match outcome {
+            MergeOutcome::Merged { merge_layer } => {
+                assert_eq!(merge_layer.id(), root.id());
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_independent_heads_resolves_through_merge() {
+        // After the merge, resolve() at the merge layer returns the
+        // values each head contributed. End-to-end correctness check.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        let mut r_a = Resource::new(iri("urn:eigenius:example:a"));
+        r_a.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("from a".into()),
+        );
+        a_b.add_resource(r_a).unwrap();
+        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+
+        let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
+        let mut r_b = Resource::new(iri("urn:eigenius:example:b"));
+        r_b.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("from b".into()),
+        );
+        b_b.add_resource(r_b).unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+
+        let outcome = merge_independent_heads(
+            vec![a.id().clone(), b.id().clone()],
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+        let merge = match outcome {
+            MergeOutcome::Merged { merge_layer } => merge_layer,
+            other => panic!("expected Merged, got {other:?}"),
+        };
+
+        let res_a = merge.resolve(&iri("urn:eigenius:example:a")).unwrap();
+        assert_eq!(
+            res_a
+                .get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from a")
+        );
+        let res_b = merge.resolve(&iri("urn:eigenius:example:b")).unwrap();
+        assert_eq!(
+            res_b
+                .get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from b")
+        );
+    }
+
+    #[test]
+    fn update_branch_strict_fast_forward_rejects_divergence() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        update_branch(
+            "main",
+            None,
+            root.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
@@ -472,6 +1268,7 @@ mod tests {
             Some(root.id().clone()),
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             &backend,
         )
         .unwrap();
@@ -480,12 +1277,13 @@ mod tests {
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(b_b, storage, &backend).unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
         let err = update_branch(
             "main",
             Some(root.id().clone()),
             b.id().clone(),
             ConflictPolicy::StrictFastForward,
+            storage.clone(),
             &backend,
         )
         .unwrap_err();
@@ -506,7 +1304,14 @@ mod tests {
     #[test]
     fn update_branch_rejects_invalid_names() {
         let backend = MemoryPersistentBackend::new();
-        let id = LayerId([1u8; 32]);
+        let storage = LayerStorage::in_memory();
+        // Use a real layer id so the trivial-merge path inside
+        // update_branch (when the branch already exists) doesn't trip
+        // on an unknown-id lookup. For these tests we mostly care about
+        // the name-validation gate, which fires before any storage
+        // touch, so a synthetic id is fine for the bad-name cases.
+        let layer = commit_root(&backend, "root", &storage);
+        let id = layer.id().clone();
 
         for bad in ["", "has space", "has/slash", "has.dot", &"x".repeat(257)] {
             let err = update_branch(
@@ -514,6 +1319,7 @@ mod tests {
                 None,
                 id.clone(),
                 ConflictPolicy::AllowTrivial,
+                storage.clone(),
                 &backend,
             )
             .unwrap_err();
@@ -525,8 +1331,14 @@ mod tests {
 
         // Valid names (regex [A-Za-z0-9_-]+).
         for ok in ["main", "auto-divergent-1", "feature_x", "ABC123"] {
-            let outcome =
-                update_branch(ok, None, id.clone(), ConflictPolicy::AllowTrivial, &backend);
+            let outcome = update_branch(
+                ok,
+                None,
+                id.clone(),
+                ConflictPolicy::AllowTrivial,
+                storage.clone(),
+                &backend,
+            );
             assert!(outcome.is_ok(), "name {ok:?} should be accepted");
         }
     }
@@ -541,13 +1353,14 @@ mod tests {
 
         let backend = Arc::new(MemoryPersistentBackend::new());
         let storage = LayerStorage::in_memory();
-        let root = commit_root(backend.as_ref(), "root", storage.clone());
+        let root = commit_root(backend.as_ref(), "root", &storage);
 
         update_branch(
             "main",
             None,
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
+            storage.clone(),
             backend.as_ref(),
         )
         .unwrap();
@@ -560,9 +1373,10 @@ mod tests {
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(b_b, storage, backend.as_ref()).unwrap();
+        let b = commit_layer(b_b, storage.clone(), backend.as_ref()).unwrap();
 
         let backend_a = Arc::clone(&backend);
+        let storage_a = storage.clone();
         let root_id_a = root.id().clone();
         let a_id = a.id().clone();
         let t_a = thread::spawn(move || {
@@ -571,12 +1385,14 @@ mod tests {
                 Some(root_id_a),
                 a_id,
                 ConflictPolicy::AllowTrivial,
+                storage_a,
                 backend_a.as_ref(),
             )
             .unwrap()
         });
 
         let backend_b = Arc::clone(&backend);
+        let storage_b = storage.clone();
         let root_id_b = root.id().clone();
         let b_id = b.id().clone();
         let t_b = thread::spawn(move || {
@@ -585,6 +1401,7 @@ mod tests {
                 Some(root_id_b),
                 b_id,
                 ConflictPolicy::AllowTrivial,
+                storage_b,
                 backend_b.as_ref(),
             )
             .unwrap()
@@ -593,23 +1410,30 @@ mod tests {
         let r_a = t_a.join().unwrap();
         let r_b = t_b.join().unwrap();
 
-        // Exactly one fast-forward; the other is a divergence outcome.
+        // 14e behavior: a and b touch disjoint IRIs (one urn:...:a, the
+        // other urn:...:b), so the loser of the CAS race trivially
+        // merges. Exactly one FastForward + exactly one TrivialMerge.
         let ff_count = [&r_a, &r_b]
             .iter()
             .filter(|o| matches!(o, UpdateOutcome::FastForward))
             .count();
-        let merge_count = [&r_a, &r_b]
+        let trivial_count = [&r_a, &r_b]
             .iter()
-            .filter(|o| matches!(o, UpdateOutcome::NeedsWitnessedMerge { .. }))
+            .filter(|o| matches!(o, UpdateOutcome::TrivialMerge { .. }))
             .count();
         assert_eq!(
             ff_count, 1,
-            "exactly one CAS must succeed (got {ff_count} FF, {merge_count} merge)"
+            "exactly one CAS must fast-forward (got {ff_count} FF, {trivial_count} trivial)"
         );
-        assert_eq!(merge_count, 1);
+        assert_eq!(trivial_count, 1);
 
-        // The branch points at one of {a, b} — whichever won.
+        // After the trivial merge, the branch points at the merge layer
+        // whose parents are sorted [a, b]. We can verify by reading the
+        // final head and asserting it's neither a nor b directly.
         let final_head = backend.get_branch("main").unwrap().unwrap();
-        assert!(final_head == *a.id() || final_head == *b.id());
+        assert!(
+            final_head != *a.id() && final_head != *b.id(),
+            "branch should point at the merge layer, not a or b"
+        );
     }
 }
