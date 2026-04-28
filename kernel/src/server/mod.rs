@@ -339,6 +339,14 @@ pub struct EigeniusService {
     components: Arc<RwLock<Arc<ComponentRegistry>>>,
     trace_store: Arc<dyn TraceStore>,
     institutions: Arc<RwLock<crate::institution::InstitutionRegistry>>,
+    /// D14 institution index — derived view of the layer chain rebuilt
+    /// after every commit. Outer lock allows swapping; inner Arc lets
+    /// the evaluator clone cheaply when constructing `EvalCtx::IO`.
+    institution_index: Arc<RwLock<Arc<crate::institution::registry::InstitutionIndex>>>,
+    /// D14 institution runtime — `Box<dyn Institution>` per
+    /// institution IRI. Populated when D14-shaped WASM institutions
+    /// are installed (B3+ wiring); otherwise empty.
+    institution_runtime: Arc<RwLock<Arc<crate::institution::runtime::InstitutionRuntime>>>,
     /// Optional persistent backend. When present, committed layers,
     /// the seed manifest, and trace state all live here; absent means
     /// the server is in-memory-only (the pre-Phase-9a behaviour).
@@ -390,6 +398,12 @@ impl EigeniusService {
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store: Arc::new(InMemoryTraceStore::new()),
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            institution_index: Arc::new(RwLock::new(Arc::new(
+                crate::institution::registry::InstitutionIndex::new(),
+            ))),
+            institution_runtime: Arc::new(RwLock::new(Arc::new(
+                crate::institution::runtime::InstitutionRuntime::new(),
+            ))),
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -431,6 +445,12 @@ impl EigeniusService {
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            institution_index: Arc::new(RwLock::new(Arc::new(
+                crate::institution::registry::InstitutionIndex::new(),
+            ))),
+            institution_runtime: Arc::new(RwLock::new(Arc::new(
+                crate::institution::runtime::InstitutionRuntime::new(),
+            ))),
             backend: Some(backend),
             task_store: Some(task_store),
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -466,6 +486,12 @@ impl EigeniusService {
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            institution_index: Arc::new(RwLock::new(Arc::new(
+                crate::institution::registry::InstitutionIndex::new(),
+            ))),
+            institution_runtime: Arc::new(RwLock::new(Arc::new(
+                crate::institution::runtime::InstitutionRuntime::new(),
+            ))),
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -639,6 +665,32 @@ impl EigeniusService {
     /// commit these to a follow-up layer so they become queryable.
     /// RESUME callers should instead use
     /// [`Self::rehydrate_wasm_from_layer`] which skips publishing.
+    /// Rebuild the D14 [`InstitutionIndex`] from the given layer
+    /// (which is the new head of the chain). Called after every
+    /// successful commit + after Phase 9a rehydration.
+    ///
+    /// Walks the entire chain from the supplied layer downward; any
+    /// per-resource parse errors are logged at warn-level and skipped
+    /// (the well-formed entries still index — same shape as the
+    /// existing capability-scan flow).
+    async fn rebuild_institution_index(&self, layer: &crate::layer::Layer) {
+        let (idx, errors) = crate::institution::registry::InstitutionIndex::from_layer(layer);
+        for err in &errors {
+            tracing::warn!(
+                { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                kind = err.kind,
+                resource_iri = err
+                    .resource_iri
+                    .as_ref()
+                    .map(|i| i.as_str())
+                    .unwrap_or(""),
+                { field::ERROR_MESSAGE } = %err.reason,
+                "institution-index parse error"
+            );
+        }
+        *self.institution_index.write().await = Arc::new(idx);
+    }
+
     async fn register_wasm_from_layer(
         &self,
         layer: &crate::layer::Layer,
@@ -960,16 +1012,20 @@ impl EigeniusService {
         let exec_result = {
             let ctx = self.context.read().await;
             let components = Arc::clone(&*self.components.read().await);
-            // Pass an empty institution registry — the pre-Phase-9b-iii
-            // RunProgram path already did this; fiber queries go
-            // through the FiberQuery RPC, not through program
-            // dispatch. Preserves existing behaviour.
-            match crate::program::eval_io::execute_program_nbe_with_institutions(
+            let index = Arc::clone(&*self.institution_index.read().await);
+            let runtime = Arc::clone(&*self.institution_runtime.read().await);
+            // Pass an empty legacy institution registry — fiber queries
+            // go through the FiberQuery RPC, not through program
+            // dispatch. The D14 index + runtime carry institution
+            // dispatch on the new path.
+            match crate::program::eval_io::execute_program_nbe_with_institutions_d14(
                 &program,
                 &input,
                 Arc::clone(ctx.head()),
                 components,
                 Arc::new(crate::institution::InstitutionRegistry::new()),
+                Some(index),
+                Some(runtime),
                 Some(Arc::clone(&self.trace_store)),
                 task_context.clone(),
             ) {
@@ -1193,7 +1249,15 @@ impl EigeniusKernel for EigeniusService {
         let mut errors = Vec::new();
 
         if req.auto_commit {
-            match ctx.commit("loaded") {
+            // Snapshot the current D14 institution index + runtime to
+            // pass to commit_with_validation. Newly committed
+            // resources are gated by AutoOnLoad QueryClasses already
+            // declared in the chain; QueryClasses declared in the
+            // same Load batch take effect on subsequent loads (the
+            // index gets rebuilt below).
+            let index_snapshot = Arc::clone(&*self.institution_index.read().await);
+            let runtime_snapshot = Arc::clone(&*self.institution_runtime.read().await);
+            match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
                 Ok(layer) => {
                     layer_id = layer.id().to_string();
                     tracing::info!(
@@ -1206,6 +1270,10 @@ impl EigeniusKernel for EigeniusService {
                     if let Some(err) = self.persist_layer_if_backend(&layer) {
                         errors.push(err);
                     }
+                    // Rebuild the D14 institution index from the new
+                    // chain so subsequent commits see the just-loaded
+                    // declarations.
+                    self.rebuild_institution_index(&layer).await;
                     // Scan the newly committed layer for WASM components/institutions.
                     // For institutions, this returns the declared morphism / query
                     // class resources that the registration produced.
@@ -1235,6 +1303,7 @@ impl EigeniusKernel for EigeniusService {
                                     if let Some(err) = self.persist_layer_if_backend(&extra) {
                                         errors.push(err);
                                     }
+                                    self.rebuild_institution_index(&extra).await;
                                 }
                                 Err(e) => {
                                     errors.push(ValidationError {
@@ -2062,6 +2131,12 @@ pub async fn start_server(
             );
         }
     }
+
+    // Build the D14 institution index from the bootstrap / rehydrated
+    // chain so subsequent Loads dispatch AutoOnLoad QueryClasses
+    // declared in the persisted chain.
+    let head = Arc::clone(service.context.read().await.head());
+    service.rebuild_institution_index(&head).await;
 
     // Background task resume sweep (D21 §6). Runs detached so the
     // gRPC listener is available immediately; clients can poll

@@ -74,6 +74,37 @@ pub fn execute_program_nbe_with_institutions(
     trace_store: Option<Arc<dyn TraceStore>>,
     task_context: Option<Arc<crate::task::TaskContext>>,
 ) -> Result<NbeExecutionResult, ProgramError> {
+    execute_program_nbe_with_institutions_d14(
+        program,
+        input,
+        layer,
+        registry,
+        institutions,
+        None,
+        None,
+        trace_store,
+        task_context,
+    )
+}
+
+/// Same as [`execute_program_nbe_with_institutions`] but accepts the
+/// D14 institution index + runtime so `Exp::InstitutionInvoke` and
+/// `Exp::NativeDecide` dispatch through the new four-step pipeline /
+/// QueryClass mechanism. The legacy `institutions` registry is still
+/// accepted for fallback during the B2/B3 transition; M8/B3 retires
+/// it together with the legacy field on `EvalCtx::IO`.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_program_nbe_with_institutions_d14(
+    program: &Resource,
+    input: &Resource,
+    layer: Arc<Layer>,
+    registry: Arc<ComponentRegistry>,
+    institutions: Arc<InstitutionRegistry>,
+    institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
+    institution_runtime: Option<Arc<crate::institution::runtime::InstitutionRuntime>>,
+    trace_store: Option<Arc<dyn TraceStore>>,
+    task_context: Option<Arc<crate::task::TaskContext>>,
+) -> Result<NbeExecutionResult, ProgramError> {
     // Extract the program body expression
     let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
     let body = match program.get(&body_prop) {
@@ -94,8 +125,8 @@ pub fn execute_program_nbe_with_institutions(
         trace_store,
         dispatched_traces: Arc::clone(&dispatched_traces),
         task_context,
-        institution_index: None,
-        institution_runtime: None,
+        institution_index,
+        institution_runtime,
     };
 
     // Bind input as a Val::ResourceVal in the environment
