@@ -12,6 +12,7 @@ members = [
 ]
 exclude = [
     "examples/wasm-cbor-echo",
+    "examples/wasm-d14-echo",
     "examples/wasm-doc-validator",
     "examples/wasm-http-shout",
     "examples/wasm-ordering-institution",

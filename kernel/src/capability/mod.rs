@@ -22,6 +22,7 @@
 pub mod registration;
 pub mod wasm_component;
 pub mod wasm_institution;
+pub mod wasm_institution_d14;
 
 #[cfg(test)]
 mod tests;
