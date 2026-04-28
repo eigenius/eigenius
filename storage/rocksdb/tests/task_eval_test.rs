@@ -30,7 +30,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::institution::InstitutionRegistry;
 use eigenius_kernel::layer::Layer;
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::{eval_ctx, EvalCtx};
@@ -147,7 +146,6 @@ fn make_io_ctx(
     EvalCtx::IO {
         layer,
         registry,
-        institutions: Arc::new(InstitutionRegistry::new()),
         trace_store,
         dispatched_traces: Arc::new(Mutex::new(Vec::new())),
         task_context,

@@ -56,19 +56,11 @@ pub struct CheckCtx {
     /// Consulted by [`subtype_of`] and any direct size-comparison
     /// site via [`crate::nbe::sized::size_le_with_hyps`].
     pub size_tso: crate::nbe::sized_rigid::Tso,
-    /// Optional institution registry for check-time dispatch of
-    /// `Constraint::Institution` predicates (Phase 11c). When
-    /// present, `eval` calls escalate from `EvalCtx::Pure` to
-    /// `EvalCtx::Check` so the institution-dispatched decide fires;
-    /// when absent, institution-dispatched constraints stay as
-    /// passthrough neutrals (D19 §8.5-style fallback).
-    pub institutions: Option<Arc<crate::institution::InstitutionRegistry>>,
     /// D14 institution index — derived view of the layer chain. When
     /// attached together with `institution_runtime`,
-    /// `Constraint::Institution` predicates dispatch through the D14
-    /// `try_d14_decide` path; otherwise they fall back to the legacy
-    /// `institutions` registry. Both can be set at once during the
-    /// transition.
+    /// `Constraint::Institution` predicates dispatch through
+    /// `try_d14_decide` (D14 §9.2). Without these, constraints stay
+    /// as passthrough neutrals — what `EvalCtx::Pure` does anyway.
     pub institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
     /// D14 institution runtime — registry of `Institution` trait
     /// objects keyed by institution IRI. See `institution_index`.
@@ -84,7 +76,6 @@ impl CheckCtx {
             layer: None,
             type_cache: BTreeMap::new(),
             size_tso: crate::nbe::sized_rigid::Tso::new(),
-            institutions: None,
             institution_index: None,
             institution_runtime: None,
         }
@@ -98,27 +89,14 @@ impl CheckCtx {
             layer: Some(layer),
             type_cache: BTreeMap::new(),
             size_tso: crate::nbe::sized_rigid::Tso::new(),
-            institutions: None,
             institution_index: None,
             institution_runtime: None,
         }
     }
 
-    /// Attach an institution registry for check-time dispatch of
-    /// `Constraint::Institution` predicates (Phase 11c).
-    pub fn with_institutions(
-        mut self,
-        institutions: Arc<crate::institution::InstitutionRegistry>,
-    ) -> Self {
-        self.institutions = Some(institutions);
-        self
-    }
-
     /// Attach a D14 institution index and runtime for check-time
-    /// dispatch of `Constraint::Institution` predicates through the
-    /// new `try_d14_decide` path. Either or both fields can be set
-    /// during the legacy → D14 transition; M8 will collapse this with
-    /// `with_institutions` once the legacy path retires.
+    /// dispatch of `Constraint::Institution` predicates through
+    /// `try_d14_decide` (D14 §9.2).
     pub fn with_institutions_d14(
         mut self,
         index: Arc<crate::institution::registry::InstitutionIndex>,
@@ -132,28 +110,15 @@ impl CheckCtx {
     /// Produce an [`EvalCtx`] suitable for evaluating expressions
     /// under this check context.
     ///
-    /// Returns `EvalCtx::Check { layer, institutions, ... }` when an
-    /// institution registry (legacy or D14) is attached; otherwise
-    /// `EvalCtx::Pure`. All internal `eval` calls in `check.rs` should
-    /// route through this so institution-dispatched constraints fire
-    /// at check time rather than deferring to runtime.
+    /// Returns `EvalCtx::Check` when a D14 institution index/runtime
+    /// is attached; otherwise `EvalCtx::Pure`. All internal `eval`
+    /// calls in `check.rs` should route through this so institution-
+    /// dispatched constraints fire at check time rather than deferring
+    /// to runtime.
     pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
-        let has_d14 = self.institution_index.is_some() && self.institution_runtime.is_some();
-        if let Some(institutions) = &self.institutions {
+        if self.institution_index.is_some() && self.institution_runtime.is_some() {
             crate::nbe::eval::EvalCtx::Check {
                 layer: self.layer.clone(),
-                institutions: institutions.clone(),
-                institution_index: self.institution_index.clone(),
-                institution_runtime: self.institution_runtime.clone(),
-            }
-        } else if has_d14 {
-            // D14-only context: legacy InstitutionRegistry unused.
-            // Synthesise an empty legacy registry so the EvalCtx
-            // shape stays uniform during the transition; M8 drops
-            // the legacy field from EvalCtx entirely.
-            crate::nbe::eval::EvalCtx::Check {
-                layer: self.layer.clone(),
-                institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
                 institution_index: self.institution_index.clone(),
                 institution_runtime: self.institution_runtime.clone(),
             }
@@ -182,7 +147,6 @@ impl CheckCtx {
             layer: self.layer.clone(),
             type_cache: self.type_cache.clone(),
             size_tso: self.size_tso.clone(),
-            institutions: self.institutions.clone(),
             institution_index: self.institution_index.clone(),
             institution_runtime: self.institution_runtime.clone(),
         })
@@ -500,7 +464,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 layer: ctx.layer.clone(),
                 type_cache: ctx.type_cache.clone(),
                 size_tso: ctx.size_tso.clone(),
-                institutions: ctx.institutions.clone(),
                 institution_index: ctx.institution_index.clone(),
                 institution_runtime: ctx.institution_runtime.clone(),
             };
@@ -1798,7 +1761,6 @@ fn check_match(
             layer: ctx.layer.clone(),
             type_cache: ctx.type_cache.clone(),
             size_tso: ctx.size_tso.clone(),
-            institutions: ctx.institutions.clone(),
             institution_index: ctx.institution_index.clone(),
             institution_runtime: ctx.institution_runtime.clone(),
         };
@@ -4082,7 +4044,6 @@ mod tests {
         let _ = ExecutionMode::ReadOnly; // silence unused-import warning on small surface
         EvalCtx::Check {
             layer: None,
-            institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
             institution_index: Some(idx),
             institution_runtime: Some(rt),
         }

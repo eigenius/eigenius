@@ -56,20 +56,6 @@ pub const SIZE_KIND: &str = "urn:eigenius:core:Size";
 /// [`IMPORT_FORMAT`], [`EXACT`].
 pub const COMORPHISM: &str = "urn:eigenius:institution:Comorphism";
 
-/// Old (pre-D14) source-institution IRI property on a Comorphism.
-/// Retained while the legacy `FiberReasoner` code path still references
-/// it; superseded by `export_format.institution_ref` under D14.
-pub const SOURCE_INSTITUTION: &str = "urn:eigenius:institution:source_institution";
-/// Old (pre-D14) target-institution IRI property on a Comorphism.
-/// Retained while the legacy `FiberReasoner` code path still references
-/// it; superseded by `import_format.institution_ref` under D14.
-pub const TARGET_INSTITUTION: &str = "urn:eigenius:institution:target_institution";
-/// Old (pre-D14) translation-procedure IRI property on a Comorphism.
-/// Retained while the legacy `FiberReasoner::translate` code path still
-/// references it; superseded by the (export_format, transformation,
-/// import_format) triple under D14.
-pub const TRANSLATION_PROCEDURE: &str = "urn:eigenius:institution:translation_procedure";
-
 // --- D14 Comorphism triadic shape (s, m, t) ---
 
 /// ExportFormat reference on a Comorphism — the source-side `s`.

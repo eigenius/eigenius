@@ -89,53 +89,6 @@ impl<'a> Validator<'a> {
         errors
     }
 
-    /// Validate all resources with institution-aware morphism checking.
-    ///
-    /// After structural validation, dispatches to registered institutions
-    /// for domain-specific morphism validation.
-    pub fn validate_with_institutions(
-        &self,
-        institutions: &crate::institution::InstitutionRegistry,
-        ctx: &crate::context::ExecutionContext,
-    ) -> Vec<ValidationError> {
-        let mut errors = self.validate();
-
-        for resource in self.layer.resources().values() {
-            let res_id = resource.id().cloned();
-            let class_iris = resource.is_a();
-
-            // Check if any class is a registered morphism type
-            for class_iri in &class_iris {
-                if let Some(reasoner) = institutions.institution_for_morphism(class_iri) {
-                    match reasoner.validate_morphism(resource, ctx) {
-                        Ok(crate::institution::error::MorphismValidation::Valid) => {}
-                        Ok(crate::institution::error::MorphismValidation::Invalid(reason)) => {
-                            errors.push(ValidationError {
-                                resource_id: res_id.clone(),
-                                property: None,
-                                rule: ValidationRule::InstitutionValidation,
-                                message: format!("institution rejected morphism: {reason}"),
-                            });
-                        }
-                        Ok(crate::institution::error::MorphismValidation::Undecidable) => {
-                            // Accept with no error — institution can't determine validity
-                        }
-                        Err(e) => {
-                            errors.push(ValidationError {
-                                resource_id: res_id.clone(),
-                                property: None,
-                                rule: ValidationRule::InstitutionValidation,
-                                message: format!("institution validation error: {e}"),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        errors
-    }
-
     /// Validate a single resource.
     pub fn validate_resource(&self, resource: &Resource) -> Vec<ValidationError> {
         let mut errors = Vec::new();

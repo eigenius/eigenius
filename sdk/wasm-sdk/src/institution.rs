@@ -12,91 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Institution helpers for WASM fiber reasoners.
+//! Institution helpers for WASM-hosted institutions.
 //!
 //! Provides resource builders for the D14 institution declaration
 //! vocabulary — `Institution`, `ExportFormat`, `ImportFormat`,
 //! `QueryClass`, `Comorphism` — which a guest component constructs and
 //! ships to the kernel as ordinary typed Resources (Eigon-JSON or
 //! Eigon-CBOR), per D14 §3 / §4.
-//!
-//! The legacy `FiberDeclaration` struct + `MorphismValidation` enum
-//! (used by the pre-D14 `eigenius-institution` WIT world) are retained
-//! only so the kernel-side `FiberReasoner` trait still compiles while
-//! the D14 migration is in flight; B4 of the retirement plan deletes
-//! both ends together with the trait.
 
 use crate::iri as wk;
 use crate::{Resource, Value};
-
-/// Declaration of a fiber reasoner's structure, matching the kernel's
-/// `FiberDeclaration` struct. Serializes into a Resource with the
-/// institution property names the kernel expects.
-pub struct FiberDeclaration {
-    pub institution_iri: String,
-    pub name: String,
-    pub morphism_types: Vec<Resource>,
-    pub query_types: Vec<Resource>,
-    pub structural_properties: Vec<Resource>,
-}
-
-impl FiberDeclaration {
-    /// Convert this declaration into a CBOR-serializable Resource.
-    pub fn into_resource(self) -> Resource {
-        let mut r = Resource::new();
-        r.set(
-            "urn:eigenius:institution:institution_iri",
-            Value::String(self.institution_iri),
-        );
-        r.set(
-            "urn:eigenius:institution:institution_name",
-            Value::String(self.name),
-        );
-        if !self.morphism_types.is_empty() {
-            r.set(
-                "urn:eigenius:institution:morphism_types",
-                Value::Array(
-                    self.morphism_types
-                        .into_iter()
-                        .map(|r| Value::Embedded(Box::new(r)))
-                        .collect(),
-                ),
-            );
-        }
-        if !self.query_types.is_empty() {
-            r.set(
-                "urn:eigenius:institution:query_types",
-                Value::Array(
-                    self.query_types
-                        .into_iter()
-                        .map(|r| Value::Embedded(Box::new(r)))
-                        .collect(),
-                ),
-            );
-        }
-        if !self.structural_properties.is_empty() {
-            r.set(
-                "urn:eigenius:institution:structural_properties",
-                Value::Array(
-                    self.structural_properties
-                        .into_iter()
-                        .map(|r| Value::Embedded(Box::new(r)))
-                        .collect(),
-                ),
-            );
-        }
-        r
-    }
-}
-
-/// Result of morphism validation. Matches the kernel's `MorphismValidation`
-/// enum and the `validation-result` WIT enum.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MorphismValidation {
-    Valid,
-    Invalid(String),
-    Undecidable,
-}
 
 // ─── D14 declaration builders ────────────────────────────────────────────
 
@@ -430,52 +355,6 @@ impl ComorphismDecl {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fiber_declaration_roundtrips() {
-        let decl = FiberDeclaration {
-            institution_iri: "urn:example:inst".into(),
-            name: "Example".into(),
-            morphism_types: vec![],
-            query_types: vec![],
-            structural_properties: vec![],
-        };
-        let r = decl.into_resource();
-        assert_eq!(
-            r.get_string("urn:eigenius:institution:institution_iri"),
-            Some("urn:example:inst")
-        );
-        assert_eq!(
-            r.get_string("urn:eigenius:institution:institution_name"),
-            Some("Example")
-        );
-    }
-
-    #[test]
-    fn fiber_declaration_with_morphism_types() {
-        let mut morphism = Resource::with_id("urn:example:Refinement");
-        morphism.set_is_a(["urn:eigenius:core:Class"]);
-        morphism.set(
-            "urn:eigenius:core:short_name",
-            Value::String("Refinement".into()),
-        );
-
-        let decl = FiberDeclaration {
-            institution_iri: "urn:example:inst".into(),
-            name: "Example".into(),
-            morphism_types: vec![morphism],
-            query_types: vec![],
-            structural_properties: vec![],
-        };
-
-        let r = decl.into_resource();
-        let morphisms = r
-            .get("urn:eigenius:institution:morphism_types")
-            .unwrap()
-            .as_array()
-            .unwrap();
-        assert_eq!(morphisms.len(), 1);
-    }
 
     // ─── D14 declaration-builder tests ──────────────────────────────
 

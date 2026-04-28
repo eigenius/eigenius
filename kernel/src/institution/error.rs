@@ -45,14 +45,3 @@ impl fmt::Display for InstitutionError {
 }
 
 impl std::error::Error for InstitutionError {}
-
-/// Result of validating a morphism against an institution's domain logic.
-#[derive(Debug, Clone)]
-pub enum MorphismValidation {
-    /// The morphism is valid according to the institution's domain logic.
-    Valid,
-    /// The morphism is invalid, with a reason.
-    Invalid(String),
-    /// The institution cannot determine validity.
-    Undecidable,
-}

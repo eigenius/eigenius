@@ -65,7 +65,6 @@ impl std::error::Error for EvalError {}
 
 use crate::institution::registry::InstitutionIndex;
 use crate::institution::runtime::InstitutionRuntime;
-use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, Patt};
@@ -88,7 +87,6 @@ pub enum EvalCtx {
     IO {
         layer: Arc<Layer>,
         registry: Arc<ComponentRegistry>,
-        institutions: Arc<InstitutionRegistry>,
         trace_store: Option<Arc<dyn TraceStore>>,
         /// ComponentTraces produced during this evaluation (for trace layer commits).
         dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
@@ -99,29 +97,23 @@ pub enum EvalCtx {
         task_context: Option<Arc<TaskContext>>,
         /// D14 institution index — derived view of the layer chain
         /// keyed by institution / format / query / comorphism IRIs.
-        /// `None` while the migration from the legacy
-        /// `InstitutionRegistry` is in flight; when `Some` and a
-        /// runtime (below) is also `Some`, `Exp::InstitutionInvoke`
-        /// dispatches via the D14 four-step pipeline (D14 §9.3).
+        /// When `Some` and a runtime (below) is also `Some`,
+        /// `Exp::InstitutionInvoke` dispatches via the D14 four-step
+        /// pipeline (D14 §9.3).
         institution_index: Option<Arc<InstitutionIndex>>,
         /// D14 institution runtime — registry of `Institution` trait
-        /// objects keyed by institution IRI. `None` until the kernel
-        /// server populates it during M7 wiring.
+        /// objects keyed by institution IRI.
         institution_runtime: Option<Arc<InstitutionRuntime>>,
     },
-    /// Pure evaluation with access to an institution registry for
-    /// check-time dispatch of `Constraint::Institution` predicates
-    /// (Phase 11c). No component registry, no trace store — this is
-    /// what the type-checker uses when it wants institutions but not
-    /// full IO.
+    /// Pure evaluation with access to the D14 institution index +
+    /// runtime for check-time dispatch of `Constraint::Institution`
+    /// predicates. No component registry, no trace store — this is
+    /// what the type-checker uses when it wants institution
+    /// resolution but not full IO. Comorphism dispatch (which applies
+    /// a transformation Component) is unavailable here; only Decidable
+    /// QueryClass dispatch and AutoOnLoad readers are wired.
     Check {
         layer: Option<Arc<Layer>>,
-        institutions: Arc<InstitutionRegistry>,
-        /// D14 index — see `IO::institution_index` above. The Check mode lacks
-        /// a `ComponentRegistry`, so the D14 InstitutionInvoke pipeline
-        /// (which applies a transformation Component) cannot run here;
-        /// the field is present for symmetry with `IO` and for future
-        /// use by readers of declaration metadata at type-check time.
         institution_index: Option<Arc<InstitutionIndex>>,
         institution_runtime: Option<Arc<InstitutionRuntime>>,
     },
@@ -131,15 +123,6 @@ impl EvalCtx {
     /// A static Pure context for convenience.
     pub fn pure() -> Self {
         EvalCtx::Pure
-    }
-
-    /// Institution registry for this evaluation context, if any.
-    pub fn institutions(&self) -> Option<&Arc<InstitutionRegistry>> {
-        match self {
-            EvalCtx::IO { institutions, .. } => Some(institutions),
-            EvalCtx::Check { institutions, .. } => Some(institutions),
-            EvalCtx::Pure | EvalCtx::Read { .. } => None,
-        }
     }
 
     /// Layer for this evaluation context, if any.
@@ -241,15 +224,16 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::Snd(e) => ev(e)?.vsnd(),
 
         Exp::App(e1, e2) => {
-            // In IO mode, check if the function is a component or institution dispatch
-            if let EvalCtx::IO {
-                registry,
-                institutions,
-                ..
-            } = ctx
-            {
+            // In IO mode, intercept component-call-shaped applications:
+            // when the LHS is a Var resolving to a registered Component,
+            // dispatch through the component runtime. Institution
+            // capabilities don't appear here under D14 — programs reach
+            // institutions only via `Exp::InstitutionInvoke` (comorphisms)
+            // and `Exp::NativeDecide(Constraint::Institution{..}, _)`
+            // (Decidable QueryClasses). The ESL compiler emits those
+            // AST nodes via the InstitutionIndex classifier (D2 v2 §3.8).
+            if let EvalCtx::IO { registry, .. } = ctx {
                 if let Exp::Var(name) = e1.as_ref() {
-                    // Check component registry first
                     if registry.get(name).is_some() {
                         let arg_val = ev(e2)?;
                         let (input_val, comp_arg) = match &arg_val {
@@ -259,13 +243,6 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                             other => (other.clone(), None),
                         };
                         return dispatch_component(name, &input_val, comp_arg, ctx);
-                    }
-                    // Check institution registry for fiber queries
-                    if let Ok(inst_iri) = Iri::parse(name) {
-                        if institutions.get(&inst_iri).is_some() {
-                            let arg_val = ev(e2)?;
-                            return dispatch_fiber_query(&inst_iri, &arg_val, ctx);
-                        }
                     }
                 }
             }
@@ -711,7 +688,6 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
         Exp::App(e1, e2) => {
             if let EvalCtx::IO {
                 registry,
-                institutions,
                 dispatched_traces,
                 ..
             } = ctx
@@ -736,12 +712,6 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
                             }
                         };
                         return Ok((val, trace));
-                    }
-                    if let Ok(inst_iri) = Iri::parse(name) {
-                        if institutions.get(&inst_iri).is_some() {
-                            let arg_val = eval_ctx(e2, rho, ctx)?;
-                            return Ok((dispatch_fiber_query(&inst_iri, &arg_val, ctx)?, None));
-                        }
                     }
                 }
             }
@@ -1769,53 +1739,6 @@ fn resolve_component_schemas(
     None
 }
 
-/// Dispatch a fiber query to an institution.
-fn dispatch_fiber_query(
-    institution_iri: &Iri,
-    query_val: &Val,
-    ctx: &EvalCtx,
-) -> Result<Val, EvalError> {
-    let (institutions, layer) = match ctx {
-        EvalCtx::IO {
-            institutions,
-            layer,
-            ..
-        } => (institutions, layer),
-        _ => {
-            return Err(EvalError::ModeError(
-                "dispatch_fiber_query called outside IO mode".into(),
-            ))
-        }
-    };
-
-    let reasoner = match institutions.get(institution_iri) {
-        Some(r) => r,
-        None => return Ok(query_val.clone()), // Unknown institution — return input
-    };
-
-    let query_resource = val_to_resource(query_val);
-
-    // Create a temporary ExecutionContext for the institution
-    let exec_ctx = crate::context::ExecutionContext::new(
-        Arc::clone(layer),
-        "fiber_query",
-        crate::context::ExecutionMode::ReadOnly,
-    );
-
-    match reasoner.query(&query_resource, &exec_ctx) {
-        Ok(result) => Ok(Val::ResourceVal(Box::new(result))),
-        Err(e) => {
-            tracing::warn!(
-                { field::OPERATION } = operation::INSTITUTION_DISPATCH,
-                { field::ERROR_KIND } = "fiber_query_failed",
-                { field::ERROR_MESSAGE } = %e,
-                "fiber query failed; returning the input query verbatim"
-            );
-            Ok(query_val.clone())
-        }
-    }
-}
-
 /// Extract the payload value from a single-property wrapper resource.
 ///
 /// Convention: `resource_value_to_val` wraps primitive values in a
@@ -2309,7 +2232,6 @@ mod tests {
 
     // --- eval_traced tests (Phase 10b) ---
 
-    use crate::institution::InstitutionRegistry;
     use crate::ontology::iri::Iri;
     use crate::ontology::resource::{Resource, Value};
     use crate::program::component::ComponentRegistry;
@@ -2320,7 +2242,6 @@ mod tests {
         EvalCtx::IO {
             layer: std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build()),
             registry: std::sync::Arc::new(ComponentRegistry::default()),
-            institutions: std::sync::Arc::new(InstitutionRegistry::new()),
             trace_store: None,
             dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             task_context: None,
@@ -2593,98 +2514,6 @@ mod tests {
             "missing observation should return Val::Unit, got {:?}",
             val
         );
-        Ok(())
-    }
-
-    #[test]
-    fn fiber_query_failure_returns_input() -> Result<(), EvalError> {
-        // Phase 10c: A fiber query that fails should return the input
-        // unchanged instead of panicking.
-        use crate::context::ExecutionContext;
-        use crate::institution::error::{InstitutionError, MorphismValidation};
-        use crate::institution::{FiberDeclaration, FiberReasoner};
-
-        struct FailingInstitution;
-        impl FiberReasoner for FailingInstitution {
-            fn fiber_declaration(&self) -> FiberDeclaration {
-                FiberDeclaration::minimal(
-                    Iri::parse("urn:eigenius:test:failing").unwrap(),
-                    "Failing",
-                )
-            }
-            fn query(
-                &self,
-                _query: &Resource,
-                _ctx: &ExecutionContext,
-            ) -> Result<Resource, InstitutionError> {
-                Err(InstitutionError::ComputationFailed(
-                    "intentional test failure".into(),
-                ))
-            }
-            fn validate_morphism(
-                &self,
-                _m: &Resource,
-                _ctx: &ExecutionContext,
-            ) -> Result<MorphismValidation, InstitutionError> {
-                Ok(MorphismValidation::Valid)
-            }
-            fn discover_morphisms(
-                &self,
-                _r: &[Resource],
-                _ctx: &ExecutionContext,
-            ) -> Result<Vec<Resource>, InstitutionError> {
-                Ok(vec![])
-            }
-        }
-
-        let mut inst_registry = InstitutionRegistry::new();
-        inst_registry
-            .register(Box::new(FailingInstitution))
-            .unwrap();
-
-        let layer = std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
-        let ctx = EvalCtx::IO {
-            layer,
-            registry: std::sync::Arc::new(ComponentRegistry::default()),
-            institutions: std::sync::Arc::new(inst_registry),
-            trace_store: None,
-            dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            task_context: None,
-            institution_index: None,
-            institution_runtime: None,
-        };
-
-        // Build a resource to use as input
-        let mut input_r = Resource::new_embedded();
-        input_r.set(
-            Iri::parse("urn:eigenius:test:val").unwrap(),
-            Value::String("data".into()),
-        );
-        let rho = Rho::Nil.extend(
-            Patt::Var("q".to_string()),
-            Val::ResourceVal(Box::new(input_r)),
-        );
-
-        // Apply the failing institution IRI to the input
-        let exp = Exp::App(
-            Box::new(Exp::Var("urn:eigenius:test:failing".to_string())),
-            Box::new(Exp::Var("q".to_string())),
-        );
-        let (val, _trace) = eval_traced(&exp, &rho, &ctx)?;
-
-        // Should return the input unchanged (not panic)
-        match val {
-            Val::ResourceVal(r) => {
-                assert_eq!(
-                    r.get(&Iri::parse("urn:eigenius:test:val").unwrap())
-                        .unwrap()
-                        .as_str(),
-                    Some("data"),
-                    "fiber query failure should return input unchanged"
-                );
-            }
-            other => panic!("expected ResourceVal, got {:?}", other),
-        }
         Ok(())
     }
 
@@ -3594,7 +3423,6 @@ mod tests {
         let ctx = EvalCtx::IO {
             layer,
             registry: Arc::new(ComponentRegistry::default()),
-            institutions: Arc::new(InstitutionRegistry::new()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
@@ -3710,7 +3538,6 @@ mod tests {
         let ctx = EvalCtx::IO {
             layer: new_layer,
             registry: Arc::new(ComponentRegistry::default()),
-            institutions: Arc::new(InstitutionRegistry::new()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
@@ -3850,7 +3677,6 @@ mod tests {
         EvalCtx::IO {
             layer,
             registry: Arc::new(ComponentRegistry::default()),
-            institutions: Arc::new(InstitutionRegistry::new()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
@@ -3914,7 +3740,6 @@ mod tests {
         let ctx = EvalCtx::IO {
             layer,
             registry: Arc::new(ComponentRegistry::default()),
-            institutions: Arc::new(InstitutionRegistry::new()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
             task_context: None,

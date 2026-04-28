@@ -294,12 +294,13 @@ async fn resume_one_task(
         Arc::clone(&task_store),
     ));
 
-    let result = crate::program::eval_io::execute_program_nbe_with_institutions(
+    let result = crate::program::eval_io::execute_program_nbe_with_institutions_d14(
         &program,
         &input,
         layer,
         components,
-        Arc::new(crate::institution::InstitutionRegistry::new()),
+        None,
+        None,
         Some(trace_store),
         Some(tc),
     );
@@ -338,7 +339,6 @@ pub struct EigeniusService {
     /// Inner Arc allows cheap cloning for passing to the evaluator.
     components: Arc<RwLock<Arc<ComponentRegistry>>>,
     trace_store: Arc<dyn TraceStore>,
-    institutions: Arc<RwLock<crate::institution::InstitutionRegistry>>,
     /// D14 institution index — derived view of the layer chain rebuilt
     /// after every commit. Outer lock allows swapping; inner Arc lets
     /// the evaluator clone cheaply when constructing `EvalCtx::IO`.
@@ -397,7 +397,6 @@ impl EigeniusService {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store: Arc::new(InMemoryTraceStore::new()),
-            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
             institution_index: Arc::new(RwLock::new(Arc::new(
                 crate::institution::registry::InstitutionIndex::new(),
             ))),
@@ -444,7 +443,6 @@ impl EigeniusService {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
-            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
             institution_index: Arc::new(RwLock::new(Arc::new(
                 crate::institution::registry::InstitutionIndex::new(),
             ))),
@@ -485,7 +483,6 @@ impl EigeniusService {
             context: Arc::new(RwLock::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
-            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
             institution_index: Arc::new(RwLock::new(Arc::new(
                 crate::institution::registry::InstitutionIndex::new(),
             ))),
@@ -967,16 +964,11 @@ impl EigeniusService {
             let components = Arc::clone(&*self.components.read().await);
             let index = Arc::clone(&*self.institution_index.read().await);
             let runtime = Arc::clone(&*self.institution_runtime.read().await);
-            // Pass an empty legacy institution registry — fiber queries
-            // go through the FiberQuery RPC, not through program
-            // dispatch. The D14 index + runtime carry institution
-            // dispatch on the new path.
             match crate::program::eval_io::execute_program_nbe_with_institutions_d14(
                 &program,
                 &input,
                 Arc::clone(ctx.head()),
                 components,
-                Arc::new(crate::institution::InstitutionRegistry::new()),
                 Some(index),
                 Some(runtime),
                 Some(Arc::clone(&self.trace_store)),
@@ -1673,36 +1665,17 @@ impl EigeniusKernel for EigeniusService {
             { field::INSTITUTION_IRI } = %req.institution_iri,
             "fiber_query target"
         );
-        let inst_iri = Iri::parse(&req.institution_iri)
-            .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
-
-        let institutions = self.institutions.read().await;
-        let reasoner = institutions
-            .get(&inst_iri)
-            .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
-
-        let query_resources = Self::parse_resources(&req.query, &req.content_type)?;
-        let query = query_resources
-            .into_iter()
-            .next()
-            .ok_or_else(|| Status::invalid_argument("no query resource"))?;
-
-        let ctx = self.context.read().await;
-        match reasoner.query(&query, &ctx) {
-            Ok(result) => Ok(Response::new(FiberQueryResponse {
-                success: true,
-                result: Self::serialize_resource(&result),
-                error: String::new(),
-            })),
-            Err(e) => {
-                guard.fail("fiber_query_failed");
-                Ok(Response::new(FiberQueryResponse {
-                    success: false,
-                    result: Vec::new(),
-                    error: format!("{e}"),
-                }))
-            }
-        }
+        // FiberQuery as a top-level RPC was a Phase-11d shape that
+        // dispatched a single institution.query. Under D14 the canonical
+        // path is the EigenQL Query RPC with a FIBER clause, which
+        // resolves a QueryClass through the InstitutionIndex and runs
+        // through Institution::query (D2 v2 §3.5 / §6.12). The RPC is
+        // retained for proto compatibility but no longer routes through
+        // a registry; the proto surface is a follow-on cleanup task.
+        let _ = (req, &mut guard);
+        Err(Status::unimplemented(
+            "FiberQuery RPC is superseded by Query + FIBER under D14; see D2 §3.5",
+        ))
     }
 
     async fn discover_morphisms(
@@ -1710,46 +1683,14 @@ impl EigeniusKernel for EigeniusService {
         request: Request<DiscoverMorphismsRequest>,
     ) -> Result<Response<DiscoverMorphismsResponse>, Status> {
         let mut guard = RpcGuard::start(operation::RPC_DISCOVER_MORPHISMS);
-        let req = request.into_inner();
-        tracing::debug!(
-            { field::OPERATION } = operation::RPC_DISCOVER_MORPHISMS,
-            { field::INSTITUTION_IRI } = %req.institution_iri,
-            "discover_morphisms target"
-        );
-        let inst_iri = Iri::parse(&req.institution_iri)
-            .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
-
-        let institutions = self.institutions.read().await;
-        let reasoner = institutions
-            .get(&inst_iri)
-            .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
-
-        let mut resources = Vec::new();
-        for data in &req.resources {
-            let parsed = Self::parse_resources(data, &req.content_type)?;
-            resources.extend(parsed);
-        }
-
-        let ctx = self.context.read().await;
-        match reasoner.discover_morphisms(&resources, &ctx) {
-            Ok(morphisms) => {
-                let serialized: Vec<Vec<u8>> =
-                    morphisms.iter().map(Self::serialize_resource).collect();
-                Ok(Response::new(DiscoverMorphismsResponse {
-                    success: true,
-                    morphisms: serialized,
-                    error: String::new(),
-                }))
-            }
-            Err(e) => {
-                guard.fail("discover_morphisms_failed");
-                Ok(Response::new(DiscoverMorphismsResponse {
-                    success: false,
-                    morphisms: Vec::new(),
-                    error: format!("{e}"),
-                }))
-            }
-        }
+        let _ = (request, &mut guard);
+        // No D14 equivalent. The Phase-11d FiberReasoner::discover_morphisms
+        // primitive was subsumed by ordinary QueryClass dispatch — a
+        // user-defined QueryClass returning a list of resources does
+        // the same work, surfaced via FIBER.
+        Err(Status::unimplemented(
+            "DiscoverMorphisms RPC has no D14 equivalent; declare a QueryClass and dispatch via FIBER",
+        ))
     }
 
     async fn list_institutions(
@@ -1757,34 +1698,33 @@ impl EigeniusKernel for EigeniusService {
         request: Request<ListInstitutionsRequest>,
     ) -> Result<Response<ListInstitutionsResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_LIST_INSTITUTIONS);
-        // `at_layer` is accepted but currently has no effect —
-        // institutions live in a kernel-global runtime registry, not
-        // in the layer chain. If Phase 14 ever introduces per-session
-        // institution scoping, this is where the layer-aware lookup
-        // would branch. For 9b-iii we validate + ignore.
         let req = request.into_inner();
         if !req.at_layer.is_empty() {
             let _ = self.resolve_read_layer(&req.at_layer).await?;
         }
-        let institutions = self.institutions.read().await;
-        let infos: Vec<proto::InstitutionInfo> = institutions
-            .list()
-            .iter()
-            .map(|info| proto::InstitutionInfo {
-                iri: info.iri.as_str().to_string(),
-                name: info.name.clone(),
-                morphism_types: info
-                    .morphism_type_iris
-                    .iter()
-                    .map(|i| i.as_str().to_string())
-                    .collect(),
-                query_types: info
-                    .query_type_iris
-                    .iter()
-                    .map(|i| i.as_str().to_string())
-                    .collect(),
+        // D14 list-from-index. The proto's `morphism_types` and
+        // `query_types` slots are populated from QueryClass entries
+        // grouped by institution_ref; comorphisms / formats are not
+        // surfaced through this RPC (a future proto revision can
+        // expand the surface).
+        let index = Arc::clone(&*self.institution_index.read().await);
+        let mut infos: Vec<proto::InstitutionInfo> = index
+            .institutions()
+            .map(|inst| {
+                let query_types: Vec<String> = index
+                    .query_classes()
+                    .filter(|qc| qc.institution_ref == inst.iri)
+                    .map(|qc| qc.query_class.as_str().to_string())
+                    .collect();
+                proto::InstitutionInfo {
+                    iri: inst.iri.as_str().to_string(),
+                    name: inst.name.clone(),
+                    morphism_types: Vec::new(),
+                    query_types,
+                }
             })
             .collect();
+        infos.sort_by(|a, b| a.iri.cmp(&b.iri));
 
         Ok(Response::new(ListInstitutionsResponse {
             institutions: infos,

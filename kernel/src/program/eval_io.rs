@@ -18,7 +18,6 @@
 //! in IO mode. Programs are parsed to Mini-TT terms, then evaluated
 //! with component dispatch, trace memoization, and resource conversion.
 
-use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::{eval_traced, EvalCtx};
@@ -48,58 +47,33 @@ pub fn execute_program_nbe(
     registry: Arc<ComponentRegistry>,
     trace_store: Option<Arc<dyn TraceStore>>,
 ) -> Result<NbeExecutionResult, ProgramError> {
-    execute_program_nbe_with_institutions(
-        program,
-        input,
-        layer,
-        registry,
-        Arc::new(InstitutionRegistry::new()),
-        trace_store,
-        None,
-    )
-}
-
-/// Execute a program resource via NbE in IO mode with institution support.
-///
-/// `task_context`, when present, routes IO dispatches through
-/// per-task positional trace keys so the task can be resumed after a
-/// crash (D21 §3.2). When `None`, the evaluator runs without task
-/// tracking (type-checker, ad-hoc eval, pre-task callers).
-pub fn execute_program_nbe_with_institutions(
-    program: &Resource,
-    input: &Resource,
-    layer: Arc<Layer>,
-    registry: Arc<ComponentRegistry>,
-    institutions: Arc<InstitutionRegistry>,
-    trace_store: Option<Arc<dyn TraceStore>>,
-    task_context: Option<Arc<crate::task::TaskContext>>,
-) -> Result<NbeExecutionResult, ProgramError> {
     execute_program_nbe_with_institutions_d14(
         program,
         input,
         layer,
         registry,
-        institutions,
         None,
         None,
         trace_store,
-        task_context,
+        None,
     )
 }
 
-/// Same as [`execute_program_nbe_with_institutions`] but accepts the
-/// D14 institution index + runtime so `Exp::InstitutionInvoke` and
-/// `Exp::NativeDecide` dispatch through the new four-step pipeline /
-/// QueryClass mechanism. The legacy `institutions` registry is still
-/// accepted for fallback during the B2/B3 transition; M8/B3 retires
-/// it together with the legacy field on `EvalCtx::IO`.
+/// Execute a program resource via NbE in IO mode with the D14
+/// institution index + runtime attached so `Exp::InstitutionInvoke`
+/// and `Exp::NativeDecide` dispatch through the four-step pipeline /
+/// Decidable QueryClass mechanism (D14 §9).
+///
+/// `task_context`, when present, routes IO dispatches through
+/// per-task positional trace keys so the task can be resumed after a
+/// crash (D21 §3.2). When `None`, the evaluator runs without task
+/// tracking (type-checker, ad-hoc eval, pre-task callers).
 #[allow(clippy::too_many_arguments)]
 pub fn execute_program_nbe_with_institutions_d14(
     program: &Resource,
     input: &Resource,
     layer: Arc<Layer>,
     registry: Arc<ComponentRegistry>,
-    institutions: Arc<InstitutionRegistry>,
     institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
     institution_runtime: Option<Arc<crate::institution::runtime::InstitutionRuntime>>,
     trace_store: Option<Arc<dyn TraceStore>>,
@@ -121,7 +95,6 @@ pub fn execute_program_nbe_with_institutions_d14(
     let ctx = EvalCtx::IO {
         layer,
         registry,
-        institutions,
         trace_store,
         dispatched_traces: Arc::clone(&dispatched_traces),
         task_context,
