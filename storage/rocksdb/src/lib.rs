@@ -382,6 +382,7 @@ impl LayerStore for RocksStore {
                 storage.cache.put(
                     eigenius_kernel::layer::ResourceKey::new(id.clone(), iri.clone()),
                     Arc::new(resource),
+                    eigenius_kernel::layer::CacheTier::Active,
                 );
             }
         }
@@ -927,6 +928,7 @@ mod tests {
                                 iri_h.clone(),
                             ),
                             Arc::new(r),
+                            eigenius_kernel::layer::CacheTier::Active,
                         );
                     }
                 }

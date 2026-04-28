@@ -34,8 +34,8 @@ mod storage;
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{
-    BloomCache, CacheStats, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
-    ResourceCache, ResourceKey,
+    BloomCache, BoundedResourceCache, CacheStats, CacheTier, MemoryBloomCache,
+    MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use storage::LayerStorage;
@@ -216,7 +216,15 @@ impl Layer {
         }
         let resource = self.storage.backend.load_resource(&self.id, iri)?;
         let arc = Arc::new(resource);
-        self.storage.cache.put(key, Arc::clone(&arc));
+        // Default tier: Active. Without a per-head shadowing index we
+        // can't tell whether this layer is top-of-stack for `iri` from
+        // here; treating fresh fetches as Active matches the typical
+        // case (resolve walks head→root and stops at first hit) and
+        // accepts the cost of lazy-demoting outdated entries on later
+        // reads (14c-ii).
+        self.storage
+            .cache
+            .put(key, Arc::clone(&arc), CacheTier::Active);
         Some(arc)
     }
 
@@ -393,7 +401,10 @@ impl LayerBuilder {
         let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
         for (iri, resource) in self.resources {
             let key = ResourceKey::new(id.clone(), iri);
-            storage.cache.put(key, Arc::new(resource));
+            // Freshly-built layers are top-of-stack by definition.
+            storage
+                .cache
+                .put(key, Arc::new(resource), CacheTier::Active);
         }
         // Pre-populate the bloom cache. Same bloom value the persistent
         // backend will write on commit (deterministic from `defined_iris`),

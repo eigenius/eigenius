@@ -27,7 +27,8 @@
 //! update to the constructors below; call sites stay unchanged.
 
 use crate::layer::{
-    BloomCache, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache, ResourceCache,
+    BloomCache, BoundedResourceCache, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
+    ResourceCache,
 };
 use crate::storage::{PersistentBackend, ResourceBackend};
 use std::sync::Arc;
@@ -66,13 +67,35 @@ impl LayerStorage {
         }
     }
 
-    /// Storage bound to a `PersistentBackend` (typically `RocksStore`).
-    /// The same Arc serves as the resource backend (via the
-    /// `PersistentBackend: ResourceBackend` supertrait) and as the bloom
-    /// cache's fall-through. Cold-cache reads hit the backend on demand.
+    /// Storage bound to a `PersistentBackend` (typically `RocksStore`)
+    /// with an unbounded in-memory resource cache. Suitable for
+    /// short-lived processes, tests, and small workloads where the
+    /// memory pressure of holding every resolved resource is fine.
+    /// For long-running production workloads, use
+    /// `with_persistent_bounded`.
     pub fn with_persistent(pb: Arc<dyn PersistentBackend>) -> Self {
         Self {
             cache: Arc::new(MemoryResourceCache::new()),
+            backend: Arc::clone(&pb) as Arc<dyn ResourceBackend>,
+            bloom_cache: Arc::new(MemoryBloomCache::new(pb)),
+        }
+    }
+
+    /// Storage bound to a `PersistentBackend` with a **bounded**
+    /// two-pool resource cache (D23 §5.3 / Phase 14c). `total_entries`
+    /// is the combined entry budget across both pools; the active pool
+    /// gets 60% by default and the historical pool 40%. Cold-cache
+    /// reads hit the backend on demand; evicted entries reload on next
+    /// access.
+    ///
+    /// `total_entries` is an entry count (not byte budget). Pick a value
+    /// such that worst-case total memory — entries × average resource
+    /// size — fits the deployment's RAM target. A common starting point
+    /// for ~1 KiB-mean resources is 1M entries (~1 GiB). Phase 12
+    /// workload data informs the production default.
+    pub fn with_persistent_bounded(pb: Arc<dyn PersistentBackend>, total_entries: u64) -> Self {
+        Self {
+            cache: Arc::new(BoundedResourceCache::new(total_entries)),
             backend: Arc::clone(&pb) as Arc<dyn ResourceBackend>,
             bloom_cache: Arc::new(MemoryBloomCache::new(pb)),
         }

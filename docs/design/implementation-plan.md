@@ -890,7 +890,44 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ---
 
-## Phase 17 — Specialty Institutions
+## Phase 17 — Chain Consolidation
+
+**Goal:** Reshape sequential runs of layers into shorter equivalent ones, without losing the per-IRI top-of-stack semantics consumers depend on. Long-lived databases accumulate depth (many small commits per session, fine-grained edits during exploration), and Phase 14b's per-layer bloom design degrades on chains beyond ~10⁴ layers because resolve walks them all. Consolidation is the structural fix; the alternative — a periodically-materialised roll-up index alongside the per-layer blooms (D23 §5.2.7) — speeds up resolve but doesn't reduce storage cost or shorten chains.
+
+This is distinct from merge (which combines parallel branches; doesn't reduce depth) and from GC (which removes unreachable layers; doesn't restructure reachable ones). Consolidation is the "git squash" analog at the typed-knowledge-graph level.
+
+**Duration estimate:** 2–4 weeks (closer to 4 if trace re-pinning and consolidate-across-merge land in scope).
+
+**Prerequisites:** Phase 14 (the DAG model and bloom-cache resolve are what consolidation operates on), Phase 15 (witnessed merge — needed to consolidate across a merge node, since the consolidated layer must preserve any conflict-resolution decisions the merge encoded).
+
+**Motivation:** Consider a notebook session that produces 200 small commits while iterating on a derivation. The session ends; the result is one effective state. With Phase 14, the chain stays 200 layers deep — every read pays a 200-layer bloom walk plus storage holds 200 small `topo:`/`bloom:`/`layer:` entries. Consolidation collapses the run into one layer that's resolve-equivalent to the topmost: same per-IRI top-of-stack values, same parent pointer (the one before the consolidated range began). The 199 collapsed layers become collectable by GC at the next pass.
+
+### Phase 17 — Deliverables
+
+- **`consolidate_chain(from: LayerId, to: LayerId) -> Result<LayerId, ConsolidateError>` API.** Takes a contiguous ancestral range `from..=to` (`from` must be an ancestor of `to`, no merge nodes in between for v1) and produces a single new layer with `parent = from.parent`, content = the range's top-of-stack values per IRI. Returns the new layer id; the caller updates whatever branch ref previously pointed at `to`.
+- **Top-of-stack computation.** Walk `from..=to` head→root, materialising the merged view per the existing `iter_all_resources` semantics. The consolidated layer's `defined_iris` is the union of the range's `defined_iris`. Per-IRI value comes from the topmost layer in the range that defines it.
+- **Trace re-pinning policy.** Traces (D21) pin specific `(LayerId, Iri)` pairs. When a pinned layer is consolidated away, the pin needs to either (a) re-point at the consolidated layer if the IRI's value is preserved, (b) be invalidated, or (c) keep the pinned layer alive (effectively blocking consolidation for traced layers). Default for v1: option (c) — refuse to consolidate ranges that contain trace-pinned resources. Less aggressive but safer; (a)/(b) are post-v1 refinements.
+- **Atomic commit.** The consolidation writes the new layer (`topo:`, `bloom:`, `layer:<id>:res:*`, chain pointer) in one `WriteBatch` (per D23 §6.3 — the same atomicity contract every commit honors). The old layers stay in place until GC sweeps them; consolidation does not delete.
+- **`eigenius db consolidate <from>..<to>` CLI.** Operator surface for triggering consolidation of an ancestral range.
+- **Bloom cache eviction for consolidated-out layers.** Whatever entries the bloom cache held for the now-collected range are dropped via `evict_layer`. Same hook as GC.
+
+### Phase 17 — Key design questions
+
+- **Consolidate across merge nodes?** v1 says no (linear ancestral range only). Multi-parent consolidation needs to decide what the consolidated layer's parents are — the merge node's parents? The lowest common ancestor? This is its own design discussion.
+- **Consolidation interaction with witnessed merge.** A consolidated layer that absorbs a merge layer needs to carry forward the comorphism witness (Phase 15) the merge used to resolve a conflict. The consolidated representation is "as if the conflict had been resolved this way from the start" — the witness is still required to justify the resolution. Per the prerequisite on Phase 15.
+- **Trace pin policy.** Refuse-to-consolidate (v1) is conservative. Re-pin-on-consolidate is more aggressive but requires the trace store to know about consolidation events.
+- **Should consolidation be automatic?** Some systems consolidate background (Postgres VACUUM analog), others require explicit user action (git rebase). v1 ships explicit-only; auto-consolidation policies are post-v1.
+
+### Phase 17 — References
+
+- D23 §5.2.7 — the deferred "deep chain" performance concern that motivates this phase
+- D21 — Task Traces and Checkpointing (trace pin re-pointing semantics)
+- Phase 15 — Witnessed Layer Reconciliation (comorphism witness preservation across consolidation)
+- D25 (to be written) — Chain Consolidation specification
+
+---
+
+## Phase 18 — Specialty Institutions
 
 **Goal:** Proof-assistant and solver institutions extend the platform's reach. Lean 4 is the canonical first example. Others (SMT solvers like Z3, possibly Coq, possibly TLA+) follow the same pattern with their own fiber reasoners.
 
@@ -900,20 +937,20 @@ The phase decomposes into two milestones that are separately reviewable:
 
 **Drives:** `docs/design/lean-4-as-institution.md` (existing sketch).
 
-### Phase 17 — Deliverables (per institution)
+### Phase 18 — Deliverables (per institution)
 
 - **Fiber declaration:** morphism types the institution understands (for Lean: proofs, reductions, elaborations), query types it answers (e.g., "is this proposition provable?").
 - **Reasoner implementation:** WASM-hosted for Lean-in-WASM if feasible; subprocess-hosted via nanoda_lib integration as a practical first cut.
 - **Comorphism specifications:** per Phase 11d/12, how Lean's natural numbers relate to Mini-TT's Nat, how Lean's Prop relates to Mini-TT's Type(0), etc. Many small comorphisms.
 - **Worked example:** a life-science or engineering claim proved in Lean, with the proof registered as a verified morphism on a class.
 
-### Phase 17 — Open questions (carried from `lean-4-as-institution.md`)
+### Phase 18 — Open questions (carried from `lean-4-as-institution.md`)
 
 - `verified_in` witness extension (§16.4 / `lean-4-as-institution.md` open question 9) — deferred until a consumer requests it.
 - Hosting model: WASM (sandboxed, matches other institutions) vs. subprocess (matches Lean's normal operating model, avoids wasm-lean complexity). Decision pending empirical data on both options.
 - Trust policy for Lean proofs: how much of the Lean environment is "ambient trust" vs. reproducible per-proof?
 
-### Phase 17 — References
+### Phase 18 — References
 
 - `docs/design/lean-4-as-institution.md` — extended sketch, nanoda_lib as reference
 - `docs/design/life-science-requirements.md` §16.4 — verified_in witness extension
@@ -951,13 +988,14 @@ The following design documents must be written and reviewed before the phase tha
 | D21 | **Task Traces and Checkpointing** | **COMPLETED** — `docs/design/d21-task-traces-and-checkpointing.md`. Per-task positional `(session_id, task_id, step_seq)` trace keys replace the Phase-9a content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state atomically via `write_batch`. `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs + `at_layer` on read RPCs. Startup resume sweep (`ResumeConfig`, `ResumeState`) rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks with bounded parallelism. Single hardwired session (`Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion. | Phase 9b-iii | Done |
 | D23 | **Out-of-Core Layer Architecture** | Topology / content split, per-layer shadowing bloom + bounded `BloomCache`, two-pool ARC cache, time-travel as standard resolve rooted at the target layer, DAG branching primitive, multi-session writes, reachability-based GC with trace pinning, branch pruning, indexed resource access for queries. The structural rework that lifts the kernel's working-set bound from "graph size" to "cache size." | Phase 14 | 12–16 pages |
 | D24 | **Out-of-Core Query Execution** | Buffer-pool abstraction over the storage backend, hash join with spill, external sort, spillable group-by accumulators, spill-aware cost model, per-query memory budget. The operator-side rewrite that lets EigenQL handle result sets larger than memory. Builds on D23's storage abstractions. | Phase 16 | 8–10 pages |
+| D25 | **Chain Consolidation** | Squash a contiguous ancestral range of layers into one resolve-equivalent layer to reduce chain depth and storage cost. Top-of-stack computation across the range, atomic commit of the consolidated layer, trace re-pinning policy, interaction with witnessed merge (consolidating across merge nodes preserves the comorphism witness). The lifecycle operation that addresses the deep-chain pathology D23 §5.2.7 flags as a deferred concern. Distinct from merge (combines branches) and GC (drops unreachable layers). | Phase 17 | 8–10 pages |
 
 **Reference documents** (analysis rather than specification):
 
 | File | Purpose |
 |------|---------|
 | `docs/design/life-science-requirements.md` | Systematic audit of life-science representation needs. Drives the Phase 10–12 sequencing and is the source of record for which kernel extensions each shape requires. |
-| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 17. |
+| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 18. |
 
 ---
 

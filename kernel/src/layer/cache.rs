@@ -52,37 +52,66 @@ impl ResourceKey {
     }
 }
 
+/// Pool selector for `ResourceCache` insertions (D23 §5.3 / Phase 14c).
+///
+/// Bounded `ResourceCache` implementations partition their budget into two
+/// pools: `Active` for entries that are top-of-stack for the current head
+/// (the steady-state hot working set) and `Historical` for entries
+/// shadowed in every active head (only reachable via time-travel reads or
+/// trace dereferences). Historical-tier entries evict first under memory
+/// pressure because they have lower locality.
+///
+/// Naïve implementations (the `MemoryResourceCache` used in tests and the
+/// in-memory bootstrap) ignore the tier — there's no eviction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheTier {
+    /// Top-of-stack for the active head. Steady-state hot working set.
+    Active,
+    /// Shadowed by a higher layer in every active head; only reachable via
+    /// time-travel or trace dereferences. Lower-priority for retention.
+    Historical,
+}
+
 /// Read/write cache for resources, keyed by `(LayerId, Iri)`.
 ///
 /// Implementations may evict at any time; the cache is a hint, not a source
-/// of truth. Misses fall through to the persistent backend (§5.4.2). Phase
-/// 14c replaces the naïve implementation with a bounded two-pool ARC cache;
-/// the trait surface is shaped to accommodate both.
+/// of truth. Misses fall through to the persistent backend (§5.4.2).
+/// Phase 14c provides a bounded two-pool implementation
+/// (`BoundedResourceCache`); naïve unbounded ones (`MemoryResourceCache`)
+/// remain available for tests and the in-memory bootstrap path where
+/// eviction gains nothing.
 pub trait ResourceCache: Send + Sync {
     /// Look up a resource. Returns `None` on miss; the caller falls through
     /// to the persistent backend.
     fn get(&self, key: &ResourceKey) -> Option<Arc<Resource>>;
 
-    /// Insert or replace a resource. Implementations may evict other entries
-    /// to make room.
-    fn put(&self, key: ResourceKey, resource: Arc<Resource>);
+    /// Insert or replace a resource in the requested pool. Implementations
+    /// may evict other entries within the same pool to make room.
+    fn put(&self, key: ResourceKey, resource: Arc<Resource>, tier: CacheTier);
 
     /// Drop all entries for a given layer. Called by GC (§5.7) when a layer
     /// is swept; also by branch pruning (§5.8).
     fn evict_layer(&self, layer: &LayerId);
 
     /// Snapshot of basic counters. Implementations may report zeros for
-    /// counters they don't track. Real metrics ship with 14c's two-pool
-    /// implementation.
+    /// counters they don't track.
     fn stats(&self) -> CacheStats;
 }
 
-/// Coarse counters reported by `ResourceCache::stats`. Implementations that
-/// don't track a particular field may report 0.
+/// Counters reported by `ResourceCache::stats`. Implementations that don't
+/// track a particular field may report 0. The bounded two-pool impl
+/// populates the per-tier `*_active` / `*_historical` fields; naïve
+/// unbounded impls populate only the totals.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CacheStats {
-    /// Number of entries currently held.
+    /// Number of entries currently held (sum of both pools).
     pub entries: u64,
+    /// Entries in the active pool. Reported as 0 by impls that don't
+    /// distinguish pools.
+    pub active_entries: u64,
+    /// Entries in the historical pool. Reported as 0 by impls that don't
+    /// distinguish pools.
+    pub historical_entries: u64,
     /// Cumulative `get` calls that hit.
     pub hits: u64,
     /// Cumulative `get` calls that missed.
@@ -138,7 +167,9 @@ impl ResourceCache for MemoryResourceCache {
         }
     }
 
-    fn put(&self, key: ResourceKey, resource: Arc<Resource>) {
+    fn put(&self, key: ResourceKey, resource: Arc<Resource>, _tier: CacheTier) {
+        // Naïve impl is unbounded; the pool selector is meaningless here.
+        // The bounded `BoundedResourceCache` honors it.
         let mut state = self.inner.write().expect("MemoryResourceCache poisoned");
         state.entries.insert(key, resource);
     }
@@ -152,8 +183,158 @@ impl ResourceCache for MemoryResourceCache {
         let state = self.inner.read().expect("MemoryResourceCache poisoned");
         CacheStats {
             entries: state.entries.len() as u64,
+            // Naïve impl doesn't partition; per-pool counters stay 0.
+            active_entries: 0,
+            historical_entries: 0,
             hits: state.hits,
             misses: state.misses,
+        }
+    }
+}
+
+// --- Bounded two-pool resource cache (D23 §5.3 / Phase 14c) ---
+
+/// Bounded resource cache with two independently-sized pools and
+/// W-TinyLFU eviction (via `moka`). Active-pool entries are top-of-stack
+/// for the current head; historical-pool entries are shadowed and only
+/// reachable via time-travel reads.
+///
+/// **Why two pools, not one.** A single LRU/W-TinyLFU over the merged
+/// set conflates steady-state queries (active reach) with low-locality
+/// time-travel and trace dereferences (historical reach). Mixing them
+/// degrades hit rate on both. With separate budgets — default 60% active
+/// / 40% historical — historical traffic can't push hot active entries
+/// out, and "historical evicts first under pressure" is realized by the
+/// budget split: each pool evicts independently within its own budget.
+///
+/// **Why moka.** D23 §5.3 originally proposed ARC; W-TinyLFU (the
+/// algorithm `moka` implements, ported from Caffeine) outperforms ARC
+/// on skewed access patterns and is production-grade in Rust services.
+/// Eviction is eventually consistent — the cache may briefly overshoot
+/// its capacity under high concurrency while background eviction
+/// catches up. This is documented behavior, not a bug; for a kernel
+/// resource cache "bounded memory" is the load-bearing property and
+/// instantaneous byte-exact accounting isn't needed.
+///
+/// **Capacity.** Pool sizes are *entry counts*, not byte counts. Bytes
+/// per entry vary widely (a small `is_a` resource vs. a long bio
+/// description), but entry-counted budgets are simpler and our
+/// downstream pressure (D23 §11.3) is an open question pending Phase 12
+/// workload data.
+pub struct BoundedResourceCache {
+    active: moka::sync::Cache<ResourceKey, Arc<Resource>>,
+    historical: moka::sync::Cache<ResourceKey, Arc<Resource>>,
+    /// Per-cache hit/miss counters. moka tracks per-pool counters
+    /// internally but doesn't surface combined hit-rate, so we keep our
+    /// own atomics for `CacheStats`.
+    hits: std::sync::atomic::AtomicU64,
+    misses: std::sync::atomic::AtomicU64,
+}
+
+impl BoundedResourceCache {
+    /// Default fraction of total budget allocated to the active pool.
+    /// D23 §5.3: Active 60%, Historical 40%.
+    pub const DEFAULT_ACTIVE_FRACTION: f64 = 0.60;
+
+    /// Construct with `total_entries` total capacity, default 60/40 split.
+    pub fn new(total_entries: u64) -> Self {
+        Self::with_split(total_entries, Self::DEFAULT_ACTIVE_FRACTION)
+    }
+
+    /// Construct with explicit pool split. `active_fraction` must be in
+    /// `(0.0, 1.0)`; values outside the range are clamped.
+    pub fn with_split(total_entries: u64, active_fraction: f64) -> Self {
+        let frac = active_fraction.clamp(f64::EPSILON, 1.0 - f64::EPSILON);
+        let active_cap = ((total_entries as f64) * frac).round() as u64;
+        let historical_cap = total_entries.saturating_sub(active_cap);
+        Self {
+            active: moka::sync::Cache::builder()
+                .max_capacity(active_cap.max(1))
+                .build(),
+            historical: moka::sync::Cache::builder()
+                .max_capacity(historical_cap.max(1))
+                .build(),
+            hits: std::sync::atomic::AtomicU64::new(0),
+            misses: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+impl ResourceCache for BoundedResourceCache {
+    fn get(&self, key: &ResourceKey) -> Option<Arc<Resource>> {
+        // Check the active pool first; it's the hot path. Fall through
+        // to the historical pool on miss. (No promotion-on-historical-hit
+        // yet — that's a 14c-ii feature.)
+        if let Some(r) = self.active.get(key) {
+            self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Some(r);
+        }
+        if let Some(r) = self.historical.get(key) {
+            self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Some(r);
+        }
+        self.misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        None
+    }
+
+    fn put(&self, key: ResourceKey, resource: Arc<Resource>, tier: CacheTier) {
+        match tier {
+            CacheTier::Active => {
+                // If the entry was previously historical, drop the stale
+                // copy so the pool counters reflect the move.
+                self.historical.invalidate(&key);
+                self.active.insert(key, resource);
+            }
+            CacheTier::Historical => {
+                self.active.invalidate(&key);
+                self.historical.insert(key, resource);
+            }
+        }
+    }
+
+    fn evict_layer(&self, layer: &LayerId) {
+        // moka's `invalidate_entries_if` queues removals to run during
+        // background maintenance; per-key `invalidate` is synchronous.
+        // GC and branch-prune callers expect "the entries are gone now,"
+        // so we collect matching keys via iteration and invalidate
+        // them directly. Iteration on a `moka::sync::Cache` is a
+        // weakly-consistent snapshot (no lock held); concurrent inserts
+        // race naturally and converge on the next pass — same
+        // semantics our callers already accept from any cache.
+        let mut to_drop: Vec<ResourceKey> = Vec::new();
+        for entry in self.active.iter() {
+            if entry.0.layer == *layer {
+                to_drop.push(entry.0.as_ref().clone());
+            }
+        }
+        for k in to_drop.drain(..) {
+            self.active.invalidate(&k);
+        }
+        for entry in self.historical.iter() {
+            if entry.0.layer == *layer {
+                to_drop.push(entry.0.as_ref().clone());
+            }
+        }
+        for k in to_drop {
+            self.historical.invalidate(&k);
+        }
+    }
+
+    fn stats(&self) -> CacheStats {
+        // moka counters are eventually consistent; `run_pending_tasks`
+        // forces processing before reading. Cheap and matches what
+        // tests want to assert on.
+        self.active.run_pending_tasks();
+        self.historical.run_pending_tasks();
+        let active_entries = self.active.entry_count();
+        let historical_entries = self.historical.entry_count();
+        CacheStats {
+            entries: active_entries.saturating_add(historical_entries),
+            active_entries,
+            historical_entries,
+            hits: self.hits.load(std::sync::atomic::Ordering::Relaxed),
+            misses: self.misses.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
@@ -356,6 +537,9 @@ impl BloomCache for MemoryBloomCache {
         let state = self.inner.read().expect("MemoryBloomCache poisoned");
         CacheStats {
             entries: state.entries.len() as u64,
+            // Bloom cache doesn't partition; per-pool counters stay 0.
+            active_entries: 0,
+            historical_entries: 0,
             hits: state.hits,
             misses: state.misses,
         }
@@ -389,7 +573,11 @@ mod tests {
         assert_eq!(cache.stats().hits, 0);
 
         // Insert and hit.
-        cache.put(key.clone(), make_resource("urn:eigenius:example:A"));
+        cache.put(
+            key.clone(),
+            make_resource("urn:eigenius:example:A"),
+            CacheTier::Active,
+        );
         let got = cache.get(&key).expect("expected hit");
         assert_eq!(got.id().unwrap().as_str(), "urn:eigenius:example:A");
         assert_eq!(cache.stats().hits, 1);
@@ -401,8 +589,16 @@ mod tests {
     fn put_replaces_existing() {
         let cache = MemoryResourceCache::new();
         let key = ResourceKey::new(lid(1), iri("urn:eigenius:example:A"));
-        cache.put(key.clone(), make_resource("urn:eigenius:example:A"));
-        cache.put(key.clone(), make_resource("urn:eigenius:example:A"));
+        cache.put(
+            key.clone(),
+            make_resource("urn:eigenius:example:A"),
+            CacheTier::Active,
+        );
+        cache.put(
+            key.clone(),
+            make_resource("urn:eigenius:example:A"),
+            CacheTier::Active,
+        );
         assert_eq!(cache.stats().entries, 1);
     }
 
@@ -411,8 +607,16 @@ mod tests {
         let cache = MemoryResourceCache::new();
         let key_a = ResourceKey::new(lid(1), iri("urn:eigenius:example:X"));
         let key_b = ResourceKey::new(lid(2), iri("urn:eigenius:example:X"));
-        cache.put(key_a, make_resource("urn:eigenius:example:X"));
-        cache.put(key_b, make_resource("urn:eigenius:example:X"));
+        cache.put(
+            key_a,
+            make_resource("urn:eigenius:example:X"),
+            CacheTier::Active,
+        );
+        cache.put(
+            key_b,
+            make_resource("urn:eigenius:example:X"),
+            CacheTier::Active,
+        );
         assert_eq!(cache.stats().entries, 2);
     }
 
@@ -423,9 +627,21 @@ mod tests {
         let l1_b = ResourceKey::new(lid(1), iri("urn:eigenius:example:B"));
         let l2_a = ResourceKey::new(lid(2), iri("urn:eigenius:example:A"));
 
-        cache.put(l1_a.clone(), make_resource("urn:eigenius:example:A"));
-        cache.put(l1_b.clone(), make_resource("urn:eigenius:example:B"));
-        cache.put(l2_a.clone(), make_resource("urn:eigenius:example:A"));
+        cache.put(
+            l1_a.clone(),
+            make_resource("urn:eigenius:example:A"),
+            CacheTier::Active,
+        );
+        cache.put(
+            l1_b.clone(),
+            make_resource("urn:eigenius:example:B"),
+            CacheTier::Active,
+        );
+        cache.put(
+            l2_a.clone(),
+            make_resource("urn:eigenius:example:A"),
+            CacheTier::Active,
+        );
         assert_eq!(cache.stats().entries, 3);
 
         cache.evict_layer(&lid(1));
@@ -440,7 +656,7 @@ mod tests {
         let cache = MemoryResourceCache::new();
         let key = ResourceKey::new(lid(1), iri("urn:eigenius:example:A"));
         let resource = make_resource("urn:eigenius:example:A");
-        cache.put(key.clone(), Arc::clone(&resource));
+        cache.put(key.clone(), Arc::clone(&resource), CacheTier::Active);
 
         // Strong count: original + cache-held = 2.
         assert_eq!(Arc::strong_count(&resource), 2);
@@ -546,5 +762,162 @@ mod tests {
         // And the loaded bloom matches what we'd build directly.
         let expected = BloomFilter::for_iris(layer.defined_iris());
         assert_eq!(*bloom, expected);
+    }
+
+    // --- BoundedResourceCache tests ---
+
+    /// Helper: run pending eviction tasks and return current entry count.
+    /// moka eviction is eventually-consistent; tests assert on the
+    /// post-`run_pending_tasks` snapshot for determinism.
+    fn bounded_total(cache: &BoundedResourceCache) -> u64 {
+        cache.stats().entries
+    }
+
+    #[test]
+    fn bounded_cache_routes_by_tier() {
+        // Entries inserted as Active land in the active pool; ditto
+        // Historical. The per-pool counters in `CacheStats` reflect this.
+        let cache = BoundedResourceCache::new(100);
+        let key_a = ResourceKey::new(lid(1), iri("urn:eigenius:test:a"));
+        let key_h = ResourceKey::new(lid(1), iri("urn:eigenius:test:h"));
+
+        cache.put(
+            key_a.clone(),
+            make_resource("urn:eigenius:test:a"),
+            CacheTier::Active,
+        );
+        cache.put(
+            key_h.clone(),
+            make_resource("urn:eigenius:test:h"),
+            CacheTier::Historical,
+        );
+
+        let stats = cache.stats();
+        assert_eq!(stats.entries, 2);
+        assert_eq!(stats.active_entries, 1);
+        assert_eq!(stats.historical_entries, 1);
+
+        // Both reachable via `get` (no tier hint needed at read time).
+        assert!(cache.get(&key_a).is_some());
+        assert!(cache.get(&key_h).is_some());
+    }
+
+    #[test]
+    fn bounded_cache_re_put_moves_between_pools() {
+        // Putting an existing key with a different tier moves the entry
+        // — the previous-pool copy is invalidated. Important so
+        // promotion/demotion (lazy in 14c-i, automatic in a future
+        // 14c-ii) doesn't leave duplicate entries.
+        let cache = BoundedResourceCache::new(100);
+        let key = ResourceKey::new(lid(1), iri("urn:eigenius:test:k"));
+
+        cache.put(
+            key.clone(),
+            make_resource("urn:eigenius:test:k"),
+            CacheTier::Historical,
+        );
+        assert_eq!(cache.stats().historical_entries, 1);
+        assert_eq!(cache.stats().active_entries, 0);
+
+        // Re-put as Active.
+        cache.put(
+            key.clone(),
+            make_resource("urn:eigenius:test:k"),
+            CacheTier::Active,
+        );
+        let stats = cache.stats();
+        assert_eq!(stats.entries, 1);
+        assert_eq!(stats.active_entries, 1);
+        assert_eq!(stats.historical_entries, 0);
+    }
+
+    #[test]
+    fn bounded_cache_honors_pool_capacities() {
+        // 60/40 split of total=10 → active=6, historical=4. Stuff each
+        // pool past its capacity and verify entries don't unbound. moka
+        // eviction is eventually-consistent so we trigger pending tasks
+        // via `run_pending_tasks` (called inside `stats()`).
+        let cache = BoundedResourceCache::new(10);
+        for i in 0..30 {
+            let key = ResourceKey::new(lid(1), iri(&format!("urn:eigenius:test:a{i}")));
+            cache.put(
+                key,
+                make_resource(&format!("urn:eigenius:test:a{i}")),
+                CacheTier::Active,
+            );
+        }
+        for i in 0..30 {
+            let key = ResourceKey::new(lid(1), iri(&format!("urn:eigenius:test:h{i}")));
+            cache.put(
+                key,
+                make_resource(&format!("urn:eigenius:test:h{i}")),
+                CacheTier::Historical,
+            );
+        }
+        let stats = cache.stats();
+        // Per-pool bound: active≈6, historical≈4. Allow modest overshoot
+        // since moka's bound is eventually-consistent under heavy churn.
+        assert!(
+            stats.active_entries <= 8,
+            "active overshoot: {} (cap was 6)",
+            stats.active_entries
+        );
+        assert!(
+            stats.historical_entries <= 6,
+            "historical overshoot: {} (cap was 4)",
+            stats.historical_entries
+        );
+        assert!(stats.entries < 60, "total overshoot: {}", stats.entries);
+    }
+
+    #[test]
+    fn bounded_cache_evict_layer_drops_only_that_layer() {
+        let cache = BoundedResourceCache::new(100);
+        let l1_a = ResourceKey::new(lid(1), iri("urn:eigenius:test:A"));
+        let l1_b = ResourceKey::new(lid(1), iri("urn:eigenius:test:B"));
+        let l2_a = ResourceKey::new(lid(2), iri("urn:eigenius:test:A"));
+
+        cache.put(
+            l1_a.clone(),
+            make_resource("urn:eigenius:test:A"),
+            CacheTier::Active,
+        );
+        cache.put(
+            l1_b.clone(),
+            make_resource("urn:eigenius:test:B"),
+            CacheTier::Historical,
+        );
+        cache.put(
+            l2_a.clone(),
+            make_resource("urn:eigenius:test:A"),
+            CacheTier::Active,
+        );
+        assert_eq!(bounded_total(&cache), 3);
+
+        cache.evict_layer(&lid(1));
+        // Both l1 entries (across both pools) gone; l2 survives.
+        assert_eq!(bounded_total(&cache), 1);
+        assert!(cache.get(&l1_a).is_none());
+        assert!(cache.get(&l1_b).is_none());
+        assert!(cache.get(&l2_a).is_some());
+    }
+
+    #[test]
+    fn bounded_cache_hits_and_misses_counted() {
+        let cache = BoundedResourceCache::new(10);
+        let key = ResourceKey::new(lid(1), iri("urn:eigenius:test:k"));
+
+        // Miss before insert.
+        assert!(cache.get(&key).is_none());
+        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats().hits, 0);
+
+        cache.put(
+            key.clone(),
+            make_resource("urn:eigenius:test:k"),
+            CacheTier::Active,
+        );
+        assert!(cache.get(&key).is_some());
+        assert_eq!(cache.stats().hits, 1);
     }
 }
