@@ -3409,135 +3409,15 @@ mod tests {
         Ok(())
     }
 
-    // --- Phase 11d: Exp::InstitutionInvoke eval dispatch ---
+    // --- Exp::InstitutionInvoke eval dispatch ---
 
-    use crate::institution::error::MorphismValidation;
-    use crate::institution::{FiberDeclaration, FiberReasoner};
-
-    /// Test institution that translates any source resource into a
-    /// fixed marker resource identifying the comorphism that was
-    /// invoked.
-    struct MarkerTranslator {
-        institution_iri: Iri,
-        comorphism_iri: Iri,
-    }
-
-    impl FiberReasoner for MarkerTranslator {
-        fn fiber_declaration(&self) -> FiberDeclaration {
-            let mut cm = crate::ontology::resource::Resource::new(self.comorphism_iri.clone());
-            cm.set(
-                Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
-                crate::ontology::resource::Value::Array(vec![
-                    crate::ontology::resource::Value::String(
-                        crate::ontology::well_known::COMORPHISM.to_string(),
-                    ),
-                ]),
-            );
-            cm.set(
-                Iri::parse(crate::ontology::well_known::SOURCE_INSTITUTION).unwrap(),
-                crate::ontology::resource::Value::String(self.institution_iri.as_str().to_string()),
-            );
-            cm.set(
-                Iri::parse(crate::ontology::well_known::TARGET_INSTITUTION).unwrap(),
-                crate::ontology::resource::Value::String("urn:eigenius:test:target".to_string()),
-            );
-            cm.set(
-                Iri::parse(crate::ontology::well_known::TRANSLATION_PROCEDURE).unwrap(),
-                crate::ontology::resource::Value::String(self.comorphism_iri.as_str().to_string()),
-            );
-            FiberDeclaration {
-                institution_iri: self.institution_iri.clone(),
-                name: "MarkerTranslator".to_string(),
-                morphism_types: vec![],
-                query_types: vec![],
-                structural_properties: vec![],
-                comorphism_types: vec![cm],
-                decide_procedures: vec![],
-            }
-        }
-        fn query(
-            &self,
-            _q: &crate::ontology::resource::Resource,
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
-        {
-            unreachable!()
-        }
-        fn validate_morphism(
-            &self,
-            _m: &crate::ontology::resource::Resource,
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<MorphismValidation, crate::institution::error::InstitutionError> {
-            unreachable!()
-        }
-        fn discover_morphisms(
-            &self,
-            _rs: &[crate::ontology::resource::Resource],
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<
-            Vec<crate::ontology::resource::Resource>,
-            crate::institution::error::InstitutionError,
-        > {
-            unreachable!()
-        }
-        fn translate(
-            &self,
-            _comorphism_iri: &Iri,
-            _source: &crate::ontology::resource::Resource,
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
-        {
-            let iri = Iri::parse("urn:eigenius:test:translated_marker").unwrap();
-            Ok(crate::ontology::resource::Resource::new(iri))
-        }
-    }
-
-    fn registry_with_marker(inst_iri: &str, cm_iri: &str) -> Arc<InstitutionRegistry> {
-        let mut reg = InstitutionRegistry::new();
-        reg.register_rehydrated(Box::new(MarkerTranslator {
-            institution_iri: Iri::parse(inst_iri).unwrap(),
-            comorphism_iri: Iri::parse(cm_iri).unwrap(),
-        }))
-        .unwrap();
-        Arc::new(reg)
-    }
-
+    /// Pure-mode `Exp::InstitutionInvoke` produces a passthrough
+    /// neutral when no institution context is attached. Verified
+    /// in pure mode (no `EvalCtx::IO` / `Check`); the legacy
+    /// `__institution_invoke_no_registry:<cm>` neutral name keeps
+    /// the surface stable.
     #[test]
-    fn institution_invoke_dispatches_via_comorphism_registry() {
-        let reg = registry_with_marker(
-            "urn:eigenius:test:marker_inst",
-            "urn:eigenius:test:marker_cm",
-        );
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
-
-        // Wrap an arbitrary source resource as Exp.
-        let src_iri = Iri::parse("urn:eigenius:test:src").unwrap();
-        let src_resource = crate::ontology::resource::Resource::new(src_iri);
-        let source = Exp::EigonResource(Box::new(src_resource));
-
-        let exp = Exp::InstitutionInvoke {
-            comorphism_iri: Iri::parse("urn:eigenius:test:marker_cm").unwrap(),
-            source: Box::new(source),
-        };
-        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("invoke");
-        match v {
-            Val::ResourceVal(r) => {
-                assert_eq!(
-                    r.id().map(|i| i.as_str()),
-                    Some("urn:eigenius:test:translated_marker")
-                );
-            }
-            other => panic!("expected ResourceVal from translate, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn institution_invoke_without_registry_produces_passthrough_neutral() {
+    fn institution_invoke_without_context_produces_passthrough_neutral() {
         let src_iri = Iri::parse("urn:eigenius:test:src").unwrap();
         let src_resource = crate::ontology::resource::Resource::new(src_iri);
         let source = Exp::EigonResource(Box::new(src_resource));
@@ -3553,34 +3433,6 @@ mod tests {
             }
             other => panic!("expected passthrough neutral, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn institution_invoke_unknown_comorphism_errors() {
-        let reg = registry_with_marker(
-            "urn:eigenius:test:marker_inst",
-            "urn:eigenius:test:marker_cm",
-        );
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
-        let src_iri = Iri::parse("urn:eigenius:test:src").unwrap();
-        let src_resource = crate::ontology::resource::Resource::new(src_iri);
-        let source = Exp::EigonResource(Box::new(src_resource));
-
-        let exp = Exp::InstitutionInvoke {
-            comorphism_iri: Iri::parse("urn:eigenius:test:unknown_cm").unwrap(),
-            source: Box::new(source),
-        };
-        let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(
-            msg.contains("no institution declared comorphism"),
-            "unexpected error: {msg}"
-        );
     }
 
     // ─── D14 four-step InstitutionInvoke pipeline ──────────────────

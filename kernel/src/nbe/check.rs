@@ -63,6 +63,16 @@ pub struct CheckCtx {
     /// when absent, institution-dispatched constraints stay as
     /// passthrough neutrals (D19 §8.5-style fallback).
     pub institutions: Option<Arc<crate::institution::InstitutionRegistry>>,
+    /// D14 institution index — derived view of the layer chain. When
+    /// attached together with `institution_runtime`,
+    /// `Constraint::Institution` predicates dispatch through the D14
+    /// `try_d14_decide` path; otherwise they fall back to the legacy
+    /// `institutions` registry. Both can be set at once during the
+    /// transition.
+    pub institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
+    /// D14 institution runtime — registry of `Institution` trait
+    /// objects keyed by institution IRI. See `institution_index`.
+    pub institution_runtime: Option<Arc<crate::institution::runtime::InstitutionRuntime>>,
 }
 
 impl CheckCtx {
@@ -75,6 +85,8 @@ impl CheckCtx {
             type_cache: BTreeMap::new(),
             size_tso: crate::nbe::sized_rigid::Tso::new(),
             institutions: None,
+            institution_index: None,
+            institution_runtime: None,
         }
     }
 
@@ -87,6 +99,8 @@ impl CheckCtx {
             type_cache: BTreeMap::new(),
             size_tso: crate::nbe::sized_rigid::Tso::new(),
             institutions: None,
+            institution_index: None,
+            institution_runtime: None,
         }
     }
 
@@ -100,21 +114,48 @@ impl CheckCtx {
         self
     }
 
+    /// Attach a D14 institution index and runtime for check-time
+    /// dispatch of `Constraint::Institution` predicates through the
+    /// new `try_d14_decide` path. Either or both fields can be set
+    /// during the legacy → D14 transition; M8 will collapse this with
+    /// `with_institutions` once the legacy path retires.
+    pub fn with_institutions_d14(
+        mut self,
+        index: Arc<crate::institution::registry::InstitutionIndex>,
+        runtime: Arc<crate::institution::runtime::InstitutionRuntime>,
+    ) -> Self {
+        self.institution_index = Some(index);
+        self.institution_runtime = Some(runtime);
+        self
+    }
+
     /// Produce an [`EvalCtx`] suitable for evaluating expressions
     /// under this check context.
     ///
-    /// Returns `EvalCtx::Check { layer, institutions }` when an
-    /// institution registry is attached; otherwise `EvalCtx::Pure`.
-    /// All internal `eval` calls in `check.rs` should route through
-    /// this so institution-dispatched constraints fire at check
-    /// time rather than deferring to runtime.
+    /// Returns `EvalCtx::Check { layer, institutions, ... }` when an
+    /// institution registry (legacy or D14) is attached; otherwise
+    /// `EvalCtx::Pure`. All internal `eval` calls in `check.rs` should
+    /// route through this so institution-dispatched constraints fire
+    /// at check time rather than deferring to runtime.
     pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
+        let has_d14 = self.institution_index.is_some() && self.institution_runtime.is_some();
         if let Some(institutions) = &self.institutions {
             crate::nbe::eval::EvalCtx::Check {
                 layer: self.layer.clone(),
                 institutions: institutions.clone(),
-                institution_index: None,
-                institution_runtime: None,
+                institution_index: self.institution_index.clone(),
+                institution_runtime: self.institution_runtime.clone(),
+            }
+        } else if has_d14 {
+            // D14-only context: legacy InstitutionRegistry unused.
+            // Synthesise an empty legacy registry so the EvalCtx
+            // shape stays uniform during the transition; M8 drops
+            // the legacy field from EvalCtx entirely.
+            crate::nbe::eval::EvalCtx::Check {
+                layer: self.layer.clone(),
+                institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
+                institution_index: self.institution_index.clone(),
+                institution_runtime: self.institution_runtime.clone(),
             }
         } else {
             crate::nbe::eval::EvalCtx::Pure
@@ -142,6 +183,8 @@ impl CheckCtx {
             type_cache: self.type_cache.clone(),
             size_tso: self.size_tso.clone(),
             institutions: self.institutions.clone(),
+            institution_index: self.institution_index.clone(),
+            institution_runtime: self.institution_runtime.clone(),
         })
     }
 
@@ -458,6 +501,8 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 type_cache: ctx.type_cache.clone(),
                 size_tso: ctx.size_tso.clone(),
                 institutions: ctx.institutions.clone(),
+                institution_index: ctx.institution_index.clone(),
+                institution_runtime: ctx.institution_runtime.clone(),
             };
             check(&mut inner, e, t)
         }
@@ -1754,6 +1799,8 @@ fn check_match(
             type_cache: ctx.type_cache.clone(),
             size_tso: ctx.size_tso.clone(),
             institutions: ctx.institutions.clone(),
+            institution_index: ctx.institution_index.clone(),
+            institution_runtime: ctx.institution_runtime.clone(),
         };
         for (spec, binding) in arg_specs.iter().zip(arm.bindings.iter()) {
             match spec {
@@ -3882,26 +3929,31 @@ mod tests {
         check(&mut c2, &match_exp, &snat_i).expect("old-style sized Nat match still works");
     }
 
-    // --- Phase 11c: institution-registered decision procedures ---
+    // --- D14 §9.2: institution-registered decision procedures ---
     //
     // Verify that `Constraint::Institution { iri, args }` dispatches
-    // to `FiberReasoner::decide` at check time when a registry is
-    // attached to `CheckCtx`. These tests construct a tiny in-test
-    // reasoner (no WASM, no ontology layer) and exercise the three
-    // `DecResult` outcomes.
+    // through the D14 `try_d14_decide` path: the constraint IRI
+    // resolves to a Decidable QueryClass, args land on the input
+    // resource as `decide_args`, and the institution's `query` returns
+    // a Verdict resource the kernel translates to a `DecResult`.
 
-    use crate::context::ExecutionContext;
-    use crate::institution::{DecResult, FiberDeclaration, FiberReasoner, InstitutionRegistry};
+    use crate::context::{ExecutionContext, ExecutionMode};
+    use crate::institution::registry::InstitutionIndex;
+    use crate::institution::runtime::{Institution, InstitutionRuntime};
+    use crate::institution::DecResult;
+    use crate::layer::LayerBuilder;
     use crate::nbe::term::Constraint;
+    use crate::ontology::resource::Resource;
     use crate::ontology::resource::Value as RVal;
+    use crate::ontology::well_known as wk;
 
-    /// Simple test institution whose `decide` returns a pre-canned
-    /// result for each constraint IRI and records the args it saw.
+    /// In-test institution whose `query` returns a pre-canned Verdict
+    /// resource for each `Constraint::Institution` invocation and
+    /// records the args it observed off the synthetic input
+    /// resource's `decide_args` property (D14 §9.2).
     struct FakeInstitution {
         iri: Iri,
-        /// For each call, the args observed (captured via `Mutex`).
         observed: std::sync::Mutex<Vec<Vec<RVal>>>,
-        /// Pre-canned result the next `decide` call returns.
         result: DecResult,
     }
 
@@ -3919,57 +3971,121 @@ mod tests {
         }
     }
 
-    impl FiberReasoner for Arc<FakeInstitution> {
-        fn fiber_declaration(&self) -> FiberDeclaration {
-            FiberDeclaration::minimal(self.iri.clone(), "FakeInstitution")
+    impl Institution for Arc<FakeInstitution> {
+        fn institution_iri(&self) -> &Iri {
+            &self.iri
+        }
+
+        fn extract_typed(
+            &self,
+            _: &Iri,
+            _: &Resource,
+            _: &ExecutionContext,
+        ) -> Result<crate::nbe::val::Val, crate::institution::error::InstitutionError> {
+            unreachable!("FakeInstitution exposes no ExportFormats")
+        }
+
+        fn reify(
+            &self,
+            _: &Iri,
+            _: &crate::nbe::val::Val,
+            _: &ExecutionContext,
+        ) -> Result<Resource, crate::institution::error::InstitutionError> {
+            unreachable!("FakeInstitution exposes no ImportFormats")
         }
 
         fn query(
             &self,
-            _q: &crate::ontology::resource::Resource,
+            _procedure_iri: &Iri,
+            input: &Resource,
             _ctx: &ExecutionContext,
-        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
-        {
-            unreachable!("query unused in decide tests")
-        }
-
-        fn validate_morphism(
-            &self,
-            _m: &crate::ontology::resource::Resource,
-            _ctx: &ExecutionContext,
-        ) -> Result<
-            crate::institution::error::MorphismValidation,
-            crate::institution::error::InstitutionError,
-        > {
-            unreachable!("validate_morphism unused in decide tests")
-        }
-
-        fn discover_morphisms(
-            &self,
-            _rs: &[crate::ontology::resource::Resource],
-            _ctx: &ExecutionContext,
-        ) -> Result<
-            Vec<crate::ontology::resource::Resource>,
-            crate::institution::error::InstitutionError,
-        > {
-            unreachable!("discover_morphisms unused in decide tests")
-        }
-
-        fn decide(
-            &self,
-            _constraint_iri: &Iri,
-            args: &[RVal],
-            _ctx: &ExecutionContext,
-        ) -> Result<DecResult, crate::institution::error::InstitutionError> {
-            self.observed.lock().unwrap().push(args.to_vec());
-            Ok(self.result)
+        ) -> Result<Resource, crate::institution::error::InstitutionError> {
+            // Pull the args off the synthetic input resource where
+            // try_d14_decide marshalled them.
+            let args = match input.get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
+            {
+                Some(RVal::Array(items)) => items.clone(),
+                _ => Vec::new(),
+            };
+            self.observed.lock().unwrap().push(args);
+            Ok(verdict_resource(self.result))
         }
     }
 
-    fn registry_with(fake: Arc<FakeInstitution>) -> Arc<InstitutionRegistry> {
-        let mut reg = InstitutionRegistry::new();
-        reg.register_rehydrated(Box::new(fake)).unwrap();
-        Arc::new(reg)
+    /// Build a Verdict-shaped result resource from a `DecResult`.
+    fn verdict_resource(result: DecResult) -> Resource {
+        let class_iri = match result {
+            DecResult::Holds => "urn:eigenius:institution:verdicts:holds",
+            DecResult::Fails => "urn:eigenius:institution:verdicts:fails",
+            DecResult::Undecidable => "urn:eigenius:institution:verdicts:undecidable",
+        };
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(class_iri.into())]),
+        );
+        r
+    }
+
+    /// Build an `InstitutionIndex` and `InstitutionRuntime` declaring a
+    /// Decidable `QueryClass` for `constraint_iri`, served by `fake`.
+    /// The index walks a synthetic test layer carrying the QueryClass
+    /// declaration; the runtime registers the fake under the same
+    /// institution IRI.
+    fn build_decide_index(
+        fake: Arc<FakeInstitution>,
+    ) -> (Arc<InstitutionIndex>, Arc<InstitutionRuntime>) {
+        let constraint_iri = fake.iri.as_str();
+        let inst_iri = constraint_iri; // for tests, institution IRI = constraint IRI
+        let input_class = "urn:eigenius:test:Subject";
+
+        let mut b = LayerBuilder::new("test", None);
+        let mut qc = Resource::new(Iri::parse(constraint_iri).unwrap());
+        qc.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk::QUERY_CLASS_CLASS.into())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
+            RVal::String(input_class.into()),
+        );
+        qc.set(
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            RVal::String(wk::VERDICT.into()),
+        );
+        qc.set(
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
+            RVal::Array(vec![RVal::String(wk::DISPATCH_DECIDABLE.into())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
+            RVal::String(format!("{constraint_iri}:handler")),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            RVal::String(inst_iri.into()),
+        );
+        b.add_resource(qc).unwrap();
+        let layer = Arc::new(b.build());
+
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut rt = InstitutionRuntime::new();
+        rt.register(Box::new(fake)).unwrap();
+        (Arc::new(idx), Arc::new(rt))
+    }
+
+    /// Build an `EvalCtx::Check` populated with the D14 index +
+    /// runtime built from `fake`.
+    fn check_ctx_for(fake: Arc<FakeInstitution>) -> EvalCtx {
+        let (idx, rt) = build_decide_index(fake);
+        let _ = ExecutionMode::ReadOnly; // silence unused-import warning on small surface
+        EvalCtx::Check {
+            layer: None,
+            institutions: Arc::new(crate::institution::InstitutionRegistry::new()),
+            institution_index: Some(idx),
+            institution_runtime: Some(rt),
+        }
     }
 
     fn wrap_int(n: i64) -> Exp {
@@ -4002,14 +4118,7 @@ mod tests {
     fn decide_holds_reduces_to_refl() {
         // Institution returns Holds → eval reduces NativeDecide to Refl.
         let fake = FakeInstitution::new("urn:eigenius:test:yes", DecResult::Holds);
-        let reg = registry_with(fake.clone());
-
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
+        let ctx = check_ctx_for(fake.clone());
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:yes").unwrap(),
             args: vec![wrap_int(42)],
@@ -4018,8 +4127,8 @@ mod tests {
         let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
         assert!(matches!(v, Val::Refl(_)), "expected Refl, got {v:?}");
 
-        // The fake observed the evaluated arg as an embedded resource
-        // (the 42 integer).
+        // The fake observed the arg via the `decide_args` array on the
+        // synthetic input resource that try_d14_decide marshals.
         let observed = fake.last_args().expect("institution was called");
         assert_eq!(observed.len(), 1);
     }
@@ -4027,13 +4136,7 @@ mod tests {
     #[test]
     fn decide_fails_produces_failing_neutral() {
         let fake = FakeInstitution::new("urn:eigenius:test:no", DecResult::Fails);
-        let reg = registry_with(fake);
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
+        let ctx = check_ctx_for(fake);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:no").unwrap(),
             args: vec![],
@@ -4051,13 +4154,7 @@ mod tests {
     #[test]
     fn decide_undecidable_produces_passthrough_neutral() {
         let fake = FakeInstitution::new("urn:eigenius:test:dunno", DecResult::Undecidable);
-        let reg = registry_with(fake);
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
+        let ctx = check_ctx_for(fake);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:dunno").unwrap(),
             args: vec![],
@@ -4074,15 +4171,12 @@ mod tests {
 
     #[test]
     fn decide_unregistered_iri_is_undecidable() {
-        // Registry exists but doesn't know the constraint IRI → Undecidable.
+        // Index has a Decidable QueryClass for one IRI; the test
+        // invokes a different IRI → no QueryClass match → D14 path
+        // returns None → legacy fallback returns Undecidable (empty
+        // legacy registry).
         let fake = FakeInstitution::new("urn:eigenius:test:other", DecResult::Holds);
-        let reg = registry_with(fake);
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
+        let ctx = check_ctx_for(fake);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:unknown_iri").unwrap(),
             args: vec![],
@@ -4096,21 +4190,12 @@ mod tests {
 
     #[test]
     fn decide_list_arg_roundtrip() {
-        // §6 life-science ensemble predicate: the arg is a list of
+        // Life-science ensemble-style predicate: the arg is a list of
         // values. Verify the Val::List marshals through to an
-        // RVal::Array that the institution sees.
+        // RVal::Array on the synthetic input's `decide_args`.
         let fake = FakeInstitution::new("urn:eigenius:test:ensemble", DecResult::Holds);
-        let reg = registry_with(fake.clone());
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
+        let ctx = check_ctx_for(fake.clone());
 
-        // Evaluate a list literal of integers — we spell it at the
-        // Val level and stash it in rho for the NativeDecide arg to
-        // reference by Var.
         let list_val = Val::List(vec![
             crate::nbe::eval::eval(&wrap_int(1), &Rho::Nil).unwrap(),
             crate::nbe::eval::eval(&wrap_int(2), &Rho::Nil).unwrap(),
@@ -4135,19 +4220,13 @@ mod tests {
 
     #[test]
     fn decide_inductive_val_arg_roundtrip() {
-        // §5 Pose-like inductive arg. Marshal `succ(zero)` of a Nat
+        // Pose-like inductive arg. Marshal `succ(zero)` of a Nat
         // through the Val::InductiveVal arm of val_to_resource_value
         // and verify the institution sees an Embedded resource whose
         // `is_a` carries the ctor name.
         let nat = nat_decl();
         let fake = FakeInstitution::new("urn:eigenius:test:pose", DecResult::Holds);
-        let reg = registry_with(fake.clone());
-        let ctx = EvalCtx::Check {
-            layer: None,
-            institutions: reg,
-            institution_index: None,
-            institution_runtime: None,
-        };
+        let ctx = check_ctx_for(fake.clone());
 
         let succ_zero_exp = Exp::InductiveCtor(
             nat.clone(),
@@ -4176,14 +4255,14 @@ mod tests {
     #[test]
     fn decide_fires_at_check_time_when_registry_on_ctx() {
         // Integration: check-time dispatch via CheckCtx. A NativeDecide
-        // whose constraint fails inside a body blocks subsequent
-        // reduction — but from CheckCtx's perspective, the decide call
-        // *did* fire (the institution observed it), confirming the
-        // registry was threaded through the check eval_ctx.
+        // whose constraint holds reduces to Refl; from CheckCtx's
+        // perspective, the decide call *did* fire (the institution
+        // observed it), confirming the index + runtime were threaded
+        // through the check eval_ctx.
         let fake = FakeInstitution::new("urn:eigenius:test:check_time", DecResult::Holds);
-        let reg = registry_with(fake.clone());
+        let (idx, rt) = build_decide_index(fake.clone());
 
-        let c = CheckCtx::new(Rho::Nil, Vec::new()).with_institutions(reg);
+        let c = CheckCtx::new(Rho::Nil, Vec::new()).with_institutions_d14(idx, rt);
 
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:check_time").unwrap(),
@@ -4191,9 +4270,6 @@ mod tests {
         };
         let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(99)));
 
-        // Drive eval through CheckCtx.eval — this is the hook that
-        // Phase 11c added to make institution-dispatched constraints
-        // fire during type-checking.
         let v = c.eval(&exp, &Rho::Nil).expect("CheckCtx eval");
         assert!(matches!(v, Val::Refl(_)));
         assert!(
