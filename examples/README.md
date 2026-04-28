@@ -27,20 +27,22 @@ Demonstrates:
 - Constructing an output resource with array-valued properties
 - Installing into a running kernel via `eigenius capability install`
 
-### [wasm-ordering-institution](wasm-ordering-institution/)
+### [wasm-d14-echo](wasm-d14-echo/)
 
-A **fiber reasoner** (institution) that provides domain-specific reasoning
-over ordering/refinement morphisms. Declares a `Refinement` morphism class
-and a `ConvergenceQuery` query class, validates that morphisms have a
-positive `delta`, and answers convergence queries.
+A **D14 institution smoke test** targeting the
+`eigenius-institution-d14` WIT world. Echoes its inputs back with
+provenance and stage markers so kernel host-bridge tests can verify
+that `extract-typed`, `reify`, and `query` round-trip correctly.
 
 Demonstrates:
 
-- Implementing the `eigenius-institution` WIT world with all four
-  fiber reasoner methods (fiber-declaration, query, validate-morphism,
-  discover-morphisms)
-- Constructing a `FiberDeclaration` with morphism/query type definitions
-- Returning typed validation results via the `validation-result` enum
+- Implementing the triadic comorphism contract from
+  [D14](../docs/design/d14-institution-realisation.md)
+- Echoing CBOR resources without dropping properties
+- Tagging the result with which export stage produced it
+
+A worked institution example with real reasoning content will follow
+in [D14 §13.4 M8](../docs/design/d14-institution-realisation.md#134-milestones).
 
 ### [wasm-http-shout](wasm-http-shout/)
 

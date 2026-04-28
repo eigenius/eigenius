@@ -425,37 +425,4 @@ mod tests {
             Some("urn:eigenius:test:proc:check_q")
         );
     }
-
-    #[test]
-    fn missing_export_surfaces_typed_error() {
-        // Construct a separate WasmInstitution from the *legacy*
-        // ordering-institution fixture (which targets the old WIT
-        // world and so does not export `extract-typed`) and verify
-        // the host bridge surfaces a clear ComputationFailed rather
-        // than panicking.
-        let legacy_bytes = include_bytes!(
-            "../../../kernel/tests/fixtures/eigenius_wasm_ordering_institution.wasm"
-        );
-        let inst = WasmInstitution::from_bytes(
-            iri("urn:eigenius:test:legacy_targeted"),
-            legacy_bytes,
-            WasmComponentConfig::default(),
-        )
-        .expect("legacy fixture compiles even though it doesn't export D14 surface");
-
-        let ctx = make_ctx();
-        let r = Resource::new(iri("urn:eigenius:test:any"));
-        let err = inst
-            .extract_typed(&iri("urn:eigenius:test:proc:any"), &r, &ctx)
-            .expect_err("legacy fixture should not export `extract-typed`");
-        match err {
-            InstitutionError::ComputationFailed(msg) => {
-                assert!(
-                    msg.contains("extract-typed"),
-                    "expected ComputationFailed mentioning the export name; got {msg}"
-                );
-            }
-            other => panic!("expected ComputationFailed, got {other:?}"),
-        }
-    }
 }

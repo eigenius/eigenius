@@ -27,9 +27,9 @@
 //! - `query` echoes the input resource with a marker.
 //!
 //! The institution declares no real domain logic — it exists only to
-//! prove the dispatch path is wired correctly. M5 will exercise this
-//! fixture from the InstitutionInvoke evaluator; M8 will replace it
-//! with the rewritten `wasm-ordering-institution`.
+//! prove the dispatch path is wired correctly. M5 exercises this
+//! fixture from the InstitutionInvoke evaluator; M8 will add a
+//! worked institution example alongside it.
 
 use eigenius_wasm_sdk::{Resource, Value};
 

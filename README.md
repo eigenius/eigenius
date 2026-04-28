@@ -145,9 +145,9 @@ sdk/
   wasm-sdk/        Rust SDK for authoring WASM capabilities
 examples/        WASM capability examples (excluded from workspace, built with cargo-component)
   wasm-cbor-echo/            CBOR echo component
+  wasm-d14-echo/             D14 institution smoke-test component
   wasm-doc-validator/        Document validation component
   wasm-http-shout/           IO component with HTTP dispatch
-  wasm-ordering-institution/ Ordering institution fiber reasoner
   wasm-read-query-probe/     Read-capability query probe
 cli/             Command-line interface (load, validate, query, run, serve, tasks, capability, ...)
 ontologies/      Ontology definitions

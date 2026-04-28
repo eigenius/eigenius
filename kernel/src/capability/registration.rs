@@ -30,7 +30,6 @@
 //! `wasm_binary_ref` (blob store IRI) is reserved for future use.
 
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
-use super::wasm_institution::WasmFiberReasoner;
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -79,7 +78,6 @@ impl std::fmt::Display for RegistrationWarning {
 #[derive(Debug, Default)]
 pub struct RegistrationReport {
     pub components_registered: Vec<String>,
-    pub institutions_registered: Vec<String>,
     pub errors: Vec<RegistrationError>,
     pub warnings: Vec<RegistrationWarning>,
 }
@@ -98,24 +96,25 @@ pub struct PendingIoComponent {
 #[derive(Default)]
 pub struct ScanResult {
     pub report: RegistrationReport,
-    pub wasm_institutions: Vec<WasmFiberReasoner>,
     pub pending_io_components: Vec<PendingIoComponent>,
 }
 
-/// Walk a Layer looking for WASM component and institution resources.
+/// Walk a Layer looking for WASM component resources.
 ///
 /// - Pure/read components are loaded and registered in `components` (kernel host).
 /// - IO components are collected as `PendingIoComponent` entries for the caller
 ///   to forward to the orchestrator (kernel can't host IO).
-/// - Institutions are returned as `WasmFiberReasoner` instances (kernel host).
 ///
 /// Resources without `implementation = "wasm"` are ignored — they are
 /// handled by the regular built-in or remote component path.
+///
+/// Institution declarations under D14 are plain ontology resources scanned
+/// elsewhere (see [`crate::institution::registry::InstitutionIndex`]); this
+/// scanner does not handle them.
 pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> ScanResult {
     let mut result = ScanResult::default();
 
     let impl_prop = Iri::parse("urn:eigenius:program:component:implementation").unwrap();
-    let inst_impl_prop = Iri::parse("urn:eigenius:institution:implementation").unwrap();
 
     for resource in layer.resources().values() {
         let id = match resource.id() {
@@ -182,40 +181,6 @@ pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> S
                 continue;
             }
         }
-
-        // Institution: has institution:implementation = "wasm"
-        if let Some(Value::String(s)) = resource.get(&inst_impl_prop) {
-            if s == "wasm" {
-                match load_wasm_institution(resource, layer) {
-                    Ok(reasoner) => {
-                        if let Err(e) = check_namespace(&id) {
-                            result.report.errors.push(RegistrationError {
-                                resource_iri: id,
-                                message: e,
-                            });
-                        } else {
-                            let decl_iri = reasoner.institution_iri().as_str().to_string();
-                            if decl_iri != id {
-                                result.report.warnings.push(RegistrationWarning {
-                                    resource_iri: id.clone(),
-                                    message: format!(
-                                        "WASM binary declares IRI '{decl_iri}' which differs from resource @id '{id}' — using binary's IRI",
-                                    ),
-                                });
-                            }
-                            result.wasm_institutions.push(reasoner);
-                            result.report.institutions_registered.push(decl_iri);
-                        }
-                    }
-                    Err(e) => {
-                        result.report.errors.push(RegistrationError {
-                            resource_iri: id,
-                            message: e,
-                        });
-                    }
-                }
-            }
-        }
     }
 
     result
@@ -237,22 +202,6 @@ fn load_wasm_component(resource: &Resource, layer: &Layer) -> Result<WasmCompone
         "urn:eigenius:program:component:memory_limit_pages",
     );
     WasmComponent::from_bytes(&bytes, level, config)
-}
-
-/// Load a WASM fiber reasoner from an institution resource.
-fn load_wasm_institution(resource: &Resource, layer: &Layer) -> Result<WasmFiberReasoner, String> {
-    let bytes = extract_wasm_bytes(
-        resource,
-        "urn:eigenius:institution:wasm_binary",
-        "urn:eigenius:institution:wasm_binary_ref",
-        layer,
-    )?;
-    let config = extract_config(
-        resource,
-        "urn:eigenius:institution:fuel_limit",
-        "urn:eigenius:institution:memory_limit_pages",
-    );
-    WasmFiberReasoner::from_bytes(&bytes, config)
 }
 
 /// Extract WASM binary bytes from a resource, trying inline first then blob ref.

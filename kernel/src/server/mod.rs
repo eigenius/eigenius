@@ -691,14 +691,17 @@ impl EigeniusService {
         *self.institution_index.write().await = Arc::new(idx);
     }
 
+    /// Walk a newly committed layer and register every WASM component
+    /// (kernel-hosted or IO-class) declared therein. WASM-institution
+    /// registration is **no longer** performed here — D14 institutions
+    /// register through the chain via the [`InstitutionIndex`] +
+    /// [`InstitutionRuntime`] populated by [`Self::rebuild_institution_index`].
     async fn register_wasm_from_layer(
         &self,
         layer: &crate::layer::Layer,
         errors: &mut Vec<ValidationError>,
     ) -> Vec<Resource> {
         // Build a new ComponentRegistry layered on top of the current one.
-        // This avoids needing `BuiltinComponent: Clone` — the parent Arc
-        // is shared, new WASM entries are added to the child.
         let mut new_registry = {
             let current = self.components.read().await;
             ComponentRegistry::new_with_parent(Arc::clone(&current))
@@ -766,47 +769,20 @@ impl EigeniusService {
             *guard = Arc::new(new_registry);
         }
 
-        // Register institutions. Collect the declared class/property
-        // resources each institution publishes so the caller can commit
-        // them in a follow-up layer. Closes #15 when paired with the
-        // Load-path commit below.
-        let mut published_resources: Vec<Resource> = Vec::new();
-        if !scan_result.wasm_institutions.is_empty() {
-            let mut institutions = self.institutions.write().await;
-            for reasoner in scan_result.wasm_institutions {
-                let iri = reasoner.institution_iri().as_str().to_string();
-                match institutions.register(Box::new(reasoner)) {
-                    Ok(declared) => {
-                        tracing::info!(
-                            { field::OPERATION } = operation::INSTITUTION_REGISTER,
-                            { field::INSTITUTION_IRI } = %iri,
-                            { field::COUNT } = declared.len(),
-                            "registered WASM institution"
-                        );
-                        published_resources.extend(declared);
-                    }
-                    Err(e) => {
-                        errors.push(ValidationError {
-                            resource_iri: iri,
-                            property_iri: String::new(),
-                            rule: "wasm_registration".to_string(),
-                            message: format!("institution registration failed: {e}"),
-                            severity: "error".to_string(),
-                        });
-                    }
-                }
-            }
-        }
-        published_resources
+        // No institution-published resources under D14 — declarations
+        // ride into the chain as ordinary Eigon resources. Returns an
+        // empty Vec for source-compatibility with the Load handler's
+        // follow-up-commit logic (which is now a no-op).
+        Vec::new()
     }
 
     /// RESUME counterpart of [`Self::register_wasm_from_layer`]. Walks a
-    /// rehydrated layer and re-registers every WASM component /
-    /// institution it finds, **without** re-publishing institution
-    /// declared classes — those are already in the persisted chain.
-    /// IO components are forwarded to the orchestrator again (same
-    /// semantics as fresh install; the orchestrator may reject if it
-    /// already has the component).
+    /// rehydrated layer and re-registers every WASM component it
+    /// finds. IO components are forwarded to the orchestrator again
+    /// (same semantics as fresh install; the orchestrator may reject
+    /// if it already has the component). WASM institutions register
+    /// via D14 (chain scan + InstitutionRuntime) — no per-layer
+    /// rehydration call here.
     async fn rehydrate_wasm_from_layer(
         &self,
         layer: &crate::layer::Layer,
@@ -860,29 +836,6 @@ impl EigeniusService {
         if any_kernel_component_added {
             let mut guard = self.components.write().await;
             *guard = Arc::new(new_registry);
-        }
-
-        if !scan_result.wasm_institutions.is_empty() {
-            let mut institutions = self.institutions.write().await;
-            for reasoner in scan_result.wasm_institutions {
-                let iri = reasoner.institution_iri().as_str().to_string();
-                if let Err(e) = institutions.register_rehydrated(Box::new(reasoner)) {
-                    errors.push(ValidationError {
-                        resource_iri: iri,
-                        property_iri: String::new(),
-                        rule: "wasm_rehydrate".to_string(),
-                        message: format!("institution rehydrate failed: {e}"),
-                        severity: "error".to_string(),
-                    });
-                } else {
-                    tracing::info!(
-                        { field::OPERATION } = operation::INSTITUTION_REGISTER,
-                        { field::INSTITUTION_IRI } = %iri,
-                        rehydrated = true,
-                        "rehydrated WASM institution"
-                    );
-                }
-            }
         }
     }
 

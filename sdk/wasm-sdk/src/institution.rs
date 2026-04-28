@@ -21,10 +21,10 @@
 //! Eigon-CBOR), per D14 §3 / §4.
 //!
 //! The legacy `FiberDeclaration` struct + `MorphismValidation` enum
-//! (used by the pre-D14 `eigenius-institution` WIT world and the
-//! `wasm-ordering-institution` example) are retained while the
-//! migration to the new dispatch surface is in flight; M5–M8 of the
-//! D14 plan retire them.
+//! (used by the pre-D14 `eigenius-institution` WIT world) are retained
+//! only so the kernel-side `FiberReasoner` trait still compiles while
+//! the D14 migration is in flight; B4 of the retirement plan deletes
+//! both ends together with the trait.
 
 use crate::iri as wk;
 use crate::{Resource, Value};
