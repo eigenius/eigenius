@@ -215,6 +215,16 @@ impl<'a> Validator<'a> {
         // along with its parents.
         errors.extend(self.check_class_definition_references(resource, &res_id));
 
+        // Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
+        // For Comorphism resources, verify that `export_format` and
+        // `import_format` references resolve to ExportFormat /
+        // ImportFormat resources, and that `transformation` resolves
+        // to *some* resource in the chain. The full Mini-TT
+        // signature-equality check between transformation Component
+        // and the export/import payload types is deferred until the
+        // institution dispatch evaluator lands (M5 of the D14 plan).
+        errors.extend(self.check_comorphism_well_formedness(resource, &res_id));
+
         errors
     }
 
@@ -832,6 +842,122 @@ impl<'a> Validator<'a> {
         errors
     }
 
+    /// Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
+    ///
+    /// For a Comorphism resource, the kernel checks that:
+    ///
+    /// - `export_format` resolves to a resource of class `ExportFormat`,
+    /// - `import_format` resolves to a resource of class `ImportFormat`,
+    /// - `transformation` resolves to *some* resource in the chain
+    ///   (the full Mini-TT signature-equality check between the
+    ///   referenced Component and the export/import payload types
+    ///   lands when the institution dispatch evaluator does — M5 of
+    ///   the D14 plan).
+    ///
+    /// Existing rules (`check_class_types`) already flag references
+    /// that resolve to *wrong-class* resources, but they deliberately
+    /// skip *missing* references on instance properties (they may be
+    /// forward references to be filled later in the same batch — see
+    /// the comment in `check_class_types` line ≈628). For a Comorphism
+    /// however, the export and import formats must already exist when
+    /// the comorphism enters the chain — the kernel needs them to
+    /// type-check the transformation, and Phase 9a rehydration won't
+    /// recover anything we don't catch here. This rule closes that
+    /// gap.
+    fn check_comorphism_well_formedness(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let comorphism_class = iri(wk::COMORPHISM);
+        if !resource.is_instance_of(&comorphism_class) {
+            return errors;
+        }
+
+        // For both typed format references the kernel checks that
+        // the referenced IRI both *resolves* and resolves to a resource
+        // of the expected class. The existing `check_class_types` rule
+        // handles wrong-class but skips missing references; this rule
+        // tightens that for Comorphism specifically.
+        for typed_ref in [
+            ComorphismFormatRef {
+                field_iri: wk::EXPORT_FORMAT,
+                field_label: "Comorphism.export_format",
+                expected_class_iri: wk::EXPORT_FORMAT_CLASS,
+                expected_label: "ExportFormat",
+            },
+            ComorphismFormatRef {
+                field_iri: wk::IMPORT_FORMAT,
+                field_label: "Comorphism.import_format",
+                expected_class_iri: wk::IMPORT_FORMAT_CLASS,
+                expected_label: "ImportFormat",
+            },
+        ] {
+            self.check_comorphism_typed_ref(resource, typed_ref, res_id, &mut errors);
+        }
+
+        // `transformation` is a generic IRI string; we only check that
+        // the referenced resource exists in the chain. The full
+        // Component-signature check waits for M5.
+        if let Some(value) = resource.get(&iri(wk::TRANSFORMATION)) {
+            if let Some(target) = value_as_iri(value) {
+                if self.layer.resolve(&target).is_none() {
+                    errors.push(ValidationError {
+                        resource_id: res_id.clone(),
+                        property: Some(iri(wk::TRANSFORMATION)),
+                        rule: ValidationRule::UnresolvedClassReference,
+                        message: format!(
+                            "Comorphism.transformation: '{target}' does not resolve to any \
+                             resource in the layer chain"
+                        ),
+                    });
+                }
+            }
+        }
+
+        errors
+    }
+
+    fn check_comorphism_typed_ref(
+        &self,
+        resource: &Resource,
+        typed_ref: ComorphismFormatRef<'_>,
+        res_id: &Option<Iri>,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        let Some(value) = resource.get(&iri(typed_ref.field_iri)) else {
+            // Required-property absence is reported by Rule 1
+            // (MissingRequired); don't double-flag here.
+            return;
+        };
+        let Some(target) = value_as_iri(value) else {
+            return; // Type errors caught elsewhere.
+        };
+        let expected = iri(typed_ref.expected_class_iri);
+        match self.layer.resolve(&target) {
+            Some(target_resource) if target_resource.is_instance_of(&expected) => {}
+            Some(_) => errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(iri(typed_ref.field_iri)),
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{}: '{target}' resolves to a resource that is not an instance of {}",
+                    typed_ref.field_label, typed_ref.expected_label
+                ),
+            }),
+            None => errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(iri(typed_ref.field_iri)),
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{}: '{target}' does not resolve to any resource in the layer chain",
+                    typed_ref.field_label,
+                ),
+            }),
+        }
+    }
+
     /// Walk an array-valued reference field on `resource` and verify
     /// every element resolves to a resource of the expected class.
     fn check_array_refs(
@@ -1010,6 +1136,21 @@ fn value_as_iri(value: &Value) -> Option<Iri> {
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }
+}
+
+/// Bundle of "what we're checking" for a Comorphism's typed-reference
+/// fields (rule 15, D14 §4.5). Two such values cover `export_format`
+/// and `import_format`.
+#[derive(Copy, Clone)]
+struct ComorphismFormatRef<'a> {
+    /// Field IRI on the Comorphism resource.
+    field_iri: &'a str,
+    /// Human label for the field used in error messages.
+    field_label: &'a str,
+    /// Class IRI the referenced resource must be an instance of.
+    expected_class_iri: &'a str,
+    /// Human label for the expected class.
+    expected_label: &'a str,
 }
 
 /// Bundle of "what we're checking" for the class-definition reference
@@ -2036,6 +2177,286 @@ mod tests {
     }
 
     /// A property's `class_types` referencing a non-Class fails.
+    /// Build a layer chain containing the bootstrap ontologies (core +
+    /// institution + program + reflection + notebook). Used by tests
+    /// that exercise the Comorphism well-formedness rule (D14 §4.5)
+    /// since Comorphism / ExportFormat / ImportFormat are declared in
+    /// the institution ontology, not core.
+    fn build_bootstrap_layer() -> Arc<Layer> {
+        Arc::clone(crate::bootstrap::bootstrap().unwrap().head())
+    }
+
+    fn comorphism_format_ref(
+        id: &str,
+        is_a_class: &str,
+        institution_ref: &str,
+        procedure: &str,
+    ) -> Resource {
+        let from_to_field = if is_a_class == wk::EXPORT_FORMAT_CLASS {
+            "urn:eigenius:institution:from_class"
+        } else {
+            "urn:eigenius:institution:to_class"
+        };
+        make_resource(
+            id,
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(is_a_class.into())]),
+                ),
+                (
+                    from_to_field,
+                    Value::String("urn:eigenius:test:SomeClass".into()),
+                ),
+                (
+                    "urn:eigenius:institution:payload_type",
+                    Value::String("urn:eigenius:core:float".into()),
+                ),
+                (
+                    "urn:eigenius:institution:institution_ref",
+                    Value::String(institution_ref.into()),
+                ),
+                (
+                    "urn:eigenius:institution:procedure",
+                    Value::String(procedure.into()),
+                ),
+            ],
+        )
+    }
+
+    fn comorphism_with(
+        id: &str,
+        export_format: &str,
+        transformation: &str,
+        import_format: &str,
+    ) -> Resource {
+        make_resource(
+            id,
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::COMORPHISM.into())]),
+                ),
+                (wk::EXPORT_FORMAT, Value::String(export_format.into())),
+                (wk::TRANSFORMATION, Value::String(transformation.into())),
+                (wk::IMPORT_FORMAT, Value::String(import_format.into())),
+                (wk::EXACT, Value::Boolean(false)),
+            ],
+        )
+    }
+
+    #[test]
+    fn well_formed_comorphism_passes_typing_check() {
+        let bootstrap = build_bootstrap_layer();
+        let mut top = LayerBuilder::new("test", Some(bootstrap));
+
+        // A target resource the transformation can resolve to. The
+        // current rule only requires this to exist; M5 will tighten
+        // it to require a typed Component.
+        top.add_resource(make_resource(
+            "urn:eigenius:test:transform",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("transform".into())),
+                (wk::DESCRIPTION, Value::String("placeholder".into())),
+            ],
+        ))
+        .unwrap();
+
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:ef",
+            wk::EXPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:extract",
+        ))
+        .unwrap();
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:imf",
+            wk::IMPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:reify",
+        ))
+        .unwrap();
+        top.add_resource(comorphism_with(
+            "urn:eigenius:test:cm",
+            "urn:eigenius:test:ef",
+            "urn:eigenius:test:transform",
+            "urn:eigenius:test:imf",
+        ))
+        .unwrap();
+
+        let layer = Arc::new(top.build());
+        let validator = Validator::new(&layer);
+        let comorphism_errors: Vec<_> = validator
+            .validate()
+            .into_iter()
+            .filter(|e| e.message.contains("Comorphism"))
+            .collect();
+        assert!(
+            comorphism_errors.is_empty(),
+            "well-formed Comorphism should pass; got {comorphism_errors:?}"
+        );
+    }
+
+    #[test]
+    fn comorphism_with_missing_export_format_is_rejected() {
+        let bootstrap = build_bootstrap_layer();
+        let mut top = LayerBuilder::new("test", Some(bootstrap));
+
+        top.add_resource(make_resource(
+            "urn:eigenius:test:transform",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("transform".into())),
+                (wk::DESCRIPTION, Value::String("placeholder".into())),
+            ],
+        ))
+        .unwrap();
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:imf",
+            wk::IMPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:reify",
+        ))
+        .unwrap();
+        // Comorphism references an ExportFormat that isn't in the chain.
+        top.add_resource(comorphism_with(
+            "urn:eigenius:test:cm",
+            "urn:eigenius:test:missing_ef",
+            "urn:eigenius:test:transform",
+            "urn:eigenius:test:imf",
+        ))
+        .unwrap();
+
+        let layer = Arc::new(top.build());
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let dangling: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("Comorphism.export_format")
+            })
+            .collect();
+        assert_eq!(
+            dangling.len(),
+            1,
+            "expected one UnresolvedClassReference on Comorphism.export_format; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn comorphism_with_export_format_pointing_at_wrong_class_is_rejected() {
+        let bootstrap = build_bootstrap_layer();
+        let mut top = LayerBuilder::new("test", Some(bootstrap));
+
+        top.add_resource(make_resource(
+            "urn:eigenius:test:transform",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.into())]),
+                ),
+                (wk::SHORT_NAME, Value::String("transform".into())),
+                (wk::DESCRIPTION, Value::String("placeholder".into())),
+            ],
+        ))
+        .unwrap();
+
+        // An ImportFormat resource accidentally referenced from the
+        // Comorphism's `export_format` slot.
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:wrong",
+            wk::IMPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:reify",
+        ))
+        .unwrap();
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:imf",
+            wk::IMPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:reify",
+        ))
+        .unwrap();
+        top.add_resource(comorphism_with(
+            "urn:eigenius:test:cm",
+            "urn:eigenius:test:wrong",
+            "urn:eigenius:test:transform",
+            "urn:eigenius:test:imf",
+        ))
+        .unwrap();
+
+        let layer = Arc::new(top.build());
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let mismatched: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("Comorphism.export_format")
+                    && e.message.contains("not an instance of ExportFormat")
+            })
+            .collect();
+        assert_eq!(
+            mismatched.len(),
+            1,
+            "expected one UnresolvedClassReference flagging the wrong-class export_format; \
+             got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn comorphism_with_unresolvable_transformation_is_rejected() {
+        let bootstrap = build_bootstrap_layer();
+        let mut top = LayerBuilder::new("test", Some(bootstrap));
+
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:ef",
+            wk::EXPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:extract",
+        ))
+        .unwrap();
+        top.add_resource(comorphism_format_ref(
+            "urn:eigenius:test:imf",
+            wk::IMPORT_FORMAT_CLASS,
+            "urn:eigenius:test:inst",
+            "urn:eigenius:test:proc:reify",
+        ))
+        .unwrap();
+        // Transformation IRI points at nothing.
+        top.add_resource(comorphism_with(
+            "urn:eigenius:test:cm",
+            "urn:eigenius:test:ef",
+            "urn:eigenius:test:absent_transform",
+            "urn:eigenius:test:imf",
+        ))
+        .unwrap();
+
+        let layer = Arc::new(top.build());
+        let validator = Validator::new(&layer);
+        let errors = validator.validate();
+        let dangling: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("Comorphism.transformation")
+            })
+            .collect();
+        assert_eq!(
+            dangling.len(),
+            1,
+            "expected one UnresolvedClassReference for unresolvable transformation; got {errors:?}"
+        );
+    }
+
     #[test]
     fn property_class_types_pointing_at_non_class_is_rejected() {
         let core = build_core_layer();
