@@ -1399,9 +1399,30 @@ fn try_d14_institution_invoke(
             ))
         })?;
 
-    // Step 5: post-translation validation invariant (D14 §9.3) lands
-    // in M7 alongside AutoOnLoad QueryClass dispatch — both share the
-    // QueryClass-on-target-class machinery.
+    // Step 5 (D14 §9.3): post-translation validation invariant. Run
+    // any AutoOnLoad QueryClasses bound to the produced target
+    // resource's class. A `Fails` here indicates the comorphism
+    // produced a target-invalid result — a comorphism-implementation
+    // bug, not a user error. Surface as a typed error rather than
+    // committing the bad resource.
+    let post_errors = crate::institution::dispatch::dispatch_auto_on_load_for_resource(
+        &target_resource,
+        index,
+        runtime,
+        &exec_ctx,
+    );
+    if !post_errors.is_empty() {
+        let reasons = post_errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(EvalError::InvalidCaseTarget(format!(
+            "comorphism `{comorphism_iri}`: post-translation validation rejected the \
+             reified resource: {reasons}"
+        )));
+    }
+
     Ok(Some(Val::ResourceVal(Box::new(target_resource))))
 }
 
