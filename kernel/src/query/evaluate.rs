@@ -985,14 +985,12 @@ fn dispatch_institution_call(
     // Build a fresh ExecutionContext for the call — mirrors the
     // kernel's NativeDecide / InstitutionInvoke behaviour.
     let head = std::sync::Arc::new(layer.clone());
-    let cache = std::sync::Arc::clone(head.cache());
-    let backend = std::sync::Arc::clone(head.backend());
+    let storage = head.storage().clone();
     let exec_ctx = crate::context::ExecutionContext::new(
         head,
         "__eigenql_dispatch__",
         crate::context::ExecutionMode::ReadOnly,
-        cache,
-        backend,
+        storage,
     );
     match capability {
         InstitutionCapability::DecidePredicate => {
@@ -1267,18 +1265,12 @@ mod tests {
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
         // Need a new layer on top of core
-        let core = Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
         let mut domain_builder = LayerBuilder::new("animals", Some(core));
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        Arc::new(domain_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
@@ -1444,10 +1436,7 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let mut builder = LayerBuilder::new("hierarchy", Some(core));
 
@@ -1480,10 +1469,7 @@ mod tests {
         );
         builder.add_resource(charlie).unwrap();
 
-        Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1641,10 +1627,7 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
         // Use FunctionCall directly at eval_expression level for a
         // focused test — the full-query integration would need more
@@ -1678,10 +1661,7 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {
@@ -1714,10 +1694,7 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {

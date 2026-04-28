@@ -332,20 +332,16 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             };
             let head = ctx.layer().cloned().unwrap_or_else(|| {
                 Arc::new(
-                    crate::layer::LayerBuilder::new("__invoke_empty_layer__", None).build(
-                        Arc::new(crate::layer::MemoryResourceCache::new()),
-                        Arc::new(crate::layer::MemoryResourceBackend::new()),
-                    ),
+                    crate::layer::LayerBuilder::new("__invoke_empty_layer__", None)
+                        .build(crate::layer::LayerStorage::in_memory()),
                 )
             });
-            let cache = Arc::clone(head.cache());
-            let backend = Arc::clone(head.backend());
+            let storage = head.storage().clone();
             let exec_ctx = crate::context::ExecutionContext::new(
                 head,
                 "__invoke__",
                 crate::context::ExecutionMode::ReadOnly,
-                cache,
-                backend,
+                storage,
             );
             match reasoner.translate(comorphism_iri, &source_resource, &exec_ctx) {
                 Ok(translated) => Ok(Val::ResourceVal(Box::new(translated))),
@@ -1628,14 +1624,11 @@ fn dispatch_fiber_query(
     let query_resource = val_to_resource(query_val);
 
     // Create a temporary ExecutionContext for the institution
-    let cache = Arc::clone(layer.cache());
-    let backend = Arc::clone(layer.backend());
     let exec_ctx = crate::context::ExecutionContext::new(
         Arc::clone(layer),
         "fiber_query",
         crate::context::ExecutionMode::ReadOnly,
-        cache,
-        backend,
+        layer.storage().clone(),
     );
 
     match reasoner.query(&query_resource, &exec_ctx) {
@@ -1754,20 +1747,16 @@ fn decide_constraint(
             let arg_values = arg_values?;
             let head = ctx.layer().cloned().unwrap_or_else(|| {
                 Arc::new(
-                    crate::layer::LayerBuilder::new("__decide_empty_layer__", None).build(
-                        Arc::new(crate::layer::MemoryResourceCache::new()),
-                        Arc::new(crate::layer::MemoryResourceBackend::new()),
-                    ),
+                    crate::layer::LayerBuilder::new("__decide_empty_layer__", None)
+                        .build(crate::layer::LayerStorage::in_memory()),
                 )
             });
-            let cache = Arc::clone(head.cache());
-            let backend = Arc::clone(head.backend());
+            let storage = head.storage().clone();
             let exec_ctx = crate::context::ExecutionContext::new(
                 head,
                 "__decide__",
                 crate::context::ExecutionMode::ReadOnly,
-                cache,
-                backend,
+                storage,
             );
             match reasoner.decide(iri, &arg_values, &exec_ctx) {
                 Ok(result) => Ok(result),
@@ -2038,10 +2027,10 @@ mod tests {
     /// Build a minimal IO evaluation context for traced tests.
     fn io_ctx() -> EvalCtx {
         EvalCtx::IO {
-            layer: std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
-                std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-            )),
+            layer: std::sync::Arc::new(
+                crate::layer::LayerBuilder::new("empty", None)
+                    .build(crate::layer::LayerStorage::in_memory()),
+            ),
             registry: std::sync::Arc::new(ComponentRegistry::default()),
             institutions: std::sync::Arc::new(InstitutionRegistry::new()),
             trace_store: None,
@@ -2363,10 +2352,10 @@ mod tests {
             .register(Box::new(FailingInstitution))
             .unwrap();
 
-        let layer = std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = std::sync::Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let ctx = EvalCtx::IO {
             layer,
             registry: std::sync::Arc::new(ComponentRegistry::default()),

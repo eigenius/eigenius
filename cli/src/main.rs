@@ -589,10 +589,7 @@ fn cmd_validate(file: &str, json_output: bool) {
             std::process::exit(1);
         }
     }
-    let layer = builder.build(
-        std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-        std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-    );
+    let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
 
     // Validate
     let validator = Validator::new(&layer);

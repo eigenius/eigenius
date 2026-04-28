@@ -119,10 +119,7 @@ mod tests {
         );
         lb.add_resource(inst).unwrap();
 
-        lb.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        )
+        lb.build(crate::layer::LayerStorage::in_memory())
     }
 
     /// Regression for issue #9: short-name RETURN keys (`{ iri: ?c, name: ?name }`)
@@ -288,10 +285,7 @@ mod tests {
         );
         lb.add_resource(b).unwrap();
 
-        let layer = lb.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = lb.build(crate::layer::LayerStorage::in_memory());
 
         let query_str = r#"
             MATCH ?a { "urn:chain:ref": ?b },

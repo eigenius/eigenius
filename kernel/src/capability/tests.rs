@@ -30,10 +30,7 @@ use crate::program::component::BuiltinComponent;
 use std::sync::Arc;
 
 fn empty_layer() -> crate::layer::Layer {
-    crate::layer::LayerBuilder::new("empty", None).build(
-        std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-        std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-    )
+    crate::layer::LayerBuilder::new("empty", None).build(crate::layer::LayerStorage::in_memory())
 }
 
 #[test]
@@ -298,15 +295,9 @@ fn load_ordering_institution() -> WasmFiberReasoner {
 }
 
 fn test_context() -> ExecutionContext {
-    let cache = std::sync::Arc::new(crate::layer::MemoryResourceCache::new())
-        as std::sync::Arc<dyn crate::layer::ResourceCache>;
-    let backend = std::sync::Arc::new(crate::layer::MemoryResourceBackend::new())
-        as std::sync::Arc<dyn crate::storage::ResourceBackend>;
-    let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
-        std::sync::Arc::clone(&cache),
-        std::sync::Arc::clone(&backend),
-    ));
-    ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, cache, backend)
+    let storage = crate::layer::LayerStorage::in_memory();
+    let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(storage.clone()));
+    ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage)
 }
 
 #[test]
@@ -624,10 +615,7 @@ fn build_fiber_test_layer() -> (
     }
 
     (
-        std::sync::Arc::new(lb.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        )),
+        std::sync::Arc::new(lb.build(crate::layer::LayerStorage::in_memory())),
         registry,
     )
 }
@@ -638,14 +626,11 @@ fn fiber_clause_converged_only() {
     use crate::query;
 
     let (layer, institutions) = build_fiber_test_layer();
-    let cache = Arc::clone(layer.cache());
-    let backend = Arc::clone(layer.backend());
     let ctx = ExecutionContext::new(
         Arc::clone(&layer),
         "fiber-test",
         ExecutionMode::ReadOnly,
-        cache,
-        backend,
+        layer.storage().clone(),
     );
 
     let runtime = query::evaluate::FiberRuntime {

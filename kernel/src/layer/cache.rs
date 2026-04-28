@@ -232,6 +232,12 @@ pub trait BloomCache: Send + Sync {
     /// in fresh DBs).
     fn get_or_load(&self, layer: &LayerId) -> Result<Option<Arc<BloomFilter>>, StorageError>;
 
+    /// Insert or replace a bloom for `layer`. Used by `LayerBuilder::build`
+    /// to pre-populate the cache with the freshly-computed bloom (avoids
+    /// a backend round-trip on the first resolve through a just-built
+    /// layer). Implementations may evict other entries to make room.
+    fn put(&self, layer: LayerId, bloom: Arc<BloomFilter>);
+
     /// Drop all entries for a layer. Called by GC when a layer is
     /// swept and by branch pruning.
     fn evict_layer(&self, layer: &LayerId);
@@ -241,11 +247,18 @@ pub trait BloomCache: Send + Sync {
     fn stats(&self) -> CacheStats;
 }
 
-/// Naïve unbounded bloom cache. Holds every fetched bloom forever
-/// until `evict_layer` removes it. Bounded eviction lands with 14c.
+/// Naïve unbounded bloom cache. Holds every fetched (or directly-`put`)
+/// bloom forever until `evict_layer` removes it. Bounded eviction lands
+/// with 14c.
+///
+/// Optionally backed by a `PersistentBackend` for fall-through reads on
+/// cache miss. The in-memory bootstrap path constructs a cache *without*
+/// a backend (every layer is freshly built and the bloom is populated
+/// at `build` time); the persistent path passes the `RocksStore` Arc so
+/// reloads-after-eviction work.
 pub struct MemoryBloomCache {
     inner: RwLock<MemoryBloomCacheState>,
-    backend: Arc<dyn PersistentBackend>,
+    backend: Option<Arc<dyn PersistentBackend>>,
 }
 
 struct MemoryBloomCacheState {
@@ -255,6 +268,7 @@ struct MemoryBloomCacheState {
 }
 
 impl MemoryBloomCache {
+    /// Create a cache that falls through to `backend` on miss.
     pub fn new(backend: Arc<dyn PersistentBackend>) -> Self {
         Self {
             inner: RwLock::new(MemoryBloomCacheState {
@@ -262,7 +276,23 @@ impl MemoryBloomCache {
                 hits: 0,
                 misses: 0,
             }),
-            backend,
+            backend: Some(backend),
+        }
+    }
+
+    /// Create a cache with no backend fall-through. Misses return
+    /// `Ok(None)` and `Layer::resolve` treats the layer as "maybe
+    /// present" (defensive — better one extra defined-IRI check than
+    /// skipping a defining layer). Used by the in-memory bootstrap
+    /// path where every layer's bloom is `put` at build time.
+    pub fn cache_only() -> Self {
+        Self {
+            inner: RwLock::new(MemoryBloomCacheState {
+                entries: BTreeMap::new(),
+                hits: 0,
+                misses: 0,
+            }),
+            backend: None,
         }
     }
 }
@@ -282,8 +312,16 @@ impl BloomCache for MemoryBloomCache {
             }
         }
 
-        // Miss: fetch from the backend, insert, return.
-        let bloom = match self.backend.load_bloom(layer)? {
+        // Miss: fetch from the backend (if configured), insert, return.
+        let backend = match self.backend.as_ref() {
+            Some(b) => b,
+            None => {
+                let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
+                state.misses = state.misses.saturating_add(1);
+                return Ok(None);
+            }
+        };
+        let bloom = match backend.load_bloom(layer)? {
             Some(b) => b,
             None => {
                 let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
@@ -302,6 +340,11 @@ impl BloomCache for MemoryBloomCache {
             .clone();
         state.misses = state.misses.saturating_add(1);
         Ok(Some(stored))
+    }
+
+    fn put(&self, layer: LayerId, bloom: Arc<BloomFilter>) {
+        let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
+        state.entries.insert(layer, bloom);
     }
 
     fn evict_layer(&self, layer: &LayerId) {
@@ -411,7 +454,7 @@ mod tests {
 
     // --- BloomCache tests ---
 
-    use crate::layer::{BloomFilter, LayerBuilder};
+    use crate::layer::{BloomFilter, LayerBuilder, LayerStorage};
     use crate::ontology::resource::Value;
     use crate::storage::memory::MemoryPersistentBackend;
 
@@ -423,10 +466,7 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:r"));
         r.set(iri("urn:eigenius:test:p"), Value::String("v".into()));
         builder.add_resource(r).unwrap();
-        Arc::new(builder.build(
-            Arc::new(MemoryResourceCache::new()),
-            Arc::new(MemoryResourceBackend::new()),
-        ))
+        Arc::new(builder.build(LayerStorage::in_memory()))
     }
 
     #[test]
@@ -493,10 +533,7 @@ mod tests {
             r.set(iri("urn:eigenius:test:p"), Value::Integer(i));
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(
-            Arc::new(MemoryResourceCache::new()),
-            Arc::new(MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(builder.build(LayerStorage::in_memory()));
         backend.store_layer(&layer).unwrap();
 
         let cache = MemoryBloomCache::new(Arc::clone(&backend));

@@ -83,10 +83,10 @@ impl WasmFiberReasoner {
         component: &Component,
         config: &WasmComponentConfig,
     ) -> Result<FiberDeclaration, String> {
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let linker = build_linker(engine)?;
 
         let mut store = Store::new(engine, HostState { layer });

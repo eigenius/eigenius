@@ -364,13 +364,12 @@ impl LayerStore for RocksStore {
         // `PersistentBackend::load_chain` + `build_chain` instead.
         let (name, _parent_id) = self.load_layer_meta(id)?;
         let defined_iris = ResourceBackend::list_layer_iris(self, id)?;
-        let cache: Arc<dyn eigenius_kernel::layer::ResourceCache> =
-            Arc::new(eigenius_kernel::layer::MemoryResourceCache::new());
-        // Use a no-op self-cloned backend reference: to avoid the trait
-        // upcast from RocksStore Arc, we wrap a fresh MemoryResourceBackend
-        // (the loaded layer's lookups will hit the cache populated below).
-        let backend: Arc<dyn ResourceBackend> =
-            Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new());
+        // Construct an in-memory storage bundle and warm both caches from
+        // RocksDB so reads via the returned Layer succeed without going
+        // back to disk. (Production callers use `PersistentBackend::load_chain`
+        // + `build_chain` instead — this path exists for the older async
+        // `LayerStore` API tests.)
+        let storage = eigenius_kernel::layer::LayerStorage::in_memory();
         let handle = LayerHandle {
             id: id.clone(),
             parents: Vec::new(),
@@ -378,23 +377,18 @@ impl LayerStore for RocksStore {
             resource_count: defined_iris.len() as u64,
             created_at: 0,
         };
-        // Pre-populate the temporary cache from RocksDB so reads via the
-        // returned Layer succeed.
         for iri in &defined_iris {
             if let Some(resource) = ResourceBackend::load_resource(self, id, iri) {
-                cache.put(
+                storage.cache.put(
                     eigenius_kernel::layer::ResourceKey::new(id.clone(), iri.clone()),
                     Arc::new(resource),
                 );
             }
         }
-        Ok(Layer::from_handle(
-            handle,
-            None,
-            defined_iris,
-            cache,
-            backend,
-        ))
+        if let Ok(Some(bloom)) = eigenius_kernel::storage::PersistentBackend::load_bloom(self, id) {
+            storage.bloom_cache.put(id.clone(), Arc::new(bloom));
+        }
+        Ok(Layer::from_handle(handle, None, defined_iris, storage))
     }
 
     async fn list_layers(&self) -> Result<Vec<LayerId>, StorageError> {
@@ -752,10 +746,7 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let layer = builder.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
         let id = layer.id().clone();
 
         store.store_layer(&layer).await.unwrap();
@@ -822,18 +813,12 @@ mod tests {
         let mut b1 = LayerBuilder::new("a", None);
         b1.add_resource(make_resource("urn:eigenius:core:x", vec![]))
             .unwrap();
-        let l1 = b1.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        );
+        let l1 = b1.build(eigenius_kernel::layer::LayerStorage::in_memory());
 
         let mut b2 = LayerBuilder::new("b", None);
         b2.add_resource(make_resource("urn:eigenius:core:y", vec![]))
             .unwrap();
-        let l2 = b2.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        );
+        let l2 = b2.build(eigenius_kernel::layer::LayerStorage::in_memory());
 
         store.store_layer(&l1).await.unwrap();
         store.store_layer(&l2).await.unwrap();
@@ -852,10 +837,7 @@ mod tests {
         builder
             .add_resource(make_resource("urn:eigenius:core:x", vec![]))
             .unwrap();
-        let layer = builder.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
         let id = layer.id().clone();
 
         store.store_layer(&layer).await.unwrap();
@@ -881,10 +863,7 @@ mod tests {
                     )],
                 ))
                 .unwrap();
-            let layer = builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            );
+            let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
             let id = layer.id().clone();
             store.store_layer(&layer).await.unwrap();
             store.set_head(&id).unwrap();
@@ -913,10 +892,7 @@ mod tests {
         root_builder
             .add_resource(make_resource("urn:eigenius:core:Class", vec![]))
             .unwrap();
-        let root = Arc::new(root_builder.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        ));
+        let root = Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
         store.store_layer(&root).await.unwrap();
 
         // Build and store child layer
@@ -930,10 +906,7 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let child = child_builder.build(
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-        );
+        let child = child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
         let child_id = child.id().clone();
         store.store_layer(&child).await.unwrap();
         store.set_head(&child_id).unwrap();
@@ -942,16 +915,13 @@ mod tests {
         let info = eigenius_kernel::storage::PersistentBackend::load_chain(&store)
             .unwrap()
             .expect("chain present");
-        let cache: Arc<dyn eigenius_kernel::layer::ResourceCache> =
-            Arc::new(eigenius_kernel::layer::MemoryResourceCache::new());
-        let backend: Arc<dyn ResourceBackend> =
-            Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new());
-        // Pre-warm the cache from the persistent store so resolve hits succeed.
+        let storage = eigenius_kernel::layer::LayerStorage::in_memory();
+        // Pre-warm the caches from the persistent store so resolve hits succeed.
         for handle in &info.handles {
             if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
                 for iri_h in iris {
                     if let Some(r) = ResourceBackend::load_resource(&store, &handle.id, iri_h) {
-                        cache.put(
+                        storage.cache.put(
                             eigenius_kernel::layer::ResourceKey::new(
                                 handle.id.clone(),
                                 iri_h.clone(),
@@ -961,8 +931,13 @@ mod tests {
                     }
                 }
             }
+            if let Ok(Some(bloom)) =
+                eigenius_kernel::storage::PersistentBackend::load_bloom(&store, &handle.id)
+            {
+                storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
+            }
         }
-        let head = eigenius_kernel::layer::build_chain(info, cache, backend);
+        let head = eigenius_kernel::layer::build_chain(info, storage);
         assert!(!head.is_root());
         // Should resolve resources from both layers
         assert!(head.resolve(&iri("urn:eigenius:core:Class")).is_some());
@@ -1045,10 +1020,7 @@ mod tests {
             builder
                 .add_resource(make_resource("urn:eigenius:core:A", vec![]))
                 .unwrap();
-            let layer = Arc::new(builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let id = layer.id().clone();
 
             PB::store_layer(&store, &layer).unwrap();
@@ -1071,20 +1043,16 @@ mod tests {
             root_builder
                 .add_resource(make_resource("urn:eigenius:core:A", vec![]))
                 .unwrap();
-            let root = Arc::new(root_builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let root =
+                Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let root_id = root.id().clone();
 
             let mut child_builder = LayerBuilder::new("child", Some(Arc::clone(&root)));
             child_builder
                 .add_resource(make_resource("urn:eigenius:example:B", vec![]))
                 .unwrap();
-            let child = Arc::new(child_builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let child =
+                Arc::new(child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let child_id = child.id().clone();
 
             PB::store_layer(&store, &root).unwrap();
@@ -1120,10 +1088,8 @@ mod tests {
                 builder
                     .add_resource(make_resource("urn:eigenius:core:X", vec![]))
                     .unwrap();
-                let layer = Arc::new(builder.build(
-                    std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                    std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-                ));
+                let layer =
+                    Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
                 layer_id = layer.id().clone();
                 PB::store_layer(&store, &layer).unwrap();
             }
@@ -1195,10 +1161,7 @@ mod tests {
             let original = r.clone();
             let mut builder = LayerBuilder::new("variants", None);
             builder.add_resource(r).unwrap();
-            let layer = Arc::new(builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let layer_id = layer.id().clone();
 
             PB::store_layer(&store, &layer).unwrap();
@@ -1244,10 +1207,7 @@ mod tests {
 
             let mut builder = LayerBuilder::new("lossy", None);
             builder.add_resource(r).unwrap();
-            let layer = Arc::new(builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let layer_id = layer.id().clone();
             PB::store_layer(&store, &layer).unwrap();
 
@@ -1291,10 +1251,7 @@ mod tests {
             for r in resources {
                 builder.add_resource(r).unwrap();
             }
-            let layer = Arc::new(builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let id = layer.id().clone();
 
             PB::store_layer(&store, &layer).unwrap();
@@ -1337,10 +1294,8 @@ mod tests {
                     )],
                 ))
                 .unwrap();
-            let root = Arc::new(root_builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let root =
+                Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
 
             // Build child with another resource.
             let mut child_builder = LayerBuilder::new("domain", Some(Arc::clone(&root)));
@@ -1350,10 +1305,8 @@ mod tests {
                     vec![("urn:eigenius:core:description", Value::String("dog".into()))],
                 ))
                 .unwrap();
-            let child = Arc::new(child_builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let child =
+                Arc::new(child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let child_id = child.id().clone();
 
             PB::store_layer(&*store_arc, &root).unwrap();
@@ -1367,10 +1320,13 @@ mod tests {
             // Reconstruct the chain pointing at the live RocksStore — fresh
             // cache, real backend.
             let info = PB::load_chain(&*store_arc).unwrap().expect("chain present");
-            let cache: Arc<dyn eigenius_kernel::layer::ResourceCache> =
-                Arc::new(eigenius_kernel::layer::MemoryResourceCache::new());
-            let backend: Arc<dyn ResourceBackend> = Arc::clone(&store_arc) as _;
-            let head = eigenius_kernel::layer::build_chain(info, Arc::clone(&cache), backend);
+            // Storage backed by the live RocksStore — fresh resource cache
+            // (cold), bloom cache backed by the same store so cold-resolve
+            // exercises both backend probes.
+            let pb_arc: Arc<dyn eigenius_kernel::storage::PersistentBackend> =
+                Arc::clone(&store_arc) as _;
+            let storage = eigenius_kernel::layer::LayerStorage::with_persistent(pb_arc);
+            let head = eigenius_kernel::layer::build_chain(info, storage.clone());
 
             // Cache is empty: this resolve must traverse the parent chain and
             // decode CBOR from RocksDB.
@@ -1395,7 +1351,7 @@ mod tests {
 
             // Cache should now have populated entries (proving misses fell
             // through to the backend rather than silently failing).
-            assert!(cache.stats().entries >= 2);
+            assert!(storage.cache.stats().entries >= 2);
         }
 
         /// `meta:` key/value surface — `put_meta`/`get_meta`/`delete_meta`/
@@ -1496,10 +1452,7 @@ mod tests {
             root_b
                 .add_resource(make_resource("urn:eigenius:core:R", vec![]))
                 .unwrap();
-            let root = Arc::new(root_b.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let root = Arc::new(root_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let root_id = root.id().clone();
 
             // Two distinct children off the same root — distinct because
@@ -1507,19 +1460,13 @@ mod tests {
             let mut a_b = LayerBuilder::new("child_a", Some(Arc::clone(&root)));
             a_b.add_resource(make_resource("urn:eigenius:example:A", vec![]))
                 .unwrap();
-            let child_a = Arc::new(a_b.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let child_a = Arc::new(a_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let a_id = child_a.id().clone();
 
             let mut b_b = LayerBuilder::new("child_b", Some(Arc::clone(&root)));
             b_b.add_resource(make_resource("urn:eigenius:example:B", vec![]))
                 .unwrap();
-            let child_b = Arc::new(b_b.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let child_b = Arc::new(b_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let b_id = child_b.id().clone();
 
             PB::store_layer(&store, &root).unwrap();
@@ -1570,10 +1517,7 @@ mod tests {
                     .add_resource(make_resource(&format!("urn:eigenius:test:r{i}"), vec![]))
                     .unwrap();
             }
-            let layer = Arc::new(builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let id = layer.id().clone();
             let original_iris = layer.defined_iris().clone();
 
@@ -1602,10 +1546,7 @@ mod tests {
             builder
                 .add_resource(make_resource("urn:eigenius:test:a", vec![]))
                 .unwrap();
-            let layer = Arc::new(builder.build(
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
-                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
-            ));
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
             let id = layer.id().clone();
 
             PB::store_layer(&store, &layer).unwrap();

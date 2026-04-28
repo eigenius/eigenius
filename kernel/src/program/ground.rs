@@ -995,10 +995,7 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
@@ -1006,10 +1003,7 @@ mod tests {
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        Arc::new(domain_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1111,20 +1105,14 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        Arc::new(user_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]

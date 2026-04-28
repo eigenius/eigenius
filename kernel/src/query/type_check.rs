@@ -466,10 +466,7 @@ mod tests {
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     fn check(layer: &Layer, query_str: &str) -> Vec<QueryError> {

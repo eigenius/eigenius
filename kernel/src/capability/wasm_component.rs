@@ -100,10 +100,10 @@ impl WasmComponent {
     ) -> Result<String, String> {
         // Empty layer for the temporary instance — component-iri
         // shouldn't need resource resolution.
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let linker = build_linker(engine, capability_level)?;
 
         let mut store = Store::new(engine, HostState { layer });

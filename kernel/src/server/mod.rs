@@ -240,23 +240,23 @@ async fn resume_one_task(
     // get an Arc<Layer>.
     let layer = match backend.load_chain_from(&record.layer_head) {
         Ok(Some(info)) => {
-            let cache: Arc<dyn crate::layer::ResourceCache> =
-                Arc::new(crate::layer::MemoryResourceCache::new());
-            let resource_backend: Arc<dyn crate::storage::ResourceBackend> =
-                Arc::new(crate::layer::MemoryResourceBackend::new());
+            let storage = crate::layer::LayerStorage::in_memory();
             for handle in &info.handles {
                 if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
                     for iri in iris {
                         if let Some(r) = backend.load_resource(&handle.id, iri) {
-                            cache.put(
+                            storage.cache.put(
                                 crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
                                 Arc::new(r),
                             );
                         }
                     }
                 }
+                if let Ok(Some(bloom)) = backend.load_bloom(&handle.id) {
+                    storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
+                }
             }
-            crate::layer::build_chain(info, cache, resource_backend)
+            crate::layer::build_chain(info, storage)
         }
         _ => {
             tracing::warn!(
@@ -564,23 +564,23 @@ impl EigeniusService {
             Ok(Some(info)) => {
                 // Phase 14a-iii: load_chain_from returns ChainInfo; warm
                 // a cache and call build_chain to materialise the Layer.
-                let cache: Arc<dyn crate::layer::ResourceCache> =
-                    Arc::new(crate::layer::MemoryResourceCache::new());
-                let resource_backend: Arc<dyn crate::storage::ResourceBackend> =
-                    Arc::new(crate::layer::MemoryResourceBackend::new());
+                let storage = crate::layer::LayerStorage::in_memory();
                 for handle in &info.handles {
                     if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
                         for iri in iris {
                             if let Some(r) = backend.load_resource(&handle.id, iri) {
-                                cache.put(
+                                storage.cache.put(
                                     crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
                                     Arc::new(r),
                                 );
                             }
                         }
                     }
+                    if let Ok(Some(bloom)) = backend.load_bloom(&handle.id) {
+                        storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
+                    }
                 }
-                Ok(crate::layer::build_chain(info, cache, resource_backend))
+                Ok(crate::layer::build_chain(info, storage))
             }
             Ok(None) => Err(Status::not_found(format!(
                 "layer {} not in store",

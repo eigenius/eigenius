@@ -1091,10 +1091,7 @@ mod tests {
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1132,10 +1129,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1162,10 +1156,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1196,10 +1187,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1232,10 +1220,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1340,10 +1325,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1381,10 +1363,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
         let my_errors: Vec<_> = errors
@@ -1442,10 +1421,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1485,10 +1461,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1522,10 +1495,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1555,10 +1525,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1590,10 +1557,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1640,10 +1604,7 @@ mod tests {
             ))
             .unwrap();
 
-        Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1673,10 +1634,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1716,10 +1674,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1760,10 +1715,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1802,10 +1754,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1832,10 +1781,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1890,10 +1836,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1935,10 +1878,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1987,10 +1927,7 @@ mod tests {
             ],
         );
         top.add_resource(bad_class).unwrap();
-        let layer = Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -2047,10 +1984,7 @@ mod tests {
         );
         top.add_resource(prop).unwrap();
         top.add_resource(class).unwrap();
-        let layer = Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -2086,10 +2020,7 @@ mod tests {
             ],
         );
         top.add_resource(bad_prop).unwrap();
-        let layer = Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -2149,10 +2080,7 @@ mod tests {
         );
         top.add_resource(instance).unwrap();
         top.add_resource(bad_prop).unwrap();
-        let layer = Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();

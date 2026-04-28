@@ -392,10 +392,7 @@ mod tests {
             "urn:eigenius:core:string",
         ))
         .unwrap();
-        let root_layer = Arc::new(root.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let root_layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
         let mut top = LayerBuilder::new("top", Some(root_layer.clone()));
         let mut dog = make_class_resource("urn:eigenius:example:Dog", "Dog");
@@ -415,10 +412,7 @@ mod tests {
             "urn:eigenius:example:Dog",
         ))
         .unwrap();
-        Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(top.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -544,10 +538,7 @@ mod tests {
         let mut root = LayerBuilder::new("root", None);
         root.add_resource(make_class_resource("urn:example:Foo", "Foo"))
             .unwrap();
-        let root_layer = Arc::new(root.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let root_layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
         let mut top = LayerBuilder::new("top", Some(root_layer));
         // Same IRI as in root, with a different short_name (override).
@@ -557,10 +548,7 @@ mod tests {
             Value::String("the second-version override".into()),
         );
         top.add_resource(foo_v2).unwrap();
-        let layer = Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let topo = walk(&layer, 0, false);
         let foo_nodes: Vec<_> = topo
@@ -596,20 +584,14 @@ mod tests {
             Value::Array(vec![Value::String("urn:example:name".to_string())]),
         );
         root.add_resource(foo.clone()).unwrap();
-        let root_layer = Arc::new(root.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let root_layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
         // The same schema, again, in a child layer. Without edge
         // dedup the walker would emit each requires/recommends/
         // property_ref twice.
         let mut top = LayerBuilder::new("top", Some(root_layer));
         top.add_resource(foo).unwrap();
-        let layer = Arc::new(top.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let topo = walk(&layer, 0, false);
         let requires_edges: Vec<_> = topo

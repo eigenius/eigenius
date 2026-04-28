@@ -764,10 +764,8 @@ mod tests {
             Iri::parse("urn:eigenius:program:name").unwrap(),
             Value::String("x".to_string()),
         );
-        let layer = crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Var(ref n) if n == "x"));
     }
@@ -785,10 +783,8 @@ mod tests {
             Iri::parse("urn:eigenius:program:function").unwrap(),
             Value::String("urn:eigenius:components:Identity".to_string()),
         );
-        let layer = crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::App(_, _)));
     }
@@ -821,10 +817,8 @@ mod tests {
             Value::Embedded(Box::new(body)),
         );
 
-        let layer = crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Lam(Patt::Var(ref n), _) if n == "x"));
     }
@@ -865,10 +859,8 @@ mod tests {
             Value::Embedded(Box::new(second)),
         );
 
-        let layer = crate::layer::LayerBuilder::new("empty", None).build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        );
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Pair(_, _)));
     }
@@ -886,20 +878,14 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        Arc::new(user_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ))
+        Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     /// Helper: parse a program by its IRI from a layer, return its body.
@@ -1802,10 +1788,7 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let source = r#"
             namespace core = "urn:eigenius:core";
@@ -1829,10 +1812,7 @@ mod tests {
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(user_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let prog_iri = Iri::parse("urn:eigenius:example:invoke_program").unwrap();
         let prog_resource = layer.resolve(&prog_iri).expect("program");
@@ -1862,10 +1842,7 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let source = r#"
             namespace core = "urn:eigenius:core";
@@ -1889,10 +1866,7 @@ mod tests {
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(user_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let prog_iri = Iri::parse("urn:eigenius:example:decide_program").unwrap();
         let prog_resource = layer.resolve(&prog_iri).expect("program");

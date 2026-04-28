@@ -2547,10 +2547,7 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let core = std::sync::Arc::new(builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let core = std::sync::Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
@@ -2558,10 +2555,8 @@ mod tests {
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        let layer = std::sync::Arc::new(domain_builder.build(
-            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
-            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
-        ));
+        let layer =
+            std::sync::Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
         let dog_type = Val::EigonClass(dog_iri);

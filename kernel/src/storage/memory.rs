@@ -305,10 +305,7 @@ mod tests {
     fn store_layer_round_trip() {
         let backend = MemoryPersistentBackend::new();
 
-        let cache: Arc<dyn crate::layer::ResourceCache> =
-            Arc::new(crate::layer::MemoryResourceCache::new());
-        let resource_backend: Arc<dyn ResourceBackend> =
-            Arc::new(crate::layer::MemoryResourceBackend::new());
+        let storage = crate::layer::LayerStorage::in_memory();
 
         let mut builder = LayerBuilder::new("test", None);
         builder
@@ -317,7 +314,7 @@ mod tests {
                 vec![("urn:eigenius:core:description", Value::String("hi".into()))],
             ))
             .unwrap();
-        let layer = builder.build(cache, resource_backend);
+        let layer = builder.build(storage);
         let id = layer.id().clone();
 
         backend.store_layer(&layer).unwrap();
@@ -385,22 +382,19 @@ mod tests {
     #[test]
     fn load_chain_from_walks_parents() {
         let backend = MemoryPersistentBackend::new();
-        let cache: Arc<dyn crate::layer::ResourceCache> =
-            Arc::new(crate::layer::MemoryResourceCache::new());
-        let resource_backend: Arc<dyn ResourceBackend> =
-            Arc::new(crate::layer::MemoryResourceBackend::new());
+        let storage = crate::layer::LayerStorage::in_memory();
 
         let mut root_b = LayerBuilder::new("root", None);
         root_b
             .add_resource(make_resource("urn:eigenius:core:r", vec![]))
             .unwrap();
-        let root = Arc::new(root_b.build(Arc::clone(&cache), Arc::clone(&resource_backend)));
+        let root = Arc::new(root_b.build(storage.clone()));
 
         let mut child_b = LayerBuilder::new("child", Some(Arc::clone(&root)));
         child_b
             .add_resource(make_resource("urn:eigenius:example:c", vec![]))
             .unwrap();
-        let child = Arc::new(child_b.build(cache, resource_backend));
+        let child = Arc::new(child_b.build(storage));
         let child_id = child.id().clone();
 
         backend.store_layer(&root).unwrap();
