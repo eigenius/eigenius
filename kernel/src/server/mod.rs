@@ -1379,10 +1379,12 @@ impl EigeniusKernel for EigeniusService {
         );
         let layer = self.resolve_read_layer(&req.at_layer).await?;
         let ctx = self.context.read().await;
-        let institutions = self.institutions.read().await;
+        let index = Arc::clone(&*self.institution_index.read().await);
+        let inst_runtime = Arc::clone(&*self.institution_runtime.read().await);
 
         let runtime = query::evaluate::FiberRuntime {
-            institutions: Some(&institutions),
+            index: Some(&index),
+            runtime: Some(&inst_runtime),
             ctx: Some(&ctx),
         };
 
