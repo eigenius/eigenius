@@ -65,6 +65,8 @@ struct MemoryState {
     /// `store_layer` builds these from the layer's `defined_iris` and
     /// inserts here; `load_bloom` reads back.
     blooms: BTreeMap<LayerId, BloomFilter>,
+    /// Branch refs (D23 §5.5 / Phase 14d).
+    branches: BTreeMap<String, LayerId>,
 }
 
 impl MemoryPersistentBackend {
@@ -77,6 +79,7 @@ impl MemoryPersistentBackend {
                 head: None,
                 meta: BTreeMap::new(),
                 blooms: BTreeMap::new(),
+                branches: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
         }
@@ -278,6 +281,41 @@ impl PersistentBackend for MemoryPersistentBackend {
             .insert(layer.clone(), bloom.clone());
         Ok(())
     }
+
+    fn get_branch(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
+        Ok(self
+            .inner
+            .read()
+            .expect("poisoned")
+            .branches
+            .get(name)
+            .cloned())
+    }
+
+    fn put_branch(&self, name: &str, id: &LayerId) -> Result<(), StorageError> {
+        self.inner
+            .write()
+            .expect("poisoned")
+            .branches
+            .insert(name.to_string(), id.clone());
+        Ok(())
+    }
+
+    fn delete_branch(&self, name: &str) -> Result<(), StorageError> {
+        self.inner.write().expect("poisoned").branches.remove(name);
+        Ok(())
+    }
+
+    fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
+        Ok(self
+            .inner
+            .read()
+            .expect("poisoned")
+            .branches
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -377,6 +415,39 @@ mod tests {
             Some(b"v1".as_ref())
         );
         assert!(backend.get_meta("to_delete").unwrap().is_none());
+    }
+
+    #[test]
+    fn branch_refs_round_trip() {
+        let backend = MemoryPersistentBackend::new();
+        assert!(backend.get_branch("main").unwrap().is_none());
+        assert!(backend.list_branches().unwrap().is_empty());
+
+        let id_a = LayerId([1u8; 32]);
+        let id_b = LayerId([2u8; 32]);
+        backend.put_branch("main", &id_a).unwrap();
+        backend.put_branch("auto-divergent", &id_b).unwrap();
+
+        assert_eq!(backend.get_branch("main").unwrap(), Some(id_a.clone()));
+        assert_eq!(
+            backend.get_branch("auto-divergent").unwrap(),
+            Some(id_b.clone())
+        );
+
+        // list_branches returns sorted by name.
+        let listed = backend.list_branches().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].0, "auto-divergent");
+        assert_eq!(listed[1].0, "main");
+
+        // Overwrite + delete.
+        backend.put_branch("main", &id_b).unwrap();
+        assert_eq!(backend.get_branch("main").unwrap(), Some(id_b.clone()));
+        backend.delete_branch("main").unwrap();
+        assert!(backend.get_branch("main").unwrap().is_none());
+
+        // Delete on absent key is a no-op.
+        backend.delete_branch("nonexistent").unwrap();
     }
 
     #[test]

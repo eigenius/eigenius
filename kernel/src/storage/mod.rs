@@ -246,6 +246,37 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
         layer: &LayerId,
         bloom: &crate::layer::BloomFilter,
     ) -> Result<(), StorageError>;
+
+    // --- Branch refs (D23 §5.5 / Phase 14d) ---
+    //
+    // Branches are named pointers into the layer DAG. The kernel never
+    // tracks "the head" beyond per-branch refs — `crate::lattice::update_branch`
+    // is the only sanctioned write path. The `head` key set by `set_head`
+    // remains for the legacy single-head boot path; future migration folds
+    // it into `branch:main`.
+
+    /// Read the current head of `branch`. Returns `None` if the branch
+    /// doesn't exist; callers wanting to create a new branch pass
+    /// `expected_old_head: None` to `update_branch` and that's
+    /// indistinguishable from "branch absent" at this layer.
+    fn get_branch(&self, name: &str) -> Result<Option<LayerId>, StorageError>;
+
+    /// Set `branch` to point at `id`. Overwrites any existing value.
+    /// **Not** a CAS primitive on its own — `crate::lattice::update_branch`
+    /// is the safe write surface; this is the storage primitive
+    /// `update_branch` lowers to once it has confirmed the CAS.
+    fn put_branch(&self, name: &str, id: &LayerId) -> Result<(), StorageError>;
+
+    /// Remove the branch ref. The layers it pointed at remain in the DAG
+    /// until GC (Phase 14f) reclaims layers reachable only through the
+    /// pruned branch. Used by `eigenius db delete-branch` and the
+    /// soon-to-arrive `prune-branch` (14g) operations.
+    fn delete_branch(&self, name: &str) -> Result<(), StorageError>;
+
+    /// Enumerate all branch refs as `(name, head)` pairs, sorted by
+    /// name. Used by `eigenius db branch list` and by GC to gather
+    /// branch-head roots.
+    fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError>;
 }
 
 /// A single operation inside a `write_batch` call.

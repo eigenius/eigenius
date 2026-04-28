@@ -39,6 +39,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const TOPO_PREFIX: &str = "topo:";
 const BLOOM_PREFIX: &str = "bloom:";
+const BRANCH_PREFIX: &str = "branch:";
 
 fn now_millis() -> i64 {
     SystemTime::now()
@@ -705,6 +706,59 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         self.db
             .put(key.as_bytes(), bytes)
             .map_err(|e| StorageError::Internal(format!("store_bloom: {e}")))
+    }
+
+    fn get_branch(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
+        let key = format!("{BRANCH_PREFIX}{name}");
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let hex_str = String::from_utf8(bytes).map_err(|e| {
+                    StorageError::Internal(format!("invalid branch ref value: {e}"))
+                })?;
+                Ok(Some(hex_to_layer_id(&hex_str)?))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get_branch: {e}"))),
+        }
+    }
+
+    fn put_branch(&self, name: &str, id: &LayerId) -> Result<(), StorageError> {
+        let key = format!("{BRANCH_PREFIX}{name}");
+        self.db
+            .put(key.as_bytes(), hex::encode(id.0))
+            .map_err(|e| StorageError::Internal(format!("put_branch: {e}")))
+    }
+
+    fn delete_branch(&self, name: &str) -> Result<(), StorageError> {
+        let key = format!("{BRANCH_PREFIX}{name}");
+        self.db
+            .delete(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete_branch: {e}")))
+    }
+
+    fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(BRANCH_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) =
+                item.map_err(|e| StorageError::Internal(format!("list_branches iter: {e}")))?;
+            let key_str = std::str::from_utf8(&k)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 branch key: {e}")))?;
+            // Prefix iterator may overshoot.
+            if !key_str.starts_with(BRANCH_PREFIX) {
+                break;
+            }
+            let name = key_str[BRANCH_PREFIX.len()..].to_string();
+            let hex_str = std::str::from_utf8(&v)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 branch value: {e}")))?;
+            let id = hex_to_layer_id(hex_str)?;
+            out.push((name, id));
+        }
+        // BTreeMap-style sort for deterministic ordering even though
+        // prefix-scan already yields sorted keys; defensive against
+        // future column-family layout changes.
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
     }
 }
 
@@ -1589,6 +1643,53 @@ mod tests {
 
             let loaded = PB::load_bloom(&store, &layer_id).unwrap().expect("present");
             assert_eq!(loaded, bloom);
+        }
+
+        /// Phase 14d: branch ref round-trip through RocksDB. Validates
+        /// `branch:<name>` key encoding, multi-branch enumeration order,
+        /// and persistence across reopen (key is plain bytes, no CBOR
+        /// surface to drift).
+        #[test]
+        fn branch_refs_round_trip() {
+            let dir = TempDir::new().unwrap();
+            let id_a = LayerId([7u8; 32]);
+            let id_b = LayerId([8u8; 32]);
+
+            // Write + close.
+            {
+                let store = RocksStore::open(dir.path()).unwrap();
+                assert!(PB::get_branch(&store, "main").unwrap().is_none());
+                assert!(PB::list_branches(&store).unwrap().is_empty());
+
+                PB::put_branch(&store, "main", &id_a).unwrap();
+                PB::put_branch(&store, "auto-divergent-1", &id_b).unwrap();
+
+                let listed = PB::list_branches(&store).unwrap();
+                assert_eq!(listed.len(), 2);
+                // Sorted by name.
+                assert_eq!(listed[0], ("auto-divergent-1".into(), id_b.clone()));
+                assert_eq!(listed[1], ("main".into(), id_a.clone()));
+            }
+
+            // Reopen — branch refs survive.
+            {
+                let store = RocksStore::open(dir.path()).unwrap();
+                assert_eq!(PB::get_branch(&store, "main").unwrap(), Some(id_a.clone()));
+                assert_eq!(
+                    PB::get_branch(&store, "auto-divergent-1").unwrap(),
+                    Some(id_b.clone())
+                );
+
+                // Delete + verify.
+                PB::delete_branch(&store, "main").unwrap();
+                assert!(PB::get_branch(&store, "main").unwrap().is_none());
+                let remaining = PB::list_branches(&store).unwrap();
+                assert_eq!(remaining.len(), 1);
+                assert_eq!(remaining[0].0, "auto-divergent-1");
+
+                // Delete on absent is a no-op.
+                PB::delete_branch(&store, "main").unwrap();
+            }
         }
     } // mod cbor_coverage_tests
 
