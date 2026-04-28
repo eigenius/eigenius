@@ -1914,6 +1914,15 @@ fn decide_constraint(
             _ => false,
         })),
         Constraint::Institution { iri, args } => {
+            // Try the D14 dispatch path first: if a Decidable
+            // QueryClass declares this constraint IRI, marshal the
+            // args into a synthetic input resource and dispatch via
+            // the institution runtime (D14 §9.2).
+            if let Some(result) = try_d14_decide(iri, args, rho, ctx)? {
+                return Ok(result);
+            }
+
+            // ─── Legacy fallback ──────────────────────────────────
             let Some(institutions) = ctx.institutions() else {
                 return Ok(DecResult::Undecidable);
             };
@@ -1941,6 +1950,146 @@ fn decide_constraint(
             }
         }
     }
+}
+
+/// D14 §9.2 dispatch for an institution-bound Decidable constraint.
+///
+/// Returns:
+/// - `Ok(Some(_))` if the D14 index has a Decidable QueryClass
+///   declaring the constraint IRI and the dispatch ran end-to-end.
+/// - `Ok(None)` if either the index or runtime is unattached, or the
+///   constraint IRI doesn't resolve to a Decidable QueryClass — the
+///   caller falls back to the legacy `FiberReasoner::decide` path.
+/// - `Err(_)` if the index *did* find the QueryClass but a downstream
+///   step failed (missing institution, bad Verdict shape, etc.). A
+///   configured-but-broken QueryClass is a structural error and not a
+///   reason to silently fall back.
+fn try_d14_decide(
+    iri: &Iri,
+    args: &[Exp],
+    rho: &Rho,
+    ctx: &EvalCtx,
+) -> Result<Option<crate::institution::DecResult>, EvalError> {
+    use crate::institution::registry::DispatchRole;
+
+    let (Some(index), Some(runtime)) = (ctx.institution_index(), ctx.institution_runtime()) else {
+        return Ok(None);
+    };
+    let Some(query_class) = index.query_class(iri) else {
+        return Ok(None);
+    };
+    if !query_class
+        .dispatch_roles
+        .contains(&DispatchRole::Decidable)
+    {
+        return Ok(None);
+    }
+    let Some(institution) = runtime.get(&query_class.institution_ref) else {
+        return Err(EvalError::InvalidCaseTarget(format!(
+            "QueryClass `{iri}` declares institution `{}` not registered in runtime",
+            query_class.institution_ref
+        )));
+    };
+
+    // Marshal args into a synthetic input resource of the declared
+    // input class. Args ride on a single `decide_args` array property
+    // — the institution handler pulls them positionally.
+    let arg_values: Result<Vec<_>, EvalError> = args
+        .iter()
+        .map(|a| eval_ctx(a, rho, ctx).map(|v| val_to_resource_value(&v)))
+        .collect();
+    let arg_values = arg_values?;
+    let mut input = crate::ontology::resource::Resource::new_embedded();
+    input.set(
+        Iri::parse(crate::ontology::well_known::IS_A).expect("well-known IRI"),
+        crate::ontology::resource::Value::Array(vec![crate::ontology::resource::Value::String(
+            query_class.query_class.as_str().into(),
+        )]),
+    );
+    input.set(
+        Iri::parse("urn:eigenius:institution:decide_args").expect("well-known IRI"),
+        crate::ontology::resource::Value::Array(arg_values),
+    );
+
+    let head = ctx.layer().cloned().unwrap_or_else(|| {
+        Arc::new(crate::layer::LayerBuilder::new("__decide_empty_layer__", None).build())
+    });
+    let exec_ctx = crate::context::ExecutionContext::new(
+        head,
+        "__decide__",
+        crate::context::ExecutionMode::ReadOnly,
+    );
+
+    // Component-implemented QueryClasses go through extract → component
+    // → reify; institution-runtime ones land in `Institution::query`.
+    // M6 wires the institution-runtime path; the Component path lands
+    // alongside Component-driven AutoOnLoad in M7.
+    let result = institution
+        .query(&query_class.query_handler, &input, &exec_ctx)
+        .map_err(|e| {
+            EvalError::InvalidCaseTarget(format!(
+                "QueryClass `{iri}` Decidable handler `{}` failed: {e}",
+                query_class.query_handler
+            ))
+        })?;
+
+    // Read off the Verdict from the result resource. The result must
+    // be (or wrap) a `Verdict` inductive value with one of the three
+    // constructor names — `Holds`, `Fails`, `Undecidable`.
+    Ok(Some(parse_verdict(&result).map_err(|e| {
+        EvalError::InvalidCaseTarget(format!(
+            "QueryClass `{iri}` Decidable handler returned a non-Verdict result: {e}"
+        ))
+    })?))
+}
+
+/// Read a `Verdict` inductive value off a result resource.
+///
+/// The institution handler is expected to set `is_a` to one of the
+/// three Verdict constructor IRIs:
+///   urn:eigenius:institution:verdicts:holds
+///   urn:eigenius:institution:verdicts:fails
+///   urn:eigenius:institution:verdicts:undecidable
+///
+/// (or, equivalently, set a `ctor_name` property to one of "Holds" /
+/// "Fails" / "Undecidable" against an is_a of `Verdict`). Both shapes
+/// are accepted.
+fn parse_verdict(
+    result: &crate::ontology::resource::Resource,
+) -> Result<crate::institution::DecResult, String> {
+    use crate::institution::DecResult;
+    use crate::ontology::well_known as wk;
+
+    // First look for an explicit `ctor_name` property — produced when
+    // a Component returns a Mini-TT Verdict value via the inductive
+    // serialisation.
+    if let Some(ctor) = result
+        .get(&Iri::parse(wk::CTOR_NAME).expect("well-known IRI"))
+        .and_then(|v| v.as_str().map(str::to_owned))
+    {
+        return match ctor.as_str() {
+            "Holds" => Ok(DecResult::Holds),
+            "Fails" => Ok(DecResult::Fails),
+            "Undecidable" => Ok(DecResult::Undecidable),
+            other => Err(format!("unknown Verdict ctor_name `{other}`")),
+        };
+    }
+
+    // Otherwise check `is_a` against the three Verdict constructor
+    // IRIs the institution might tag the result with.
+    for class_iri in result.is_a() {
+        match class_iri.as_str() {
+            "urn:eigenius:institution:verdicts:holds" => return Ok(DecResult::Holds),
+            "urn:eigenius:institution:verdicts:fails" => return Ok(DecResult::Fails),
+            "urn:eigenius:institution:verdicts:undecidable" => return Ok(DecResult::Undecidable),
+            _ => {}
+        }
+    }
+
+    Err(format!(
+        "result resource is_a={:?} carries no Verdict marker",
+        result.is_a()
+    ))
 }
 
 /// Check equality of ground-type values.
@@ -3766,5 +3915,202 @@ mod tests {
                 && msg.contains("not in InstitutionIndex"),
             "expected typed error about the missing ExportFormat; got: {msg}"
         );
+    }
+
+    // ─── D14 NativeDecide dispatch ─────────────────────────────────
+
+    /// In-process Institution that answers Decidable QueryClasses by
+    /// inspecting the `decide_args` array on the input resource and
+    /// returning a Verdict resource. The verdict is configured at
+    /// construction time so the test can assert on each branch.
+    struct VerdictInstitution {
+        iri: Iri,
+        verdict_class: &'static str,
+    }
+
+    impl Institution for VerdictInstitution {
+        fn institution_iri(&self) -> &Iri {
+            &self.iri
+        }
+        fn extract_typed(
+            &self,
+            _procedure_iri: &Iri,
+            _resource: &crate::ontology::resource::Resource,
+            _ctx: &crate::context::ExecutionContext,
+        ) -> Result<Val, crate::institution::error::InstitutionError> {
+            unreachable!("VerdictInstitution exposes no ExportFormats")
+        }
+        fn reify(
+            &self,
+            _procedure_iri: &Iri,
+            _value: &Val,
+            _ctx: &crate::context::ExecutionContext,
+        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
+        {
+            unreachable!("VerdictInstitution exposes no ImportFormats")
+        }
+        fn query(
+            &self,
+            _procedure_iri: &Iri,
+            input: &crate::ontology::resource::Resource,
+            _ctx: &crate::context::ExecutionContext,
+        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
+        {
+            // Confirm the kernel marshalled args via the convention.
+            let _ = input
+                .get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
+                .expect("kernel must marshal decide_args onto the input resource");
+            let mut verdict = crate::ontology::resource::Resource::new_embedded();
+            verdict.set(
+                Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+                crate::ontology::resource::Value::Array(vec![
+                    crate::ontology::resource::Value::String(self.verdict_class.into()),
+                ]),
+            );
+            Ok(verdict)
+        }
+    }
+
+    fn build_d14_decide_ctx(verdict_class: &'static str) -> EvalCtx {
+        let mut b = crate::layer::LayerBuilder::new("test", None);
+
+        let inst_iri = "urn:eigenius:test:d14_decide:inst";
+        let constraint_iri = "urn:eigenius:test:d14_decide:has_property";
+        let input_class = "urn:eigenius:test:d14_decide:Subject";
+
+        // QueryClass declaring Decidable role for `constraint_iri`.
+        let mut qc = crate::ontology::resource::Resource::new(Iri::parse(constraint_iri).unwrap());
+        qc.set(
+            Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(
+                    crate::ontology::well_known::QUERY_CLASS_CLASS.into(),
+                ),
+            ]),
+        );
+        qc.set(
+            Iri::parse(crate::ontology::well_known::QUERY_CLASS).unwrap(),
+            crate::ontology::resource::Value::String(input_class.into()),
+        );
+        qc.set(
+            Iri::parse(crate::ontology::well_known::RESULT_CLASS).unwrap(),
+            crate::ontology::resource::Value::String(crate::ontology::well_known::VERDICT.into()),
+        );
+        qc.set(
+            Iri::parse(crate::ontology::well_known::DISPATCH_ROLE).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(
+                    crate::ontology::well_known::DISPATCH_DECIDABLE.into(),
+                ),
+            ]),
+        );
+        qc.set(
+            Iri::parse(crate::ontology::well_known::QUERY_HANDLER).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_decide:proc:check".into(),
+            ),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            crate::ontology::resource::Value::String(inst_iri.into()),
+        );
+        b.add_resource(qc).unwrap();
+
+        let layer = Arc::new(b.build());
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let mut runtime = InstitutionRuntime::new();
+        runtime
+            .register(Box::new(VerdictInstitution {
+                iri: Iri::parse(inst_iri).unwrap(),
+                verdict_class,
+            }))
+            .unwrap();
+
+        EvalCtx::IO {
+            layer,
+            registry: Arc::new(ComponentRegistry::default()),
+            institutions: Arc::new(InstitutionRegistry::new()),
+            trace_store: None,
+            dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            task_context: None,
+            institution_index: Some(Arc::new(idx)),
+            institution_runtime: Some(Arc::new(runtime)),
+        }
+    }
+
+    #[test]
+    fn native_decide_d14_holds_reduces_to_refl() {
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:holds");
+        let constraint = crate::nbe::term::Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
+            args: vec![Exp::Unit],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(Exp::Unit));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        match v {
+            Val::Refl(_) => {}
+            other => panic!("expected Refl from Holds verdict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_decide_d14_fails_produces_failing_neutral() {
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:fails");
+        let constraint = crate::nbe::term::Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(Exp::Unit));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        match v {
+            Val::Nt(Neut::Gen(_, name)) if name == "__constraint_failed" => {}
+            other => panic!("expected __constraint_failed neutral, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_decide_d14_undecidable_produces_passthrough_neutral() {
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:undecidable");
+        let constraint = crate::nbe::term::Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(Exp::Unit));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        match v {
+            Val::Nt(Neut::Gen(_, name)) if name == "__constraint_undecidable" => {}
+            other => panic!("expected __constraint_undecidable neutral, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_decide_d14_falls_back_to_legacy_when_no_decidable_query_class() {
+        // Constraint IRI not in the D14 index → fallback to legacy
+        // institutions registry. With neither configured the legacy
+        // path returns Undecidable (passthrough).
+        let layer = Arc::new(crate::layer::LayerBuilder::new("test", None).build());
+        let (idx, _) = InstitutionIndex::from_layer(&layer);
+        let ctx = EvalCtx::IO {
+            layer,
+            registry: Arc::new(ComponentRegistry::default()),
+            institutions: Arc::new(InstitutionRegistry::new()),
+            trace_store: None,
+            dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            task_context: None,
+            institution_index: Some(Arc::new(idx)),
+            institution_runtime: Some(Arc::new(InstitutionRuntime::new())),
+        };
+        let constraint = crate::nbe::term::Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:d14_decide:not_declared").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(Exp::Unit));
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+        match v {
+            Val::Nt(Neut::Gen(_, name)) if name == "__constraint_undecidable" => {}
+            other => panic!("expected fallback Undecidable, got {other:?}"),
+        }
     }
 }
