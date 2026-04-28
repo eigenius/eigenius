@@ -235,29 +235,14 @@ async fn resume_one_task(
     _max_attempts: u32,
 ) {
     use crate::task::TaskStatus;
-    // Rehydrate the pinned layer chain from the backend. Phase 14a-iii:
-    // load_chain_from returns ChainInfo; warm a cache and build_chain to
-    // get an Arc<Layer>.
+    // Rehydrate the pinned layer chain from the backend. ChainInfo
+    // gives us the metadata; `LayerStorage::with_persistent` wraps the
+    // real RocksDB-backed PB so cold-cache reads hit storage on demand.
     let layer = match backend.load_chain_from(&record.layer_head) {
-        Ok(Some(info)) => {
-            let storage = crate::layer::LayerStorage::in_memory();
-            for handle in &info.handles {
-                if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
-                    for iri in iris {
-                        if let Some(r) = backend.load_resource(&handle.id, iri) {
-                            storage.cache.put(
-                                crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
-                                Arc::new(r),
-                            );
-                        }
-                    }
-                }
-                if let Ok(Some(bloom)) = backend.load_bloom(&handle.id) {
-                    storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
-                }
-            }
-            crate::layer::build_chain(info, storage)
-        }
+        Ok(Some(info)) => crate::layer::build_chain(
+            info,
+            crate::layer::LayerStorage::with_persistent(Arc::clone(&backend)),
+        ),
         _ => {
             tracing::warn!(
                 { field::OPERATION } = operation::TASK_RESUME,
@@ -433,7 +418,7 @@ impl EigeniusService {
         components: ComponentRegistry,
         backend: Arc<dyn crate::storage::PersistentBackend>,
     ) -> Result<Self, String> {
-        let ctx = bootstrap::bootstrap_persistent(backend.as_ref())
+        let ctx = bootstrap::bootstrap_persistent(Arc::clone(&backend))
             .map_err(|e| format!("persistent bootstrap failed: {e}"))?;
 
         // Wrap the backend's trace-store view into an Arc<dyn TraceStore>
@@ -561,27 +546,10 @@ impl EigeniusService {
         id.copy_from_slice(&bytes);
         let layer_id = crate::layer::LayerId(id);
         match backend.load_chain_from(&layer_id) {
-            Ok(Some(info)) => {
-                // Phase 14a-iii: load_chain_from returns ChainInfo; warm
-                // a cache and call build_chain to materialise the Layer.
-                let storage = crate::layer::LayerStorage::in_memory();
-                for handle in &info.handles {
-                    if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
-                        for iri in iris {
-                            if let Some(r) = backend.load_resource(&handle.id, iri) {
-                                storage.cache.put(
-                                    crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
-                                    Arc::new(r),
-                                );
-                            }
-                        }
-                    }
-                    if let Ok(Some(bloom)) = backend.load_bloom(&handle.id) {
-                        storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
-                    }
-                }
-                Ok(crate::layer::build_chain(info, storage))
-            }
+            Ok(Some(info)) => Ok(crate::layer::build_chain(
+                info,
+                crate::layer::LayerStorage::with_persistent(Arc::clone(backend)),
+            )),
             Ok(None) => Err(Status::not_found(format!(
                 "layer {} not in store",
                 at_layer

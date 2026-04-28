@@ -639,4 +639,73 @@ mod tests {
         let all = child.resolve_all(&iri("urn:eigenius:example:X"));
         assert_eq!(all.len(), 2);
     }
+
+    /// Phase 14b: when a layer's bloom reports `false` for an IRI,
+    /// `Layer::resolve` must skip that layer and continue walking the
+    /// parent chain — even if the layer's `defined_iris` actually
+    /// contains the IRI. This is what makes the bloom optimization
+    /// load-bearing rather than a redundant pre-check.
+    ///
+    /// Construction: build root and child both defining the same IRI,
+    /// with different values. Then overwrite the child's bloom in the
+    /// shared cache with one built from an empty IRI set — i.e., a bloom
+    /// that always says "no". Resolve must then return root's value,
+    /// proving the child was skipped via its (lying) bloom and the walk
+    /// continued past it.
+    #[test]
+    fn resolve_skips_layer_when_bloom_says_no() {
+        let storage = test_storage();
+        let mut root_builder = LayerBuilder::new("root", None);
+        root_builder
+            .add_resource(make_resource(
+                "urn:eigenius:example:X",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("from_root".into()),
+                )],
+            ))
+            .unwrap();
+        let root = Arc::new(root_builder.build(storage.clone()));
+
+        let mut child_builder = LayerBuilder::new("child", Some(root));
+        child_builder
+            .add_resource(make_resource(
+                "urn:eigenius:example:X",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("from_child".into()),
+                )],
+            ))
+            .unwrap();
+        let child = child_builder.build(storage.clone());
+        let child_id = child.id().clone();
+
+        // Sanity: with the real bloom, child's value wins (top-of-stack).
+        let real = child.resolve(&iri("urn:eigenius:example:X")).unwrap();
+        assert_eq!(
+            real.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from_child"),
+        );
+
+        // Replace child's bloom with one built from an empty IRI set.
+        // `BloomFilter::for_iris` over an empty `BTreeSet` produces a
+        // bloom whose `might_contain` always returns false.
+        let empty_iris: BTreeSet<Iri> = BTreeSet::new();
+        let lying_bloom = BloomFilter::for_iris(&empty_iris);
+        storage.bloom_cache.put(child_id, Arc::new(lying_bloom));
+
+        // Resolve again. The lying bloom skips child entirely; the walk
+        // continues to root, returning root's value. If `Layer::resolve`
+        // were ignoring the bloom and falling back to `defined_iris`,
+        // it would still return "from_child" — this assertion catches
+        // any regression that breaks the skip optimization.
+        let after = child.resolve(&iri("urn:eigenius:example:X")).unwrap();
+        assert_eq!(
+            after
+                .get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from_root"),
+        );
+    }
 }

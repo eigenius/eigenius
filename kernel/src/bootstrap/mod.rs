@@ -183,7 +183,7 @@ pub fn bootstrap_with_storage(
 ///   does, rehydrate the layer chain from the backend. If it doesn't,
 ///   return a `ManifestDrift` error with actionable detail.
 pub fn bootstrap_persistent(
-    backend: &dyn crate::storage::PersistentBackend,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
     match backend
         .get_head()
@@ -235,7 +235,7 @@ fn current_manifest() -> Vec<u8> {
 }
 
 fn seed_backend(
-    backend: &dyn crate::storage::PersistentBackend,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
     // Build the four ontologies in memory (reusing the existing path)
     // so they're validated before anything touches the DB.
@@ -269,7 +269,7 @@ fn seed_backend(
 }
 
 fn resume_from_backend(
-    backend: &dyn crate::storage::PersistentBackend,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
     // Manifest check before trusting the chain. If drift is detected we
     // refuse to boot rather than silently upgrading the ontology in
@@ -304,31 +304,9 @@ fn resume_from_backend(
             BootstrapError::Storage("head pointer set but chain load returned None".into())
         })?;
 
-    // The persistent backend Arc must come from the caller for proper Arc-
-    // sharing; bootstrap_persistent currently takes `&dyn`. Use the
-    // in-memory storage shape and warm both caches from the persistent
-    // backend below — reads through the rebuilt chain are then cache-only.
-    // This is a known-suboptimal interim choice; the server-side caller
-    // should switch to `Arc<dyn PersistentBackend>` and `LayerStorage::with_persistent`
-    // (follow-up) so the chain references the real RocksDB backend directly.
-    let storage = crate::layer::LayerStorage::in_memory();
-
-    // Warm both caches from the persistent backend so cache-only reads work.
-    for handle in &info.handles {
-        if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
-            for iri in iris {
-                if let Some(resource) = backend.load_resource(&handle.id, iri) {
-                    storage.cache.put(
-                        crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
-                        Arc::new(resource),
-                    );
-                }
-            }
-        }
-        if let Ok(Some(bloom)) = backend.load_bloom(&handle.id) {
-            storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
-        }
-    }
+    // Storage backed by the live `PersistentBackend`. Cold-cache reads
+    // hit RocksDB on demand; no separate warming step needed.
+    let storage = crate::layer::LayerStorage::with_persistent(backend);
 
     let head = crate::layer::build_chain(info, storage.clone());
 
