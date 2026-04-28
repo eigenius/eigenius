@@ -63,6 +63,8 @@ impl std::fmt::Display for EvalError {
 
 impl std::error::Error for EvalError {}
 
+use crate::institution::registry::InstitutionIndex;
+use crate::institution::runtime::InstitutionRuntime;
 use crate::institution::InstitutionRegistry;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
@@ -95,6 +97,17 @@ pub enum EvalCtx {
         /// of the cross-task content-address cache. Synchronous
         /// `RunProgram` and the type-checker leave this `None`.
         task_context: Option<Arc<TaskContext>>,
+        /// D14 institution index — derived view of the layer chain
+        /// keyed by institution / format / query / comorphism IRIs.
+        /// `None` while the migration from the legacy
+        /// `InstitutionRegistry` is in flight; when `Some` and a
+        /// runtime (below) is also `Some`, `Exp::InstitutionInvoke`
+        /// dispatches via the D14 four-step pipeline (D14 §9.3).
+        institution_index: Option<Arc<InstitutionIndex>>,
+        /// D14 institution runtime — registry of `Institution` trait
+        /// objects keyed by institution IRI. `None` until the kernel
+        /// server populates it during M7 wiring.
+        institution_runtime: Option<Arc<InstitutionRuntime>>,
     },
     /// Pure evaluation with access to an institution registry for
     /// check-time dispatch of `Constraint::Institution` predicates
@@ -104,6 +117,13 @@ pub enum EvalCtx {
     Check {
         layer: Option<Arc<Layer>>,
         institutions: Arc<InstitutionRegistry>,
+        /// D14 index — see `IO::institution_index` above. The Check mode lacks
+        /// a `ComponentRegistry`, so the D14 InstitutionInvoke pipeline
+        /// (which applies a transformation Component) cannot run here;
+        /// the field is present for symmetry with `IO` and for future
+        /// use by readers of declaration metadata at type-check time.
+        institution_index: Option<Arc<InstitutionIndex>>,
+        institution_runtime: Option<Arc<InstitutionRuntime>>,
     },
 }
 
@@ -129,6 +149,34 @@ impl EvalCtx {
             EvalCtx::Read { layer } => Some(layer),
             EvalCtx::IO { layer, .. } => Some(layer),
             EvalCtx::Check { layer, .. } => layer.as_ref(),
+        }
+    }
+
+    /// D14 institution index for this evaluation context, if any.
+    pub fn institution_index(&self) -> Option<&Arc<InstitutionIndex>> {
+        match self {
+            EvalCtx::IO {
+                institution_index, ..
+            } => institution_index.as_ref(),
+            EvalCtx::Check {
+                institution_index, ..
+            } => institution_index.as_ref(),
+            EvalCtx::Pure | EvalCtx::Read { .. } => None,
+        }
+    }
+
+    /// D14 institution runtime for this evaluation context, if any.
+    pub fn institution_runtime(&self) -> Option<&Arc<InstitutionRuntime>> {
+        match self {
+            EvalCtx::IO {
+                institution_runtime,
+                ..
+            } => institution_runtime.as_ref(),
+            EvalCtx::Check {
+                institution_runtime,
+                ..
+            } => institution_runtime.as_ref(),
+            EvalCtx::Pure | EvalCtx::Read { .. } => None,
         }
     }
 }
@@ -294,17 +342,33 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             }
         }
 
-        // Cross-institution translation via declared comorphism
-        // (Phase 11d). When an institution registry is attached to
-        // the eval context, dispatch to
-        // `FiberReasoner::translate`; otherwise produce a neutral
-        // passthrough so the expression can reduce later under a
-        // richer context.
+        // Cross-institution translation via declared comorphism.
+        //
+        // D14 §9.3 four-step pipeline: resolve the Comorphism resource
+        // in the InstitutionIndex, extract a typed payload via the
+        // source institution's ExportFormat procedure, apply the
+        // transformation Component, reify a target-class resource via
+        // the target institution's ImportFormat procedure. The
+        // post-translation validation invariant (D14 §9.3 step 5) is
+        // wired in M7 alongside AutoOnLoad QueryClass dispatch.
+        //
+        // Falls back to the legacy `FiberReasoner::translate` path
+        // when the D14 index/runtime aren't attached or the comorphism
+        // isn't found there — this keeps Phase-11d-vintage tests
+        // green while M5–M8 retire the legacy. M8 deletes the
+        // fallback.
         Exp::InstitutionInvoke {
             comorphism_iri,
             source,
         } => {
             let source_val = ev(source)?;
+
+            if let Some(translated) = try_d14_institution_invoke(comorphism_iri, &source_val, ctx)?
+            {
+                return Ok(translated);
+            }
+
+            // ─── Legacy fallback ──────────────────────────────────────
             let Some(institutions) = ctx.institutions() else {
                 return Ok(Val::Nt(Neut::Gen(
                     usize::MAX,
@@ -319,9 +383,6 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             let source_resource = match val_to_resource_value(&source_val) {
                 crate::ontology::resource::Value::Embedded(r) => *r,
                 other => {
-                    // Non-embedded marshal form: wrap in an embedded
-                    // resource with a single payload value so the
-                    // institution has a resource-shaped input.
                     let mut r = crate::ontology::resource::Resource::new_embedded();
                     r.set(
                         Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
@@ -1219,6 +1280,131 @@ fn build_recursor_ih(
     }
 }
 
+/// D14 four-step InstitutionInvoke pipeline.
+///
+/// Returns:
+/// - `Ok(Some(translated))` if the comorphism IRI resolved through the
+///   D14 index and the pipeline ran end-to-end.
+/// - `Ok(None)` if the D14 index / runtime aren't attached to the
+///   evaluation context, or the comorphism IRI isn't found in the
+///   index — the caller falls back to legacy.
+/// - `Err(_)` if the index *did* find the comorphism but a downstream
+///   step failed (missing format, missing institution, transformation
+///   error, marshalling error). Failure of a configured pipeline is
+///   not a reason to fall back — the comorphism is structurally
+///   broken and the caller should surface the error.
+fn try_d14_institution_invoke(
+    comorphism_iri: &Iri,
+    source_val: &Val,
+    ctx: &EvalCtx,
+) -> Result<Option<Val>, EvalError> {
+    let (Some(index), Some(runtime)) = (ctx.institution_index(), ctx.institution_runtime()) else {
+        return Ok(None);
+    };
+    let Some(comorphism) = index.comorphism(comorphism_iri) else {
+        return Ok(None);
+    };
+
+    // Step 1: source-side ExportFormat.
+    let export = index
+        .export_format(&comorphism.export_format)
+        .ok_or_else(|| {
+            EvalError::InvalidCaseTarget(format!(
+                "comorphism `{comorphism_iri}`: export_format `{}` not in InstitutionIndex",
+                comorphism.export_format
+            ))
+        })?;
+    let source_inst = runtime.get(&export.institution_ref).ok_or_else(|| {
+        EvalError::InvalidCaseTarget(format!(
+            "comorphism `{comorphism_iri}`: source institution `{}` not registered in runtime",
+            export.institution_ref
+        ))
+    })?;
+
+    // Marshal the source Val into a Resource for the boundary call —
+    // M5 supports ResourceVal directly; primitives are wrapped in a
+    // single-property resource (matching the legacy fallback).
+    let source_resource = match val_to_resource_value(source_val) {
+        crate::ontology::resource::Value::Embedded(r) => *r,
+        other => {
+            let mut r = crate::ontology::resource::Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                other,
+            );
+            r
+        }
+    };
+
+    let head = ctx.layer().cloned().unwrap_or_else(|| {
+        Arc::new(crate::layer::LayerBuilder::new("__invoke_empty_layer__", None).build())
+    });
+    let exec_ctx = crate::context::ExecutionContext::new(
+        head,
+        "__invoke__",
+        crate::context::ExecutionMode::ReadOnly,
+    );
+
+    // Step 2: extract typed payload from source-side resource.
+    let typed_source = source_inst
+        .extract_typed(&export.procedure, &source_resource, &exec_ctx)
+        .map_err(|e| {
+            EvalError::InvalidCaseTarget(format!(
+                "comorphism `{comorphism_iri}`: extract_typed via `{}` failed: {e}",
+                export.procedure
+            ))
+        })?;
+
+    // Step 3: apply the transformation Component to the typed payload.
+    // The Component must be in the kernel's ComponentRegistry, which
+    // means the eval context must be IO mode. If it isn't, the four-
+    // step pipeline can't complete here — surface the error rather
+    // than silently falling back.
+    if !matches!(ctx, EvalCtx::IO { .. }) {
+        return Err(EvalError::ModeError(format!(
+            "comorphism `{comorphism_iri}`: D14 InstitutionInvoke requires IO mode \
+             (transformation Component application); found {ctx_kind}",
+            ctx_kind = match ctx {
+                EvalCtx::Pure => "Pure",
+                EvalCtx::Read { .. } => "Read",
+                EvalCtx::Check { .. } => "Check",
+                EvalCtx::IO { .. } => unreachable!(),
+            }
+        )));
+    }
+    let transformed =
+        dispatch_component(comorphism.transformation.as_str(), &typed_source, None, ctx)?;
+
+    // Step 4: target-side ImportFormat reifies the typed result.
+    let import = index
+        .import_format(&comorphism.import_format)
+        .ok_or_else(|| {
+            EvalError::InvalidCaseTarget(format!(
+                "comorphism `{comorphism_iri}`: import_format `{}` not in InstitutionIndex",
+                comorphism.import_format
+            ))
+        })?;
+    let target_inst = runtime.get(&import.institution_ref).ok_or_else(|| {
+        EvalError::InvalidCaseTarget(format!(
+            "comorphism `{comorphism_iri}`: target institution `{}` not registered in runtime",
+            import.institution_ref
+        ))
+    })?;
+    let target_resource = target_inst
+        .reify(&import.procedure, &transformed, &exec_ctx)
+        .map_err(|e| {
+            EvalError::InvalidCaseTarget(format!(
+                "comorphism `{comorphism_iri}`: reify via `{}` failed: {e}",
+                import.procedure
+            ))
+        })?;
+
+    // Step 5: post-translation validation invariant (D14 §9.3) lands
+    // in M7 alongside AutoOnLoad QueryClass dispatch — both share the
+    // QueryClass-on-target-class machinery.
+    Ok(Some(Val::ResourceVal(Box::new(target_resource))))
+}
+
 /// Dispatch an IO component call.
 ///
 /// Converts the Val argument to a Resource, calls the component via the
@@ -2022,6 +2208,8 @@ mod tests {
             trace_store: None,
             dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             task_context: None,
+            institution_index: None,
+            institution_runtime: None,
         }
     }
 
@@ -2346,6 +2534,8 @@ mod tests {
             trace_store: None,
             dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             task_context: None,
+            institution_index: None,
+            institution_runtime: None,
         };
 
         // Build a resource to use as input
@@ -3151,6 +3341,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
 
         // Wrap an arbitrary source resource as Exp.
@@ -3202,6 +3394,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
         let src_iri = Iri::parse("urn:eigenius:test:src").unwrap();
         let src_resource = crate::ontology::resource::Resource::new(src_iri);
@@ -3216,6 +3410,361 @@ mod tests {
         assert!(
             msg.contains("no institution declared comorphism"),
             "unexpected error: {msg}"
+        );
+    }
+
+    // ─── D14 four-step InstitutionInvoke pipeline ──────────────────
+
+    use crate::institution::registry::InstitutionIndex;
+    use crate::institution::runtime::{Institution, InstitutionRuntime};
+    use crate::ontology::well_known as wk;
+    use std::sync::Mutex;
+
+    /// In-process Institution that records every dispatched call so a
+    /// test can assert on the four-step pipeline routing — extract on
+    /// the source side, reify on the target side. Both sides are the
+    /// same institution here for setup brevity; production
+    /// deployments cross institution boundaries.
+    struct PipelineLogger {
+        iri: Iri,
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Institution for PipelineLogger {
+        fn institution_iri(&self) -> &Iri {
+            &self.iri
+        }
+
+        fn extract_typed(
+            &self,
+            procedure_iri: &Iri,
+            resource: &crate::ontology::resource::Resource,
+            _ctx: &crate::context::ExecutionContext,
+        ) -> Result<Val, crate::institution::error::InstitutionError> {
+            let id = resource
+                .id()
+                .map(|i| i.as_str().to_string())
+                .unwrap_or_else(|| "<embedded>".to_string());
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("extract@{procedure_iri}({id})"));
+            // Tag the resource with a provenance marker so reify can
+            // confirm it received the extracted payload.
+            let mut tagged = resource.clone();
+            tagged.set(
+                Iri::parse("urn:eigenius:test:d14_pipeline:extracted_via").expect("well-known IRI"),
+                crate::ontology::resource::Value::String(procedure_iri.as_str().into()),
+            );
+            Ok(Val::ResourceVal(Box::new(tagged)))
+        }
+
+        fn reify(
+            &self,
+            procedure_iri: &Iri,
+            value: &Val,
+            _ctx: &crate::context::ExecutionContext,
+        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
+        {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("reify@{procedure_iri}"));
+            let payload = match value {
+                Val::ResourceVal(r) => r.as_ref().clone(),
+                other => panic!("PipelineLogger.reify: expected ResourceVal, got {other:?}"),
+            };
+            // Tag the produced resource so the test can assert reify ran.
+            let mut tagged = payload;
+            tagged.set(
+                Iri::parse("urn:eigenius:test:d14_pipeline:reified_via").expect("well-known IRI"),
+                crate::ontology::resource::Value::String(procedure_iri.as_str().into()),
+            );
+            Ok(tagged)
+        }
+    }
+
+    fn build_d14_pipeline_chain() -> Arc<crate::layer::Layer> {
+        // Layer holds: Institution + ExportFormat + ImportFormat +
+        // Comorphism declarations. Same institution_ref for source
+        // and target — deliberately, to keep the runtime registry
+        // setup minimal.
+        let mut b = crate::layer::LayerBuilder::new("test", None);
+
+        let mut institution = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:d14_pipe:inst").unwrap(),
+        );
+        institution.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(
+                    "urn:eigenius:institution:Institution".into(),
+                ),
+            ]),
+        );
+        institution.set(
+            Iri::parse("urn:eigenius:institution:institution_iri").unwrap(),
+            crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:inst".into()),
+        );
+        institution.set(
+            Iri::parse("urn:eigenius:institution:institution_name").unwrap(),
+            crate::ontology::resource::Value::String("Pipeline test institution".into()),
+        );
+        b.add_resource(institution).unwrap();
+
+        let mut export = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:d14_pipe:export").unwrap(),
+        );
+        export.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(wk::EXPORT_FORMAT_CLASS.into()),
+            ]),
+        );
+        export.set(
+            Iri::parse(wk::FROM_CLASS).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:SourceClass".into(),
+            ),
+        );
+        export.set(
+            Iri::parse(wk::PAYLOAD_TYPE).unwrap(),
+            crate::ontology::resource::Value::String(wk::FLOAT.into()),
+        );
+        export.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:inst".into()),
+        );
+        export.set(
+            Iri::parse(wk::PROCEDURE).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:proc:extract".into(),
+            ),
+        );
+        b.add_resource(export).unwrap();
+
+        let mut import = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:d14_pipe:import").unwrap(),
+        );
+        import.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(wk::IMPORT_FORMAT_CLASS.into()),
+            ]),
+        );
+        import.set(
+            Iri::parse(wk::TO_CLASS).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:TargetClass".into(),
+            ),
+        );
+        import.set(
+            Iri::parse(wk::PAYLOAD_TYPE).unwrap(),
+            crate::ontology::resource::Value::String(wk::FLOAT.into()),
+        );
+        import.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:inst".into()),
+        );
+        import.set(
+            Iri::parse(wk::PROCEDURE).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:proc:reify".into(),
+            ),
+        );
+        b.add_resource(import).unwrap();
+
+        let mut comorphism = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:d14_pipe:cm").unwrap(),
+        );
+        comorphism.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(wk::COMORPHISM.into()),
+            ]),
+        );
+        comorphism.set(
+            Iri::parse(wk::EXPORT_FORMAT).unwrap(),
+            crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:export".into()),
+        );
+        comorphism.set(
+            Iri::parse(wk::TRANSFORMATION).unwrap(),
+            // No real Component — dispatch_component falls back to
+            // identity for unknown component IRIs, which is what we
+            // want for this structural test.
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:identity_transform".into(),
+            ),
+        );
+        comorphism.set(
+            Iri::parse(wk::IMPORT_FORMAT).unwrap(),
+            crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:import".into()),
+        );
+        comorphism.set(
+            Iri::parse(wk::EXACT).unwrap(),
+            crate::ontology::resource::Value::Boolean(false),
+        );
+        b.add_resource(comorphism).unwrap();
+
+        Arc::new(b.build())
+    }
+
+    fn build_d14_pipeline_ctx(log: Arc<Mutex<Vec<String>>>) -> (EvalCtx, Arc<InstitutionIndex>) {
+        let layer = build_d14_pipeline_chain();
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "index errors: {errors:?}");
+        let idx = Arc::new(idx);
+
+        let mut runtime = InstitutionRuntime::new();
+        runtime
+            .register(Box::new(PipelineLogger {
+                iri: Iri::parse("urn:eigenius:test:d14_pipe:inst").unwrap(),
+                log,
+            }))
+            .unwrap();
+
+        let ctx = EvalCtx::IO {
+            layer,
+            registry: Arc::new(ComponentRegistry::default()),
+            institutions: Arc::new(InstitutionRegistry::new()),
+            trace_store: None,
+            dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            task_context: None,
+            institution_index: Some(Arc::clone(&idx)),
+            institution_runtime: Some(Arc::new(runtime)),
+        };
+        (ctx, idx)
+    }
+
+    #[test]
+    fn institution_invoke_runs_d14_four_step_pipeline_end_to_end() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (ctx, _idx) = build_d14_pipeline_ctx(Arc::clone(&log));
+
+        let source = Exp::EigonResource(Box::new(crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:d14_pipe:source_instance").unwrap(),
+        )));
+        let exp = Exp::InstitutionInvoke {
+            comorphism_iri: Iri::parse("urn:eigenius:test:d14_pipe:cm").unwrap(),
+            source: Box::new(source),
+        };
+        let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("D14 pipeline eval");
+        let result = match v {
+            Val::ResourceVal(r) => *r,
+            other => panic!("expected ResourceVal from pipeline, got {other:?}"),
+        };
+
+        // Extract → identity-transform → reify all ran:
+        let extracted_via = result
+            .get(&Iri::parse("urn:eigenius:test:d14_pipeline:extracted_via").unwrap())
+            .and_then(|v| v.as_str().map(str::to_owned));
+        assert_eq!(
+            extracted_via.as_deref(),
+            Some("urn:eigenius:test:d14_pipe:proc:extract"),
+            "extract_typed should have tagged the resource with the export procedure IRI"
+        );
+        let reified_via = result
+            .get(&Iri::parse("urn:eigenius:test:d14_pipeline:reified_via").unwrap())
+            .and_then(|v| v.as_str().map(str::to_owned));
+        assert_eq!(
+            reified_via.as_deref(),
+            Some("urn:eigenius:test:d14_pipe:proc:reify"),
+            "reify should have tagged the resource with the import procedure IRI"
+        );
+
+        // Order: extract first, reify last — confirms the four-step
+        // pipeline shape (transformation in between is the identity
+        // fallback for the unregistered Component IRI).
+        let trail = log.lock().unwrap().clone();
+        assert_eq!(
+            trail,
+            vec![
+                "extract@urn:eigenius:test:d14_pipe:proc:extract(urn:eigenius:test:d14_pipe:source_instance)".to_string(),
+                "reify@urn:eigenius:test:d14_pipe:proc:reify".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn institution_invoke_d14_missing_format_surfaces_typed_error() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (ctx, idx) = build_d14_pipeline_ctx(Arc::clone(&log));
+
+        // Sanity: the index has the comorphism we'll reference.
+        assert!(idx
+            .comorphism(&Iri::parse("urn:eigenius:test:d14_pipe:cm").unwrap())
+            .is_some());
+
+        // Build a *separate* comorphism that points at an
+        // ExportFormat IRI not in the index. Must drop it into a new
+        // layer above the existing chain so the InstitutionIndex can
+        // still see the original declarations.
+        let mut top =
+            crate::layer::LayerBuilder::new("orphan_cm", Some(Arc::clone(ctx.layer().unwrap())));
+        let mut orphan = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:d14_pipe:orphan_cm").unwrap(),
+        );
+        orphan.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(wk::COMORPHISM.into()),
+            ]),
+        );
+        orphan.set(
+            Iri::parse(wk::EXPORT_FORMAT).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:not_in_index".into(),
+            ),
+        );
+        orphan.set(
+            Iri::parse(wk::TRANSFORMATION).unwrap(),
+            crate::ontology::resource::Value::String(
+                "urn:eigenius:test:d14_pipe:identity_transform".into(),
+            ),
+        );
+        orphan.set(
+            Iri::parse(wk::IMPORT_FORMAT).unwrap(),
+            crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:import".into()),
+        );
+        top.add_resource(orphan).unwrap();
+        let new_layer = Arc::new(top.build());
+
+        // Re-derive the index over the new chain so it picks up the
+        // orphan comorphism.
+        let (new_idx, _errs) = InstitutionIndex::from_layer(&new_layer);
+        let mut runtime = InstitutionRuntime::new();
+        runtime
+            .register(Box::new(PipelineLogger {
+                iri: Iri::parse("urn:eigenius:test:d14_pipe:inst").unwrap(),
+                log,
+            }))
+            .unwrap();
+        let ctx = EvalCtx::IO {
+            layer: new_layer,
+            registry: Arc::new(ComponentRegistry::default()),
+            institutions: Arc::new(InstitutionRegistry::new()),
+            trace_store: None,
+            dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            task_context: None,
+            institution_index: Some(Arc::new(new_idx)),
+            institution_runtime: Some(Arc::new(runtime)),
+        };
+
+        let exp = Exp::InstitutionInvoke {
+            comorphism_iri: Iri::parse("urn:eigenius:test:d14_pipe:orphan_cm").unwrap(),
+            source: Box::new(Exp::EigonResource(Box::new(
+                crate::ontology::resource::Resource::new(
+                    Iri::parse("urn:eigenius:test:src").unwrap(),
+                ),
+            ))),
+        };
+        let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("export_format")
+                && msg.contains("not_in_index")
+                && msg.contains("not in InstitutionIndex"),
+            "expected typed error about the missing ExportFormat; got: {msg}"
         );
     }
 }

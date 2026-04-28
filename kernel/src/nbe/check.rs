@@ -113,6 +113,8 @@ impl CheckCtx {
             crate::nbe::eval::EvalCtx::Check {
                 layer: self.layer.clone(),
                 institutions: institutions.clone(),
+                institution_index: None,
+                institution_runtime: None,
             }
         } else {
             crate::nbe::eval::EvalCtx::Pure
@@ -4005,6 +4007,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:yes").unwrap(),
@@ -4027,6 +4031,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:no").unwrap(),
@@ -4049,6 +4055,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:dunno").unwrap(),
@@ -4072,6 +4080,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:unknown_iri").unwrap(),
@@ -4094,6 +4104,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
 
         // Evaluate a list literal of integers — we spell it at the
@@ -4133,6 +4145,8 @@ mod tests {
         let ctx = EvalCtx::Check {
             layer: None,
             institutions: reg,
+            institution_index: None,
+            institution_runtime: None,
         };
 
         let succ_zero_exp = Exp::InductiveCtor(

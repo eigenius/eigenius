@@ -151,6 +151,8 @@ fn make_io_ctx(
         trace_store,
         dispatched_traces: Arc::new(Mutex::new(Vec::new())),
         task_context,
+        institution_index: None,
+        institution_runtime: None,
     }
 }
 
