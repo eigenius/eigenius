@@ -970,7 +970,7 @@ fn resolve_full_codata_decl(
     })?;
     let short_name_iri =
         Iri::parse(crate::ontology::well_known::SHORT_NAME).expect("well-known IRI");
-    for (iri, resource) in layer.all_resources() {
+    for (iri, resource) in layer.iter_all_resources() {
         if !resource
             .is_a()
             .iter()
@@ -980,7 +980,7 @@ fn resolve_full_codata_decl(
         }
         if let Some(crate::ontology::resource::Value::String(sn)) = resource.get(&short_name_iri) {
             if sn == &stub.name {
-                let v = crate::program::ground::resolve_class_type(iri, layer)?;
+                let v = crate::program::ground::resolve_class_type(&iri, layer)?;
                 match v {
                     Val::CodataType { decl, .. } => return Ok(decl),
                     Val::Codata(_, _) => {
@@ -2547,7 +2547,10 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let core = std::sync::Arc::new(builder.build());
+        let core = std::sync::Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
@@ -2555,7 +2558,10 @@ mod tests {
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        let layer = std::sync::Arc::new(domain_builder.build());
+        let layer = std::sync::Arc::new(domain_builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
 
         let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
         let dog_type = Val::EigonClass(dog_iri);

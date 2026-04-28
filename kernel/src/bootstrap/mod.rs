@@ -71,6 +71,8 @@ fn load_layer(
     name: &str,
     json: &str,
     parent: Option<Arc<Layer>>,
+    cache: Arc<dyn crate::layer::ResourceCache>,
+    backend: Arc<dyn crate::storage::ResourceBackend>,
 ) -> Result<Arc<Layer>, BootstrapError> {
     let resources = eigon_json::parse_document(json).map_err(BootstrapError::Parse)?;
 
@@ -81,7 +83,7 @@ fn load_layer(
             .add_resource(resource)
             .map_err(BootstrapError::Layer)?;
     }
-    let layer = Arc::new(builder.build());
+    let layer = Arc::new(builder.build(cache, backend));
 
     let validator = Validator::new(&layer);
     let errors = validator.validate();
@@ -111,41 +113,72 @@ fn load_layer(
 /// Loads five ontology layers: core → program → reflection → institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
+///
+/// Phase 14a-iii: an in-memory cache + backend are created here and shared
+/// across all bootstrap layers and the returned `ExecutionContext`. Persistent
+/// backends (`bootstrap_persistent`) replace the in-memory backend with a
+/// `RocksStore` adapter.
 pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
+    let cache: Arc<dyn crate::layer::ResourceCache> =
+        Arc::new(crate::layer::MemoryResourceCache::new());
+    let backend: Arc<dyn crate::storage::ResourceBackend> =
+        Arc::new(crate::layer::MemoryResourceBackend::new());
+    bootstrap_with_storage(cache, backend)
+}
+
+/// Bootstrap with caller-provided cache + backend. Used by
+/// `bootstrap_persistent` (RocksDB-backed) and tests that need a particular
+/// storage configuration.
+pub fn bootstrap_with_storage(
+    cache: Arc<dyn crate::layer::ResourceCache>,
+    backend: Arc<dyn crate::storage::ResourceBackend>,
+) -> Result<ExecutionContext, BootstrapError> {
     let core = load_layer(
         "core",
         include_str!("../../../ontologies/core/core-ontology.json"),
         None,
+        Arc::clone(&cache),
+        Arc::clone(&backend),
     )?;
 
     let program = load_layer(
         "program",
         include_str!("../../../ontologies/program/program-ontology.json"),
         Some(core),
+        Arc::clone(&cache),
+        Arc::clone(&backend),
     )?;
 
     let reflection = load_layer(
         "reflection",
         include_str!("../../../ontologies/reflection/reflection-ontology.json"),
         Some(program),
+        Arc::clone(&cache),
+        Arc::clone(&backend),
     )?;
 
     let institution = load_layer(
         "institution",
         include_str!("../../../ontologies/institution/institution-ontology.json"),
         Some(reflection),
+        Arc::clone(&cache),
+        Arc::clone(&backend),
     )?;
 
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
         Some(institution),
+        Arc::clone(&cache),
+        Arc::clone(&backend),
     )?;
 
     Ok(ExecutionContext::new(
         notebook,
         "working",
         ExecutionMode::ReadWrite,
+        cache,
+        backend,
     ))
 }
 
@@ -277,17 +310,47 @@ fn resume_from_backend(
         }
     }
 
-    let head = backend
+    let info = backend
         .load_chain()
         .map_err(|e| BootstrapError::Storage(format!("load_chain: {e}")))?
         .ok_or_else(|| {
             BootstrapError::Storage("head pointer set but chain load returned None".into())
         })?;
 
+    let cache: Arc<dyn crate::layer::ResourceCache> =
+        Arc::new(crate::layer::MemoryResourceCache::new());
+    // The persistent backend Arc must come from the caller for proper Arc-
+    // sharing; bootstrap_persistent currently takes `&dyn`. Construct a
+    // throw-away in-memory backend to satisfy the type and warm the cache
+    // ourselves below — reads through the rebuilt chain hit the in-memory
+    // backend (cache-only). This is a known-suboptimal interim choice; the
+    // server-side caller should switch to `Arc<dyn PersistentBackend>` so
+    // the chain references the real RocksDB backend (follow-up).
+    let resource_backend: Arc<dyn crate::storage::ResourceBackend> =
+        Arc::new(crate::layer::MemoryResourceBackend::new());
+
+    // Warm cache from the persistent backend so cache-only reads work.
+    for handle in &info.handles {
+        if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
+            for iri in iris {
+                if let Some(resource) = backend.load_resource(&handle.id, iri) {
+                    cache.put(
+                        crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
+                        Arc::new(resource),
+                    );
+                }
+            }
+        }
+    }
+
+    let head = crate::layer::build_chain(info, Arc::clone(&cache), Arc::clone(&resource_backend));
+
     Ok(ExecutionContext::new(
         head,
         "working",
         ExecutionMode::ReadWrite,
+        cache,
+        resource_backend,
     ))
 }
 

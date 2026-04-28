@@ -28,7 +28,8 @@
 use crate::layer::LayerId;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
-use std::collections::BTreeMap;
+use crate::storage::{ResourceBackend, StorageError};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 /// Cache key: a specific (layer, iri) pair.
@@ -154,6 +155,62 @@ impl ResourceCache for MemoryResourceCache {
             hits: state.hits,
             misses: state.misses,
         }
+    }
+}
+
+/// In-memory `ResourceBackend` for tests and the kernel's bootstrap path.
+///
+/// Holds resources keyed by `(LayerId, Iri)` in a single map. Equivalent to
+/// `RocksStore` from a `Layer`'s point of view but with no durability and
+/// none of the persistent-backend surface. Used so the kernel can exercise
+/// `Layer` without spinning up a temp RocksDB.
+pub struct MemoryResourceBackend {
+    inner: RwLock<BTreeMap<(LayerId, Iri), Arc<Resource>>>,
+}
+
+impl MemoryResourceBackend {
+    pub fn new() -> Self {
+        Self {
+            inner: RwLock::new(BTreeMap::new()),
+        }
+    }
+
+    /// Insert a resource. Used during layer build/test setup.
+    pub fn insert(&self, layer: LayerId, iri: Iri, resource: Arc<Resource>) {
+        let mut state = self.inner.write().expect("MemoryResourceBackend poisoned");
+        state.insert((layer, iri), resource);
+    }
+}
+
+impl Default for MemoryResourceBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ResourceBackend for MemoryResourceBackend {
+    fn load_resource(&self, layer_id: &LayerId, iri: &Iri) -> Option<Resource> {
+        let state = self.inner.read().expect("MemoryResourceBackend poisoned");
+        state
+            .get(&(layer_id.clone(), iri.clone()))
+            .map(|arc| (**arc).clone())
+    }
+
+    fn try_load_resource(
+        &self,
+        layer_id: &LayerId,
+        iri: &Iri,
+    ) -> Result<Option<Resource>, StorageError> {
+        Ok(self.load_resource(layer_id, iri))
+    }
+
+    fn list_layer_iris(&self, layer_id: &LayerId) -> Result<BTreeSet<Iri>, StorageError> {
+        let state = self.inner.read().expect("MemoryResourceBackend poisoned");
+        Ok(state
+            .keys()
+            .filter(|(lid, _)| lid == layer_id)
+            .map(|(_, iri)| iri.clone())
+            .collect())
     }
 }
 

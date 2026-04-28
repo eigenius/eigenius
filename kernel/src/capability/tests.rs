@@ -30,7 +30,10 @@ use crate::program::component::BuiltinComponent;
 use std::sync::Arc;
 
 fn empty_layer() -> crate::layer::Layer {
-    crate::layer::LayerBuilder::new("empty", None).build()
+    crate::layer::LayerBuilder::new("empty", None).build(
+        std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+        std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+    )
 }
 
 #[test]
@@ -295,8 +298,15 @@ fn load_ordering_institution() -> WasmFiberReasoner {
 }
 
 fn test_context() -> ExecutionContext {
-    let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
-    ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly)
+    let cache = std::sync::Arc::new(crate::layer::MemoryResourceCache::new())
+        as std::sync::Arc<dyn crate::layer::ResourceCache>;
+    let backend = std::sync::Arc::new(crate::layer::MemoryResourceBackend::new())
+        as std::sync::Arc<dyn crate::storage::ResourceBackend>;
+    let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
+        std::sync::Arc::clone(&cache),
+        std::sync::Arc::clone(&backend),
+    ));
+    ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, cache, backend)
 }
 
 #[test]
@@ -613,7 +623,13 @@ fn build_fiber_test_layer() -> (
         lb.add_resource(r).unwrap();
     }
 
-    (std::sync::Arc::new(lb.build()), registry)
+    (
+        std::sync::Arc::new(lb.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        )),
+        registry,
+    )
 }
 
 #[test]
@@ -622,7 +638,15 @@ fn fiber_clause_converged_only() {
     use crate::query;
 
     let (layer, institutions) = build_fiber_test_layer();
-    let ctx = ExecutionContext::new(Arc::clone(&layer), "fiber-test", ExecutionMode::ReadOnly);
+    let cache = Arc::clone(layer.cache());
+    let backend = Arc::clone(layer.backend());
+    let ctx = ExecutionContext::new(
+        Arc::clone(&layer),
+        "fiber-test",
+        ExecutionMode::ReadOnly,
+        cache,
+        backend,
+    );
 
     let runtime = query::evaluate::FiberRuntime {
         institutions: Some(&institutions),

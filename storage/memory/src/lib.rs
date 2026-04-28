@@ -142,7 +142,10 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
         let id = layer.id().clone();
 
         store.store_layer(&layer).await.unwrap();
@@ -201,12 +204,18 @@ mod tests {
         let mut b1 = LayerBuilder::new("a", None);
         b1.add_resource(make_resource("urn:eigenius:core:x", vec![]))
             .unwrap();
-        let l1 = b1.build();
+        let l1 = b1.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
 
         let mut b2 = LayerBuilder::new("b", None);
         b2.add_resource(make_resource("urn:eigenius:core:y", vec![]))
             .unwrap();
-        let l2 = b2.build();
+        let l2 = b2.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
 
         store.store_layer(&l1).await.unwrap();
         store.store_layer(&l2).await.unwrap();

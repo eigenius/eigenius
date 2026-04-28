@@ -589,7 +589,10 @@ fn cmd_validate(file: &str, json_output: bool) {
             std::process::exit(1);
         }
     }
-    let layer = builder.build();
+    let layer = builder.build(
+        std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+        std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+    );
 
     // Validate
     let validator = Validator::new(&layer);
@@ -634,7 +637,7 @@ fn cmd_inspect(iri_str: &str, json_output: bool) {
 
     match ctx.resolve(&iri) {
         Some(resource) => {
-            let json = eigon_json::serialize_resource(resource);
+            let json = eigon_json::serialize_resource(&resource);
             if json_output {
                 println!("{}", serde_json::to_string(&json).unwrap());
             } else {
@@ -801,9 +804,8 @@ fn cmd_db(command: DbCommands) {
             for layer_id in &layers {
                 let layer = rt.block_on(store.load_layer(layer_id)).unwrap();
                 let resources: Vec<serde_json::Value> = layer
-                    .resources()
-                    .values()
-                    .map(eigon_json::serialize_resource)
+                    .iter_resources()
+                    .map(|(_, r)| eigon_json::serialize_resource(&r))
                     .collect();
 
                 let json = serde_json::to_string_pretty(&resources).unwrap();
@@ -816,7 +818,7 @@ fn cmd_db(command: DbCommands) {
                 println!(
                     "Exported layer {} ({} resources) → {}",
                     layer_id,
-                    layer.resources().len(),
+                    layer.defined_iris().len(),
                     file_path.display()
                 );
             }

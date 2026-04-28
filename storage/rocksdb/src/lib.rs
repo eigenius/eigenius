@@ -26,11 +26,13 @@
 //!   meta:<key>                        → Generic metadata KV
 
 use async_trait::async_trait;
-use eigenius_kernel::layer::{Layer, LayerBuilder, LayerHandle, LayerId, LayerTopology};
+#[cfg(test)]
+use eigenius_kernel::layer::LayerBuilder;
+use eigenius_kernel::layer::{Layer, LayerHandle, LayerId, LayerTopology};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
-use eigenius_kernel::storage::{LayerStore, ResourceStore, StorageError};
+use eigenius_kernel::storage::{LayerStore, ResourceBackend, ResourceStore, StorageError};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -125,67 +127,45 @@ impl RocksStore {
         }
     }
 
-    /// Reconstruct the full layer chain from storage, starting from the head.
-    pub fn load_chain(&self) -> Result<Option<Arc<Layer>>, StorageError> {
-        let head_id = match self.get_head()? {
-            Some(id) => id,
-            None => return Ok(None),
-        };
-
-        self.load_chain_from(&head_id)
-    }
-
-    /// Reconstruct a layer chain from a specific layer ID.
-    pub fn load_chain_from(&self, layer_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError> {
-        // Walk the chain to collect IDs from head to root
-        let mut chain_ids = vec![layer_id.clone()];
-        let mut current = layer_id.clone();
+    /// Build a `ChainInfo` describing the chain from root → `head`. Phase 14a-iii:
+    /// returns metadata only, no resource bodies; the caller turns this into
+    /// an `Arc<Layer>` chain via `crate::layer::build_chain`.
+    pub fn build_chain_info(
+        &self,
+        head: &LayerId,
+    ) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
+        // Walk parent pointers head → root, then reverse for build order.
+        let mut chain_ids = vec![head.clone()];
+        let mut current = head.clone();
         while let Some(parent_id) = self.get_chain(&current)? {
             chain_ids.push(parent_id.clone());
             current = parent_id;
         }
-
-        // Build layers from root to head
         chain_ids.reverse();
-        let mut parent: Option<Arc<Layer>> = None;
 
+        let mut handles = Vec::with_capacity(chain_ids.len());
+        let mut defined_iris_per_layer = std::collections::BTreeMap::new();
         for id in &chain_ids {
-            let (name, _parent_id) = self.load_layer_meta(id)?;
-            let resources = self.load_all_resources(id)?;
-
-            let mut builder = LayerBuilder::new(&name, parent.clone());
-            for resource in resources {
-                builder
-                    .add_resource(resource)
-                    .map_err(|e| StorageError::Internal(format!("rebuild error: {e}")))?;
-            }
-            parent = Some(Arc::new(builder.build()));
+            let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
+            let bytes = self
+                .db
+                .get(topo_key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("get topo entry: {e}")))?
+                .ok_or_else(|| {
+                    StorageError::NotFound(format!("topo entry for layer {}", hex::encode(id.0)))
+                })?;
+            let handle: LayerHandle = ciborium::from_reader(bytes.as_slice())
+                .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+            let iris = ResourceBackend::list_layer_iris(self, id)?;
+            handles.push(handle);
+            defined_iris_per_layer.insert(id.clone(), iris);
         }
 
-        Ok(parent)
-    }
-
-    /// Load all resources for a given layer.
-    fn load_all_resources(&self, layer_id: &LayerId) -> Result<Vec<Resource>, StorageError> {
-        let prefix = format!("layer:{}:res:", hex::encode(layer_id.0));
-        let mut resources = Vec::new();
-
-        let iter = self.db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            let (key, value) =
-                item.map_err(|e| StorageError::Internal(format!("iteration error: {e}")))?;
-
-            let key_str = String::from_utf8_lossy(&key);
-            if !key_str.starts_with(&prefix) {
-                break; // Past the prefix
-            }
-
-            let resource = eigon_cbor::parse_resource(&value)
-                .map_err(|e| StorageError::Internal(format!("CBOR parse error: {e}")))?;
-            resources.push(resource);
-        }
-
-        Ok(resources)
+        Ok(Some(eigenius_kernel::storage::ChainInfo {
+            head: head.clone(),
+            handles,
+            defined_iris_per_layer,
+        }))
     }
 
     /// Load layer metadata (name + first parent) for a known layer.
@@ -356,15 +336,15 @@ impl LayerStore for RocksStore {
             id: id.clone(),
             parents: parent_id.clone().into_iter().collect(),
             name: layer.name().to_string(),
-            resource_count: layer.resources().len() as u64,
+            resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
         };
         self.put_topology_entry(&handle)?;
 
         // Store each resource as CBOR
-        for (iri, resource) in layer.resources() {
+        for (iri, resource) in layer.iter_resources() {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            let value = eigon_cbor::serialize_resource(resource);
+            let value = eigon_cbor::serialize_resource(&resource);
             self.db
                 .put(key.as_bytes(), value)
                 .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
@@ -377,18 +357,43 @@ impl LayerStore for RocksStore {
     }
 
     async fn load_layer(&self, id: &LayerId) -> Result<Layer, StorageError> {
+        // Phase 14a-iii: rebuild as a parent-less Layer with self as both
+        // cache (fresh) and backend. Used by tests that exercise the older
+        // `LayerStore` API in isolation; production code uses
+        // `PersistentBackend::load_chain` + `build_chain` instead.
         let (name, _parent_id) = self.load_layer_meta(id)?;
-        let resources = self.load_all_resources(id)?;
-
-        // Rebuild layer (without parent pointer — caller reconstructs chain)
-        let mut builder = LayerBuilder::new(&name, None);
-        for resource in resources {
-            builder
-                .add_resource(resource)
-                .map_err(|e| StorageError::Internal(format!("rebuild error: {e}")))?;
+        let defined_iris = ResourceBackend::list_layer_iris(self, id)?;
+        let cache: Arc<dyn eigenius_kernel::layer::ResourceCache> =
+            Arc::new(eigenius_kernel::layer::MemoryResourceCache::new());
+        // Use a no-op self-cloned backend reference: to avoid the trait
+        // upcast from RocksStore Arc, we wrap a fresh MemoryResourceBackend
+        // (the loaded layer's lookups will hit the cache populated below).
+        let backend: Arc<dyn ResourceBackend> =
+            Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new());
+        let handle = LayerHandle {
+            id: id.clone(),
+            parents: Vec::new(),
+            name,
+            resource_count: defined_iris.len() as u64,
+            created_at: 0,
+        };
+        // Pre-populate the temporary cache from RocksDB so reads via the
+        // returned Layer succeed.
+        for iri in &defined_iris {
+            if let Some(resource) = ResourceBackend::load_resource(self, id, iri) {
+                cache.put(
+                    eigenius_kernel::layer::ResourceKey::new(id.clone(), iri.clone()),
+                    Arc::new(resource),
+                );
+            }
         }
-
-        Ok(builder.build())
+        Ok(Layer::from_handle(
+            handle,
+            None,
+            defined_iris,
+            cache,
+            backend,
+        ))
     }
 
     async fn list_layers(&self) -> Result<Vec<LayerId>, StorageError> {
@@ -480,6 +485,61 @@ impl ResourceStore for RocksStore {
     }
 }
 
+// --- ResourceBackend (Phase 14a-iii: sync single-resource lookup) ---
+
+impl ResourceBackend for RocksStore {
+    fn load_resource(&self, layer_id: &LayerId, iri: &Iri) -> Option<Resource> {
+        // Panic on storage error: matches the kernel's broken-disk failure
+        // model. Use try_load_resource for fallible callers.
+        match self.try_load_resource(layer_id, iri) {
+            Ok(opt) => opt,
+            Err(e) => panic!("RocksStore::load_resource failed: {e}"),
+        }
+    }
+
+    fn try_load_resource(
+        &self,
+        layer_id: &LayerId,
+        iri: &Iri,
+    ) -> Result<Option<Resource>, StorageError> {
+        let key = format!("layer:{}:res:{}", hex::encode(layer_id.0), iri.as_str());
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let resource = eigon_cbor::parse_resource(&bytes)
+                    .map_err(|e| StorageError::Internal(format!("CBOR parse error: {e}")))?;
+                Ok(Some(resource))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!(
+                "failed to load resource: {e}"
+            ))),
+        }
+    }
+
+    fn list_layer_iris(
+        &self,
+        layer_id: &LayerId,
+    ) -> Result<std::collections::BTreeSet<Iri>, StorageError> {
+        let prefix = format!("layer:{}:res:", hex::encode(layer_id.0));
+        let mut iris = std::collections::BTreeSet::new();
+        let iter = self.db.prefix_iterator(prefix.as_bytes());
+        for item in iter {
+            let (key, _) =
+                item.map_err(|e| StorageError::Internal(format!("list_layer_iris iter: {e}")))?;
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            if let Some(iri_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(iri) = Iri::parse(iri_str) {
+                    iris.insert(iri);
+                }
+            }
+        }
+        Ok(iris)
+    }
+}
+
 // --- PersistentBackend (D13) ---
 
 impl eigenius_kernel::storage::PersistentBackend for RocksStore {
@@ -491,12 +551,18 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         RocksStore::set_head(self, id)
     }
 
-    fn load_chain(&self) -> Result<Option<Arc<Layer>>, StorageError> {
-        RocksStore::load_chain(self)
+    fn load_chain(&self) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
+        match self.get_head()? {
+            Some(head) => self.build_chain_info(&head),
+            None => Ok(None),
+        }
     }
 
-    fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError> {
-        RocksStore::load_chain_from(self, head_id)
+    fn load_chain_from(
+        &self,
+        head_id: &LayerId,
+    ) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
+        self.build_chain_info(head_id)
     }
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
@@ -513,14 +579,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             id: id.clone(),
             parents: parent_id.clone().into_iter().collect(),
             name: layer.name().to_string(),
-            resource_count: layer.resources().len() as u64,
+            resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
         };
         self.put_topology_entry(&handle)?;
 
-        for (iri, resource) in layer.resources() {
+        for (iri, resource) in layer.iter_resources() {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            let value = eigon_cbor::serialize_resource(resource);
+            let value = eigon_cbor::serialize_resource(&resource);
             self.db
                 .put(key.as_bytes(), value)
                 .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
@@ -636,13 +702,16 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
         let id = layer.id().clone();
 
         store.store_layer(&layer).await.unwrap();
         let loaded = store.load_layer(&id).await.unwrap();
         assert_eq!(loaded.name(), "test");
-        assert_eq!(loaded.resources().len(), 1);
+        assert_eq!(loaded.iter_resources().count(), 1);
     }
 
     #[tokio::test]
@@ -665,8 +734,7 @@ mod tests {
         );
 
         store.store_resource(&layer_id, &resource).await.unwrap();
-        let loaded = store
-            .load_resource(&layer_id, &iri("urn:eigenius:test:foo"))
+        let loaded = ResourceStore::load_resource(&store, &layer_id, &iri("urn:eigenius:test:foo"))
             .await
             .unwrap();
         assert!(loaded.is_some());
@@ -704,12 +772,18 @@ mod tests {
         let mut b1 = LayerBuilder::new("a", None);
         b1.add_resource(make_resource("urn:eigenius:core:x", vec![]))
             .unwrap();
-        let l1 = b1.build();
+        let l1 = b1.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
 
         let mut b2 = LayerBuilder::new("b", None);
         b2.add_resource(make_resource("urn:eigenius:core:y", vec![]))
             .unwrap();
-        let l2 = b2.build();
+        let l2 = b2.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
 
         store.store_layer(&l1).await.unwrap();
         store.store_layer(&l2).await.unwrap();
@@ -728,7 +802,10 @@ mod tests {
         builder
             .add_resource(make_resource("urn:eigenius:core:x", vec![]))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
         let id = layer.id().clone();
 
         store.store_layer(&layer).await.unwrap();
@@ -754,7 +831,10 @@ mod tests {
                     )],
                 ))
                 .unwrap();
-            let layer = builder.build();
+            let layer = builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            );
             let id = layer.id().clone();
             store.store_layer(&layer).await.unwrap();
             store.set_head(&id).unwrap();
@@ -783,7 +863,10 @@ mod tests {
         root_builder
             .add_resource(make_resource("urn:eigenius:core:Class", vec![]))
             .unwrap();
-        let root = Arc::new(root_builder.build());
+        let root = Arc::new(root_builder.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        ));
         store.store_layer(&root).await.unwrap();
 
         // Build and store child layer
@@ -797,16 +880,39 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let child = child_builder.build();
+        let child = child_builder.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
         let child_id = child.id().clone();
         store.store_layer(&child).await.unwrap();
         store.set_head(&child_id).unwrap();
 
-        // Reconstruct chain
-        let reconstructed = store.load_chain().unwrap();
-        assert!(reconstructed.is_some());
-
-        let head = reconstructed.unwrap();
+        // Reconstruct chain via the new ChainInfo + build_chain pattern.
+        let info = eigenius_kernel::storage::PersistentBackend::load_chain(&store)
+            .unwrap()
+            .expect("chain present");
+        let cache: Arc<dyn eigenius_kernel::layer::ResourceCache> =
+            Arc::new(eigenius_kernel::layer::MemoryResourceCache::new());
+        let backend: Arc<dyn ResourceBackend> =
+            Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new());
+        // Pre-warm the cache from the persistent store so resolve hits succeed.
+        for handle in &info.handles {
+            if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
+                for iri_h in iris {
+                    if let Some(r) = ResourceBackend::load_resource(&store, &handle.id, iri_h) {
+                        cache.put(
+                            eigenius_kernel::layer::ResourceKey::new(
+                                handle.id.clone(),
+                                iri_h.clone(),
+                            ),
+                            Arc::new(r),
+                        );
+                    }
+                }
+            }
+        }
+        let head = eigenius_kernel::layer::build_chain(info, cache, backend);
         assert!(!head.is_root());
         // Should resolve resources from both layers
         assert!(head.resolve(&iri("urn:eigenius:core:Class")).is_some());
@@ -826,13 +932,16 @@ mod tests {
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = builder.build();
+        let layer = builder.build(
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+        );
         let id = layer.id().clone();
 
         store.store_layer(&layer).await.unwrap();
         let loaded = store.load_layer(&id).await.unwrap();
 
-        assert_eq!(loaded.resources().len(), count);
+        assert_eq!(loaded.iter_resources().count(), count);
     }
 
     #[tokio::test]
@@ -907,7 +1016,10 @@ mod tests {
             builder
                 .add_resource(make_resource("urn:eigenius:core:A", vec![]))
                 .unwrap();
-            let layer = Arc::new(builder.build());
+            let layer = Arc::new(builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
             let id = layer.id().clone();
 
             PB::store_layer(&store, &layer).unwrap();
@@ -930,14 +1042,20 @@ mod tests {
             root_builder
                 .add_resource(make_resource("urn:eigenius:core:A", vec![]))
                 .unwrap();
-            let root = Arc::new(root_builder.build());
+            let root = Arc::new(root_builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
             let root_id = root.id().clone();
 
             let mut child_builder = LayerBuilder::new("child", Some(Arc::clone(&root)));
             child_builder
                 .add_resource(make_resource("urn:eigenius:example:B", vec![]))
                 .unwrap();
-            let child = Arc::new(child_builder.build());
+            let child = Arc::new(child_builder.build(
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+            ));
             let child_id = child.id().clone();
 
             PB::store_layer(&store, &root).unwrap();
@@ -973,7 +1091,10 @@ mod tests {
                 builder
                     .add_resource(make_resource("urn:eigenius:core:X", vec![]))
                     .unwrap();
-                let layer = Arc::new(builder.build());
+                let layer = Arc::new(builder.build(
+                    std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceCache::new()),
+                    std::sync::Arc::new(eigenius_kernel::layer::MemoryResourceBackend::new()),
+                ));
                 layer_id = layer.id().clone();
                 PB::store_layer(&store, &layer).unwrap();
             }

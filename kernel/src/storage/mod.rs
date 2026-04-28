@@ -22,7 +22,66 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use async_trait::async_trait;
 use std::fmt;
+#[allow(unused_imports)]
 use std::sync::Arc;
+
+/// Sync, single-resource read surface for `Layer`.
+///
+/// `PersistentBackend` is a supertrait, so every persistent backend
+/// automatically satisfies this; the smaller surface exists so test backends
+/// don't have to implement the full `PersistentBackend` (head/chain/meta/...)
+/// just to be plugged into a `Layer`.
+///
+/// Two flavours of read:
+///
+/// - [`load_resource`](ResourceBackend::load_resource) — panics on storage
+///   error. Matches the kernel's "broken disk = process death" failure model
+///   for RocksDB. Use this for normal lookups; supervisor restarts handle the
+///   rare disk-failure case.
+/// - [`try_load_resource`](ResourceBackend::try_load_resource) — returns
+///   `Result` so callers that want to handle backend failures explicitly can.
+///   Phase 14 doesn't use this internally; it exists so that future networked
+///   backends (TiKV) and storage-aware tooling can adopt fallible reads
+///   without forcing the panic path through another rewrite.
+pub trait ResourceBackend: Send + Sync {
+    /// Look up `iri` in the layer's stored content. Panics on storage error
+    /// (treats it as kernel-fatal — for RocksDB this means corruption or
+    /// disk failure, neither of which is recoverable in-process).
+    fn load_resource(&self, layer_id: &LayerId, iri: &Iri) -> Option<Resource>;
+
+    /// Same lookup, but returns the storage error explicitly. Use when you
+    /// want to handle transient backend failures.
+    fn try_load_resource(
+        &self,
+        layer_id: &LayerId,
+        iri: &Iri,
+    ) -> Result<Option<Resource>, StorageError>;
+
+    /// Enumerate all IRIs defined directly in `layer_id`. Used by chain
+    /// reconstruction to populate `Layer::defined_iris` without loading
+    /// resource bodies eagerly.
+    fn list_layer_iris(
+        &self,
+        layer_id: &LayerId,
+    ) -> Result<std::collections::BTreeSet<Iri>, StorageError>;
+}
+
+/// Chain reconstruction metadata returned by `PersistentBackend::load_chain`.
+///
+/// Carries everything needed to construct a chain of `Layer`s without
+/// holding any resource content — just `LayerHandle`s and per-layer IRI
+/// sets. The actual `Arc<Layer>` chain is built by
+/// [`crate::layer::build_chain`] given this info plus a cache + backend Arc.
+#[derive(Debug, Clone)]
+pub struct ChainInfo {
+    /// Head LayerId; last entry of `handles` should match this.
+    pub head: LayerId,
+    /// Handles ordered root → head.
+    pub handles: Vec<crate::layer::LayerHandle>,
+    /// IRIs defined per layer.
+    pub defined_iris_per_layer:
+        std::collections::BTreeMap<LayerId, std::collections::BTreeSet<Iri>>,
+}
 
 /// Errors from storage operations.
 #[derive(Debug)]
@@ -83,21 +142,29 @@ pub trait ResourceStore: Send + Sync {
 /// kernel can carry without depending on any particular storage crate.
 /// The sync-flavored head/chain methods are used at boot, so we keep
 /// them synchronous rather than going async-within-async.
-pub trait PersistentBackend: Send + Sync + 'static {
+pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// Read the current head layer ID, if any.
     fn get_head(&self) -> Result<Option<LayerId>, StorageError>;
 
     /// Write the current head layer ID atomically.
     fn set_head(&self, id: &LayerId) -> Result<(), StorageError>;
 
-    /// Reconstruct the full layer chain from the persisted head.
-    fn load_chain(&self) -> Result<Option<Arc<Layer>>, StorageError>;
+    /// Reconstruct chain metadata from the persisted head.
+    ///
+    /// Returns the `ChainInfo` describing the chain from root → head, with
+    /// handles and per-layer IRI sets. The caller turns this into a
+    /// `Arc<Layer>` chain via [`crate::layer::build_chain`], passing in
+    /// the cache and an `Arc<dyn ResourceBackend>` (typically obtained by
+    /// upcasting the `Arc<dyn PersistentBackend>` they hold).
+    ///
+    /// Returns `None` if no head is set.
+    fn load_chain(&self) -> Result<Option<ChainInfo>, StorageError>;
 
-    /// Reconstruct the layer chain rooted at a specific `LayerId`.
-    /// Used by the `at_layer` read-path extension (D21 §3.7) and by
-    /// resume to re-hydrate a task's pinned head. Returns `None` if
-    /// the target layer is absent from the store.
-    fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<Arc<Layer>>, StorageError>;
+    /// Reconstruct chain metadata for a specific head `LayerId`. Used by
+    /// the `at_layer` read-path extension (D21 §3.7) and by resume to
+    /// re-hydrate a task's pinned head. Returns `None` if the target
+    /// layer is absent from the store.
+    fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<ChainInfo>, StorageError>;
 
     /// Store a layer (metadata + resources + chain pointer + topology
     /// handle). Idempotent by layer id (content-addressed).

@@ -100,7 +100,10 @@ impl WasmComponent {
     ) -> Result<String, String> {
         // Empty layer for the temporary instance — component-iri
         // shouldn't need resource resolution.
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
         let linker = build_linker(engine, capability_level)?;
 
         let mut store = Store::new(engine, HostState { layer });
@@ -228,7 +231,7 @@ fn link_read_access(linker: &mut Linker<HostState>) -> Result<(), String> {
             let layer = &ctx.data().layer;
             match layer.resolve(&iri) {
                 Some(resource) => {
-                    let cbor = eigon_cbor::serialize_resource(resource);
+                    let cbor = eigon_cbor::serialize_resource(&resource);
                     let bytes_val = Val::List(cbor.into_iter().map(Val::U8).collect());
                     results[0] = Val::Option(Some(Box::new(bytes_val)));
                 }

@@ -807,10 +807,17 @@ mod tests {
             .institution_for_comorphism(&comorphism_iri)
             .expect("registered");
         let src = Resource::new(Iri::parse("urn:eigenius:test:src_resource").unwrap());
-        let layer =
-            std::sync::Arc::new(crate::layer::LayerBuilder::new("test_layer", None).build());
-        let exec =
-            ExecutionContext::new(layer, "test_exec", crate::context::ExecutionMode::ReadOnly);
+        let layer = std::sync::Arc::new(crate::layer::LayerBuilder::new("test_layer", None).build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
+        let exec = ExecutionContext::new(
+            std::sync::Arc::clone(&layer),
+            "test_exec",
+            crate::context::ExecutionMode::ReadOnly,
+            std::sync::Arc::clone(layer.cache()),
+            std::sync::Arc::clone(layer.backend()),
+        );
         let result = reasoner
             .translate(&comorphism_iri, &src, &exec)
             .expect("translate");
@@ -858,10 +865,17 @@ mod tests {
         let inst = NoTranslate;
         let iri = Iri::parse("urn:eigenius:test:nonexistent_comorphism").unwrap();
         let src = Resource::new(Iri::parse("urn:eigenius:test:src").unwrap());
-        let layer =
-            std::sync::Arc::new(crate::layer::LayerBuilder::new("test_layer", None).build());
-        let exec =
-            ExecutionContext::new(layer, "test_exec", crate::context::ExecutionMode::ReadOnly);
+        let layer = std::sync::Arc::new(crate::layer::LayerBuilder::new("test_layer", None).build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
+        let exec = ExecutionContext::new(
+            std::sync::Arc::clone(&layer),
+            "test_exec",
+            crate::context::ExecutionMode::ReadOnly,
+            std::sync::Arc::clone(layer.cache()),
+            std::sync::Arc::clone(layer.backend()),
+        );
         let err = inst.translate(&iri, &src, &exec).unwrap_err();
         assert!(
             matches!(err, InstitutionError::UnknownType(_)),

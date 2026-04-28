@@ -389,7 +389,7 @@ fn resolve_fiber_institution(
 fn resolve_name_to_class_iri(layer: &Layer, short: &str) -> Option<Iri> {
     let class_iri = Iri::parse(wk::CLASS).unwrap();
     let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-    for (iri, res) in layer.all_resources() {
+    for (iri, res) in layer.iter_all_resources() {
         if !res.is_instance_of(&class_iri) {
             continue;
         }
@@ -516,7 +516,7 @@ fn collect_candidates<'a>(
     }
 
     // Collect from layer chain + FIBER overlay.
-    let all = layer.all_resources();
+    let all = layer.iter_all_resources();
     let class_iri = pattern.class.as_ref().and_then(|n| resolve_name(n, layer));
 
     let mut candidates: Vec<(Option<Iri>, BTreeMap<Iri, Value>)> = all
@@ -656,7 +656,7 @@ fn resolve_name(name: &Name, layer: &Layer) -> Option<Iri> {
         Name::ShortName(s) => {
             // Search layer for a resource with this shortname
             let short_name_iri = Iri::parse(wk::SHORT_NAME).ok()?;
-            for (iri, resource) in layer.all_resources() {
+            for (iri, resource) in layer.iter_all_resources() {
                 if let Some(Value::String(sn)) = resource.get(&short_name_iri) {
                     if sn == s {
                         return Some(iri.clone());
@@ -985,10 +985,14 @@ fn dispatch_institution_call(
     // Build a fresh ExecutionContext for the call — mirrors the
     // kernel's NativeDecide / InstitutionInvoke behaviour.
     let head = std::sync::Arc::new(layer.clone());
+    let cache = std::sync::Arc::clone(head.cache());
+    let backend = std::sync::Arc::clone(head.backend());
     let exec_ctx = crate::context::ExecutionContext::new(
         head,
         "__eigenql_dispatch__",
         crate::context::ExecutionMode::ReadOnly,
+        cache,
+        backend,
     );
     match capability {
         InstitutionCapability::DecidePredicate => {
@@ -1263,12 +1267,18 @@ mod tests {
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
         // Need a new layer on top of core
-        let core = Arc::new(builder.build());
+        let core = Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
         let mut domain_builder = LayerBuilder::new("animals", Some(core));
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        Arc::new(domain_builder.build())
+        Arc::new(domain_builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ))
     }
 
     fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
@@ -1434,7 +1444,10 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build());
+        let core = Arc::new(core_builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
 
         let mut builder = LayerBuilder::new("hierarchy", Some(core));
 
@@ -1467,7 +1480,10 @@ mod tests {
         );
         builder.add_resource(charlie).unwrap();
 
-        Arc::new(builder.build())
+        Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ))
     }
 
     #[test]
@@ -1625,7 +1641,10 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build());
+        let layer = Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
 
         // Use FunctionCall directly at eval_expression level for a
         // focused test — the full-query integration would need more
@@ -1659,7 +1678,10 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build());
+        let layer = Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {
@@ -1692,7 +1714,10 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build());
+        let layer = Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ));
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {

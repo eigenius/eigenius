@@ -235,9 +235,29 @@ async fn resume_one_task(
     _max_attempts: u32,
 ) {
     use crate::task::TaskStatus;
-    // Rehydrate the pinned layer chain from the backend.
+    // Rehydrate the pinned layer chain from the backend. Phase 14a-iii:
+    // load_chain_from returns ChainInfo; warm a cache and build_chain to
+    // get an Arc<Layer>.
     let layer = match backend.load_chain_from(&record.layer_head) {
-        Ok(Some(l)) => l,
+        Ok(Some(info)) => {
+            let cache: Arc<dyn crate::layer::ResourceCache> =
+                Arc::new(crate::layer::MemoryResourceCache::new());
+            let resource_backend: Arc<dyn crate::storage::ResourceBackend> =
+                Arc::new(crate::layer::MemoryResourceBackend::new());
+            for handle in &info.handles {
+                if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
+                    for iri in iris {
+                        if let Some(r) = backend.load_resource(&handle.id, iri) {
+                            cache.put(
+                                crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
+                                Arc::new(r),
+                            );
+                        }
+                    }
+                }
+            }
+            crate::layer::build_chain(info, cache, resource_backend)
+        }
         _ => {
             tracing::warn!(
                 { field::OPERATION } = operation::TASK_RESUME,
@@ -256,7 +276,7 @@ async fn resume_one_task(
     // Resolve program and input resources from the pinned layer.
     let program = match Iri::parse(&record.program_iri)
         .ok()
-        .and_then(|i| layer.resolve(&i).cloned())
+        .and_then(|i| layer.resolve(&i).map(|arc| (*arc).clone()))
     {
         Some(p) => p,
         None => {
@@ -275,7 +295,7 @@ async fn resume_one_task(
     };
     let input = match Iri::parse(&record.input_iri)
         .ok()
-        .and_then(|i| layer.resolve(&i).cloned())
+        .and_then(|i| layer.resolve(&i).map(|arc| (*arc).clone()))
     {
         Some(r) => r,
         None => {
@@ -541,7 +561,27 @@ impl EigeniusService {
         id.copy_from_slice(&bytes);
         let layer_id = crate::layer::LayerId(id);
         match backend.load_chain_from(&layer_id) {
-            Ok(Some(layer)) => Ok(layer),
+            Ok(Some(info)) => {
+                // Phase 14a-iii: load_chain_from returns ChainInfo; warm
+                // a cache and call build_chain to materialise the Layer.
+                let cache: Arc<dyn crate::layer::ResourceCache> =
+                    Arc::new(crate::layer::MemoryResourceCache::new());
+                let resource_backend: Arc<dyn crate::storage::ResourceBackend> =
+                    Arc::new(crate::layer::MemoryResourceBackend::new());
+                for handle in &info.handles {
+                    if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
+                        for iri in iris {
+                            if let Some(r) = backend.load_resource(&handle.id, iri) {
+                                cache.put(
+                                    crate::layer::ResourceKey::new(handle.id.clone(), iri.clone()),
+                                    Arc::new(r),
+                                );
+                            }
+                        }
+                    }
+                }
+                Ok(crate::layer::build_chain(info, cache, resource_backend))
+            }
             Ok(None) => Err(Status::not_found(format!(
                 "layer {} not in store",
                 at_layer
@@ -1335,7 +1375,7 @@ impl EigeniusKernel for EigeniusService {
         match layer.resolve(&iri) {
             Some(resource) => Ok(Response::new(InspectResponse {
                 found: true,
-                resource: Self::serialize_resource(resource),
+                resource: Self::serialize_resource(&resource),
             })),
             None => Ok(Response::new(InspectResponse {
                 found: false,
@@ -1553,16 +1593,16 @@ impl EigeniusKernel for EigeniusService {
         let layer = self.resolve_read_layer(&req.at_layer).await?;
         let program = layer
             .resolve(&program_iri)
+            .map(|arc| (*arc).clone())
             .ok_or_else(|| {
                 Status::not_found(format!("program resource not found: {}", req.program_iri))
-            })?
-            .clone();
+            })?;
         let input = layer
             .resolve(&input_iri)
+            .map(|arc| (*arc).clone())
             .ok_or_else(|| {
                 Status::not_found(format!("input resource not found: {}", req.input_iri))
-            })?
-            .clone();
+            })?;
 
         self.execute_program(program, input).await
     }
@@ -1620,7 +1660,7 @@ impl EigeniusKernel for EigeniusService {
         // remain inspectable when debugging readiness/liveness.
         let _guard = RpcGuard::start(operation::RPC_HEALTH);
         let ctx = self.context.read().await;
-        let all = ctx.head().all_resources();
+        let resource_count = ctx.head().iter_all_resources().count() as u64;
 
         // D21 §6 resume observability — populated by the resume
         // sweep when it's active.
@@ -1632,7 +1672,7 @@ impl EigeniusKernel for EigeniusService {
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
             layer_count: 2, // core + program ontology
-            resource_count: all.len() as u64,
+            resource_count,
             resume_in_progress,
             tasks_resuming,
         }))

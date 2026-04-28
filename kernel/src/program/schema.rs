@@ -674,7 +674,10 @@ mod tests {
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        std::sync::Arc::new(builder.build())
+        std::sync::Arc::new(builder.build(
+            std::sync::Arc::new(crate::layer::MemoryResourceCache::new()),
+            std::sync::Arc::new(crate::layer::MemoryResourceBackend::new()),
+        ))
     }
 
     #[test]

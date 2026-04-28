@@ -30,13 +30,49 @@
 mod cache;
 mod handle;
 
-pub use cache::{CacheStats, MemoryResourceCache, ResourceCache, ResourceKey};
+pub use cache::{
+    CacheStats, MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
+};
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
+
+/// Construct an `Arc<Layer>` chain from chain metadata.
+///
+/// Wires each `LayerHandle` from `info.handles` (root → head) into a
+/// `Layer` via `Layer::from_handle`, threading parent pointers, the
+/// per-layer `defined_iris` set, and the shared `cache` + `backend`.
+///
+/// Returns the head `Arc<Layer>`. The caller normally obtained `info`
+/// from `PersistentBackend::load_chain` or `load_chain_from`.
+pub fn build_chain(
+    info: crate::storage::ChainInfo,
+    cache: std::sync::Arc<dyn ResourceCache>,
+    backend: std::sync::Arc<dyn crate::storage::ResourceBackend>,
+) -> std::sync::Arc<Layer> {
+    let mut parent: Option<std::sync::Arc<Layer>> = None;
+    for handle in info.handles {
+        let id = handle.id.clone();
+        let defined = info
+            .defined_iris_per_layer
+            .get(&id)
+            .cloned()
+            .unwrap_or_default();
+        let layer = Layer::from_handle(
+            handle,
+            parent.clone(),
+            defined,
+            std::sync::Arc::clone(&cache),
+            std::sync::Arc::clone(&backend),
+        );
+        parent = Some(std::sync::Arc::new(layer));
+    }
+    parent.expect("ChainInfo must have at least one handle")
+}
 
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
+use crate::storage::ResourceBackend;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -58,19 +94,67 @@ impl fmt::Display for LayerId {
 
 /// An immutable layer in the chain.
 ///
-/// Each layer holds its own resources and an optional parent pointer.
-/// Resolution walks the parent chain: check self, then parent, then
-/// grandparent, down to the root. The root layer (`parent.is_none()`)
-/// holds the core ontology.
-#[derive(Debug, Clone)]
+/// **Phase 14a-iii structure**: holds metadata (id, name, parent pointer, the
+/// set of IRIs defined in this specific layer) and indirect handles for
+/// resource access (`cache` + `backend`). It does NOT hold full resource
+/// content; resource bodies are fetched lazily via the cache, falling through
+/// to the backend on miss.
+///
+/// The `parent: Option<Arc<Layer>>` chain is preserved as a transitional
+/// shape — chain walking still happens via `resolve` recursing into the
+/// parent. A later slice (after 14b's shadowing index lands) will replace
+/// this with topology-driven resolution.
+///
+/// Cloning a Layer is cheap: it bumps Arc refcounts on cache+backend and
+/// shallow-copies the metadata. The parent Arc is shared.
+#[derive(Clone)]
 pub struct Layer {
     id: LayerId,
     name: String,
-    resources: BTreeMap<Iri, Resource>,
     parent: Option<Arc<Layer>>,
+    /// IRIs defined in this layer specifically (not transitively from parents).
+    /// Bounded by per-layer resource count; needed because we don't yet have
+    /// a shadowing index (14b) — `get_resource` rejects unknown IRIs without
+    /// going to the backend.
+    defined_iris: BTreeSet<Iri>,
+    cache: Arc<dyn ResourceCache>,
+    backend: Arc<dyn ResourceBackend>,
+}
+
+impl fmt::Debug for Layer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Layer")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("parent_id", &self.parent.as_ref().map(|p| &p.id))
+            .field("defined_iri_count", &self.defined_iris.len())
+            .finish()
+    }
 }
 
 impl Layer {
+    /// Construct a Layer from already-stored content. Used by storage
+    /// backends when reconstructing a chain — caller passes the metadata
+    /// (handle), parent pointer, the set of IRIs this layer defines (typically
+    /// gathered via a `layer:<id>:res:` prefix scan), and the cache + backend
+    /// references for lazy reads. No resource content is loaded eagerly.
+    pub fn from_handle(
+        handle: LayerHandle,
+        parent: Option<Arc<Layer>>,
+        defined_iris: BTreeSet<Iri>,
+        cache: Arc<dyn ResourceCache>,
+        backend: Arc<dyn ResourceBackend>,
+    ) -> Self {
+        Self {
+            id: handle.id,
+            name: handle.name,
+            parent,
+            defined_iris,
+            cache,
+            backend,
+        }
+    }
+
     /// Returns the content-addressed identifier of this layer.
     pub fn id(&self) -> &LayerId {
         &self.id
@@ -91,34 +175,53 @@ impl Layer {
         self.parent.is_none()
     }
 
-    /// Look up a resource in this layer only (does not walk parents).
-    pub fn get_resource(&self, iri: &Iri) -> Option<&Resource> {
-        self.resources.get(iri)
+    /// Returns the set of IRIs defined directly in this layer (not parents).
+    pub fn defined_iris(&self) -> &BTreeSet<Iri> {
+        &self.defined_iris
     }
 
-    /// Returns all resources in this layer (not including parents).
-    pub fn resources(&self) -> &BTreeMap<Iri, Resource> {
-        &self.resources
+    /// Returns the shared resource cache this layer was built/loaded with.
+    pub fn cache(&self) -> &Arc<dyn ResourceCache> {
+        &self.cache
+    }
+
+    /// Returns the shared backend this layer was built/loaded with.
+    pub fn backend(&self) -> &Arc<dyn crate::storage::ResourceBackend> {
+        &self.backend
+    }
+
+    /// Look up a resource defined in this layer only (does not walk parents).
+    /// Cache → backend fallback. Returns `None` if `iri` is not defined here.
+    pub fn get_resource(&self, iri: &Iri) -> Option<Arc<Resource>> {
+        if !self.defined_iris.contains(iri) {
+            return None;
+        }
+        let key = ResourceKey::new(self.id.clone(), iri.clone());
+        if let Some(r) = self.cache.get(&key) {
+            return Some(r);
+        }
+        let resource = self.backend.load_resource(&self.id, iri)?;
+        let arc = Arc::new(resource);
+        self.cache.put(key, Arc::clone(&arc));
+        Some(arc)
     }
 
     /// Resolve a resource by IRI, walking the parent chain.
     ///
     /// Checks this layer first, then parent, then grandparent, etc.
     /// Returns the first match (topmost layer wins).
-    pub fn resolve(&self, iri: &Iri) -> Option<&Resource> {
-        if let Some(r) = self.resources.get(iri) {
+    pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
+        if let Some(r) = self.get_resource(iri) {
             return Some(r);
         }
-        if let Some(parent) = &self.parent {
-            return parent.resolve(iri);
-        }
-        None
+        self.parent.as_ref()?.resolve(iri)
     }
 
-    /// Collect all resources at this IRI across the entire chain (top to bottom).
-    pub fn resolve_all(&self, iri: &Iri) -> Vec<&Resource> {
+    /// Collect all resources at this IRI across the entire chain (top to
+    /// bottom). Top layer's value comes first.
+    pub fn resolve_all(&self, iri: &Iri) -> Vec<Arc<Resource>> {
         let mut results = Vec::new();
-        if let Some(r) = self.resources.get(iri) {
+        if let Some(r) = self.get_resource(iri) {
             results.push(r);
         }
         if let Some(parent) = &self.parent {
@@ -127,22 +230,33 @@ impl Layer {
         results
     }
 
-    /// Merged view of all resources across the entire chain.
-    /// Top layer wins for duplicate IRIs.
-    pub fn all_resources(&self) -> BTreeMap<&Iri, &Resource> {
-        let mut merged = BTreeMap::new();
-        // Start from root so that top layers overwrite
-        self.collect_resources_bottom_up(&mut merged);
-        merged
+    /// Iterate over resources defined directly in this layer.
+    /// Yields owned `(Iri, Arc<Resource>)` pairs in IRI order.
+    pub fn iter_resources(&self) -> impl Iterator<Item = (Iri, Arc<Resource>)> + '_ {
+        self.defined_iris
+            .iter()
+            .filter_map(move |iri| self.get_resource(iri).map(|r| (iri.clone(), r)))
     }
 
-    fn collect_resources_bottom_up<'a>(&'a self, merged: &mut BTreeMap<&'a Iri, &'a Resource>) {
-        if let Some(parent) = &self.parent {
-            parent.collect_resources_bottom_up(merged);
+    /// Iterate over the merged view across the entire chain (top layer wins
+    /// for duplicate IRIs). Materialises the merged set eagerly for
+    /// determinism; callers who need lazy iteration over very large chains
+    /// should call `iter_resources` per layer manually.
+    pub fn iter_all_resources(&self) -> impl Iterator<Item = (Iri, Arc<Resource>)> {
+        let mut seen = BTreeSet::<Iri>::new();
+        let mut buf: BTreeMap<Iri, Arc<Resource>> = BTreeMap::new();
+        let mut current: Option<&Layer> = Some(self);
+        while let Some(layer) = current {
+            for iri in &layer.defined_iris {
+                if seen.insert(iri.clone()) {
+                    if let Some(res) = layer.get_resource(iri) {
+                        buf.insert(iri.clone(), res);
+                    }
+                }
+            }
+            current = layer.parent.as_deref();
         }
-        for (iri, resource) in &self.resources {
-            merged.insert(iri, resource);
-        }
+        buf.into_iter()
     }
 }
 
@@ -226,15 +340,32 @@ impl LayerBuilder {
 
     /// Build the immutable `Layer`.
     ///
-    /// Computes the `LayerId` as the SHA-256 hash of the canonical form
-    /// of all resources (sorted by IRI, minified JSON).
-    pub fn build(self) -> Layer {
+    /// Computes the `LayerId` as the SHA-256 hash of the canonical CBOR
+    /// encoding of resources (in IRI order). Populates `cache` with one
+    /// `(LayerId, Iri) → Arc<Resource>` entry per built resource so
+    /// subsequent lookups via the layer hit the cache without going to the
+    /// backend.
+    ///
+    /// Note: this does NOT write to the backend. Durable persistence is the
+    /// caller's responsibility (typically `PersistentBackend::store_layer`
+    /// or `LayerStore::store_layer`). If the cache evicts a freshly-built
+    /// resource before it has been committed to the backend, the resource
+    /// is lost; commit promptly. The bounded cache (14c) will need
+    /// coordination with this lifecycle.
+    pub fn build(self, cache: Arc<dyn ResourceCache>, backend: Arc<dyn ResourceBackend>) -> Layer {
         let id = self.compute_layer_id();
+        let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
+        for (iri, resource) in self.resources {
+            let key = ResourceKey::new(id.clone(), iri);
+            cache.put(key, Arc::new(resource));
+        }
         Layer {
             id,
             name: self.name,
-            resources: self.resources,
             parent: self.parent,
+            defined_iris,
+            cache,
+            backend,
         }
     }
 
@@ -272,13 +403,22 @@ mod tests {
         r
     }
 
+    /// Test helper: build a fresh in-memory cache + backend pair.
+    fn test_storage() -> (Arc<dyn ResourceCache>, Arc<dyn ResourceBackend>) {
+        (
+            Arc::new(MemoryResourceCache::new()),
+            Arc::new(MemoryResourceBackend::new()),
+        )
+    }
+
     #[test]
     fn build_root_layer() {
+        let (cache, backend) = test_storage();
         let mut builder = LayerBuilder::new("core", None);
         builder
             .add_resource(make_resource("urn:eigenius:core:Class", vec![]))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(cache, backend);
         assert!(layer.is_root());
         assert!(layer
             .get_resource(&iri("urn:eigenius:core:Class"))
@@ -287,7 +427,8 @@ mod tests {
 
     #[test]
     fn core_namespace_protection() {
-        let root = Arc::new(LayerBuilder::new("core", None).build());
+        let (cache, backend) = test_storage();
+        let root = Arc::new(LayerBuilder::new("core", None).build(cache, backend));
         let mut builder = LayerBuilder::new("domain", Some(root));
         let result = builder.add_resource(make_resource("urn:eigenius:core:Foo", vec![]));
         assert!(matches!(
@@ -315,6 +456,8 @@ mod tests {
 
     #[test]
     fn resolve_walks_parent_chain() {
+        let (cache, backend) = test_storage();
+
         // Build root with resource A
         let mut root_builder = LayerBuilder::new("root", None);
         root_builder
@@ -326,7 +469,7 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let root = Arc::new(root_builder.build());
+        let root = Arc::new(root_builder.build(Arc::clone(&cache), Arc::clone(&backend)));
 
         // Build child with resource B
         let mut child_builder = LayerBuilder::new("child", Some(root));
@@ -339,7 +482,7 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let child = child_builder.build();
+        let child = child_builder.build(cache, backend);
 
         // Child can resolve both A (from root) and B (from self)
         assert!(child.resolve(&iri("urn:eigenius:core:A")).is_some());
@@ -350,6 +493,7 @@ mod tests {
 
     #[test]
     fn top_layer_shadows_parent() {
+        let (cache, backend) = test_storage();
         let mut root_builder = LayerBuilder::new("root", None);
         root_builder
             .add_resource(make_resource(
@@ -357,7 +501,7 @@ mod tests {
                 vec![("urn:eigenius:core:description", Value::String("v1".into()))],
             ))
             .unwrap();
-        let root = Arc::new(root_builder.build());
+        let root = Arc::new(root_builder.build(Arc::clone(&cache), Arc::clone(&backend)));
 
         let mut child_builder = LayerBuilder::new("child", Some(root));
         child_builder
@@ -366,7 +510,7 @@ mod tests {
                 vec![("urn:eigenius:core:description", Value::String("v2".into()))],
             ))
             .unwrap();
-        let child = child_builder.build();
+        let child = child_builder.build(cache, backend);
 
         let resolved = child.resolve(&iri("urn:eigenius:example:X")).unwrap();
         let desc = resolved.get(&iri("urn:eigenius:core:description")).unwrap();
@@ -376,6 +520,7 @@ mod tests {
     #[test]
     fn deterministic_layer_id() {
         let build = || {
+            let (cache, backend) = test_storage();
             let mut builder = LayerBuilder::new("test", None);
             builder
                 .add_resource(make_resource(
@@ -386,7 +531,7 @@ mod tests {
                     )],
                 ))
                 .unwrap();
-            builder.build()
+            builder.build(cache, backend)
         };
 
         let layer1 = build();
@@ -396,21 +541,23 @@ mod tests {
 
     #[test]
     fn different_content_different_id() {
+        let (cache, backend) = test_storage();
         let mut b1 = LayerBuilder::new("test", None);
         b1.add_resource(make_resource("urn:eigenius:core:A", vec![]))
             .unwrap();
-        let l1 = b1.build();
+        let l1 = b1.build(Arc::clone(&cache), Arc::clone(&backend));
 
         let mut b2 = LayerBuilder::new("test", None);
         b2.add_resource(make_resource("urn:eigenius:core:B", vec![]))
             .unwrap();
-        let l2 = b2.build();
+        let l2 = b2.build(cache, backend);
 
         assert_ne!(l1.id(), l2.id());
     }
 
     #[test]
-    fn all_resources_merged() {
+    fn iter_all_resources_merged() {
+        let (cache, backend) = test_storage();
         let mut root_builder = LayerBuilder::new("root", None);
         root_builder
             .add_resource(make_resource("urn:eigenius:core:A", vec![]))
@@ -418,20 +565,21 @@ mod tests {
         root_builder
             .add_resource(make_resource("urn:eigenius:core:B", vec![]))
             .unwrap();
-        let root = Arc::new(root_builder.build());
+        let root = Arc::new(root_builder.build(Arc::clone(&cache), Arc::clone(&backend)));
 
         let mut child_builder = LayerBuilder::new("child", Some(root));
         child_builder
             .add_resource(make_resource("urn:eigenius:example:C", vec![]))
             .unwrap();
-        let child = child_builder.build();
+        let child = child_builder.build(cache, backend);
 
-        let all = child.all_resources();
+        let all: Vec<_> = child.iter_all_resources().collect();
         assert_eq!(all.len(), 3); // A, B from root + C from child
     }
 
     #[test]
     fn resolve_all_returns_both_layers() {
+        let (cache, backend) = test_storage();
         let mut root_builder = LayerBuilder::new("root", None);
         root_builder
             .add_resource(make_resource(
@@ -439,7 +587,7 @@ mod tests {
                 vec![("urn:eigenius:core:description", Value::String("v1".into()))],
             ))
             .unwrap();
-        let root = Arc::new(root_builder.build());
+        let root = Arc::new(root_builder.build(Arc::clone(&cache), Arc::clone(&backend)));
 
         let mut child_builder = LayerBuilder::new("child", Some(root));
         child_builder
@@ -448,7 +596,7 @@ mod tests {
                 vec![("urn:eigenius:core:description", Value::String("v2".into()))],
             ))
             .unwrap();
-        let child = child_builder.build();
+        let child = child_builder.build(cache, backend);
 
         let all = child.resolve_all(&iri("urn:eigenius:example:X"));
         assert_eq!(all.len(), 2);
