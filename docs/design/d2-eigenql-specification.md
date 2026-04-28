@@ -2,9 +2,37 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Draft (D14-aligned)
 **Required before:** Phase 1 implementation
 **Resolves:** Final EBNF grammar, keyword choices, escaping rules, type checking rules, error message format
+
+### Revision: D14 alignment
+
+This revision updates EigenQL's institution surface against
+[D14 (Institution Realisation)](d14-institution-realisation.md), which
+supersedes the D10 surface the prior draft was wired against. The
+substantive shape changes:
+
+- The dispatch backbone is the derived [`InstitutionIndex`] over
+  declared `Institution`, `QueryClass`, `Comorphism`, `ExportFormat`,
+  and `ImportFormat` resources, plus an `InstitutionRuntime` that
+  supplies the `Institution` trait implementations. There is no
+  `InstitutionRegistry` and no `FiberReasoner` trait.
+- A `FIBER` clause dispatches a registered `QueryClass` whose
+  `dispatch_role` includes `OnDemand`, via `Institution::query`.
+- Comorphisms surface as **FIBER parameter coercions**:
+  `param: comorphism_iri(source)` runs the four-step pipeline
+  (extract → transformation → reify) inline as part of FIBER input
+  marshalling. They are not free-standing expressions.
+- A qualified-name function call in expression position dispatches
+  only as a `Decidable` `QueryClass` invocation, and returns a
+  typed `Verdict` value (not Boolean).
+- New postfix predicates `HOLDS`, `FAILS`, `UNDECIDABLE` project
+  a Verdict to Boolean. They are reserved keywords.
+- `FIBER`-bound response resources of `result_class = Verdict` are
+  pattern-matchable on `ctor_name` in subsequent `MATCH` clauses.
+
+[`InstitutionIndex`]: d14-institution-realisation.md
 
 ---
 
@@ -69,6 +97,7 @@ MATCH  WHERE  RETURN  USING  INSTITUTION  AS  DEFINE  FROM  FIBER
 AND  OR  NOT  IN  LIKE  EXISTS
 GROUP  BY  ORDER  ASC  DESC
 DISTINCT  LIMIT  OFFSET
+HOLDS  FAILS  UNDECIDABLE
 ```
 
 Built-in function names are also keywords:
@@ -78,7 +107,10 @@ DATE  TIMESTAMP  REGEX  LENGTH  CONTAINS  CONCAT
 COUNT  SUM  AVG  MIN  MAX
 ```
 
-`INSTITUTION` and `FIBER` are reserved for institution dispatch (§3.3.1, §3.5).
+`INSTITUTION` and `FIBER` are reserved for institution dispatch
+(§3.3.1, §3.5). `HOLDS`, `FAILS`, and `UNDECIDABLE` are reserved as
+postfix predicates that project a `Verdict`-typed expression to a
+boolean (§3.8).
 
 ### 2.3 Identifiers and variables
 
@@ -232,10 +264,21 @@ Multiple USING clauses are allowed and their imports are merged (duplicates remo
 using_institution ::= 'USING' 'INSTITUTION' STRING 'AS' IDENTIFIER
 ```
 
-A `USING INSTITUTION` clause binds a short alias to a registered
+A `USING INSTITUTION` clause binds a short alias to a declared
 institution IRI for use in subsequent `FIBER` clauses (§3.5). The IRI
-must resolve to a resource registered with the kernel's institution
-registry whose `is_a` includes `urn:eigenius:institution:Institution`.
+must resolve in the layer chain to a resource whose `is_a` includes
+`urn:eigenius:institution:Institution` — D14 institutions ride into
+the chain as ordinary ontology resources. The kernel's
+`InstitutionIndex` (built from the chain) is the authority for the
+lookup.
+
+Beyond alias introduction, `USING INSTITUTION` carries a structural
+assertion: the QueryClass cited by every subsequent `FIBER` clause
+referencing this alias must declare the aliased institution as its
+`institution_ref`. The assertion is enforced at type check (§5.7).
+Likewise, when a FIBER parameter uses comorphism coercion (§3.5), the
+comorphism's `import_format`'s `institution_ref` must match the
+aliased institution.
 
 The alias inhabits a separate namespace from `USING` class shortnames
 and from variable names — it is only valid as the institution-reference
@@ -302,49 +345,84 @@ fiber_clause      ::= 'FIBER' institution_ref ':' query_class_ref
 institution_ref   ::= IDENTIFIER | STRING
 query_class_ref   ::= IDENTIFIER | STRING
 param_list        ::= param (',' param)*
-param             ::= name ':' expression
+param             ::= name ':' param_value
+param_value       ::= expression | comorphism_coercion
+comorphism_coercion ::= qualified_name '(' expression ')'
+qualified_name    ::= IDENTIFIER ':' IDENTIFIER | STRING
 ```
 
-A `FIBER` clause dispatches to a registered institution's fiber
-reasoner (D10 `FiberReasoner::query`) and binds the response resource
-to a variable that subsequent clauses can decompose with `MATCH`.
+A `FIBER` clause dispatches a `QueryClass` declared in the chain that
+includes `OnDemand` in its `dispatch_role` set (D14 §6.2). The dispatch
+is `Institution::query(query_handler, input_resource, ctx)` where:
+
+- The `Institution` is looked up by the `institution_ref` of the
+  cited `QueryClass` in the runtime's `InstitutionRuntime`.
+- The `query_handler` is the `QueryClass`'s declared procedure IRI.
+- The `input_resource` is constructed from the FIBER param block,
+  with `is_a` set to the `QueryClass`'s `query_class` input class.
+
+The clause binds the response resource (or a synthesized handle for
+it; see §6.12) to a variable that subsequent clauses can decompose
+with `MATCH`.
 
 - `institution_ref` is either a `USING INSTITUTION` alias
   (`IDENTIFIER`) or an inline full IRI (quoted `STRING`).
-- `query_class_ref` is the institution's query class — a short name
-  resolved against the institution's declared `query_types`, or a
-  full IRI.
-- The brace block contains parameter bindings (`name : expression`)
-  passed as properties on the constructed query resource.
-- `AS variable` binds the response resource's IRI to a variable usable
-  in later clauses.
+- `query_class_ref` is the QueryClass — a short name resolved against
+  the QueryClass declarations in the index, or a full IRI. The cited
+  QueryClass's `institution_ref` must equal the aliased / inline
+  institution (§5.8).
+- The brace block contains parameter bindings (`name : param_value`)
+  passed as properties on the constructed input resource.
+- `AS variable` binds the response resource to a variable usable in
+  later clauses.
+
+A param's value is normally an expression (literal, variable, scalar
+function call). A param can also use **comorphism coercion**:
+`name: comorphism_iri(source)` runs the named comorphism's four-step
+pipeline (D14 §9.3) — extract a typed value from the source resource
+via the source institution's `ExportFormat`, apply the comorphism's
+`transformation` Component, reify into a target-class resource via the
+target institution's `ImportFormat` — and uses the reified value as
+the parameter input. The coercion's target class must match (or
+satisfy `subclass_of` against) the FIBER QueryClass's input class for
+that property; see §5.8.
+
+**v1 restriction: no IO in the comorphism transformation.** The cited
+comorphism's `transformation` Component must have a `capability_level`
+of `Pure` or `Read`. A comorphism whose transformation requires `IO`
+is rejected with the typed error `comorphism_io_not_supported_in_v1`
+(§7). This restriction lets the EigenQL evaluator run a coercion
+inline without standing up an IO evaluator backing for the FIBER path.
+A future revision can lift the restriction; the surface syntax is
+unchanged when it does.
 
 `FIBER` is only valid in the top-level query's `match_part`, never in
-a `DEFINE` body. See §5 for type rules and §6.12 for evaluation.
+a `DEFINE` body. See §5.7–5.9 for type rules and §6.12 for evaluation.
 
 **Examples**
 
 With alias:
 
 ```
-USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+USING INSTITUTION "urn:eigenius:dock:Inst"  AS dock
+USING INSTITUTION "urn:eigenius:assay:Inst" AS assay
 
-MATCH Refinement(?m) { latest_delta: ?d, target: ?t }
-FIBER  ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
-FIBER  ord:TrendQuery        { window: 10,    delta: ?d }         AS ?trend
-MATCH  ?conv  { "urn:eigenius:test:wasm:converged":  ?c }
-MATCH  ?trend { "urn:eigenius:test:wasm:direction":  ?dir }
-WHERE  ?c = true AND ?dir = "down"
-RETURN [] { m: ?m, t: ?t }
+MATCH DockingResult(?d) { binding_pose: ?p }
+FIBER assay:CheckBindingAffinity {
+    candidate: dock_to_assay(?d),    // comorphism coercion
+    threshold: 0.85
+} AS ?check
+WHERE ?check HOLDS
+RETURN [] { d: ?d }
 ```
 
-Inline IRI (one-shot):
+Inline IRI (one-shot, no coercion):
 
 ```
 MATCH Refinement(?m) { latest_delta: ?d }
-FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
+FIBER "urn:eigenius:test:Ordering":ConvergenceQuery
       { tolerance: 0.01, latest_delta: ?d } AS ?conv
-MATCH ?conv { "urn:eigenius:test:wasm:converged": ?c }
+MATCH ?conv { "urn:eigenius:test:converged": ?c }
 WHERE ?c = true
 RETURN [] { m: ?m }
 ```
@@ -378,18 +456,8 @@ Multiple expressions in the WHERE clause are implicitly ANDed.
 
 ### 3.7 Expressions
 
-Operator precedence (highest to lowest):
-
-| Precedence | Operators | Associativity |
-|------------|-----------|---------------|
-| 1 | Unary `NOT`, `+`, `-` | Right |
-| 2 | `**` | Left (parser quirk; see note) |
-| 3 | `*`, `/`, `%` | Left |
-| 4 | `+`, `-`, `\|\|` | Left |
-| 5 | `<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE` | Left |
-| 6 | `=`, `<>` | Left |
-| 7 | `AND` | Left |
-| 8 | `OR` | Left |
+Operator precedence is given below the grammar (after the operator
+list), once the postfix Verdict predicate has been introduced.
 
 `**` is conventionally right-associative in mathematics (`2**3**2 = 512`)
 but the current parser folds it left (`(2**3)**2 = 64`). Always parenthesise
@@ -404,14 +472,16 @@ relational_expr ::= additive_expr ((cmp_op | comparison_op) additive_expr)*
 additive_expr   ::= mult_expr (('+' | '-' | '||') mult_expr)*
 mult_expr       ::= power_expr (('*' | '/' | '%') power_expr)*
 power_expr      ::= unary_expr ('**' unary_expr)*
-unary_expr      ::= primary_expr
+unary_expr      ::= verdict_term
                    | 'NOT' unary_expr
                    | 'NOT' 'EXISTS' '(' variable ')'
                    | '+' unary_expr
                    | '-' unary_expr
+verdict_term    ::= primary_expr (verdict_predicate)?
 
-cmp_op          ::= '<' | '<=' | '>' | '>='
-comparison_op   ::= 'IN' | 'NOT' 'IN' | 'LIKE' | 'NOT' 'LIKE'
+cmp_op            ::= '<' | '<=' | '>' | '>='
+comparison_op     ::= 'IN' | 'NOT' 'IN' | 'LIKE' | 'NOT' 'LIKE'
+verdict_predicate ::= 'HOLDS' | 'FAILS' | 'UNDECIDABLE'
 
 primary_expr    ::= value
                    | '(' expression ')'
@@ -424,6 +494,40 @@ primary_expr    ::= value
 
 shortname_literal ::= IDENTIFIER     // bare identifier — string-typed shortname literal
 ```
+
+`verdict_predicate` is a postfix operator that binds tighter than `NOT`
+and looser than primary-expression construction. Its operand must
+evaluate to a `Verdict` inductive value (§3.8); the result is
+`boolean`. Because it is non-associative, expressions like
+`?v HOLDS FAILS` are syntactically rejected.
+
+The placement gives the natural reading on `NOT`:
+
+```
+NOT qc:check(?x) HOLDS    ≡    NOT (qc:check(?x) HOLDS)
+                          ≡    "either Fails or Undecidable"
+```
+
+And on `AND`/`OR`:
+
+```
+qc:a(?x) HOLDS AND qc:b(?y) FAILS
+    ≡  (qc:a(?x) HOLDS) AND (qc:b(?y) FAILS)
+```
+
+The operator-precedence table is updated accordingly:
+
+| Precedence | Operators | Associativity |
+|------------|-----------|---------------|
+| 1 | Postfix `HOLDS`, `FAILS`, `UNDECIDABLE` | Non-associative |
+| 2 | Unary `NOT`, `+`, `-` | Right |
+| 3 | `**` | Left (parser quirk; see §3.7 note) |
+| 4 | `*`, `/`, `%` | Left |
+| 5 | `+`, `-`, `\|\|` | Left |
+| 6 | `<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE` | Left |
+| 7 | `=`, `<>` | Left |
+| 8 | `AND` | Left |
+| 9 | `OR` | Left |
 
 A bare `IDENTIFIER` in expression position evaluates to the identifier
 text as a string-typed scalar. This is the same form used to pass class
@@ -453,8 +557,9 @@ function_call ::= DATE '(' value ')'
 | `CONCAT` | array, array | array | Concatenate two arrays |
 
 The second category is institution-dispatched function calls: a
-`qualified_call` invokes a decide predicate or comorphism registered by
-an institution (D10).
+`qualified_call` invokes a `Decidable` `QueryClass` declared by some
+institution (D14 §6.2). The result is a typed `Verdict` value, not a
+Boolean.
 
 ```ebnf
 qualified_call ::= qualified_name '(' arg_list? ')'
@@ -462,18 +567,44 @@ qualified_name ::= IDENTIFIER ':' IDENTIFIER
 arg_list       ::= expression (',' expression)*
 ```
 
-The qualified name resolves to a full IRI through the institution
-registry's classification table (`InstitutionRegistry::classify`), per
-§5 and §6.13:
+The qualified name resolves to a full IRI and is looked up in the
+`InstitutionIndex`. The IRI must reference a `QueryClass` declaration
+whose `dispatch_role` set includes `Decidable` (§5.9). If the IRI is
+not a Decidable QueryClass — or no institution is in scope — the
+qualified-name fall-through is **`unknown function: ns:local`**
+(§6.13). Comorphism dispatch is **not** available in expression
+position; comorphisms surface only in FIBER parameter coercion (§3.5).
 
-| Classification | Number of args | Returns |
-|---|---|---|
-| Decide predicate | any | boolean (three-valued result mapped: `Holds → true`, `Fails → false`, `Undecidable → false`) |
-| Comorphism | exactly one source resource | embedded resource (`Value::Embedded`) |
+The result of a Decidable call is a `Verdict` resource (constructors
+`Holds | Fails | Undecidable`). To use that result as a Boolean, apply
+a postfix Verdict predicate:
 
-A qualified name that fails to classify (no institution registered for
-the IRI, or the IRI is not in the institution's `decide_procedures` or
-`comorphism_types`) is an evaluation error: `unknown function`.
+```
+?v HOLDS         // true iff ctor_name = "Holds"
+?v FAILS         // true iff ctor_name = "Fails"
+?v UNDECIDABLE   // true iff ctor_name = "Undecidable"
+```
+
+The postfix predicates also accept any expression that evaluates to a
+Verdict — most commonly the `qualified_call` itself, or a variable
+bound by a `FIBER` clause whose `result_class` is `Verdict`. Examples:
+
+```
+WHERE qc:check(?x) HOLDS                // common case: Decidable in WHERE
+WHERE NOT qc:check(?x) HOLDS            // "either Fails or Undecidable"
+WHERE ?conv HOLDS AND ?other FAILS      // FIBER-bound Verdicts
+RETURN [] { ok: qc:check(?x) HOLDS }    // boolean projection in RETURN
+```
+
+A bare Verdict expression in Boolean position (e.g. `WHERE qc:check(?x)`
+without a postfix predicate) is a type error (§5.9). This is
+deliberate — it forces an explicit choice on how Undecidable should
+behave, rather than silently collapsing it.
+
+The postfix predicates are Verdict-specific in v1: they reject any
+operand whose static type isn't `Verdict`. A future revision could
+generalise them to project any inductive value to a constructor-name
+match without breaking existing source.
 
 The third category is the aggregate calls covered in §3.9.
 
@@ -619,8 +750,12 @@ interface FiberClause {
 
 interface ParamBinding {
   name: Name;
-  expression: Expression;
+  value: ParamValue;
 }
+
+type ParamValue =
+  | { kind: 'expression'; expression: Expression }
+  | { kind: 'comorphism'; comorphism: Name; source: Expression };
 
 interface Query {
   body: MatchPart;              // USING + USING INSTITUTION + (MATCH | FIBER)+ + WHERE
@@ -671,6 +806,7 @@ type Expression =
   | { variable: Variable }                                // Variable reference
   | { binary: BinaryOperator; left: Expression; right: Expression }
   | { unary: UnaryOperator; operand: Expression }
+  | { verdictPredicate: VerdictPredicate; operand: Expression } // ?v HOLDS / FAILS / UNDECIDABLE
   | { notExists: Variable }                               // NOT EXISTS(?var)
   | { function: string; arguments: Expression[] }         // Function call (builtin or qualified)
   | { aggregate: AggregateOp; argument: Expression }      // Aggregate function
@@ -686,13 +822,17 @@ type BinaryOperator =
 
 type UnaryOperator = 'not' | '+' | '-';
 
+type VerdictPredicate = 'holds' | 'fails' | 'undecidable';
+
 type AggregateOp = 'count' | 'sum' | 'avg' | 'min' | 'max';
 ```
 
 The `function` Expression variant carries the textual function name —
 either a builtin (`"DATE"`, `"LENGTH"`, …) or a qualified name
-(`"docking:within_tolerance"`). Resolution and dispatch are performed
-at evaluate time per §6.13.
+(`"docking:within_tolerance"`). Qualified names dispatch only to
+`Decidable` `QueryClass` declarations under D14; resolution and
+dispatch happen at evaluate time per §6.13. Comorphism dispatch lives
+on `ParamValue.kind = 'comorphism'`, not on the `function` variant.
 
 ---
 
@@ -761,9 +901,9 @@ Aggregates may only appear in RETURN expressions. Non-aggregated RETURN expressi
 ### 5.7 USING INSTITUTION type rules
 
 - The IRI in `USING INSTITUTION "iri" AS alias` must resolve to a
-  resource registered with the kernel's institution registry whose
-  `is_a` includes `urn:eigenius:institution:Institution`. Failure rule:
-  `using_institution_unresolved`.
+  resource in the layer chain whose `is_a` includes
+  `urn:eigenius:institution:Institution` and which is indexed by the
+  `InstitutionIndex`. Failure rule: `using_institution_unresolved`.
 - An alias must be unique within a `match_part`. Failure rule:
   `duplicate_using_institution_alias`.
 - Aliases inhabit a separate namespace from `USING` class shortnames
@@ -777,40 +917,75 @@ For each `FIBER inst_ref : QueryClass { params } AS ?var` clause:
 1. **Institution resolution.** `inst_ref` is either an alias declared by
    a `USING INSTITUTION` (rule `undeclared_institution_alias` if
    missing) or an inline IRI (rule `using_institution_unresolved` if
-   not registered).
+   not indexed). The resolved IRI is the *aliased institution*.
 
-2. **Query class.** `QueryClass` must resolve to a resource whose
-   `is_a` includes `urn:eigenius:core:Class`. Failure rule:
-   `fiber_query_class_not_class`. The class must additionally appear
-   in the institution's declared `query_types` — runtime enforced.
+2. **QueryClass.** `QueryClass` must resolve to a `QueryClass`
+   declaration in the `InstitutionIndex` (i.e. an indexed resource
+   whose `is_a` includes
+   `urn:eigenius:institution:QueryClass`). Failure rule:
+   `fiber_query_class_not_query_class`.
 
-3. **Short-name parameter scope.** A short-name parameter must resolve
-   against the union of the query class's `urn:eigenius:core:requires`
-   and `urn:eigenius:core:recommends` property lists. A short name that
-   fails to resolve is rule `fiber_param_short_name_unresolved`. This
-   is the rule that catches typos like `tolerence` for `tolerance`.
+3. **Dispatch role.** The cited QueryClass's `dispatch_role` set must
+   include `OnDemand`. Failure rule:
+   `fiber_query_class_not_on_demand` — a Decidable-only QueryClass
+   cannot be dispatched via FIBER even though it has the same shape;
+   the user surfaces it via §3.8 instead.
 
-4. **Required-property coverage.** Every property in the query class's
+4. **Institution agreement.** The cited QueryClass's `institution_ref`
+   must equal the aliased institution. Failure rule:
+   `fiber_institution_mismatch`.
+
+5. **Short-name parameter scope.** A short-name parameter must resolve
+   against the union of the QueryClass's `urn:eigenius:core:requires`
+   and `urn:eigenius:core:recommends` property lists. A short name
+   that fails to resolve is rule `fiber_param_short_name_unresolved`.
+   This is the rule that catches typos like `tolerence` for `tolerance`.
+
+6. **Required-property coverage.** Every property in the QueryClass's
    `requires` list must have a matching entry in `params`. Missing
    coverage is rule `fiber_missing_required_param`.
 
-5. **Full-IRI parameters** (quoted-string names) bypass class-scope
+7. **Full-IRI parameters** (quoted-string names) bypass class-scope
    validation — the open-world type system permits resources to carry
    properties beyond their declared class, and FIBER params follow
    the same rule. Type-checker does not warn on these.
 
-6. **Parameter expression types.** Each param expression's inferred
-   type must match the declared `data_type` on the resolved Property
-   resource. Lenient v1: if the type checker cannot infer an
+8. **Parameter expression types.** Each plain-expression param's
+   inferred type must match the declared `data_type` on the resolved
+   Property resource. Lenient v1: if the type checker cannot infer an
    expression's type, the check is skipped (runtime catches genuine
    mismatches).
 
-7. **Variable binding.** `?var` must not shadow an existing variable.
+9. **Comorphism coercion params.** When a param's value is a
+   `comorphism_coercion` of shape `comorphism_ref(source_expr)`:
 
-The response resource bound to `?var` is treated as an untyped resource
-in subsequent `MATCH ?var { ... }` clauses — short-name dot-paths on
-`?var` are not available in v1, since the institution does not declare
-the response class. Use full-IRI property references when decomposing.
+   a. `comorphism_ref` must resolve to a `Comorphism` declaration in
+      the `InstitutionIndex`. Failure rule:
+      `comorphism_unresolved`.
+   b. The resolved comorphism's `import_format`'s `institution_ref`
+      must equal the aliased institution. Failure rule:
+      `comorphism_target_mismatch`.
+   c. The resolved comorphism's `transformation` Component must have
+      `capability_level` `Pure` or `Read`. Failure rule:
+      `comorphism_io_not_supported_in_v1`.
+   d. The reified target class (from the comorphism's `import_format`
+      `to_class`) must equal or `subclass_of` the FIBER QueryClass's
+      input class for that property. Failure rule:
+      `comorphism_target_class_mismatch`.
+   e. `source_expr` evaluates to a resource value (variable bound by
+      MATCH, embedded literal, or another expression of resource
+      type). Non-resource source values fail rule
+      `comorphism_source_not_resource`.
+
+10. **Variable binding.** `?var` must not shadow an existing variable.
+
+The response resource bound to `?var` carries the QueryClass's
+`result_class` as its `is_a`. When that class is `Verdict`, subsequent
+clauses may use `?var HOLDS` / `?var FAILS` / `?var UNDECIDABLE` for
+projection (§3.8) or pattern-match `MATCH ?var { ctor_name: ?c }`
+directly. For other result classes, the response resource is treated
+as an untyped resource for the purposes of short-name dot-paths on
+`?var` (use full-IRI property references when decomposing).
 
 ### 5.9 Institution-dispatched function-call type rules
 
@@ -818,24 +993,35 @@ For each expression of the form `qualified_name(args...)` where
 `qualified_name = ns : local`:
 
 1. **Classification.** The implementation joins `ns` and `local` to
-   form an IRI string and looks it up via
-   `InstitutionRegistry::classify`. The result is `DecidePredicate`,
-   `Comorphism`, or unrecognised. Unrecognised qualified names are
-   not a type-check error — they fall through to evaluate-time
-   builtin dispatch and surface as evaluation error `unknown function`
-   (see §6.13).
+   form an IRI string and looks it up in the `InstitutionIndex`. The
+   IRI must reference a `QueryClass` declaration whose `dispatch_role`
+   set includes `Decidable`. Unrecognised qualified names are not a
+   type-check error — they fall through to evaluate-time builtin
+   dispatch and surface as evaluation error `unknown function`
+   (see §6.13). A qualified name that resolves to a `QueryClass`
+   *without* `Decidable` in its dispatch role is rule
+   `qualified_call_not_decidable` — to dispatch an OnDemand-only
+   QueryClass, use FIBER (§3.5).
 
-2. **Decide predicates.** No static arity or argument-type check —
-   the institution validates arity and argument compatibility in its
-   `decide` implementation. Result type is boolean.
+2. **Decidable QueryClass.** No static arity or argument-type check
+   on the args themselves — the institution's query handler validates
+   shape against the QueryClass's input class. Result type is
+   `Verdict`.
 
-3. **Comorphisms.** Must receive exactly one argument — the source
-   resource. A different number of arguments is an evaluation error
-   (rule `comorphism_arity`). Result type is `embedded resource`.
+3. **Postfix predicates.** A `verdict_predicate` (`HOLDS` / `FAILS`
+   / `UNDECIDABLE`) requires its operand's inferred type to be
+   `Verdict`. Otherwise rule `verdict_predicate_non_verdict_operand`.
+   The result is `boolean`.
+
+4. **Bare Verdict in Boolean position.** A `Verdict`-typed expression
+   used directly where a `boolean` is required (WHERE, AND/OR
+   operands, RETURN's boolean projection sites, etc.) is rule
+   `bare_verdict_in_boolean_position`. The user surfaces a Boolean by
+   applying a postfix predicate.
 
 The closed-set built-in function calls of §3.8 retain their existing
 arity-checked rules; only qualified names dispatch through the
-institution registry.
+`InstitutionIndex`.
 
 ---
 
@@ -974,27 +1160,66 @@ Queries using `NOT EXISTS` or negated MATCH patterns (`NOT ClassName(...)`) are 
 `FIBER` clauses are processed in textual order interleaved with `MATCH`
 clauses. For each surviving binding produced by preceding clauses:
 
-1. Resolve the institution (via `USING INSTITUTION` alias or inline
-   IRI) to a registered `FiberReasoner` (D10).
-2. Construct the query resource: `is_a = [query_class_iri]`, with each
-   `param` evaluated against the binding and stored as a property
-   value under the corresponding Property IRI (short-name params
-   resolved through the query class's `requires`/`recommends`; full-IRI
-   params passed through verbatim).
-3. Invoke `FiberReasoner::query(&resource, ctx)`.
-4. Attach the response resource to a **query-scoped transient overlay
+1. Resolve the QueryClass via the `InstitutionIndex`. The cited
+   institution agreement (§5.8 step 4) is enforced at type check, so
+   evaluation only re-fetches the indexed entry.
+2. Look up the declaring `Institution` in the `InstitutionRuntime` by
+   the QueryClass's `institution_ref`. A missing runtime registration
+   is evaluation error `institution_runtime_missing` (§7).
+3. Construct the input resource: `is_a = [query_class.query_class]`
+   (the QueryClass's declared input class), then evaluate each `param`
+   against the current binding:
+   - **Plain expression** params evaluate as in §3.7. The result is
+     stored as a property value under the resolved Property IRI
+     (short-name params resolved through the QueryClass's
+     `requires`/`recommends`; full-IRI params passed through verbatim).
+   - **Comorphism coercion** params run the four-step pipeline (D14
+     §9.3) inline, see "Comorphism coercion" below.
+4. Invoke
+   `Institution::query(query_class.query_handler, &input, ctx)`.
+5. Attach the response resource to a **query-scoped transient overlay
    layer** sitting on top of the evaluation layer chain. The overlay
    is private to the current query and is discarded when evaluation
    ends. The response resource's IRI is synthesized as
    `urn:eigenius:query:gen:<query-hash>:fiber:<clause-ordinal>:<binding-ordinal>`,
    deterministic within one query but never persisted.
-5. Bind `?var` to that response IRI.
+6. Bind `?var` to that response IRI.
 
 Subsequent clauses — including `MATCH ?var { ... }` decomposition —
 see the response via normal layer iteration, reusing EigenQL's existing
 pattern-match semantics. The overlay reuses the existing layer
 machinery rather than introducing a parallel "bound-to-embedded-
 resource" code path in the pattern matcher.
+
+**Verdict-shaped responses.** When `query_class.result_class` is
+`Verdict`, the response resource's `ctor_name` property carries the
+constructor (`"Holds"` / `"Fails"` / `"Undecidable"`) and the IRI is
+typed as `Verdict`. The bound variable can then be projected with the
+postfix predicate (`?var HOLDS`) or matched directly (`MATCH ?var
+{ ctor_name: ?c }`). Both are equivalent ways of reading the
+constructor; `?var HOLDS` is the more ergonomic of the two.
+
+**Comorphism coercion in params.** When a param's value is
+`comorphism_iri(source_expr)`:
+
+1. Evaluate `source_expr` against the current binding to yield a
+   source resource. Non-resource sources are caught at type check
+   (§5.8 step 9e).
+2. Look up the comorphism in the `InstitutionIndex`. The capability-
+   level guard (§5.8 step 9c) ensures the transformation is `Pure` or
+   `Read` — IO transformations are rejected before evaluation begins.
+3. Run the four-step pipeline:
+   - `Institution::extract_typed(export_format.procedure, source, ctx)`
+     against the source institution to yield a typed value.
+   - Apply the comorphism's `transformation` Component to the typed
+     value.
+   - `Institution::reify(import_format.procedure, transformed, ctx)`
+     against the target institution to yield a target-class resource.
+4. Use the reified resource as the param value.
+
+The four-step pipeline runs once per binding per param coercion. There
+is no caching across bindings in v1 — the same memoization caveat as
+plain FIBER dispatch applies.
 
 **Stratification.** Each FIBER clause forms its own evaluation step.
 The total per-query order is:
@@ -1008,62 +1233,63 @@ Within `(MATCH | FIBER)+`, clauses are processed left to right and a
 or `FIBER`. Forward references are caught at type check.
 
 **Dispatch frequency.** Fiber dispatches happen **once per binding in
-the current candidate set**. Callers who care about dispatch cost
-should constrain the candidate set upstream via `MATCH`.
+the current candidate set**. Comorphism coercions inside a FIBER
+clause dispatch alongside it — once per binding, per coercion.
+Callers who care about dispatch cost should constrain the candidate
+set upstream via `MATCH`.
 
 **Memoization is not supported in v1.** Two identical `FIBER` clauses
 with identical parameters dispatch twice. Future work: integrate with
-the trace store so repeated fiber dispatches are cached by
-`(institution, query class, param hash)` and recovered on subsequent
-evaluations.
+the trace store so repeated fiber dispatches (and the comorphism
+sub-dispatches inside them) are cached by `(institution, query class,
+param hash)` and recovered on subsequent evaluations.
 
-**Error handling.** A fiber dispatch that returns `Err` aborts the
-whole query with that error surfaced as the query's error message.
-Per-binding fallbacks (e.g. "filter out bindings whose fiber query
-failed") are not supported — predictability over cleverness.
+**Error handling.** A fiber dispatch (or any of its sub-coercions)
+that returns `Err` aborts the whole query with that error surfaced as
+the query's error message. Per-binding fallbacks (e.g. "filter out
+bindings whose fiber query failed") are not supported — predictability
+over cleverness.
 
 ### 6.13 Institution function-call evaluation
 
-Expressions of the form `ns:local(args...)` dispatch through the
-institution registry. For each evaluated call:
+Expressions of the form `ns:local(args...)` dispatch a Decidable
+QueryClass through the `InstitutionIndex`. For each evaluated call:
 
 1. Construct the IRI string `ns:local` (or treat the qualified name
    as a full IRI if it parses as one).
-2. Look up the IRI in `InstitutionRegistry::classify`.
-3. Dispatch:
+2. Look up the IRI in the `InstitutionIndex` as a `QueryClass`. If
+   the entry is missing, or its `dispatch_role` set does not include
+   `Decidable`, fall through to builtin function dispatch — the
+   builtin path then raises evaluation error
+   `unknown function: ns:local`.
+3. Look up the declaring `Institution` in the `InstitutionRuntime` by
+   the QueryClass's `institution_ref`. A missing runtime registration
+   is `institution_runtime_missing`.
+4. Construct the input resource: `is_a = [query_class.query_class]`,
+   plus an `urn:eigenius:institution:decide_args` array property
+   carrying the evaluated argument values in positional order. (The
+   institution's query handler unpacks this array against its declared
+   input class — D14 §9.2.)
+5. Invoke
+   `Institution::query(query_class.query_handler, &input, ctx)`.
+6. Read the response resource's `ctor_name` property to determine the
+   `Verdict` constructor. Result is a `Verdict`-typed value carrying
+   the constructor and the original response (so subsequent property
+   access via `MATCH` / dot-path still works on FIBER-bound Verdicts;
+   the in-expression form is typically projected immediately via a
+   postfix predicate).
 
-   - **Decide predicate** (`Some(DecidePredicate)`):
-     a. Resolve the declaring institution via
-        `InstitutionRegistry::institution_for_decide`.
-     b. Call `reasoner.decide(&iri, &arg_values, &exec_ctx)`.
-     c. Map the three-valued `DecResult` to a boolean: `Holds → true`,
-        `Fails → false`, `Undecidable → false`. The
-        `Undecidable → false` choice is **WHERE-semantics-first**: a
-        decide call in a `WHERE` should default to filtering out
-        rather than passing through. Three-valued semantics in
-        downstream logic require either a richer wrapping or a
-        `FIBER` clause.
+Result type is `Verdict`. Use a postfix predicate (§3.8) to project
+to a `boolean`. A bare Verdict expression in a position requiring
+Boolean is type error `bare_verdict_in_boolean_position`.
 
-   - **Comorphism** (`Some(Comorphism)`):
-     a. Verify exactly one argument was passed; otherwise raise
-        `comorphism_arity` error.
-     b. Resolve the declaring institution via
-        `InstitutionRegistry::institution_for_comorphism`.
-     c. Convert the argument to a `Resource`: if it evaluated to
-        `Value::Embedded(r)`, use the embedded resource directly;
-        otherwise wrap the scalar in an embedded resource carrying a
-        single `urn:eigenius:core:value` property.
-     d. Call `reasoner.translate(&iri, &source_resource, &exec_ctx)`.
-     e. Wrap the returned resource as `Value::Embedded(...)`.
+This evaluation requires the kernel runtime's `InstitutionIndex` and
+`InstitutionRuntime` to be available. Calls invoked through
+`execute(program, layer)` (no runtime) raise `unknown function`
+because the classification step has nothing to look up against.
 
-   - **Unrecognised** (`None`): fall through to builtin function
-     dispatch. Since builtins do not recognise qualified IRIs, the
-     dispatch fails with evaluation error `unknown function: ns:local`.
-
-This evaluation requires an institution registry to be available in
-the runtime. Calls invoked through `execute(program, layer)` (no
-runtime) raise the same `unknown function` error because the
-classification step has nothing to look up against.
+Comorphism dispatch is **not** available in expression position;
+comorphisms surface only in FIBER parameter coercion (§3.5, §6.12).
 
 ---
 
@@ -1083,14 +1309,40 @@ interface QueryError {
 Error phases:
 - **lexer** — unrecognized token, unterminated string, invalid escape
 - **parser** — syntax error, unexpected token, malformed clause
-- **type_check** — type mismatch, unbound variable, invalid property reference, aggregate without GROUP BY, FIBER schema violation (see §5.7–5.9 for rule names)
+- **type_check** — type mismatch, unbound variable, invalid property
+  reference, aggregate without GROUP BY, FIBER schema violation,
+  comorphism-coercion well-formedness, Verdict-position rules
+  (see §5.7–5.9 for rule names)
 - **stratification** — negation cycle in DEFINE rules (§6.9)
-- **evaluation** — runtime errors (division by zero, invalid date parse, missing institution registry, fiber dispatch failure, unknown qualified-name function, comorphism arity)
+- **evaluation** — runtime errors (division by zero, invalid date
+  parse, fiber dispatch failure, comorphism dispatch failure, missing
+  institution runtime registration, unknown qualified-name function)
 
-Each error carries a `rule` identifier (e.g. `unbound_variable`,
-`fiber_missing_required_param`, `using_unresolved`,
-`comorphism_arity`) so consumers can react programmatically without
-parsing the human-readable `message`.
+Institution-surface rule identifiers used by §5.7–5.9 and §6.12–6.13:
+
+| Rule | Phase | Where |
+|------|-------|-------|
+| `using_institution_unresolved` | type_check | §5.7 |
+| `duplicate_using_institution_alias` | type_check | §5.7 |
+| `undeclared_institution_alias` | type_check | §5.8 |
+| `fiber_query_class_not_query_class` | type_check | §5.8 |
+| `fiber_query_class_not_on_demand` | type_check | §5.8 |
+| `fiber_institution_mismatch` | type_check | §5.8 |
+| `fiber_param_short_name_unresolved` | type_check | §5.8 |
+| `fiber_missing_required_param` | type_check | §5.8 |
+| `comorphism_unresolved` | type_check | §5.8 |
+| `comorphism_target_mismatch` | type_check | §5.8 |
+| `comorphism_io_not_supported_in_v1` | type_check | §5.8 |
+| `comorphism_target_class_mismatch` | type_check | §5.8 |
+| `comorphism_source_not_resource` | type_check | §5.8 |
+| `qualified_call_not_decidable` | type_check | §5.9 |
+| `verdict_predicate_non_verdict_operand` | type_check | §5.9 |
+| `bare_verdict_in_boolean_position` | type_check | §5.9 |
+| `institution_runtime_missing` | evaluation | §6.12, §6.13 |
+| `unknown function` | evaluation | §6.13 |
+
+Each error carries a `rule` identifier so consumers can react
+programmatically without parsing the human-readable `message`.
 
 ---
 
@@ -1300,6 +1552,57 @@ RETURN [] {
 }
 ```
 
+### 8.13 Decidable QueryClass with postfix predicate
+
+A `Decidable` `QueryClass` invoked in expression position returns a
+`Verdict`. The postfix predicate projects to Boolean for use in
+`WHERE`:
+
+```
+USING "urn:eigenius:example:DockingResult" AS dock_class
+
+MATCH dock_class(?d) { score: ?s }
+WHERE  dock:within_tolerance(?d, 0.85) HOLDS
+RETURN [] { d: ?d, score: ?s }
+```
+
+`dock:within_tolerance` resolves through the `InstitutionIndex` to a
+`QueryClass` whose `dispatch_role` includes `Decidable`. The
+institution returns `Holds`/`Fails`/`Undecidable`; only `Holds`
+survives the WHERE filter. To accept Undecidable results too, the
+user writes `NOT dock:within_tolerance(?d, 0.85) FAILS`.
+
+### 8.14 Comorphism coercion in a FIBER parameter
+
+A FIBER param coerces a value across an institution boundary by
+running a comorphism inline. `?dock_result` is a resource in the
+docking institution's fiber; the comorphism translates it into the
+class the assay institution's QueryClass expects:
+
+```
+USING INSTITUTION "urn:eigenius:dock:Inst"  AS dock
+USING INSTITUTION "urn:eigenius:assay:Inst" AS assay
+
+MATCH DockingResult(?d) { binding_pose: ?p }
+FIBER assay:CheckBindingAffinity {
+    candidate: dock:dock_to_assay(?d),       // comorphism coercion
+    threshold: 0.85
+} AS ?check
+WHERE ?check HOLDS
+RETURN [] { d: ?d }
+```
+
+The comorphism `dock:dock_to_assay` must declare an `import_format`
+whose `institution_ref` is `assay` (so the coercion lands in the
+right fibre) and whose `to_class` matches the type
+`assay:CheckBindingAffinity` declares for `candidate`. Both
+constraints are checked at type-check time (§5.8 step 9). The
+transformation Component must be Pure or Read in v1 (no IO).
+
+`?check` carries `result_class = Verdict`. The FIBER-bound variable
+can be projected with `?check HOLDS` (§3.8) or matched directly:
+`MATCH ?check { ctor_name: ?c }`.
+
 ---
 
 ## 9. Decisions Log
@@ -1321,10 +1624,13 @@ RETURN [] {
 | Full-IRI FIBER params | Bypass class-scope validation (open-world) | Consistent with §3.4's treatment of full-IRI property references in MATCH; clients can pass extra info the institution opted into |
 | FIBER memoization | Not in v1 — every binding triggers a fresh dispatch | Predictable cost model; future trace-store integration tracked separately |
 | FIBER dispatch order | Textual order, interleaved with MATCH | Forward references caught at type check; lets queries stage results from one institution into the next |
-| Decide-result Undecidable mapping | Maps to `false` in expression position | WHERE-semantics-first: filter out by default. Three-valued semantics needs richer wrapping or a FIBER clause |
-| Comorphism arity | Exactly one source argument | Comorphisms are unary by construction — one source resource → one translated resource. Multi-arg cases pre-package into an embedded resource |
+| Decidable-call result type | `Verdict`, not Boolean | D14 keeps Holds/Fails/Undecidable distinct. Boolean is recovered explicitly with a postfix predicate (`HOLDS`/`FAILS`/`UNDECIDABLE`); the user can no longer accidentally fold Undecidable into "false" |
+| Bare Verdict in Boolean position | Type error `bare_verdict_in_boolean_position` | Forces the user to choose how Undecidable behaves rather than collapsing silently. Pairs with the postfix predicate as the canonical projection |
+| Postfix predicate scope (v1) | Verdict-specific | Generalising to any inductive value's `ctor_name` is future-extensible; v1 keeps the type rule sharp |
+| Comorphism in expression position | Dropped (use FIBER param coercion) | The four-step pipeline (extract → transformation → reify) is the wrong shape for an expression-position function call. FIBER parameter coercion is the natural surface — comorphism feeds a value from one institution into a query in another |
+| Comorphism IO transformation in v1 | Rejected (`comorphism_io_not_supported_in_v1`) | Initial version restricts comorphism transformations to Pure/Read so EigenQL can run the coercion inline without standing up an IO evaluator. The surface is unchanged when this lifts |
 | Qualified-name unrecognised IRIs | Evaluation error `unknown function`, not type error | Allows late registration of institutions and gives the same diagnostic shape as misspelt builtins |
-| Shared `InstitutionRegistry::classify` | One classification table for both ESL compile-time and EigenQL evaluate-time dispatch | Single source of truth — ESL and EigenQL never disagree about which IRIs are decide vs. comorphism |
+| ESL/EigenQL classification | Both consult the `InstitutionIndex`; classification is per-call (Comorphism vs. Decidable QueryClass) rather than via a separate "classify" table | Single source of truth (the index, derived from the chain) supersedes the prior `InstitutionRegistry::classify` route. ESL and EigenQL agree because they read the same data |
 | `**` associativity | Left in current parser (`(a**b)**c`) | Implementation pragmatism; convention is right-associative — users should parenthesise stacked exponents |
 | `IN` / `LIKE` RHS | Any `additive_expr` (not restricted to array / string literal) | Allows variables and computed values; rejected types fail at evaluation |
 
