@@ -25,6 +25,12 @@ pub enum InstitutionError {
     ComputationFailed(String),
     /// The institution requires resources not available in the context.
     MissingDependency(String),
+    /// The institution declares the relevant procedure (export, import,
+    /// or query handler) only by reference; it has no runtime
+    /// implementation for it. Used by the default `Institution::query`
+    /// impl for institutions whose QueryClasses are all
+    /// Component-implemented (D14 §6.2 / §8).
+    NotImplemented(String),
 }
 
 impl fmt::Display for InstitutionError {
@@ -33,6 +39,7 @@ impl fmt::Display for InstitutionError {
             InstitutionError::UnknownType(msg) => write!(f, "unknown type: {msg}"),
             InstitutionError::ComputationFailed(msg) => write!(f, "computation failed: {msg}"),
             InstitutionError::MissingDependency(msg) => write!(f, "missing dependency: {msg}"),
+            InstitutionError::NotImplemented(msg) => write!(f, "not implemented: {msg}"),
         }
     }
 }

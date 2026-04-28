@@ -21,9 +21,9 @@
 //! types in this module file are removed in M3 once D14's `Institution`
 //! trait + dispatch model take over.
 
-pub mod comorphism;
 pub mod error;
 pub mod registry;
+pub mod runtime;
 
 use crate::context::ExecutionContext;
 use crate::institution::error::{InstitutionError, MorphismValidation};

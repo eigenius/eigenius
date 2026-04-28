@@ -1,0 +1,333 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! D14 institution runtime — the trait an institution implements and
+//! the registry the kernel dispatches through.
+//!
+//! [`Institution`] is the minimal trait surface from D14 §8: two
+//! mandatory boundary methods (`extract_typed`, `reify`) and one
+//! optional reasoning method (`query`). Institutions whose QueryClasses
+//! are all Component-implemented never see `query` called.
+//!
+//! [`InstitutionRuntime`] is a typed registry of trait objects keyed
+//! by institution IRI. The kernel uses [`registry::InstitutionIndex`]
+//! to resolve a procedure / class / comorphism IRI to a *declaring
+//! institution IRI*, then this runtime to dispatch the call to the
+//! actual implementation.
+//!
+//! M3 of the D14 plan: trait + runtime + tests, no dispatch sites yet.
+//! M5–M7 wire `Exp::InstitutionInvoke`, `Exp::NativeDecide`, and
+//! AutoOnLoad Load handling onto this surface.
+
+use crate::context::ExecutionContext;
+use crate::institution::error::InstitutionError;
+use crate::nbe::val::Val;
+use crate::ontology::iri::Iri;
+use crate::ontology::resource::Resource;
+use std::collections::BTreeMap;
+
+/// The interface an institution implements at runtime. Three methods,
+/// of which only the two boundary methods are mandatory.
+///
+/// **Boundary methods** (`extract_typed`, `reify`) translate between
+/// the institution's resource form and the typed Mini-TT `Val` form
+/// the kernel manipulates internally. Every institution must implement
+/// these — they are how the kernel reaches the institution's data at
+/// all.
+///
+/// **Reasoning method** (`query`) is the institution's escape hatch
+/// for QueryClasses whose implementation is opaque code (e.g. an
+/// LLM, an external prover). QueryClasses whose `query_handler` IRI
+/// resolves to a kernel-registered Component are dispatched entirely
+/// through Mini-TT (extract → component → reify) and never call this
+/// method. The default impl returns
+/// [`InstitutionError::NotImplemented`].
+///
+/// `procedure_iri` in each method is the dispatch key declared on the
+/// `ExportFormat` / `ImportFormat` / `QueryClass` resource. The same
+/// institution may handle multiple procedures and dispatch internally
+/// on the IRI.
+pub trait Institution: Send + Sync {
+    /// The institution's IRI. Used as the key in
+    /// [`InstitutionRuntime`].
+    fn institution_iri(&self) -> &Iri;
+
+    /// Boundary: extract a typed Mini-TT value from a resource, via a
+    /// procedure declared by an `ExportFormat` resource owned by this
+    /// institution. The returned `Val` must inhabit the type declared
+    /// by the matching `ExportFormat.payload_type`.
+    fn extract_typed(
+        &self,
+        procedure_iri: &Iri,
+        resource: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<Val, InstitutionError>;
+
+    /// Boundary: construct a target-class resource from a typed value,
+    /// via a procedure declared by an `ImportFormat` resource owned by
+    /// this institution. The input `Val` is guaranteed to inhabit the
+    /// type declared by the matching `ImportFormat.payload_type`.
+    fn reify(
+        &self,
+        procedure_iri: &Iri,
+        value: &Val,
+        ctx: &ExecutionContext,
+    ) -> Result<Resource, InstitutionError>;
+
+    /// Apply an institution-defined query — input resource of one
+    /// class, output resource of another. Subsumes the prior
+    /// `validate_morphism` / `decide` / `query` / `discover_morphisms`
+    /// trichotomy; the dispatch role is determined by the QueryClass
+    /// resource, not the trait method.
+    ///
+    /// Default impl: return `NotImplemented`. Institutions whose
+    /// QueryClasses are all Component-implemented need not override.
+    fn query(
+        &self,
+        procedure_iri: &Iri,
+        input: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<Resource, InstitutionError> {
+        let _ = (input, ctx);
+        Err(InstitutionError::NotImplemented(format!(
+            "institution `{}` has no runtime query handler for `{procedure_iri}`",
+            self.institution_iri()
+        )))
+    }
+}
+
+/// Registry of institution implementations keyed by institution IRI.
+///
+/// The runtime is the dispatch table for kernel ↔ institution calls.
+/// It is rebuilt at startup (bootstrap), refreshed on Phase 9a
+/// rehydration, and updated when a new institution is installed via
+/// the Load path.
+///
+/// The runtime does **not** mirror the chain — it carries
+/// implementations only. Declaration data (Institution metadata,
+/// ExportFormat / ImportFormat / QueryClass / Comorphism resources)
+/// lives in the layer chain and is summarised by
+/// [`registry::InstitutionIndex`]. The two are looked up together: the
+/// index resolves a procedure / class IRI to a declaring institution
+/// IRI, the runtime dispatches the call.
+#[derive(Default)]
+pub struct InstitutionRuntime {
+    institutions: BTreeMap<Iri, Box<dyn Institution>>,
+}
+
+impl InstitutionRuntime {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register an institution implementation. Returns an error if an
+    /// institution with the same IRI is already registered — registry
+    /// updates require an explicit replace via [`replace`].
+    pub fn register(&mut self, institution: Box<dyn Institution>) -> Result<(), InstitutionError> {
+        let iri = institution.institution_iri().clone();
+        if self.institutions.contains_key(&iri) {
+            return Err(InstitutionError::ComputationFailed(format!(
+                "institution `{iri}` is already registered"
+            )));
+        }
+        self.institutions.insert(iri, institution);
+        Ok(())
+    }
+
+    /// Replace an existing institution implementation, or insert if
+    /// missing. Used during rehydration when a re-registration is
+    /// expected.
+    pub fn replace(&mut self, institution: Box<dyn Institution>) {
+        let iri = institution.institution_iri().clone();
+        self.institutions.insert(iri, institution);
+    }
+
+    /// Look up an institution by its IRI.
+    pub fn get(&self, iri: &Iri) -> Option<&dyn Institution> {
+        self.institutions.get(iri).map(|b| b.as_ref())
+    }
+
+    /// True if no institutions are registered.
+    pub fn is_empty(&self) -> bool {
+        self.institutions.is_empty()
+    }
+
+    /// Number of registered institutions.
+    pub fn len(&self) -> usize {
+        self.institutions.len()
+    }
+
+    /// All registered institution IRIs, in iteration order.
+    pub fn iris(&self) -> impl Iterator<Item = &Iri> {
+        self.institutions.keys()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::institution::error::InstitutionError;
+    use crate::nbe::val::Val;
+    use std::sync::Arc;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    /// A minimal institution implementation used to exercise the
+    /// trait + runtime dispatch surface. Records every dispatched
+    /// call so the test can assert on the routing.
+    struct TestInstitution {
+        iri: Iri,
+        log: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl Institution for TestInstitution {
+        fn institution_iri(&self) -> &Iri {
+            &self.iri
+        }
+
+        fn extract_typed(
+            &self,
+            procedure_iri: &Iri,
+            _resource: &Resource,
+            _ctx: &ExecutionContext,
+        ) -> Result<Val, InstitutionError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("extract:{procedure_iri}"));
+            Ok(Val::Unit)
+        }
+
+        fn reify(
+            &self,
+            procedure_iri: &Iri,
+            _value: &Val,
+            _ctx: &ExecutionContext,
+        ) -> Result<Resource, InstitutionError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("reify:{procedure_iri}"));
+            Ok(Resource::new_embedded())
+        }
+
+        // Deliberately *do not* override `query` — the test uses the
+        // default impl to confirm `NotImplemented` is returned.
+    }
+
+    fn make_ctx() -> ExecutionContext {
+        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        ExecutionContext::new(layer, "test", crate::context::ExecutionMode::ReadOnly)
+    }
+
+    #[test]
+    fn registers_and_dispatches_through_runtime() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let inst = Box::new(TestInstitution {
+            iri: iri("urn:eigenius:test:inst:dock"),
+            log: Arc::clone(&log),
+        });
+
+        let mut runtime = InstitutionRuntime::new();
+        runtime.register(inst).expect("register");
+
+        assert_eq!(runtime.len(), 1);
+        let dispatched = runtime
+            .get(&iri("urn:eigenius:test:inst:dock"))
+            .expect("registered institution looked up");
+
+        let ctx = make_ctx();
+        let resource = Resource::new_embedded();
+        dispatched
+            .extract_typed(&iri("urn:eigenius:test:proc:p1"), &resource, &ctx)
+            .expect("extract_typed dispatched");
+        dispatched
+            .reify(&iri("urn:eigenius:test:proc:p2"), &Val::Unit, &ctx)
+            .expect("reify dispatched");
+
+        let entries = log.lock().unwrap();
+        assert_eq!(
+            *entries,
+            vec![
+                "extract:urn:eigenius:test:proc:p1".to_string(),
+                "reify:urn:eigenius:test:proc:p2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_register_rejected_without_replace() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut runtime = InstitutionRuntime::new();
+        runtime
+            .register(Box::new(TestInstitution {
+                iri: iri("urn:eigenius:test:inst:dup"),
+                log: Arc::clone(&log),
+            }))
+            .expect("first register");
+
+        let err = runtime
+            .register(Box::new(TestInstitution {
+                iri: iri("urn:eigenius:test:inst:dup"),
+                log: Arc::clone(&log),
+            }))
+            .expect_err("duplicate register should fail");
+        assert!(matches!(err, InstitutionError::ComputationFailed(_)));
+        assert_eq!(runtime.len(), 1);
+    }
+
+    #[test]
+    fn replace_overwrites_existing() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut runtime = InstitutionRuntime::new();
+        runtime
+            .register(Box::new(TestInstitution {
+                iri: iri("urn:eigenius:test:inst:rehydrate"),
+                log: Arc::clone(&log),
+            }))
+            .expect("register");
+        runtime.replace(Box::new(TestInstitution {
+            iri: iri("urn:eigenius:test:inst:rehydrate"),
+            log: Arc::clone(&log),
+        }));
+        assert_eq!(runtime.len(), 1);
+    }
+
+    #[test]
+    fn default_query_returns_not_implemented() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let inst = TestInstitution {
+            iri: iri("urn:eigenius:test:inst:noquery"),
+            log,
+        };
+        let ctx = make_ctx();
+        let err = inst
+            .query(
+                &iri("urn:eigenius:test:proc:any"),
+                &Resource::new_embedded(),
+                &ctx,
+            )
+            .expect_err("default query should error");
+        assert!(matches!(err, InstitutionError::NotImplemented(_)));
+    }
+
+    #[test]
+    fn missing_lookup_returns_none() {
+        let runtime = InstitutionRuntime::new();
+        assert!(runtime.get(&iri("urn:eigenius:test:inst:absent")).is_none());
+        assert!(runtime.is_empty());
+    }
+}
