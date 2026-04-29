@@ -175,6 +175,106 @@ fn branch_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// Outcome of `prune_branch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PruneOutcome {
+    /// Branch was deleted; previous head is returned so the caller
+    /// can pass it to `gc::collect` or otherwise decide what to do
+    /// (e.g., display "branch X pointed at L; layers reachable only
+    /// via X will be reclaimed on the next GC pass").
+    Pruned { previous_head: LayerId },
+    /// Branch didn't exist; nothing was done.
+    NotFound,
+}
+
+/// Safety policy for `prune_branch`.
+pub enum PruneSafety<'a> {
+    /// Reject if any pin in `active_pins` equals the branch's current
+    /// head. The caller is expected to populate this from the task
+    /// store (running tasks' `TaskRecord.layer_head` pins). The check
+    /// is conservative — a task pinned at the branch head suggests
+    /// "someone is actively working off this branch as their starting
+    /// point." Note that even with `Force`, task-pinned layers
+    /// survive subsequent GC because the pin is itself a GC root;
+    /// the safety check is about preserving the branch *label*, not
+    /// preventing data loss.
+    CheckPins(&'a [LayerId]),
+    /// Skip the safety check; just delete the branch ref. The caller
+    /// has decided that any active sessions are on their own.
+    Force,
+}
+
+/// Errors from `prune_branch`.
+#[derive(Debug)]
+pub enum PruneError {
+    /// Branch name fails the regex `[A-Za-z0-9_-]+` (or is too long).
+    InvalidBranchName(String),
+    /// Storage backend reported an error during read or write.
+    Storage(StorageError),
+    /// `CheckPins` policy and the branch's current head matches an
+    /// active task pin. The branch is unchanged.
+    InUse { branch: String, head: LayerId },
+}
+
+impl std::fmt::Display for PruneError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PruneError::InvalidBranchName(n) => write!(f, "invalid branch name: {n:?}"),
+            PruneError::Storage(e) => write!(f, "storage error: {e}"),
+            PruneError::InUse { branch, head } => {
+                write!(
+                    f,
+                    "branch {branch:?} is in use (head {head} matches an active task pin)"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for PruneError {}
+
+/// Remove a branch ref. The layers it pointed at remain in the DAG
+/// until the next `gc::collect` reclaims layers reachable only through
+/// this branch.
+///
+/// **Phase 14g.** Sister operation to `update_branch`; same name
+/// validation, same branch lock for serialization. The actual layer
+/// reclamation is GC's job — pruning a branch just removes the label.
+///
+/// `safety` controls whether the kernel rejects pruning a branch that
+/// matches an active task pin. See [`PruneSafety`] for the policies.
+pub fn prune_branch(
+    name: &str,
+    safety: PruneSafety<'_>,
+    backend: &dyn PersistentBackend,
+) -> Result<PruneOutcome, PruneError> {
+    if !is_valid_branch_name(name) {
+        return Err(PruneError::InvalidBranchName(name.to_string()));
+    }
+
+    let _guard = branch_lock().lock().expect("branch lock poisoned");
+
+    let head = match backend.get_branch(name).map_err(PruneError::Storage)? {
+        Some(h) => h,
+        None => return Ok(PruneOutcome::NotFound),
+    };
+
+    if let PruneSafety::CheckPins(pins) = safety {
+        if pins.contains(&head) {
+            return Err(PruneError::InUse {
+                branch: name.to_string(),
+                head,
+            });
+        }
+    }
+
+    backend.delete_branch(name).map_err(PruneError::Storage)?;
+
+    Ok(PruneOutcome::Pruned {
+        previous_head: head,
+    })
+}
+
 /// Run `f` while holding the branch lock. Phase 14f's GC uses this to
 /// take a consistent snapshot of branch refs at the start of its mark
 /// phase — no `update_branch` can be in flight while `f` runs, so the
@@ -1449,5 +1549,185 @@ mod tests {
             final_head != *a.id() && final_head != *b.id(),
             "branch should point at the merge layer, not a or b"
         );
+    }
+
+    // --- 14g-iii: prune_branch ---
+
+    #[test]
+    fn prune_branch_removes_existing_branch() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        update_branch(
+            "main",
+            None,
+            root.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        let outcome = prune_branch("main", PruneSafety::Force, &backend).unwrap();
+        match outcome {
+            PruneOutcome::Pruned { previous_head } => {
+                assert_eq!(previous_head, *root.id());
+            }
+            PruneOutcome::NotFound => panic!("expected Pruned, got NotFound"),
+        }
+
+        // Branch is gone.
+        assert!(backend.get_branch("main").unwrap().is_none());
+    }
+
+    #[test]
+    fn prune_branch_returns_not_found_for_unknown_branch() {
+        let backend = MemoryPersistentBackend::new();
+        let outcome = prune_branch("never-existed", PruneSafety::Force, &backend).unwrap();
+        assert_eq!(outcome, PruneOutcome::NotFound);
+    }
+
+    #[test]
+    fn prune_branch_check_pins_rejects_in_use() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        update_branch(
+            "main",
+            None,
+            root.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        // Pretend a task is pinned at root (the branch's current head).
+        let pins = vec![root.id().clone()];
+        let err = prune_branch("main", PruneSafety::CheckPins(&pins), &backend).unwrap_err();
+        match err {
+            PruneError::InUse { branch, head } => {
+                assert_eq!(branch, "main");
+                assert_eq!(head, *root.id());
+            }
+            other => panic!("expected InUse, got {other:?}"),
+        }
+
+        // Branch unchanged.
+        assert_eq!(backend.get_branch("main").unwrap(), Some(root.id().clone()));
+    }
+
+    #[test]
+    fn prune_branch_check_pins_allows_when_pin_doesnt_match() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+        let other = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&root),
+            "other",
+            "urn:eigenius:test:o",
+        );
+
+        update_branch(
+            "main",
+            None,
+            root.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        // Task pinned at `other`, branch points at `root` — no conflict.
+        let pins = vec![other.id().clone()];
+        let outcome = prune_branch("main", PruneSafety::CheckPins(&pins), &backend).unwrap();
+        assert!(matches!(outcome, PruneOutcome::Pruned { .. }));
+    }
+
+    #[test]
+    fn prune_branch_force_overrides_pin_check() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        update_branch(
+            "main",
+            None,
+            root.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        // Force ignores task pins.
+        let outcome = prune_branch("main", PruneSafety::Force, &backend).unwrap();
+        assert!(matches!(outcome, PruneOutcome::Pruned { .. }));
+    }
+
+    #[test]
+    fn prune_branch_followed_by_gc_reclaims_orphaned_layers() {
+        // End-to-end: prune the only branch pointing at a layer chain;
+        // a subsequent gc::collect reclaims those layers.
+        use crate::gc::{collect, GcConfig, GcRoots};
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+        let tip = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&root),
+            "tip",
+            "urn:eigenius:test:t",
+        );
+
+        update_branch(
+            "main",
+            None,
+            tip.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        // Verify reachable before prune.
+        assert_eq!(backend.load_topology().unwrap().layer_count(), 2);
+
+        prune_branch("main", PruneSafety::Force, &backend).unwrap();
+
+        // GC with min_age = 0 to skip the recent-commit protection.
+        let stats = collect(
+            GcRoots::from_branches(&backend).unwrap(),
+            &GcConfig {
+                min_age: std::time::Duration::from_secs(0),
+            },
+            storage.cache.as_ref(),
+            storage.bloom_cache.as_ref(),
+            &backend,
+        )
+        .unwrap();
+        assert_eq!(stats.layers_swept, 2, "root + tip both reclaimed");
+        assert_eq!(backend.load_topology().unwrap().layer_count(), 0);
+    }
+
+    /// Helper: commit a child layer above `parent`. Local to the
+    /// prune-branch tests; not extracted because lattice.rs's other
+    /// tests don't need it.
+    fn commit_child(
+        backend: &dyn PersistentBackend,
+        storage: &LayerStorage,
+        parent: Arc<Layer>,
+        name: &str,
+        iri_str: &str,
+    ) -> Arc<Layer> {
+        let mut b = LayerBuilder::new(name, Some(parent));
+        b.add_resource(make_resource(iri_str)).unwrap();
+        commit_layer(b, storage.clone(), backend).unwrap()
     }
 }

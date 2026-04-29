@@ -141,32 +141,22 @@ pub trait ResourceStore: Send + Sync {
 /// A persistent backend usable by the kernel server.
 ///
 /// Combines layer storage, metadata storage (for the seed manifest from
-/// D13 §4.2), and trace-store access into a single trait object the
-/// kernel can carry without depending on any particular storage crate.
-/// The sync-flavored head/chain methods are used at boot, so we keep
-/// them synchronous rather than going async-within-async.
+/// D13 §4.2), branch refs (Phase 14d), and trace-store access into a
+/// single trait object the kernel can carry without depending on any
+/// particular storage crate. Sync surface — the boot path is synchronous
+/// to avoid async-within-async.
+///
+/// **Phase 14g:** the pre-Phase-14 single-`head` pointer (`get_head` /
+/// `set_head` / `load_chain`) is gone. Branches are the only sanctioned
+/// head-pointer surface. `bootstrap_persistent`'s seed-vs-resume
+/// discriminator keys off `branch:main`; chain reconstruction goes
+/// through `load_chain_from(branch_head)`.
 pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
-    /// Read the current head layer ID, if any.
-    fn get_head(&self) -> Result<Option<LayerId>, StorageError>;
-
-    /// Write the current head layer ID atomically.
-    fn set_head(&self, id: &LayerId) -> Result<(), StorageError>;
-
-    /// Reconstruct chain metadata from the persisted head.
-    ///
-    /// Returns the `ChainInfo` describing the chain from root → head, with
-    /// handles and per-layer IRI sets. The caller turns this into a
-    /// `Arc<Layer>` chain via [`crate::layer::build_chain`], passing in
-    /// the cache and an `Arc<dyn ResourceBackend>` (typically obtained by
-    /// upcasting the `Arc<dyn PersistentBackend>` they hold).
-    ///
-    /// Returns `None` if no head is set.
-    fn load_chain(&self) -> Result<Option<ChainInfo>, StorageError>;
-
-    /// Reconstruct chain metadata for a specific head `LayerId`. Used by
-    /// the `at_layer` read-path extension (D21 §3.7) and by resume to
-    /// re-hydrate a task's pinned head. Returns `None` if the target
-    /// layer is absent from the store.
+    /// Reconstruct chain metadata for a specific head `LayerId`. Used
+    /// by `bootstrap_persistent`'s resume path (loading from
+    /// `branch:main`), by the `at_layer` read-path extension (D21 §3.7),
+    /// and by resume to re-hydrate a task's pinned head. Returns
+    /// `None` if the target layer is absent from the store.
     fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<ChainInfo>, StorageError>;
 
     /// Store a layer (metadata + resources + chain pointer + topology

@@ -584,29 +584,47 @@ impl EigeniusService {
                 severity: "error".to_string(),
             });
         }
-        if let Err(e) = backend.set_head(layer.id()) {
-            tracing::warn!(
-                { field::OPERATION } = operation::LAYER_COMMIT,
-                { field::ERROR_KIND } = "persist_head_failed",
-                { field::LAYER_ID } = %layer.id(),
-                { field::ERROR_MESSAGE } = %e,
-                "failed to advance persisted head"
-            );
-            return Some(ValidationError {
-                resource_iri: String::new(),
-                property_iri: String::new(),
-                rule: "persist_head".to_string(),
-                message: format!("{e}"),
-                severity: "error".to_string(),
-            });
+        // Phase 14g: advance `branch:main` to the new layer via the
+        // lattice's CAS primitive. The expected old head is the new
+        // layer's parent (we just committed a child of the previous
+        // head). Single-branch model for now; ExecutionContext-aware
+        // current-branch tracking is a follow-up.
+        let expected_old = layer.parent().map(|p| p.id().clone());
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        match crate::lattice::update_branch(
+            "main",
+            expected_old,
+            layer.id().clone(),
+            crate::lattice::ConflictPolicy::AllowTrivial,
+            storage,
+            backend.as_ref(),
+        ) {
+            Ok(_) => {
+                tracing::debug!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::LAYER_ID } = %layer.id(),
+                    persisted = true,
+                    "layer persisted to backend and branch:main advanced"
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::ERROR_KIND } = "branch_update_failed",
+                    { field::LAYER_ID } = %layer.id(),
+                    { field::ERROR_MESSAGE } = %e,
+                    "failed to advance branch:main"
+                );
+                Some(ValidationError {
+                    resource_iri: String::new(),
+                    property_iri: String::new(),
+                    rule: "advance_branch".to_string(),
+                    message: format!("{e}"),
+                    severity: "error".to_string(),
+                })
+            }
         }
-        tracing::debug!(
-            { field::OPERATION } = operation::LAYER_COMMIT,
-            { field::LAYER_ID } = %layer.id(),
-            persisted = true,
-            "layer persisted to backend and head advanced"
-        );
-        None
     }
 
     /// Parse resources from CBOR, JSON, or ESL based on content_type.

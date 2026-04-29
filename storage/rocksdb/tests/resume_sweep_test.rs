@@ -94,7 +94,8 @@ async fn resume_sweep_completes_injected_running_task() {
     }
     let layer = ctx.commit("test_setup").unwrap();
     backend.store_layer(&layer).unwrap();
-    backend.set_head(layer.id()).unwrap();
+    // Phase 14g: branches replace the legacy single-head pointer.
+    backend.put_branch("main", layer.id()).unwrap();
     let pinned_head = layer.id().clone();
 
     // Inject a Running task pointing at that program.

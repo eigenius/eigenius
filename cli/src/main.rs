@@ -765,10 +765,18 @@ fn cmd_db(command: DbCommands) {
             }
             println!("Total resources: {total_resources}");
 
-            match store.get_head() {
-                Ok(Some(head)) => println!("Head: {head}"),
-                Ok(None) => println!("Head: (none)"),
-                Err(e) => println!("Head: error ({e})"),
+            // Phase 14g: branches replace the single-head pointer.
+            // List all known branches and their heads.
+            use eigenius_kernel::storage::PersistentBackend;
+            match PersistentBackend::list_branches(&store) {
+                Ok(branches) if branches.is_empty() => println!("Branches: (none)"),
+                Ok(branches) => {
+                    println!("Branches:");
+                    for (name, head) in branches {
+                        println!("  {name}: {head}");
+                    }
+                }
+                Err(e) => println!("Branches: error ({e})"),
             }
         }
         DbCommands::Compact { path } => {

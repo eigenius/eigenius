@@ -71,27 +71,6 @@ impl RocksStore {
         self.db.compact_range::<&[u8], &[u8]>(None, None);
     }
 
-    /// Store the head layer ID.
-    pub fn set_head(&self, layer_id: &LayerId) -> Result<(), StorageError> {
-        self.db
-            .put(b"head", hex::encode(layer_id.0))
-            .map_err(|e| StorageError::Internal(format!("failed to set head: {e}")))
-    }
-
-    /// Get the current head layer ID.
-    pub fn get_head(&self) -> Result<Option<LayerId>, StorageError> {
-        match self.db.get(b"head") {
-            Ok(Some(bytes)) => {
-                let hex_str = String::from_utf8(bytes)
-                    .map_err(|e| StorageError::Internal(format!("invalid head value: {e}")))?;
-                let id = hex_to_layer_id(&hex_str)?;
-                Ok(Some(id))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!("failed to get head: {e}"))),
-        }
-    }
-
     /// Store a layer's parent chain pointer.
     fn set_chain(
         &self,
@@ -544,21 +523,6 @@ impl ResourceBackend for RocksStore {
 // --- PersistentBackend (D13) ---
 
 impl eigenius_kernel::storage::PersistentBackend for RocksStore {
-    fn get_head(&self) -> Result<Option<LayerId>, StorageError> {
-        RocksStore::get_head(self)
-    }
-
-    fn set_head(&self, id: &LayerId) -> Result<(), StorageError> {
-        RocksStore::set_head(self, id)
-    }
-
-    fn load_chain(&self) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
-        match self.get_head()? {
-            Some(head) => self.build_chain_info(&head),
-            None => Ok(None),
-        }
-    }
-
     fn load_chain_from(
         &self,
         head_id: &LayerId,
@@ -931,24 +895,11 @@ mod tests {
         assert_eq!(ids.len(), 2);
     }
 
-    #[tokio::test]
-    async fn head_pointer() {
-        let (store, _dir) = open_temp_store();
-
-        assert!(store.get_head().unwrap().is_none());
-
-        let mut builder = LayerBuilder::new("test", None);
-        builder
-            .add_resource(make_resource("urn:eigenius:core:x", vec![]))
-            .unwrap();
-        let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
-        let id = layer.id().clone();
-
-        store.store_layer(&layer).await.unwrap();
-        store.set_head(&id).unwrap();
-
-        assert_eq!(store.get_head().unwrap().unwrap(), id);
-    }
+    // Phase 14g: the legacy `head_pointer` test was removed. The
+    // pre-Phase-14 single-head pointer (`set_head`/`get_head`) is gone;
+    // branches via `put_branch`/`get_branch` are the only head-pointer
+    // surface. Branch-ref round-trip is exercised by
+    // `cbor_coverage_tests::branch_refs_round_trip` below.
 
     #[tokio::test]
     async fn persistence_across_reopen() {
@@ -970,16 +921,19 @@ mod tests {
             let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
             let id = layer.id().clone();
             store.store_layer(&layer).await.unwrap();
-            store.set_head(&id).unwrap();
+            // Phase 14g: track the head via `branch:main` instead of
+            // the removed `set_head`.
+            eigenius_kernel::storage::PersistentBackend::put_branch(&store, "main", &id).unwrap();
         }
 
         // Reopen and verify
         {
             let store = RocksStore::open(dir.path()).unwrap();
-            let head = store.get_head().unwrap();
-            assert!(head.is_some());
+            let head = eigenius_kernel::storage::PersistentBackend::get_branch(&store, "main")
+                .unwrap()
+                .expect("branch:main survives reopen");
 
-            let layer = store.load_layer(&head.unwrap()).await.unwrap();
+            let layer = store.load_layer(&head).await.unwrap();
             assert_eq!(layer.name(), "persisted");
             assert!(layer
                 .get_resource(&iri("urn:eigenius:core:persistent"))
@@ -1013,10 +967,15 @@ mod tests {
         let child = child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
         let child_id = child.id().clone();
         store.store_layer(&child).await.unwrap();
-        store.set_head(&child_id).unwrap();
+        // Phase 14g: track head via `branch:main`; load chain via
+        // `load_chain_from(branch_head)` rather than the removed
+        // no-arg `load_chain()`.
+        eigenius_kernel::storage::PersistentBackend::put_branch(&store, "main", &child_id).unwrap();
 
-        // Reconstruct chain via the new ChainInfo + build_chain pattern.
-        let info = eigenius_kernel::storage::PersistentBackend::load_chain(&store)
+        let main_head = eigenius_kernel::storage::PersistentBackend::get_branch(&store, "main")
+            .unwrap()
+            .expect("branch:main present");
+        let info = eigenius_kernel::storage::PersistentBackend::load_chain_from(&store, &main_head)
             .unwrap()
             .expect("chain present");
         let storage = eigenius_kernel::layer::LayerStorage::in_memory();
@@ -1416,7 +1375,8 @@ mod tests {
 
             PB::store_layer(&*store_arc, &root).unwrap();
             PB::store_layer(&*store_arc, &child).unwrap();
-            store_arc.set_head(&child_id).unwrap();
+            // Phase 14g: head pointer via `branch:main`.
+            PB::put_branch(&*store_arc, "main", &child_id).unwrap();
 
             // Drop the original layer Arcs so their throwaway caches go away.
             drop(root);
@@ -1424,7 +1384,10 @@ mod tests {
 
             // Reconstruct the chain pointing at the live RocksStore — fresh
             // cache, real backend.
-            let info = PB::load_chain(&*store_arc).unwrap().expect("chain present");
+            let main_head = PB::get_branch(&*store_arc, "main").unwrap().unwrap();
+            let info = PB::load_chain_from(&*store_arc, &main_head)
+                .unwrap()
+                .expect("chain present");
             // Storage backed by the live RocksStore — fresh resource cache
             // (cold), bloom cache backed by the same store so cold-resolve
             // exercises both backend probes.

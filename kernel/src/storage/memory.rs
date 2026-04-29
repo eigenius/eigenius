@@ -54,18 +54,19 @@ struct MemoryState {
     resources: BTreeMap<(LayerId, Iri), Resource>,
     /// `LayerId → LayerHandle` — topology entries.
     topology: BTreeMap<LayerId, LayerHandle>,
-    /// `LayerId → parent_id` — single-parent chain edges. Multi-parent
-    /// merges (Phase 14e+) will need to use `LayerHandle::parents` instead.
+    /// `LayerId → parent_id` — single-parent (canonical) chain edges
+    /// for `load_chain_from`. The full multi-parent record lives on
+    /// `LayerHandle.parents` in `topology`.
     chain: BTreeMap<LayerId, Option<LayerId>>,
-    /// Persisted head pointer.
-    head: Option<LayerId>,
     /// Generic key/value metadata (D21 task storage substrate).
     meta: BTreeMap<String, Vec<u8>>,
     /// `LayerId → BloomFilter` — D23 §5.2 per-layer shadowing blooms.
     /// `store_layer` builds these from the layer's `defined_iris` and
     /// inserts here; `load_bloom` reads back.
     blooms: BTreeMap<LayerId, BloomFilter>,
-    /// Branch refs (D23 §5.5 / Phase 14d).
+    /// Branch refs (D23 §5.5 / Phase 14d). Phase 14g made these the
+    /// only head-pointer surface — the legacy single-`head` field is
+    /// gone.
     branches: BTreeMap<String, LayerId>,
 }
 
@@ -76,7 +77,6 @@ impl MemoryPersistentBackend {
                 resources: BTreeMap::new(),
                 topology: BTreeMap::new(),
                 chain: BTreeMap::new(),
-                head: None,
                 meta: BTreeMap::new(),
                 blooms: BTreeMap::new(),
                 branches: BTreeMap::new(),
@@ -122,23 +122,6 @@ impl ResourceBackend for MemoryPersistentBackend {
 }
 
 impl PersistentBackend for MemoryPersistentBackend {
-    fn get_head(&self) -> Result<Option<LayerId>, StorageError> {
-        Ok(self.inner.read().expect("poisoned").head.clone())
-    }
-
-    fn set_head(&self, id: &LayerId) -> Result<(), StorageError> {
-        self.inner.write().expect("poisoned").head = Some(id.clone());
-        Ok(())
-    }
-
-    fn load_chain(&self) -> Result<Option<ChainInfo>, StorageError> {
-        let head = self.inner.read().expect("poisoned").head.clone();
-        match head {
-            Some(h) => self.load_chain_from(&h),
-            None => Ok(None),
-        }
-    }
-
     fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<ChainInfo>, StorageError> {
         let state = self.inner.read().expect("poisoned");
         if !state.topology.contains_key(head_id) {

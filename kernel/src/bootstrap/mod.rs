@@ -177,17 +177,21 @@ pub fn bootstrap_with_storage(
 ///   then commit each of the five embedded ontology layers
 ///   (core → program → reflection → institution → notebook) to the
 ///   backend in parent→child order, record the seed manifest, and
-///   point the head at the notebook layer.
-/// - **RESUME** (backend has a head): verify the stored seed manifest
-///   matches the current embedded ontologies' SHA-256 hashes; if it
-///   does, rehydrate the layer chain from the backend. If it doesn't,
-///   return a `ManifestDrift` error with actionable detail.
+///   create the `main` branch pointing at the notebook layer.
+/// - **RESUME** (backend has a `main` branch): verify the stored seed
+///   manifest matches the current embedded ontologies' SHA-256 hashes;
+///   if it does, rehydrate the layer chain from the backend. If it
+///   doesn't, return a `ManifestDrift` error with actionable detail.
+///
+/// Phase 14g: presence of `branch:main` is the seed-vs-resume
+/// discriminator. The pre-Phase-14 single-`head` pointer is gone;
+/// branches are the only sanctioned head-pointer surface.
 pub fn bootstrap_persistent(
     backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
     match backend
-        .get_head()
-        .map_err(|e| BootstrapError::Storage(format!("get_head: {e}")))?
+        .get_branch("main")
+        .map_err(|e| BootstrapError::Storage(format!("get_branch(main): {e}")))?
     {
         Some(_) => resume_from_backend(backend),
         None => seed_backend(backend),
@@ -257,9 +261,21 @@ fn seed_backend(
             .store_layer(layer)
             .map_err(|e| BootstrapError::Storage(format!("store_layer {}: {e}", layer.name())))?;
     }
-    backend
-        .set_head(ctx.head().id())
-        .map_err(|e| BootstrapError::Storage(format!("set_head: {e}")))?;
+
+    // Phase 14g: create the `main` branch pointing at the notebook layer.
+    // This is the only head-pointer surface from Phase 14 onward —
+    // bootstrap_persistent's seed-vs-resume discriminator above keys off
+    // the presence of `branch:main`.
+    let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
+    crate::lattice::update_branch(
+        "main",
+        None,
+        ctx.head().id().clone(),
+        crate::lattice::ConflictPolicy::AllowTrivial,
+        storage,
+        backend.as_ref(),
+    )
+    .map_err(|e| BootstrapError::Storage(format!("create main branch: {e}")))?;
 
     backend
         .put_meta(SEED_MANIFEST_KEY, &current_manifest())
@@ -297,12 +313,21 @@ fn resume_from_backend(
         }
     }
 
-    let info = backend
-        .load_chain()
-        .map_err(|e| BootstrapError::Storage(format!("load_chain: {e}")))?
+    // Phase 14g: load chain from `branch:main` head. The discriminator
+    // in `bootstrap_persistent` already verified the branch exists.
+    let main_head = backend
+        .get_branch("main")
+        .map_err(|e| BootstrapError::Storage(format!("get_branch(main): {e}")))?
         .ok_or_else(|| {
-            BootstrapError::Storage("head pointer set but chain load returned None".into())
+            BootstrapError::Storage(
+                "branch:main present in discriminator but absent in resume — concurrent delete?"
+                    .into(),
+            )
         })?;
+    let info = backend
+        .load_chain_from(&main_head)
+        .map_err(|e| BootstrapError::Storage(format!("load_chain_from: {e}")))?
+        .ok_or_else(|| BootstrapError::Storage("branch:main pointed at unknown layer".into()))?;
 
     // Storage backed by the live `PersistentBackend`. Cold-cache reads
     // hit RocksDB on demand; no separate warming step needed.
