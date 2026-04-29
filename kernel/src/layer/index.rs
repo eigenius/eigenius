@@ -35,8 +35,8 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
 use crate::storage::StorageError;
-use std::collections::BTreeSet;
-use std::sync::RwLock;
+use std::collections::{BTreeSet, VecDeque};
+use std::sync::{Arc, RwLock};
 
 /// A single subject-predicate-object triple, borrowed from a `Resource`'s
 /// property values at indexing time. All three positions are IRIs in v1
@@ -484,6 +484,131 @@ pub mod index_keys {
     }
 }
 
+/// Collect every ancestor `LayerId` reachable from `head` via parent
+/// pointers, including `head` itself.
+///
+/// Used by [`scan_chain`] to filter index candidates to layers in the
+/// head's chain. The cost is one BFS over the in-memory `Arc<Layer>`
+/// topology — no backend reads. For typical workloads (10–50 layer
+/// chains, occasional Phase 14e merges with a few extra parents) this
+/// is microseconds.
+pub fn collect_ancestors(head: &Layer) -> BTreeSet<LayerId> {
+    let mut visited = BTreeSet::<LayerId>::new();
+    visited.insert(head.id().clone());
+    let mut queue: VecDeque<Arc<Layer>> = VecDeque::new();
+    for parent in head.parents() {
+        queue.push_back(Arc::clone(parent));
+    }
+    while let Some(layer) = queue.pop_front() {
+        if !visited.insert(layer.id().clone()) {
+            continue;
+        }
+        for parent in layer.parents() {
+            queue.push_back(Arc::clone(parent));
+        }
+    }
+    visited
+}
+
+/// Bloom-walk shadow check: is `subject` redefined in any ancestor of
+/// `head` other than `defining_layer` itself?
+///
+/// Walks `head` and its ancestors via parent pointers; for each visited
+/// layer (skipping `defining_layer`) consults the per-layer shadowing
+/// bloom and falls through to `get_resource` on a positive bloom. The
+/// first confirmed hit returns `true`.
+///
+/// **Multi-parent care.** With Phase 14e merges, the walk may visit
+/// layers parallel to `defining_layer` (e.g., the other branch of a
+/// merge). In valid trivial merges the parallel branch's contributions
+/// are unioned into the merge layer's `defined_iris`; the shadow
+/// check correctly drops the older entry as "shadowed by the merge"
+/// even though the underlying resource value is identical. The
+/// dedup outcome (one subject in the result set) is correct in either
+/// reading.
+pub fn is_shadowed(head: &Layer, defining_layer: &LayerId, subject: &Iri) -> bool {
+    if head.id() == defining_layer {
+        // Candidate is at head itself — nothing above to shadow it.
+        return false;
+    }
+    // Probe head, then BFS its parents via Arc clones.
+    if layer_might_define(head, subject) {
+        return true;
+    }
+    let mut visited = BTreeSet::<LayerId>::new();
+    visited.insert(head.id().clone());
+    let mut queue: VecDeque<Arc<Layer>> = VecDeque::new();
+    for parent in head.parents() {
+        queue.push_back(Arc::clone(parent));
+    }
+    while let Some(layer) = queue.pop_front() {
+        if !visited.insert(layer.id().clone()) {
+            continue;
+        }
+        if layer.id() == defining_layer {
+            // Don't probe the defining layer itself, and don't enqueue
+            // its parents — anything below `defining_layer` can't
+            // shadow a candidate at `defining_layer`.
+            continue;
+        }
+        if layer_might_define(&layer, subject) {
+            return true;
+        }
+        for parent in layer.parents() {
+            queue.push_back(Arc::clone(parent));
+        }
+    }
+    false
+}
+
+fn layer_might_define(layer: &Layer, subject: &Iri) -> bool {
+    let maybe_present = match layer.bloom_cache().get_or_load(layer.id()) {
+        Ok(Some(bloom)) => bloom.might_contain(subject),
+        _ => true, // Defensive: missing bloom → treat as maybe-present.
+    };
+    maybe_present && layer.get_resource(subject).is_some()
+}
+
+/// Indexed scan over the layer chain rooted at `head`. Returns every
+/// distinct subject `s` such that `(s, predicate, object)` is defined
+/// in some ancestor of `head` and not shadowed by a redefinition above
+/// the defining layer.
+///
+/// Algorithm (D23 §5.9, Phase 14h plan):
+/// 1. Build `head`'s ancestor set via [`collect_ancestors`].
+/// 2. Iterate the global POS index for `(predicate, object)`.
+/// 3. Drop entries whose defining layer isn't in the chain.
+/// 4. Drop entries shadowed by a redefinition closer to `head`
+///    (per [`is_shadowed`]).
+/// 5. Return the remaining subjects, deduplicated.
+///
+/// Returns an empty `Vec` on storage errors mid-scan — the index is a
+/// best-effort accelerator and a transient failure should not propagate
+/// up as a query error. Callers that want strict failure semantics
+/// should bypass this helper and walk the iterator directly.
+pub fn scan_chain(head: &Layer, predicate: &Iri, object: &Iri) -> Vec<Iri> {
+    let chain = collect_ancestors(head);
+    let mut subjects: BTreeSet<Iri> = BTreeSet::new();
+    for entry in head
+        .storage()
+        .triple_index
+        .scan_predicate_object(predicate, object)
+    {
+        let (subject, defining) = match entry {
+            Ok(pair) => pair,
+            Err(_) => continue,
+        };
+        if !chain.contains(&defining) {
+            continue;
+        }
+        if is_shadowed(head, &defining, &subject) {
+            continue;
+        }
+        subjects.insert(subject);
+    }
+    subjects.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -841,6 +966,164 @@ mod tests {
 
         let triples = extract_indexable_triples(&layer);
         assert!(triples.is_empty());
+    }
+
+    // --- Tests for scan_chain / is_shadowed (Phase 14h commit 3 prep) ---
+
+    /// Build a chain `core_props_layer → instances_layer` where:
+    /// - Core layer defines `is_a` Property with data_type=resource_array.
+    /// - Instance layer defines `rex` and `buddy` as instances of `Dog`,
+    ///   and `mittens` as an instance of `Cat`.
+    ///
+    /// Returns `(head_arc, layer_id_of_instances)`.
+    fn build_simple_chain() -> (Arc<Layer>, LayerId) {
+        let storage = LayerStorage::in_memory();
+        let mut core_builder = LayerBuilder::new("core", None);
+        core_builder
+            .add_resource(property_def(wk::IS_A, wk::RESOURCE_ARRAY))
+            .unwrap();
+        let core = Arc::new(core_builder.build(storage.clone()));
+
+        // Use the helper to populate the index — in-memory backend
+        // doesn't go through `store_layer` here, so we simulate
+        // commit-time index population by calling the trait directly.
+        let owned = extract_indexable_triples(&core);
+        let borrowed: Vec<Triple> = owned.iter().map(|t| t.as_borrowed()).collect();
+        storage
+            .triple_index
+            .extend_layer(core.id(), &borrowed)
+            .unwrap();
+
+        let mut inst_builder = LayerBuilder::new("instances", Some(Arc::clone(&core)));
+        let mut rex = Resource::new(iri("urn:eigenius:test:rex"));
+        rex.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String("urn:eigenius:test:Dog".into())]),
+        );
+        inst_builder.add_resource(rex).unwrap();
+        let mut buddy = Resource::new(iri("urn:eigenius:test:buddy"));
+        buddy.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String("urn:eigenius:test:Dog".into())]),
+        );
+        inst_builder.add_resource(buddy).unwrap();
+        let mut mittens = Resource::new(iri("urn:eigenius:test:mittens"));
+        mittens.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String("urn:eigenius:test:Cat".into())]),
+        );
+        inst_builder.add_resource(mittens).unwrap();
+        let instances = Arc::new(inst_builder.build(storage.clone()));
+        let inst_id = instances.id().clone();
+
+        let owned = extract_indexable_triples(&instances);
+        let borrowed: Vec<Triple> = owned.iter().map(|t| t.as_borrowed()).collect();
+        storage
+            .triple_index
+            .extend_layer(instances.id(), &borrowed)
+            .unwrap();
+
+        (instances, inst_id)
+    }
+
+    #[test]
+    fn collect_ancestors_includes_head_and_walks_parents() {
+        let (head, inst_id) = build_simple_chain();
+        let ancestors = collect_ancestors(&head);
+        assert!(ancestors.contains(&inst_id));
+        // Two layers in the chain (core + instances).
+        assert_eq!(ancestors.len(), 2);
+    }
+
+    #[test]
+    fn scan_chain_returns_subjects_at_head() {
+        let (head, _) = build_simple_chain();
+        let dogs = scan_chain(&head, &iri(wk::IS_A), &iri("urn:eigenius:test:Dog"));
+        let dogs_set: BTreeSet<Iri> = dogs.into_iter().collect();
+        assert_eq!(dogs_set.len(), 2);
+        assert!(dogs_set.contains(&iri("urn:eigenius:test:rex")));
+        assert!(dogs_set.contains(&iri("urn:eigenius:test:buddy")));
+    }
+
+    #[test]
+    fn scan_chain_returns_empty_for_unknown_class() {
+        let (head, _) = build_simple_chain();
+        let nothing = scan_chain(&head, &iri(wk::IS_A), &iri("urn:eigenius:test:Unicorn"));
+        assert!(nothing.is_empty());
+    }
+
+    #[test]
+    fn shadow_check_drops_redefined_subjects() {
+        // Build core + main + feature where `feature` redefines `rex`.
+        let storage = LayerStorage::in_memory();
+        let mut core_builder = LayerBuilder::new("core", None);
+        core_builder
+            .add_resource(property_def(wk::IS_A, wk::RESOURCE_ARRAY))
+            .unwrap();
+        let core = Arc::new(core_builder.build(storage.clone()));
+        let owned = extract_indexable_triples(&core);
+        storage
+            .triple_index
+            .extend_layer(
+                core.id(),
+                &owned.iter().map(|t| t.as_borrowed()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+
+        let mut main_builder = LayerBuilder::new("main", Some(Arc::clone(&core)));
+        let mut rex_dog = Resource::new(iri("urn:eigenius:test:rex"));
+        rex_dog.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String("urn:eigenius:test:Dog".into())]),
+        );
+        main_builder.add_resource(rex_dog).unwrap();
+        let main = Arc::new(main_builder.build(storage.clone()));
+        let owned = extract_indexable_triples(&main);
+        storage
+            .triple_index
+            .extend_layer(
+                main.id(),
+                &owned.iter().map(|t| t.as_borrowed()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+
+        let mut feature_builder = LayerBuilder::new("feature", Some(Arc::clone(&main)));
+        let mut rex_cat = Resource::new(iri("urn:eigenius:test:rex"));
+        rex_cat.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String("urn:eigenius:test:Cat".into())]),
+        );
+        feature_builder.add_resource(rex_cat).unwrap();
+        let feature = Arc::new(feature_builder.build(storage.clone()));
+        let owned = extract_indexable_triples(&feature);
+        storage
+            .triple_index
+            .extend_layer(
+                feature.id(),
+                &owned.iter().map(|t| t.as_borrowed()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+
+        // At head=feature, rex is_a Cat (Dog is shadowed by feature's redef).
+        let dogs = scan_chain(&feature, &iri(wk::IS_A), &iri("urn:eigenius:test:Dog"));
+        assert!(
+            dogs.is_empty(),
+            "rex_is_a_Dog should be shadowed at feature head, got {:?}",
+            dogs
+        );
+        let cats = scan_chain(&feature, &iri(wk::IS_A), &iri("urn:eigenius:test:Cat"));
+        assert_eq!(cats, vec![iri("urn:eigenius:test:rex")]);
+
+        // At head=main, rex is_a Dog (no shadow).
+        let dogs_at_main = scan_chain(&main, &iri(wk::IS_A), &iri("urn:eigenius:test:Dog"));
+        assert_eq!(dogs_at_main, vec![iri("urn:eigenius:test:rex")]);
+    }
+
+    #[test]
+    fn is_shadowed_at_head_is_false() {
+        let (head, head_id) = build_simple_chain();
+        // A candidate at head itself can never be shadowed.
+        assert!(!is_shadowed(&head, &head_id, &iri("urn:eigenius:test:rex")));
     }
 
     #[test]

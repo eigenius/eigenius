@@ -40,8 +40,8 @@ pub use cache::{
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{
-    extract_indexable_triples, index_keys, is_indexable_predicate, IndexStats, MemoryTripleIndex,
-    OwnedTriple, Triple, TripleIndex,
+    collect_ancestors, extract_indexable_triples, index_keys, is_indexable_predicate, is_shadowed,
+    scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
 pub use storage::LayerStorage;
 
@@ -485,13 +485,37 @@ impl LayerBuilder {
         // on-disk bloom match.
         let bloom = BloomFilter::for_iris(&defined_iris);
         storage.bloom_cache.put(id.clone(), Arc::new(bloom));
-        Layer {
+        let layer = Layer {
             id,
             name: self.name,
             parents: self.parents,
             defined_iris,
             storage,
+        };
+        // Phase 14h: pre-populate the triple index from the layer's
+        // indexable triples. `extract_indexable_triples` consults each
+        // predicate's `Property.data_type` via `Layer::resolve`, which
+        // walks the cache (just populated above) and parents — so this
+        // call is self-contained and doesn't touch the backend.
+        // Mirrors the bloom precomputation: same entries the persistent
+        // backend would write at commit, populated up front so reads
+        // against a freshly-built (but not-yet-persisted) layer work
+        // identically to reads after restart.
+        let owned = crate::layer::index::extract_indexable_triples(&layer);
+        if !owned.is_empty() {
+            let borrowed: Vec<crate::layer::index::Triple> =
+                owned.iter().map(|t| t.as_borrowed()).collect();
+            // `extend_layer` is idempotent by `(layer, p, o, s)` — if
+            // the persistent backend's `store_layer` later replays the
+            // same writes inside its WriteBatch, the second write is a
+            // no-op at the index's logical level (RocksDB will overwrite
+            // the same key with the same empty value).
+            let _ = layer
+                .storage
+                .triple_index
+                .extend_layer(layer.id(), &borrowed);
         }
+        layer
     }
 
     /// Compute the content-and-parent-addressed `LayerId`.

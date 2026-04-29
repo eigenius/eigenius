@@ -30,9 +30,7 @@ mod triple_index;
 use async_trait::async_trait;
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
-use eigenius_kernel::layer::{
-    extract_indexable_triples, BloomFilter, Layer, LayerHandle, LayerId, LayerTopology,
-};
+use eigenius_kernel::layer::{BloomFilter, Layer, LayerHandle, LayerId, LayerTopology};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
@@ -579,14 +577,6 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         ciborium::into_writer(&bloom, &mut bloom_bytes)
             .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
 
-        // Phase 14h: extract indexable triples before opening the
-        // batch. Extraction reads `Property.data_type` defs through
-        // `Layer::resolve`, which uses the layer's pre-populated cache
-        // for self-defined props and walks parents otherwise. Both
-        // paths are read-only and need no batch awareness.
-        let owned_triples = extract_indexable_triples(layer);
-        let triples: Vec<_> = owned_triples.iter().map(|t| t.as_borrowed()).collect();
-
         let mut batch = rocksdb::WriteBatch::default();
 
         let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
@@ -608,13 +598,11 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         };
         batch.put(chain_key.as_bytes(), chain_value.as_bytes());
 
-        // Phase 14h: layer + index entries land in one atomic write per
-        // D23 §6.3. Skipped when there are no indexable triples (root
-        // bootstrap layers, layers with only literal-typed properties).
-        if !triples.is_empty() {
-            self.triple_index
-                .extend_into_batch(&mut batch, &id, &triples);
-        }
+        // Phase 14h: index entries are populated by `LayerBuilder::build`
+        // (same precomputation pattern as the bloom). The persistent
+        // index is shared (`RocksStore.triple_index` ↔ `LayerStorage.triple_index`)
+        // so the build-time `extend_layer` already wrote them to RocksDB.
+        // No duplicate population here.
 
         self.db
             .write(batch)

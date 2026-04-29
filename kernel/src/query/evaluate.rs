@@ -16,7 +16,7 @@
 
 use crate::context::ExecutionContext;
 use crate::institution::InstitutionRegistry;
-use crate::layer::Layer;
+use crate::layer::{is_indexable_predicate, scan_chain, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
@@ -24,7 +24,7 @@ use crate::query::ast::*;
 use crate::query::document::QueryFingerprint;
 use crate::query::error::QueryError;
 use crate::query::functions::{self, like_match, to_f64, values_compare, values_equal};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Runtime resources available to FIBER clause evaluation. `None` means
 /// FIBER clauses will be rejected (e.g. CLI local-only queries that have
@@ -488,6 +488,14 @@ fn apply_negated_pattern(
 }
 
 /// Collect candidate resources for a pattern.
+///
+/// Phase 14h: when the pattern's class is bound and the `is_a` predicate
+/// is indexable (its `Property.data_type` is `resource` or
+/// `resource_array`), this uses [`scan_chain`] to enumerate matching
+/// subjects via the per-layer triple index instead of the full chain
+/// scan that pre-14h code used. The scan path remains as a fallback for
+/// untyped patterns and for setups where `is_a` somehow lost its
+/// indexable data_type.
 fn collect_candidates<'a>(
     pattern: &Pattern,
     layer: &'a Layer,
@@ -515,21 +523,35 @@ fn collect_candidates<'a>(
         }
     }
 
-    // Collect from layer chain + FIBER overlay.
-    let all = layer.iter_all_resources();
     let class_iri = pattern.class.as_ref().and_then(|n| resolve_name(n, layer));
+    let is_a_iri = Iri::parse(wk::IS_A).expect("well-known is_a IRI");
 
-    let mut candidates: Vec<(Option<Iri>, BTreeMap<Iri, Value>)> = all
-        .into_iter()
-        .filter(|(_, resource)| {
-            if let Some(ref class) = class_iri {
-                resource.is_instance_of(class) || is_subclass_instance(resource, class, layer)
+    // Indexed path: bound class + indexable is_a predicate.
+    let mut candidates: Vec<(Option<Iri>, BTreeMap<Iri, Value>)> =
+        if let Some(ref class) = class_iri {
+            if is_indexable_predicate(layer, &is_a_iri) {
+                let class_closure = class_with_subclass_closure(class, layer);
+                let mut subjects: BTreeSet<Iri> = BTreeSet::new();
+                for concrete in &class_closure {
+                    for s in scan_chain(layer, &is_a_iri, concrete) {
+                        subjects.insert(s);
+                    }
+                }
+                subjects
+                    .into_iter()
+                    .filter_map(|iri| {
+                        layer
+                            .resolve(&iri)
+                            .map(|r| (Some(iri), r.properties().clone()))
+                    })
+                    .collect()
             } else {
-                true // Untyped pattern matches all
+                collect_candidates_via_scan(layer, Some(class))
             }
-        })
-        .map(|(iri, resource)| (Some(iri.clone()), resource.properties().clone()))
-        .collect();
+        } else {
+            // Untyped pattern: no predicate to index by, fall back to scan.
+            collect_candidates_via_scan(layer, None)
+        };
 
     for (iri, resource) in overlay {
         let matches = if let Some(ref class) = class_iri {
@@ -543,6 +565,50 @@ fn collect_candidates<'a>(
     }
 
     candidates
+}
+
+/// Pre-14h scan path retained for the untyped-pattern case and as
+/// fallback when `is_a`'s data_type isn't indexable. Walks the entire
+/// chain via `iter_all_resources`.
+fn collect_candidates_via_scan(
+    layer: &Layer,
+    class_iri: Option<&Iri>,
+) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
+    layer
+        .iter_all_resources()
+        .filter(|(_, resource)| {
+            if let Some(class) = class_iri {
+                resource.is_instance_of(class) || is_subclass_instance(resource, class, layer)
+            } else {
+                true
+            }
+        })
+        .map(|(iri, resource)| (Some(iri.clone()), resource.properties().clone()))
+        .collect()
+}
+
+/// `{class} ∪ all transitive subclasses(class)` — the set of concrete
+/// classes whose instances satisfy `MATCH ?x : class { ... }`. Walks the
+/// `subclass_of` index recursively. When `subclass_of` isn't indexable,
+/// returns just `{class}` and accepts the (small) loss of subclass
+/// matches — pre-14h behavior would also have missed them via the
+/// scan-only `is_subclass_instance` walk in degenerate setups.
+fn class_with_subclass_closure(class_iri: &Iri, layer: &Layer) -> BTreeSet<Iri> {
+    let subclass_of = Iri::parse(wk::PARENT_CLASSES).expect("well-known subclass_of IRI");
+    let mut closure: BTreeSet<Iri> = BTreeSet::new();
+    closure.insert(class_iri.clone());
+    if !is_indexable_predicate(layer, &subclass_of) {
+        return closure;
+    }
+    let mut frontier: Vec<Iri> = vec![class_iri.clone()];
+    while let Some(parent) = frontier.pop() {
+        for sub in scan_chain(layer, &subclass_of, &parent) {
+            if closure.insert(sub.clone()) {
+                frontier.push(sub);
+            }
+        }
+    }
+    closure
 }
 
 /// Try to match a resource against a pattern, extending an existing binding.
@@ -1254,6 +1320,7 @@ mod tests {
     use std::sync::Arc;
 
     fn build_test_layer() -> Arc<Layer> {
+        let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
@@ -1264,13 +1331,16 @@ mod tests {
         // Add example animals
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
-        // Need a new layer on top of core
-        let core = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        // Need a new layer on top of core. Share the same `LayerStorage`
+        // so the bloom cache, resource cache, and triple index are all
+        // populated from one set of writes — production bootstrap does
+        // the same (see `bootstrap_with_storage`).
+        let core = Arc::new(builder.build(storage.clone()));
         let mut domain_builder = LayerBuilder::new("animals", Some(core));
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()))
+        Arc::new(domain_builder.build(storage))
     }
 
     fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
@@ -1430,13 +1500,14 @@ mod tests {
 
     fn build_hierarchy_layer() -> Arc<Layer> {
         // Build a simple hierarchy: Alice -> Bob -> Charlie
+        let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut core_builder = LayerBuilder::new("core", None);
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
+        let core = Arc::new(core_builder.build(storage.clone()));
 
         let mut builder = LayerBuilder::new("hierarchy", Some(core));
 
@@ -1469,7 +1540,7 @@ mod tests {
         );
         builder.add_resource(charlie).unwrap();
 
-        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+        Arc::new(builder.build(storage))
     }
 
     #[test]
