@@ -25,7 +25,7 @@ just build      # equivalent to: just build-wasm && cargo build --workspace
 The `build-wasm` dependency does two things:
 
 1. **Compile every `examples/wasm-*` crate** with `cargo component build` (one per directory).
-2. **Copy two of the resulting `.wasm` binaries into [`kernel/tests/fixtures/`](../../../kernel/tests/fixtures/)** — `eigenius_wasm_doc_validator.wasm` and `eigenius_wasm_ordering_institution.wasm`. The kernel test suite loads these via `include_bytes!` to verify end-to-end WASM dispatch.
+2. **Copy the resulting `.wasm` binaries into [`kernel/tests/fixtures/`](../../../kernel/tests/fixtures/)** — `eigenius_wasm_doc_validator.wasm` plus the four D14 fixtures (`eigenius_wasm_d14_echo.wasm`, `eigenius_wasm_d14_dock.wasm`, `eigenius_wasm_d14_assay.wasm`, `eigenius_wasm_d14_arrhenius.wasm`). The kernel test suite loads these via `include_bytes!` to verify end-to-end WASM dispatch.
 
 If you don't have the WASM toolchain installed, `just build-wasm` fails. You can still run `cargo build --workspace` directly to build the rest of the platform — but the WASM-fixture-dependent kernel tests will fail at compile time.
 

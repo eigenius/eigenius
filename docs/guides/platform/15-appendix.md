@@ -57,8 +57,9 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`kernel/src/server/`](../../../kernel/src/server/) — gRPC service definitions
 - [`kernel/src/bootstrap/`](../../../kernel/src/bootstrap/) — embedded ontology loader
 - [`kernel/src/storage/`](../../../kernel/src/storage/) — storage interface traits
-- [`kernel/src/capability/`](../../../kernel/src/capability/) — WASM capability hosting, component/institution registries
-- [`kernel/src/institution/mod.rs`](../../../kernel/src/institution/mod.rs) — `FiberReasoner` trait, `InstitutionRegistry`
+- [`kernel/src/capability/`](../../../kernel/src/capability/) — WASM capability hosting; `wasm_institution_d14.rs` is the host bridge for D14 institutions; `registration.rs` does chain-scan auto-registration
+- [`kernel/src/institution/runtime.rs`](../../../kernel/src/institution/runtime.rs) — D14 `Institution` trait, `InstitutionRuntime`
+- [`kernel/src/institution/registry.rs`](../../../kernel/src/institution/registry.rs) — `InstitutionIndex` (derived from chain scan)
 
 ### Storage backends
 
@@ -79,7 +80,8 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`examples/wasm-doc-validator/`](../../../examples/wasm-doc-validator/) — pure component with typed I/O
 - [`examples/wasm-read-query-probe/`](../../../examples/wasm-read-query-probe/) — read-capability component
 - [`examples/wasm-http-shout/`](../../../examples/wasm-http-shout/) — IO component dispatching `CompleteText`
-- [`examples/wasm-ordering-institution/`](../../../examples/wasm-ordering-institution/) — institution implementation
+- [`examples/wasm-d14-echo/`](../../../examples/wasm-d14-echo/) — minimum-viable D14 institution (smoke test of the WIT bindings)
+- [`examples/wasm-d14-dock/`](../../../examples/wasm-d14-dock/), [`examples/wasm-d14-assay/`](../../../examples/wasm-d14-assay/), [`examples/wasm-d14-arrhenius/`](../../../examples/wasm-d14-arrhenius/) — the M8 worked example (dock institution + assay institution + Arrhenius transformation Component)
 
 ### Orchestrator
 
@@ -118,7 +120,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [**D6b — Reasoning trace schema**](../../design/d6b-reasoning-trace-schema.md) — trace storage
 - [**D7 — ESL surface syntax**](../../design/d7-esl-surface-syntax.md) — ESL spec
 - [**D8 — CompleteJson component**](../../design/d8-complete-json-component.md) — structured LLM output
-- [**D10 — Grothendieck institution protocol**](../../design/d10-grothendieck-institution-protocol.md) — institution model
+- [**D14 — Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10)
 - [**D12 — WASM extensibility**](../../design/d12-wasm-extensibility.md) — capability levels, host imports, fuel/memory
 - [**D13 — Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec, restart re-registration
 - [**D21 — Task traces and checkpointing**](../../design/d21-task-traces-and-checkpointing.md) — task model and resume sweep

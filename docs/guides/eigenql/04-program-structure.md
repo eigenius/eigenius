@@ -138,30 +138,33 @@ Here the second `MATCH` refines bindings from the first by requiring `?o` to als
 FiberClause ::= 'FIBER' inst '.' QueryClass '{' Params '}' 'AS' Variable
 ```
 
-A `FIBER` clause dispatches a query resource to an institution and binds the response.
+A `FIBER` clause dispatches an `OnDemand` `QueryClass` to its institution and binds the response. Param values may use comorphism coercion (`comorphism_iri(source)`) to translate across an institution boundary inline.
 
 ```eigenql
-FIBER dock:PredictBinding {
-    compound: ?cpd,
-    receptor: ?rec
-} AS ?pred
+FIBER assay:validate_prediction {
+    candidate: dock_to_assay(?d)
+} AS ?check
 ```
 
-**What happens at evaluation**:
+**What happens at evaluation** (D14 §9):
 
-1. Build a query resource of class `dock:PredictBinding` with the param bindings filled in from the current binding.
-2. Look up the institution by alias via the `InstitutionRegistry`.
-3. Call `FiberReasoner::query(&query_resource, &ctx)`.
+1. Resolve the QueryClass in the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs); confirm `OnDemand` is in its `dispatch_role` set.
+2. Build an input resource of class `QueryClass.query_class` with each param's value filled in. Comorphism-coerced param values run the four-step extract → transform → reify pipeline (D14 §9.3).
+3. Look up the QueryClass's `institution_ref` in the [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) and call `Institution::query(query_handler, input, ctx)`.
 4. Stamp the response with a deterministic transient IRI and attach it to the `FiberOverlay`.
-5. Extend the binding with `?pred` → the response IRI (as a `Value::String`).
+5. Extend the binding with the AS-named variable → the response IRI (as a `Value::String`).
 
 Subsequent `MATCH` clauses can pattern-match against the response through the overlay exactly as if it were a layer resource, scoped to this query only.
 
 **Type-check rules** (D2 §5.8):
 
 - `fiber_query_class_not_class` if the query class doesn't resolve to a `Class`
+- `fiber_query_class_not_on_demand` if the QueryClass is declared but its `dispatch_role` set excludes `OnDemand`
+- `fiber_institution_mismatch` if the QueryClass's `institution_ref` doesn't match the alias / inline IRI in the FIBER clause
 - `fiber_param_short_name_unresolved` if a param's short name isn't a declared `requires` / `recommends` property of the query class
 - `fiber_missing_required_param` if a `requires` property of the query class isn't supplied
+- `comorphism_coercion_class_mismatch` if a comorphism coercion's `to_class` doesn't satisfy the FIBER input class for that property
+- `comorphism_io_not_supported_in_v1` if a comorphism's transformation Component requires `IO` capability
 
 Full FIBER semantics: [chapter 7](07-fiber-clauses.md).
 
@@ -179,13 +182,13 @@ WHERE ?age > 18 AND ?country = "DE"
 
 The expression grammar is a full operator precedence hierarchy (see [chapter 6](06-expressions.md)). Aggregates are not permitted in `WHERE` — the type checker rejects them with `aggregate_in_where`.
 
-**Institution-decide predicates** (Phase 11e.2):
+**Decidable QueryClass predicates** (D14):
 
 ```eigenql
-WHERE cap:within_tolerance(?delta, 0.1)
+WHERE cap:within_tolerance(?delta, 0.1) HOLDS
 ```
 
-Qualified-name function calls with `:` in the name dispatch to `FiberReasoner::decide`. Only `DecResult::Holds` survives the filter; `Fails` and `Undecidable` both drop the binding (boolean semantics).
+Qualified-name function calls dispatch to `Institution::query` for the matching `Decidable` `QueryClass` and return a `Verdict`. The postfix `HOLDS` (or `FAILS` / `UNDECIDABLE`) projects the Verdict to a Boolean — only `Holds` survives the `... HOLDS` filter. A bare Verdict-typed expression in Boolean position is a static type error (`bare_verdict_in_boolean_position`); the conversion is always explicit.
 
 ## 4.8. `RETURN` — result shaping
 

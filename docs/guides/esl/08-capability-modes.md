@@ -6,12 +6,20 @@ The kernel evaluator runs in one of four **capability modes**, declared as the [
 pub enum EvalCtx {
     Pure,
     Read { layer: Arc<Layer> },
-    Check { layer: Option<Arc<Layer>>, institutions: Arc<InstitutionRegistry> },
-    IO { layer, registry, institutions, trace_store, dispatched_traces, task_context },
+    Check {
+        layer: Option<Arc<Layer>>,
+        institution_index: Option<Arc<InstitutionIndex>>,
+        institution_runtime: Option<Arc<InstitutionRuntime>>,
+    },
+    IO {
+        layer, registry,
+        institution_index, institution_runtime,
+        trace_store, dispatched_traces, task_context,
+    },
 }
 ```
 
-The mode controls **which kernel operations can produce values vs. stay neutral**. Operations that need resources beyond pure normalisation — layer lookups, component dispatch, institution decide procedures — require explicit capability. If the operation appears in code that runs in a weaker mode, the term stays neutral and the kernel reads it back without reducing.
+The mode controls **which kernel operations can produce values vs. stay neutral**. Operations that need resources beyond pure normalisation — layer lookups, component dispatch, Decidable QueryClass dispatch — require explicit capability. If the operation appears in code that runs in a weaker mode, the term stays neutral and the kernel reads it back without reducing.
 
 This chapter explains what each mode permits and which kernel forms behave differently across modes.
 
@@ -70,19 +78,19 @@ The constructor: `EvalCtx::Read { layer }`.
 
 ## 8.4. `Check`
 
-Check mode is Read plus an `Arc<InstitutionRegistry>`. The layer is optional in Check (some checks can run without one). The evaluator can additionally:
+Check mode is Read plus institution dispatch — an optional `Arc<InstitutionIndex>` (chain-derived classifier) and `Arc<InstitutionRuntime>` (`Box<dyn Institution>` keyed by IRI). The layer is also optional in Check (some checks can run without one). The evaluator can additionally:
 
-- **Fire institution-registered decide procedures.** When evaluation encounters `Exp::NativeDecide(Constraint::Institution { iri, args }, _)`, the kernel resolves the institution via `registry.institution_for_decide(iri)` and calls `reasoner.decide(iri, args, ctx)`. The three-valued result (`Holds`/`Fails`/`Undecidable`) is mapped to a boolean (`Holds → true`, others → `false`).
-- **Comorphism invocations** — when evaluation encounters `Exp::InstitutionInvoke { iri, source }`, calls `reasoner.translate(iri, source, ctx)` and returns the resulting embedded resource.
+- **Fire Decidable QueryClass dispatch.** When evaluation encounters `Exp::NativeDecide(Constraint::Institution { iri, args }, _)`, the kernel resolves the QueryClass in the index, marshals `args` into a synthetic input resource, and calls `Institution::query(query_handler, input, ctx)` on the registered runtime. The Verdict's `ctor_name` selects the reduction: `Holds` → `Refl(v)`, `Fails` → failing neutral, `Undecidable` → passthrough neutral (D14 §9.2).
+- **Run the four-step comorphism pipeline.** When the kernel evaluator encounters `Exp::InstitutionInvoke { comorphism_iri, source }` (typically synthesised by EigenQL FIBER param coercion, not user-written), it dispatches `extract_typed → transformation Component → reify` through the relevant institutions and the component registry (D14 §9.3).
 
 What Check still **can't** do:
 
-- Dispatch components — no component registry, no trace store.
+- Dispatch IO components — no component registry, no trace store.
 - Run programs that rely on IO components.
 
-**When Check is the right mode.** Type-checking programs that use institution-dispatched constraints or invocations. The type-checker switches to Check mode when it needs to verify that a value satisfies an institution-decided predicate, or to evaluate a comorphism call to know its result type.
+**When Check is the right mode.** Type-checking programs that use institution-dispatched constraints. The type-checker switches to Check mode when it needs to verify that a value satisfies a Decidable predicate, or to evaluate a comorphism call to know its result type.
 
-The constructor: `EvalCtx::Check { layer, institutions }`.
+The constructor: `EvalCtx::Check { layer, institution_index, institution_runtime }`.
 
 ## 8.5. `IO`
 
@@ -94,7 +102,7 @@ In addition to everything Check can do, IO can:
 - **Produce traces.** Each component dispatch contributes a `ComponentTrace` to `dispatched_traces`. After evaluation, traces are committed to the trace store (if one is configured).
 - **Resume from traces.** When a `task_context` is supplied (D21 §3.2), the dispatcher consults per-task positional trace keys to recover prior dispatch results — this is how resumable execution works.
 
-The constructor: `EvalCtx::IO { layer, registry, institutions, trace_store, dispatched_traces, task_context }`.
+The constructor: `EvalCtx::IO { layer, registry, institution_index, institution_runtime, trace_store, dispatched_traces, task_context }`.
 
 ## 8.6. Per-form behaviour by mode
 
@@ -111,8 +119,8 @@ A summary of which kernel `Exp` forms behave differently across modes:
 | `EigonClass(iri)` | neutral | **resolve via `resolve_class_type`** | resolve | resolve |
 | `EigonPrimitive` | reduce | reduce | reduce | reduce |
 | `NativeDecide(Constraint::Builtin{..}, val)` | reduce | reduce | reduce | reduce |
-| `NativeDecide(Constraint::Institution{..}, val)` | neutral | neutral | **decide via `reasoner.decide`** | decide |
-| `InstitutionInvoke { iri, source }` | neutral | neutral | **translate via `reasoner.translate`** | translate |
+| `NativeDecide(Constraint::Institution{..}, val)` | neutral | neutral | **dispatch via `Institution::query` → reduce by Verdict** | dispatch |
+| `InstitutionInvoke { comorphism_iri, source }` | neutral | neutral | **four-step pipeline (extract → transform → reify)** | pipeline |
 | `Map`/`Reduce` over known list | reduce | reduce | reduce | reduce |
 | `CoRecord` / `Observe` (productive) | reduce | reduce | reduce | reduce |
 

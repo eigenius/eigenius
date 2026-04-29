@@ -30,7 +30,7 @@ As a reference, the most useful chapters are:
 
 7. **[FIBER clauses](07-fiber-clauses.md)** — structured institution dispatch: query-class-typed parameter objects, the transient overlay, the determinism guarantee via synthesized response IRIs, and a full multi-step example.
 
-8. **[Institutions in EigenQL](08-institutions.md)** — how EigenQL dispatches to registered institutions: capability classification (`InstitutionCapability`), decide predicates (three-valued `DecResult` → boolean), comorphisms (source `Resource` → embedded output), and comparison with `FIBER`.
+8. **[Institutions in EigenQL](08-institutions.md)** — how EigenQL dispatches to registered institutions under D14: the `InstitutionIndex` derived from the chain, Decidable `QueryClass` calls returning `Verdict`, the postfix `HOLDS` / `FAILS` / `UNDECIDABLE` predicates, comorphism coercion in FIBER params, and the classification table shared with ESL.
 
 9. **[Stratification](09-stratification.md)** — why the stratifier exists, what a negation cycle looks like, how strata are assigned, the `FIBER`-in-`DEFINE` restriction, and safe patterns for combining recursion and negation.
 
@@ -43,7 +43,7 @@ As a reference, the most useful chapters are:
 ## Related documents
 
 - [**EigenQL specification (D2)**](../../design/d2-eigenql-specification.md) — the authoritative grammar and semantics. This guide is derived from D2 but adds worked examples and implementation pointers.
-- [**Grothendieck institution protocol (D10)**](../../design/d10-grothendieck-institution-protocol.md) — how institutions are registered and invoked; the substrate that `FIBER` and qualified-name calls dispatch through.
+- [**Institution Realisation (D14)**](../../design/d14-institution-realisation.md) — the institution model `FIBER` and qualified-name calls dispatch through: ontology-first declarations (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`), the three-method `Institution` trait (`extract_typed` / `reify` / `query`), triadic comorphism realisation, and the dispatch model. Supersedes D10.
 - [**Eigon serialization format (D1)**](../../design/d1-eigon-serialization-format.md) — the resource / value model that EigenQL reads from and writes to.
 - [**ESL user guide**](../esl/README.md) — the companion surface language for declaring ontologies and programs.
 

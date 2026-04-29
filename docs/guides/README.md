@@ -17,7 +17,7 @@ The platform maintains four epistemic categories:
 
 For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-**Current status (April 2026):** Phases 0–11e complete. The platform is operational end-to-end — kernel, orchestrator, LLM integration, and CLI connected via gRPC; type-checked programs with dependent types, sized inductives and codata; institution dispatch through ESL and EigenQL; durable RocksDB persistence; WASM-sandboxed extensions; deployable via Docker Compose. See the [implementation plan](../design/implementation-plan.md) for the full phased build plan and the [top-level README](https://github.com/eigenius/eigenius#readme) for the live capability list.
+**Current status:** Phases 0–11e + D22 complete; Phase 12 in progress. The platform is operational end-to-end — kernel, orchestrator, LLM integration, and CLI connected via gRPC; type-checked programs with dependent types, sized inductives and codata; **institution dispatch under D14** (declarations as ontology resources, the three-method `Institution` trait, triadic comorphisms, Verdict-typed Decidable QueryClasses, FIBER param coercion, auto-registration of WASM institutions from chain scan); the React notebook + TypeScript SDK; durable RocksDB persistence; WASM-sandboxed extensions; deployable via Docker Compose. See the [implementation plan](../design/implementation-plan.md) for the full phased build plan and the [top-level README](https://github.com/eigenius/eigenius#readme) for the live capability list.
 
 > This is still a very early stage of this project. Anticipate
 > features not working or missing functionality overall. Our goal
@@ -73,7 +73,7 @@ A consolidated bibliography for the platform — what we cite, what we depend on
 
 The **platform** guide is operational — it covers everything *around* writing ESL/EigenQL: installing, running, managing data, deploying, building WASM extensions. The **ESL** and **EigenQL** guides are surface-language references — they cover what you write *into* the system.
 
-ESL **computes**; EigenQL **retrieves and filters**. They share the same kernel primitives — most importantly the institution capability classification, which means the same qualified-name IRI dispatches identically from both languages ([ESL §9.8](esl/09-institutions.md), [EigenQL §8](eigenql/08-institutions.md)).
+ESL **computes**; EigenQL **retrieves and filters**. They share the same kernel primitives — most importantly the [`InstitutionIndex`](../../kernel/src/institution/registry.rs) classification (D14 §9.5), which means the same qualified-name IRI dispatches identically from both languages ([ESL §9.8](esl/09-institutions.md), [EigenQL §8](eigenql/08-institutions.md)).
 
 If you're new to the platform: start with [platform chapter 13](platform/13-notebook.md) (the notebook UX) — it's the lowest-friction first touch. Then read [platform chapters 1, 2, 5](platform/01-introduction.md) for orientation, install, and the kernel/orchestrator topology under the notebook, and dip into [ESL chapters 1, 6](esl/01-introduction.md) + [EigenQL chapters 1, 2](eigenql/01-introduction.md) when you want to write your own ontologies, programs, and queries.
 
@@ -85,7 +85,7 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D2 EigenQL specification](../design/d2-eigenql-specification.md) — authoritative grammar and semantics, complementary to the EigenQL guide
 - [D18 Ontology-as-types resolution](../design/d18-ontology-as-types-resolution.md) — the bridge mechanism explained in ESL chapter 6
 - [D19 Inductive and sized types](../design/d19-inductive-types.md) — type theory underpinning ESL `data`/`codata` declarations
-- [D10 Grothendieck institution protocol](../design/d10-grothendieck-institution-protocol.md) — institution mechanism dispatched in both guides
+- [D14 Institution Realisation](../design/d14-institution-realisation.md) — institution mechanism dispatched in both guides (supersedes D10)
 - [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 13 + 14
 
 The full set (D1–D22 plus standalone notes including the [Lean 4 as institution](../design/lean-4-as-institution.md) integration plan) lives at [`docs/design/`](../design/).

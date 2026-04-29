@@ -28,7 +28,7 @@ The single most important chapter for understanding *how Eigenius differs from a
 
 8. **[Capability modes](08-capability-modes.md)** — `Pure` / `Read` / `Check` / `IO` and how they gate which kernel AST nodes can produce values vs. stay neutral. Covers the `EigonClass` resolution rule, component dispatch, and institution constraint firing.
 
-9. **[Institutions in ESL](09-institutions.md)** — the institution surface from a program-author perspective: declared capabilities (decide procedures, comorphism types), how `cap:predicate(args)` and `cap:translate(source)` are classified at compile time and dispatched at runtime, and the life-science motivating example.
+9. **[Institutions in ESL](09-institutions.md)** — the institution surface from a program-author perspective under D14: declarations (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`), how `cap:predicate(args)` dispatches as `Exp::NativeDecide` returning a `Verdict`, why comorphisms aren't expression-level, and the life-science motivating example.
 
 10. **[Error messages](10-error-messages.md)** — common compile-time and check-time errors with the messages you'll see, what they mean, and how to fix them.
 
@@ -40,7 +40,7 @@ The single most important chapter for understanding *how Eigenius differs from a
 - [**D18 Ontology-as-types resolution**](../../design/d18-ontology-as-types-resolution.md) — the bridge mechanism explained in chapter 6.
 - [**D19 Inductive and sized types**](../../design/d19-inductive-types.md) — type theory underpinning chapters 4 (`data`/`codata`) and 7.
 - [**D11 Codata, streams, and resumable execution**](../../design/d11-codata-streams.md) — coinductive type design.
-- [**D10 Grothendieck institution protocol**](../../design/d10-grothendieck-institution-protocol.md) — institution mechanism dispatched in chapter 9.
+- [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution mechanism dispatched in chapter 9. Supersedes D10.
 - [**D1 Eigon serialization format**](../../design/d1-eigon-serialization-format.md) — the resource model ESL compiles into.
 - [**EigenQL user guide**](../eigenql/README.md) — the companion query language; the two share the institution capability classification table.
 

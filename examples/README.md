@@ -41,8 +41,31 @@ Demonstrates:
 - Echoing CBOR resources without dropping properties
 - Tagging the result with which export stage produced it
 
-A worked institution example with real reasoning content will follow
-in [D14 §13.4 M8](../docs/design/d14-institution-realisation.md#134-milestones).
+### [wasm-d14-dock](wasm-d14-dock/), [wasm-d14-assay](wasm-d14-assay/), [wasm-d14-arrhenius](wasm-d14-arrhenius/)
+
+The **M8 dock-assay worked example** (D14 §5.1, §13.4 M8). Three crates
+that together exercise the full D14 institution surface end-to-end:
+
+- `wasm-d14-dock` — a source-side institution implementing
+  `extract_typed` for an `ef_dock_to_dg` ExportFormat (reads `delta_g`
+  off a `DockingResult`, returns it as a Float-typed payload).
+- `wasm-d14-assay` — a target-side institution implementing `reify`
+  (constructs an `AssayPrediction` with a Float `ic50`) plus `query`
+  for three QueryClasses: `within_tolerance` (Decidable),
+  `assay_prediction_validity` (AutoOnLoad), `validate_prediction`
+  (OnDemand).
+- `wasm-d14-arrhenius` — a Pure Component implementing the middle of
+  the `dock_to_assay` Comorphism: Float → Float via
+  `IC₅₀ ≈ exp(-ΔG / R·T) · 10⁹`.
+
+The supporting ontology lives in
+[`ontologies/examples/d14-dock-assay/dock-assay.json`](../ontologies/examples/d14-dock-assay/dock-assay.json).
+Both an in-process variant
+([`kernel/tests/d14_dock_assay_demo.rs`](../kernel/tests/d14_dock_assay_demo.rs))
+and a WASM-hosted variant
+([`kernel/tests/d14_dock_assay_demo_wasm.rs`](../kernel/tests/d14_dock_assay_demo_wasm.rs))
+exercise the surface; the WASM test demonstrates auto-registration
+from a child layer carrying `runtime: wasm` + inline `wasm_binary`.
 
 ### [wasm-http-shout](wasm-http-shout/)
 
@@ -156,6 +179,10 @@ cp target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm \
 - **[D12: WASM Extensibility](../docs/design/d12-wasm-extensibility.md)** —
   design specification for the WASM hosting architecture, capability levels,
   and WIT interface contracts
+- **[D14: Institution Realisation](../docs/design/d14-institution-realisation.md)** —
+  the canonical institution model that the D14-flavoured examples target
+  (Institution trait, declaration vocabulary, dispatch model). Supersedes D10.
 - **[SDK reference](../sdk/wasm-sdk/src/lib.rs)** — `Resource` and `Value`
-  APIs, CBOR helpers, and the `institution` submodule for fiber reasoner
-  declarations
+  APIs, CBOR helpers, and the `institution` submodule with builders for the
+  D14 declaration shapes (`InstitutionDecl`, `ExportFormatDecl`,
+  `ImportFormatDecl`, `QueryClassDecl`, `ComorphismDecl`)

@@ -54,11 +54,11 @@ pub fn compile(source: &str) -> Result<Vec<Resource>, Vec<EslError>>;
 
 pub fn compile_with_institutions(
     source: &str,
-    institutions: Arc<InstitutionRegistry>,
+    index: Arc<InstitutionIndex>,
 ) -> Result<Vec<Resource>, Vec<EslError>>;
 ```
 
-Use the basic `compile` for ontologies and resources that don't reference institution capabilities. Use `compile_with_institutions` when a `program` body invokes qualified-name function calls (`cap:predicate(...)`, `cap:translate(...)`) that need to be classified at compile time — see chapter 9.
+Use the basic `compile` for ontologies and resources that don't reference institution capabilities. Use `compile_with_institutions` when a `program` body invokes qualified-name function calls referencing a `Decidable` `QueryClass` — the chain-derived [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) classifies the IRI at compile time. See chapter 9 (and note that under D14 comorphisms are not callable from ESL expression position — they surface inside EigenQL FIBER param coercion).
 
 ## 1.3. What this guide covers
 
@@ -77,7 +77,7 @@ The rest of the guide proceeds bottom-up:
 
 ## 1.4. What this guide does not cover
 
-- **Implementing a new institution.** That's a separate document, aimed at a different audience (institution authors, not program authors). The relevant interfaces are the [`FiberReasoner` trait](../../../kernel/src/institution/mod.rs) and [D10](../../design/d10-grothendieck-institution-protocol.md).
+- **Implementing a new institution.** That's a separate audience (institution authors, not program authors). The relevant interfaces are the [`Institution` trait](../../../kernel/src/institution/runtime.rs) and [D14](../../design/d14-institution-realisation.md); the WASM-flavoured implementer guide is [platform §10](../platform/10-wasm-institutions.md).
 - **Kernel internals beyond the user-visible surface.** This guide explains what the type-checker enforces and what the evaluator computes; it does not explain how NbE works internally beyond chapter 7's primer.
 - **Operational concerns** — deploying eigenius, configuring storage, managing layer chains across services. Those belong in operations docs.
 

@@ -166,21 +166,23 @@ Use parentheses when in doubt: `(?a + ?b) * ?c` vs `?a + (?b * ?c)`.
 
 `<hash>` is 16 hex characters (first 8 bytes of SHA-256 over the query text).
 
-## 12.6. Institution capability quick reference
+## 12.6. Institution dispatch quick reference
 
-From [`InstitutionRegistry`](../../../kernel/src/institution/mod.rs):
+The kernel maintains two derived structures over the layer chain:
 
-| Method | Returns | Used by |
+- [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) — by-IRI lookup over `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism` declarations on the chain. Built by `InstitutionIndex::from_layer`. ESL and EigenQL share it for compile-time classification.
+- [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) — `BTreeMap<Iri, Box<dyn Institution>>` keyed by institution IRI. WASM-runtime institutions are auto-registered from chain scan via [`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs); in-process / external runtimes are caller-registered.
+
+EigenQL classifies a `qualified_call` IRI against the index:
+
+| Index entry | EigenQL emits | Runtime call |
 |---|---|---|
-| `register(reasoner)` | `Result<Vec<Resource>, String>` | Startup — persists ontology resources |
-| `register_rehydrated(reasoner)` | `Result<(), String>` | Restart — assumes resources persisted |
-| `get(iri)` | `Option<&dyn FiberReasoner>` | `FIBER` dispatch |
-| `institution_for_morphism(iri)` | `Option<&dyn FiberReasoner>` | Morphism validation |
-| `institution_for_query(iri)` | `Option<&dyn FiberReasoner>` | Fiber query dispatch |
-| `institution_for_decide(iri)` | `Option<&dyn FiberReasoner>` | Decide predicate dispatch (§8) |
-| `institution_for_comorphism(iri)` | `Option<&dyn FiberReasoner>` | Comorphism dispatch (§8) |
-| `classify(iri)` | `Option<InstitutionCapability>` | Function-call classification (§8) |
-| `list()` | `Vec<&InstitutionInfo>` | Introspection |
+| `Decidable` `QueryClass` | `Exp::NativeDecide(Constraint::Institution { … }, Unit)` (returns Verdict; project with postfix `HOLDS`/`FAILS`/`UNDECIDABLE`) | `Institution::query(query_handler, synthetic_input, ctx)` |
+| `OnDemand` `QueryClass` | only inside FIBER clauses | `Institution::query(query_handler, input, ctx)` |
+| `Comorphism` | only inside FIBER param value coercion | `extract_typed → transformation Component → reify` four-step pipeline |
+| Class / property / built-in / aggregate | various | no institution call |
+
+See [chapter 8](08-institutions.md) for the full surface and [D14 §9](../../design/d14-institution-realisation.md) for the protocol.
 
 ## 12.7. Execution entry points
 
@@ -199,27 +201,32 @@ pub fn execute_with(
 ) -> Result<Vec<Resource>, Vec<QueryError>>
 ```
 
-- `execute` — convenience wrapper. No `FIBER`, no institution-dispatched function calls. Useful for CLI and tests.
-- `execute_with` — full pipeline. Required for `FIBER` and for decide/comorphism calls in expressions.
+- `execute` — convenience wrapper that supplies a default empty `FiberRuntime`. No `FIBER`, no institution-dispatched function calls. Useful for CLI local mode and tests.
+- `execute_with` — full pipeline. Required for FIBER clauses and for Decidable QueryClass calls in expressions.
 
-`FiberRuntime` shape:
+`FiberRuntime` shape (D14):
 
 ```rust
 pub struct FiberRuntime<'a> {
-    pub institutions: Option<&'a InstitutionRegistry>,
+    pub index: Option<&'a InstitutionIndex>,
+    pub runtime: Option<&'a InstitutionRuntime>,
+    pub components: Option<&'a ComponentRegistry>,
+    pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
 }
 ```
 
-Both fields must be `Some` for FIBER clauses to dispatch. Institution-dispatched function calls (decide/comorphism) only need `institutions`; they construct an `ExecutionContext` on demand from the layer.
+- `index` + `runtime` are required for FIBER clauses and Decidable function calls.
+- `components` is required when any FIBER param uses comorphism coercion (the four-step pipeline applies the comorphism's transformation Component).
+- `ctx` is required for any institution-dispatched call.
+- `overlay` is populated automatically — pass `None`.
 
 ## 12.8. Related documents
 
 - [D2 EigenQL specification](../../design/d2-eigenql-specification.md) — authoritative grammar and semantics
-- [D10 Grothendieck institution protocol](../../design/d10-grothendieck-institution-protocol.md) — institution-kernel interface
+- [D14 Institution Realisation](../../design/d14-institution-realisation.md) — institution-kernel interface (supersedes D10)
 - [D1 Eigon serialization format](../../design/d1-eigon-serialization-format.md) — resource/value model
-- [ESL user guide](../esl/README.md) — the other surface language (once written)
-- [user-guides content plan](../user-guides-content-plan.md) — the plan that drove this guide
+- [ESL user guide](../esl/README.md) — the other surface language
 
 ## 12.9. Source index
 
@@ -237,12 +244,17 @@ All source references in the guide, collected here for easy navigation:
 - [kernel/src/query/document.rs](../../../kernel/src/query/document.rs) — result-document shaping
 - [kernel/src/query/error.rs](../../../kernel/src/query/error.rs) — `QueryError`
 
-**Institution module**:
-- [kernel/src/institution/mod.rs](../../../kernel/src/institution/mod.rs) — `FiberReasoner`, `InstitutionRegistry`, `DecResult`, `InstitutionCapability`
-- [kernel/src/institution/error.rs](../../../kernel/src/institution/error.rs) — `InstitutionError`, `MorphismValidation`
+**Institution module** (D14):
+- [kernel/src/institution/runtime.rs](../../../kernel/src/institution/runtime.rs) — `Institution` trait, `InstitutionRuntime`
+- [kernel/src/institution/registry.rs](../../../kernel/src/institution/registry.rs) — `InstitutionIndex` (derived from chain scan)
+- [kernel/src/institution/dispatch.rs](../../../kernel/src/institution/dispatch.rs) — `AutoOnLoad` dispatch
+- [kernel/src/institution/error.rs](../../../kernel/src/institution/error.rs) — `InstitutionError`
+- [kernel/src/capability/registration.rs](../../../kernel/src/capability/registration.rs) — chain-scan auto-registration of WASM institutions / components
+- [kernel/src/capability/wasm_institution_d14.rs](../../../kernel/src/capability/wasm_institution_d14.rs) — host bridge to the `eigenius-institution-d14` WIT world
 
-**Core ontology**:
-- [ontologies/core/core-ontology.json](../../../ontologies/core/core-ontology.json) — shipped definitions of Class, Property, Comorphism, etc.
+**Core / institution ontology**:
+- [ontologies/core/core-ontology.json](../../../ontologies/core/core-ontology.json) — shipped definitions of `Class`, `Property`, `Verdict`, etc.
+- [ontologies/institution/institution-ontology.json](../../../ontologies/institution/institution-ontology.json) — `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`
 
 ---
 

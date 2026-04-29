@@ -340,14 +340,14 @@ mod tests {
 
 The SDK is `no_std`-compatible by feature flag (`default-features = false`) so it links cleanly into both the WASM target and a host test binary.
 
-## 9.11. The eight test paths
+## 9.11. Test paths
 
-The kernel test suite covers eight WASM dispatch paths, all in `kernel/tests/`:
+The kernel test suite covers the WASM dispatch paths, all in `kernel/tests/`:
 
 1. Pure component (kernel-hosted) — `wasm-doc-validator`
 2. Read-capability component — `wasm-read-query-probe`
 3. IO component (orchestrator-hosted) — `wasm-http-shout`
-4. Pure institution — `wasm-ordering-institution`
+4. D14 institution (kernel-hosted, three WASM crates: `wasm-d14-dock`, `wasm-d14-assay`, plus the `wasm-d14-arrhenius` transformation Component) — see [chapter 10](10-wasm-institutions.md) and [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)
 5. Component install + dispatch round-trip
 6. Capability persistence across restart (with `--db`)
 7. Fuel-exhaustion handling

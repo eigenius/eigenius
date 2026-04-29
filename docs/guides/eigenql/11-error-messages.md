@@ -188,7 +188,7 @@ If you see this after type-check, it's a bug — please file an issue.
 [Evaluation] FIBER requires an institution registry — not available in this execution context
 ```
 
-You called `execute(program, layer)` (no runtime) on a query that uses `FIBER`. Switch to `execute_with(program, layer, FiberRuntime { institutions: Some(...), ctx: Some(...) })`.
+You called `execute(program, layer)` (no runtime) on a query that uses `FIBER`. Switch to `execute_with(program, layer, FiberRuntime { index: Some(...), runtime: Some(...), components: Some(...), ctx: Some(...), overlay: None })`.
 
 **Institution not registered**
 
@@ -196,7 +196,7 @@ You called `execute(program, layer)` (no runtime) on a query that uses `FIBER`. 
 [Evaluation] no institution registered for IRI 'urn:eigenius:institutions:docking'
 ```
 
-The `USING INSTITUTION` alias maps to an IRI but no `FiberReasoner` was registered at that IRI. Register the institution before running the query.
+The `USING INSTITUTION` alias maps to an IRI but no `Institution` is registered against it in the [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs). For WASM-runtime institutions the auto-registration scan ([`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs)) needs an `Institution` declaration with `runtime: wasm` + inline `wasm_binary` on the chain; for in-process / external institutions, register the runtime entry programmatically before running the query.
 
 **FIBER param unresolvable**
 
