@@ -53,7 +53,7 @@ Three things in particular shape the design:
 
 **Storage uses string-prefixed keys, not RocksDB column families.** Per [`storage/rocksdb/src/lib.rs`](../../storage/rocksdb/src/lib.rs): `layer:<id_hex>:meta`, `layer:<id_hex>:res:<iri>`, `chain:<id_hex>`, `head`, `trace:<key_hex>`. Design decision (§6.1): we keep the prefix scheme and add new prefixes for Phase 14 surfaces, rather than switching to CFs. Rationale: CFs add operational complexity (per-CF compaction tuning) for a benefit (per-CF read isolation) we don't currently exploit; the prefix scheme is debuggable with `rocksdb_dump` and trivially extensible.
 
-**The SPO/POS/OPS indexes in [`storage/indexing/src/lib.rs`](../../storage/indexing/src/lib.rs) are skeleton-only — every method is `todo!()`.** Phase 14h is therefore not "wire indexes through the evaluator" but "implement the indexes, populate them on layer commit, then wire them through the evaluator." This is more work than the implementation-plan stub implied; it's still the right scope for the milestone.
+**Phase 14h shipped a per-layer triple index** (§5.9) in [`kernel/src/layer/index.rs`](../../kernel/src/layer/index.rs) (trait + in-memory impl + chain-walk helpers) and [`storage/rocksdb/src/triple_index.rs`](../../storage/rocksdb/src/triple_index.rs) (RocksDB-backed impl). The earlier `storage/indexing/` stub crate was superseded and removed.
 
 The session model ([`kernel/src/task/mod.rs`](../../kernel/src/task/mod.rs)) hardwires a single `Session::hardwired()` returning `Uuid::nil()`. D21 explicitly noted multi-session as a Phase-14 surface expansion; this doc cashes in that promise.
 
@@ -550,36 +550,85 @@ Pruning is GC's policy front end: it removes a branch ref from the topology, imm
 
 ### 5.9 Indexed query reads (14h)
 
-The three EigenQL evaluator hot spots that today scan `layer.all_resources()`:
+The three EigenQL evaluator hot spots that pre-14h scan `layer.iter_all_resources()`:
 
-| Site | File:line | Today | After 14h |
+| Site | File:line | Pre-14h | Post-14h |
 |---|---|---|---|
-| `resolve_name_to_class_iri` | [`evaluate.rs:392`](../../kernel/src/query/evaluate.rs#L392) | linear scan | class-name index lookup |
-| `collect_candidates` | [`evaluate.rs:519`](../../kernel/src/query/evaluate.rs#L519) | scan + class filter | SPO index by class IRI |
-| Negation helper | [`evaluate.rs:659`](../../kernel/src/query/evaluate.rs#L659) | scan + non-match filter | indexed lookup + complement |
+| `resolve_name_to_class_iri` | [`evaluate.rs:389`](../../kernel/src/query/evaluate.rs#L389) | linear scan | scan over index-narrowed Class candidates |
+| `collect_candidates` | [`evaluate.rs:491`](../../kernel/src/query/evaluate.rs#L491) | scan + class filter | POS index scan + chain dedup |
+| Negation helper | [`evaluate.rs:468`](../../kernel/src/query/evaluate.rs#L468) | scan + non-match filter | shares `collect_candidates`'s indexed path |
 
-The index implementations themselves go from `todo!()` to working triple stores. We need three:
+#### Per-layer storage (matching §5.2)
+
+The earlier draft of this section specified per-head materialisation (`idx_*:<head>:<s>:<p>:<o>`) on the same reasoning that motivated a per-head shadowing snapshot. §5.2 then made that argument *against* itself for blooms — every layer's defined-IRI set is a property of that layer alone, so per-head bookkeeping is unnecessary if the read path can walk the chain. The triple index gets the same treatment for the same reasons:
+
+- Branch divergence is naturally represented (each chain walks its own ancestors).
+- Multi-parent merges (Phase 14e) need no index reconciliation — `collect_ancestors` walks the topology.
+- No replication on every commit; each layer writes only its own diff.
+
+Read-path cost is `O(answer × shadow_check)` instead of `O(answer)`. The shadow check piggybacks on the per-layer blooms (§5.2): bloom probes are tens of nanoseconds, so the asymmetric cost is bounded by chain depth × small constant. For typical chains (10–50 layers, occasional Phase 14e merges) this is well under a millisecond.
+
+#### Schema
+
+Two physical orderings, both presence-only (empty values), keyed using length-prefixed IRI segments + a fixed 32-byte `LayerId`. Encoder lives in [`kernel/src/layer/index.rs::index_keys`](../../kernel/src/layer/index.rs).
+
+| Prefix | Purpose | Why |
+|---|---|---|
+| `idx_pos:<predicate>:<object>:<subject>:<layer>` | Read path | One prefix scan answers `(p, o) → {(s, defining_layer)}` across the entire DAG; chain membership and shadow check are post-filters in process memory. |
+| `idx_layer:<layer>:<predicate>:<object>:<subject>` | GC path | One prefix scan per layer drop yields every entry that layer contributed; deletes both orderings in a single atomic batch. |
+
+The reverse `idx_layer:` index doubles storage but turns GC's `delete_layer` into a clean prefix delete. Tolerable trade for a presence-only index.
+
+POS only in v1. SPO and OPS are deferred — the three hot sites all want "subjects with predicate p and object o". Add other orderings when a workload demands them.
+
+#### Indexability rule
+
+A `(subject, predicate, object)` triple is indexed iff `predicate`'s `Property.data_type` resolves to `urn:eigenius:core:resource` or `urn:eigenius:core:resource_array` at the layer being committed. Same rule decides query-time eligibility — write and read paths share the [`is_indexable_predicate`](../../kernel/src/layer/index.rs) helper, so the planner deterministically picks the indexed path when the predicate is IRI-typed and the scan path otherwise. `resource_array` values unpack to one entry per element. Literal-typed properties (string, integer, boolean, embedded) bypass the index and post-filter the index-narrowed candidate set in process memory.
+
+Schema mutation (a property's `data_type` flipped post-commit) does not trigger reindexing — each layer's entries reflect the predicate def visible at that layer's commit time. Documented limitation; manual rebuild required if a property's data_type changes class.
+
+#### Trait
 
 ```rust
 pub trait TripleIndex: Send + Sync {
-    /// Subjects with a given class.
-    fn scan_class(&self, head: LayerId, class: &Iri) -> Box<dyn Iterator<Item = Iri> + '_>;
-    /// (subject, value) pairs for a given (head, predicate).
-    fn scan_predicate(&self, head: LayerId, p: &Iri) -> Box<dyn Iterator<Item = (Iri, Value)> + '_>;
-    /// Subjects with a given (predicate, object).
-    fn scan_predicate_object(&self, head: LayerId, p: &Iri, o: &Value) -> Box<dyn Iterator<Item = Iri> + '_>;
-    /// Values of (subject, predicate).
-    fn scan_subject_predicate(&self, head: LayerId, s: &Iri, p: &Iri) -> Box<dyn Iterator<Item = Value> + '_>;
-    /// Update on layer commit.
-    fn extend(&mut self, head: LayerId, new_layer: LayerId, layer_resources: &[(Iri, &Resource)]) -> Result<()>;
+    /// Insert all triples for a layer. Idempotent by `(layer, p, o, s)`.
+    fn extend_layer(&self, layer: &LayerId, triples: &[Triple<'_>]) -> Result<(), StorageError>;
+
+    /// Drop both orderings' entries for a layer. Called by GC.
+    fn drop_layer(&self, layer: &LayerId) -> Result<(), StorageError>;
+
+    /// Iterate `(subject, defining_layer)` pairs matching `(p, o)`,
+    /// across the entire DAG. Caller filters by chain membership and
+    /// shadow-checks via the per-layer bloom cache.
+    fn scan_predicate_object<'a>(
+        &'a self,
+        p: &Iri,
+        o: &Iri,
+    ) -> Box<dyn Iterator<Item = Result<(Iri, LayerId), StorageError>> + 'a>;
+
+    fn stats(&self) -> IndexStats;
 }
 ```
 
-**Storage:** three prefixes — `idx_spo:<head>:<s>:<p>:<o>`, `idx_pos:<head>:<p>:<o>:<s>`, `idx_ops:<head>:<o>:<p>:<s>` — value is empty (presence-only). Iteration uses RocksDB's prefix scan. Per-head replication is necessary because the *resolved* triple set differs per head: identical IRIs can resolve to different resources on different chains, so the index must materialise the resolution result for each head it serves.
+#### Query algorithm
 
-**Result-set processing remains in memory.** Iterators stream subjects/values; the evaluator builds intermediate hash tables and result vectors in process memory as today. Operators that materialize large intermediates remain a Phase 16 concern.
+[`scan_chain(head, predicate, object)`](../../kernel/src/layer/index.rs) implements:
 
-**Cost-model awareness:** for a query with multiple bound positions, prefer the most selective index probe. v1 selectivity heuristic: count the index prefix's storage size via RocksDB's `approximate_sizes`. v2 (D24) introduces real cardinality estimates.
+1. Build `head`'s ancestor set via [`collect_ancestors`](../../kernel/src/layer/index.rs) (BFS over `Layer.parents`).
+2. Iterate the global `idx_pos:` scan for `(predicate, object)`.
+3. Filter to entries whose `defining_layer ∈ ancestor_set`.
+4. For each survivor, [`is_shadowed(head, defining, subject)`](../../kernel/src/layer/index.rs) bloom-walks `head`'s ancestors that descend from `defining` (skipping `defining` itself) — first confirmed redefinition drops the candidate. Same mechanic `Layer::resolve` already uses.
+5. Return the deduplicated subject set.
+
+`collect_candidates` calls `scan_chain` once per concrete class in `{class} ∪ subclass_closure(class)`; the closure walk uses `scan_chain` recursively against the `subclass_of` predicate.
+
+#### Atomicity
+
+`LayerBuilder::build` populates the triple index for the freshly-built layer in process memory (mirrors how it pre-populates the bloom cache). The persistent backend's `RocksTripleIndex` writes through to the same RocksDB the layer commit uses, so by the time `store_layer`'s atomic batch commits, the index is already populated. A crash between `build` and `store_layer` leaves orphan index entries pointing at a layer that doesn't exist — they're invisible to queries (the chain-membership filter drops them) and reclaimed when `delete_layer` is called against the orphan layer (or by a future "rebuild index for layer L" tool).
+
+#### Cost-model awareness
+
+Deferred. The three hot sites have one bound predicate-object pair each, so there's no choice between probe orderings. A v2 cost model becomes useful once SPO/OPS land and the planner has to pick the most selective probe — D24's cardinality estimates handle that case.
 
 ## 6. Storage layout
 
@@ -602,23 +651,24 @@ The Phase 9a layout uses prefix-keyed entries in a single RocksDB instance. Phas
 | `topo:<layer_id>` | — | LayerHandle CBOR | Topology entry per layer |
 | `branch:<name>` | — | BranchRef CBOR | Named branch heads |
 | `bloom:<layer_id>` | — | serialised BloomFilter (CBOR) | Per-layer shadowing bloom (§5.2) |
-| `idx_spo:<head>:<s>:<p>:<o>` | — | (empty) | SPO index |
-| `idx_pos:<head>:<p>:<o>:<s>` | — | (empty) | POS index |
-| `idx_ops:<head>:<o>:<p>:<s>` | — | (empty) | OPS index |
+| `idx_pos:<p>:<o>:<s>:<layer>` | — | (empty) | POS triple index, read path (§5.9) |
+| `idx_layer:<layer>:<p>:<o>:<s>` | — | (empty) | Reverse triple index, GC path (§5.9) |
 | `gc:state` | — | GCState CBOR | Last-run timestamp, in-progress flag |
 | `gc:tombstone:<layer>` | — | swept-at timestamp | Layers awaiting compaction |
 
+The `idx_*` segments are length-prefixed, not `:`-separated, because IRIs contain `:`. SPO and OPS orderings are deferred until a workload demands them.
+
 ### 6.3 Atomic commit
 
-Every layer commit must atomically:
+Every layer commit atomically writes:
 
-1. Write `layer:<new_id>:meta` and all `layer:<new_id>:res:<iri>` entries.
-2. Write `topo:<new_id>` with the LayerHandle.
-3. Write `bloom:<new_id>` with the layer's per-IRI shadowing bloom (§5.2).
-4. Update `branch:<branch_name>` to point at `<new_id>`.
-5. Append to all three `idx_*:<branch_head>:...` entries for each (s, p, o) triple.
+1. `layer:<new_id>:meta` and all `layer:<new_id>:res:<iri>` entries.
+2. `topo:<new_id>` with the LayerHandle.
+3. `bloom:<new_id>` with the layer's per-IRI shadowing bloom (§5.2).
+4. `idx_pos:` and `idx_layer:` entries for each indexable `(s, p, o)` triple in the new layer (§5.9). Population happens at `LayerBuilder::build` time through the shared `Arc<dyn TripleIndex>` in `LayerStorage`; the persistent backend's `RocksTripleIndex` writes to the same RocksDB so the entries are durable by the time the layer's other content lands.
+5. `branch:<branch_name>` to point at `<new_id>` (separate `update_branch` CAS — see §5.4).
 
-This is one RocksDB `WriteBatch`. RocksDB guarantees the batch is atomic across all keys, so partial commits are impossible.
+Steps 1–3 are one RocksDB `WriteBatch` inside `store_layer`; RocksDB guarantees atomicity across the batch, so partial commits of layer/topology/bloom are impossible. Step 4's index writes happen via a separate `WriteBatch` driven by `RocksTripleIndex::extend_layer`. A crash between step 4 and step 1 leaves orphan index entries — invisible to queries because the chain-membership filter drops them, harmless until the next `delete_layer` call against the orphan layer reclaims them. Step 5 (branch CAS) is sequenced after the layer is durable per §5.4.
 
 ## 7. Public API
 
@@ -633,7 +683,7 @@ New traits in `kernel/src/storage/`:
 - `BranchManager` — branch ref read/list/delete surface (§5.5); `update_branch` lives here as the CAS primitive with the trivial-merge contract from §5.4.3
 - `GarbageCollector` — reachability-based mark-and-sweep (§5.7)
 - `BranchPruner` — explicit branch removal + GC trigger (§5.8)
-- `TripleIndex` — replaces the `todo!()` skeleton in `storage/indexing/` (§5.9)
+- `TripleIndex` — per-layer triple index for indexed query reads (§5.9). Trait + in-memory impl in `kernel/src/layer/index.rs`; RocksDB-backed impl in `storage/rocksdb/src/triple_index.rs`.
 
 The trait list deliberately *excludes* a `SessionRegistry` / `PromotionService` / `ReanchorService` shape — D23's write model (§5.4) is stateless on the kernel side. Pinning is a parameter; promotion / reanchor are workflows clients orchestrate via `commit_layer` + `update_branch`. Sessions, where they exist (D21's `TaskRecord`), already hold their pin in `layer_head` and do not need new kernel infrastructure.
 
@@ -964,7 +1014,8 @@ Source code touchpoints (entering Phase 14):
 - [`kernel/src/layer/mod.rs`](../../kernel/src/layer/mod.rs) — Layer struct (becomes a handle in 14a)
 - [`kernel/src/context/mod.rs`](../../kernel/src/context/mod.rs) — ExecutionContext (read APIs gain explicit pin parameter in 14d)
 - [`storage/rocksdb/src/lib.rs`](../../storage/rocksdb/src/lib.rs) — RocksStore (extended with new prefixes throughout)
-- [`storage/indexing/src/lib.rs`](../../storage/indexing/src/lib.rs) — TripleIndex skeleton (implemented in 14h)
+- [`kernel/src/layer/index.rs`](../../kernel/src/layer/index.rs) — `TripleIndex` trait + `MemoryTripleIndex` + chain-walk helpers (Phase 14h)
+- [`storage/rocksdb/src/triple_index.rs`](../../storage/rocksdb/src/triple_index.rs) — RocksDB-backed `TripleIndex` (Phase 14h)
 - [`kernel/src/task/mod.rs`](../../kernel/src/task/mod.rs) — TaskRecord (gains a small outcome field in 14e)
 - [`kernel/src/query/evaluate.rs`](../../kernel/src/query/evaluate.rs) — pattern-matching evaluator (rewritten in 14h)
 - [`kernel/src/storage/mod.rs`](../../kernel/src/storage/mod.rs) — PersistentBackend trait (extended for the new prefixes)

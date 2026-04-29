@@ -27,9 +27,8 @@ eigenius/
 │   └── Cargo.toml
 ├── storage/                   # Storage backend implementations
 │   ├── tikv/                  # TiKV backend crate (§10.7)
-│   ├── rocksdb/               # RocksDB embedded storage backend
-│   ├── memory/                # In-memory backend (testing)
-│   └── indexing/              # SPO/POS/OPS triple index construction (§10.8)
+│   ├── rocksdb/               # RocksDB embedded storage backend (incl. RocksTripleIndex per D23 §5.9)
+│   └── memory/                # In-memory backend (testing)
 ├── orchestration/             # Deno/TypeScript orchestration layer (§2.2)
 │   ├── src/
 │   │   ├── program/            # Program execution engine (§12)
@@ -155,7 +154,7 @@ The following decisions have been made and documented in **design doc D1** (`doc
   - Stratified evaluation ordering for negated patterns
 - Built-in functions: DATE, TIMESTAMP, REGEX, LENGTH, CONTAINS, CONCAT
 - Aggregate functions: COUNT, SUM, AVG, MIN, MAX
-- Triple index construction on layer commit: SPO/POS/OPS indexes built as in-memory BTreeMap structures, used by the query evaluator for efficient pattern matching
+- Triple index construction on layer commit: per-layer POS index (D23 §5.9 / Phase 14h) populated by `LayerBuilder::build` and consulted by the query evaluator's `scan_chain` for indexed pattern matching
 - CLI `query` command: takes an EigenQL program string, evaluates it against the current layer chain, prints typed results
 - Structured query error reporting with position, phase (lexer/parser/type_check/stratification/evaluation), rule, and message
 
@@ -286,7 +285,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 - **Integration test:** Start kernel service with in-memory backend, send Load/Query/Validate RPCs via CLI, verify correct responses.
 - **TiKV round-trip:** Start kernel with TiKV backend, load ontology, commit layers, restart kernel, verify data persists and queries return correct results.
-- **Index correctness:** Load 1,000 resources, verify SPO/POS/OPS indexes in TiKV produce the same query results as the in-memory backend.
+- **Index correctness:** Load 1,000 resources, verify the per-layer POS index in RocksDB produces the same query results as the in-memory backend.
 - **Container build:** Docker build succeeds, container starts, health check passes.
 - **Azure deployment smoke test:** Deploy to ContainerApps staging environment, run the CLI integration test suite against the deployed endpoint.
 - **Concurrent access:** Two CLI sessions loading resources and querying concurrently against the same kernel service — no corruption, snapshot isolation holds.
@@ -803,7 +802,7 @@ The phase decomposes into two milestones that are separately reviewable:
   Documented client convention shipped alongside 14e (in the task runner / SDK, not the kernel): **per-task recovery branch** named `recovery-{task_id}`. On task launch, the runner creates the recovery branch pinned to the launch-point layer; each task commit advances it via `update_branch(... StrictFastForward)`. On successful completion, the runner attempts to advance the *target* branch from the recovery branch's head and prunes the recovery branch on success. On failure (or `NeedsWitnessedMerge`), the recovery branch stays for inspection. The kernel doesn't model this — `TaskRecord` derives the recovery branch name from `task_id`, no new persisted field — but 14e is the right milestone to document the convention since this is the first phase where trivial merge makes the publish-step viable end-to-end. Read-only tasks skip the recovery-branch dance entirely.
 - **14f — Reachability-based GC (~2 weeks).** Mark-and-sweep over the resource graph. Roots: pinned branch heads, active sessions, resources referenced by reflection-ontology traces, verified-knowledge claims. Background task with backpressure; configurable triggers (size threshold, idle interval).
 - **14g — Branch pruning (~1 week).** `eigenius db prune <branch>` removes a branch from the topology; GC sweeps anything reachable only through it. Rejects pruning of branches with active sessions.
-- **14h — Indexed resource access for queries (~1.5 weeks).** Wire the existing SPO/POS/OPS indexes from `storage/indexing/` through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes an indexed lookup against the storage backend instead of a full BTreeMap scan. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap.
+- **14h — Indexed resource access for queries (~1.5 weeks).** Implement the per-layer triple index (D23 §5.9) and wire it through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes a POS prefix scan against the storage backend instead of a full chain scan, with chain-membership filtering and a bloom-walk shadow check (matching §5.2's per-layer model) to dedupe across the DAG. POS-only in v1 (the three hot sites need only `(p, o) → s`); SPO/OPS deferred. IRI-valued objects only (`Property.data_type ∈ {resource, resource_array}`); literal-typed properties post-filter the index-narrowed candidate set. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap. The previously-stubbed `storage/indexing/` crate is superseded by the new in-kernel implementation in `kernel/src/layer/index.rs` and the RocksDB-backed impl in `storage/rocksdb/src/triple_index.rs`.
 
 ### Phase 14 — Key design questions
 
@@ -818,7 +817,9 @@ The phase decomposes into two milestones that are separately reviewable:
 
 - D13 §8, §11 — drift-refusal and single-session boundary this phase generalises
 - D21 §3.6 — `--at-layer` queries (time-travel surface; D23 §5.6 shows it reuses the standard `Layer::resolve` rooted at L)
-- `storage/indexing/` — existing SPO/POS/OPS index implementation Phase 14h plugs into
+- `kernel/src/layer/index.rs` — `TripleIndex` trait + `MemoryTripleIndex` + chain-walk helpers (Phase 14h)
+- `storage/rocksdb/src/triple_index.rs` — RocksDB-backed `TripleIndex` (Phase 14h)
+- `storage/indexing/` — pre-14h stub crate, superseded; can be removed
 - D23 — Out-of-Core Layer Architecture
 
 ---

@@ -830,14 +830,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eigenius-storage-indexing"
-version = "0.1.0"
-dependencies = [
- "eigenius-kernel",
- "serde",
-]
-
-[[package]]
 name = "eigenius-storage-memory"
 version = "0.1.0"
 dependencies = [
