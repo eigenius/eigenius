@@ -27,7 +27,9 @@ services:
       - "50051:50051"
     environment:
       - EIGENIUS_ORCHESTRATOR_ENDPOINT=http://orchestrator:8080
-    command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080"]
+    command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db"]
+    volumes:
+      - eigenius_db:/var/lib/eigenius/db
     depends_on:
       orchestrator:
         condition: service_healthy
@@ -55,3 +57,6 @@ services:
       timeout: 3s
       retries: 5
       start_period: 2s
+
+volumes:
+  eigenius_db:
