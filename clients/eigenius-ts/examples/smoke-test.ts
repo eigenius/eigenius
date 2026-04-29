@@ -13,16 +13,18 @@
 // limitations under the License.
 
 /**
- * Smoke test for `@eigenius/client` (Phase 1 + Phase 3a).
+ * Smoke test for `@eigenius/client` (Phase 1 + Phase 3a + Phase 14g).
  *
  * Exercises every method the SDK currently exposes:
- *   - layerTopology (NotebookService)
- *   - inspect          (EigeniusKernel passthrough)
- *   - query            (EigeniusKernel passthrough)
+ *   - layerTopology   (NotebookService)
+ *   - inspect         (EigeniusKernel passthrough)
+ *   - query           (EigeniusKernel passthrough)
  *   - listInstitutions (EigeniusKernel passthrough)
- *   - health           (EigeniusKernel passthrough)
- *   - load             (EigeniusKernel passthrough — Phase 3a)
- *   - validateProgram  (EigeniusKernel passthrough — Phase 3a)
+ *   - health          (EigeniusKernel passthrough)
+ *   - load            (EigeniusKernel passthrough — Phase 3a)
+ *   - validateProgram (EigeniusKernel passthrough — Phase 3a)
+ *   - listBranches / getBranch / createBranch / deleteBranch +
+ *     per-call branch routing on load          (Phase 14g)
  *
  * Requires a running stack (kernel + orchestrator). Easiest is:
  *   EIGENIUS_MOCK_LLM=true docker compose up --build -d
@@ -40,7 +42,7 @@ const eigen = new Eigen({ endpoint: ENDPOINT });
 console.log(`SDK smoke test against ${ENDPOINT}\n`);
 
 let stepNum = 0;
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 8;
 function step(label: string): void {
   stepNum++;
   console.log(`[${stepNum}/${TOTAL_STEPS}] ${label}`);
@@ -129,7 +131,9 @@ if (full.nodes.length < taxonomy.nodes.length) {
   );
 }
 ok(
-  `full: ${full.nodes.length} nodes (+ ${full.nodes.length - taxonomy.nodes.length} instance resources), ${full.edges.length} edges`,
+  `full: ${full.nodes.length} nodes (+ ${
+    full.nodes.length - taxonomy.nodes.length
+  } instance resources), ${full.edges.length} edges`,
 );
 
 // ---------------------------------------------------------------------
@@ -184,6 +188,85 @@ if (!validateResp.valid) {
 }
 ok(
   `program validated as ${validateResp.programType || "(no type returned)"}`,
+);
+console.log();
+
+// ---------------------------------------------------------------------
+// 8. branch CRUD + per-call branch routing (Phase 14g)
+// ---------------------------------------------------------------------
+step("branch CRUD + per-call routing");
+
+const branches = await eigen.listBranches();
+const mainBranch = branches.find((b) => b.name === "main");
+if (!mainBranch) fail("expected `main` in listBranches output");
+ok(
+  `listBranches: ${branches.length} branch(es); main at ${
+    mainBranch.headLayer.slice(0, 12)
+  }…`,
+);
+
+const mainGet = await eigen.getBranch("main");
+if (!mainGet.found) fail("getBranch(main) returned found=false");
+if (mainGet.headLayer !== mainBranch.headLayer) {
+  fail(
+    `getBranch head ${
+      mainGet.headLayer.slice(0, 12)
+    }… disagrees with listBranches ${mainBranch.headLayer.slice(0, 12)}…`,
+  );
+}
+ok("getBranch(main) head matches listBranches");
+
+const branchName = `smoke-${Date.now()}`;
+const created = await eigen.createBranch(branchName, {
+  fromLayer: mainBranch.headLayer,
+});
+if (!created.success) fail(`createBranch failed: ${created.error}`);
+ok(`createBranch(${branchName}) at ${created.headLayer.slice(0, 12)}…`);
+
+// Load a tiny resource into the new branch and verify main is unchanged.
+const ISOLATE_ESL = `
+namespace branchsmoke = "urn:eigenius:branchsmoke:${stepNum}";
+namespace core = "urn:eigenius:core";
+
+class branchsmoke:Marker {
+    description = "Marker resource that proves per-branch routing.";
+}
+`;
+const loadIntoBranch = await eigen.load(ISOLATE_ESL, { branch: branchName });
+if (!loadIntoBranch.success) {
+  fail(
+    `load into ${branchName} failed: ${
+      loadIntoBranch.errors.map((e) => e.message).join("; ")
+    }`,
+  );
+}
+if (loadIntoBranch.branch !== branchName) {
+  fail(`load echoed branch=${loadIntoBranch.branch}; expected ${branchName}`);
+}
+ok(
+  `load committed to ${branchName} (layer ${
+    loadIntoBranch.layerId.slice(0, 12)
+  }…)`,
+);
+
+const mainAfter = await eigen.getBranch("main");
+if (mainAfter.headLayer !== mainBranch.headLayer) {
+  fail(
+    `main advanced to ${
+      mainAfter.headLayer.slice(0, 12)
+    }… while loading into ${branchName}`,
+  );
+}
+ok("main head unchanged after load into feature branch");
+
+const deleted = await eigen.deleteBranch(branchName);
+if (!deleted.success || !deleted.deleted) {
+  fail(`deleteBranch failed: ${deleted.error}`);
+}
+ok(
+  `deleteBranch(${branchName}) reclaimed ref (was at ${
+    deleted.previousHead.slice(0, 12)
+  }…)`,
 );
 console.log();
 
