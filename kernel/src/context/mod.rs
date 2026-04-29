@@ -19,9 +19,12 @@
 //! uncommitted resources. On commit, the working layer is built, validated,
 //! and becomes the new head.
 
-use crate::layer::{Layer, LayerBuilder, LayerError, LayerId};
+use crate::layer::{
+    BloomCache, Layer, LayerBuilder, LayerError, LayerId, LayerStorage, ResourceCache,
+};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
+use crate::storage::ResourceBackend;
 use crate::validation::Validator;
 use std::fmt;
 use std::sync::Arc;
@@ -76,6 +79,10 @@ impl std::error::Error for ContextError {}
 ///
 /// The context provides resolution (checking working layer first, then the
 /// committed chain) and controlled mutation (add resources, then commit).
+///
+/// **Phase 14a-iii**: holds a shared `LayerStorage` bundle that flows into
+/// every `LayerBuilder::build` call so all committed layers share the same
+/// caches and backing store.
 pub struct ExecutionContext {
     /// The topmost committed layer.
     head: Arc<Layer>,
@@ -83,19 +90,24 @@ pub struct ExecutionContext {
     working: LayerBuilder,
     /// Read-only or read-write.
     mode: ExecutionMode,
+    /// Shared storage handles. Cloned cheaply on commit and forwarded to
+    /// `LayerBuilder::build`.
+    storage: LayerStorage,
 }
 
 impl ExecutionContext {
     /// Create a new execution context.
     ///
     /// `head` is the topmost committed layer. `name` is the name for the
-    /// working layer being built.
-    pub fn new(head: Arc<Layer>, name: &str, mode: ExecutionMode) -> Self {
+    /// working layer being built. `storage` is the shared bundle every
+    /// committed layer in this context will use.
+    pub fn new(head: Arc<Layer>, name: &str, mode: ExecutionMode, storage: LayerStorage) -> Self {
         let working = LayerBuilder::new(name, Some(Arc::clone(&head)));
         Self {
             head,
             working,
             mode,
+            storage,
         }
     }
 
@@ -109,15 +121,37 @@ impl ExecutionContext {
         self.mode
     }
 
+    /// Returns the bundled `LayerStorage` (cache + backend + bloom cache).
+    pub fn storage(&self) -> &LayerStorage {
+        &self.storage
+    }
+
+    /// Returns the shared resource cache.
+    pub fn cache(&self) -> &Arc<dyn ResourceCache> {
+        &self.storage.cache
+    }
+
+    /// Returns the shared resource backend.
+    pub fn backend(&self) -> &Arc<dyn ResourceBackend> {
+        &self.storage.backend
+    }
+
+    /// Returns the shared bloom cache.
+    pub fn bloom_cache(&self) -> &Arc<dyn BloomCache> {
+        &self.storage.bloom_cache
+    }
+
     /// Resolve a resource by IRI.
     ///
     /// Checks the working layer first, then walks the committed chain.
-    pub fn resolve(&self, iri: &Iri) -> Option<&Resource> {
-        // Check working layer first
+    /// Returns an owned `Arc<Resource>` because cache-backed lookups can't
+    /// hand out borrowed references that outlive the cache state.
+    pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
+        // Check working layer first (still in-builder, holds Resource by value)
         if let Some(r) = self.working.get_resource(iri) {
-            return Some(r);
+            return Some(Arc::new(r.clone()));
         }
-        // Then walk the committed chain
+        // Then walk the committed chain (cache-backed)
         self.head.resolve(iri)
     }
 
@@ -150,12 +184,12 @@ impl ExecutionContext {
             return Err(ContextError::ReadOnly);
         }
 
-        // Build the layer
+        // Build the layer using the context's shared cache + backend.
         let working = std::mem::replace(
             &mut self.working,
             LayerBuilder::new(name, Some(Arc::clone(&self.head))),
         );
-        let new_layer = Arc::new(working.build());
+        let new_layer = Arc::new(working.build(self.storage.clone()));
 
         // Validate the new layer
         let validator = Validator::new(&new_layer);
@@ -197,35 +231,42 @@ mod tests {
         r
     }
 
-    fn build_core_layer() -> Arc<Layer> {
+    fn test_storage() -> LayerStorage {
+        LayerStorage::in_memory()
+    }
+
+    fn build_core_layer(storage: LayerStorage) -> Arc<Layer> {
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        Arc::new(builder.build())
+        Arc::new(builder.build(storage))
     }
 
     #[test]
     fn read_only_rejects_add() {
-        let core = build_core_layer();
-        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly, storage);
         let r = make_resource("urn:eigenius:test:foo", vec![]);
         assert!(matches!(ctx.add_resource(r), Err(ContextError::ReadOnly)));
     }
 
     #[test]
     fn read_only_rejects_commit() {
-        let core = build_core_layer();
-        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly, storage);
         assert!(matches!(ctx.commit("test"), Err(ContextError::ReadOnly)));
     }
 
     #[test]
     fn resolve_from_head() {
-        let core = build_core_layer();
-        let ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly, storage);
         // Should resolve core ontology resources
         assert!(ctx.resolve(&iri("urn:eigenius:core:Class")).is_some());
         assert!(ctx.resolve(&iri("urn:eigenius:core:is_a")).is_some());
@@ -233,8 +274,9 @@ mod tests {
 
     #[test]
     fn resolve_working_layer_first() {
-        let core = build_core_layer();
-        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite, storage);
 
         let r = make_resource(
             "urn:eigenius:test:foo",
@@ -252,8 +294,10 @@ mod tests {
 
     #[test]
     fn commit_valid_resource() {
-        let core = build_core_layer();
-        let mut ctx = ExecutionContext::new(core.clone(), "test", ExecutionMode::ReadWrite);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx =
+            ExecutionContext::new(core.clone(), "test", ExecutionMode::ReadWrite, storage);
 
         // Add a valid Property resource
         ctx.add_resource(make_resource(
@@ -282,8 +326,9 @@ mod tests {
 
     #[test]
     fn commit_invalid_resource_fails() {
-        let core = build_core_layer();
-        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite, storage);
 
         // Add a Property missing required 'data_type'
         ctx.add_resource(make_resource(
@@ -308,8 +353,9 @@ mod tests {
 
     #[test]
     fn has_changes() {
-        let core = build_core_layer();
-        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite);
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite, storage);
         assert!(!ctx.has_changes());
         ctx.add_resource(make_resource("urn:eigenius:test:x", vec![]))
             .unwrap();

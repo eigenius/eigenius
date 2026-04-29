@@ -7,7 +7,6 @@ members = [
     "storage/tikv",
     "storage/rocksdb",
     "storage/memory",
-    "storage/indexing",
     "cli",
 ]
 exclude = [

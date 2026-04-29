@@ -8,6 +8,10 @@ license.workspace = true
 async-trait = "0.1"
 ciborium = "0.2"
 hex = "0.4"
+# Concurrent cache for the bounded two-pool resource cache (D23 §5.3 /
+# Phase 14c). W-TinyLFU eviction outperforms LRU/ARC on skewed access
+# patterns and the crate is production-grade in Rust services.
+moka = { version = "0.12", features = ["sync"] }
 regex = "1"
 sha2 = "0.10"
 serde.workspace = true

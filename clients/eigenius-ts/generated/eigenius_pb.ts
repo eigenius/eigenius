@@ -29,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file eigenius.proto.
  */
 export const file_eigenius: GenFile = /*@__PURE__*/
-  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iLwoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIxCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJXCg1RdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEAoIZG9jdW1lbnQYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJEg0KBWVycm9yGAQgASgJIj8KFlZhbGlkYXRlUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkibAoXVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USDQoFdmFsaWQYASABKAgSLAoGZXJyb3JzGAIgAygLMhwuZWlnZW5pdXMudjEuVmFsaWRhdGlvbkVycm9yEhQKDHByb2dyYW1fdHlwZRgDIAEoCSJJChFSdW5Qcm9ncmFtUmVxdWVzdBIPCgdwcm9ncmFtGAEgASgMEg0KBWlucHV0GAIgASgMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSKHAQoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkSDwoHdGFza19pZBgFIAEoCSJSChZSdW5Qcm9ncmFtQnlJcmlSZXF1ZXN0EhMKC3Byb2dyYW1faXJpGAEgASgJEhEKCWlucHV0X2lyaRgCIAEoCRIQCghhdF9sYXllchgDIAEoCSI1Cg5SZWZsZWN0UmVxdWVzdBINCgV0cmFjZRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkiNQoPUmVmbGVjdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJdHJhY2VfaXJpGAIgASgJIg8KDUhlYWx0aFJlcXVlc3QikwEKDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBBIaChJyZXN1bWVfaW5fcHJvZ3Jlc3MYBSABKAgSFgoOdGFza3NfcmVzdW1pbmcYBiABKA0iegocUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEhMKC3dhc21fYmluYXJ5GAIgASgMEhIKCmZ1ZWxfbGltaXQYAyABKAQSGgoSbWVtb3J5X2xpbWl0X3BhZ2VzGAQgASgEIj8KHVJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDQoFZXJyb3IYAiABKAkiYAoQQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEg0KBWlucHV0GAIgASgMEhAKCGFyZ3VtZW50GAMgASgMEhQKDGNvbnRlbnRfdHlwZRgEIAEoCSJzChFDb21wb25lbnRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBm91dHB1dBgCIAEoDBINCgVlcnJvchgDIAEoCRIuCgdtZXRyaWNzGAQgASgLMh0uZWlnZW5pdXMudjEuQ29tcG9uZW50TWV0cmljcyJ5ChBDb21wb25lbnRNZXRyaWNzEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhUKDXByb21wdF90b2tlbnMYAyABKAMSGQoRY29tcGxldGlvbl90b2tlbnMYBCABKAMSEgoKbGF0ZW5jeV9tcxgFIAEoAyJRChFGaWJlclF1ZXJ5UmVxdWVzdBIXCg9pbnN0aXR1dGlvbl9pcmkYASABKAkSDQoFcXVlcnkYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJIkQKEkZpYmVyUXVlcnlSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBnJlc3VsdBgCIAEoDBINCgVlcnJvchgDIAEoCSJcChhEaXNjb3Zlck1vcnBoaXNtc1JlcXVlc3QSFwoPaW5zdGl0dXRpb25faXJpGAEgASgJEhEKCXJlc291cmNlcxgCIAMoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiTgoZRGlzY292ZXJNb3JwaGlzbXNSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhEKCW1vcnBoaXNtcxgCIAMoDBINCgVlcnJvchgDIAEoCSIrChdMaXN0SW5zdGl0dXRpb25zUmVxdWVzdBIQCghhdF9sYXllchgBIAEoCSJOChhMaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USMgoMaW5zdGl0dXRpb25zGAEgAygLMhwuZWlnZW5pdXMudjEuSW5zdGl0dXRpb25JbmZvIlkKD0luc3RpdHV0aW9uSW5mbxILCgNpcmkYASABKAkSDAoEbmFtZRgCIAEoCRIWCg5tb3JwaGlzbV90eXBlcxgDIAMoCRITCgtxdWVyeV90eXBlcxgEIAMoCSI3ChBHZXRTY2hlbWFSZXF1ZXN0EhEKCWNsYXNzX2lyaRgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJIChFHZXRTY2hlbWFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhMKC2pzb25fc2NoZW1hGAIgASgJEg0KBWVycm9yGAMgASgJIqYCCghUYXNrSW5mbxIPCgd0YXNrX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEwoLcHJvZ3JhbV9pcmkYAyABKAkSEQoJaW5wdXRfaXJpGAQgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpsYXllcl9oZWFkGAYgASgJEhAKCHN0ZXBfc2VxGAcgASgEEhgKEGxhdGVzdF90cmFjZV9zZXEYCCABKAQSHAoUbGFzdF9jaGVja3BvaW50X3N0ZXAYCSABKAkSGQoRcmVzdWx0X2xheWVyX2hlYWQYCiABKAkSFQoNY3JlYXRlZF9hdF9tcxgLIAEoAxIVCg11cGRhdGVkX2F0X21zGAwgASgDEhYKDnJldGFpbl9mb3JldmVyGA0gASgIIhIKEExpc3RUYXNrc1JlcXVlc3QiOQoRTGlzdFRhc2tzUmVzcG9uc2USJAoFdGFza3MYASADKAsyFS5laWdlbml1cy52MS5UYXNrSW5mbyInChRHZXRUYXNrU3RhdHVzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIksKFUdldFRhc2tTdGF0dXNSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIjCgR0YXNrGAIgASgLMhUuZWlnZW5pdXMudjEuVGFza0luZm8iJAoRQ2FuY2VsVGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCSJEChJDYW5jZWxUYXNrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIOCgZzdGF0dXMYAiABKAkSDQoFZXJyb3IYAyABKAkibgoPVmFsaWRhdGlvbkVycm9yEhQKDHJlc291cmNlX2lyaRgBIAEoCRIUCgxwcm9wZXJ0eV9pcmkYAiABKAkSDAoEcnVsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJEhAKCHNldmVyaXR5GAUgASgJIlgKFExheWVyVG9wb2xvZ3lSZXF1ZXN0EhIKCnJvb3RfbGF5ZXIYASABKAkSEQoJbWF4X2RlcHRoGAIgASgNEhkKEWluY2x1ZGVfcmVzb3VyY2VzGAMgASgIImsKFUxheWVyVG9wb2xvZ3lSZXNwb25zZRIoCgVub2RlcxgBIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZRIoCgVlZGdlcxgCIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5RWRnZSKxAQoMVG9wb2xvZ3lOb2RlEgoKAmlkGAEgASgJEiMKBGtpbmQYAiABKA4yFS5laWdlbml1cy52MS5Ob2RlS2luZBINCgVsYWJlbBgDIAEoCRIzCgVhdHRycxgEIAMoCzIkLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZS5BdHRyc0VudHJ5GiwKCkF0dHJzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASK2AQoMVG9wb2xvZ3lFZGdlEg4KBnNvdXJjZRgBIAEoCRIOCgZ0YXJnZXQYAiABKAkSIwoEa2luZBgDIAEoDjIVLmVpZ2VuaXVzLnYxLkVkZ2VLaW5kEjMKBWF0dHJzGAQgAygLMiQuZWlnZW5pdXMudjEuVG9wb2xvZ3lFZGdlLkF0dHJzRW50cnkaLAoKQXR0cnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBKpoBCghOb2RlS2luZBIZChVOT0RFX0tJTkRfVU5TUEVDSUZJRUQQABITCg9OT0RFX0tJTkRfTEFZRVIQARITCg9OT0RFX0tJTkRfQ0xBU1MQAhIWChJOT0RFX0tJTkRfUFJPUEVSVFkQAxIWChJOT0RFX0tJTkRfUkVTT1VSQ0UQBBIZChVOT0RFX0tJTkRfSU5TVElUVVRJT04QBSriAQoIRWRnZUtpbmQSGQoVRURHRV9LSU5EX1VOU1BFQ0lGSUVEEAASGgoWRURHRV9LSU5EX1BBUkVOVF9MQVlFUhABEhIKDkVER0VfS0lORF9JU19BEAISGQoVRURHRV9LSU5EX1NVQkNMQVNTX09GEAMSFgoSRURHRV9LSU5EX1JFUVVJUkVTEAQSGAoURURHRV9LSU5EX1JFQ09NTUVORFMQBRIaChZFREdFX0tJTkRfUFJPUEVSVFlfUkVGEAYSIgoeRURHRV9LSU5EX0lOU1RJVFVUSU9OX0RFQ0xBUkVTEAcyjQoKDkVpZ2VuaXVzS2VybmVsEjsKBExvYWQSGC5laWdlbml1cy52MS5Mb2FkUmVxdWVzdBoZLmVpZ2VuaXVzLnYxLkxvYWRSZXNwb25zZRJECgdJbnNwZWN0EhsuZWlnZW5pdXMudjEuSW5zcGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5JbnNwZWN0UmVzcG9uc2USPgoFUXVlcnkSGS5laWdlbml1cy52MS5RdWVyeVJlcXVlc3QaGi5laWdlbml1cy52MS5RdWVyeVJlc3BvbnNlElwKD1ZhbGlkYXRlUHJvZ3JhbRIjLmVpZ2VuaXVzLnYxLlZhbGlkYXRlUHJvZ3JhbVJlcXVlc3QaJC5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXNwb25zZRJNCgpSdW5Qcm9ncmFtEh4uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlcXVlc3QaHy5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVzcG9uc2USVwoPUnVuUHJvZ3JhbUJ5SXJpEiMuZWlnZW5pdXMudjEuUnVuUHJvZ3JhbUJ5SXJpUmVxdWVzdBofLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXNwb25zZRJECgdSZWZsZWN0EhsuZWlnZW5pdXMudjEuUmVmbGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5SZWZsZWN0UmVzcG9uc2USQQoGSGVhbHRoEhouZWlnZW5pdXMudjEuSGVhbHRoUmVxdWVzdBobLmVpZ2VuaXVzLnYxLkhlYWx0aFJlc3BvbnNlEk0KCkZpYmVyUXVlcnkSHi5laWdlbml1cy52MS5GaWJlclF1ZXJ5UmVxdWVzdBofLmVpZ2VuaXVzLnYxLkZpYmVyUXVlcnlSZXNwb25zZRJiChFEaXNjb3Zlck1vcnBoaXNtcxIlLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBomLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVzcG9uc2USXwoQTGlzdEluc3RpdHV0aW9ucxIkLmVpZ2VuaXVzLnYxLkxpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0GiUuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1Jlc3BvbnNlEkoKCUdldFNjaGVtYRIdLmVpZ2VuaXVzLnYxLkdldFNjaGVtYVJlcXVlc3QaHi5laWdlbml1cy52MS5HZXRTY2hlbWFSZXNwb25zZRJKCglMaXN0VGFza3MSHS5laWdlbml1cy52MS5MaXN0VGFza3NSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuTGlzdFRhc2tzUmVzcG9uc2USVgoNR2V0VGFza1N0YXR1cxIhLmVpZ2VuaXVzLnYxLkdldFRhc2tTdGF0dXNSZXF1ZXN0GiIuZWlnZW5pdXMudjEuR2V0VGFza1N0YXR1c1Jlc3BvbnNlEk0KCkNhbmNlbFRhc2sSHi5laWdlbml1cy52MS5DYW5jZWxUYXNrUmVxdWVzdBofLmVpZ2VuaXVzLnYxLkNhbmNlbFRhc2tSZXNwb25zZRJWCg1MYXllclRvcG9sb2d5EiEuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlcXVlc3QaIi5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVzcG9uc2UyzQEKEUNvbXBvbmVudEV4ZWN1dG9yEkgKB0V4ZWN1dGUSHS5laWdlbml1cy52MS5Db21wb25lbnRSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVzcG9uc2USbgoVUmVnaXN0ZXJXYXNtQ29tcG9uZW50EikuZWlnZW5pdXMudjEuUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBoqLmVpZ2VuaXVzLnYxLlJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlMmkKD05vdGVib29rU2VydmljZRJWCg1MYXllclRvcG9sb2d5EiEuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlcXVlc3QaIi5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiWwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCBIOCgZicmFuY2gYBCABKAkihwEKDExvYWRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIQCghsYXllcl9pZBgDIAEoCRIWCg5yZXNvdXJjZV9jb3VudBgEIAEoDRIOCgZicmFuY2gYBSABKAkiPwoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJEg4KBmJyYW5jaBgDIAEoCSIyCg9JbnNwZWN0UmVzcG9uc2USDQoFZm91bmQYASABKAgSEAoIcmVzb3VyY2UYAiABKAwiQQoMUXVlcnlSZXF1ZXN0Eg8KB2VpZ2VucWwYASABKAkSEAoIYXRfbGF5ZXIYAiABKAkSDgoGYnJhbmNoGAMgASgJIlcKDVF1ZXJ5UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIQCghkb2N1bWVudBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkSDQoFZXJyb3IYBCABKAkiPwoWVmFsaWRhdGVQcm9ncmFtUmVxdWVzdBIPCgdwcm9ncmFtGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCSJsChdWYWxpZGF0ZVByb2dyYW1SZXNwb25zZRINCgV2YWxpZBgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISFAoMcHJvZ3JhbV90eXBlGAMgASgJIlkKEVJ1blByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSDQoFaW5wdXQYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJEg4KBmJyYW5jaBgEIAEoCSKHAQoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkSDwoHdGFza19pZBgFIAEoCSJiChZSdW5Qcm9ncmFtQnlJcmlSZXF1ZXN0EhMKC3Byb2dyYW1faXJpGAEgASgJEhEKCWlucHV0X2lyaRgCIAEoCRIQCghhdF9sYXllchgDIAEoCRIOCgZicmFuY2gYBCABKAkiRQoOUmVmbGVjdFJlcXVlc3QSDQoFdHJhY2UYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEg4KBmJyYW5jaBgDIAEoCSI1Cg9SZWZsZWN0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIRCgl0cmFjZV9pcmkYAiABKAkiDwoNSGVhbHRoUmVxdWVzdCKTAQoOSGVhbHRoUmVzcG9uc2USDwoHaGVhbHRoeRgBIAEoCBIPCgd2ZXJzaW9uGAIgASgJEhMKC2xheWVyX2NvdW50GAMgASgEEhYKDnJlc291cmNlX2NvdW50GAQgASgEEhoKEnJlc3VtZV9pbl9wcm9ncmVzcxgFIAEoCBIWCg50YXNrc19yZXN1bWluZxgGIAEoDSJ6ChxSZWdpc3Rlcldhc21Db21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSEwoLd2FzbV9iaW5hcnkYAiABKAwSEgoKZnVlbF9saW1pdBgDIAEoBBIaChJtZW1vcnlfbGltaXRfcGFnZXMYBCABKAQiPwodUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSJgChBDb21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSDQoFaW5wdXQYAiABKAwSEAoIYXJndW1lbnQYAyABKAwSFAoMY29udGVudF90eXBlGAQgASgJInMKEUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEg0KBWVycm9yGAMgASgJEi4KB21ldHJpY3MYBCABKAsyHS5laWdlbml1cy52MS5Db21wb25lbnRNZXRyaWNzInkKEENvbXBvbmVudE1ldHJpY3MSEAoIcHJvdmlkZXIYASABKAkSDQoFbW9kZWwYAiABKAkSFQoNcHJvbXB0X3Rva2VucxgDIAEoAxIZChFjb21wbGV0aW9uX3Rva2VucxgEIAEoAxISCgpsYXRlbmN5X21zGAUgASgDIlEKEUZpYmVyUXVlcnlSZXF1ZXN0EhcKD2luc3RpdHV0aW9uX2lyaRgBIAEoCRINCgVxdWVyeRgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiRAoSRmliZXJRdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGcmVzdWx0GAIgASgMEg0KBWVycm9yGAMgASgJIlwKGERpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBIXCg9pbnN0aXR1dGlvbl9pcmkYASABKAkSEQoJcmVzb3VyY2VzGAIgAygMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSJOChlEaXNjb3Zlck1vcnBoaXNtc1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJbW9ycGhpc21zGAIgAygMEg0KBWVycm9yGAMgASgJIisKF0xpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0EhAKCGF0X2xheWVyGAEgASgJIk4KGExpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRIyCgxpbnN0aXR1dGlvbnMYASADKAsyHC5laWdlbml1cy52MS5JbnN0aXR1dGlvbkluZm8iWQoPSW5zdGl0dXRpb25JbmZvEgsKA2lyaRgBIAEoCRIMCgRuYW1lGAIgASgJEhYKDm1vcnBoaXNtX3R5cGVzGAMgAygJEhMKC3F1ZXJ5X3R5cGVzGAQgAygJIjcKEEdldFNjaGVtYVJlcXVlc3QSEQoJY2xhc3NfaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJIkgKEUdldFNjaGVtYVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEwoLanNvbl9zY2hlbWEYAiABKAkSDQoFZXJyb3IYAyABKAkipgIKCFRhc2tJbmZvEg8KB3Rhc2tfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRITCgtwcm9ncmFtX2lyaRgDIAEoCRIRCglpbnB1dF9pcmkYBCABKAkSDgoGc3RhdHVzGAUgASgJEhIKCmxheWVyX2hlYWQYBiABKAkSEAoIc3RlcF9zZXEYByABKAQSGAoQbGF0ZXN0X3RyYWNlX3NlcRgIIAEoBBIcChRsYXN0X2NoZWNrcG9pbnRfc3RlcBgJIAEoCRIZChFyZXN1bHRfbGF5ZXJfaGVhZBgKIAEoCRIVCg1jcmVhdGVkX2F0X21zGAsgASgDEhUKDXVwZGF0ZWRfYXRfbXMYDCABKAMSFgoOcmV0YWluX2ZvcmV2ZXIYDSABKAgiEgoQTGlzdFRhc2tzUmVxdWVzdCI5ChFMaXN0VGFza3NSZXNwb25zZRIkCgV0YXNrcxgBIAMoCzIVLmVpZ2VuaXVzLnYxLlRhc2tJbmZvIicKFEdldFRhc2tTdGF0dXNSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkiSwoVR2V0VGFza1N0YXR1c1Jlc3BvbnNlEg0KBWZvdW5kGAEgASgIEiMKBHRhc2sYAiABKAsyFS5laWdlbml1cy52MS5UYXNrSW5mbyIkChFDYW5jZWxUYXNrUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIkQKEkNhbmNlbFRhc2tSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBnN0YXR1cxgCIAEoCRINCgVlcnJvchgDIAEoCSJuCg9WYWxpZGF0aW9uRXJyb3ISFAoMcmVzb3VyY2VfaXJpGAEgASgJEhQKDHByb3BlcnR5X2lyaRgCIAEoCRIMCgRydWxlGAMgASgJEg8KB21lc3NhZ2UYBCABKAkSEAoIc2V2ZXJpdHkYBSABKAkiWAoUTGF5ZXJUb3BvbG9neVJlcXVlc3QSEgoKcm9vdF9sYXllchgBIAEoCRIRCgltYXhfZGVwdGgYAiABKA0SGQoRaW5jbHVkZV9yZXNvdXJjZXMYAyABKAgiawoVTGF5ZXJUb3BvbG9neVJlc3BvbnNlEigKBW5vZGVzGAEgAygLMhkuZWlnZW5pdXMudjEuVG9wb2xvZ3lOb2RlEigKBWVkZ2VzGAIgAygLMhkuZWlnZW5pdXMudjEuVG9wb2xvZ3lFZGdlIrEBCgxUb3BvbG9neU5vZGUSCgoCaWQYASABKAkSIwoEa2luZBgCIAEoDjIVLmVpZ2VuaXVzLnYxLk5vZGVLaW5kEg0KBWxhYmVsGAMgASgJEjMKBWF0dHJzGAQgAygLMiQuZWlnZW5pdXMudjEuVG9wb2xvZ3lOb2RlLkF0dHJzRW50cnkaLAoKQXR0cnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIrYBCgxUb3BvbG9neUVkZ2USDgoGc291cmNlGAEgASgJEg4KBnRhcmdldBgCIAEoCRIjCgRraW5kGAMgASgOMhUuZWlnZW5pdXMudjEuRWRnZUtpbmQSMwoFYXR0cnMYBCADKAsyJC5laWdlbml1cy52MS5Ub3BvbG9neUVkZ2UuQXR0cnNFbnRyeRosCgpBdHRyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiLgoKQnJhbmNoSW5mbxIMCgRuYW1lGAEgASgJEhIKCmhlYWRfbGF5ZXIYAiABKAkiFQoTTGlzdEJyYW5jaGVzUmVxdWVzdCJBChRMaXN0QnJhbmNoZXNSZXNwb25zZRIpCghicmFuY2hlcxgBIAMoCzIXLmVpZ2VuaXVzLnYxLkJyYW5jaEluZm8iIAoQR2V0QnJhbmNoUmVxdWVzdBIMCgRuYW1lGAEgASgJIjYKEUdldEJyYW5jaFJlc3BvbnNlEg0KBWZvdW5kGAEgASgIEhIKCmhlYWRfbGF5ZXIYAiABKAkiNwoTQ3JlYXRlQnJhbmNoUmVxdWVzdBIMCgRuYW1lGAEgASgJEhIKCmZyb21fbGF5ZXIYAiABKAkiSgoUQ3JlYXRlQnJhbmNoUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBISCgpoZWFkX2xheWVyGAIgASgJEg0KBWVycm9yGAMgASgJIjIKE0RlbGV0ZUJyYW5jaFJlcXVlc3QSDAoEbmFtZRgBIAEoCRINCgVmb3JjZRgCIAEoCCJeChREZWxldGVCcmFuY2hSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB2RlbGV0ZWQYAiABKAgSFQoNcHJldmlvdXNfaGVhZBgDIAEoCRINCgVlcnJvchgEIAEoCSqaAQoITm9kZUtpbmQSGQoVTk9ERV9LSU5EX1VOU1BFQ0lGSUVEEAASEwoPTk9ERV9LSU5EX0xBWUVSEAESEwoPTk9ERV9LSU5EX0NMQVNTEAISFgoSTk9ERV9LSU5EX1BST1BFUlRZEAMSFgoSTk9ERV9LSU5EX1JFU09VUkNFEAQSGQoVTk9ERV9LSU5EX0lOU1RJVFVUSU9OEAUq4gEKCEVkZ2VLaW5kEhkKFUVER0VfS0lORF9VTlNQRUNJRklFRBAAEhoKFkVER0VfS0lORF9QQVJFTlRfTEFZRVIQARISCg5FREdFX0tJTkRfSVNfQRACEhkKFUVER0VfS0lORF9TVUJDTEFTU19PRhADEhYKEkVER0VfS0lORF9SRVFVSVJFUxAEEhgKFEVER0VfS0lORF9SRUNPTU1FTkRTEAUSGgoWRURHRV9LSU5EX1BST1BFUlRZX1JFRhAGEiIKHkVER0VfS0lORF9JTlNUSVRVVElPTl9ERUNMQVJFUxAHMtgMCg5FaWdlbml1c0tlcm5lbBI7CgRMb2FkEhguZWlnZW5pdXMudjEuTG9hZFJlcXVlc3QaGS5laWdlbml1cy52MS5Mb2FkUmVzcG9uc2USRAoHSW5zcGVjdBIbLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuSW5zcGVjdFJlc3BvbnNlEj4KBVF1ZXJ5EhkuZWlnZW5pdXMudjEuUXVlcnlSZXF1ZXN0GhouZWlnZW5pdXMudjEuUXVlcnlSZXNwb25zZRJcCg9WYWxpZGF0ZVByb2dyYW0SIy5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXF1ZXN0GiQuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USTQoKUnVuUHJvZ3JhbRIeLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXF1ZXN0Gh8uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlc3BvbnNlElcKD1J1blByb2dyYW1CeUlyaRIjLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1CeUlyaVJlcXVlc3QaHy5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVzcG9uc2USRAoHUmVmbGVjdBIbLmVpZ2VuaXVzLnYxLlJlZmxlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuUmVmbGVjdFJlc3BvbnNlEkEKBkhlYWx0aBIaLmVpZ2VuaXVzLnYxLkhlYWx0aFJlcXVlc3QaGy5laWdlbml1cy52MS5IZWFsdGhSZXNwb25zZRJNCgpGaWJlclF1ZXJ5Eh4uZWlnZW5pdXMudjEuRmliZXJRdWVyeVJlcXVlc3QaHy5laWdlbml1cy52MS5GaWJlclF1ZXJ5UmVzcG9uc2USYgoRRGlzY292ZXJNb3JwaGlzbXMSJS5laWdlbml1cy52MS5EaXNjb3Zlck1vcnBoaXNtc1JlcXVlc3QaJi5laWdlbml1cy52MS5EaXNjb3Zlck1vcnBoaXNtc1Jlc3BvbnNlEl8KEExpc3RJbnN0aXR1dGlvbnMSJC5laWdlbml1cy52MS5MaXN0SW5zdGl0dXRpb25zUmVxdWVzdBolLmVpZ2VuaXVzLnYxLkxpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRJKCglHZXRTY2hlbWESHS5laWdlbml1cy52MS5HZXRTY2hlbWFSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuR2V0U2NoZW1hUmVzcG9uc2USSgoJTGlzdFRhc2tzEh0uZWlnZW5pdXMudjEuTGlzdFRhc2tzUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkxpc3RUYXNrc1Jlc3BvbnNlElYKDUdldFRhc2tTdGF0dXMSIS5laWdlbml1cy52MS5HZXRUYXNrU3RhdHVzUmVxdWVzdBoiLmVpZ2VuaXVzLnYxLkdldFRhc2tTdGF0dXNSZXNwb25zZRJNCgpDYW5jZWxUYXNrEh4uZWlnZW5pdXMudjEuQ2FuY2VsVGFza1JlcXVlc3QaHy5laWdlbml1cy52MS5DYW5jZWxUYXNrUmVzcG9uc2USVgoNTGF5ZXJUb3BvbG9neRIhLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXF1ZXN0GiIuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlc3BvbnNlElMKDExpc3RCcmFuY2hlcxIgLmVpZ2VuaXVzLnYxLkxpc3RCcmFuY2hlc1JlcXVlc3QaIS5laWdlbml1cy52MS5MaXN0QnJhbmNoZXNSZXNwb25zZRJKCglHZXRCcmFuY2gSHS5laWdlbml1cy52MS5HZXRCcmFuY2hSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuR2V0QnJhbmNoUmVzcG9uc2USUwoMQ3JlYXRlQnJhbmNoEiAuZWlnZW5pdXMudjEuQ3JlYXRlQnJhbmNoUmVxdWVzdBohLmVpZ2VuaXVzLnYxLkNyZWF0ZUJyYW5jaFJlc3BvbnNlElMKDERlbGV0ZUJyYW5jaBIgLmVpZ2VuaXVzLnYxLkRlbGV0ZUJyYW5jaFJlcXVlc3QaIS5laWdlbml1cy52MS5EZWxldGVCcmFuY2hSZXNwb25zZTLNAQoRQ29tcG9uZW50RXhlY3V0b3ISSAoHRXhlY3V0ZRIdLmVpZ2VuaXVzLnYxLkNvbXBvbmVudFJlcXVlc3QaHi5laWdlbml1cy52MS5Db21wb25lbnRSZXNwb25zZRJuChVSZWdpc3Rlcldhc21Db21wb25lbnQSKS5laWdlbml1cy52MS5SZWdpc3Rlcldhc21Db21wb25lbnRSZXF1ZXN0GiouZWlnZW5pdXMudjEuUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVzcG9uc2UyaQoPTm90ZWJvb2tTZXJ2aWNlElYKDUxheWVyVG9wb2xvZ3kSIS5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVxdWVzdBoiLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message eigenius.v1.LoadRequest
@@ -55,6 +55,14 @@ export type LoadRequest = Message<"eigenius.v1.LoadRequest"> & {
    * @generated from field: bool auto_commit = 3;
    */
   autoCommit: boolean;
+
+  /**
+   * Branch to commit into (Phase 14g). Empty defaults to "main".
+   * Branch must already exist — create with CreateBranch first.
+   *
+   * @generated from field: string branch = 4;
+   */
+  branch: string;
 };
 
 /**
@@ -89,6 +97,13 @@ export type LoadResponse = Message<"eigenius.v1.LoadResponse"> & {
    * @generated from field: uint32 resource_count = 4;
    */
   resourceCount: number;
+
+  /**
+   * Echoes the branch this Load committed to (defaults to "main").
+   *
+   * @generated from field: string branch = 5;
+   */
+  branch: string;
 };
 
 /**
@@ -115,6 +130,14 @@ export type InspectRequest = Message<"eigenius.v1.InspectRequest"> & {
    * @generated from field: string at_layer = 2;
    */
   atLayer: string;
+
+  /**
+   * Optional branch name (Phase 14g). Pin reads to this branch's
+   * current head. Mutually exclusive with `at_layer`. Empty = "main".
+   *
+   * @generated from field: string branch = 3;
+   */
+  branch: string;
 };
 
 /**
@@ -166,6 +189,14 @@ export type QueryRequest = Message<"eigenius.v1.QueryRequest"> & {
    * @generated from field: string at_layer = 2;
    */
   atLayer: string;
+
+  /**
+   * Optional branch name (Phase 14g). Pin reads to this branch's
+   * current head. Mutually exclusive with `at_layer`. Empty = "main".
+   *
+   * @generated from field: string branch = 3;
+   */
+  branch: string;
 };
 
 /**
@@ -292,6 +323,13 @@ export type RunProgramRequest = Message<"eigenius.v1.RunProgramRequest"> & {
    * @generated from field: string content_type = 3;
    */
   contentType: string;
+
+  /**
+   * Branch the trace layer commits into (Phase 14g). Empty = "main".
+   *
+   * @generated from field: string branch = 4;
+   */
+  branch: string;
 };
 
 /**
@@ -369,6 +407,14 @@ export type RunProgramByIriRequest = Message<"eigenius.v1.RunProgramByIriRequest
    * @generated from field: string at_layer = 3;
    */
   atLayer: string;
+
+  /**
+   * Branch the trace layer commits into (Phase 14g). Empty = "main".
+   * Reads still respect `at_layer` independently of `branch`.
+   *
+   * @generated from field: string branch = 4;
+   */
+  branch: string;
 };
 
 /**
@@ -391,6 +437,13 @@ export type ReflectRequest = Message<"eigenius.v1.ReflectRequest"> & {
    * @generated from field: string content_type = 2;
    */
   contentType: string;
+
+  /**
+   * Branch the trace layer commits into (Phase 14g). Empty = "main".
+   *
+   * @generated from field: string branch = 3;
+   */
+  branch: string;
 };
 
 /**
@@ -1307,6 +1360,224 @@ export const TopologyEdgeSchema: GenMessage<TopologyEdge> = /*@__PURE__*/
   messageDesc(file_eigenius, 40);
 
 /**
+ * @generated from message eigenius.v1.BranchInfo
+ */
+export type BranchInfo = Message<"eigenius.v1.BranchInfo"> & {
+  /**
+   * matches [A-Za-z0-9_-]+
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * hex-encoded LayerId
+   *
+   * @generated from field: string head_layer = 2;
+   */
+  headLayer: string;
+};
+
+/**
+ * Describes the message eigenius.v1.BranchInfo.
+ * Use `create(BranchInfoSchema)` to create a new message.
+ */
+export const BranchInfoSchema: GenMessage<BranchInfo> = /*@__PURE__*/
+  messageDesc(file_eigenius, 41);
+
+/**
+ * @generated from message eigenius.v1.ListBranchesRequest
+ */
+export type ListBranchesRequest = Message<"eigenius.v1.ListBranchesRequest"> & {
+};
+
+/**
+ * Describes the message eigenius.v1.ListBranchesRequest.
+ * Use `create(ListBranchesRequestSchema)` to create a new message.
+ */
+export const ListBranchesRequestSchema: GenMessage<ListBranchesRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 42);
+
+/**
+ * @generated from message eigenius.v1.ListBranchesResponse
+ */
+export type ListBranchesResponse = Message<"eigenius.v1.ListBranchesResponse"> & {
+  /**
+   * @generated from field: repeated eigenius.v1.BranchInfo branches = 1;
+   */
+  branches: BranchInfo[];
+};
+
+/**
+ * Describes the message eigenius.v1.ListBranchesResponse.
+ * Use `create(ListBranchesResponseSchema)` to create a new message.
+ */
+export const ListBranchesResponseSchema: GenMessage<ListBranchesResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 43);
+
+/**
+ * @generated from message eigenius.v1.GetBranchRequest
+ */
+export type GetBranchRequest = Message<"eigenius.v1.GetBranchRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message eigenius.v1.GetBranchRequest.
+ * Use `create(GetBranchRequestSchema)` to create a new message.
+ */
+export const GetBranchRequestSchema: GenMessage<GetBranchRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 44);
+
+/**
+ * @generated from message eigenius.v1.GetBranchResponse
+ */
+export type GetBranchResponse = Message<"eigenius.v1.GetBranchResponse"> & {
+  /**
+   * @generated from field: bool found = 1;
+   */
+  found: boolean;
+
+  /**
+   * Set when found=true; hex-encoded LayerId of the branch's current head.
+   *
+   * @generated from field: string head_layer = 2;
+   */
+  headLayer: string;
+};
+
+/**
+ * Describes the message eigenius.v1.GetBranchResponse.
+ * Use `create(GetBranchResponseSchema)` to create a new message.
+ */
+export const GetBranchResponseSchema: GenMessage<GetBranchResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 45);
+
+/**
+ * @generated from message eigenius.v1.CreateBranchRequest
+ */
+export type CreateBranchRequest = Message<"eigenius.v1.CreateBranchRequest"> & {
+  /**
+   * must match [A-Za-z0-9_-]+
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Hex-encoded LayerId to start the branch from. Must be a known layer.
+   *
+   * @generated from field: string from_layer = 2;
+   */
+  fromLayer: string;
+};
+
+/**
+ * Describes the message eigenius.v1.CreateBranchRequest.
+ * Use `create(CreateBranchRequestSchema)` to create a new message.
+ */
+export const CreateBranchRequestSchema: GenMessage<CreateBranchRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 46);
+
+/**
+ * @generated from message eigenius.v1.CreateBranchResponse
+ */
+export type CreateBranchResponse = Message<"eigenius.v1.CreateBranchResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Echo of the created branch's head; empty on failure.
+   *
+   * @generated from field: string head_layer = 2;
+   */
+  headLayer: string;
+
+  /**
+   * populated when !success
+   *
+   * @generated from field: string error = 3;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message eigenius.v1.CreateBranchResponse.
+ * Use `create(CreateBranchResponseSchema)` to create a new message.
+ */
+export const CreateBranchResponseSchema: GenMessage<CreateBranchResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 47);
+
+/**
+ * @generated from message eigenius.v1.DeleteBranchRequest
+ */
+export type DeleteBranchRequest = Message<"eigenius.v1.DeleteBranchRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * When false, refuse to prune if the branch's head matches an active
+   * task pin (lattice::PruneSafety::CheckPins). When true, delete
+   * unconditionally (PruneSafety::Force).
+   *
+   * @generated from field: bool force = 2;
+   */
+  force: boolean;
+};
+
+/**
+ * Describes the message eigenius.v1.DeleteBranchRequest.
+ * Use `create(DeleteBranchRequestSchema)` to create a new message.
+ */
+export const DeleteBranchRequestSchema: GenMessage<DeleteBranchRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 48);
+
+/**
+ * @generated from message eigenius.v1.DeleteBranchResponse
+ */
+export type DeleteBranchResponse = Message<"eigenius.v1.DeleteBranchResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * True when the branch existed and was deleted; false when it didn't
+   * exist (still success=true). When success=false, see `error`.
+   *
+   * @generated from field: bool deleted = 2;
+   */
+  deleted: boolean;
+
+  /**
+   * Hex-encoded LayerId the branch pointed at before deletion (when
+   * deleted=true); empty otherwise.
+   *
+   * @generated from field: string previous_head = 3;
+   */
+  previousHead: string;
+
+  /**
+   * @generated from field: string error = 4;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message eigenius.v1.DeleteBranchResponse.
+ * Use `create(DeleteBranchResponseSchema)` to create a new message.
+ */
+export const DeleteBranchResponseSchema: GenMessage<DeleteBranchResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 49);
+
+/**
  * @generated from enum eigenius.v1.NodeKind
  */
 export enum NodeKind {
@@ -1593,6 +1864,50 @@ export const EigeniusKernel: GenService<{
     methodKind: "unary";
     input: typeof LayerTopologyRequestSchema;
     output: typeof LayerTopologyResponseSchema;
+  },
+  /**
+   * Enumerate every branch ref as (name, head LayerId) pairs.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.ListBranches
+   */
+  listBranches: {
+    methodKind: "unary";
+    input: typeof ListBranchesRequestSchema;
+    output: typeof ListBranchesResponseSchema;
+  },
+  /**
+   * Resolve a branch name to its current head and chain depth.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.GetBranch
+   */
+  getBranch: {
+    methodKind: "unary";
+    input: typeof GetBranchRequestSchema;
+    output: typeof GetBranchResponseSchema;
+  },
+  /**
+   * Create a new branch pointing at `from_layer`. Fails if a branch
+   * with this name already exists, or if `from_layer` is unknown.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.CreateBranch
+   */
+  createBranch: {
+    methodKind: "unary";
+    input: typeof CreateBranchRequestSchema;
+    output: typeof CreateBranchResponseSchema;
+  },
+  /**
+   * Remove a branch ref. Layers reachable only through the deleted
+   * branch are reclaimed by the next GC pass — the ref itself is
+   * gone immediately. With `force=false`, refuses to prune a branch
+   * whose head matches an active task pin.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.DeleteBranch
+   */
+  deleteBranch: {
+    methodKind: "unary";
+    input: typeof DeleteBranchRequestSchema;
+    output: typeof DeleteBranchResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_eigenius, 0);

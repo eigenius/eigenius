@@ -42,33 +42,43 @@ eigenius compile demo/document.esl > demo/document.json
 
 Pure surface-language transformation — no validation, no layer load.
 
-### `inspect <IRI> [--at-layer <LAYER_ID>]`
+### `inspect <IRI> [--at-layer <LAYER_ID>] [--branch <NAME>]`
 
 Print a resource by IRI. Resolves through the in-process layer chain (or through a remote kernel's chain when combined with `--endpoint`).
 
 ```bash
 eigenius inspect "urn:eigenius:core:Class"
 eigenius --endpoint http://localhost:50051 inspect "urn:example:Dog"
+
+# Pin to a feature branch's current head
+eigenius --endpoint http://localhost:50051 inspect "urn:example:Dog" --branch feature-x
 ```
 
 `--at-layer` (remote mode only) resolves at a specific historical layer rather than the current top — useful for reaching a forked task result layer (D21 §3.6).
+
+`--branch` (remote mode only) pins reads to the named branch's current head. Mutually exclusive with `--at-layer`. Empty / omitted defaults to `main`.
 
 ## 4.2. Knowledge-graph commands
 
 Read or modify the layer chain. In-process operations get a fresh in-memory chain each invocation; remote operations work against the running kernel's persistent state.
 
-### `load <FILE>`
+### `load <FILE> [--branch <NAME>]`
 
 Load an Eigon-JSON or ESL file as a new layer on top of the current chain. Validates first; rejects on validation failure.
 
 ```bash
 eigenius --endpoint http://localhost:50051 load demo/document.json
 eigenius --endpoint http://localhost:50051 load demo/document.esl
+
+# Commit to a named branch instead of main
+eigenius --endpoint http://localhost:50051 load demo/document.esl --branch feature-x
 ```
 
 In-process `load` is mostly useful with `--json` for scripting; the new layer is in-memory and discarded when the command exits.
 
-### `query <EIGENQL> [--file <PATH>] [--at-layer <LAYER_ID>]`
+`--branch` (remote mode only) commits the new layer to the named branch. Empty / omitted defaults to `main`. The branch must already exist — create it with `eigenius branch create` first.
+
+### `query <EIGENQL> [--file <PATH>] [--at-layer <LAYER_ID>] [--branch <NAME>]`
 
 Execute an EigenQL query.
 
@@ -83,9 +93,14 @@ eigenius query --file ontologies/examples/animals.json \
 # Against a running kernel
 eigenius --endpoint http://localhost:50051 query \
     'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?n } RETURN [] { name: ?n }'
+
+# Query against a feature branch's current head
+eigenius --endpoint http://localhost:50051 query \
+    'MATCH "urn:eigenius:core:Class"(?c) { short_name: ?n } RETURN [] { name: ?n }' \
+    --branch feature-x
 ```
 
-`--at-layer` (remote mode only) targets a specific historical layer.
+`--at-layer` (remote mode only) targets a specific historical layer. `--branch` (remote mode only) pins the read to the named branch's current head; mutually exclusive with `--at-layer`. Empty / omitted defaults to `main`.
 
 EigenQL syntax: see the [EigenQL guide](../eigenql/README.md).
 
@@ -100,7 +115,7 @@ eigenius program-validate ontologies/examples/simple-program.json \
     --ontology ontologies/examples/animals.json
 ```
 
-### `run <PROGRAM_FILE> <INPUT_FILE>` (requires `--endpoint`)
+### `run <PROGRAM_FILE> <INPUT_FILE> [--branch <NAME>]` (requires `--endpoint`)
 
 Execute a program against an input. Requires a running kernel because programs may dispatch IO components to the orchestrator.
 
@@ -110,9 +125,15 @@ eigenius --endpoint http://localhost:50051 run \
 
 eigenius --endpoint http://localhost:50051 run \
     demo/summarize.esl demo/input.json
+
+# Commit the trace layer to a feature branch
+eigenius --endpoint http://localhost:50051 run \
+    demo/summarize.esl demo/input.json --branch feature-x
 ```
 
 Both program and input may be Eigon-JSON or ESL — auto-detected by extension.
+
+`--branch` chooses the branch the trace layer commits into. Empty / omitted defaults to `main`.
 
 ## 4.4. The server command
 
@@ -156,7 +177,7 @@ Print storage statistics for the database.
 eigenius db stats /var/lib/eigenius
 ```
 
-Reports per-column-family statistics: live data size, number of keys, level distribution, etc.
+Reports storage statistics: total keys, total bytes, plus a list of every branch ref with its current head.
 
 ### `db compact <PATH>`
 
@@ -176,7 +197,62 @@ eigenius db export /var/lib/eigenius /tmp/eigenius-export
 
 Useful for backup snapshots and for migrating between RocksDB versions. The output is round-trippable: `eigenius load` over the exported files reconstructs an equivalent layer set.
 
-## 4.6. Capability commands
+## 4.6. Branch commands (require `--endpoint`)
+
+Branches are named pointers into the layer DAG (D23 §5.5). Every commit lands on a branch — `main` is the default for any `load` / `run` / `reflect` that omits `--branch`. Feature branches let you stage divergent work without touching `main`; trivial-merge auto-reconciles disjoint changes (D23 §5.4).
+
+All branch commands require `--endpoint` — branches require a persistent backend, which only the running kernel exposes.
+
+### `branch list`
+
+```bash
+eigenius --endpoint http://localhost:50051 branch list
+```
+
+Print every branch ref with its current head:
+
+```
+NAME                              HEAD
+feature-x                         abe85ea7d9b7f2bc4a32...
+main                              5b2d014a3c8e9f1d2b88...
+```
+
+### `branch show <NAME>`
+
+```bash
+eigenius --endpoint http://localhost:50051 branch show main
+```
+
+Show a single branch's current head. Exits non-zero if the branch doesn't exist.
+
+### `branch create <NAME> --from <LAYER_ID>`
+
+Create a new branch pointing at an existing layer. Branch names match `[A-Za-z0-9_-]+` (max 256 chars). Fails if a branch with the same name already exists or if the `from_layer` is unknown.
+
+```bash
+# Branch off main's current head
+MAIN_HEAD=$(eigenius --endpoint http://localhost:50051 branch show main --json | jq -r .head_layer)
+eigenius --endpoint http://localhost:50051 branch create feature-x --from "$MAIN_HEAD"
+```
+
+After creation, `eigenius load --branch feature-x ...` commits onto the new branch.
+
+### `branch delete <NAME> [--force]`
+
+Remove a branch ref. Layers reachable only through this branch are reclaimed by the next GC pass; the ref itself is gone immediately.
+
+```bash
+eigenius --endpoint http://localhost:50051 branch delete feature-x
+```
+
+By default, the kernel refuses to prune a branch whose head matches an active task pin (a running task pinned its `layer_head` here). Pass `--force` to delete unconditionally — task pins outlive the branch ref via the GC root system, so data isn't lost; only the branch label disappears.
+
+```bash
+# Force-delete even if a task is pinned to this branch's head
+eigenius --endpoint http://localhost:50051 branch delete feature-x --force
+```
+
+## 4.7. Capability commands
 
 WASM components and institutions are managed through the `capability` subcommand. All require `--endpoint`.
 
@@ -244,7 +320,7 @@ eigenius --endpoint http://localhost:50051 capability test \
 
 For institutions, `--mode query` (default) dispatches a fiber query; `--mode discover` dispatches `discover-morphisms`.
 
-## 4.7. Task commands (require `--endpoint`)
+## 4.8. Task commands (require `--endpoint`)
 
 Inspect and control persisted tasks (D21).
 
@@ -272,7 +348,7 @@ eigenius --endpoint http://localhost:50051 tasks cancel <uuid>
 
 Request cooperative cancellation. The task transitions to `Cancelled` at its next checkpoint.
 
-## 4.8. Other commands
+## 4.9. Other commands
 
 ### `list-institutions` (requires `--endpoint`)
 
@@ -306,7 +382,7 @@ eigenius version
 
 Print the build version and metadata.
 
-## 4.9. Output formatting
+## 4.10. Output formatting
 
 The global `--json` flag switches output from human-formatted prose to a machine-readable JSON envelope, suitable for piping into `jq` or scripting:
 
@@ -316,7 +392,7 @@ eigenius --json query 'MATCH ?x {} RETURN [] { x: ?x }' | jq '.results[0]'
 
 Without `--json`, output is colourised plain text intended for terminal display.
 
-## 4.10. Exit codes
+## 4.11. Exit codes
 
 The CLI uses standard exit codes:
 

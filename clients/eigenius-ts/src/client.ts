@@ -22,44 +22,55 @@
  * and any new browser-specific methods that join `NotebookService`.
  */
 
-import {
-  type Client,
-  createClient,
-  type Transport,
-} from "@connectrpc/connect";
+import { type Client, createClient, type Transport } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create } from "@bufbuild/protobuf";
 import {
+  type BranchInfo,
+  CreateBranchRequestSchema,
+  type CreateBranchResponse,
+  DeleteBranchRequestSchema,
+  type DeleteBranchResponse,
   EigeniusKernel,
-  type HealthResponse,
+  GetBranchRequestSchema,
+  type GetBranchResponse,
   HealthRequestSchema,
-  type InspectResponse,
+  type HealthResponse,
   InspectRequestSchema,
+  type InspectResponse,
   type InstitutionInfo,
-  type LayerTopologyResponse,
   LayerTopologyRequestSchema,
+  type LayerTopologyResponse,
+  ListBranchesRequestSchema,
   ListInstitutionsRequestSchema,
-  type LoadResponse,
   LoadRequestSchema,
+  type LoadResponse,
   NotebookService,
-  type QueryResponse,
   QueryRequestSchema,
-  type RunProgramResponse,
-  RunProgramRequestSchema,
+  type QueryResponse,
+  ReflectRequestSchema,
+  type ReflectResponse,
   RunProgramByIriRequestSchema,
-  type ValidateProgramResponse,
+  RunProgramRequestSchema,
+  type RunProgramResponse,
   ValidateProgramRequestSchema,
+  type ValidateProgramResponse,
   type ValidationError,
 } from "../generated/eigenius_pb.ts";
 
 // Re-export wire types so consumers don't have to reach into generated/.
 export type {
+  BranchInfo,
+  CreateBranchResponse,
+  DeleteBranchResponse,
+  GetBranchResponse,
   HealthResponse,
   InspectResponse,
   InstitutionInfo,
   LayerTopologyResponse,
   LoadResponse,
   QueryResponse,
+  ReflectResponse,
   RunProgramResponse,
   ValidateProgramResponse,
   ValidationError,
@@ -96,6 +107,14 @@ export interface EigenOptions {
    * up now without an API change later.
    */
   bearerToken?: string;
+
+  /**
+   * Default branch for `load`, `runProgram`, `runProgramByIri`,
+   * `inspect`, `query`, `reflect`. Empty / omitted = `"main"`. Per-call
+   * `branch` options override this. Use `useBranch()` to mutate the
+   * default after construction.
+   */
+  defaultBranch?: string;
 }
 
 export interface LayerTopologyOptions {
@@ -122,16 +141,32 @@ export interface InspectOptions {
   /**
    * Hex-encoded `LayerId` to read against. Empty / omitted = the
    * orchestrator's session active top (D21 §3.6 convention).
+   * Mutually exclusive with `branch`.
    */
   atLayer?: string;
+
+  /**
+   * Branch name to read against (Phase 14g). Pin reads to this branch's
+   * current head. Empty / omitted = client's `defaultBranch` (or `"main"`).
+   * Mutually exclusive with `atLayer`.
+   */
+  branch?: string;
 }
 
 export interface QueryOptions {
   /**
    * Hex-encoded `LayerId` to evaluate the query against. Empty /
    * omitted = the orchestrator's session active top.
+   * Mutually exclusive with `branch`.
    */
   atLayer?: string;
+
+  /**
+   * Branch name to read against (Phase 14g). Pin reads to this branch's
+   * current head. Empty / omitted = client's `defaultBranch` (or `"main"`).
+   * Mutually exclusive with `atLayer`.
+   */
+  branch?: string;
 }
 
 export interface LoadOptions {
@@ -149,6 +184,13 @@ export interface LoadOptions {
    * and reports errors but does not extend the chain.
    */
   autoCommit?: boolean;
+
+  /**
+   * Branch to commit into (Phase 14g). Empty / omitted = client's
+   * `defaultBranch` (or `"main"`). Branch must already exist —
+   * use `createBranch()` to create one.
+   */
+  branch?: string;
 }
 
 export interface RunProgramOptions {
@@ -161,6 +203,44 @@ export interface RunProgramOptions {
    * against an already-loaded input.
    */
   contentType?: SourceContentType;
+
+  /**
+   * Branch the trace layer commits into (Phase 14g). Empty / omitted =
+   * client's `defaultBranch` (or `"main"`).
+   */
+  branch?: string;
+}
+
+export interface RunProgramByIriOptions {
+  /**
+   * Hex-encoded `LayerId` to pin both reads to. Empty / omitted = the
+   * client's `defaultBranch` head (or `"main"`).
+   */
+  atLayer?: string;
+
+  /**
+   * Branch the trace layer commits into (Phase 14g). Empty / omitted =
+   * client's `defaultBranch` (or `"main"`). Reads still respect
+   * `atLayer` independently.
+   */
+  branch?: string;
+}
+
+export interface CreateBranchOptions {
+  /**
+   * Hex-encoded `LayerId` to start the branch from. Required — branches
+   * must always anchor on a known layer. Use `getBranch("main")` to
+   * fetch the default starting point.
+   */
+  fromLayer: string;
+}
+
+export interface DeleteBranchOptions {
+  /**
+   * Skip the safety check that refuses to prune a branch whose head
+   * matches an active task pin. Default false.
+   */
+  force?: boolean;
 }
 
 export class Eigen {
@@ -168,6 +248,7 @@ export class Eigen {
   private readonly transport: Transport;
   private readonly notebook: Client<typeof NotebookService>;
   private readonly kernel: Client<typeof EigeniusKernel>;
+  private defaultBranch: string;
 
   constructor(options: EigenOptions) {
     this.endpoint = options.endpoint;
@@ -177,11 +258,35 @@ export class Eigen {
     });
     this.notebook = createClient(NotebookService, this.transport);
     this.kernel = createClient(EigeniusKernel, this.transport);
+    this.defaultBranch = options.defaultBranch ?? "";
   }
 
   /** The orchestrator endpoint this client is bound to. */
   getEndpoint(): string {
     return this.endpoint;
+  }
+
+  /**
+   * Current default branch — applied when a call doesn't pass an
+   * explicit `branch`. Empty string means "let the server default to
+   * `main`". Returns the configured value verbatim.
+   */
+  getDefaultBranch(): string {
+    return this.defaultBranch;
+  }
+
+  /**
+   * Set the default branch for subsequent calls. Per-call `branch`
+   * options still override. Pass `""` to clear and fall back to the
+   * server's default (`"main"`).
+   */
+  useBranch(branch: string): void {
+    this.defaultBranch = branch;
+  }
+
+  /** Resolve a per-call branch override, falling back to the default. */
+  private resolveBranch(branch: string | undefined): string {
+    return branch ?? this.defaultBranch;
   }
 
   // ------------------------------------------------------------------
@@ -221,11 +326,15 @@ export class Eigen {
    * resolve in the layer chain — this is not an error, just an
    * absence. The `resource` field is a CBOR-encoded Eigon resource.
    */
-  async inspect(iri: string, options: InspectOptions = {}): Promise<InspectResponse> {
+  async inspect(
+    iri: string,
+    options: InspectOptions = {},
+  ): Promise<InspectResponse> {
     return await this.kernel.inspect(
       create(InspectRequestSchema, {
         iri,
         atLayer: options.atLayer ?? "",
+        branch: this.resolveBranch(options.branch),
       }),
     );
   }
@@ -239,11 +348,15 @@ export class Eigen {
    * may decode this into typed `ResultRow` objects; for now consumers
    * decode `document` themselves with the cbor-x library or similar.
    */
-  async query(eigenql: string, options: QueryOptions = {}): Promise<QueryResponse> {
+  async query(
+    eigenql: string,
+    options: QueryOptions = {},
+  ): Promise<QueryResponse> {
     return await this.kernel.query(
       create(QueryRequestSchema, {
         eigenql,
         atLayer: options.atLayer ?? "",
+        branch: this.resolveBranch(options.branch),
       }),
     );
   }
@@ -283,6 +396,7 @@ export class Eigen {
         resources: bytes,
         contentType,
         autoCommit: options.autoCommit ?? true,
+        branch: this.resolveBranch(options.branch),
       }),
     );
   }
@@ -340,6 +454,7 @@ export class Eigen {
         program: programBytes,
         input: inputBytes,
         contentType,
+        branch: this.resolveBranch(options.branch),
       }),
     );
   }
@@ -362,13 +477,38 @@ export class Eigen {
   async runProgramByIri(
     programIri: string,
     inputIri: string,
-    options: { atLayer?: string } = {},
+    options: RunProgramByIriOptions = {},
   ): Promise<RunProgramResponse> {
     return await this.kernel.runProgramByIri(
       create(RunProgramByIriRequestSchema, {
         programIri,
         inputIri,
         atLayer: options.atLayer ?? "",
+        branch: this.resolveBranch(options.branch),
+      }),
+    );
+  }
+
+  /**
+   * Record a reasoning trace into a layer.
+   *
+   * The first resource in `trace` is treated as the trace head; the
+   * server commits all parsed resources into a new layer on the named
+   * branch (or the client's `defaultBranch`).
+   */
+  async reflect(
+    trace: string | Uint8Array,
+    options: { contentType?: SourceContentType; branch?: string } = {},
+  ): Promise<ReflectResponse> {
+    const contentType = options.contentType ?? "application/eigon+json";
+    const bytes = typeof trace === "string"
+      ? TEXT_ENCODER.encode(trace)
+      : trace;
+    return await this.kernel.reflect(
+      create(ReflectRequestSchema, {
+        trace: bytes,
+        contentType,
+        branch: this.resolveBranch(options.branch),
       }),
     );
   }
@@ -379,6 +519,74 @@ export class Eigen {
    */
   async health(): Promise<HealthResponse> {
     return await this.kernel.health(create(HealthRequestSchema, {}));
+  }
+
+  // ------------------------------------------------------------------
+  // Branch refs (Phase 14g / D23 §5.5)
+  // ------------------------------------------------------------------
+
+  /**
+   * Enumerate every branch ref the kernel currently exposes. Each
+   * `BranchInfo` carries the branch name and its current head's
+   * hex-encoded LayerId. Sorted by name.
+   *
+   * Requires a kernel with a persistent backend — the in-memory
+   * variant only serves `"main"` and exposes nothing else.
+   */
+  async listBranches(): Promise<readonly BranchInfo[]> {
+    const response = await this.kernel.listBranches(
+      create(ListBranchesRequestSchema, {}),
+    );
+    return response.branches;
+  }
+
+  /**
+   * Resolve a branch name to its current head. `found: false` means
+   * the branch doesn't exist; `headLayer` is empty in that case.
+   */
+  async getBranch(name: string): Promise<GetBranchResponse> {
+    return await this.kernel.getBranch(
+      create(GetBranchRequestSchema, { name }),
+    );
+  }
+
+  /**
+   * Create a new branch pointing at `fromLayer`. Fails (`success: false`,
+   * `error` populated) if a branch with this name already exists.
+   * Server-side validates the name against `[A-Za-z0-9_-]+` (max 256
+   * chars) and rejects unknown layers.
+   */
+  async createBranch(
+    name: string,
+    options: CreateBranchOptions,
+  ): Promise<CreateBranchResponse> {
+    return await this.kernel.createBranch(
+      create(CreateBranchRequestSchema, {
+        name,
+        fromLayer: options.fromLayer,
+      }),
+    );
+  }
+
+  /**
+   * Remove a branch ref. With `force: false` (default), refuses to
+   * prune a branch whose head matches an active task pin. With
+   * `force: true`, deletes unconditionally. Layers reachable only
+   * through the deleted branch are reclaimed by the next GC pass.
+   *
+   * `success: true, deleted: false` means the branch didn't exist
+   * (the call is idempotent).
+   */
+  async deleteBranch(
+    name: string,
+    options: DeleteBranchOptions = {},
+  ): Promise<DeleteBranchResponse> {
+    return await this.kernel.deleteBranch(
+      create(DeleteBranchRequestSchema, {
+        name,
+        force: options.force ?? false,
+      }),
+    );
   }
 
   // ------------------------------------------------------------------
@@ -400,11 +608,13 @@ export class Eigen {
    */
   async publishNotebook(
     notebook: NotebookJson,
+    options: { branch?: string } = {},
   ): Promise<{ publish: PublishOutput; load: LoadResponse }> {
     const publish = await notebookJsonToResources(notebook);
     const load = await this.load(JSON.stringify(publish.resources), {
       contentType: "application/eigon+json",
       autoCommit: true,
+      branch: options.branch,
     });
     return { publish, load };
   }

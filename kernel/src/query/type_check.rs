@@ -311,7 +311,7 @@ fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryEr
 
         let class_resource = query_class_iri
             .as_ref()
-            .and_then(|iri| layer.resolve(iri).cloned());
+            .and_then(|iri| layer.resolve(iri).map(|arc| (*arc).clone()));
 
         if let Some(ref cr) = class_resource {
             if !cr.is_instance_of(&class_iri) {
@@ -422,7 +422,7 @@ fn resolve_short_name_to_class(layer: &Layer, short: &str) -> Option<Iri> {
     use crate::ontology::resource::Value;
     let class_iri = Iri::parse(wk::CLASS).unwrap();
     let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-    for (iri, res) in layer.all_resources() {
+    for (iri, res) in layer.iter_all_resources() {
         if !res.is_instance_of(&class_iri) {
             continue;
         }
@@ -466,7 +466,7 @@ mod tests {
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        Arc::new(builder.build())
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     fn check(layer: &Layer, query_str: &str) -> Vec<QueryError> {

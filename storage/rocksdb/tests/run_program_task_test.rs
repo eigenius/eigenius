@@ -89,6 +89,7 @@ async fn run_program_persists_task_record() {
             resources: class_and_input_json().into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load")
@@ -109,6 +110,7 @@ async fn run_program_persists_task_record() {
             program: identity_program_json().into_bytes(),
             input: input_bytes,
             content_type: "application/eigon+json".to_string(),
+            branch: String::new(),
         }))
         .await
         .expect("run_program")
@@ -162,6 +164,7 @@ async fn list_tasks_and_get_task_status() {
             resources: class_and_input_json().into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load");
@@ -178,6 +181,7 @@ async fn list_tasks_and_get_task_status() {
             program: identity_program_json().into_bytes(),
             input: input_bytes,
             content_type: "application/eigon+json".to_string(),
+            branch: String::new(),
         }))
         .await
         .expect("run_program")
@@ -249,6 +253,7 @@ async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
             resources: class_and_input_json().into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load");
@@ -294,6 +299,7 @@ async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
             program: identity_program_json().into_bytes(),
             input: input_bytes,
             content_type: "application/eigon+json".to_string(),
+            branch: String::new(),
         }))
         .await
         .expect("run_program")
@@ -343,6 +349,7 @@ async fn inspect_at_layer_reaches_prior_head() {
             resources: a_json.into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load a")
@@ -363,6 +370,7 @@ async fn inspect_at_layer_reaches_prior_head() {
             resources: b_json.into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load b");
@@ -373,6 +381,7 @@ async fn inspect_at_layer_reaches_prior_head() {
             eigenius_kernel::server::proto::InspectRequest {
                 iri: "urn:eigenius:example:B".to_string(),
                 at_layer: String::new(),
+                branch: String::new(),
             },
         ))
         .await
@@ -386,6 +395,7 @@ async fn inspect_at_layer_reaches_prior_head() {
             eigenius_kernel::server::proto::InspectRequest {
                 iri: "urn:eigenius:example:A".to_string(),
                 at_layer: layer_a.clone(),
+                branch: String::new(),
             },
         ))
         .await
@@ -398,6 +408,7 @@ async fn inspect_at_layer_reaches_prior_head() {
             eigenius_kernel::server::proto::InspectRequest {
                 iri: "urn:eigenius:example:B".to_string(),
                 at_layer: layer_a,
+                branch: String::new(),
             },
         ))
         .await
@@ -415,6 +426,7 @@ async fn inspect_at_layer_reaches_prior_head() {
             eigenius_kernel::server::proto::InspectRequest {
                 iri: "urn:eigenius:example:A".to_string(),
                 at_layer: bogus,
+                branch: String::new(),
             },
         ))
         .await
@@ -435,6 +447,7 @@ async fn run_program_without_backend_has_empty_task_id() {
             resources: class_and_input_json().into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load")
@@ -454,6 +467,7 @@ async fn run_program_without_backend_has_empty_task_id() {
             program: identity_program_json().into_bytes(),
             input: input_bytes,
             content_type: "application/eigon+json".to_string(),
+            branch: String::new(),
         }))
         .await
         .expect("run_program")

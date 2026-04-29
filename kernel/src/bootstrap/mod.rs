@@ -33,7 +33,39 @@ pub enum BootstrapError {
     Layer(crate::layer::LayerError),
     CoreOntologyInvalid(Vec<crate::validation::ValidationError>),
     Storage(String),
-    ManifestDrift { stored: String, current: String },
+    ManifestDrift {
+        stored: String,
+        current: String,
+    },
+    /// D24 §2: non-empty DB without `meta:schema_version`. The DB
+    /// was written by a pre-marker kernel (Phase 14 or earlier);
+    /// the operator must re-seed against a fresh `--db` path.
+    SchemaVersionAbsent,
+    /// D24 §2: stored schema version is higher than this kernel's
+    /// `SCHEMA_VERSION`. Older kernel against a newer DB.
+    SchemaTooNew {
+        stored: u32,
+        kernel: u32,
+    },
+    /// D24 §2: stored schema version is lower than this kernel's
+    /// `SCHEMA_VERSION` and no contiguous migration chain exists in
+    /// the kernel's `MigrationRegistry` to bridge the gap.
+    NoMigrationPath {
+        from: u32,
+        to: u32,
+    },
+    /// D24 §2: a registered migration ran but returned an error. The
+    /// DB is left at its pre-migration version (migrations are
+    /// required to be atomic).
+    MigrationFailed {
+        from: u32,
+        to: u32,
+        message: String,
+    },
+    /// D24 §3.1: the on-disk `meta:schema_version` value couldn't be
+    /// decoded. Indicates corruption rather than version mismatch —
+    /// no migration path applies.
+    SchemaVersionCorrupt(String),
 }
 
 impl fmt::Display for BootstrapError {
@@ -60,6 +92,40 @@ impl fmt::Display for BootstrapError {
                  Options:\n  1. Use a fresh --db path (reinstalls your capabilities).\n  \
                  2. Run a migration when `eigenius db migrate` lands (tracked as Phase 14)."
             ),
+            BootstrapError::SchemaVersionAbsent => write!(
+                f,
+                "schema version marker absent — refusing to boot against a non-empty DB without \
+                 `meta:schema_version`.\n\
+                 The DB was written by a pre-marker kernel (Phase 14 or earlier). Re-seed against \
+                 a fresh `--db` path; pre-marker DBs are not supported.\n\
+                 See docs/design/d24-schema-versioning.md."
+            ),
+            BootstrapError::SchemaTooNew { stored, kernel } => write!(
+                f,
+                "schema version too new — DB stamped at v{stored}, this kernel expects v{kernel}.\n\
+                 Upgrade the kernel binary; older kernels cannot open DBs migrated past their \
+                 expected version (D24 §5: no forward compatibility)."
+            ),
+            BootstrapError::NoMigrationPath { from, to } => write!(
+                f,
+                "no migration path from schema v{from} to v{to}. The kernel's `MigrationRegistry` \
+                 lacks a contiguous chain.\n\
+                 This usually means the kernel was built with `SCHEMA_VERSION={to}` but the \
+                 corresponding `vN_to_vN+1` migrations were not all registered. Report this as a \
+                 kernel bug; see docs/design/d24-schema-versioning.md §6.1."
+            ),
+            BootstrapError::MigrationFailed { from, to, message } => write!(
+                f,
+                "migration v{from} → v{to} failed: {message}\n\
+                 The DB is left at its pre-migration version. Inspect the error above and \
+                 retry; migrations are required to be atomic and idempotent (D24 §3.3)."
+            ),
+            BootstrapError::SchemaVersionCorrupt(detail) => write!(
+                f,
+                "`meta:schema_version` is corrupt: {detail}\n\
+                 The version marker exists but cannot be decoded. This indicates DB corruption, \
+                 not a version mismatch — no migration applies. Restore from backup."
+            ),
         }
     }
 }
@@ -71,6 +137,7 @@ fn load_layer(
     name: &str,
     json: &str,
     parent: Option<Arc<Layer>>,
+    storage: crate::layer::LayerStorage,
 ) -> Result<Arc<Layer>, BootstrapError> {
     let resources = eigon_json::parse_document(json).map_err(BootstrapError::Parse)?;
 
@@ -81,7 +148,7 @@ fn load_layer(
             .add_resource(resource)
             .map_err(BootstrapError::Layer)?;
     }
-    let layer = Arc::new(builder.build());
+    let layer = Arc::new(builder.build(storage));
 
     let validator = Validator::new(&layer);
     let errors = validator.validate();
@@ -111,41 +178,60 @@ fn load_layer(
 /// Loads five ontology layers: core → program → reflection → institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
+///
+/// Phase 14a-iii: an in-memory cache + backend are created here and shared
+/// across all bootstrap layers and the returned `ExecutionContext`. Persistent
+/// backends (`bootstrap_persistent`) replace the in-memory backend with a
+/// `RocksStore` adapter.
 pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
+    bootstrap_with_storage(crate::layer::LayerStorage::in_memory())
+}
+
+/// Bootstrap with caller-provided storage. Used by `bootstrap_persistent`
+/// (RocksDB-backed) and tests that need a particular storage configuration.
+pub fn bootstrap_with_storage(
+    storage: crate::layer::LayerStorage,
+) -> Result<ExecutionContext, BootstrapError> {
     let core = load_layer(
         "core",
         include_str!("../../../ontologies/core/core-ontology.json"),
         None,
+        storage.clone(),
     )?;
 
     let program = load_layer(
         "program",
         include_str!("../../../ontologies/program/program-ontology.json"),
         Some(core),
+        storage.clone(),
     )?;
 
     let reflection = load_layer(
         "reflection",
         include_str!("../../../ontologies/reflection/reflection-ontology.json"),
         Some(program),
+        storage.clone(),
     )?;
 
     let institution = load_layer(
         "institution",
         include_str!("../../../ontologies/institution/institution-ontology.json"),
         Some(reflection),
+        storage.clone(),
     )?;
 
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
         Some(institution),
+        storage.clone(),
     )?;
 
     Ok(ExecutionContext::new(
         notebook,
         "working",
         ExecutionMode::ReadWrite,
+        storage,
     ))
 }
 
@@ -154,19 +240,24 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
 /// Two paths:
 ///
 /// - **SEED** (empty backend): run the normal in-memory bootstrap,
-///   then commit each of the four embedded ontology layers to the
+///   then commit each of the five embedded ontology layers
+///   (core → program → reflection → institution → notebook) to the
 ///   backend in parent→child order, record the seed manifest, and
-///   point the head at the institution layer.
-/// - **RESUME** (backend has a head): verify the stored seed manifest
-///   matches the current embedded ontologies' SHA-256 hashes; if it
-///   does, rehydrate the layer chain from the backend. If it doesn't,
-///   return a `ManifestDrift` error with actionable detail.
+///   create the `main` branch pointing at the notebook layer.
+/// - **RESUME** (backend has a `main` branch): verify the stored seed
+///   manifest matches the current embedded ontologies' SHA-256 hashes;
+///   if it does, rehydrate the layer chain from the backend. If it
+///   doesn't, return a `ManifestDrift` error with actionable detail.
+///
+/// Phase 14g: presence of `branch:main` is the seed-vs-resume
+/// discriminator. The pre-Phase-14 single-`head` pointer is gone;
+/// branches are the only sanctioned head-pointer surface.
 pub fn bootstrap_persistent(
-    backend: &dyn crate::storage::PersistentBackend,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
     match backend
-        .get_head()
-        .map_err(|e| BootstrapError::Storage(format!("get_head: {e}")))?
+        .get_branch("main")
+        .map_err(|e| BootstrapError::Storage(format!("get_branch(main): {e}")))?
     {
         Some(_) => resume_from_backend(backend),
         None => seed_backend(backend),
@@ -176,6 +267,162 @@ pub fn bootstrap_persistent(
 // --- SEED / RESUME helpers ---
 
 const SEED_MANIFEST_KEY: &str = "seed_manifest_v1";
+
+fn now_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Stamp `meta:schema_version` + `meta:last_writer_version` +
+/// `meta:schema_history` (empty Vec) on a freshly-seeded DB. Called
+/// at the end of `seed_backend`. D24 §2.1.
+fn stamp_schema_version_seed(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<(), BootstrapError> {
+    use crate::storage::version::{
+        encode_schema_version, MigrationRecord, LAST_WRITER_VERSION_KEY, SCHEMA_HISTORY_KEY,
+        SCHEMA_VERSION, SCHEMA_VERSION_KEY,
+    };
+
+    backend
+        .put_meta(SCHEMA_VERSION_KEY, &encode_schema_version(SCHEMA_VERSION))
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_version): {e}")))?;
+
+    backend
+        .put_meta(
+            LAST_WRITER_VERSION_KEY,
+            env!("CARGO_PKG_VERSION").as_bytes(),
+        )
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(last_writer_version): {e}")))?;
+
+    let empty_history: Vec<MigrationRecord> = Vec::new();
+    let mut history_bytes = Vec::new();
+    ciborium::into_writer(&empty_history, &mut history_bytes)
+        .map_err(|e| BootstrapError::Storage(format!("encode schema_history: {e}")))?;
+    backend
+        .put_meta(SCHEMA_HISTORY_KEY, &history_bytes)
+        .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_history): {e}")))?;
+    Ok(())
+}
+
+/// Read + validate `meta:schema_version` against the kernel's compiled
+/// expectation. Returns `Ok(())` when the DB is at the expected
+/// version (no migration needed); `Err` otherwise. Migration handling
+/// (running registered `Migration` impls) is performed by the caller
+/// when the registry is non-empty — Phase 14 ships an empty registry
+/// so any `from < SCHEMA_VERSION` currently surfaces as
+/// `NoMigrationPath`. D24 §2.
+fn check_and_migrate_schema_version(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Result<(), BootstrapError> {
+    use crate::storage::version::{
+        decode_schema_version, encode_schema_version, MigrationRecord, MigrationRegistry,
+        LAST_WRITER_VERSION_KEY, SCHEMA_HISTORY_KEY, SCHEMA_VERSION, SCHEMA_VERSION_KEY,
+    };
+
+    let stored_bytes = backend
+        .get_meta(SCHEMA_VERSION_KEY)
+        .map_err(|e| BootstrapError::Storage(format!("get_meta(schema_version): {e}")))?;
+
+    let stored = match stored_bytes {
+        Some(bytes) => {
+            decode_schema_version(&bytes).map_err(BootstrapError::SchemaVersionCorrupt)?
+        }
+        None => return Err(BootstrapError::SchemaVersionAbsent),
+    };
+
+    if stored == SCHEMA_VERSION {
+        return Ok(());
+    }
+    if stored > SCHEMA_VERSION {
+        return Err(BootstrapError::SchemaTooNew {
+            stored,
+            kernel: SCHEMA_VERSION,
+        });
+    }
+
+    // Stored < SCHEMA_VERSION: run registered migrations stored → SCHEMA_VERSION.
+    let registry = MigrationRegistry::default();
+    if !registry.has_path(stored, SCHEMA_VERSION) {
+        return Err(BootstrapError::NoMigrationPath {
+            from: stored,
+            to: SCHEMA_VERSION,
+        });
+    }
+
+    let mut current = stored;
+    while current < SCHEMA_VERSION {
+        let migration = registry
+            .get(current)
+            .ok_or(BootstrapError::NoMigrationPath {
+                from: current,
+                to: SCHEMA_VERSION,
+            })?;
+        let next = migration.to_version();
+
+        tracing::info!(
+            { field::OPERATION } = operation::BOOTSTRAP_LOAD,
+            from = current,
+            to = next,
+            description = migration.description(),
+            "applying schema migration"
+        );
+
+        migration
+            .apply(backend)
+            .map_err(|e| BootstrapError::MigrationFailed {
+                from: current,
+                to: next,
+                message: e.to_string(),
+            })?;
+
+        // Re-stamp version + last writer + append history. Three
+        // separate meta writes; the version stamp last so a crash mid-
+        // append leaves the DB at the pre-migration version (the
+        // history is append-only and idempotent at re-run).
+        let history_bytes = backend
+            .get_meta(SCHEMA_HISTORY_KEY)
+            .map_err(|e| BootstrapError::Storage(format!("get_meta(schema_history): {e}")))?
+            .unwrap_or_default();
+        let mut history: Vec<MigrationRecord> = if history_bytes.is_empty() {
+            Vec::new()
+        } else {
+            ciborium::from_reader(history_bytes.as_slice())
+                .map_err(|e| BootstrapError::Storage(format!("decode schema_history: {e}")))?
+        };
+        history.push(MigrationRecord {
+            from: current,
+            to: next,
+            applied_at_ms: now_millis(),
+            kernel_version: env!("CARGO_PKG_VERSION").to_string(),
+        });
+        let mut new_history = Vec::new();
+        ciborium::into_writer(&history, &mut new_history)
+            .map_err(|e| BootstrapError::Storage(format!("encode schema_history: {e}")))?;
+        backend
+            .put_meta(SCHEMA_HISTORY_KEY, &new_history)
+            .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_history): {e}")))?;
+
+        backend
+            .put_meta(
+                LAST_WRITER_VERSION_KEY,
+                env!("CARGO_PKG_VERSION").as_bytes(),
+            )
+            .map_err(|e| BootstrapError::Storage(format!("put_meta(last_writer_version): {e}")))?;
+
+        // Version stamp last — see comment above.
+        backend
+            .put_meta(SCHEMA_VERSION_KEY, &encode_schema_version(next))
+            .map_err(|e| BootstrapError::Storage(format!("put_meta(schema_version): {e}")))?;
+
+        current = next;
+    }
+
+    Ok(())
+}
 
 fn embedded_ontologies() -> [(&'static str, &'static str); 5] {
     [
@@ -214,7 +461,7 @@ fn current_manifest() -> Vec<u8> {
 }
 
 fn seed_backend(
-    backend: &dyn crate::storage::PersistentBackend,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
     // Build the four ontologies in memory (reusing the existing path)
     // so they're validated before anything touches the DB.
@@ -236,20 +483,42 @@ fn seed_backend(
             .store_layer(layer)
             .map_err(|e| BootstrapError::Storage(format!("store_layer {}: {e}", layer.name())))?;
     }
-    backend
-        .set_head(ctx.head().id())
-        .map_err(|e| BootstrapError::Storage(format!("set_head: {e}")))?;
+
+    // Phase 14g: create the `main` branch pointing at the notebook layer.
+    // This is the only head-pointer surface from Phase 14 onward —
+    // bootstrap_persistent's seed-vs-resume discriminator above keys off
+    // the presence of `branch:main`.
+    let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
+    crate::lattice::update_branch(
+        "main",
+        None,
+        ctx.head().id().clone(),
+        crate::lattice::ConflictPolicy::AllowTrivial,
+        storage,
+        backend.as_ref(),
+    )
+    .map_err(|e| BootstrapError::Storage(format!("create main branch: {e}")))?;
 
     backend
         .put_meta(SEED_MANIFEST_KEY, &current_manifest())
         .map_err(|e| BootstrapError::Storage(format!("put_meta(manifest): {e}")))?;
 
+    // D24: stamp schema version + writer + empty history.
+    stamp_schema_version_seed(backend.as_ref())?;
+
     Ok(ctx)
 }
 
 fn resume_from_backend(
-    backend: &dyn crate::storage::PersistentBackend,
+    backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
+    // D24 §2.2: schema version check first. Refuse to boot before
+    // touching the chain on a version mismatch — there's no point
+    // validating ontology fingerprints against a DB whose shape we
+    // can't safely walk. Migrations (when registered) run inside
+    // this call.
+    check_and_migrate_schema_version(backend.as_ref())?;
+
     // Manifest check before trusting the chain. If drift is detected we
     // refuse to boot rather than silently upgrading the ontology in
     // place (D13 §8).
@@ -276,17 +545,33 @@ fn resume_from_backend(
         }
     }
 
-    let head = backend
-        .load_chain()
-        .map_err(|e| BootstrapError::Storage(format!("load_chain: {e}")))?
+    // Phase 14g: load chain from `branch:main` head. The discriminator
+    // in `bootstrap_persistent` already verified the branch exists.
+    let main_head = backend
+        .get_branch("main")
+        .map_err(|e| BootstrapError::Storage(format!("get_branch(main): {e}")))?
         .ok_or_else(|| {
-            BootstrapError::Storage("head pointer set but chain load returned None".into())
+            BootstrapError::Storage(
+                "branch:main present in discriminator but absent in resume — concurrent delete?"
+                    .into(),
+            )
         })?;
+    let info = backend
+        .load_chain_from(&main_head)
+        .map_err(|e| BootstrapError::Storage(format!("load_chain_from: {e}")))?
+        .ok_or_else(|| BootstrapError::Storage("branch:main pointed at unknown layer".into()))?;
+
+    // Storage backed by the live `PersistentBackend`. Cold-cache reads
+    // hit RocksDB on demand; no separate warming step needed.
+    let storage = crate::layer::LayerStorage::with_persistent(backend);
+
+    let head = crate::layer::build_chain(info, storage.clone());
 
     Ok(ExecutionContext::new(
         head,
         "working",
         ExecutionMode::ReadWrite,
+        storage,
     ))
 }
 
@@ -502,5 +787,153 @@ mod tests {
                 "should resolve property kind {kind}"
             );
         }
+    }
+
+    // --- D24 schema-version tests ---
+
+    use crate::storage::memory::MemoryPersistentBackend;
+    use crate::storage::version::{
+        decode_schema_version, encode_schema_version, MigrationRecord, LAST_WRITER_VERSION_KEY,
+        SCHEMA_HISTORY_KEY, SCHEMA_VERSION, SCHEMA_VERSION_KEY,
+    };
+
+    #[test]
+    fn seed_stamps_schema_version() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ctx = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        let stored = backend
+            .get_meta(SCHEMA_VERSION_KEY)
+            .unwrap()
+            .expect("schema_version stamped on seed");
+        assert_eq!(decode_schema_version(&stored).unwrap(), SCHEMA_VERSION);
+
+        let writer = backend
+            .get_meta(LAST_WRITER_VERSION_KEY)
+            .unwrap()
+            .expect("last_writer_version stamped on seed");
+        assert_eq!(
+            std::str::from_utf8(&writer).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+
+        let history_bytes = backend
+            .get_meta(SCHEMA_HISTORY_KEY)
+            .unwrap()
+            .expect("schema_history stamped on seed");
+        let history: Vec<MigrationRecord> =
+            ciborium::from_reader(history_bytes.as_slice()).unwrap();
+        assert!(history.is_empty(), "fresh seed has no migration history");
+    }
+
+    #[test]
+    fn resume_succeeds_when_version_matches() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+
+        // Seed.
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+        // Resume — same backend, same version.
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+    }
+
+    #[test]
+    fn resume_refuses_when_version_absent_on_non_empty_db() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+
+        // Seed, then strip the schema_version key to simulate a
+        // pre-marker DB.
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+        backend.delete_meta(SCHEMA_VERSION_KEY).unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        assert!(
+            matches!(err, BootstrapError::SchemaVersionAbsent),
+            "expected SchemaVersionAbsent, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn resume_refuses_when_version_too_new() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        // Stamp a version higher than the kernel expects.
+        backend
+            .put_meta(
+                SCHEMA_VERSION_KEY,
+                &encode_schema_version(SCHEMA_VERSION + 5),
+            )
+            .unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        match err {
+            BootstrapError::SchemaTooNew { stored, kernel } => {
+                assert_eq!(stored, SCHEMA_VERSION + 5);
+                assert_eq!(kernel, SCHEMA_VERSION);
+            }
+            other => panic!("expected SchemaTooNew, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_refuses_when_no_migration_path() {
+        // Phase 14 ships SCHEMA_VERSION = 1 and an empty registry, so
+        // any stored < SCHEMA_VERSION (impossible until v2 lands) would
+        // have no path. Simulate by stamping v0 even though that's not
+        // a real version — the boot check decodes 0 as a u32 and looks
+        // for a 0→1 migration, finds none, refuses.
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        // Force stored back to 0 to simulate a pre-v1 DB that
+        // somehow got stamped (real pre-v1 DBs would hit
+        // SchemaVersionAbsent above).
+        backend
+            .put_meta(SCHEMA_VERSION_KEY, &encode_schema_version(0))
+            .unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        match err {
+            BootstrapError::NoMigrationPath { from, to } => {
+                assert_eq!(from, 0);
+                assert_eq!(to, SCHEMA_VERSION);
+            }
+            other => panic!("expected NoMigrationPath, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resume_refuses_when_version_corrupt() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let _ = bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+        // Stamp a 3-byte (wrong-length) value.
+        backend
+            .put_meta(SCHEMA_VERSION_KEY, &[0x00, 0x00, 0x01])
+            .unwrap();
+
+        let err = match bootstrap_persistent(Arc::clone(&backend)) {
+            Err(e) => e,
+            Ok(_) => panic!("expected error, got success"),
+        };
+        assert!(
+            matches!(err, BootstrapError::SchemaVersionCorrupt(_)),
+            "expected SchemaVersionCorrupt, got {err:?}"
+        );
     }
 }
