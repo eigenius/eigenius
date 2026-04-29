@@ -132,55 +132,52 @@ Future witnessed merges (Phase 15) that resolve conflicts by writing new resourc
 
 No legacy DBs exist. Bootstrap doesn't verify index/layer consistency; the atomic-batch guarantee makes drift impossible at commit time. Any DB the kernel opens was built post-14h and therefore has index entries. No migration code, no rebuild path.
 
-## Steps (4 commits)
+## Steps (4 commits — as landed)
 
 **Commit 1 — Trait + in-memory impl + LayerStorage slot**
 
-- `kernel/src/layer/index.rs`: `TripleIndex` trait, `Triple`, `IndexBatch`, `IndexStats`.
-- `kernel/src/layer/index_keys.rs`: length-prefixed key encoding.
-- `storage/indexing/src/lib.rs`: replace `todo!()` stub with in-memory impl using `BTreeMap<Vec<u8>, ()>` for both prefixes.
-- `LayerStorage` gains `triple_index: Arc<dyn TripleIndex>`; constructors updated.
-- `PersistentBackend::as_triple_index`; `MemoryPersistentBackend` returns its index; `RocksStore` panics with "Phase 14h commit 2 not yet landed".
-- Tests: trait round-trip, multi-value array unpacking, drop_layer.
+- `kernel/src/layer/index.rs`: `TripleIndex` trait, `Triple`, `IndexStats`, `MemoryTripleIndex`, plus the `index_keys` submodule for length-prefixed forward/reverse keys.
+- `LayerStorage` gains `triple_index: Arc<dyn TripleIndex>`; all three constructors wired (`in_memory()`, `with_persistent()`, `with_persistent_bounded()`).
+- `PersistentBackend::triple_index_arc()` mirrors `as_trace_store`; `MemoryPersistentBackend` returns its index; `RocksStore` carries a placeholder `Arc<MemoryTripleIndex>` that commit 2 swaps out for the real impl.
+- The pre-14h `storage/indexing/` stub crate is left in place for commit 1 (zero callers) and removed in commit 4 alongside the doc cleanup.
 
 **Commit 2 — RocksDB impl + commit-time population + GC drop**
 
-- `storage/rocksdb/src/lib.rs`: `TripleIndex` impl using prefix scans; both forward and reverse keys.
-- `lattice::commit_layer` (or `Layer::build` — pick the lower one) extracts indexable triples and calls `extend_layer` inside the existing `WriteBatch`. Indexability check uses `is_indexable(layer, predicate)`.
-- `gc::collect`'s `delete_layer` path enumerates the reverse index for each swept layer and deletes both forward + reverse entries in the same `WriteBatch`.
+- `storage/rocksdb/src/triple_index.rs`: `RocksTripleIndex` over `Arc<rocksdb::DB>` with both `idx_pos:` and `idx_layer:` prefixes; standalone `extend_layer`/`drop_layer` create their own `WriteBatch`; `extend_into_batch`/`drop_into_batch` append to a caller-supplied batch.
+- `RocksStore.db: Arc<rocksdb::DB>` so the index can share the handle. `RocksStore.triple_index: Arc<RocksTripleIndex>` replaces the placeholder.
+- `RocksStore::store_layer` initially populated the index in its `WriteBatch`; commit 3 moved population to `LayerBuilder::build` so the in-memory and persistent paths are symmetric. `RocksStore::delete_layer` drops index entries via the reverse-index walk in its `WriteBatch`.
 - Tests: forward/reverse symmetry, restart consistency, GC drop, branch-divergence (define `rex` differently on `main` and `feature`; verify per-chain queries see the right thing).
 
 **Commit 3 — Wire query evaluator**
 
-- `evaluate.rs`: `scan_chain(head, p, o)` helper using `TripleIndex` + `is_shadowed` walk.
-- Rewrite `collect_candidates` and the negation helper to use it.
-- `resolve_name_to_class_iri` stays a scan but operates on the index-narrowed Class candidate set.
-- Equivalence test: every existing query fixture asserts indexed results match scan results bit-for-bit.
+- `kernel/src/layer/index.rs` adds `collect_ancestors`, `is_shadowed`, `scan_chain` — bloom-walk over the multi-parent ancestor topology, skipping the defining layer and its parents.
+- `LayerBuilder::build` pre-populates the triple index for the freshly-built layer (mirrors how it pre-populates the bloom). This is what makes the in-memory bootstrap path index-aware without going through `store_layer`. The duplicate population in `RocksStore::store_layer` is removed.
+- `kernel/src/query/evaluate.rs::collect_candidates` uses `scan_chain` when the pattern's class is bound and `is_a` is indexable; falls back to `collect_candidates_via_scan` for untyped patterns or non-indexable predicates. `class_with_subclass_closure` walks `subclass_of` recursively via `scan_chain`.
+- Test helpers updated to share `LayerStorage` across builders (matches production bootstrap semantics).
 
-**Commit 4 — D23 §5.9 doc fix**
+**Commit 4 — Doc cleanup + remove superseded crate**
 
-- Update D23 §5.9 to per-layer storage matching §5.2.
-- Document the indexability rule (`data_type ∈ {resource, resource_array}`).
-- Document the shadow-check algorithm and the multi-parent BFS.
-- One-line implementation-plan update.
+- D23 §5.9 rewritten to per-layer storage matching §5.2; §6.2 prefix table updated to `idx_pos:` / `idx_layer:`; §6.3 atomic-commit list reflects build-time population.
+- D23 §3, §7.1, §10 references updated; appendix and implementation plan mirror the same.
+- `storage/indexing/` crate deleted (superseded; stubs were never called).
+- `Cargo.toml` workspace member list updated.
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `kernel/src/layer/index.rs` | New: `TripleIndex` trait |
-| `kernel/src/layer/index_keys.rs` | New: length-prefixed key encoder |
-| `storage/indexing/src/lib.rs` | Replace `todo!()` stub with in-memory impl |
+| `kernel/src/layer/index.rs` | New: `TripleIndex` trait + `MemoryTripleIndex` + `index_keys` + `extract_indexable_triples` + `is_indexable_predicate` + `collect_ancestors` + `is_shadowed` + `scan_chain` |
 | `kernel/src/layer/storage.rs` | `LayerStorage.triple_index` |
-| `kernel/src/storage/mod.rs` | `PersistentBackend::as_triple_index` |
-| `kernel/src/storage/memory.rs` | Wire memory backend's index |
-| `storage/rocksdb/src/lib.rs` | RocksDB impl + commit/GC integration |
-| `kernel/src/lattice.rs` (or `layer/mod.rs`) | `commit_layer` extracts + indexes triples |
-| `kernel/src/gc.rs` | `delete_layer` drops index entries |
-| `kernel/src/query/evaluate.rs` | `scan_chain` + planner branch + 3 hot sites |
-| `storage/rocksdb/tests/triple_index_test.rs` | New |
-| `kernel/src/query/tests/indexed_equivalence_test.rs` | New |
-| `docs/design/d23-out-of-core-layer-architecture.md` | §5.9 rewrite (commit 4) |
+| `kernel/src/layer/mod.rs` | Re-exports + `LayerBuilder::build` pre-populates the index |
+| `kernel/src/storage/mod.rs` | `PersistentBackend::triple_index_arc` |
+| `kernel/src/storage/memory.rs` | `MemoryPersistentBackend.triple_index` |
+| `storage/rocksdb/src/triple_index.rs` | New: `RocksTripleIndex` |
+| `storage/rocksdb/src/lib.rs` | `RocksStore.db: Arc<DB>`, real index plumbing, `delete_layer` drops index entries atomically |
+| `kernel/src/query/evaluate.rs` | `collect_candidates` indexed path + `class_with_subclass_closure` + scan fallback |
+| `storage/rocksdb/tests/triple_index_test.rs` | New: 7 integration tests |
+| `docs/design/d23-out-of-core-layer-architecture.md` | §5.9 / §6.2 / §6.3 rewrite |
+| `docs/design/implementation-plan.md` + `docs/guides/platform/15-appendix.md` | References updated |
+| `Cargo.toml` + `storage/indexing/` | Workspace member removed; superseded crate deleted |
 
 ## Risk areas
 
