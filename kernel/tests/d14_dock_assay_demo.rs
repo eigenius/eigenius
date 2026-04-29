@@ -71,6 +71,8 @@ const EXTRACT_DG_PROC: &str = "urn:eigenius:demo:d14:proc:extract_dg";
 const REIFY_IC50_PROC: &str = "urn:eigenius:demo:d14:proc:reify_ic50";
 const WITHIN_TOLERANCE_PROC: &str = "urn:eigenius:demo:d14:proc:within_tolerance";
 const CHECK_ASSAY_PREDICTION_PROC: &str = "urn:eigenius:demo:d14:proc:check_assay_prediction";
+const VALIDATE_PREDICTION_PROC: &str = "urn:eigenius:demo:d14:proc:validate_prediction";
+const CANDIDATE_PROP: &str = "urn:eigenius:demo:d14:candidate";
 const ARRHENIUS_COMPONENT_IRI: &str = "urn:eigenius:demo:d14:cm_arrhenius";
 
 const DEMO_LAYER_NAME: &str = "d14-dock-assay-demo";
@@ -354,6 +356,27 @@ impl Institution for AssayInstitution {
             }
             CHECK_ASSAY_PREDICTION_PROC => {
                 let ctor = Self::assay_prediction_verdict(input);
+                Ok(Self::verdict_resource(ctor))
+            }
+            VALIDATE_PREDICTION_PROC => {
+                // OnDemand QueryClass: input carries `candidate` →
+                // AssayPrediction. Read it out and reuse the same
+                // ic50-validity verdict as the AutoOnLoad path.
+                let candidate_val = input.get(&iri(CANDIDATE_PROP));
+                let candidate = match candidate_val {
+                    Some(Value::Embedded(r)) => r.as_ref(),
+                    Some(other) => {
+                        return Err(InstitutionError::ComputationFailed(format!(
+                            "validate_prediction: `candidate` must be an Embedded resource, got {other:?}"
+                        )));
+                    }
+                    None => {
+                        return Err(InstitutionError::ComputationFailed(
+                            "validate_prediction: input is missing `candidate`".into(),
+                        ));
+                    }
+                };
+                let ctor = Self::assay_prediction_verdict(candidate);
                 Ok(Self::verdict_resource(ctor))
             }
             _ => Err(InstitutionError::UnknownType(format!(
@@ -645,6 +668,211 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
         (ic50 - expected).abs() < expected * 1e-9,
         "expected IC50≈{expected}, got {ic50}"
     );
+}
+
+// ─── 5. EigenQL queries — full surface against the demo (D2 v2) ────────
+
+/// Build a data layer with a sample DockingResult resource the
+/// EigenQL queries can MATCH against.
+fn build_demo_data_layer() -> Arc<Layer> {
+    let demo = build_demo_layer();
+    let mut builder = LayerBuilder::new("d14-demo-data", Some(demo));
+    let mut docking = Resource::new(iri("urn:eigenius:demo:d14:dock-result-1"));
+    docking.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
+    );
+    docking.set(iri(DELTA_G_PROP), Value::Float(-8.5));
+    builder.add_resource(docking).expect("add docking resource");
+    Arc::new(builder.build())
+}
+
+/// Sanity check: the demo data layer's DockingResult is matchable
+/// via EigenQL MATCH. If this fails, the FIBER tests below are
+/// vacuously zero-row.
+#[test]
+fn eigenql_match_finds_demo_docking_result() {
+    use eigenius_kernel::query;
+    let data = build_demo_data_layer();
+    let runtime = query::evaluate::FiberRuntime::default();
+    let source = r#"
+        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
+            "urn:eigenius:demo:d14:delta_g": ?dg
+        }
+        RETURN [] { d: ?d }
+    "#;
+    let document = query::execute_with(source, &data, runtime).expect("query executes");
+    let result_set = document
+        .iter()
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|i| i.as_str() == "urn:eigenius:query:ResultSet")
+        })
+        .expect("ResultSet");
+    let row_count = match result_set.get(&iri("urn:eigenius:query:row_count")) {
+        Some(Value::Integer(n)) => *n,
+        _ => panic!("ResultSet missing row_count"),
+    };
+    assert_eq!(row_count, 1, "MATCH should find the demo DockingResult");
+}
+
+/// Diagnostic: FIBER + comorphism coercion alone (no postfix). Should
+/// produce one row with ?v bound to the Verdict resource IRI.
+#[test]
+fn eigenql_fiber_coercion_only_produces_verdict_binding() {
+    use eigenius_kernel::query;
+    let data = build_demo_data_layer();
+    let index = build_demo_index(&data);
+    let inst_runtime = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&data));
+    let runtime = query::evaluate::FiberRuntime {
+        index: Some(&index),
+        runtime: Some(&inst_runtime),
+        components: Some(&components),
+        overlay: None,
+        ctx: Some(&exec_ctx),
+    };
+    let source = r#"
+        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+
+        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
+            "urn:eigenius:demo:d14:delta_g": ?dg
+        }
+        FIBER assay:validate_prediction {
+            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+        } AS ?v
+        RETURN [] { d: ?d, v: ?v }
+    "#;
+    let document = query::execute_with(source, &data, runtime).expect("query executes");
+    let result_set = document
+        .iter()
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|i| i.as_str() == "urn:eigenius:query:ResultSet")
+        })
+        .expect("ResultSet");
+    let row_count = match result_set.get(&iri("urn:eigenius:query:row_count")) {
+        Some(Value::Integer(n)) => *n,
+        _ => panic!("ResultSet missing row_count"),
+    };
+    assert_eq!(row_count, 1, "FIBER should produce exactly one row");
+}
+
+/// EigenQL FIBER + comorphism coercion + postfix HOLDS — the canonical
+/// D2 v2 §3.5 / §3.8 surface composed end-to-end. The query:
+///
+/// 1. MATCHes a `DockingResult` in the data layer.
+/// 2. FIBER-dispatches `validate_prediction` against the assay
+///    institution, with `candidate` set via comorphism coercion of
+///    the matched DockingResult through `dock_to_assay`.
+/// 3. Filters on `?v HOLDS` (the postfix Verdict predicate projects
+///    the ?v Verdict resource to a Boolean).
+/// 4. RETURNs the matched DockingResult IRI.
+#[test]
+fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
+    use eigenius_kernel::query;
+
+    let data = build_demo_data_layer();
+    let index = build_demo_index(&data);
+    let runtime = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&data));
+
+    let runtime = query::evaluate::FiberRuntime {
+        index: Some(&index),
+        runtime: Some(&runtime),
+        components: Some(&components),
+        overlay: None,
+        ctx: Some(&exec_ctx),
+    };
+
+    let source = r#"
+        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+
+        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
+            "urn:eigenius:demo:d14:delta_g": ?dg
+        }
+        FIBER assay:validate_prediction {
+            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+        } AS ?v
+        WHERE ?v HOLDS
+        RETURN [] {
+            d: ?d
+        }
+    "#;
+
+    let document = query::execute_with(source, &data, runtime).expect("query executes");
+
+    // Expect exactly one row — the matched DockingResult survived the
+    // postfix-HOLDS filter (Arrhenius IC₅₀ for ΔG=-8.5 is positive,
+    // so validate_prediction returns Holds).
+    let result_set = document
+        .iter()
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|i| i.as_str() == "urn:eigenius:query:ResultSet")
+        })
+        .expect("ResultSet in document");
+    let row_count = match result_set.get(&iri("urn:eigenius:query:row_count")) {
+        Some(Value::Integer(n)) => *n,
+        _ => panic!("ResultSet missing row_count"),
+    };
+    assert_eq!(row_count, 1, "expected one row, got {row_count}");
+}
+
+/// `WHERE ?v FAILS` filters the same setup the other way: ΔG=-8.5
+/// produces a positive IC₅₀ (Holds), so the FAILS-projected row drops.
+#[test]
+fn eigenql_postfix_fails_drops_holding_row() {
+    use eigenius_kernel::query;
+
+    let data = build_demo_data_layer();
+    let index = build_demo_index(&data);
+    let runtime = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&data));
+
+    let runtime = query::evaluate::FiberRuntime {
+        index: Some(&index),
+        runtime: Some(&runtime),
+        components: Some(&components),
+        overlay: None,
+        ctx: Some(&exec_ctx),
+    };
+
+    let source = r#"
+        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+
+        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
+            "urn:eigenius:demo:d14:delta_g": ?dg
+        }
+        FIBER assay:validate_prediction {
+            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+        } AS ?v
+        WHERE ?v FAILS
+        RETURN [] {
+            d: ?d
+        }
+    "#;
+
+    let document = query::execute_with(source, &data, runtime).expect("query executes");
+    let result_set = document
+        .iter()
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|i| i.as_str() == "urn:eigenius:query:ResultSet")
+        })
+        .expect("ResultSet in document");
+    let row_count = match result_set.get(&iri("urn:eigenius:query:row_count")) {
+        Some(Value::Integer(n)) => *n,
+        _ => panic!("ResultSet missing row_count"),
+    };
+    assert_eq!(row_count, 0, "FAILS should filter out the Holds row");
 }
 
 /// An unregistered comorphism IRI surfaces as a typed evaluation error

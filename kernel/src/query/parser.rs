@@ -765,10 +765,22 @@ impl Parser {
                 }
             }
 
-            // String literal
+            // String literal — and, if directly followed by `(`, a
+            // function call whose name is the literal IRI string. This
+            // matches D2 v2 §3.5 / §3.8's `qualified_name ::= IDENTIFIER ':' IDENTIFIER | STRING`,
+            // allowing comorphism coercion / decide-predicate calls
+            // written with a full quoted IRI rather than a namespace
+            // alias.
             TokenKind::StringLit(_) => {
                 let s = self.parse_string_lit()?;
-                Ok(Expression::Literal(Literal::String(s)))
+                if self.at(&TokenKind::LParen) {
+                    self.advance();
+                    let args = self.parse_expression_list()?;
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Expression::FunctionCall { name: s, args })
+                } else {
+                    Ok(Expression::Literal(Literal::String(s)))
+                }
             }
 
             // Number literal

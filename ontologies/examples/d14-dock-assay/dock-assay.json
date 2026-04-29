@@ -139,5 +139,36 @@
     ],
     "urn:eigenius:institution:query_handler": "urn:eigenius:demo:d14:proc:check_assay_prediction",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:d14:assay"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:d14:PredictionValidationInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "PredictionValidationInput",
+    "urn:eigenius:core:description": "OnDemand QueryClass input: a candidate AssayPrediction to validate.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:d14:candidate"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:d14:candidate",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "candidate",
+    "urn:eigenius:core:description": "An AssayPrediction the QueryClass should evaluate.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:demo:d14:AssayPrediction"],
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:d14:PredictionValidationInput"]
+  },
+  {
+    "@id": "urn:eigenius:demo:d14:validate_prediction",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "validate_prediction",
+    "urn:eigenius:institution:query_class": "urn:eigenius:demo:d14:PredictionValidationInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:demo:d14:proc:validate_prediction",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:d14:assay"
   }
 ]

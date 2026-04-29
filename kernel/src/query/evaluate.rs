@@ -44,6 +44,14 @@ pub struct FiberRuntime<'a> {
     /// evaluation time when this is `None`. v1 restricts the cited
     /// transformation Component to Pure or Read capability levels.
     pub components: Option<&'a crate::program::component::ComponentRegistry>,
+    /// Query-scoped transient overlay populated by FIBER clauses with
+    /// their response resources (D2 v2 §6.12). Threaded into the
+    /// expression evaluator so postfix Verdict predicates and
+    /// resource-typed projections can resolve a FIBER-bound `?var`
+    /// (held as the synthesized response IRI) back to the actual
+    /// response resource. `None` outside of FIBER-bearing match
+    /// parts.
+    pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
 }
 
@@ -273,9 +281,17 @@ fn evaluate_match_part_with_fiber(
     }
 
     if !part.conditions.is_empty() {
+        // Thread the FIBER overlay into expression eval so postfix
+        // Verdict predicates and resource-typed projections can
+        // resolve a `?var` bound to a FIBER-synthesized response IRI
+        // back to the response resource.
+        let where_runtime = FiberRuntime {
+            overlay: Some(&overlay.entries),
+            ..runtime
+        };
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer, runtime)
+                eval_expression(cond, b, layer, where_runtime)
                     .and_then(|v| {
                         v.as_boolean().ok_or_else(|| {
                             QueryError::evaluation("WHERE condition must be boolean")
@@ -944,7 +960,7 @@ fn eval_expression(
         }
         Expression::VerdictPredicate { kind, operand } => {
             let v = eval_expression(operand, binding, layer, runtime)?;
-            eval_verdict_predicate(*kind, &v)
+            eval_verdict_predicate(*kind, &v, layer, runtime)
         }
         Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
         Expression::FunctionCall { name, args } => {
@@ -1193,15 +1209,40 @@ fn eval_unary(op: UnaryOp, val: &Value) -> Result<Value, QueryError> {
 }
 
 /// Project a `Verdict`-typed value to `Boolean` per a postfix predicate
-/// (D2 v2 §3.7 / §3.8). The operand is expected to be a Verdict
-/// resource (`Value::Embedded`) carrying `ctor_name`. Returns `true`
-/// iff the constructor matches the predicate.
+/// (D2 v2 §3.7 / §3.8). The operand is one of:
+///
+/// - `Value::Embedded(verdict)` — the Verdict resource directly.
+/// - `Value::String(iri)` / `Value::ResourceRef(iri)` — a synthesized
+///   IRI (typically from a FIBER `AS ?var` binding) that resolves to
+///   the response resource through the runtime's transient overlay or
+///   the layer chain.
 fn eval_verdict_predicate(
     kind: crate::query::ast::VerdictPredicate,
     val: &Value,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
 ) -> Result<Value, QueryError> {
-    let resource = match val {
+    let resolved: Resource;
+    let resource: &Resource = match val {
         Value::Embedded(r) => r.as_ref(),
+        Value::String(s) => {
+            resolved = resolve_iri_string(s, layer, runtime).ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "{kw} operand IRI `{s}` does not resolve to a resource (FIBER overlay or layer chain)",
+                    kw = kind.ctor_name(),
+                ))
+            })?;
+            &resolved
+        }
+        Value::ResourceRef(iri) => {
+            resolved = resolve_iri_string(iri.as_str(), layer, runtime).ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "{kw} operand IRI `{iri}` does not resolve to a resource",
+                    kw = kind.ctor_name(),
+                ))
+            })?;
+            &resolved
+        }
         other => {
             return Err(QueryError::evaluation(format!(
                 "{kw} expects a Verdict-typed operand; got {other:?}",
@@ -1219,6 +1260,20 @@ fn eval_verdict_predicate(
             )
         })?;
     Ok(Value::Boolean(ctor == kind.ctor_name()))
+}
+
+/// Resolve a String IRI to a Resource — checks the FiberOverlay first
+/// (so FIBER-bound responses are visible) then walks the layer chain.
+fn resolve_iri_string(s: &str, layer: &Layer, runtime: FiberRuntime<'_>) -> Option<Resource> {
+    let iri = Iri::parse(s).ok()?;
+    if let Some(overlay) = runtime.overlay {
+        for (entry_iri, entry_resource) in overlay {
+            if entry_iri == &iri {
+                return Some(entry_resource.clone());
+            }
+        }
+    }
+    layer.resolve(&iri).cloned()
 }
 
 fn literal_to_value(lit: &Literal) -> Value {
@@ -1956,6 +2011,7 @@ mod tests {
             index: Some(&index),
             runtime: Some(&inst_runtime),
             components: None,
+            overlay: None,
             ctx: Some(&exec_ctx),
         };
 
@@ -2012,6 +2068,7 @@ mod tests {
             index: Some(&index),
             runtime: Some(&inst_runtime),
             components: None,
+            overlay: None,
             ctx: Some(&exec_ctx),
         };
 

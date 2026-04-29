@@ -1379,6 +1379,7 @@ impl EigeniusKernel for EigeniusService {
             index: Some(&index),
             runtime: Some(&inst_runtime),
             components: Some(&components),
+            overlay: None,
             ctx: Some(&ctx),
         };
 
