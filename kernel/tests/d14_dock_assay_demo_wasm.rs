@@ -12,26 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 §13.4 M8 — worked example end-to-end through WASM.
+//! D14 §13.4 M8 — worked example end-to-end through WASM, auto-
+//! registered from the layer chain.
 //!
-//! Mirror of `d14_dock_assay_demo.rs` with the in-process Rust
-//! `Institution` impls replaced by `WasmInstitution` instances loaded
-//! from the `examples/wasm-d14-{dock,assay,arrhenius}` crates and the
-//! Arrhenius `BuiltinComponent` replaced by a `WasmComponent`. Same
-//! ontology, same four scenarios, same Verdicts; the difference is
-//! that every dispatch crosses the WASM host bridge.
+//! Mirror of `d14_dock_assay_demo.rs` but:
 //!
-//! Validates `WasmInstitution` (D14 §11) + `WasmComponent` (D12)
-//! routing under a real domain. The dock/assay fixtures are built by
-//! `just build-wasm` and copied into `kernel/tests/fixtures/`.
+//! - The Dock / Assay `Institution` impls are loaded as `WasmInstitution`
+//!   instances from the `examples/wasm-d14-{dock,assay}` crates.
+//! - The Arrhenius transformation is loaded as a `WasmComponent` from
+//!   the `examples/wasm-d14-arrhenius` crate.
+//! - All three are auto-registered from the layer chain — the test
+//!   builds a child layer carrying `runtime: wasm` + `wasm_binary`
+//!   declarations and runs the same scan-and-register helpers the
+//!   `EigeniusService` runs on commit. No manual `runtime.register()`
+//!   or `components.register()` calls.
+//!
+//! Validates the "ontology-first" deployment promise: an institution
+//! ships as a WASM binary embedded in an Eigon document, the kernel
+//! installs it on Load, and dispatch routes through it transparently.
+//! The dock/assay fixtures are built by `just build-wasm` and copied
+//! into `kernel/tests/fixtures/`.
 
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::capability::wasm_component::{
-    CapabilityLevel, WasmComponent, WasmComponentConfig,
+use eigenius_kernel::capability::registration::{
+    build_wasm_institution_runtime, scan_and_register,
 };
-use eigenius_kernel::capability::wasm_institution_d14::WasmInstitution;
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::registry::InstitutionIndex;
 use eigenius_kernel::institution::runtime::InstitutionRuntime;
@@ -52,6 +59,14 @@ const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:d14:AssayPrediction";
 const DELTA_G_PROP: &str = "urn:eigenius:demo:d14:delta_g";
 const IC50_PROP: &str = "urn:eigenius:demo:d14:ic50";
 const ARRHENIUS_COMPONENT_IRI: &str = "urn:eigenius:demo:d14:cm_arrhenius";
+
+const INSTITUTION_CLASS: &str = "urn:eigenius:institution:Institution";
+const COMPONENT_CLASS: &str = "urn:eigenius:program:Component";
+const INST_WASM_BINARY: &str = "urn:eigenius:institution:wasm_binary";
+const COMP_IMPLEMENTATION: &str = "urn:eigenius:program:component:implementation";
+const COMP_WASM_BINARY: &str = "urn:eigenius:program:component:wasm_binary";
+const COMP_CAPABILITY_LEVEL: &str = "urn:eigenius:program:component:capability_level";
+const CAPABILITY_PURE: &str = "urn:eigenius:program:capability_levels:pure";
 
 const DOCK_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_d14_dock.wasm");
 const ASSAY_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_d14_assay.wasm");
@@ -76,14 +91,82 @@ fn as_float(value: Option<&Value>) -> Option<f64> {
     }
 }
 
+/// Encode WASM bytes as a hex-prefixed string for embedding in an Eigon
+/// resource via `urn:eigenius:institution:wasm_binary` or
+/// `urn:eigenius:program:component:wasm_binary`. The registration scanner
+/// recognises both base64 (default) and `hex:` prefix encodings.
+fn embed_wasm(bytes: &[u8]) -> Value {
+    Value::String(format!("hex:{}", hex::encode(bytes)))
+}
+
+/// Build a child layer that overrides the Dock / Assay institutions and
+/// the cm_arrhenius component from the demo ontology with WASM-runtime
+/// variants carrying inline `wasm_binary` declarations.
+///
+/// `all_resources()` is topmost-wins, so the child's `runtime: wasm`
+/// declarations replace the parent's `runtime: in_process` ones. The
+/// auto-registration scan in `build_wasm_institution_runtime` and
+/// `scan_and_register` then picks up the WASM variants and constructs
+/// the runtime + registry exactly as `EigeniusService` does on commit.
 fn build_demo_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap kernel");
     let parent = Arc::clone(ctx.head());
-    let mut builder = LayerBuilder::new("d14-dock-assay-wasm-demo", Some(parent));
+
+    let mut base_builder = LayerBuilder::new("d14-dock-assay-base", Some(parent));
     for r in eigon_json::parse_document(DEMO_ONTOLOGY).expect("parse demo ontology") {
-        builder.add_resource(r).expect("add demo resource");
+        base_builder.add_resource(r).expect("add demo resource");
     }
-    Arc::new(builder.build())
+    let base_layer = Arc::new(base_builder.build());
+
+    let mut wasm_builder = LayerBuilder::new("d14-dock-assay-wasm", Some(base_layer));
+    wasm_builder
+        .add_resource(wasm_institution(DOCK_INST_IRI, "Dock", DOCK_FIXTURE))
+        .expect("add Dock WASM override");
+    wasm_builder
+        .add_resource(wasm_institution(ASSAY_INST_IRI, "Assay", ASSAY_FIXTURE))
+        .expect("add Assay WASM override");
+    wasm_builder
+        .add_resource(wasm_component(ARRHENIUS_COMPONENT_IRI, ARRHENIUS_FIXTURE))
+        .expect("add Arrhenius WASM override");
+
+    Arc::new(wasm_builder.build())
+}
+
+fn wasm_institution(inst_iri: &str, name: &str, bytes: &[u8]) -> Resource {
+    let mut r = Resource::new(iri(inst_iri));
+    r.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(INSTITUTION_CLASS.to_string())]),
+    );
+    r.set(
+        iri("urn:eigenius:institution:institution_iri"),
+        Value::String(inst_iri.to_string()),
+    );
+    r.set(
+        iri("urn:eigenius:institution:institution_name"),
+        Value::String(name.to_string()),
+    );
+    r.set(
+        iri(wk::RUNTIME),
+        Value::String(wk::RUNTIME_WASM.to_string()),
+    );
+    r.set(iri(INST_WASM_BINARY), embed_wasm(bytes));
+    r
+}
+
+fn wasm_component(component_iri: &str, bytes: &[u8]) -> Resource {
+    let mut r = Resource::new(iri(component_iri));
+    r.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(COMPONENT_CLASS.to_string())]),
+    );
+    r.set(iri(COMP_IMPLEMENTATION), Value::String("wasm".to_string()));
+    r.set(
+        iri(COMP_CAPABILITY_LEVEL),
+        Value::String(CAPABILITY_PURE.to_string()),
+    );
+    r.set(iri(COMP_WASM_BINARY), embed_wasm(bytes));
+    r
 }
 
 fn build_demo_index(layer: &Layer) -> Arc<InstitutionIndex> {
@@ -92,44 +175,53 @@ fn build_demo_index(layer: &Layer) -> Arc<InstitutionIndex> {
     Arc::new(idx)
 }
 
-/// Build the InstitutionRuntime by loading the dock + assay WASM
-/// fixtures via `WasmInstitution::from_bytes`.
-fn build_demo_runtime() -> Arc<InstitutionRuntime> {
-    let mut runtime = InstitutionRuntime::new();
-    runtime
-        .register(Box::new(
-            WasmInstitution::from_bytes(
-                iri(DOCK_INST_IRI),
-                DOCK_FIXTURE,
-                WasmComponentConfig::default(),
-            )
-            .expect("load dock WASM fixture"),
-        ))
-        .expect("register Dock WasmInstitution");
-    runtime
-        .register(Box::new(
-            WasmInstitution::from_bytes(
-                iri(ASSAY_INST_IRI),
-                ASSAY_FIXTURE,
-                WasmComponentConfig::default(),
-            )
-            .expect("load assay WASM fixture"),
-        ))
-        .expect("register Assay WasmInstitution");
+/// Auto-register the WASM institutions declared in the layer chain.
+fn build_demo_runtime(layer: &Layer) -> Arc<InstitutionRuntime> {
+    let (runtime, report) = build_wasm_institution_runtime(layer);
+    assert!(
+        report.errors.is_empty(),
+        "WASM institution registration errors: {:?}",
+        report.errors
+    );
+    let registered: Vec<&str> = report
+        .institutions_registered
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    assert!(
+        registered.contains(&DOCK_INST_IRI),
+        "Dock not auto-registered: {registered:?}"
+    );
+    assert!(
+        registered.contains(&ASSAY_INST_IRI),
+        "Assay not auto-registered: {registered:?}"
+    );
     Arc::new(runtime)
 }
 
-/// Build the ComponentRegistry by loading the Arrhenius WASM fixture
-/// as a Pure-capability `WasmComponent`.
-fn build_demo_components() -> Arc<ComponentRegistry> {
+/// Auto-register the WASM components declared in the layer chain.
+fn build_demo_components(layer: &Layer) -> Arc<ComponentRegistry> {
     let mut registry = ComponentRegistry::default();
-    let component = WasmComponent::from_bytes(
-        ARRHENIUS_FIXTURE,
-        CapabilityLevel::Pure,
-        WasmComponentConfig::default(),
-    )
-    .expect("load arrhenius WASM fixture");
-    registry.register(ARRHENIUS_COMPONENT_IRI.to_string(), Box::new(component));
+    let result = scan_and_register(layer, &mut registry);
+    assert!(
+        result.report.errors.is_empty(),
+        "WASM component registration errors: {:?}",
+        result.report.errors
+    );
+    assert!(
+        result
+            .report
+            .components_registered
+            .iter()
+            .any(|s| s == ARRHENIUS_COMPONENT_IRI),
+        "cm_arrhenius not auto-registered: {:?}",
+        result.report.components_registered
+    );
+    assert!(
+        result.pending_io_components.is_empty(),
+        "demo has no IO components, got {} pending",
+        result.pending_io_components.len()
+    );
     Arc::new(registry)
 }
 
@@ -143,8 +235,8 @@ fn build_exec_ctx(layer: Arc<Layer>) -> ExecutionContext {
 fn wasm_comorphism_translates_dock_to_assay() {
     let layer = build_demo_layer();
     let index = build_demo_index(&layer);
-    let runtime = build_demo_runtime();
-    let components = build_demo_components();
+    let runtime = build_demo_runtime(&layer);
+    let components = build_demo_components(&layer);
 
     let source = "
         namespace demo = \"urn:eigenius:demo:d14\";
@@ -219,8 +311,8 @@ fn run_within_tolerance(
 
     let layer = build_demo_layer();
     let index = build_demo_index(&layer);
-    let runtime = build_demo_runtime();
-    let components = build_demo_components();
+    let runtime = build_demo_runtime(&layer);
+    let components = build_demo_components(&layer);
     let dispatched_traces = Arc::new(Mutex::new(Vec::new()));
 
     let ctx = EvalCtx::IO {
@@ -280,7 +372,7 @@ fn wasm_auto_on_load_fires_on_assay_prediction() {
 
     let layer = build_demo_layer();
     let index = build_demo_index(&layer);
-    let runtime = build_demo_runtime();
+    let runtime = build_demo_runtime(&layer);
     let exec_ctx = build_exec_ctx(Arc::clone(&layer));
 
     let mut good = Resource::new(iri("urn:eigenius:demo:d14:wasm_good"));

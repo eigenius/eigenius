@@ -670,6 +670,19 @@ impl EigeniusService {
     /// per-resource parse errors are logged at warn-level and skipped
     /// (the well-formed entries still index — same shape as the
     /// existing capability-scan flow).
+    ///
+    /// Also rebuilds the [`InstitutionRuntime`] by scanning the chain
+    /// for Institution declarations whose `runtime` is
+    /// `urn:eigenius:institution:runtimes:wasm` and constructing a
+    /// [`WasmInstitution`] for each. In-process / external runtime
+    /// declarations are skipped — those callers register
+    /// programmatically via the runtime API. This closes the
+    /// "ontology-first" loop for WASM institutions: declaring an
+    /// Institution + `wasm_binary` in the chain auto-installs its
+    /// dispatcher on commit.
+    ///
+    /// [`InstitutionRuntime`]: crate::institution::runtime::InstitutionRuntime
+    /// [`WasmInstitution`]: crate::capability::wasm_institution_d14::WasmInstitution
     async fn rebuild_institution_index(&self, layer: &crate::layer::Layer) {
         let (idx, errors) = crate::institution::registry::InstitutionIndex::from_layer(layer);
         for err in &errors {
@@ -686,6 +699,27 @@ impl EigeniusService {
             );
         }
         *self.institution_index.write().await = Arc::new(idx);
+
+        // Rebuild the runtime from chain-declared WASM institutions.
+        let (runtime, report) =
+            crate::capability::registration::build_wasm_institution_runtime(layer);
+        for err in &report.errors {
+            tracing::warn!(
+                { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                resource_iri = %err.resource_iri,
+                { field::ERROR_MESSAGE } = %err.message,
+                "WASM institution registration error"
+            );
+        }
+        for inst_iri in &report.institutions_registered {
+            tracing::info!(
+                { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                { field::INSTITUTION_IRI } = %inst_iri,
+                host = "kernel",
+                "registered WASM institution"
+            );
+        }
+        *self.institution_runtime.write().await = Arc::new(runtime);
     }
 
     /// Walk a newly committed layer and register every WASM component

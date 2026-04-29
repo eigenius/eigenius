@@ -30,9 +30,12 @@
 //! `wasm_binary_ref` (blob store IRI) is reserved for future use.
 
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
+use super::wasm_institution_d14::WasmInstitution;
+use crate::institution::runtime::{Institution, InstitutionRuntime};
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
+use crate::ontology::well_known as wk;
 use crate::program::component::ComponentRegistry;
 
 /// Protected namespace prefixes. Domain-supplied WASM modules cannot register
@@ -78,6 +81,7 @@ impl std::fmt::Display for RegistrationWarning {
 #[derive(Debug, Default)]
 pub struct RegistrationReport {
     pub components_registered: Vec<String>,
+    pub institutions_registered: Vec<String>,
     pub errors: Vec<RegistrationError>,
     pub warnings: Vec<RegistrationWarning>,
 }
@@ -184,6 +188,83 @@ pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> S
     }
 
     result
+}
+
+/// Walk the layer chain for D14 Institution declarations whose
+/// `runtime` is `urn:eigenius:institution:runtimes:wasm` and build an
+/// [`InstitutionRuntime`] populated with [`WasmInstitution`] instances
+/// for each. In-process / external runtime declarations are skipped —
+/// the caller is responsible for registering those programmatically.
+///
+/// Resources are merged across the chain; the topmost declaration for
+/// each institution IRI wins (so a child layer can override a parent
+/// layer's `runtime: in_process` declaration with `runtime: wasm` +
+/// `wasm_binary`).
+pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, RegistrationReport) {
+    let mut report = RegistrationReport::default();
+    let mut runtime = InstitutionRuntime::new();
+
+    let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
+    let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
+
+    for (iri, resource) in layer.all_resources() {
+        if !resource.is_instance_of(&institution_class_iri) {
+            continue;
+        }
+        let runtime_kind = match resource.get(&runtime_prop) {
+            Some(Value::String(s)) if s == wk::RUNTIME_WASM => s,
+            _ => continue, // not WASM-runtime — caller's responsibility
+        };
+        let _ = runtime_kind;
+
+        match load_wasm_institution(resource, iri, layer) {
+            Ok(wasm_inst) => {
+                let inst_iri = wasm_inst.institution_iri().clone();
+                if let Err(e) = runtime.register(Box::new(wasm_inst)) {
+                    report.errors.push(RegistrationError {
+                        resource_iri: iri.as_str().to_string(),
+                        message: format!("InstitutionRuntime::register failed: {e}"),
+                    });
+                    continue;
+                }
+                report
+                    .institutions_registered
+                    .push(inst_iri.as_str().to_string());
+            }
+            Err(e) => {
+                report.errors.push(RegistrationError {
+                    resource_iri: iri.as_str().to_string(),
+                    message: e,
+                });
+            }
+        }
+    }
+
+    (runtime, report)
+}
+
+/// Load a WASM institution from an Institution resource declaring
+/// `runtime: wasm` + `wasm_binary`.
+fn load_wasm_institution(
+    resource: &Resource,
+    iri: &Iri,
+    layer: &Layer,
+) -> Result<WasmInstitution, String> {
+    let bytes = extract_wasm_bytes(
+        resource,
+        "urn:eigenius:institution:wasm_binary",
+        "urn:eigenius:institution:wasm_binary_ref",
+        layer,
+    )?;
+    let config = extract_config(
+        resource,
+        "urn:eigenius:institution:fuel_limit",
+        "urn:eigenius:institution:memory_limit_pages",
+    );
+    // The institution's IRI is its @id — same as the resource IRI.
+    // The InstitutionRuntime keys by this; D14 dispatch resolves a
+    // QueryClass's `institution_ref` against this key.
+    WasmInstitution::from_bytes(iri.clone(), &bytes, config)
 }
 
 /// Load a WASM component from a resource.
