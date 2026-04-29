@@ -47,9 +47,10 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
         _ => {}
     }
 
-    let resource = layer
+    let resource_arc = layer
         .resolve(class_iri)
         .ok_or_else(|| format!("class '{}' not found in layer chain", class_iri))?;
+    let resource: &crate::ontology::resource::Resource = &resource_arc;
 
     // Codata types resolve to Val::Codata with each observation's
     // result type embedded as a syntactic Exp (evaluated in Rho::Nil
@@ -161,9 +162,10 @@ fn collect_properties_inner(
 /// Handles all data types including resource references (with class_types
 /// and allows_only), arrays, and primitive types.
 pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, String> {
-    let resource = layer
+    let resource_arc = layer
         .resolve(prop_iri)
         .ok_or_else(|| format!("property '{}' not found", prop_iri))?;
+    let resource: &crate::ontology::resource::Resource = &resource_arc;
 
     let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
     let data_type_str = match resource.get(&dt_iri) {
@@ -948,7 +950,8 @@ fn decode_arg_type(
     // the target — the stub is enough for name-based dispatch and
     // avoids infinite recursion on mutually-referential decls (out of
     // scope but worth guarding against).
-    if let Some(other_resource) = layer.resolve(&arg_iri) {
+    if let Some(other_resource_arc) = layer.resolve(&arg_iri) {
+        let other_resource: &crate::ontology::resource::Resource = &other_resource_arc;
         if is_inductive_type(other_resource) {
             let other_name = match other_resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
                 Some(Value::String(s)) => s.clone(),
@@ -992,7 +995,7 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(builder.build());
+        let core = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animal_resources = eigon_json::parse_document(animals_json).unwrap();
@@ -1000,7 +1003,7 @@ mod tests {
         for r in animal_resources {
             domain_builder.add_resource(r).unwrap();
         }
-        Arc::new(domain_builder.build())
+        Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1102,14 +1105,14 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build());
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        Arc::new(user_builder.build())
+        Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]

@@ -127,6 +127,33 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.runProgramByIri,
         req,
       ),
+
+    // Branch refs (Phase 14g). Notebook needs all four to surface a
+    // branch picker, create feature branches, and prune obsolete ones.
+    listBranches: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_LIST_BRANCHES,
+        kernel.raw.listBranches,
+        req,
+      ),
+    getBranch: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_GET_BRANCH,
+        kernel.raw.getBranch,
+        req,
+      ),
+    createBranch: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CREATE_BRANCH,
+        kernel.raw.createBranch,
+        req,
+      ),
+    deleteBranch: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_DELETE_BRANCH,
+        kernel.raw.deleteBranch,
+        req,
+      ),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path

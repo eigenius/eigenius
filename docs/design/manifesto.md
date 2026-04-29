@@ -16,11 +16,13 @@ The problem is not that LLMs are bad at reasoning. The problem is that the infra
 
 We believe this is a solvable engineering problem, and we are building the solution.
 
-## Three kinds of knowledge.
+## Four kinds of knowledge.
 
 Not all knowledge is created equal. A measured experimental result, a computational derivation, and a mathematically proved theorem are fundamentally different things. They deserve different levels of trust, and any system that collapses them into the same undifferentiated representation is lying about what it knows.
 
-Eigenius maintains three epistemic categories as a first-class architectural concern:
+Eigenius maintains four epistemic categories as a first-class architectural concern:
+
+**Declared knowledge** has authority but no evidence. It entered the system because a human decided it should be there — a load requirement of 5kN, a target safety factor of 2.0, an ontology definition, a regulatory threshold. The system vouches for its well-formedness: the declaration is structurally valid, the types are correct, the required fields are present. It does not vouch for its truth. Declared knowledge expresses intent, policy, or convention. It is the starting point from which everything else is measured, and it is the weakest epistemic claim the system makes — because it rests on human judgment alone.
 
 **Observed knowledge** has provenance. It came from somewhere — a measurement, a paper, a dataset — and the system records where. The system does not claim it is true. It claims it was recorded, and it can tell you by whom, when, and from what source.
 

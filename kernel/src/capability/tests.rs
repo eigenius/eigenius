@@ -30,7 +30,7 @@ use crate::program::component::BuiltinComponent;
 use std::sync::Arc;
 
 fn empty_layer() -> crate::layer::Layer {
-    crate::layer::LayerBuilder::new("empty", None).build()
+    crate::layer::LayerBuilder::new("empty", None).build(crate::layer::LayerStorage::in_memory())
 }
 
 #[test]
@@ -295,8 +295,9 @@ fn load_ordering_institution() -> WasmFiberReasoner {
 }
 
 fn test_context() -> ExecutionContext {
-    let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
-    ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly)
+    let storage = crate::layer::LayerStorage::in_memory();
+    let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(storage.clone()));
+    ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage)
 }
 
 #[test]
@@ -613,7 +614,10 @@ fn build_fiber_test_layer() -> (
         lb.add_resource(r).unwrap();
     }
 
-    (std::sync::Arc::new(lb.build()), registry)
+    (
+        std::sync::Arc::new(lb.build(crate::layer::LayerStorage::in_memory())),
+        registry,
+    )
 }
 
 #[test]
@@ -622,7 +626,12 @@ fn fiber_clause_converged_only() {
     use crate::query;
 
     let (layer, institutions) = build_fiber_test_layer();
-    let ctx = ExecutionContext::new(Arc::clone(&layer), "fiber-test", ExecutionMode::ReadOnly);
+    let ctx = ExecutionContext::new(
+        Arc::clone(&layer),
+        "fiber-test",
+        ExecutionMode::ReadOnly,
+        layer.storage().clone(),
+    );
 
     let runtime = query::evaluate::FiberRuntime {
         institutions: Some(&institutions),

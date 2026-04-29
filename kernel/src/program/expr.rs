@@ -161,7 +161,8 @@ fn parse_decide_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String>
 fn resolve_ctor_iri(s: &str, layer: &Layer) -> Option<(Arc<InductiveDecl>, usize, usize)> {
     let (parent_str, ctor_name) = s.rsplit_once(':')?;
     let parent_iri = Iri::parse(parent_str).ok()?;
-    let resource = layer.resolve(&parent_iri)?;
+    let resource_arc = layer.resolve(&parent_iri)?;
+    let resource: &Resource = &resource_arc;
     if !is_inductive_type(resource) {
         return None;
     }
@@ -463,9 +464,10 @@ fn resolve_match_parent(arms: &[ParsedArm], layer: &Layer) -> Result<Arc<Inducti
     }
     let parent_iri = Iri::parse(parent_iri_str)
         .map_err(|e| format!("invalid match arm parent IRI `{parent_iri_str}`: {e}"))?;
-    let parent_resource = layer
+    let parent_resource_arc = layer
         .resolve(&parent_iri)
         .ok_or_else(|| format!("match arm parent inductive `{parent_iri_str}` not in layer"))?;
+    let parent_resource: &Resource = &parent_resource_arc;
     if !is_inductive_type(parent_resource) {
         return Err(format!(
             "match arm parent `{parent_iri_str}` is not an inductive type"
@@ -762,7 +764,8 @@ mod tests {
             Iri::parse("urn:eigenius:program:name").unwrap(),
             Value::String("x".to_string()),
         );
-        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Var(ref n) if n == "x"));
     }
@@ -780,7 +783,8 @@ mod tests {
             Iri::parse("urn:eigenius:program:function").unwrap(),
             Value::String("urn:eigenius:components:Identity".to_string()),
         );
-        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::App(_, _)));
     }
@@ -813,7 +817,8 @@ mod tests {
             Value::Embedded(Box::new(body)),
         );
 
-        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Lam(Patt::Var(ref n), _) if n == "x"));
     }
@@ -854,7 +859,8 @@ mod tests {
             Value::Embedded(Box::new(second)),
         );
 
-        let layer = crate::layer::LayerBuilder::new("empty", None).build();
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Pair(_, _)));
     }
@@ -872,21 +878,21 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build());
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        Arc::new(user_builder.build())
+        Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     /// Helper: parse a program by its IRI from a layer, return its body.
     fn parse_program_body(program_iri: &str, layer: &crate::layer::Layer) -> Exp {
         let iri = Iri::parse(program_iri).unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, _typ) = parse_program(resource, layer).expect("parse_program");
+        let (term, _typ) = parse_program(&resource, layer).expect("parse_program");
         match term {
             Exp::Lam(_, body) => *body,
             other => panic!("expected Lam, got {other:?}"),
@@ -986,7 +992,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:two").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
 
         // Type-check: term should have type `typ` in an empty context
         // with the layer available for class resolution.
@@ -1096,7 +1102,7 @@ mod tests {
         // Type-check and evaluate end-to-end.
         let iri = Iri::parse("urn:eigenius:example:two_elem_list").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1146,7 +1152,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let err = parse_program(resource, &layer).unwrap_err();
+        let err = parse_program(&resource, &layer).unwrap_err();
         assert!(
             err.contains("expects 2 args, got 1"),
             "expected arity error, got: {err}"
@@ -1191,7 +1197,7 @@ mod tests {
         // Type-check + evaluate.
         let iri = Iri::parse("urn:eigenius:example:my_triple").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1301,7 +1307,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:flip").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1357,7 +1363,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:pred_of_one").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1407,7 +1413,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:head_or_zero").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1455,7 +1461,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let err = parse_program(resource, &layer).unwrap_err();
+        let err = parse_program(&resource, &layer).unwrap_err();
         assert!(
             err.contains("non-exhaustive"),
             "expected non-exhaustive error, got: {err}"
@@ -1490,7 +1496,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let err = parse_program(resource, &layer).unwrap_err();
+        let err = parse_program(&resource, &layer).unwrap_err();
         assert!(
             err.contains("expects 2 bindings"),
             "expected binding count error, got: {err}"
@@ -1555,7 +1561,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:flip").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1601,7 +1607,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:pred_of_one").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1644,7 +1650,7 @@ mod tests {
         );
         let iri = Iri::parse("urn:eigenius:example:bad").unwrap();
         let resource = layer.resolve(&iri).expect("program resource");
-        let (term, typ) = parse_program(resource, &layer).expect("parse_program");
+        let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
         use crate::nbe::eval::eval;
@@ -1782,7 +1788,7 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build());
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let source = r#"
             namespace core = "urn:eigenius:core";
@@ -1806,11 +1812,11 @@ mod tests {
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(user_builder.build());
+        let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let prog_iri = Iri::parse("urn:eigenius:example:invoke_program").unwrap();
         let prog_resource = layer.resolve(&prog_iri).expect("program");
-        let (term, _ty) = parse_program(prog_resource, &layer).expect("parse");
+        let (term, _ty) = parse_program(&prog_resource, &layer).expect("parse");
         // The compiled term should end up as Lam(input, InstitutionInvoke(..)).
         match term {
             Exp::Lam(_, body) => match *body {
@@ -1836,7 +1842,7 @@ mod tests {
         for r in core_resources {
             core_builder.add_resource(r).unwrap();
         }
-        let core = Arc::new(core_builder.build());
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let source = r#"
             namespace core = "urn:eigenius:core";
@@ -1860,11 +1866,11 @@ mod tests {
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(user_builder.build());
+        let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let prog_iri = Iri::parse("urn:eigenius:example:decide_program").unwrap();
         let prog_resource = layer.resolve(&prog_iri).expect("program");
-        let (term, _ty) = parse_program(prog_resource, &layer).expect("parse");
+        let (term, _ty) = parse_program(&prog_resource, &layer).expect("parse");
         // The compiled term should end up as Lam(input, NativeDecide(Institution, Unit)).
         match term {
             Exp::Lam(_, body) => match *body {

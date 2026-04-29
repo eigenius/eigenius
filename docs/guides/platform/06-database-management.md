@@ -20,25 +20,49 @@ The path can be anywhere the kernel process can write. On first start, the kerne
 
 ## 6.2. What gets persisted
 
-Three categories:
+Phase 14 made the on-disk layout a stable contract. The kernel writes (and reads) several distinct prefixes inside a single RocksDB instance — see [D23 §6](../../design/d23-out-of-core-layer-architecture.md#6-storage-layout) for the full layout. At a high level:
 
-| Category | Source of truth |
+| Category | Prefix(es) | Purpose |
+|---|---|---|
+| **Layer content** | `layer:<id>:meta`, `layer:<id>:res:<iri>` | Per-layer metadata + every resource it defines, CBOR-encoded |
+| **Topology** | `topo:<id>` | Per-layer `LayerHandle` (DAG metadata) |
+| **Chain** | `chain:<id>` | Single-parent canonical edge for chain-walk reconstruction |
+| **Branches** | `branch:<name>` | Named pointers into the layer DAG (D23 §5.5) |
+| **Shadowing blooms** | `bloom:<id>` | Per-layer Bloom filters for `Layer::resolve` (D23 §5.2) |
+| **Triple index** | `idx_pos:<p>:<o>:<s>:<layer>`, `idx_layer:<layer>:<p>:<o>:<s>` | POS index for indexed query reads (D23 §5.9 / D24-relevant) |
+| **Traces** | `trace:<key>` | Completed program execution traces (D6b, D21) |
+| **Tasks** | `meta:session:<id>:task:<id>:*` | Task records + per-task IO traces (D21) |
+| **Schema metadata** | `meta:schema_version`, `meta:last_writer_version`, `meta:schema_history` | On-disk schema versioning (D24) |
+| **Manifest** | `meta:seed_manifest_v1` | Embedded-ontology hash, for drift refusal |
+
+WASM capability binaries are persisted as ordinary resources inside layers — they live under `layer:<id>:res:<iri>` like any other resource and re-register on kernel restart.
+
+Direct manipulation of these prefixes outside the kernel API is unsupported and likely to cause corruption — go through `eigenius` or the gRPC surface.
+
+## 6.3. Boot-time refusal: schema version + manifest
+
+`bootstrap_persistent` runs two independent checks on every restart against a populated database. The kernel refuses to start if either fails.
+
+### Schema-version check (D24)
+
+The first time `serve --db <path>` runs against a fresh DB, the kernel stamps `meta:schema_version` with its compiled-in `SCHEMA_VERSION` (currently `1` — the cumulative Phase 14 layout). On every restart, it reads that value and compares to its expectation:
+
+| Stored | Action |
 |---|---|
-| **Layers** — every layer loaded after the bootstrap chain | [`storage/rocksdb/`](../../../storage/rocksdb/) layer column families |
-| **Traces** — completed program execution traces (D6b, D21) | trace column family |
-| **WASM capabilities** — installed component and institution binaries plus their declarations | capability column family |
+| Missing on a non-empty DB | Refuse — `SchemaVersionAbsent`. The DB was written by a pre-marker kernel; re-seed against a fresh `--db` path. |
+| Equal to current | Resume normally. |
+| Lower than current | Run registered migrations in order. Phase 14 is `v1` and ships no migrations; the first migration arrives with whichever future PR bumps to `v2`. |
+| Higher than current | Refuse — `SchemaTooNew`. Older kernel against a newer DB; upgrade the kernel binary. |
 
-Plus one important piece of metadata:
+See [D24 — Schema Versioning Policy](../../design/d24-schema-versioning.md) and the [schema changelog](../../design/schema-changelog.md) for the full contract and the per-version history.
 
-| Metadata | Purpose |
-|---|---|
-| **Embedded-ontology manifest** — SHA-256 of the four bootstrap ontology files at first start | Drift refusal on subsequent restarts |
+The schema-version check fires *first* — there's no point validating ontology fingerprints against a DB whose shape we can't safely walk.
 
-## 6.3. Drift refusal
+### Manifest drift check
 
-The first time you run `serve --db <path>` on a fresh database, the kernel records a SHA-256 manifest of the four embedded ontologies (`core`, `program`, `reflection`, `institution`) into the database. On every subsequent restart, it re-hashes the embedded ontologies and compares to the stored manifest.
+The kernel also records a SHA-256 manifest of the five embedded ontologies (`core`, `program`, `reflection`, `institution`, `notebook`) on first start. On every subsequent restart, it re-hashes the embedded ontologies and compares to the stored manifest.
 
-If the hashes differ — typically because you upgraded `eigenius` to a version that ships a different bootstrap ontology — **the kernel refuses to start**. The error message names the differing file(s).
+If the hashes differ — typically because you upgraded `eigenius` to a version that ships different bootstrap ontology JSON — the kernel refuses to start with `ManifestDrift`. The error names the differing file(s).
 
 This is intentional: an ontology change can invalidate persisted resources whose validation depended on the prior shape. The recovery path:
 
@@ -49,21 +73,22 @@ This is intentional: an ontology change can invalidate persisted resources whose
 
 For routine kernel upgrades that don't touch the bootstrap ontologies (the common case), no migration is needed and no drift is detected.
 
+The two checks are independent: a kernel upgrade that changes storage shape (schema-version bump) but keeps the same ontologies passes the manifest check; a kernel that bundles a new ontology JSON without changing storage shape passes the version check. In practice most upgrades pass both.
+
 ## 6.4. `db stats` — what's in there
 
-Stop the server first (RocksDB takes a directory lock; `db stats` opens the directory read-only-ish but cleanly).
+Stop the server first (RocksDB takes a directory lock; `db stats` opens the directory cleanly when the server is down).
 
 ```bash
 eigenius db stats /var/lib/eigenius
 ```
 
-Output includes per-column-family statistics:
+Output includes:
 
-- Live data size (compressed bytes on disk)
-- Number of keys
-- Level distribution (RocksDB's LSM tree levels)
+- Total bytes on disk and total key count.
+- One line per branch ref with its current head (Phase 14g) — useful for spotting stale feature branches that haven't been pruned.
 
-Use this to spot unexpected size growth or to confirm a compaction took effect.
+Use this to spot unexpected size growth, to confirm a compaction took effect, and to audit branches before running cleanup. For a live kernel, `eigenius --endpoint ... branch list` gives the branch view without taking the database offline.
 
 ## 6.5. `db compact` — defragmenting
 
@@ -98,7 +123,34 @@ Use cases:
 
 The exported file format is the standard Eigon-JSON ([D1](../../design/d1-eigon-serialization-format.md)) — readable in any editor, compact via `gzip`.
 
-## 6.7. Backup strategy
+## 6.7. Branches
+
+Phase 14g made branches the only head-pointer surface — every commit lands on a branch, and `main` is the default. Day-to-day operators interact with branches through the CLI:
+
+```bash
+# List every branch and its current head
+eigenius --endpoint http://localhost:50051 branch list
+
+# Show one branch
+eigenius --endpoint http://localhost:50051 branch show main
+
+# Create a feature branch off main
+MAIN_HEAD=$(eigenius --endpoint http://localhost:50051 branch show main --json | jq -r .head_layer)
+eigenius --endpoint http://localhost:50051 branch create feature-x --from "$MAIN_HEAD"
+
+# Commit onto it
+eigenius --endpoint http://localhost:50051 load demo/document.esl --branch feature-x
+
+# Prune when done — refuses by default if a task pin matches the head
+eigenius --endpoint http://localhost:50051 branch delete feature-x
+eigenius --endpoint http://localhost:50051 branch delete feature-x --force   # skip the pin check
+```
+
+See [§4.6](04-cli-reference.md#46-branch-commands-require---endpoint) for the full command reference. The full design is in [D23 §5.5 (branch refs)](../../design/d23-out-of-core-layer-architecture.md#55-branch-refs-14d) and [§5.4 (`update_branch` CAS)](../../design/d23-out-of-core-layer-architecture.md#54-write-model).
+
+When a branch is deleted, layers reachable only through it become candidates for garbage collection on the next sweep. Today GC is a library-level API only — no CLI command — so deleted-branch storage stays on disk until the dev DB is wiped (`docker compose down -v` or equivalent). [Issue #37](https://github.com/eigenius/eigenius/issues/37) tracks the operator-facing GC surface for Phase 14f-ii.
+
+## 6.8. Backup strategy
 
 Three options, ordered by overhead:
 
@@ -110,29 +162,23 @@ Three options, ordered by overhead:
 
 For point-in-time backups during operation, prefer (2) — it doesn't require stopping the server.
 
-## 6.8. RocksDB layout
+## 6.9. RocksDB layout
 
-The RocksDB directory contains:
+The RocksDB directory contains the standard RocksDB on-disk files:
 
 - `OPTIONS-*` — RocksDB configuration files
 - `MANIFEST-*` — RocksDB's internal manifest
+- `CURRENT` — pointer to the current MANIFEST
 - `*.sst` — SSTable files holding the actual data
+- `*.log` — write-ahead logs for recent writes
 - `LOCK` — process lock (the reason `serve` and `db compact` can't run concurrently)
-- `LOG`, `LOG.old.*` — RocksDB internal logs
+- `LOG`, `LOG.old.*` — RocksDB internal info logs
 
-Eigenius uses several **column families** (separate keyspaces within one database):
+Eigenius uses a **single column family** with prefix-keyed entries — see §6.2 for the full prefix list. This is a deliberate choice (D23 §4): the prefix scheme is debuggable with `rocksdb_dump`, requires no per-CF tuning, and additively extends as new Phase-14+ surfaces land. Phase 14 added `topo:`, `bloom:`, `branch:`, `idx_pos:`, `idx_layer:` to the cumulative layout.
 
-| Column family | Holds |
-|---|---|
-| `layers` | Layer metadata + layer-id chains |
-| `resources` | Resources keyed by (LayerId, IRI) |
-| `traces` | Completed reasoning traces |
-| `capabilities` | Installed WASM binaries and capability declarations |
-| `manifest` | Embedded-ontology hashes (drift detection) |
+Direct manipulation of the RocksDB files outside the `eigenius db` and `eigenius branch` commands is unsupported and likely to cause corruption.
 
-Direct manipulation of the RocksDB files outside the `eigenius db` commands is unsupported and likely to cause corruption.
-
-## 6.9. Restart re-registration
+## 6.10. Restart re-registration
 
 When the kernel restarts on a populated database, persisted WASM capabilities are **re-registered** with the runtime. This means:
 
@@ -142,7 +188,7 @@ When the kernel restarts on a populated database, persisted WASM capabilities ar
 
 Restart re-registration is what makes `serve --db` truly persistent: not just data but the *executable extensions* survive. See [D13 §4](../../design/d13-durable-kernel-state.md) for the protocol.
 
-## 6.10. Sizing and growth
+## 6.11. Sizing and growth
 
 Rough numbers from the demo:
 
@@ -152,7 +198,7 @@ Rough numbers from the demo:
 
 For production-sized deployments, the dominant growth factor is usually trace storage. If trace volume becomes a concern, the trace store has a configurable retention policy (planned for Phase 14) and can be size-bounded.
 
-## 6.11. The TiKV backend (placeholder)
+## 6.12. The TiKV backend (placeholder)
 
 [`storage/tikv/`](../../../storage/tikv/) exists as a placeholder for a future distributed-storage backend. The kernel has the abstraction in place ([`kernel/src/storage/`](../../../kernel/src/storage/) traits) but the TiKV implementation is not production-ready and is not covered by this guide.
 

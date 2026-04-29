@@ -27,7 +27,7 @@
 //! `Read` capability mode.
 
 use crate::layer::Layer;
-use crate::ontology::resource::Value;
+use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::ontology::Iri;
 use crate::server::proto;
@@ -103,7 +103,8 @@ fn walk_layer(
     let institution_iri =
         Iri::parse("urn:eigenius:institution:Institution").expect("Institution IRI");
 
-    for (iri, resource) in layer.resources() {
+    for (iri, arc_resource) in layer.iter_resources() {
+        let resource: &Resource = &arc_resource;
         let is_class = resource.is_instance_of(&class_iri);
         let is_property = resource.is_instance_of(&property_iri);
         let is_institution = resource.is_instance_of(&institution_iri);
@@ -127,7 +128,7 @@ fn walk_layer(
 
         let id = iri.as_str().to_string();
         if seen_node_ids.insert(id.clone()) {
-            let label = node_label(resource, iri);
+            let label = node_label(resource, &iri);
             let mut attrs = resource_attrs(resource);
             // Attribute the node to the layer that introduced it so
             // clients can filter "what's in this layer" without
@@ -149,7 +150,7 @@ fn walk_layer(
             // times. Head-down traversal means the edges come from
             // the topmost (most-specific) version of the resource,
             // matching what the validator/resolver sees.
-            emit_resource_edges(resource, iri, kind, edges);
+            emit_resource_edges(resource, &iri, kind, edges);
         }
     }
 
@@ -192,7 +193,8 @@ fn layer_counts(layer: &Layer) -> LayerCounts {
         Iri::parse("urn:eigenius:institution:Institution").expect("Institution IRI");
 
     let mut c = LayerCounts::default();
-    for resource in layer.resources().values() {
+    for arc_resource in layer.iter_resources().map(|(_, r)| r) {
+        let resource: &Resource = &arc_resource;
         if resource.is_instance_of(&class_iri) {
             c.classes += 1;
         } else if resource.is_instance_of(&property_iri) {
@@ -390,7 +392,7 @@ mod tests {
             "urn:eigenius:core:string",
         ))
         .unwrap();
-        let root_layer = Arc::new(root.build());
+        let root_layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
         let mut top = LayerBuilder::new("top", Some(root_layer.clone()));
         let mut dog = make_class_resource("urn:eigenius:example:Dog", "Dog");
@@ -410,7 +412,7 @@ mod tests {
             "urn:eigenius:example:Dog",
         ))
         .unwrap();
-        Arc::new(top.build())
+        Arc::new(top.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -536,7 +538,7 @@ mod tests {
         let mut root = LayerBuilder::new("root", None);
         root.add_resource(make_class_resource("urn:example:Foo", "Foo"))
             .unwrap();
-        let root_layer = Arc::new(root.build());
+        let root_layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
         let mut top = LayerBuilder::new("top", Some(root_layer));
         // Same IRI as in root, with a different short_name (override).
@@ -546,7 +548,7 @@ mod tests {
             Value::String("the second-version override".into()),
         );
         top.add_resource(foo_v2).unwrap();
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let topo = walk(&layer, 0, false);
         let foo_nodes: Vec<_> = topo
@@ -582,14 +584,14 @@ mod tests {
             Value::Array(vec![Value::String("urn:example:name".to_string())]),
         );
         root.add_resource(foo.clone()).unwrap();
-        let root_layer = Arc::new(root.build());
+        let root_layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
         // The same schema, again, in a child layer. Without edge
         // dedup the walker would emit each requires/recommends/
         // property_ref twice.
         let mut top = LayerBuilder::new("top", Some(root_layer));
         top.add_resource(foo).unwrap();
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let topo = walk(&layer, 0, false);
         let requires_edges: Vec<_> = topo

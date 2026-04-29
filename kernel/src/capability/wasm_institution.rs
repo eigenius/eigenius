@@ -83,7 +83,10 @@ impl WasmFiberReasoner {
         component: &Component,
         config: &WasmComponentConfig,
     ) -> Result<FiberDeclaration, String> {
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let linker = build_linker(engine)?;
 
         let mut store = Store::new(engine, HostState { layer });
@@ -342,7 +345,7 @@ fn link_read_access(linker: &mut Linker<HostState>) -> Result<(), String> {
 
             match ctx.data().layer.resolve(&iri) {
                 Some(resource) => {
-                    let cbor = eigon_cbor::serialize_resource(resource);
+                    let cbor = eigon_cbor::serialize_resource(&resource);
                     let bytes_val = Val::List(cbor.into_iter().map(Val::U8).collect());
                     results[0] = Val::Option(Some(Box::new(bytes_val)));
                 }

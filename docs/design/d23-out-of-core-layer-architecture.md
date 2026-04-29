@@ -31,7 +31,7 @@ The fix is structural: stop holding all resource content in memory; stop assumin
 - Multiple branches per database, single writer per branch, multi-reader.
 - Background reachability-based GC; explicit branch pruning.
 - Indexed query reads via SPO/POS/OPS (currently `todo!()`).
-- Atomic commit across topology + shadowing index + content + branch ref.
+- Atomic commit across topology + bloom + content + branch ref.
 - Time-travel queries (`--at-layer L`) preserved with bounded reconstruction cost.
 - Restart correctness preserved (Phase 9a's RESUME path still works on the new layout).
 - Online migration from Phase 9a's layout, no DB rebuild required.
@@ -53,7 +53,7 @@ Three things in particular shape the design:
 
 **Storage uses string-prefixed keys, not RocksDB column families.** Per [`storage/rocksdb/src/lib.rs`](../../storage/rocksdb/src/lib.rs): `layer:<id_hex>:meta`, `layer:<id_hex>:res:<iri>`, `chain:<id_hex>`, `head`, `trace:<key_hex>`. Design decision (§6.1): we keep the prefix scheme and add new prefixes for Phase 14 surfaces, rather than switching to CFs. Rationale: CFs add operational complexity (per-CF compaction tuning) for a benefit (per-CF read isolation) we don't currently exploit; the prefix scheme is debuggable with `rocksdb_dump` and trivially extensible.
 
-**The SPO/POS/OPS indexes in [`storage/indexing/src/lib.rs`](../../storage/indexing/src/lib.rs) are skeleton-only — every method is `todo!()`.** Phase 14h is therefore not "wire indexes through the evaluator" but "implement the indexes, populate them on layer commit, then wire them through the evaluator." This is more work than the implementation-plan stub implied; it's still the right scope for the milestone.
+**Phase 14h shipped a per-layer triple index** (§5.9) in [`kernel/src/layer/index.rs`](../../kernel/src/layer/index.rs) (trait + in-memory impl + chain-walk helpers) and [`storage/rocksdb/src/triple_index.rs`](../../storage/rocksdb/src/triple_index.rs) (RocksDB-backed impl). The earlier `storage/indexing/` stub crate was superseded and removed.
 
 The session model ([`kernel/src/task/mod.rs`](../../kernel/src/task/mod.rs)) hardwires a single `Session::hardwired()` returning `Uuid::nil()`. D21 explicitly noted multi-session as a Phase-14 surface expansion; this doc cashes in that promise.
 
@@ -71,10 +71,10 @@ The fundamental shape change: **a Layer is now a node in a DAG with named branch
                        └────┬─────────────────┬──────────┘
                             │                 │
               ┌─────────────▼──┐   ┌──────────▼──────────────┐
-              │ ShadowingIndex │   │ ResourceCache (bounded) │
-              │ (per branch    │   │ key: (LayerId, Iri)     │
-              │  head)         │   │ two pools: active /     │
-              │                │   │            historical   │
+              │ BloomCache     │   │ ResourceCache (bounded) │
+              │ (per layer     │   │ key: (LayerId, Iri)     │
+              │  blooms,       │   │ two pools: active /     │
+              │  bounded)      │   │            historical   │
               └─────────┬──────┘   └────────┬────────────────┘
                         │                   │
                         └─────────┬─────────┘
@@ -109,42 +109,109 @@ pub struct LayerTopology {
 
 The topology is bounded by the number of layers and branches, not by graph size. For a database with 100k layers and 50 branches, the topology is comfortably under 100MB even with generous metadata.
 
-### 5.2 Shadowing index
+### 5.2 Per-layer shadowing bloom
 
-The **per-head shadowing index** is the load-bearing data structure that turns `O(chain_depth)` lookup into `O(1)` (one storage hit on cache miss, plus the cache check itself).
+The kernel needs a way to skip layers during `Layer::resolve(iri)` without a storage probe. The naïve walk — for each layer in the head→root chain, look up `iri` in the cache (and on miss, the backend) — is O(chain_depth) storage hits in the worst case (deep history, IRI not present anywhere). For long-lived databases this is the dominant cost.
+
+**The structure: one bloom filter per layer.** A layer's bloom describes exactly the set of IRIs it *defines directly* — the same set as the layer's `defined_iris`, just compressed. `might_contain(iri)` answers "should I bother probing this layer for `iri`?" in a few hash operations over a small bit array.
+
+**Why per-layer, not per-head.** Whether layer `L` defines IRI `X` is a property of `L` alone. The shadowing question — *which* layer in head H's chain defines X — varies per head, but the answer is computed by walking the chain and asking each layer's bloom in turn. Keeping the index per-layer gives us:
+
+- An immutable per-layer artifact, computable from `defined_iris` at commit time. Same lifecycle as the layer itself.
+- Zero per-head bookkeeping. The kernel stays a pure DAG: there is no "shadowing index for head H" to maintain on commit, branch, or merge.
+- Free multi-parent merges (Phase 14e and 15): chain walks handle multiple parents naturally; nothing to reconcile in the index.
+- Clean GC: drop a layer, drop its bloom. No surgical edits.
+
+The cost is asymptotic — `O(chain_depth)` bloom checks instead of `O(1)` per-head index lookup — but bloom checks are in-memory hash ops measured in tens of nanoseconds. Real probes (cache → backend) only happen at layers the bloom flags as "maybe present", which is the matching layer plus a small false-positive count (1% FPR by default → ~1 false probe per 100-layer chain).
+
+#### 5.2.1 The cache
+
+Blooms live behind a bounded cache, paged from the persistent backend. Same shape as `ResourceCache`:
 
 ```rust
-/// For a given branch head H and IRI X, returns the highest layer in H's
-/// chain that defines X — or None if X is not defined anywhere in H's
-/// reachable history.
-pub trait ShadowingIndex {
-    fn resolve(&self, head: LayerId, iri: &Iri) -> Result<Option<LayerId>>;
+pub trait BloomCache: Send + Sync {
+    fn get(&self, layer: &LayerId) -> Option<Arc<BloomFilter>>;
+    fn put(&self, layer: LayerId, bloom: Arc<BloomFilter>);
+    /// Called by GC to drop entries belonging to a swept layer.
+    fn evict_layer(&self, layer: &LayerId);
+    fn stats(&self) -> CacheStats;
+}
 
-    /// Bloom-filter front end for fast negative answers. May return false
-    /// positives; callers must follow up with `resolve` on a true return.
-    fn might_contain(&self, head: LayerId, iri: &Iri) -> bool;
-
-    /// Update on layer commit. The new layer's content has IRIs `defined`;
-    /// for each, the new mapping is iri -> new_layer when reading via head.
-    /// `parent_head` is the head this commit extends.
-    fn extend(
-        &mut self,
-        parent_head: LayerId,
-        new_layer: LayerId,
-        defined: &[Iri],
-    ) -> Result<()>;
-
-    /// Used by Phase 15 (merge) and by branch creation: produce a new
-    /// shadowing-index head from an existing head, optionally with overlay.
-    fn fork(&mut self, source: LayerId, new_head: LayerId) -> Result<()>;
+/// Backend-side surface. May be implemented by the same type as
+/// `PersistentBackend` (RocksStore is) or kept separate for tests.
+pub trait BloomBackend: Send + Sync {
+    fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError>;
+    fn store_bloom(&self, layer: &LayerId, bloom: &BloomFilter) -> Result<(), StorageError>;
 }
 ```
 
-**Storage:** prefix `shadow:<head_hex>:<iri>` → `<defining_layer_hex>` in the RocksDB keyspace. Sorted-key access lets us efficiently scan-by-head if needed (e.g. for index migration).
+`Layer` carries `Arc<dyn BloomCache>` alongside the existing `Arc<dyn ResourceCache>` and `Arc<dyn ResourceBackend>`; `build_chain` threads it through.
 
-**Bloom filter:** per branch head, in memory, sized to a configurable budget (default 32 MB per head, holding ~100M IRIs at 1% FPR). Rebuilt on startup by scanning the head's `shadow:` prefix. Branches with cold heads keep their bloom filters on disk (serialised to a `bloom:<head_hex>` key) and load lazily.
+#### 5.2.2 The resolve algorithm
 
-**Storage cost:** O(distinct IRIs) per branch head. For 100M resources × 10 active branches = 1B index entries. RocksDB's prefix compression keeps this manageable; a sustained heavy-branching workload may want a periodic compaction trigger.
+```rust
+impl Layer {
+    pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
+        for layer in self.iter_head_to_root() {
+            let bloom = layer.bloom_cache.get(&layer.id)
+                .or_else(|| {
+                    let b = layer.bloom_backend.load_bloom(&layer.id).ok().flatten()?;
+                    let arc = Arc::new(b);
+                    layer.bloom_cache.put(layer.id.clone(), Arc::clone(&arc));
+                    Some(arc)
+                })?;
+            if !bloom.might_contain(iri) { continue; }
+            if let Some(r) = layer.lookup_local(iri) { return Some(r); }
+            // false positive — keep walking
+        }
+        None
+    }
+}
+```
+
+Hot path (head's recent layers, blooms cached): all checks are in-memory hash ops + one cache/backend probe at the matching layer. Cold path (first touch of an unwarmed branch): a cache miss per layer triggers one backend probe per layer to load blooms; subsequent resolves on the same chain are warm.
+
+#### 5.2.3 Storage
+
+`bloom:<layer_id_hex>` → CBOR-encoded `BloomFilter` (bit array + hash count + bit width + IRI count for diagnostics). Written at `PB::store_layer` time alongside `topo:` and `layer:...:res:...` entries — part of the same atomic `WriteBatch` (§6.3).
+
+A `BloomFilter` for a typical layer is small:
+
+| IRIs in layer | Bloom @ 1% FPR | Bloom @ 0.1% FPR |
+|---|---|---|
+| 1,000 | ~1.2 KB | ~1.8 KB |
+| 10,000 | ~12 KB | ~18 KB |
+| 100,000 | ~120 KB | ~180 KB |
+| 1,000,000 | ~1.2 MB | ~1.8 MB |
+
+Disk cost across the whole DB ≈ 1.2 bytes per defined IRI at 1% FPR — ~1 GB of bloom storage for 1B distinct IRIs across history. Negligible relative to resource bodies and easily compressed by RocksDB's Lz4.
+
+#### 5.2.4 Memory budget
+
+Cache budget is a Phase 14b config knob. As an indicative target, **64 MB** holds blooms for ~5,000 typical layers (assuming ~12 KB/bloom for a 10K-IRI layer at 1% FPR). That covers the active reach of most workloads. Heavy-branching workloads with many simultaneously-active heads scale linearly — but blooms are cheap; doubling the budget is a one-line change.
+
+The bloom cache is sized independently of the resource cache (which is much larger because resource bodies dwarf bloom data). Both share the same `evict_layer(&LayerId)` interface so GC treats them uniformly.
+
+#### 5.2.5 Build, eviction, and GC
+
+- **Build**: at commit time, the kernel computes the bloom from `defined_iris` (already gathered for the `LayerHandle`) and hands it to `BloomBackend::store_bloom`. Linear in IRI count; microseconds for typical layers, low milliseconds for the largest.
+- **Eviction**: bounded cache with the same policy class as `ResourceCache`. Evicted blooms reload from the backend on next access.
+- **GC**: when layer `L` is swept (§5.7), the same `WriteBatch` that drops `topo:<L>` and the `layer:<L>:res:*` range also drops `bloom:<L>`, and the GC sweep calls `BloomCache::evict_layer(&L)`.
+
+#### 5.2.6 False-positive budget and tuning
+
+Bloom FPR is fixed per layer at commit time (the bit array's `m/n` ratio is baked in). The default is **1% FPR** at the layer's actual IRI count, sized to a power-of-two bit width for fast modular arithmetic. The kernel does not currently expose per-layer FPR tuning; a heavy-resolve workload could lower the default globally via config without changing the bloom format.
+
+A 1% FPR over a 100-layer chain produces ~1 spurious probe per resolve — measurable in profiling but not architecturally significant. Below ~0.1% FPR the bloom-storage cost grows faster than the saved probes; the default sits in the sweet spot.
+
+#### 5.2.7 What this design gives up
+
+The per-head shadowing index originally proposed in this doc had `O(1)` resolve. Per-layer blooms are `O(chain_depth × bloom_check)`. This matters in two regimes:
+
+1. **Pathologically deep chains (10⁴+ layers without consolidation).** Bloom-walk dominates resolve cost. Mitigation: those workloads need layer consolidation (Phase 14e merge) anyway. If real workloads ever stress this, an optional roll-up index — periodically materialising "as of layer L, here is `iri → defining_layer`" — can sit alongside the per-layer blooms without changing the kernel's resolution algorithm. Deferred until a workload demands it.
+2. **Negative-resolve hot paths (most queries return "no such IRI").** Each negative resolve walks the entire chain (every bloom returns "no"). For workloads where this dominates, the same roll-up index helps; alternatively, a per-head presence sketch (cheap because IRIs not in any layer of the chain are also not in any sketch's union) can short-circuit. Also deferred.
+
+Both mitigations are additive — they do not require changing the per-layer bloom design that 14b ships.
 
 ### 5.3 ResourceCache (two pools)
 
@@ -163,10 +230,13 @@ pub struct ResourceKey {
 }
 
 pub enum CacheTier {
-    /// Entry is the top-of-stack per the active head's shadowing index.
+    /// Entry is top-of-stack for the active head — i.e., the first layer
+    /// in head→root order whose bloom flags `iri` and that actually defines
+    /// it. Determined by the same chain-walk resolve algorithm used for
+    /// reads (§5.2.2).
     Active,
-    /// Entry is shadowed in every active head; only reachable via
-    /// time-travel or trace dereferences.
+    /// Entry is shadowed by a higher layer in every active head; only
+    /// reachable via time-travel reads or trace dereferences.
     Historical,
 }
 
@@ -198,7 +268,7 @@ pub struct CacheStats {
 
 **Cross-pool transitions:**
 
-- *Promotion historical → active*: on access, if the entry's layer is now top-of-stack per the current head's shadowing index, promote.
+- *Promotion historical → active*: on access, if the entry's layer is now top-of-stack for the current head (per the §5.2.2 chain walk), promote.
 - *Demotion active → historical*: when a new layer commit shadows an entry's IRI, demote on next access (lazy; no eager scan).
 - *Eviction*: out of historical first, then out of active.
 
@@ -278,7 +348,7 @@ When a client calls `update_branch(branch, expected_old=L_pin, new_head=L_new, o
 3. If `S_caller ∩ S_other = ∅` (disjoint contributions), produce a merge layer with `parents = [L_new, L_other]` containing the union of contributions. CAS-update the branch ref to point at the merge layer. Return `TrivialMerge`.
 4. If `S_caller ∩ S_other ≠ ∅` (real conflict), the branch is left unchanged. Return `NeedsWitnessedMerge { current_head: L_other, conflicting_iris: S_caller ∩ S_other }`. The caller's new-head chain still exists in the DAG; the caller can either name it as a sibling branch (`update_branch("auto-...", None, L_new, ...)`) or discard it (let it become GC-eligible).
 
-**Implementation cost.** The IRI-set computation is just a scan of the per-layer "defined IRIs" set the shadowing index already maintains (§5.2). Common-ancestor traversal is a graph walk over the topology DAG (small in-memory structure). Producing the merge layer is a `commit_layer` with multi-parent semantics — already supported by `LayerHandle.parents: Vec<LayerId>` (§5.1). Total: ~6–8 days of additional implementation in Phase 14e.
+**Implementation cost.** The IRI-set computation is a scan of the per-layer `defined_iris` set already carried on each `LayerHandle` (§5.1). Common-ancestor traversal is a graph walk over the topology DAG (small in-memory structure). Producing the merge layer is a `commit_layer` with multi-parent semantics — already supported by `LayerHandle.parents: Vec<LayerId>` (§5.1). Total: ~6–8 days of additional implementation in Phase 14e.
 
 **Why this is the right place for trivial merge.** Without it, every concurrent activity (two notebooks, a long-running task while you load fresh data, etc.) produces a divergent branch even when the contributions don't actually conflict. The user-visible result is "lots of branches piling up that no one wants." Trivial merge handles the 80% case automatically; Phase 15's witnessed merge handles the residual 20% where contributions genuinely conflict.
 
@@ -378,36 +448,19 @@ Branch creation is just `update_branch(name, expected_old=None, new_head=L, ...)
 
 **`delete` vs. `prune`:** `delete` removes the branch ref but leaves the layers in place (they remain reachable through other branches or as orphans pending GC). `prune` (§5.8) is the destructive operation that tells GC "anything reachable only via this branch is collectible."
 
-### 5.6 Time-travel checkpoints
+### 5.6 Time-travel reads
 
-`--at-layer L` queries (D21 §3.6) need an "as-of-L" view of the shadowing index. Two extreme strategies:
+`--at-layer L` queries (D21 §3.6) need an "as-of-L" view. With per-layer blooms (§5.2), this requires no special machinery: the resolve algorithm against L is the same chain walk used for resolve against the current head, just rooted at L instead. `PB::load_chain_from(L)` reconstructs the chain metadata; `Layer::resolve` then walks it with the same bloom-cache + resource-cache fall-through.
 
-- **Eager checkpoint per commit:** correct but expensive — one full snapshot per layer.
-- **Lazy reconstruction:** walk back from current head, undoing each commit's contribution. Linear in chain length — too slow for deep histories.
+The historical pool of `ResourceCache` (§5.3) absorbs the working-set pressure that time-travel queries create — entries fetched on a `--at-layer` resolve land there rather than evicting steady-state hot entries from the active pool.
 
-**Compromise: sparse checkpoints + on-demand rewind.**
+No `CheckpointStore`, no shadowing-snapshot serialisation, no checkpoint cadence to tune. The earlier draft of this doc carried such a structure to keep the per-head shadowing index time-travel-friendly; that machinery exists only to support a per-head index and disappears once shadowing is per-layer.
 
-```rust
-pub trait CheckpointStore {
-    /// Returns the most recent checkpointed ancestor of `target` (inclusive).
-    fn nearest(&self, target: LayerId) -> Option<LayerId>;
-    /// Read a stored checkpoint snapshot.
-    fn read(&self, layer: LayerId) -> Result<Option<ShadowingSnapshot>>;
-    /// Write a checkpoint at `layer` (called by commit when a checkpoint
-    /// trigger fires; see policy below).
-    fn write(&mut self, layer: LayerId, snapshot: ShadowingSnapshot) -> Result<()>;
-}
-```
-
-**Checkpoint policy (defaults):**
-
-- Auto-checkpoint at every named branch head (cheap; bounded by branch count).
-- Auto-checkpoint at every Nth commit (default N = 1000, configurable per branch).
-- Time-travel queries reconstruct: find nearest checkpoint ancestor C ≤ L, then forward-replay layers from C to L. Forward replay is fast because we only need IRIs defined between C and L, not full content.
-
-**Storage cost:** roughly O(distinct IRIs at the checkpointed layer). With sparse checkpointing, total cost is O((distinct_IRIs / N) × chain_length) — for N = 1000 and a million-layer chain, single-digit GB.
+**Reconstruction cost:** O(chain_depth × bloom_check) per resolve, identical to the current-head case. Storage cost: zero additional bytes beyond the per-layer blooms already written.
 
 ### 5.7 GarbageCollector
+
+GC operates in one of two modes per the §11.1 decision: **topology-DAG reachability** (default) preserves all layers transitively reachable through parent pointers; **content-tree reachability** (`db gc --keep-from <layer>`) drops everything outside the chosen retention window. Both share the sweep mechanism.
 
 ```rust
 pub struct GCRoots {
@@ -420,7 +473,17 @@ pub struct GCRoots {
     pub verified_pins: Vec<ResourceKey>,
 }
 
+pub enum GCMode {
+    /// Default: walk parents in the topology DAG from every root; everything
+    /// transitively reachable is preserved.
+    TopologyDAG,
+    /// Aggressive compaction: walk only the content tree of `keep_from`;
+    /// drop all layers older than it. Loses time-travel below `keep_from`.
+    ContentTree { keep_from: LayerId },
+}
+
 pub struct GCConfig {
+    pub mode: GCMode,                  // default GCMode::TopologyDAG
     pub min_idle_seconds: u64,         // default 600 — wait for activity to settle
     pub size_threshold_bytes: u64,     // default 1 GiB — don't run on small DBs
     pub max_runtime_seconds: u64,      // default 300 — bound a single pass
@@ -441,13 +504,20 @@ pub trait GarbageCollector {
 }
 ```
 
-**Algorithm (mark-and-sweep):**
+**Algorithm (mark-and-sweep, topology-DAG mode):**
 
 1. **Mark phase:** from `roots.branch_heads`, walk parents in the topology DAG, building a `reachable_layers: HashSet<LayerId>`. Add `roots.session_pins` (each active session contributes both its `pinned_layer` and `scratch_head` if any). For each `ResourceKey` in `trace_pins` and `verified_pins`, walk back from the referenced layer.
 2. **For each layer L not in `reachable_layers`:** the layer itself is collectible. Schedule layer drop. This includes scratch chains from sessions that have closed without promoting, and sibling branches that have been deleted but never pruned.
 3. **For each (L, X) where L is reachable but X is shadowed in every reachable head:** the resource is collectible. Schedule resource drop.
-4. **Sweep:** write tombstones in a single batched RocksDB transaction. Update affected shadowing indexes to remove dropped entries. Notify the cache to evict via `ResourceCache::evict_layer`.
+4. **Sweep:** in a single batched RocksDB transaction, drop the swept layers' `topo:<id>`, `bloom:<id>`, and `layer:<id>:res:*` ranges. Notify both the bloom cache and the resource cache to evict via `BloomCache::evict_layer` and `ResourceCache::evict_layer`.
 5. **Compaction:** RocksDB compaction reclaims tombstoned space asynchronously.
+
+**Algorithm (content-tree mode, `--keep-from <layer>`):**
+
+1. **Mark phase:** walk the content tree of `keep_from` — for each IRI defined or shadowed-up-to that layer, mark its defining layer as reachable. Also mark `keep_from`'s descendants (everything reachable through branches that have moved past `keep_from`). Trace pins and verified-knowledge pins are still respected (a pin can keep an older layer alive even in this mode).
+2. Steps 2–5 as above.
+
+The content-tree mode is invoked manually via the CLI; it is never triggered by the background scheduler. Users who run it accept the loss of time-travel queries to layers older than `keep_from`.
 
 **Cancellation:** the GC pass is a Tokio task; cancellation drops the in-flight sweep transaction and leaves the DB in its pre-sweep state. The `completed: false` stat distinguishes timeout from full completion.
 
@@ -480,36 +550,85 @@ Pruning is GC's policy front end: it removes a branch ref from the topology, imm
 
 ### 5.9 Indexed query reads (14h)
 
-The three EigenQL evaluator hot spots that today scan `layer.all_resources()`:
+The three EigenQL evaluator hot spots that pre-14h scan `layer.iter_all_resources()`:
 
-| Site | File:line | Today | After 14h |
+| Site | File:line | Pre-14h | Post-14h |
 |---|---|---|---|
-| `resolve_name_to_class_iri` | [`evaluate.rs:392`](../../kernel/src/query/evaluate.rs#L392) | linear scan | class-name index lookup |
-| `collect_candidates` | [`evaluate.rs:519`](../../kernel/src/query/evaluate.rs#L519) | scan + class filter | SPO index by class IRI |
-| Negation helper | [`evaluate.rs:659`](../../kernel/src/query/evaluate.rs#L659) | scan + non-match filter | indexed lookup + complement |
+| `resolve_name_to_class_iri` | [`evaluate.rs:389`](../../kernel/src/query/evaluate.rs#L389) | linear scan | scan over index-narrowed Class candidates |
+| `collect_candidates` | [`evaluate.rs:491`](../../kernel/src/query/evaluate.rs#L491) | scan + class filter | POS index scan + chain dedup |
+| Negation helper | [`evaluate.rs:468`](../../kernel/src/query/evaluate.rs#L468) | scan + non-match filter | shares `collect_candidates`'s indexed path |
 
-The index implementations themselves go from `todo!()` to working triple stores. We need three:
+#### Per-layer storage (matching §5.2)
+
+The earlier draft of this section specified per-head materialisation (`idx_*:<head>:<s>:<p>:<o>`) on the same reasoning that motivated a per-head shadowing snapshot. §5.2 then made that argument *against* itself for blooms — every layer's defined-IRI set is a property of that layer alone, so per-head bookkeeping is unnecessary if the read path can walk the chain. The triple index gets the same treatment for the same reasons:
+
+- Branch divergence is naturally represented (each chain walks its own ancestors).
+- Multi-parent merges (Phase 14e) need no index reconciliation — `collect_ancestors` walks the topology.
+- No replication on every commit; each layer writes only its own diff.
+
+Read-path cost is `O(answer × shadow_check)` instead of `O(answer)`. The shadow check piggybacks on the per-layer blooms (§5.2): bloom probes are tens of nanoseconds, so the asymmetric cost is bounded by chain depth × small constant. For typical chains (10–50 layers, occasional Phase 14e merges) this is well under a millisecond.
+
+#### Schema
+
+Two physical orderings, both presence-only (empty values), keyed using length-prefixed IRI segments + a fixed 32-byte `LayerId`. Encoder lives in [`kernel/src/layer/index.rs::index_keys`](../../kernel/src/layer/index.rs).
+
+| Prefix | Purpose | Why |
+|---|---|---|
+| `idx_pos:<predicate>:<object>:<subject>:<layer>` | Read path | One prefix scan answers `(p, o) → {(s, defining_layer)}` across the entire DAG; chain membership and shadow check are post-filters in process memory. |
+| `idx_layer:<layer>:<predicate>:<object>:<subject>` | GC path | One prefix scan per layer drop yields every entry that layer contributed; deletes both orderings in a single atomic batch. |
+
+The reverse `idx_layer:` index doubles storage but turns GC's `delete_layer` into a clean prefix delete. Tolerable trade for a presence-only index.
+
+POS only in v1. SPO and OPS are deferred — the three hot sites all want "subjects with predicate p and object o". Add other orderings when a workload demands them.
+
+#### Indexability rule
+
+A `(subject, predicate, object)` triple is indexed iff `predicate`'s `Property.data_type` resolves to `urn:eigenius:core:resource` or `urn:eigenius:core:resource_array` at the layer being committed. Same rule decides query-time eligibility — write and read paths share the [`is_indexable_predicate`](../../kernel/src/layer/index.rs) helper, so the planner deterministically picks the indexed path when the predicate is IRI-typed and the scan path otherwise. `resource_array` values unpack to one entry per element. Literal-typed properties (string, integer, boolean, embedded) bypass the index and post-filter the index-narrowed candidate set in process memory.
+
+Schema mutation (a property's `data_type` flipped post-commit) does not trigger reindexing — each layer's entries reflect the predicate def visible at that layer's commit time. Documented limitation; manual rebuild required if a property's data_type changes class.
+
+#### Trait
 
 ```rust
 pub trait TripleIndex: Send + Sync {
-    /// Subjects with a given class.
-    fn scan_class(&self, head: LayerId, class: &Iri) -> Box<dyn Iterator<Item = Iri> + '_>;
-    /// (subject, value) pairs for a given (head, predicate).
-    fn scan_predicate(&self, head: LayerId, p: &Iri) -> Box<dyn Iterator<Item = (Iri, Value)> + '_>;
-    /// Subjects with a given (predicate, object).
-    fn scan_predicate_object(&self, head: LayerId, p: &Iri, o: &Value) -> Box<dyn Iterator<Item = Iri> + '_>;
-    /// Values of (subject, predicate).
-    fn scan_subject_predicate(&self, head: LayerId, s: &Iri, p: &Iri) -> Box<dyn Iterator<Item = Value> + '_>;
-    /// Update on layer commit.
-    fn extend(&mut self, head: LayerId, new_layer: LayerId, layer_resources: &[(Iri, &Resource)]) -> Result<()>;
+    /// Insert all triples for a layer. Idempotent by `(layer, p, o, s)`.
+    fn extend_layer(&self, layer: &LayerId, triples: &[Triple<'_>]) -> Result<(), StorageError>;
+
+    /// Drop both orderings' entries for a layer. Called by GC.
+    fn drop_layer(&self, layer: &LayerId) -> Result<(), StorageError>;
+
+    /// Iterate `(subject, defining_layer)` pairs matching `(p, o)`,
+    /// across the entire DAG. Caller filters by chain membership and
+    /// shadow-checks via the per-layer bloom cache.
+    fn scan_predicate_object<'a>(
+        &'a self,
+        p: &Iri,
+        o: &Iri,
+    ) -> Box<dyn Iterator<Item = Result<(Iri, LayerId), StorageError>> + 'a>;
+
+    fn stats(&self) -> IndexStats;
 }
 ```
 
-**Storage:** three prefixes — `idx_spo:<head>:<s>:<p>:<o>`, `idx_pos:<head>:<p>:<o>:<s>`, `idx_ops:<head>:<o>:<p>:<s>` — value is empty (presence-only). Iteration uses RocksDB's prefix scan. Per-head replication is necessary because shadowing differs per head.
+#### Query algorithm
 
-**Result-set processing remains in memory.** Iterators stream subjects/values; the evaluator builds intermediate hash tables and result vectors in process memory as today. Operators that materialize large intermediates remain a Phase 16 concern.
+[`scan_chain(head, predicate, object)`](../../kernel/src/layer/index.rs) implements:
 
-**Cost-model awareness:** for a query with multiple bound positions, prefer the most selective index probe. v1 selectivity heuristic: count the index prefix's storage size via RocksDB's `approximate_sizes`. v2 (D24) introduces real cardinality estimates.
+1. Build `head`'s ancestor set via [`collect_ancestors`](../../kernel/src/layer/index.rs) (BFS over `Layer.parents`).
+2. Iterate the global `idx_pos:` scan for `(predicate, object)`.
+3. Filter to entries whose `defining_layer ∈ ancestor_set`.
+4. For each survivor, [`is_shadowed(head, defining, subject)`](../../kernel/src/layer/index.rs) bloom-walks `head`'s ancestors that descend from `defining` (skipping `defining` itself) — first confirmed redefinition drops the candidate. Same mechanic `Layer::resolve` already uses.
+5. Return the deduplicated subject set.
+
+`collect_candidates` calls `scan_chain` once per concrete class in `{class} ∪ subclass_closure(class)`; the closure walk uses `scan_chain` recursively against the `subclass_of` predicate.
+
+#### Atomicity
+
+`LayerBuilder::build` populates the triple index for the freshly-built layer in process memory (mirrors how it pre-populates the bloom cache). The persistent backend's `RocksTripleIndex` writes through to the same RocksDB the layer commit uses, so by the time `store_layer`'s atomic batch commits, the index is already populated. A crash between `build` and `store_layer` leaves orphan index entries pointing at a layer that doesn't exist — they're invisible to queries (the chain-membership filter drops them) and reclaimed when `delete_layer` is called against the orphan layer (or by a future "rebuild index for layer L" tool).
+
+#### Cost-model awareness
+
+Deferred. The three hot sites have one bound predicate-object pair each, so there's no choice between probe orderings. A v2 cost model becomes useful once SPO/OPS land and the planner has to pick the most selective probe — D24's cardinality estimates handle that case.
 
 ## 6. Storage layout
 
@@ -531,27 +650,25 @@ The Phase 9a layout uses prefix-keyed entries in a single RocksDB instance. Phas
 |---|---|---|---|
 | `topo:<layer_id>` | — | LayerHandle CBOR | Topology entry per layer |
 | `branch:<name>` | — | BranchRef CBOR | Named branch heads |
-| `shadow:<head>:<iri>` | — | defining LayerId hex | Per-head shadowing index |
-| `bloom:<head>` | — | serialised Bloom filter | Persisted bloom for cold heads |
-| `checkpoint:<layer>` | — | ShadowingSnapshot CBOR | Time-travel checkpoint |
-| `idx_spo:<head>:<s>:<p>:<o>` | — | (empty) | SPO index |
-| `idx_pos:<head>:<p>:<o>:<s>` | — | (empty) | POS index |
-| `idx_ops:<head>:<o>:<p>:<s>` | — | (empty) | OPS index |
+| `bloom:<layer_id>` | — | serialised BloomFilter (CBOR) | Per-layer shadowing bloom (§5.2) |
+| `idx_pos:<p>:<o>:<s>:<layer>` | — | (empty) | POS triple index, read path (§5.9) |
+| `idx_layer:<layer>:<p>:<o>:<s>` | — | (empty) | Reverse triple index, GC path (§5.9) |
 | `gc:state` | — | GCState CBOR | Last-run timestamp, in-progress flag |
 | `gc:tombstone:<layer>` | — | swept-at timestamp | Layers awaiting compaction |
 
+The `idx_*` segments are length-prefixed, not `:`-separated, because IRIs contain `:`. SPO and OPS orderings are deferred until a workload demands them.
+
 ### 6.3 Atomic commit
 
-Every layer commit must atomically:
+Every layer commit atomically writes:
 
-1. Write `layer:<new_id>:meta` and all `layer:<new_id>:res:<iri>` entries.
-2. Write `topo:<new_id>` with the LayerHandle.
-3. Update `branch:<branch_name>` to point at `<new_id>`.
-4. Append to `shadow:<branch_head>:<iri>` for each defined IRI.
-5. Append to all three `idx_*:<branch_head>:...` entries for each (s, p, o) triple.
-6. Optionally, write a `checkpoint:<new_id>` if the checkpoint policy fires.
+1. `layer:<new_id>:meta` and all `layer:<new_id>:res:<iri>` entries.
+2. `topo:<new_id>` with the LayerHandle.
+3. `bloom:<new_id>` with the layer's per-IRI shadowing bloom (§5.2).
+4. `idx_pos:` and `idx_layer:` entries for each indexable `(s, p, o)` triple in the new layer (§5.9). Population happens at `LayerBuilder::build` time through the shared `Arc<dyn TripleIndex>` in `LayerStorage`; the persistent backend's `RocksTripleIndex` writes to the same RocksDB so the entries are durable by the time the layer's other content lands.
+5. `branch:<branch_name>` to point at `<new_id>` (separate `update_branch` CAS — see §5.4).
 
-This is one RocksDB `WriteBatch`. RocksDB guarantees the batch is atomic across all keys, so partial commits are impossible.
+Steps 1–3 are one RocksDB `WriteBatch` inside `store_layer`; RocksDB guarantees atomicity across the batch, so partial commits of layer/topology/bloom are impossible. Step 4's index writes happen via a separate `WriteBatch` driven by `RocksTripleIndex::extend_layer`. A crash between step 4 and step 1 leaves orphan index entries — invisible to queries because the chain-membership filter drops them, harmless until the next `delete_layer` call against the orphan layer reclaims them. Step 5 (branch CAS) is sequenced after the layer is durable per §5.4.
 
 ## 7. Public API
 
@@ -560,13 +677,13 @@ This is one RocksDB `WriteBatch`. RocksDB guarantees the batch is atomic across 
 New traits in `kernel/src/storage/`:
 
 - `LayerTopologyStore` — append-only DAG (`commit_layer` lives here, §5.4.1)
-- `ShadowingIndex` — per-head IRI → defining layer (§5.2)
+- `BloomCache` — bounded per-layer shadowing-bloom cache (§5.2)
+- `BloomBackend` — persistent read/write surface for `bloom:<layer_id>` (§5.2); typically implemented by the same type as `PersistentBackend`
 - `ResourceCache` — bounded two-pool content cache (§5.3)
 - `BranchManager` — branch ref read/list/delete surface (§5.5); `update_branch` lives here as the CAS primitive with the trivial-merge contract from §5.4.3
-- `CheckpointStore` — time-travel snapshot store (§5.6)
 - `GarbageCollector` — reachability-based mark-and-sweep (§5.7)
 - `BranchPruner` — explicit branch removal + GC trigger (§5.8)
-- `TripleIndex` — replaces the `todo!()` skeleton in `storage/indexing/` (§5.9)
+- `TripleIndex` — per-layer triple index for indexed query reads (§5.9). Trait + in-memory impl in `kernel/src/layer/index.rs`; RocksDB-backed impl in `storage/rocksdb/src/triple_index.rs`.
 
 The trait list deliberately *excludes* a `SessionRegistry` / `PromotionService` / `ReanchorService` shape — D23's write model (§5.4) is stateless on the kernel side. Pinning is a parameter; promotion / reanchor are workflows clients orchestrate via `commit_layer` + `update_branch`. Sessions, where they exist (D21's `TaskRecord`), already hold their pin in `layer_head` and do not need new kernel infrastructure.
 
@@ -576,8 +693,8 @@ The `Layer` struct in `kernel/src/layer/` stops holding `BTreeMap<Iri, Resource>
 pub struct Layer {
     handle: LayerHandle,
     cache: Arc<dyn ResourceCache>,
-    shadowing: Arc<dyn ShadowingIndex>,
-    backend: Arc<dyn PersistentBackend>,
+    bloom_cache: Arc<dyn BloomCache>,
+    backend: Arc<dyn PersistentBackend>,  // also impls BloomBackend
 }
 
 impl Layer {
@@ -616,7 +733,8 @@ eigenius db branch create <name> [--from <branch>]   # convenience wrapper aroun
 eigenius db branch delete <name>
 eigenius db divergence list                # auto-named branches from clients that hit NeedsWitnessedMerge
 eigenius db prune <name> [--force]
-eigenius db gc [--max-runtime <secs>]
+eigenius db gc [--max-runtime <secs>]                 # topology-DAG mode (default per §11.1)
+eigenius db gc --keep-from <layer-id>                  # content-tree mode: drop layers older than <layer-id>
 eigenius db cache-stats
 ```
 
@@ -630,7 +748,7 @@ eigenius inspect --branch <name> [--pin <layer-id>] [--at-layer <id>] ...
 eigenius run --branch <name> [--pin <layer-id>] ...
 ```
 
-`--branch` defaults to `main` everywhere. `--pin` overrides the default of "current head of `--branch`"; useful for re-deriving against a specific historical layer. `--at-layer` is read-only time-travel (triggers the checkpoint reconstruction path of §5.6) and is mutually exclusive with `--pin`.
+`--branch` defaults to `main` everywhere. `--pin` overrides the default of "current head of `--branch`"; useful for re-deriving against a specific historical layer. `--at-layer` is read-only time-travel (per §5.6: same resolve algorithm rooted at the target layer, no checkpoint machinery required) and is mutually exclusive with `--pin`.
 
 ## 8. Operational behaviour
 
@@ -646,8 +764,8 @@ Split:
 
 - Active pool: 60% of budget.
 - Historical pool: 40% of budget.
-- Bloom filters: separate from cache budget; sized at 32 MiB per active branch head, capped at total `min(physical_RAM × 0.05, 1 GiB)` across all branches.
-- Topology + shadowing index hot pages: bounded by RocksDB's own block cache (governed by RocksDB settings, not Phase 14 config).
+- Bloom cache: separate from the resource-cache budget; default 64 MiB, holding ~5K typical layers' blooms (§5.2.4). Configurable via `--bloom-cache-mb`.
+- Topology + bloom hot pages: bounded by RocksDB's own block cache (governed by RocksDB settings, not Phase 14 config).
 
 ### 8.2 GC scheduling
 
@@ -676,12 +794,11 @@ Operators can set `--gc-disabled` to disable background GC entirely (useful for 
 
 `--at-layer <id>` performs:
 
-1. Find nearest checkpoint ancestor C of the target layer.
-2. Load the checkpoint snapshot into a temporary `ShadowingSnapshot`.
-3. Forward-replay layers from C to target, applying their IRI definitions on top of the snapshot.
-4. Use the resulting snapshot for the query's resolution, hitting the historical cache pool.
+1. `PB::load_chain_from(<id>)` returns the chain metadata rooted at the target layer.
+2. `build_chain` constructs the `Arc<Layer>` chain against the same bloom cache and resource cache used by the current head; the resource cache's historical pool absorbs the working-set pressure (§5.6).
+3. The query executes against that chain using the standard `Layer::resolve` path (§5.2.2).
 
-Reconstruction cost: O(layers between C and target × IRIs defined per layer). For default checkpoint cadence (1000 layers), worst-case cost is bounded; typical cost is single-digit milliseconds.
+Reconstruction cost: identical to the current-head case — `O(chain_depth × bloom_check) + O(matches)`. No checkpoint replay, no separate snapshot to materialise.
 
 ## 9. Migration from Phase 9a
 
@@ -692,7 +809,7 @@ There are no production deployments to preserve, so migration is a dev-time conv
 1. On Phase-14 kernel startup, check for the presence of `topo:` keys. Absent → run migration.
 2. Walk the existing chain from `head` backward via `chain:<id>` pointers; for each layer L, write `topo:<L>` with `parents = [chain[L]]` and `resource_count` from a key scan.
 3. Create `branch:main` pointing at the current head.
-4. Build the shadowing index for `main` by walking the chain top-down and emitting one `shadow:<head>:<iri>` per first-occurrence.
+4. For each layer L, compute its shadowing bloom from the per-layer defined-IRI set and write `bloom:<L>`.
 5. Build the triple indexes by walking each layer's resources and emitting (s, p, o) entries.
 6. Mark migration complete in metadata.
 
@@ -707,7 +824,7 @@ Per sub-milestone, with success criteria:
 | Milestone | Test surface | Pass criterion |
 |---|---|---|
 | 14a | Unit tests for `LayerHandle`, `ResourceCache`, `Layer::resolve` | Resolve walks topology + cache; cache miss falls through to backend; correctness preserved against current behaviour |
-| 14b | Unit tests for `ShadowingIndex` insert/lookup/bloom; integration test on commit path | Lookup is O(1) backend probes; bloom filter false-positive rate within configured budget; commit atomically updates topology + index |
+| 14b | Unit tests for `BloomFilter` build/might_contain/FPR; `BloomCache` get/put/evict; `Layer::resolve` cold-cache path; integration test on commit path | Resolve probes the matching layer plus ≤ expected bloom false positives over the chain; commit atomically writes `bloom:<id>` alongside topology + content |
 | 14c | Unit tests for `TwoPoolCache`; benchmark on a simulated workload | Hit rate within 5% of analytical optimum on a Zipfian access pattern; promotion/demotion behaves per spec |
 | 14d | Integration tests for branch CRUD; end-to-end test of two-branch divergence | Create / list / delete work atomically; reads from sibling branch return that branch's view |
 | 14e | Concurrent integration tests with two `serve` instances | Cross-branch writes refused with clear error; cross-branch reads succeed; lease handoff after kill -9 works within blackout window |
@@ -723,24 +840,18 @@ Cross-cutting tests:
 
 ## 11. Open questions and Phase 15 dependency
 
-### 11.1 GC reachability model: topology-DAG vs. content-tree (load-bearing)
+### 11.1 GC reachability model: topology-DAG default + explicit content-tree escape valve
 
-The Irmin/Tezos GC follow-up (§13.6) surfaced a design choice that D23's current §5.7 silently makes one way without acknowledging the alternative. Worth flagging explicitly because it shapes both the GC algorithm and the "what time-travel can I do?" user-facing guarantee.
+**Decision (2026-04-27):** Phase 14 ships **topology-DAG reachability as the default** GC model. The content-tree alternative (Irmin/Tezos style) is exposed as an explicit `eigenius db gc --keep-from <layer>` operation for users who want to compact aggressively after experimentation.
 
 | Approach | What's reachable | What's preserved | Cost |
 |---|---|---|---|
-| **Topology-DAG reachability (§5.7 default)** | Walk parents in the layer DAG from every branch head + session pin + trace pin. Every layer transitively reachable through `parents` is preserved. | Full time-travel anywhere along any branch's history, indefinitely. | Storage grows monotonically with history; long-running DBs accumulate "shadowed-but-still-pinned-via-parents" layers forever. |
-| **Content-tree reachability (Irmin/Tezos)** | Walk only the *content tree* of each chosen GC-root commit. Parent references between commits are *not* followed. | Time-travel within an explicit "keep window" of recent layers; layers older than the window are dropped wholesale. | Bounded storage; configurable retention; loss of deep historical queries. |
+| **Topology-DAG (default)** | Walk parents in the layer DAG from every branch head + session pin + trace pin. Every layer transitively reachable through `parents` is preserved. | Full time-travel anywhere along any branch's history, indefinitely. | Storage grows monotonically with history; long-running DBs accumulate "shadowed-but-still-pinned-via-parents" layers forever. Bounded only by trace pins / verified claims / branch refs going stale. |
+| **Content-tree (explicit `--keep-from <layer>`)** | Walk only the *content tree* of the chosen layer. Parent references between commits are *not* followed. Layers older than `<layer>` are dropped wholesale. | Time-travel within the explicit retention window. | Aggressive compaction; loss of deep historical queries. |
 
-D23 currently picks the first model implicitly. The implications:
+**Why this is right for Eigenius:** the epistemic model frames derived results as replayable. A trace recorded "input was IRI X at L_pin" — for replay to work, X at L_pin has to remain reachable. Under topology-DAG that's automatic (the layer is preserved by virtue of being an ancestor of any reachable head). Under content-tree it would require explicit trace-pin roots, with all the bookkeeping fragility that implies. Topology-DAG aligns with our default semantics; content-tree is the user's deliberate choice when they want to reclaim disk after experimentation, accepting the loss of historical depth.
 
-- Our trace pinning (§5.7) and verified-knowledge pinning are exactly the mechanisms that prevent unbounded growth under topology-DAG reachability — the *only* layers that drop are ones with no branch ref, no trace reference, and no verified-knowledge reference anywhere in the system. This works as long as those root sets stay bounded.
-- Irmin/Tezos chose content-tree because their workload (blockchain node) genuinely doesn't need queries against deep history — only the recent active state matters.
-- Eigenius's epistemic model leans the other way: a derived result that references an old layer should remain replayable. That's the topology-DAG model.
-
-**Recommendation: keep topology-DAG as the default; expose Irmin's content-tree mode as an explicit `db gc --keep-from <layer>` operation for users who need to compact aggressively.** This adds a CLI surface but doesn't change the default behaviour. The `--keep-from` operation drops all layers not in the chosen window, preserving only their content-tree roots. Useful for reclaiming disk after experimentation, or for archive-style "snapshot the current state and drop everything else" workflows.
-
-This decision is not yet locked in. Open for discussion.
+**Implementation impact (Phase 14f):** the GC mark phase walks the topology DAG from `GCRoots.branch_heads + session_pins`, plus follows resource references from `trace_pins` and `verified_pins`. The `--keep-from <layer>` mode invokes a different mark phase: walk only the chosen layer's content tree (resources defined or shadowed-up-to that layer), drop everything else. Both share the sweep mechanism.
 
 ### 11.2 Phase 15 dependency: witnessed merge unblocks the residual case
 
@@ -759,11 +870,11 @@ This is a usability constraint Phase 14 ships under, not a deferrable enhancemen
 Defaults are noted; benchmark or operational data is the natural trigger for revisiting:
 
 1. **ARC vs. CLOCK-Pro vs. LRU.** ARC is the default; benchmark before committing.
-2. **Bloom filter size budget per branch.** 32 MiB is a starting point; tune from observed FPR.
-3. **GC trigger composition.** Default supports idle + size + manual triggers (any-of). Decide whether to add a quota-style trigger ("auto-run once GC reclaim potential exceeds X bytes") based on observed behaviour.
-4. **Trace pinning depth.** Default: shallow (resources directly referenced by traces). Decide whether to extend to transitive after observing trace-graph shapes.
-5. **Checkpoint cadence.** Default: every 1000 layers and every named head. Adjust based on time-travel query frequency.
-6. **Index fragmentation.** Shadowing-index entries are tombstoned on GC. Periodic compaction is needed; policy is "trigger compaction after each GC pass" by default.
+2. **Per-layer bloom FPR.** 1% is the default at commit time (§5.2.6). Tune globally via config if a heavy-resolve workload demonstrates value; lower FPR trades disk for fewer spurious probes.
+3. **Bloom cache budget.** 64 MiB is the starting point (§5.2.4). Workloads with deep chains across many simultaneously-active heads may want more.
+4. **GC trigger composition.** Default supports idle + size + manual triggers (any-of). Decide whether to add a quota-style trigger ("auto-run once GC reclaim potential exceeds X bytes") based on observed behaviour.
+5. **Trace pinning depth.** Default: shallow (resources directly referenced by traces). Decide whether to extend to transitive after observing trace-graph shapes.
+6. **Roll-up index for pathological chains.** §5.2.7 notes that 10⁴+ deep chains or negative-resolve-heavy workloads may want a periodically-materialised "as of layer L, here is `iri → defining_layer`" index alongside the per-layer blooms. Defer until a workload demands it.
 7. **Cache stats observability.** What to expose via `eigenius db cache-stats` and gRPC's `GetCacheStats`. Default: hit rate, byte counts per pool, promotions/demotions; add more on user request.
 8. **Default branch name.** `main` (matches modern Git convention). Configurable via `EIGENIUS_DEFAULT_BRANCH`.
 9. **Trivial-merge IRI-set computation.** The diff `[L_anc, L_new]` and `[L_anc, L_other]` is naively `O(layers × per-layer-IRIs)`. For deep chains (long sessions producing many layers) this could be expensive; possible optimisation is a per-chain summary index. Default: compute on demand; add the summary if profile data shows it matters.
@@ -775,7 +886,7 @@ Implementation order (see [implementation-plan.md §Phase 14](implementation-pla
 
 ```
 14a topology/content split  ──┐
-                              ├─→ 14b shadowing index  ──┐
+                              ├─→ 14b per-layer bloom   ──┐
                               │                          ├─→ 14c two-pool cache
                               │                          │
                               │                          ├─→ 14d commit_layer + update_branch
@@ -808,7 +919,7 @@ Mapping Irmin's components onto our design:
 |---|---|---|
 | **Pack file** — append-only blob storage; each entry = serialized data + length + hash; **internal references use offsets, not hashes** | Our `layer:<id>:res:<iri>` entries in RocksDB. We use `LayerId` (hash) for parent refs in the topology. | Irmin's offset-based parent refs avoid an index lookup per DAG traversal. Worth considering for `LayerHandle.parents` (see refinement §13.5). |
 | **Dict** — bidirectional hash table mapping path strings to short integer IDs; persisted via append-only file; ~15 MB at Tezos scale | We don't currently have this. | Our IRIs are long URI strings; a dict would substantially compress storage and speed up lookups. See refinement §13.5. |
-| **Index** — hash → `(offset, length)` map; **two-tier**: bounded `log` (recent bindings, in-memory + WAL) + larger sorted `data` (historical bindings, on-disk with interpolation search); background merge log → data when the log fills | The shadowing index of §5.2. | Refines §5.2's "RocksDB sorted keys + Bloom filter" into a more sophisticated hot-log + cold-sorted-data + background-compaction design. See refinement §13.5. |
+| **Index** — hash → `(offset, length)` map; **two-tier**: bounded `log` (recent bindings, in-memory + WAL) + larger sorted `data` (historical bindings, on-disk with interpolation search); background merge log → data when the log fills | Not adopted. Our §5.2 uses per-layer blooms + cache instead of a per-head global index, sidestepping the problem Irmin's two-tier design solves. | The Irmin approach is well-suited to a per-head shadowing index (the shape this doc originally proposed); per-layer blooms make it unnecessary. See §13.5 for why we declined to import it even when we had a per-head index. |
 | **Merge module** — composable per-type 3-way merge functions (`Merge.option`, `Merge.idempotent`, `Merge.unique`, etc.) | Our `update_branch` trivial-merge logic (§5.4.3) is the disjoint-IRI generalization of these. | Phase 15's witnessed merge can borrow Irmin's primitive vocabulary; pending detailed read of the Merge API. |
 
 **Headline number from production:** Tezos saw **250 GB → 25 GB** (~10×) compression switching to irmin-pack from earlier backends, with comparable query performance in memory-constrained environments. The dict and the offset-based pack format together account for most of this.
@@ -840,16 +951,16 @@ The "stack of immutable layers, top-most wins" pattern is identical to **contain
 
 **Time-travel:**
 
-- **Datomic** — Rich Hickey's "[Datomic Architecture](https://www.youtube.com/watch?v=5GMGGjvSIqg)" talk and the [architecture page](https://docs.datomic.com/cloud/whatis/architecture.html). The most mature production example of "the database remembers everything" with `as-of` semantics. Their per-tx covering indexes are the closest analog to our per-head shadowing index — "given a transaction time, what's the value of this attribute for this entity" is structurally identical to "given a branch head, what's the highest defining layer for this IRI."
+- **Datomic** — Rich Hickey's "[Datomic Architecture](https://www.youtube.com/watch?v=5GMGGjvSIqg)" talk and the [architecture page](https://docs.datomic.com/cloud/whatis/architecture.html). The most mature production example of "the database remembers everything" with `as-of` semantics. Their per-tx covering indexes solve the same problem our per-layer blooms (§5.2) do, with a different trade-off: O(1) lookup at the cost of a per-tx index. We accepted O(chain_depth × bloom_check) to keep shadowing as a per-layer immutable artifact rather than a per-head structure.
 - **XTDB** (formerly Crux) — open-source bitemporal database with similar time-travel semantics.
 
 ### 13.5 Irmin mechanisms considered and not adopted
 
 The mechanical optimisations Irmin uses are heavily shaped by their substrate: they sit directly on POSIX I/O, so they had to build their own LSM, their own dict, their own offset-based pack format. We sit on RocksDB, which is itself a tuned LSM, so most of those mechanisms either duplicate what RocksDB already gives us or solve problems we don't have. The conceptually-load-bearing pieces of the Irmin reading (merge composability, GC reachability semantics, branch/ref separation) are captured elsewhere in this section and in §11.1 / §13.6; the mechanism-level borrowings below were considered and dropped.
 
-1. **IRI dictionary** — *deferred as possible future optimization.* RocksDB's LZ4 compression already handles the bulk of IRI repetition; an explicit dict adds maybe 1.5–2× on top at the cost of meaningful concurrency and atomicity complexity. No production data points at this as a bottleneck. Revisit only if storage size or shadowing-index lookup speed becomes a measured constraint; doing it later means rewriting resources, but in our dev-only mode the recovery is `rm -rf <db>` and re-load.
+1. **IRI dictionary** — *deferred as possible future optimization.* RocksDB's LZ4 compression already handles the bulk of IRI repetition; an explicit dict adds maybe 1.5–2× on top at the cost of meaningful concurrency and atomicity complexity. No production data points at this as a bottleneck. Revisit only if storage size becomes a measured constraint; doing it later means rewriting resources, but in our dev-only mode the recovery is `rm -rf <db>` and re-load.
 
-2. **Two-tier shadowing index** — *deferred as possible future optimization.* Irmin's `log + data + background merge` is a hand-built LSM, which RocksDB already gives us (memtable + WAL + SST files + compaction). Building a parallel two-tier structure would duplicate RocksDB's internals and lose `WriteBatch` atomicity across "commit + index update + branch ref update." If shadowing-index reads become a measured hot-path bottleneck, the cheaper refinement is per-column-family RocksDB tuning (bloom filter size, prefix bloom, block-cache priority) rather than a parallel storage layer.
+2. **Two-tier shadowing index** — *not applicable.* Irmin's `log + data + background merge` design solves the per-head global-index lookup problem. With per-layer blooms (§5.2) we don't have a per-head global index in the first place — each layer carries its own immutable bloom, paged through `BloomCache`. The two-tier design's complexity buys nothing in the per-layer model.
 
 3. **Offset-based parent refs** — *dropped, premise does not apply.* The motivation was "avoid an index lookup per DAG walk," but our topology (§5.1) is a fully in-memory `BTreeMap<LayerId, LayerHandle>` — parent traversal is already an in-memory map probe with no RocksDB read involved. Irmin needs offsets because they don't keep the topology in memory; we do. Removed entirely rather than deferred.
 
@@ -886,7 +997,7 @@ Primitive combinators:
 
 **Still on the follow-up list (lower priority):**
 
-- **Datomic's index design** — specifically the per-tx covering index trees. Closest analog to our per-head shadowing index. Worth understanding before locking in §5.2's representation.
+- **Datomic's index design** — specifically the per-tx covering index trees. The closest external precedent for an O(1) per-head shadowing structure; worth understanding if §5.2's per-layer blooms ever prove inadequate and we revisit a per-head materialised index (the §5.2.7 roll-up option).
 - **Nix store GC** — [`nix-collect-garbage` documentation](https://nixos.org/manual/nix/stable/package-management/garbage-collection.html). Same shape as our reachability-based GC (§5.7), with the "long-lived references pinning large subgraphs" case handled explicitly — directly relevant to our trace-pinning question.
 
 ## 14. References
@@ -903,7 +1014,8 @@ Source code touchpoints (entering Phase 14):
 - [`kernel/src/layer/mod.rs`](../../kernel/src/layer/mod.rs) — Layer struct (becomes a handle in 14a)
 - [`kernel/src/context/mod.rs`](../../kernel/src/context/mod.rs) — ExecutionContext (read APIs gain explicit pin parameter in 14d)
 - [`storage/rocksdb/src/lib.rs`](../../storage/rocksdb/src/lib.rs) — RocksStore (extended with new prefixes throughout)
-- [`storage/indexing/src/lib.rs`](../../storage/indexing/src/lib.rs) — TripleIndex skeleton (implemented in 14h)
+- [`kernel/src/layer/index.rs`](../../kernel/src/layer/index.rs) — `TripleIndex` trait + `MemoryTripleIndex` + chain-walk helpers (Phase 14h)
+- [`storage/rocksdb/src/triple_index.rs`](../../storage/rocksdb/src/triple_index.rs) — RocksDB-backed `TripleIndex` (Phase 14h)
 - [`kernel/src/task/mod.rs`](../../kernel/src/task/mod.rs) — TaskRecord (gains a small outcome field in 14e)
 - [`kernel/src/query/evaluate.rs`](../../kernel/src/query/evaluate.rs) — pattern-matching evaluator (rewritten in 14h)
 - [`kernel/src/storage/mod.rs`](../../kernel/src/storage/mod.rs) — PersistentBackend trait (extended for the new prefixes)

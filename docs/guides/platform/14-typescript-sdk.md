@@ -45,6 +45,7 @@ const eigen = new Eigen({ endpoint: "http://localhost:8080" });
 | `endpoint` | yes | Orchestrator base URL — e.g. `http://localhost:8080` |
 | `fetch` | no | Override the global `fetch` (Deno tests, custom interceptors) |
 | `bearerToken` | no | Currently unused; the hook for token auth without an API change later (D22 §8.3) |
+| `defaultBranch` | no | Branch used when a call doesn't pass an explicit `branch`. Empty / omitted = the server's default (`main`). See §14.4 for branch semantics. |
 
 ## 14.3. Five-line examples
 
@@ -125,13 +126,73 @@ console.log(`${publish.cellIris.length} cell IRI(s) in the published layer ${loa
 
 Identical content yields the same `notebookIri` (content-addressed). See [chapter 13 §13.5](13-notebook.md#135-publish-to-layer).
 
-## 14.4. Error handling
+## 14.4. Branches
+
+Phase 14g made every `load` / `runProgram` / `runProgramByIri` / `reflect` call branch-aware. The TypeScript client mirrors the gRPC surface: per-call `branch` overrides on the relevant methods, plus a `defaultBranch` constructor option and a `useBranch(name)` mutator for setting the client-wide default after construction. Empty / omitted on a call falls back to the client default; empty / omitted on the constructor falls back to the server default (`main`).
+
+```typescript
+// Default to a feature branch for the lifetime of this client
+const eigen = new Eigen({
+  endpoint: "http://localhost:8080",
+  defaultBranch: "feature-x",
+});
+
+// All commits land on feature-x
+await eigen.load(eslSource, { contentType: "application/x-esl" });
+
+// Override for one call — commit to main even though the default is feature-x
+await eigen.load(eslSource, {
+  contentType: "application/x-esl",
+  branch: "main",
+});
+
+// Mutate the default after construction
+eigen.useBranch("experiment-42");
+console.log(eigen.getDefaultBranch()); // "experiment-42"
+```
+
+For reads, `branch` and `atLayer` are mutually exclusive — pass either to pin the read, leave both empty to use the (default) branch's current head:
+
+```typescript
+// Pin to a specific layer
+const r1 = await eigen.inspect("urn:example:Dog", { atLayer: "abe85ea7..." });
+
+// Pin to a branch's current head
+const r2 = await eigen.inspect("urn:example:Dog", { branch: "feature-x" });
+```
+
+Branch CRUD methods (require a kernel with a persistent backend):
+
+```typescript
+// List
+const branches = await eigen.listBranches();
+for (const b of branches) console.log(`${b.name}: ${b.headLayer}`);
+
+// Show
+const main = await eigen.getBranch("main");
+if (main.found) console.log(`main is at ${main.headLayer}`);
+
+// Create — branch off main's head
+const created = await eigen.createBranch("feature-x", { fromLayer: main.headLayer });
+if (!created.success) console.error(created.error);
+
+// Delete (defaults to safe — refuses if a task pin matches the head)
+const del = await eigen.deleteBranch("feature-x");
+console.log(del.deleted ? `deleted (was at ${del.previousHead})` : "did not exist");
+
+// Force-delete (skip the task-pin safety check)
+await eigen.deleteBranch("feature-x", { force: true });
+```
+
+See [chapter 4 §4.6](04-cli-reference.md#46-branch-commands-require---endpoint) for the equivalent CLI surface and [D23 §5.4–§5.5](../../design/d23-out-of-core-layer-architecture.md#54-write-model) for the design.
+
+## 14.6. Error handling
 
 Most methods return structured response objects with `success: bool` and an `errors: ValidationError[]` array — non-RPC failures (validation, parse, etc.) come back this way and the call doesn't throw.
 
 Connect-RPC errors (network failures, kernel-side gRPC `Status` errors that the orchestrator translates) throw `ConnectError` (from `@connectrpc/connect`). The orchestrator's passthrough explicitly re-wraps kernel gRPC errors so the inbound Connect protocol carries the actual message — without this, browser callers see `[internal] HTTP 400` with the real message URL-encoded into a `grpc-message` header. See [`orchestration/src/notebook/eigenius_kernel_passthrough.ts`](../../../orchestration/src/notebook/eigenius_kernel_passthrough.ts).
 
-## 14.5. Layout and dependencies
+## 14.7. Layout and dependencies
 
 ```
 clients/eigenius-ts/
@@ -151,7 +212,7 @@ clients/eigenius-ts/
 
 Runtime deps: `@bufbuild/protobuf@^2`, `@connectrpc/connect@^2`, `@connectrpc/connect-web@^2`. The notebook consumes the SDK as a `file:../clients/eigenius-ts` workspace dep; once the SDK stabilises, npm publication via `dnt` (Deno-to-Node) will follow.
 
-## 14.6. Regenerating the proto stubs
+## 14.8. Regenerating the proto stubs
 
 The buf pipeline lives at the repo root ([`buf.yaml`](../../../buf.yaml) + [`buf.gen.yaml`](../../../buf.gen.yaml)). The SDK's `generated/` is one of two output targets (the other being the orchestrator's `src/gen/`). Regenerate after any change to [`proto/eigenius.proto`](../../../proto/eigenius.proto):
 
@@ -161,7 +222,7 @@ npx --yes @bufbuild/buf generate
 
 Buf is pinned at v2; both targets emit `protoc-gen-es target=ts`, which produces idiomatic Connect-Web TypeScript stubs.
 
-## 14.7. Smoke test
+## 14.9. Smoke test
 
 The smoke test at [`clients/eigenius-ts/examples/smoke-test.ts`](../../../clients/eigenius-ts/examples/smoke-test.ts) hits every RPC against a live stack:
 
@@ -173,7 +234,7 @@ deno run --allow-net --allow-env examples/smoke-test.ts
 
 Output is a 7-step transcript: `health → inspect → query → listInstitutions → layerTopology (taxonomy + full) → load → validateProgram`. This is the SDK's Phase 1 acceptance criterion (D22 §5.7).
 
-## 14.8. Design references
+## 14.10. Design references
 
 - [**D22** — Notebook UX and TypeScript SDK](../../design/d22-notebook-and-typescript-sdk.md) — full SDK + notebook spec, including the layer-topology data shape and the planned post-MVP additions
 - [**D5** — gRPC API specification](../../design/d5-grpc-api-specification.md) — the underlying RPC surface (the SDK is a thin wrapper)
