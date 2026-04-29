@@ -108,6 +108,14 @@ impl LayerTopology {
         self.layers.len()
     }
 
+    /// Iterate every known layer handle in `LayerId` order. Used by
+    /// Phase 14f GC's sweep phase, which needs to enumerate the full
+    /// topology to find layers not in the reachable set, and by any
+    /// future caller that wants a topology-wide scan.
+    pub fn iter_layers(&self) -> impl Iterator<Item = &LayerHandle> {
+        self.layers.values()
+    }
+
     /// Iterate ancestors of `start`, top-down (most recent first), via parent
     /// pointers. Stops at the root or at any unknown id. Phase 14 layers have
     /// at most one parent, so this is a linear walk; Phase 15's merge layers

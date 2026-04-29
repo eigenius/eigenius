@@ -322,6 +322,19 @@ impl PersistentBackend for MemoryPersistentBackend {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect())
     }
+
+    fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.topology.remove(layer);
+        state.chain.remove(layer);
+        state.blooms.remove(layer);
+        state.resources.retain(|(lid, _), _| lid != layer);
+        // Don't touch branches — branches pointing at deleted layers
+        // would be a caller bug and we don't masquerade by silently
+        // unsetting them. GC ensures branch-pointed layers stay in
+        // the reachable set.
+        Ok(())
+    }
 }
 
 #[cfg(test)]

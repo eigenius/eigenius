@@ -277,6 +277,21 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// name. Used by `eigenius db branch list` and by GC to gather
     /// branch-head roots.
     fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError>;
+
+    /// Atomically delete every storage entry associated with `layer`:
+    /// the `topo:<id>` topology entry, the `bloom:<id>` shadowing bloom,
+    /// the `chain:<id>` parent pointer, and every `layer:<id>:res:*`
+    /// resource entry. Used by Phase 14f garbage collection (D23 §5.7)
+    /// to reclaim storage for unreachable layers.
+    ///
+    /// The delete is one atomic write (per D23 §6.3) — partial deletion
+    /// is impossible. After this returns, the layer is gone from
+    /// storage; in-memory caches must be evicted separately by the
+    /// caller (`ResourceCache::evict_layer`, `BloomCache::evict_layer`).
+    ///
+    /// No-op if the layer doesn't exist (idempotent — safe to call
+    /// during a re-run of GC against the same id).
+    fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError>;
 }
 
 /// A single operation inside a `write_batch` call.

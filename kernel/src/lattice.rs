@@ -175,6 +175,20 @@ fn branch_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// Run `f` while holding the branch lock. Phase 14f's GC uses this to
+/// take a consistent snapshot of branch refs at the start of its mark
+/// phase — no `update_branch` can be in flight while `f` runs, so the
+/// snapshot is coherent across all branches. The lock is released
+/// when `f` returns; GC's mark + sweep work happens outside the lock
+/// (concurrent commits and updates are safe per the min-age contract).
+///
+/// `f` should be brief (read branch refs into memory, return). Long
+/// work inside the closure blocks all `update_branch` calls.
+pub fn with_branch_lock<R>(f: impl FnOnce() -> R) -> R {
+    let _guard = branch_lock().lock().expect("branch lock poisoned");
+    f()
+}
+
 /// Append a validated layer to the DAG.
 ///
 /// Builds the `Layer` from `builder` (which already carries its parent

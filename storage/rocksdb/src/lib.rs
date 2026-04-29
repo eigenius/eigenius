@@ -746,6 +746,45 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             .map_err(|e| StorageError::Internal(format!("delete_branch: {e}")))
     }
 
+    fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
+        let id_hex = hex::encode(layer.0);
+        // Per D23 §6.3, layer-shape mutations land via one WriteBatch.
+        // Atomic across the topology entry, bloom, chain pointer, and
+        // every resource entry — no partial state visible after a
+        // crash mid-delete.
+        let mut batch = rocksdb::WriteBatch::default();
+
+        let topo_key = format!("{TOPO_PREFIX}{id_hex}");
+        batch.delete(topo_key.as_bytes());
+
+        let bloom_key = format!("{BLOOM_PREFIX}{id_hex}");
+        batch.delete(bloom_key.as_bytes());
+
+        let chain_key = format!("chain:{id_hex}");
+        batch.delete(chain_key.as_bytes());
+
+        // Resource entries: prefix-scan + per-key delete inside the
+        // batch. RocksDB's `delete_range` is faster but has subtle
+        // interactions with snapshot iterators we don't want to pull
+        // in for v1; per-key delete is correct and fast enough for
+        // typical layer sizes.
+        let res_prefix = format!("layer:{id_hex}:res:");
+        let iter = self.db.prefix_iterator(res_prefix.as_bytes());
+        for item in iter {
+            let (k, _v) =
+                item.map_err(|e| StorageError::Internal(format!("delete_layer iter: {e}")))?;
+            if !k.starts_with(res_prefix.as_bytes()) {
+                break;
+            }
+            batch.delete(&k);
+        }
+
+        self.db
+            .write(batch)
+            .map_err(|e| StorageError::Internal(format!("delete_layer batch: {e}")))?;
+        Ok(())
+    }
+
     fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
         let mut out = Vec::new();
         let iter = self.db.prefix_iterator(BRANCH_PREFIX.as_bytes());
