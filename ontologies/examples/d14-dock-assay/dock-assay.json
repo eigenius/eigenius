@@ -120,6 +120,7 @@
   {
     "@id": "urn:eigenius:demo:d14:within_tolerance",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "within_tolerance",
     "urn:eigenius:institution:query_class": "urn:eigenius:demo:d14:WithinToleranceInput",
     "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
     "urn:eigenius:institution:dispatch_role": [
@@ -132,6 +133,7 @@
   {
     "@id": "urn:eigenius:demo:d14:assay_prediction_validity",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "assay_prediction_validity",
     "urn:eigenius:institution:query_class": "urn:eigenius:demo:d14:AssayPrediction",
     "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
     "urn:eigenius:institution:dispatch_role": [

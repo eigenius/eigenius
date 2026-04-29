@@ -17,6 +17,7 @@
 //! Validates a parsed AST against the ontology before evaluation.
 //! Checks variable binding, USING resolution, and aggregate/GROUP BY consistency.
 
+use crate::institution::registry::{DispatchRole, InstitutionIndex};
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::well_known as wk;
@@ -30,6 +31,10 @@ use std::collections::BTreeSet;
 pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
+    // Build the D14 institution index once for the whole pass — every
+    // FIBER / qualified-call check resolves through it.
+    let (index, _index_errors) = InstitutionIndex::from_layer(layer);
+
     // Check DEFINE rules
     for def in &program.definitions {
         check_match_part(&def.body, layer, &mut errors);
@@ -38,9 +43,42 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // Check the query
     check_match_part(&program.query.body, layer, &mut errors);
 
-    // FIBER-clause specifics: USING INSTITUTION alias uniqueness, FIBER
-    // referent resolution, required-param coverage, short-name scope.
-    check_fiber_clauses(&program.query.body, layer, &mut errors);
+    // FIBER-clause specifics: USING INSTITUTION alias + IRI resolution,
+    // FIBER QueryClass / institution-agreement / OnDemand-role checks,
+    // param scope + required coverage, comorphism coercion rules.
+    check_fiber_clauses(&program.query.body, layer, &index, &mut errors);
+
+    // Qualified-name function calls in expression position must
+    // resolve to a Decidable QueryClass under D14 (D2 v2 §5.9).
+    for cond in &program.query.body.conditions {
+        check_qualified_calls(cond, &index, &mut errors);
+    }
+    for item in &program.query.result {
+        check_qualified_calls(&item.expression, &index, &mut errors);
+    }
+    for expr in &program.query.group_by {
+        check_qualified_calls(expr, &index, &mut errors);
+    }
+    for item in &program.query.order_by {
+        check_qualified_calls(&item.expression, &index, &mut errors);
+    }
+
+    // D2 v2 §5.9 — Verdict-typed expression rules. Verdicts only
+    // arise from two doorways (Decidable QueryClass call; FIBER ?v
+    // bound to a Verdict-result_class QueryClass), so the check
+    // reduces to a static is-Verdict-source predicate. No general
+    // expression-type inference required.
+    let verdict_vars = collect_verdict_bound_vars(program, layer, &index);
+    check_verdict_typing(&program.query.body, &verdict_vars, &index, &mut errors);
+    for item in &program.query.result {
+        check_verdict_in_expression(&item.expression, &verdict_vars, &index, &mut errors);
+    }
+    for expr in &program.query.group_by {
+        check_verdict_in_expression(expr, &verdict_vars, &index, &mut errors);
+    }
+    for item in &program.query.order_by {
+        check_verdict_in_expression(&item.expression, &verdict_vars, &index, &mut errors);
+    }
 
     // Collect all bound variables from MATCH patterns
     let bound_vars = collect_bound_variables(program);
@@ -266,10 +304,15 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
 // FIBER-clause checks (D2 §5.8)
 // ---------------------------------------------------------------------------
 
-fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError>) {
-    // 1. USING INSTITUTION aliases: uniqueness among themselves and with
-    //    class-name USING imports (bare identifiers in queries).
+fn check_fiber_clauses(
+    part: &MatchPart,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    errors: &mut Vec<QueryError>,
+) {
+    // D2 v2 §5.7 — USING INSTITUTION uniqueness and IRI resolution.
     let mut alias_set: BTreeSet<&str> = BTreeSet::new();
+    let mut alias_iri: std::collections::BTreeMap<&str, Iri> = std::collections::BTreeMap::new();
     for alias in &part.using_institutions {
         if !alias_set.insert(alias.alias.as_str()) {
             errors.push(QueryError::type_check(
@@ -277,10 +320,19 @@ fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryEr
                 format!("duplicate USING INSTITUTION alias: '{}'", alias.alias),
             ));
         }
+        alias_iri.insert(alias.alias.as_str(), alias.iri.clone());
+        if index.institution(&alias.iri).is_none() {
+            errors.push(QueryError::type_check(
+                "using_institution_unresolved",
+                format!(
+                    "USING INSTITUTION '{}' does not resolve to an indexed Institution",
+                    alias.iri
+                ),
+            ));
+        }
     }
 
-    // 2. Each FIBER clause.
-    let class_iri = Iri::parse(wk::CLASS).unwrap();
+    // D2 v2 §5.8 — each FIBER clause.
     let requires_prop = Iri::parse(wk::REQUIRES).unwrap();
     let recommends_prop = Iri::parse(wk::RECOMMENDS).unwrap();
     let short_name_prop = Iri::parse(wk::SHORT_NAME).unwrap();
@@ -291,67 +343,119 @@ fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryEr
             _ => continue,
         };
 
-        // 2a. Institution ref — if it's a ShortName, alias must be declared.
-        //     If it's a FullIri, we trust it resolves at runtime (institution
-        //     resources aren't always layer-resident).
-        if let Name::ShortName(ref alias) = fc.institution {
-            if !alias_set.contains(alias.as_str()) {
-                errors.push(QueryError::type_check(
-                    "undeclared_institution_alias",
-                    format!(
-                        "FIBER refers to undeclared institution alias '{alias}' — \
-                         add `USING INSTITUTION \"...\" AS {alias}` or use an inline IRI"
-                    ),
-                ));
+        // 1. Institution ref — alias must be declared, or inline IRI must
+        //    resolve to an indexed Institution. Capture the resolved IRI
+        //    for the institution-agreement check below.
+        let aliased_inst_iri: Option<Iri> = match &fc.institution {
+            Name::ShortName(alias) => {
+                if !alias_set.contains(alias.as_str()) {
+                    errors.push(QueryError::type_check(
+                        "undeclared_institution_alias",
+                        format!(
+                            "FIBER refers to undeclared institution alias '{alias}' — \
+                             add `USING INSTITUTION \"...\" AS {alias}` or use an inline IRI"
+                        ),
+                    ));
+                    None
+                } else {
+                    alias_iri.get(alias.as_str()).cloned()
+                }
             }
-        }
-
-        // 2b. Resolve the query class. If resolvable in the layer, it must
-        //     be a Class; we also use it to scope short-name params.
-        let query_class_iri = match &fc.query_class {
-            Name::FullIri(iri) => Some(iri.clone()),
-            Name::ShortName(name) => resolve_short_name_to_class(layer, name),
+            Name::FullIri(iri) => {
+                if index.institution(iri).is_none() {
+                    errors.push(QueryError::type_check(
+                        "using_institution_unresolved",
+                        format!(
+                            "FIBER inline institution '{iri}' does not resolve to an indexed Institution"
+                        ),
+                    ));
+                    None
+                } else {
+                    Some(iri.clone())
+                }
+            }
         };
 
-        let class_resource = query_class_iri
-            .as_ref()
-            .and_then(|iri| layer.resolve(iri).cloned());
-
-        if let Some(ref cr) = class_resource {
-            if !cr.is_instance_of(&class_iri) {
+        // 2. Resolve the QueryClass against the index. Short-name lookup
+        //    walks indexed QueryClass declarations by their resource
+        //    short_name.
+        let qc_iri = match &fc.query_class {
+            Name::FullIri(iri) => Some(iri.clone()),
+            Name::ShortName(short) => resolve_short_name_to_query_class(layer, short),
+        };
+        let qc_entry = qc_iri.as_ref().and_then(|i| index.query_class(i));
+        let qc_entry = match qc_entry {
+            Some(e) => e,
+            None => {
                 errors.push(QueryError::type_check(
-                    "fiber_query_class_not_class",
+                    "fiber_query_class_not_query_class",
                     format!(
-                        "FIBER query class '{}' does not resolve to a Class",
+                        "FIBER query class '{}' does not resolve to an indexed QueryClass declaration",
                         query_class_name_display(&fc.query_class)
                     ),
                 ));
+                continue;
             }
-        } else {
-            // v1 lenient: if we can't resolve, skip downstream checks and
-            // let the evaluator fail with a clearer message at dispatch
-            // time (institution may have registered the class dynamically).
-            continue;
-        }
-        let class_resource = class_resource.unwrap();
+        };
 
-        // Collect the class's allowed property IRIs (requires ∪ recommends)
-        // and build a short_name → IRI map for short-name resolution.
+        // 3. QueryClass must include OnDemand in its dispatch_role set.
+        if !qc_entry.dispatch_roles.contains(&DispatchRole::OnDemand) {
+            errors.push(QueryError::type_check(
+                "fiber_query_class_not_on_demand",
+                format!(
+                    "FIBER query class '{}' has no OnDemand dispatch role — \
+                     declare on_demand on the QueryClass to allow FIBER dispatch",
+                    qc_entry.iri
+                ),
+            ));
+        }
+
+        // 4. The QueryClass's institution_ref must equal the aliased
+        //    institution.
+        if let Some(ref aliased) = aliased_inst_iri {
+            if qc_entry.institution_ref != *aliased {
+                errors.push(QueryError::type_check(
+                    "fiber_institution_mismatch",
+                    format!(
+                        "FIBER cites institution '{}' but QueryClass '{}' declares institution_ref '{}'",
+                        aliased, qc_entry.iri, qc_entry.institution_ref
+                    ),
+                ));
+            }
+        }
+
+        // 5. Param scope: short-name params must resolve in the
+        //    QueryClass's input class (requires ∪ recommends). Required
+        //    params must all be supplied.
+        let input_class_resource = match layer.resolve(&qc_entry.query_class) {
+            Some(r) => r.clone(),
+            None => {
+                // The QueryClass declares an input class IRI that
+                // doesn't resolve in the chain. The runtime would
+                // surface this; flag it.
+                errors.push(QueryError::type_check(
+                    "fiber_query_class_not_query_class",
+                    format!(
+                        "QueryClass '{}' declares input class '{}' which does not resolve in the layer chain",
+                        qc_entry.iri, qc_entry.query_class
+                    ),
+                ));
+                continue;
+            }
+        };
+
         let mut allowed_prop_iris: BTreeSet<String> = BTreeSet::new();
         let mut required_prop_iris: BTreeSet<String> = BTreeSet::new();
         let mut short_to_iri: BTreeMap<String, String> = BTreeMap::new();
 
-        let required_list = collect_property_iris(&class_resource, &requires_prop);
-        let recommended_list = collect_property_iris(&class_resource, &recommends_prop);
-
-        for iri in &required_list {
+        for iri in collect_property_iris(&input_class_resource, &requires_prop) {
             allowed_prop_iris.insert(iri.as_str().to_string());
             required_prop_iris.insert(iri.as_str().to_string());
         }
-        for iri in &recommended_list {
+        for iri in collect_property_iris(&input_class_resource, &recommends_prop) {
             allowed_prop_iris.insert(iri.as_str().to_string());
         }
-        for iri in allowed_prop_iris.iter() {
+        for iri in &allowed_prop_iris {
             if let Ok(iri_parsed) = Iri::parse(iri) {
                 if let Some(prop_res) = layer.resolve(&iri_parsed) {
                     if let Some(crate::ontology::resource::Value::String(s)) =
@@ -363,7 +467,6 @@ fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryEr
             }
         }
 
-        // 2c. Validate each param.
         let mut supplied_iris: BTreeSet<String> = BTreeSet::new();
         for param in &fc.params {
             let resolved_iri = match &param.name {
@@ -376,32 +479,402 @@ fn check_fiber_clauses(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryEr
                             "fiber_param_short_name_unresolved",
                             format!(
                                 "FIBER param '{short}' is not a declared property of \
-                                 query class '{}' (requires ∪ recommends)",
-                                query_class_name_display(&fc.query_class)
+                                 QueryClass input class '{}' (requires ∪ recommends)",
+                                qc_entry.query_class
                             ),
                         ));
                         None
                     }
                 }
             };
-            if let Some(iri) = resolved_iri {
-                supplied_iris.insert(iri);
+            if let Some(ref iri) = resolved_iri {
+                supplied_iris.insert(iri.clone());
+            }
+
+            // 6. Comorphism coercion sub-checks (D2 v2 §5.8 step 9).
+            if let ParamValue::Comorphism { name, source } = &param.value {
+                check_comorphism_coercion(
+                    name,
+                    source,
+                    qc_entry,
+                    aliased_inst_iri.as_ref(),
+                    resolved_iri.as_deref(),
+                    layer,
+                    index,
+                    errors,
+                );
             }
         }
 
-        // 2d. Required-property coverage.
         for req in &required_prop_iris {
             if !supplied_iris.contains(req) {
                 errors.push(QueryError::type_check(
                     "fiber_missing_required_param",
                     format!(
-                        "FIBER for query class '{}' is missing required param '{}'",
-                        query_class_name_display(&fc.query_class),
-                        req
+                        "FIBER for QueryClass '{}' is missing required param '{}'",
+                        qc_entry.iri, req
                     ),
                 ));
             }
         }
+    }
+}
+
+/// D2 v2 §5.8 step 9 — comorphism-coercion sub-checks.
+#[allow(clippy::too_many_arguments)]
+fn check_comorphism_coercion(
+    name: &Name,
+    source: &Expression,
+    qc_entry: &crate::institution::registry::QueryClassEntry,
+    aliased_inst_iri: Option<&Iri>,
+    target_param_iri: Option<&str>,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    errors: &mut Vec<QueryError>,
+) {
+    let _ = (qc_entry, source); // qc_entry used only for context; source typed-checked via expression-variable walk
+                                // Resolve the comorphism IRI.
+    let comorphism_iri = match name {
+        Name::FullIri(i) => i.clone(),
+        Name::ShortName(s) => match Iri::parse(s) {
+            Ok(i) => i,
+            Err(_) => {
+                errors.push(QueryError::type_check(
+                    "comorphism_unresolved",
+                    format!("comorphism coercion `{s}` is not a parseable IRI"),
+                ));
+                return;
+            }
+        },
+    };
+    let comorphism = match index.comorphism(&comorphism_iri) {
+        Some(c) => c,
+        None => {
+            errors.push(QueryError::type_check(
+                "comorphism_unresolved",
+                format!(
+                    "comorphism coercion '{comorphism_iri}' does not resolve to an indexed Comorphism"
+                ),
+            ));
+            return;
+        }
+    };
+
+    // Target-side institution must equal the FIBER's aliased institution.
+    let import = match index.import_format(&comorphism.import_format) {
+        Some(i) => i,
+        None => {
+            errors.push(QueryError::type_check(
+                "comorphism_unresolved",
+                format!(
+                    "comorphism '{comorphism_iri}' references import_format '{}' which is not indexed",
+                    comorphism.import_format
+                ),
+            ));
+            return;
+        }
+    };
+    if let Some(aliased) = aliased_inst_iri {
+        if import.institution_ref != *aliased {
+            errors.push(QueryError::type_check(
+                "comorphism_target_mismatch",
+                format!(
+                    "comorphism '{comorphism_iri}' reifies into institution '{}' but FIBER cites '{aliased}'",
+                    import.institution_ref
+                ),
+            ));
+        }
+    }
+
+    // The reified target class must satisfy the FIBER param's declared
+    // class_types (D2 v2 §5.8 step 9d).
+    if let Some(param_iri_str) = target_param_iri {
+        if let Ok(param_iri) = Iri::parse(param_iri_str) {
+            if let Some(prop_res) = layer.resolve(&param_iri) {
+                let class_types_iri = Iri::parse("urn:eigenius:core:class_types").unwrap();
+                if let Some(crate::ontology::resource::Value::Array(items)) =
+                    prop_res.get(&class_types_iri)
+                {
+                    let accepted: Vec<Iri> = items
+                        .iter()
+                        .filter_map(|v| match v {
+                            crate::ontology::resource::Value::String(s) => Iri::parse(s).ok(),
+                            crate::ontology::resource::Value::ResourceRef(i) => Some(i.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !accepted.is_empty() && !accepted.contains(&import.to_class) {
+                        errors.push(QueryError::type_check(
+                            "comorphism_target_class_mismatch",
+                            format!(
+                                "comorphism '{comorphism_iri}' produces an instance of '{}' but \
+                                 FIBER param '{param_iri_str}' declares class_types {accepted:?}",
+                                import.to_class
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // v1 restriction: transformation Component must be Pure / Read.
+    let cap_level_iri = Iri::parse("urn:eigenius:program:component:capability_level").unwrap();
+    if let Some(comp_res) = layer.resolve(&comorphism.transformation) {
+        if let Some(crate::ontology::resource::Value::String(level)) = comp_res.get(&cap_level_iri)
+        {
+            if level == "urn:eigenius:program:capability_levels:io" {
+                errors.push(QueryError::type_check(
+                    "comorphism_io_not_supported_in_v1",
+                    format!(
+                        "comorphism '{comorphism_iri}' transformation '{}' has IO capability — \
+                         v1 restricts FIBER coercion transformations to Pure or Read",
+                        comorphism.transformation
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// D2 v2 §5.9 — qualified-name function calls in expression position
+/// must resolve to an indexed Decidable QueryClass. Untyped/unknown
+/// IRIs fall through to evaluation-time `unknown function` (no
+/// type-check error so late institution registration stays valid).
+fn check_qualified_calls(
+    expr: &Expression,
+    index: &InstitutionIndex,
+    errors: &mut Vec<QueryError>,
+) {
+    match expr {
+        Expression::FunctionCall { name, args } => {
+            for a in args {
+                check_qualified_calls(a, index, errors);
+            }
+            if name.contains(':') {
+                if let Ok(iri) = Iri::parse(name) {
+                    if let Some(qc) = index.query_class(&iri) {
+                        if !qc.dispatch_roles.contains(&DispatchRole::Decidable) {
+                            errors.push(QueryError::type_check(
+                                "qualified_call_not_decidable",
+                                format!(
+                                    "qualified function call '{name}' resolves to QueryClass '{}' \
+                                     but its dispatch_role does not include Decidable — \
+                                     use FIBER for OnDemand QueryClasses",
+                                    qc.iri
+                                ),
+                            ));
+                        }
+                    }
+                    // No QueryClass entry → fall-through to builtin /
+                    // unknown-function at evaluation. Comorphism IRIs in
+                    // expression position are not classified here; they
+                    // also fall through and surface at evaluation as
+                    // unknown function.
+                }
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            check_qualified_calls(left, index, errors);
+            check_qualified_calls(right, index, errors);
+        }
+        Expression::Unary { operand, .. } => {
+            check_qualified_calls(operand, index, errors);
+        }
+        Expression::VerdictPredicate { operand, .. } => {
+            check_qualified_calls(operand, index, errors);
+        }
+        Expression::Aggregate { arg, .. } => {
+            check_qualified_calls(arg, index, errors);
+        }
+        Expression::Array(items) => {
+            for it in items {
+                check_qualified_calls(it, index, errors);
+            }
+        }
+        Expression::Object(pairs) => {
+            for (_, v) in pairs {
+                check_qualified_calls(v, index, errors);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ─── D2 v2 §5.9 — Verdict-typed expression rules ──────────────────────
+
+/// Collect every variable name that's FIBER-bound to a Verdict
+/// resource. Under D14 these are the only Verdict-typed `?var`
+/// references in EigenQL — Verdicts have no algebra, so a static
+/// "is this a Verdict source?" predicate is sufficient (no general
+/// type inference required).
+fn collect_verdict_bound_vars(
+    program: &Program,
+    layer: &Layer,
+    index: &InstitutionIndex,
+) -> BTreeSet<String> {
+    let verdict_iri = Iri::parse(wk::VERDICT).expect("well-known IRI");
+    let mut verdict_vars = BTreeSet::new();
+    let visit = |part: &MatchPart, set: &mut BTreeSet<String>| {
+        for clause in &part.clauses {
+            if let Clause::Fiber(fc) = clause {
+                let qc_iri = match &fc.query_class {
+                    Name::FullIri(iri) => Some(iri.clone()),
+                    Name::ShortName(short) => resolve_short_name_to_query_class(layer, short),
+                };
+                if let Some(iri) = qc_iri {
+                    if let Some(qc) = index.query_class(&iri) {
+                        if qc.result_class == verdict_iri {
+                            set.insert(fc.binding.name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    };
+    visit(&program.query.body, &mut verdict_vars);
+    for def in &program.definitions {
+        visit(&def.body, &mut verdict_vars);
+    }
+    verdict_vars
+}
+
+/// Decide whether `expr` is statically a Verdict source (D2 v2 §3.8 /
+/// §6.13). Only two productions count:
+///
+/// 1. A qualified-name function call `qc:check(args)` where the IRI
+///    resolves to a `Decidable` QueryClass.
+/// 2. A `?v` reference where `?v` is bound by a FIBER clause whose
+///    QueryClass declares `result_class = Verdict`.
+///
+/// All other expression shapes return `false` — Verdicts have no
+/// algebra (no operator that consumes a Verdict and yields a Verdict),
+/// so propagation through binary / unary / aggregate / dot-path / etc.
+/// is structurally impossible.
+fn is_verdict_source(
+    expr: &Expression,
+    verdict_vars: &BTreeSet<String>,
+    index: &InstitutionIndex,
+) -> bool {
+    match expr {
+        Expression::FunctionCall { name, .. } if name.contains(':') => Iri::parse(name)
+            .ok()
+            .and_then(|iri| index.query_class(&iri))
+            .is_some_and(|qc| qc.dispatch_roles.contains(&DispatchRole::Decidable)),
+        Expression::Variable(v) => verdict_vars.contains(&v.name),
+        _ => false,
+    }
+}
+
+/// Check the WHERE conditions of a MatchPart for D2 v2 §3.8 / §5.9
+/// rules:
+///
+/// - `verdict_predicate_non_verdict_operand` — postfix `HOLDS` /
+///   `FAILS` / `UNDECIDABLE` over a non-Verdict-source operand.
+/// - `bare_verdict_in_boolean_position` — a Verdict source appearing
+///   directly in WHERE (or as an AND/OR/NOT operand) without a
+///   wrapping postfix predicate.
+fn check_verdict_typing(
+    part: &MatchPart,
+    verdict_vars: &BTreeSet<String>,
+    index: &InstitutionIndex,
+    errors: &mut Vec<QueryError>,
+) {
+    for cond in &part.conditions {
+        // Top-level WHERE expression: must NOT itself be a Verdict
+        // source (forces explicit projection).
+        check_boolean_position(cond, verdict_vars, index, errors);
+        // Recurse into sub-expressions for postfix-operand checks
+        // and AND/OR/NOT-operand bare-Verdict checks.
+        check_verdict_in_expression(cond, verdict_vars, index, errors);
+    }
+}
+
+/// Recursively walk `expr` checking every `VerdictPredicate { operand }`
+/// node and every Boolean-required sub-position.
+fn check_verdict_in_expression(
+    expr: &Expression,
+    verdict_vars: &BTreeSet<String>,
+    index: &InstitutionIndex,
+    errors: &mut Vec<QueryError>,
+) {
+    match expr {
+        Expression::VerdictPredicate { kind, operand } => {
+            if !is_verdict_source(operand, verdict_vars, index) {
+                errors.push(QueryError::type_check(
+                    "verdict_predicate_non_verdict_operand",
+                    format!(
+                        "postfix `{kw}` requires a Verdict-typed operand (a Decidable \
+                         QueryClass call, or a FIBER-bound variable whose result_class \
+                         is Verdict); given operand is not a Verdict source",
+                        kw = kind.ctor_name(),
+                    ),
+                ));
+            }
+            check_verdict_in_expression(operand, verdict_vars, index, errors);
+        }
+        Expression::Binary { op, left, right } => {
+            // AND / OR are Boolean-position contexts; their operands
+            // must not be bare Verdict sources.
+            if matches!(op, BinaryOp::And | BinaryOp::Or) {
+                check_boolean_position(left, verdict_vars, index, errors);
+                check_boolean_position(right, verdict_vars, index, errors);
+            }
+            check_verdict_in_expression(left, verdict_vars, index, errors);
+            check_verdict_in_expression(right, verdict_vars, index, errors);
+        }
+        Expression::Unary { op, operand } => {
+            // `NOT operand` requires Boolean.
+            if matches!(op, UnaryOp::Not) {
+                check_boolean_position(operand, verdict_vars, index, errors);
+            }
+            check_verdict_in_expression(operand, verdict_vars, index, errors);
+        }
+        Expression::FunctionCall { args, .. } => {
+            for a in args {
+                check_verdict_in_expression(a, verdict_vars, index, errors);
+            }
+        }
+        Expression::Aggregate { arg, .. } => {
+            check_verdict_in_expression(arg, verdict_vars, index, errors);
+        }
+        Expression::Array(items) => {
+            for it in items {
+                check_verdict_in_expression(it, verdict_vars, index, errors);
+            }
+        }
+        Expression::Object(pairs) => {
+            for (_, v) in pairs {
+                check_verdict_in_expression(v, verdict_vars, index, errors);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A Boolean-required position (top-level WHERE, AND/OR/NOT operand)
+/// rejects a bare Verdict source — the user must apply a postfix
+/// predicate (`?v HOLDS`, etc.) to project to Boolean.
+fn check_boolean_position(
+    expr: &Expression,
+    verdict_vars: &BTreeSet<String>,
+    index: &InstitutionIndex,
+    errors: &mut Vec<QueryError>,
+) {
+    if is_verdict_source(expr, verdict_vars, index) {
+        let display = match expr {
+            Expression::FunctionCall { name, .. } => format!("`{name}(...)`"),
+            Expression::Variable(v) => format!("`?{}`", v.name),
+            _ => "this expression".to_string(),
+        };
+        errors.push(QueryError::type_check(
+            "bare_verdict_in_boolean_position",
+            format!(
+                "{display} evaluates to a Verdict but appears in a Boolean position — \
+                 apply a postfix predicate (`HOLDS`, `FAILS`, or `UNDECIDABLE`) to \
+                 project to Boolean"
+            ),
+        ));
     }
 }
 
@@ -422,12 +895,16 @@ fn collect_property_iris(class_resource: &Resource, prop_iri: &Iri) -> Vec<Iri> 
     }
 }
 
-fn resolve_short_name_to_class(layer: &Layer, short: &str) -> Option<Iri> {
+/// Resolve a `FIBER fc.query_class` short name against indexed
+/// QueryClass declarations. The QueryClass class itself is not a
+/// `urn:eigenius:core:Class` instance — it is its own ontology class
+/// — so the lookup filters on `is_a == QueryClass` directly.
+fn resolve_short_name_to_query_class(layer: &Layer, short: &str) -> Option<Iri> {
     use crate::ontology::resource::Value;
-    let class_iri = Iri::parse(wk::CLASS).unwrap();
+    let qc_class_iri = Iri::parse(wk::QUERY_CLASS_CLASS).unwrap();
     let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
     for (iri, res) in layer.all_resources() {
-        if !res.is_instance_of(&class_iri) {
+        if !res.is_instance_of(&qc_class_iri) {
             continue;
         }
         if let Some(Value::String(s)) = res.get(&short_prop) {
@@ -590,5 +1067,313 @@ mod tests {
             "#,
         );
         assert!(errors.iter().any(|e| e.rule == "not_exists_unbound"));
+    }
+
+    // ─── D2 v2 §5.7–5.9 — D14 institution-surface rules ────────────────
+
+    /// Build a layer with the dock-assay demo ontology stacked on top
+    /// of the bootstrap chain. Provides a realistic InstitutionIndex
+    /// for the FIBER / qualified-call type-check tests.
+    fn build_demo_layer() -> Arc<Layer> {
+        let demo_ontology =
+            include_str!("../../../ontologies/examples/d14-dock-assay/dock-assay.json");
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let parent = Arc::clone(ctx.head());
+        let mut builder = LayerBuilder::new("type-check-demo", Some(parent));
+        for r in eigon_json::parse_document(demo_ontology).expect("parse demo") {
+            builder.add_resource(r).expect("add demo resource");
+        }
+        Arc::new(builder.build())
+    }
+
+    #[test]
+    fn using_institution_unresolved_when_iri_not_indexed() {
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:nonexistent:institution" AS bogus
+            MATCH ?x {}
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "using_institution_unresolved"),
+            "expected using_institution_unresolved; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn fiber_query_class_must_resolve_as_query_class() {
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?x {}
+            FIBER assay:not_a_real_query_class { } AS ?v
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "fiber_query_class_not_query_class"),
+            "expected fiber_query_class_not_query_class; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn fiber_query_class_must_have_on_demand_role() {
+        let layer = build_demo_layer();
+        // `within_tolerance` is Decidable-only — FIBER should reject it.
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?x {}
+            FIBER assay:within_tolerance {
+                "urn:eigenius:demo:d14:predicted_ic50": 1.0,
+                "urn:eigenius:demo:d14:target_ic50": 1.0,
+                "urn:eigenius:demo:d14:tolerance": 0.5
+            } AS ?v
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "fiber_query_class_not_on_demand"),
+            "expected fiber_query_class_not_on_demand; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn fiber_institution_mismatch_when_alias_disagrees() {
+        let layer = build_demo_layer();
+        // Aliasing the dock institution but FIBERing the assay-owned
+        // QueryClass triggers the institution-agreement rule.
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:dock" AS dock
+            MATCH ?x {}
+            FIBER dock:validate_prediction {
+                candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
+            } AS ?v
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "fiber_institution_mismatch"),
+            "expected fiber_institution_mismatch; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn comorphism_coercion_unresolved() {
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?x {}
+            FIBER assay:validate_prediction {
+                candidate: "urn:eigenius:demo:d14:nonexistent_comorphism"(?x)
+            } AS ?v
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "comorphism_unresolved"),
+            "expected comorphism_unresolved; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn qualified_call_must_be_decidable() {
+        // Calling the OnDemand-only `validate_prediction` QueryClass in
+        // expression position should fire the rule (it's not Decidable).
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?x {}
+            WHERE "urn:eigenius:demo:d14:validate_prediction"(?x)
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "qualified_call_not_decidable"),
+            "expected qualified_call_not_decidable; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn fiber_decidable_only_call_unaffected_by_qualified_call_rule() {
+        // Sanity: a qualified call that resolves to a Decidable QueryClass
+        // type-checks cleanly (no qualified_call_not_decidable).
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?x {}
+            WHERE "urn:eigenius:demo:d14:within_tolerance"(1.0, 1.0, 0.5) HOLDS
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.rule == "qualified_call_not_decidable"),
+            "Decidable QueryClass call should not trigger the rule; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn bare_verdict_qualified_call_in_where_rejected() {
+        // A Decidable QueryClass call directly in WHERE without a
+        // postfix predicate fires bare_verdict_in_boolean_position.
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?x {}
+            WHERE "urn:eigenius:demo:d14:within_tolerance"(1.0, 1.0, 0.5)
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "bare_verdict_in_boolean_position"),
+            "expected bare_verdict_in_boolean_position; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn bare_verdict_fiber_var_in_where_rejected() {
+        // A FIBER-bound Verdict variable used directly in WHERE fires
+        // bare_verdict_in_boolean_position. The user should project
+        // it through HOLDS / FAILS / UNDECIDABLE.
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?x {}
+            FIBER assay:validate_prediction {
+                candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
+            } AS ?v
+            WHERE ?v
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "bare_verdict_in_boolean_position"),
+            "expected bare_verdict_in_boolean_position; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn projected_verdict_in_where_accepted() {
+        // The HOLDS-projected form of the same FIBER-bound Verdict
+        // should type-check cleanly — neither rule fires.
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?x {}
+            FIBER assay:validate_prediction {
+                candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
+            } AS ?v
+            WHERE ?v HOLDS
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.rule == "bare_verdict_in_boolean_position"),
+            "projected Verdict should be accepted; got {errors:?}"
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.rule == "verdict_predicate_non_verdict_operand"),
+            "FIBER-bound Verdict is a Verdict source; should not trigger; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verdict_predicate_on_non_verdict_operand_rejected() {
+        // `?name HOLDS` where ?name is bound to a string property
+        // fires verdict_predicate_non_verdict_operand.
+        let layer = build_core_layer();
+        let errors = check(
+            &layer,
+            r#"
+            USING "urn:eigenius:core:Class"
+            MATCH Class(?c) { short_name: ?name }
+            WHERE ?name HOLDS
+            RETURN [] { x: ?name }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "verdict_predicate_non_verdict_operand"),
+            "expected verdict_predicate_non_verdict_operand; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn verdict_predicate_on_literal_rejected() {
+        // `42 HOLDS` is structurally non-sensical; the rule fires.
+        let layer = build_core_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?x {}
+            WHERE 42 HOLDS
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "verdict_predicate_non_verdict_operand"),
+            "expected verdict_predicate_non_verdict_operand; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn not_bare_verdict_rejected() {
+        // `WHERE NOT qc:check(?x)` — Verdict in NOT operand position
+        // fires bare_verdict_in_boolean_position. The user must
+        // project first: `NOT qc:check(?x) HOLDS`.
+        let layer = build_demo_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?x {}
+            WHERE NOT "urn:eigenius:demo:d14:within_tolerance"(1.0, 1.0, 0.5)
+            RETURN [] { x: ?x }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "bare_verdict_in_boolean_position"),
+            "expected bare_verdict_in_boolean_position under NOT; got {errors:?}"
+        );
     }
 }
