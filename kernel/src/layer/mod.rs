@@ -39,7 +39,10 @@ pub use cache::{
     MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
-pub use index::{index_keys, IndexStats, MemoryTripleIndex, Triple, TripleIndex};
+pub use index::{
+    extract_indexable_triples, index_keys, is_indexable_predicate, IndexStats, MemoryTripleIndex,
+    OwnedTriple, Triple, TripleIndex,
+};
 pub use storage::LayerStorage;
 
 /// Construct an `Arc<Layer>` chain from chain metadata.

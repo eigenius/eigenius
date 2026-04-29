@@ -25,10 +25,14 @@
 //!   trace:<key_hex>                   → ComponentTrace (CBOR)
 //!   meta:<key>                        → Generic metadata KV
 
+mod triple_index;
+
 use async_trait::async_trait;
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
-use eigenius_kernel::layer::{BloomFilter, Layer, LayerHandle, LayerId, LayerTopology};
+use eigenius_kernel::layer::{
+    extract_indexable_triples, BloomFilter, Layer, LayerHandle, LayerId, LayerTopology,
+};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
@@ -36,6 +40,7 @@ use eigenius_kernel::storage::{LayerStore, ResourceBackend, ResourceStore, Stora
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use triple_index::RocksTripleIndex;
 
 const TOPO_PREFIX: &str = "topo:";
 const BLOOM_PREFIX: &str = "bloom:";
@@ -50,13 +55,14 @@ fn now_millis() -> i64 {
 
 /// RocksDB-backed storage.
 pub struct RocksStore {
-    db: rocksdb::DB,
-    /// Phase 14h commit 1 placeholder: an in-process `MemoryTripleIndex`
-    /// stands in for the eventual RocksDB-backed index. Commit 2
-    /// replaces this field's type with a `RocksTripleIndex` that reads
-    /// and writes the `idx_pos:` / `idx_layer:` prefixes alongside
-    /// `store_layer`'s atomic batch.
-    triple_index: std::sync::Arc<eigenius_kernel::layer::MemoryTripleIndex>,
+    db: Arc<rocksdb::DB>,
+    /// RocksDB-backed `TripleIndex` (Phase 14h / D23 §5.9). Shares the
+    /// same `Arc<rocksdb::DB>` as `db` so commit + index-update writes
+    /// land in the same physical store. The index's atomic-batch
+    /// methods (`extend_into_batch` / `drop_into_batch`) participate in
+    /// `store_layer` / `delete_layer`'s `WriteBatch` so layer + index
+    /// commits stay atomic per D23 §6.3.
+    triple_index: Arc<RocksTripleIndex>,
 }
 
 impl RocksStore {
@@ -68,11 +74,10 @@ impl RocksStore {
 
         let db = rocksdb::DB::open(&opts, path)
             .map_err(|e| StorageError::Internal(format!("failed to open RocksDB: {e}")))?;
+        let db = Arc::new(db);
+        let triple_index = Arc::new(RocksTripleIndex::new(Arc::clone(&db)));
 
-        Ok(Self {
-            db,
-            triple_index: std::sync::Arc::new(eigenius_kernel::layer::MemoryTripleIndex::new()),
-        })
+        Ok(Self { db, triple_index })
     }
 
     /// Trigger manual compaction on the entire database.
@@ -574,6 +579,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         ciborium::into_writer(&bloom, &mut bloom_bytes)
             .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
 
+        // Phase 14h: extract indexable triples before opening the
+        // batch. Extraction reads `Property.data_type` defs through
+        // `Layer::resolve`, which uses the layer's pre-populated cache
+        // for self-defined props and walks parents otherwise. Both
+        // paths are read-only and need no batch awareness.
+        let owned_triples = extract_indexable_triples(layer);
+        let triples: Vec<_> = owned_triples.iter().map(|t| t.as_borrowed()).collect();
+
         let mut batch = rocksdb::WriteBatch::default();
 
         let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
@@ -594,6 +607,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             None => String::new(),
         };
         batch.put(chain_key.as_bytes(), chain_value.as_bytes());
+
+        // Phase 14h: layer + index entries land in one atomic write per
+        // D23 §6.3. Skipped when there are no indexable triples (root
+        // bootstrap layers, layers with only literal-typed properties).
+        if !triples.is_empty() {
+            self.triple_index
+                .extend_into_batch(&mut batch, &id, &triples);
+        }
 
         self.db
             .write(batch)
@@ -668,16 +689,8 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         self
     }
 
-    fn triple_index_arc(&self) -> std::sync::Arc<dyn eigenius_kernel::layer::TripleIndex> {
-        // Phase 14h commit 1 placeholder: shares an in-process
-        // `MemoryTripleIndex` per `RocksStore` instance so existing tests
-        // keep working without a real persistent index. The query
-        // evaluator doesn't yet consult the index (commit 3 work), so
-        // returning an unpopulated in-memory index is harmless. Commit 2
-        // replaces this with a `RocksTripleIndex` backed by the
-        // `idx_pos:` / `idx_layer:` prefixes in the same RocksDB.
-        std::sync::Arc::clone(&self.triple_index)
-            as std::sync::Arc<dyn eigenius_kernel::layer::TripleIndex>
+    fn triple_index_arc(&self) -> Arc<dyn eigenius_kernel::layer::TripleIndex> {
+        Arc::clone(&self.triple_index) as Arc<dyn eigenius_kernel::layer::TripleIndex>
     }
 
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
@@ -734,9 +747,9 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
         let id_hex = hex::encode(layer.0);
         // Per D23 §6.3, layer-shape mutations land via one WriteBatch.
-        // Atomic across the topology entry, bloom, chain pointer, and
-        // every resource entry — no partial state visible after a
-        // crash mid-delete.
+        // Atomic across the topology entry, bloom, chain pointer,
+        // every resource entry, and (Phase 14h) every index entry —
+        // no partial state visible after a crash mid-delete.
         let mut batch = rocksdb::WriteBatch::default();
 
         let topo_key = format!("{TOPO_PREFIX}{id_hex}");
@@ -763,6 +776,11 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             }
             batch.delete(&k);
         }
+
+        // Phase 14h: drop both index orderings for this layer in the
+        // same atomic batch. Walks the reverse `idx_layer:<L>:` prefix
+        // to discover which forward `idx_pos:` entries to delete.
+        self.triple_index.drop_into_batch(&mut batch, layer)?;
 
         self.db
             .write(batch)

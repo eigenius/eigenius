@@ -30,8 +30,10 @@
 //!
 //! See `docs/design/phase-14h-indexed-reads.md` for the full design.
 
-use crate::layer::LayerId;
+use crate::layer::{Layer, LayerId};
 use crate::ontology::iri::Iri;
+use crate::ontology::resource::Value;
+use crate::ontology::well_known as wk;
 use crate::storage::StorageError;
 use std::collections::BTreeSet;
 use std::sync::RwLock;
@@ -104,6 +106,131 @@ pub trait TripleIndex: Send + Sync {
 
     /// Snapshot of operational counters.
     fn stats(&self) -> IndexStats;
+}
+
+/// Indexability rule (D23 §5.9 + Phase 14h plan, Q1).
+///
+/// A `(subject, predicate, object)` triple is indexable iff `predicate`'s
+/// `Property.data_type` resolves to `urn:eigenius:core:resource` or
+/// `urn:eigenius:core:resource_array` at the layer being inspected. Both
+/// the write path (`extract_indexable_triples` at commit time) and the
+/// read path (the query planner deciding whether to use the index for a
+/// given pattern) call this so the two sides agree by construction.
+///
+/// Returns `false` when the predicate's def can't be resolved or has no
+/// `data_type` field — same posture as the validator: undefined props
+/// silently bypass the index without erroring.
+pub fn is_indexable_predicate(layer: &Layer, predicate: &Iri) -> bool {
+    let data_type_prop = match Iri::parse(wk::DATA_TYPE_PROP) {
+        Ok(iri) => iri,
+        Err(_) => return false,
+    };
+    let prop_def = match layer.resolve(predicate) {
+        Some(def) => def,
+        None => return false,
+    };
+    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return false,
+    };
+    data_type == wk::RESOURCE || data_type == wk::RESOURCE_ARRAY
+}
+
+/// Owned form of [`Triple`] — emitted by [`extract_indexable_triples`] so
+/// callers can hold the triple set without lifetime entanglement to a
+/// `Layer` they no longer borrow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedTriple {
+    pub subject: Iri,
+    pub predicate: Iri,
+    pub object: Iri,
+}
+
+impl OwnedTriple {
+    /// Borrow as the `Triple<'_>` that [`TripleIndex::extend_layer`] takes.
+    pub fn as_borrowed(&self) -> Triple<'_> {
+        Triple {
+            subject: &self.subject,
+            predicate: &self.predicate,
+            object: &self.object,
+        }
+    }
+}
+
+/// Walk every resource defined in `layer` and yield the indexable
+/// triples it contributes (D23 §5.9 / Phase 14h).
+///
+/// Indexability is gated by [`is_indexable_predicate`]: only properties
+/// whose `data_type` is `resource` or `resource_array` produce entries.
+/// `resource_array` values unpack to one triple per element. Object
+/// values that aren't valid IRI strings (or that can't be parsed) are
+/// silently skipped — the index is best-effort, never blocks a commit.
+///
+/// Called from the storage layer's `store_layer` path so the resulting
+/// triples join the same atomic batch as the layer's resource bytes,
+/// blooms, and topology entries (D23 §6.3). The function takes a
+/// `&Layer` (not just a list of resources) because the indexability
+/// rule consults the predicate's `Property.data_type` definition,
+/// which may live in a parent layer.
+pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
+    let data_type_prop = match Iri::parse(wk::DATA_TYPE_PROP) {
+        Ok(iri) => iri,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut triples = Vec::new();
+    for (subject_iri, resource) in layer.iter_resources() {
+        for (predicate_iri, value) in resource.properties() {
+            // Inline the indexability check rather than calling
+            // `is_indexable_predicate` so we resolve each predicate def
+            // exactly once per resource per layer, not twice.
+            let prop_def = match layer.resolve(predicate_iri) {
+                Some(def) => def,
+                None => continue,
+            };
+            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
+                Some(t) => t,
+                None => continue,
+            };
+            let push_iri_value = |triples: &mut Vec<OwnedTriple>, raw: &str| {
+                if let Ok(object) = Iri::parse(raw) {
+                    triples.push(OwnedTriple {
+                        subject: subject_iri.clone(),
+                        predicate: predicate_iri.clone(),
+                        object,
+                    });
+                }
+            };
+            match data_type {
+                wk::RESOURCE => match value {
+                    Value::String(s) => push_iri_value(&mut triples, s),
+                    Value::ResourceRef(iri) => triples.push(OwnedTriple {
+                        subject: subject_iri.clone(),
+                        predicate: predicate_iri.clone(),
+                        object: iri.clone(),
+                    }),
+                    _ => {}
+                },
+                wk::RESOURCE_ARRAY => {
+                    if let Value::Array(items) = value {
+                        for item in items {
+                            match item {
+                                Value::String(s) => push_iri_value(&mut triples, s),
+                                Value::ResourceRef(iri) => triples.push(OwnedTriple {
+                                    subject: subject_iri.clone(),
+                                    predicate: predicate_iri.clone(),
+                                    object: iri.clone(),
+                                }),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    triples
 }
 
 /// In-memory `TripleIndex` for tests, the in-memory bootstrap path, and
@@ -577,5 +704,173 @@ mod tests {
         index.extend_layer(&layer, &[]).unwrap();
         assert_eq!(index.stats().triples, 0);
         assert_eq!(index.stats().layers, 0);
+    }
+
+    // --- Tests for is_indexable_predicate + extract_indexable_triples ---
+
+    use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::ontology::resource::{Resource, Value};
+    use std::sync::Arc;
+
+    fn property_def(prop_iri: &str, data_type: &str) -> Resource {
+        let mut r = Resource::new(iri(prop_iri));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Property".into())]),
+        );
+        r.set(iri(wk::DATA_TYPE_PROP), Value::String(data_type.into()));
+        r
+    }
+
+    /// Build a parent layer that defines `properties` (IRI → data_type).
+    /// Used to give the child layer a chain in which to resolve predicates.
+    fn parent_with_properties(props: &[(&str, &str)]) -> Arc<crate::layer::Layer> {
+        let storage = LayerStorage::in_memory();
+        let mut builder = LayerBuilder::new("test_parent", None);
+        for (iri_str, data_type) in props {
+            builder
+                .add_resource(property_def(iri_str, data_type))
+                .unwrap();
+        }
+        Arc::new(builder.build(storage))
+    }
+
+    #[test]
+    fn is_indexable_predicate_true_for_resource_typed() {
+        let parent = parent_with_properties(&[("urn:eigenius:test:owner", wk::RESOURCE)]);
+        assert!(is_indexable_predicate(
+            &parent,
+            &iri("urn:eigenius:test:owner")
+        ));
+    }
+
+    #[test]
+    fn is_indexable_predicate_true_for_resource_array_typed() {
+        let parent = parent_with_properties(&[("urn:eigenius:core:is_a", wk::RESOURCE_ARRAY)]);
+        assert!(is_indexable_predicate(
+            &parent,
+            &iri("urn:eigenius:core:is_a")
+        ));
+    }
+
+    #[test]
+    fn is_indexable_predicate_false_for_string_typed() {
+        let parent =
+            parent_with_properties(&[("urn:eigenius:core:short_name", "urn:eigenius:core:string")]);
+        assert!(!is_indexable_predicate(
+            &parent,
+            &iri("urn:eigenius:core:short_name")
+        ));
+    }
+
+    #[test]
+    fn is_indexable_predicate_false_for_undefined_property() {
+        let parent = parent_with_properties(&[]);
+        assert!(!is_indexable_predicate(
+            &parent,
+            &iri("urn:eigenius:test:never_defined")
+        ));
+    }
+
+    #[test]
+    fn extract_unpacks_resource_array_one_per_element() {
+        let parent = parent_with_properties(&[("urn:eigenius:core:is_a", wk::RESOURCE_ARRAY)]);
+        let storage = parent.storage().clone();
+        let mut builder = LayerBuilder::new("test_child", Some(parent));
+        let mut rex = Resource::new(iri("urn:eigenius:test:rex"));
+        rex.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![
+                Value::String("urn:eigenius:test:Dog".into()),
+                Value::String("urn:eigenius:test:Pet".into()),
+            ]),
+        );
+        builder.add_resource(rex).unwrap();
+        let layer = builder.build(storage);
+
+        let triples = extract_indexable_triples(&layer);
+        assert_eq!(triples.len(), 2);
+        let objects: BTreeSet<Iri> = triples.iter().map(|t| t.object.clone()).collect();
+        assert!(objects.contains(&iri("urn:eigenius:test:Dog")));
+        assert!(objects.contains(&iri("urn:eigenius:test:Pet")));
+        for t in &triples {
+            assert_eq!(t.subject, iri("urn:eigenius:test:rex"));
+            assert_eq!(t.predicate, iri("urn:eigenius:core:is_a"));
+        }
+    }
+
+    #[test]
+    fn extract_skips_non_indexable_predicates() {
+        let parent = parent_with_properties(&[
+            ("urn:eigenius:core:is_a", wk::RESOURCE_ARRAY),
+            ("urn:eigenius:core:short_name", "urn:eigenius:core:string"),
+        ]);
+        let storage = parent.storage().clone();
+        let mut builder = LayerBuilder::new("test_child", Some(parent));
+        let mut dog = Resource::new(iri("urn:eigenius:test:Dog"));
+        dog.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
+        dog.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("Dog".into()),
+        );
+        builder.add_resource(dog).unwrap();
+        let layer = builder.build(storage);
+
+        let triples = extract_indexable_triples(&layer);
+        // Only the is_a triple — short_name is a string, not indexed.
+        assert_eq!(triples.len(), 1);
+        assert_eq!(triples[0].predicate, iri("urn:eigenius:core:is_a"));
+        assert_eq!(triples[0].object, iri("urn:eigenius:core:Class"));
+    }
+
+    #[test]
+    fn extract_skips_unparseable_iri_object() {
+        let parent = parent_with_properties(&[("urn:eigenius:test:owner", wk::RESOURCE)]);
+        let storage = parent.storage().clone();
+        let mut builder = LayerBuilder::new("test_child", Some(parent));
+        let mut r = Resource::new(iri("urn:eigenius:test:thing"));
+        r.set(
+            iri("urn:eigenius:test:owner"),
+            Value::String("not a valid IRI string".into()),
+        );
+        builder.add_resource(r).unwrap();
+        let layer = builder.build(storage);
+
+        let triples = extract_indexable_triples(&layer);
+        assert!(triples.is_empty());
+    }
+
+    #[test]
+    fn extract_emits_owned_triples_usable_for_extend_layer() {
+        let parent = parent_with_properties(&[("urn:eigenius:core:is_a", wk::RESOURCE_ARRAY)]);
+        let storage = parent.storage().clone();
+        let mut builder = LayerBuilder::new("test_child", Some(parent));
+        let mut rex = Resource::new(iri("urn:eigenius:test:rex"));
+        rex.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:test:Dog".into())]),
+        );
+        builder.add_resource(rex).unwrap();
+        let layer = builder.build(storage);
+
+        let triples = extract_indexable_triples(&layer);
+        let borrowed: Vec<Triple> = triples.iter().map(|t| t.as_borrowed()).collect();
+
+        let index = MemoryTripleIndex::new();
+        index.extend_layer(layer.id(), &borrowed).unwrap();
+
+        let hits: Vec<(Iri, LayerId)> = index
+            .scan_predicate_object(
+                &iri("urn:eigenius:core:is_a"),
+                &iri("urn:eigenius:test:Dog"),
+            )
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, iri("urn:eigenius:test:rex"));
+        assert_eq!(hits[0].1, *layer.id());
     }
 }
