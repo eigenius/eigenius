@@ -12,9 +12,15 @@ build-wasm:
     cd examples/wasm-http-shout && cargo component build
     cd examples/wasm-read-query-probe && cargo component build
     cd examples/wasm-d14-echo && cargo component build
+    cd examples/wasm-d14-dock && cargo component build
+    cd examples/wasm-d14-assay && cargo component build
+    cd examples/wasm-d14-arrhenius && cargo component build
     mkdir -p kernel/tests/fixtures
     cp examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm kernel/tests/fixtures/
     cp examples/wasm-d14-echo/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_echo.wasm kernel/tests/fixtures/
+    cp examples/wasm-d14-dock/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_dock.wasm kernel/tests/fixtures/
+    cp examples/wasm-d14-assay/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_assay.wasm kernel/tests/fixtures/
+    cp examples/wasm-d14-arrhenius/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_arrhenius.wasm kernel/tests/fixtures/
 
 # Run all tests (Rust + Deno)
 test:

@@ -75,7 +75,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: kernel/tests/fixtures
-          key: ${{ runner.os }}-wasm-fixtures-cc0.21-${{ hashFiles('examples/wasm-doc-validator/**', 'examples/wasm-d14-echo/**', 'sdk/wasm-sdk/**', 'wit/**') }}
+          key: ${{ runner.os }}-wasm-fixtures-cc0.21-${{ hashFiles('examples/wasm-doc-validator/**', 'examples/wasm-d14-echo/**', 'examples/wasm-d14-dock/**', 'examples/wasm-d14-assay/**', 'examples/wasm-d14-arrhenius/**', 'sdk/wasm-sdk/**', 'wit/**') }}
 
       - name: Build WASM fixtures
         if: steps.wasm-fixtures-cache.outputs.cache-hit != 'true'
@@ -85,9 +85,15 @@ jobs:
         run: |
           (cd examples/wasm-doc-validator && cargo component build)
           (cd examples/wasm-d14-echo && cargo component build)
+          (cd examples/wasm-d14-dock && cargo component build)
+          (cd examples/wasm-d14-assay && cargo component build)
+          (cd examples/wasm-d14-arrhenius && cargo component build)
           mkdir -p kernel/tests/fixtures
           cp examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm kernel/tests/fixtures/
           cp examples/wasm-d14-echo/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_echo.wasm kernel/tests/fixtures/
+          cp examples/wasm-d14-dock/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_dock.wasm kernel/tests/fixtures/
+          cp examples/wasm-d14-assay/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_assay.wasm kernel/tests/fixtures/
+          cp examples/wasm-d14-arrhenius/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_arrhenius.wasm kernel/tests/fixtures/
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets

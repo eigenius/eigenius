@@ -1,0 +1,18 @@
+[package]
+name = "eigenius-wasm-d14-dock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eigenius-wasm-sdk = { path = "../../sdk/wasm-sdk" }
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "eigenius:component"
+
+[package.metadata.component.target]
+world = "eigenius-institution-d14"
+path = "../../wit"
