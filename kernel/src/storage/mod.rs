@@ -28,6 +28,8 @@ use std::sync::Arc;
 #[cfg(test)]
 pub(crate) mod memory;
 
+pub mod version;
+
 /// Sync, single-resource read surface for `Layer`.
 ///
 /// `PersistentBackend` is a supertrait, so every persistent backend

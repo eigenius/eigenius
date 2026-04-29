@@ -433,6 +433,8 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized termination via bounded binders, self-referential parameterised codata, productivity by typing |
 | [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |
 | [D22: Notebook UX and TypeScript SDK](docs/design/d22-notebook-and-typescript-sdk.md) | The React notebook, the `Eigen` SDK, the notebook ontology, content-addressed publish |
+| [D23: Out-of-Core Layer Architecture](docs/design/d23-out-of-core-layer-architecture.md) | Phase 14: topology/content split, per-layer blooms, branches + CAS, multi-parent merges, GC, per-layer triple index |
+| [D24: Schema Versioning Policy](docs/design/d24-schema-versioning.md) | On-disk schema versioning: kernel `SCHEMA_VERSION`, migration framework, boot-time check, contributor checklist. Companion: [Schema Changelog](docs/design/schema-changelog.md). |
 | [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 | [Lean 4 as Institution](docs/design/lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
