@@ -30,13 +30,15 @@
 
 #![cfg(test)]
 
-use crate::layer::{BloomFilter, Layer, LayerHandle, LayerId, LayerTopology};
+use crate::layer::{
+    BloomFilter, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex, TripleIndex,
+};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use crate::program::trace::{InMemoryTraceStore, TraceStore};
 use crate::storage::{BatchOp, ChainInfo, PersistentBackend, ResourceBackend, StorageError};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// In-memory `PersistentBackend` for kernel-side tests.
@@ -47,6 +49,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) struct MemoryPersistentBackend {
     inner: RwLock<MemoryState>,
     traces: InMemoryTraceStore,
+    triple_index: Arc<MemoryTripleIndex>,
 }
 
 struct MemoryState {
@@ -82,6 +85,7 @@ impl MemoryPersistentBackend {
                 branches: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
+            triple_index: Arc::new(MemoryTripleIndex::new()),
         }
     }
 }
@@ -250,6 +254,10 @@ impl PersistentBackend for MemoryPersistentBackend {
 
     fn as_trace_store(&self) -> &(dyn TraceStore + Send + Sync) {
         &self.traces
+    }
+
+    fn triple_index_arc(&self) -> Arc<dyn TripleIndex> {
+        Arc::clone(&self.triple_index) as Arc<dyn TripleIndex>
     }
 
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {

@@ -51,6 +51,12 @@ fn now_millis() -> i64 {
 /// RocksDB-backed storage.
 pub struct RocksStore {
     db: rocksdb::DB,
+    /// Phase 14h commit 1 placeholder: an in-process `MemoryTripleIndex`
+    /// stands in for the eventual RocksDB-backed index. Commit 2
+    /// replaces this field's type with a `RocksTripleIndex` that reads
+    /// and writes the `idx_pos:` / `idx_layer:` prefixes alongside
+    /// `store_layer`'s atomic batch.
+    triple_index: std::sync::Arc<eigenius_kernel::layer::MemoryTripleIndex>,
 }
 
 impl RocksStore {
@@ -63,7 +69,10 @@ impl RocksStore {
         let db = rocksdb::DB::open(&opts, path)
             .map_err(|e| StorageError::Internal(format!("failed to open RocksDB: {e}")))?;
 
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            triple_index: std::sync::Arc::new(eigenius_kernel::layer::MemoryTripleIndex::new()),
+        })
     }
 
     /// Trigger manual compaction on the entire database.
@@ -657,6 +666,18 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
 
     fn as_trace_store(&self) -> &(dyn eigenius_kernel::program::trace::TraceStore + Send + Sync) {
         self
+    }
+
+    fn triple_index_arc(&self) -> std::sync::Arc<dyn eigenius_kernel::layer::TripleIndex> {
+        // Phase 14h commit 1 placeholder: shares an in-process
+        // `MemoryTripleIndex` per `RocksStore` instance so existing tests
+        // keep working without a real persistent index. The query
+        // evaluator doesn't yet consult the index (commit 3 work), so
+        // returning an unpopulated in-memory index is harmless. Commit 2
+        // replaces this with a `RocksTripleIndex` backed by the
+        // `idx_pos:` / `idx_layer:` prefixes in the same RocksDB.
+        std::sync::Arc::clone(&self.triple_index)
+            as std::sync::Arc<dyn eigenius_kernel::layer::TripleIndex>
     }
 
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {

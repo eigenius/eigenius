@@ -30,6 +30,7 @@
 mod bloom;
 mod cache;
 mod handle;
+mod index;
 mod storage;
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
@@ -38,6 +39,7 @@ pub use cache::{
     MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
+pub use index::{index_keys, IndexStats, MemoryTripleIndex, Triple, TripleIndex};
 pub use storage::LayerStorage;
 
 /// Construct an `Arc<Layer>` chain from chain metadata.

@@ -28,7 +28,7 @@
 
 use crate::layer::{
     BloomCache, BoundedResourceCache, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
-    ResourceCache,
+    MemoryTripleIndex, ResourceCache, TripleIndex,
 };
 use crate::storage::{PersistentBackend, ResourceBackend};
 use std::sync::Arc;
@@ -52,6 +52,12 @@ pub struct LayerStorage {
     /// to its own `PersistentBackend` Arc (set when the cache was built);
     /// `Layer::resolve` consults it before probing the resource cache.
     pub bloom_cache: Arc<dyn BloomCache>,
+    /// Per-layer triple index (D23 §5.9 / Phase 14h). Populated at
+    /// commit time inside `store_layer`'s atomic batch; consulted by
+    /// the EigenQL evaluator's `scan_chain` helper. In-memory layers
+    /// share a fresh `MemoryTripleIndex`; persistent layers share the
+    /// backend's `as_triple_index()` view.
+    pub triple_index: Arc<dyn TripleIndex>,
 }
 
 impl LayerStorage {
@@ -64,6 +70,7 @@ impl LayerStorage {
             cache: Arc::new(MemoryResourceCache::new()),
             backend: Arc::new(MemoryResourceBackend::new()),
             bloom_cache: Arc::new(MemoryBloomCache::cache_only()),
+            triple_index: Arc::new(MemoryTripleIndex::new()),
         }
     }
 
@@ -74,10 +81,12 @@ impl LayerStorage {
     /// For long-running production workloads, use
     /// `with_persistent_bounded`.
     pub fn with_persistent(pb: Arc<dyn PersistentBackend>) -> Self {
+        let triple_index = pb.triple_index_arc();
         Self {
             cache: Arc::new(MemoryResourceCache::new()),
             backend: Arc::clone(&pb) as Arc<dyn ResourceBackend>,
             bloom_cache: Arc::new(MemoryBloomCache::new(pb)),
+            triple_index,
         }
     }
 
@@ -94,10 +103,12 @@ impl LayerStorage {
     /// for ~1 KiB-mean resources is 1M entries (~1 GiB). Phase 12
     /// workload data informs the production default.
     pub fn with_persistent_bounded(pb: Arc<dyn PersistentBackend>, total_entries: u64) -> Self {
+        let triple_index = pb.triple_index_arc();
         Self {
             cache: Arc::new(BoundedResourceCache::new(total_entries)),
             backend: Arc::clone(&pb) as Arc<dyn ResourceBackend>,
             bloom_cache: Arc::new(MemoryBloomCache::new(pb)),
+            triple_index,
         }
     }
 }

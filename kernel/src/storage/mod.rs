@@ -213,6 +213,16 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// route `ComponentTrace` reads/writes through the same storage.
     fn as_trace_store(&self) -> &(dyn crate::program::trace::TraceStore + Send + Sync);
 
+    /// Arc-shared triple index view of this backend (D23 §5.9 / Phase 14h).
+    ///
+    /// Returned as an `Arc<dyn TripleIndex>` so it slots directly into
+    /// `LayerStorage.triple_index`. Every backend implementation owns
+    /// its own underlying index (in-memory `MemoryTripleIndex` for the
+    /// memory backend; RocksDB prefix scans for `RocksStore`) and returns
+    /// `Arc::clone`s so multiple `LayerStorage` instances share the same
+    /// physical index.
+    fn triple_index_arc(&self) -> Arc<dyn crate::layer::TripleIndex>;
+
     /// Read a layer's persisted shadowing bloom (D23 §5.2). Returns
     /// `None` if no bloom was persisted — a layer written by an
     /// older kernel build, or any layer for which `store_layer`
