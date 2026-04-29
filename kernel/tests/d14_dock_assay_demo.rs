@@ -578,3 +578,116 @@ fn auto_on_load_fires_on_assay_prediction() {
         errs[0].message
     );
 }
+
+// ─── 4. FIBER param comorphism coercion (D2 v2 §3.5 / §6.12) ───────────
+
+/// FIBER param coercion: `param: dock_to_assay(?d)` runs the four-step
+/// pipeline inline as part of FIBER input marshalling. The dispatch
+/// path mirrors `Exp::InstitutionInvoke` — same comorphism, same
+/// transformation Component, same post-translation invariant — but
+/// reached via the EigenQL evaluator's helper. Here we drive the
+/// helper directly with the dock-assay layer/index/runtime/components
+/// to verify the EigenQL-side wiring works end-to-end.
+#[test]
+fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
+    use eigenius_kernel::ontology::resource::Resource;
+    use eigenius_kernel::query::ast::{Expression, Name};
+    use std::collections::BTreeMap;
+
+    let layer = build_demo_layer();
+    let index = build_demo_index(&layer);
+    let runtime = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&layer));
+
+    // Build a sample DockingResult and bind it to ?d in the binding.
+    let dock_iri = iri("urn:eigenius:demo:d14:input1");
+    let mut docking = Resource::new(dock_iri.clone());
+    docking.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
+    );
+    docking.set(iri(DELTA_G_PROP), Value::Float(-8.5));
+    let mut binding: BTreeMap<String, Value> = BTreeMap::new();
+    binding.insert("d".into(), Value::Embedded(Box::new(docking)));
+
+    let comorphism_name = Name::FullIri(iri("urn:eigenius:demo:d14:dock_to_assay"));
+    let source_expr =
+        Expression::Variable(eigenius_kernel::query::ast::Variable { name: "d".into() });
+
+    let reified = eigenius_kernel::query::evaluate::eval_comorphism_coercion(
+        &comorphism_name,
+        &source_expr,
+        &binding,
+        &layer,
+        &index,
+        &runtime,
+        &components,
+        &exec_ctx,
+    )
+    .expect("coercion four-step pipeline");
+
+    let resource = match reified {
+        Value::Embedded(r) => *r,
+        other => panic!("expected Embedded AssayPrediction, got {other:?}"),
+    };
+    assert!(
+        resource
+            .is_a()
+            .iter()
+            .any(|i| i.as_str() == ASSAY_PREDICTION_CLASS),
+        "expected reified resource to be an AssayPrediction; got is_a={:?}",
+        resource.is_a()
+    );
+    let ic50 = as_float(resource.get(&iri(IC50_PROP))).expect("AssayPrediction.ic50");
+    let expected = arrhenius_ic50_nm(-8.5);
+    assert!(
+        (ic50 - expected).abs() < expected * 1e-9,
+        "expected IC50≈{expected}, got {ic50}"
+    );
+}
+
+/// An unregistered comorphism IRI surfaces as a typed evaluation error
+/// rather than silently identity-passing the source through.
+#[test]
+fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
+    use eigenius_kernel::query::ast::{Expression, Name};
+    use std::collections::BTreeMap;
+
+    let layer = build_demo_layer();
+    let index = build_demo_index(&layer);
+    let runtime = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&layer));
+
+    let dock_iri = iri("urn:eigenius:demo:d14:input1");
+    let mut docking = Resource::new(dock_iri);
+    docking.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
+    );
+    docking.set(iri(DELTA_G_PROP), Value::Float(-8.5));
+    let mut binding: BTreeMap<String, Value> = BTreeMap::new();
+    binding.insert("d".into(), Value::Embedded(Box::new(docking)));
+
+    let bogus_name = Name::FullIri(iri("urn:eigenius:demo:d14:nonexistent_comorphism"));
+    let source_expr =
+        Expression::Variable(eigenius_kernel::query::ast::Variable { name: "d".into() });
+
+    let err = eigenius_kernel::query::evaluate::eval_comorphism_coercion(
+        &bogus_name,
+        &source_expr,
+        &binding,
+        &layer,
+        &index,
+        &runtime,
+        &components,
+        &exec_ctx,
+    )
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not registered"),
+        "expected `not registered` error; got: {msg}"
+    );
+}

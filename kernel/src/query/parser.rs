@@ -340,7 +340,31 @@ impl Parser {
         let name = self.parse_name()?;
         self.expect(&TokenKind::Colon)?;
         let expression = self.parse_expression()?;
-        Ok(ParamBinding { name, expression })
+        // D2 v2 §3.5 — disambiguate comorphism coercion from a plain
+        // expression. A single-arg qualified-name function call in
+        // FIBER param value position is treated as a comorphism
+        // coercion (the type checker validates it actually resolves
+        // to a Comorphism declaration). Anything else is a plain
+        // expression.
+        let value = match expression {
+            Expression::FunctionCall {
+                name: fname,
+                mut args,
+            } if fname.contains(':') && args.len() == 1 => {
+                let source = args.pop().expect("len == 1 checked above");
+                let coercion = if let Ok(iri) = Iri::parse(&fname) {
+                    crate::query::ast::Name::FullIri(iri)
+                } else {
+                    crate::query::ast::Name::ShortName(fname)
+                };
+                crate::query::ast::ParamValue::Comorphism {
+                    name: coercion,
+                    source,
+                }
+            }
+            other => crate::query::ast::ParamValue::Expression(other),
+        };
+        Ok(ParamBinding { name, value })
     }
 
     fn parse_match_clause(&mut self) -> Result<Vec<Pattern>, QueryError> {

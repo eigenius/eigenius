@@ -38,6 +38,12 @@ pub struct FiberRuntime<'a> {
     pub index: Option<&'a InstitutionIndex>,
     /// `Institution` trait implementations keyed by institution IRI.
     pub runtime: Option<&'a InstitutionRuntime>,
+    /// Kernel ComponentRegistry, used only by FIBER comorphism
+    /// coercion (D2 v2 §3.5 / §6.12) to dispatch the transformation
+    /// Component step of the four-step pipeline. Coercion errors at
+    /// evaluation time when this is `None`. v1 restricts the cited
+    /// transformation Component to Pure or Read capability levels.
+    pub components: Option<&'a crate::program::component::ComponentRegistry>,
     pub ctx: Option<&'a ExecutionContext>,
 }
 
@@ -382,7 +388,27 @@ fn apply_fiber_clause(
                     ))
                 })?,
             };
-            let value = eval_expression(&param.expression, binding, layer, runtime)?;
+            let value = match &param.value {
+                ParamValue::Expression(expr) => eval_expression(expr, binding, layer, runtime)?,
+                ParamValue::Comorphism { name, source } => {
+                    let components = runtime.components.ok_or_else(|| {
+                        QueryError::evaluation(
+                            "FIBER comorphism coercion requires a ComponentRegistry — not \
+                             available in this execution context",
+                        )
+                    })?;
+                    eval_comorphism_coercion(
+                        name,
+                        source,
+                        binding,
+                        layer,
+                        index,
+                        inst_runtime,
+                        components,
+                        ctx,
+                    )?
+                }
+            };
             query_res.set(param_iri, value);
         }
 
@@ -427,6 +453,177 @@ fn resolve_fiber_institution(
                     "FIBER references undeclared institution alias '{alias}'"
                 ))
             }),
+    }
+}
+
+/// Run the four-step comorphism pipeline for a FIBER param coercion
+/// (D2 v2 §3.5 / §6.12). Mirrors the kernel-side
+/// [`crate::nbe::eval::try_d14_institution_invoke`] but operates on
+/// EigenQL `Value`s and dispatches the transformation Component
+/// directly via `BuiltinComponent::execute` — v1 restricts coercion
+/// transformations to Pure/Read so we don't need IO mode plumbing.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_comorphism_coercion(
+    name: &Name,
+    source: &Expression,
+    binding: &Binding,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    inst_runtime: &InstitutionRuntime,
+    components: &crate::program::component::ComponentRegistry,
+    ctx: &ExecutionContext,
+) -> Result<Value, QueryError> {
+    // Resolve the comorphism by name / IRI to its index entry.
+    let comorphism_iri = match name {
+        Name::FullIri(i) => i.clone(),
+        Name::ShortName(short) => Iri::parse(short).map_err(|_| {
+            QueryError::evaluation(format!(
+                "comorphism_coercion: '{short}' is not a parseable IRI"
+            ))
+        })?,
+    };
+    let comorphism = index.comorphism(&comorphism_iri).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}` not registered in InstitutionIndex"
+        ))
+    })?;
+
+    // Source-side institution lookup.
+    let export = index
+        .export_format(&comorphism.export_format)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: export_format `{}` not in InstitutionIndex",
+                comorphism.export_format
+            ))
+        })?;
+    let source_inst = inst_runtime.get(&export.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: source institution `{}` not registered in runtime",
+            export.institution_ref
+        ))
+    })?;
+
+    // Evaluate the source expression against the current binding;
+    // unwrap an Embedded resource or dereference a String → IRI →
+    // resource lookup. Other primitive values are wrapped on a
+    // single core:value property.
+    let source_value = eval_expression(source, binding, layer, FiberRuntime::default())?;
+    let source_resource = value_to_source_resource(&source_value, layer);
+
+    // Step 2 — extract typed payload via the source institution.
+    let typed_source = source_inst
+        .extract_typed(&export.procedure, &source_resource, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: extract_typed via `{}` failed: {e}",
+                export.procedure
+            ))
+        })?;
+    let typed_resource = match typed_source {
+        crate::nbe::val::Val::ResourceVal(r) => *r,
+        other => {
+            return Err(QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: extract_typed returned {other:?}, but the \
+                 EigenQL four-step pipeline only marshals ResourceVal payloads in v1"
+            )));
+        }
+    };
+
+    // Step 3 — apply the transformation Component.
+    let component = components
+        .get(comorphism.transformation.as_str())
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: transformation Component `{}` not registered",
+                comorphism.transformation
+            ))
+        })?;
+    let transformed_resource = component
+        .execute(&typed_resource, None, layer)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: transformation `{}` failed: {e}",
+                comorphism.transformation
+            ))
+        })?
+        .output;
+
+    // Step 4 — target-side institution reify.
+    let import = index
+        .import_format(&comorphism.import_format)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: import_format `{}` not in InstitutionIndex",
+                comorphism.import_format
+            ))
+        })?;
+    let target_inst = inst_runtime.get(&import.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: target institution `{}` not registered in runtime",
+            import.institution_ref
+        ))
+    })?;
+    let transformed_val = crate::nbe::val::Val::ResourceVal(Box::new(transformed_resource));
+    let target_resource = target_inst
+        .reify(&import.procedure, &transformed_val, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: reify via `{}` failed: {e}",
+                import.procedure
+            ))
+        })?;
+
+    // Post-translation validation invariant (D14 §9.3 step 5).
+    let post_errors = crate::institution::dispatch::dispatch_auto_on_load_for_resource(
+        &target_resource,
+        index,
+        inst_runtime,
+        ctx,
+    );
+    if !post_errors.is_empty() {
+        let reasons = post_errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: post-translation validation rejected the reified \
+             resource: {reasons}"
+        )));
+    }
+
+    Ok(Value::Embedded(Box::new(target_resource)))
+}
+
+/// Convert a FIBER param-coercion source `Value` to a Resource.
+/// Embedded values pass through; IRI-shaped Strings dereference
+/// against the layer; all other shapes are wrapped on a single
+/// `core:value` property.
+fn value_to_source_resource(value: &Value, layer: &Layer) -> Resource {
+    match value {
+        Value::Embedded(r) => r.as_ref().clone(),
+        Value::String(s) => {
+            if let Ok(iri) = Iri::parse(s) {
+                if let Some(r) = layer.resolve(&iri) {
+                    return r.clone();
+                }
+            }
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                Value::String(s.clone()),
+            );
+            r
+        }
+        other => {
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                other.clone(),
+            );
+            r
+        }
     }
 }
 
@@ -1758,6 +1955,7 @@ mod tests {
         let runtime = FiberRuntime {
             index: Some(&index),
             runtime: Some(&inst_runtime),
+            components: None,
             ctx: Some(&exec_ctx),
         };
 
@@ -1813,6 +2011,7 @@ mod tests {
         let runtime = FiberRuntime {
             index: Some(&index),
             runtime: Some(&inst_runtime),
+            components: None,
             ctx: Some(&exec_ctx),
         };
 
@@ -1915,6 +2114,83 @@ mod tests {
             project(VerdictPredicate::Undecidable),
             Value::Boolean(false)
         );
+    }
+
+    // ─── D2 v2 §3.5 — comorphism coercion in FIBER param values ────────
+
+    #[test]
+    fn parser_recognises_comorphism_coercion_in_fiber_param() {
+        // A single-arg qualified-name function call in FIBER param value
+        // position is a comorphism coercion: parser produces
+        // ParamValue::Comorphism { name, source }, not
+        // ParamValue::Expression(FunctionCall).
+        use crate::query::ast::{Clause, ParamValue};
+        let source = r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?d {}
+            FIBER assay:within_tolerance {
+                predicted_ic50: dock:dock_to_assay(?d)
+            } AS ?v
+            RETURN [] { d: ?d }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse FIBER + coercion");
+        let fiber = program
+            .query
+            .body
+            .clauses
+            .iter()
+            .find_map(|c| match c {
+                Clause::Fiber(fc) => Some(fc),
+                _ => None,
+            })
+            .expect("FIBER clause");
+        let predicted = fiber
+            .params
+            .iter()
+            .find(|p| matches!(&p.name, Name::ShortName(s) if s == "predicted_ic50"))
+            .expect("predicted_ic50 param");
+        match &predicted.value {
+            ParamValue::Comorphism { name, .. } => match name {
+                Name::ShortName(s) => assert_eq!(s, "dock:dock_to_assay"),
+                Name::FullIri(i) => assert_eq!(i.as_str(), "dock:dock_to_assay"),
+            },
+            other => panic!("expected ParamValue::Comorphism, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_treats_multi_arg_qualified_call_as_expression() {
+        // Multi-arg qualified-name function calls stay as Expression
+        // in FIBER param value position (comorphisms are unary by
+        // construction).
+        use crate::query::ast::{Clause, Expression, ParamValue};
+        let source = r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?d {}
+            FIBER assay:within_tolerance {
+                predicted_ic50: cap:multi(?d, 1.0)
+            } AS ?v
+            RETURN [] { d: ?d }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse FIBER + multi-arg");
+        let fiber = program
+            .query
+            .body
+            .clauses
+            .iter()
+            .find_map(|c| match c {
+                Clause::Fiber(fc) => Some(fc),
+                _ => None,
+            })
+            .expect("FIBER clause");
+        match &fiber.params[0].value {
+            ParamValue::Expression(Expression::FunctionCall { args, .. }) => {
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected ParamValue::Expression(FunctionCall), got {other:?}"),
+        }
     }
 
     #[test]
