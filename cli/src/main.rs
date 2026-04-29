@@ -45,6 +45,10 @@ enum Commands {
         /// Path to Eigon-JSON file
         #[arg(value_name = "FILE")]
         file: String,
+
+        /// Branch to commit into (defaults to "main"). Remote mode only.
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Validate an Eigon-JSON file without loading
@@ -67,8 +71,13 @@ enum Commands {
         /// Evaluate the query against a specific LayerId (hex-encoded SHA-256)
         /// instead of the session's active top (D21 §3.6). Useful for
         /// reaching a forked task result layer. Remote mode only.
-        #[arg(long, value_name = "LAYER_ID")]
+        #[arg(long, value_name = "LAYER_ID", conflicts_with = "branch")]
         at_layer: Option<String>,
+
+        /// Pin reads to this branch's current head. Mutually exclusive
+        /// with --at-layer. Remote mode only.
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Type-check a program
@@ -92,6 +101,10 @@ enum Commands {
         /// Path to input file (Eigon-JSON or ESL)
         #[arg(value_name = "INPUT_FILE")]
         input_file: String,
+
+        /// Branch the trace layer commits into (defaults to "main").
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Print a resource by IRI
@@ -103,8 +116,13 @@ enum Commands {
         /// Resolve against a specific LayerId (hex-encoded SHA-256)
         /// instead of the session's active top (D21 §3.6). Remote
         /// mode only.
-        #[arg(long, value_name = "LAYER_ID")]
+        #[arg(long, value_name = "LAYER_ID", conflicts_with = "branch")]
         at_layer: Option<String>,
+
+        /// Pin reads to this branch's current head. Mutually exclusive
+        /// with --at-layer. Remote mode only.
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Start the gRPC server
@@ -334,20 +352,52 @@ async fn main() {
     // Remote mode: delegate to gRPC client
     if let Some(ref endpoint) = cli.endpoint {
         match cli.command {
-            Commands::Inspect { iri, at_layer } => {
-                remote_inspect(endpoint, &iri, at_layer.as_deref(), cli.json).await
+            Commands::Inspect {
+                iri,
+                at_layer,
+                branch,
+            } => {
+                remote_inspect(
+                    endpoint,
+                    &iri,
+                    at_layer.as_deref(),
+                    branch.as_deref(),
+                    cli.json,
+                )
+                .await
             }
             Commands::Query {
                 query,
                 file: _,
                 at_layer,
-            } => remote_query(endpoint, &query, at_layer.as_deref(), cli.json).await,
+                branch,
+            } => {
+                remote_query(
+                    endpoint,
+                    &query,
+                    at_layer.as_deref(),
+                    branch.as_deref(),
+                    cli.json,
+                )
+                .await
+            }
             Commands::Run {
                 program_file,
                 input_file,
-                ..
-            } => remote_run(endpoint, &program_file, &input_file, cli.json).await,
-            Commands::Load { file } => remote_load(endpoint, &file, cli.json).await,
+                branch,
+            } => {
+                remote_run(
+                    endpoint,
+                    &program_file,
+                    &input_file,
+                    branch.as_deref(),
+                    cli.json,
+                )
+                .await
+            }
+            Commands::Load { file, branch } => {
+                remote_load(endpoint, &file, branch.as_deref(), cli.json).await
+            }
             Commands::Reflect { file } => remote_reflect(endpoint, &file, cli.json).await,
             Commands::ListInstitutions => remote_list_institutions(endpoint, cli.json).await,
             Commands::GetSchema { class_iri } => {
@@ -372,7 +422,7 @@ async fn main() {
 
     // Local mode: embedded kernel
     match cli.command {
-        Commands::Load { file } => cmd_load(&file, cli.json),
+        Commands::Load { file, .. } => cmd_load(&file, cli.json),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
         Commands::Query { query, file, .. } => cmd_query(&query, file.as_deref(), cli.json),
         Commands::ProgramValidate {
@@ -963,12 +1013,19 @@ async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport
         .max_encoding_message_size(128 * 1024 * 1024)
 }
 
-async fn remote_inspect(endpoint: &str, iri_str: &str, at_layer: Option<&str>, json_output: bool) {
+async fn remote_inspect(
+    endpoint: &str,
+    iri_str: &str,
+    at_layer: Option<&str>,
+    branch: Option<&str>,
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::InspectRequest {
         at_layer: at_layer.unwrap_or("").to_string(),
         iri: iri_str.to_string(),
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.inspect(request).await {
@@ -999,12 +1056,19 @@ async fn remote_inspect(endpoint: &str, iri_str: &str, at_layer: Option<&str>, j
     }
 }
 
-async fn remote_query(endpoint: &str, eigenql: &str, at_layer: Option<&str>, json_output: bool) {
+async fn remote_query(
+    endpoint: &str,
+    eigenql: &str,
+    at_layer: Option<&str>,
+    branch: Option<&str>,
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::QueryRequest {
         at_layer: at_layer.unwrap_or("").to_string(),
         eigenql: eigenql.to_string(),
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.query(request).await {
@@ -1040,7 +1104,13 @@ async fn remote_query(endpoint: &str, eigenql: &str, at_layer: Option<&str>, jso
     }
 }
 
-async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_output: bool) {
+async fn remote_run(
+    endpoint: &str,
+    program_file: &str,
+    input_file: &str,
+    branch: Option<&str>,
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     // Compile ESL files client-side since program and input may have different formats
@@ -1051,6 +1121,7 @@ async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_o
         program: program_data,
         input: input_data,
         content_type: "application/eigon+json".to_string(),
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.run_program(request).await {
@@ -1084,7 +1155,7 @@ async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_o
     }
 }
 
-async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
+async fn remote_load(endpoint: &str, file: &str, branch: Option<&str>, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     let data = std::fs::read(file).unwrap_or_else(|e| {
@@ -1097,6 +1168,7 @@ async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
         resources: data,
         content_type,
         auto_commit: true,
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.load(request).await {
@@ -1105,13 +1177,13 @@ async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
             if resp.success {
                 if json_output {
                     println!(
-                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\"}}",
-                        resp.resource_count, resp.layer_id
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\"}}",
+                        resp.resource_count, resp.layer_id, resp.branch
                     );
                 } else {
                     println!(
-                        "Loaded {} resource(s). Layer: {}",
-                        resp.resource_count, resp.layer_id
+                        "Loaded {} resource(s) into branch {}. Layer: {}",
+                        resp.resource_count, resp.branch, resp.layer_id
                     );
                 }
             } else {
@@ -1137,6 +1209,7 @@ async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
     let request = eigenius_kernel::server::proto::ReflectRequest {
         trace: data,
         content_type: "application/eigon+json".to_string(),
+        branch: String::new(),
     };
 
     match client.reflect(request).await {
@@ -1621,6 +1694,7 @@ async fn run_query(
         .query(eigenius_kernel::server::proto::QueryRequest {
             at_layer: String::new(),
             eigenql: eigenql.to_string(),
+            branch: String::new(),
         })
         .await
     {
@@ -1746,6 +1820,7 @@ async fn remote_capability_inspect(endpoint: &str, iri: &str, json: bool) {
     let request = eigenius_kernel::server::proto::InspectRequest {
         at_layer: String::new(),
         iri: iri.to_string(),
+        branch: String::new(),
     };
 
     match client.inspect(request).await {
@@ -1891,6 +1966,7 @@ async fn remote_capability_install(
         resources: resource_json.into_bytes(),
         content_type: "application/eigon+json".to_string(),
         auto_commit: true,
+        branch: String::new(),
     };
 
     match client.load(request).await {
@@ -2188,6 +2264,7 @@ async fn remote_capability_test(
                 program: program_json.into_bytes(),
                 input: input_json,
                 content_type: "application/eigon+json".to_string(),
+                branch: String::new(),
             })
             .await
         {

@@ -117,6 +117,9 @@ message LoadRequest {
   bytes resources = 1;          // Resources as CBOR or Eigon-JSON
   string content_type = 2;      // "application/cbor" or "application/eigon+json"
   bool auto_commit = 3;         // Commit after successful validation
+  // Branch to commit into (Phase 14g). Empty defaults to "main".
+  // Branch must already exist — create with CreateBranch first.
+  string branch = 4;
 }
 
 message LoadResponse {
@@ -124,6 +127,8 @@ message LoadResponse {
   repeated ValidationError errors = 2;
   string layer_id = 3;          // Set if auto_commit succeeded
   uint32 resource_count = 4;
+  // Echoes the branch this Load committed to (defaults to "main").
+  string branch = 5;
 }
 
 // --- Inspect ---
@@ -134,6 +139,9 @@ message InspectRequest {
   // instead of the session's active top (D21 §3.6). Empty = active top.
   // Useful for inspecting forked task result layers.
   string at_layer = 2;
+  // Optional branch name (Phase 14g). Pin reads to this branch's
+  // current head. Mutually exclusive with `at_layer`. Empty = "main".
+  string branch = 3;
 }
 
 message InspectResponse {
@@ -148,6 +156,9 @@ message QueryRequest {
   // Optional hex-encoded LayerId to evaluate the query against a
   // specific layer instead of the session's active top (D21 §3.6).
   string at_layer = 2;
+  // Optional branch name (Phase 14g). Pin reads to this branch's
+  // current head. Mutually exclusive with `at_layer`. Empty = "main".
+  string branch = 3;
 }
 
 message QueryResponse {
@@ -181,6 +192,8 @@ message RunProgramRequest {
   bytes program = 1;            // Program as CBOR or Eigon-JSON
   bytes input = 2;              // Input as CBOR or Eigon-JSON
   string content_type = 3;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  string branch = 4;
 }
 
 message RunProgramResponse {
@@ -201,6 +214,9 @@ message RunProgramByIriRequest {
   // Optional hex-encoded LayerId to pin both reads to a specific layer
   // instead of the session's active top (D21 §3.6). Empty = active top.
   string at_layer = 3;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  // Reads still respect `at_layer` independently of `branch`.
+  string branch = 4;
 }
 
 // --- Reflect ---
@@ -208,6 +224,8 @@ message RunProgramByIriRequest {
 message ReflectRequest {
   bytes trace = 1;
   string content_type = 2;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  string branch = 3;
 }
 
 message ReflectResponse {

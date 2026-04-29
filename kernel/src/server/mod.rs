@@ -18,13 +18,15 @@
 //! See design doc D5 for the full API specification.
 
 use crate::bootstrap;
-use crate::context::ExecutionContext;
+use crate::context::{ExecutionContext, ExecutionMode};
+use crate::layer::{build_chain, LayerStorage};
 use crate::observability::{field, operation, RpcGuard};
 use crate::ontology::{eigon_cbor, eigon_json, Iri, Resource};
 use crate::program::component::ComponentRegistry;
 use crate::program::expr;
 use crate::program::trace::{InMemoryTraceStore, TraceStore};
 use crate::query;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
@@ -337,8 +339,50 @@ async fn resume_one_task(
 }
 
 /// The Eigenius gRPC service implementation.
+/// Default branch name for requests that omit `branch`. Phase 14g.
+pub const DEFAULT_BRANCH: &str = "main";
+
+/// Resolve a request's branch field (empty → "main").
+fn resolve_branch_name(req_branch: &str) -> &str {
+    if req_branch.is_empty() {
+        DEFAULT_BRANCH
+    } else {
+        req_branch
+    }
+}
+
+/// Per-branch ExecutionContext cache (Phase 14g).
+///
+/// Each branch the server has touched lives in this map as an
+/// `Arc<RwLock<ExecutionContext>>`. The cache is populated lazily:
+/// requests targeting an unseen branch trigger a `get_branch` lookup
+/// against the backend and a chain rehydration via `load_chain_from`.
+///
+/// `"main"` is seeded eagerly at construction time so the in-memory
+/// (no-backend) path keeps working — that path can never serve any
+/// branch but `"main"`.
+///
+/// **Concurrency.** The outer `RwLock<HashMap>` is held only for the
+/// lookup/insert; per-branch operations work against the inner
+/// `Arc<RwLock<ExecutionContext>>` so different branches don't
+/// contend on each other.
+struct BranchContextCache {
+    contexts: RwLock<HashMap<String, Arc<RwLock<ExecutionContext>>>>,
+}
+
+impl BranchContextCache {
+    fn new(main_ctx: ExecutionContext) -> Self {
+        let mut map = HashMap::new();
+        map.insert(DEFAULT_BRANCH.to_string(), Arc::new(RwLock::new(main_ctx)));
+        Self {
+            contexts: RwLock::new(map),
+        }
+    }
+}
+
 pub struct EigeniusService {
-    context: Arc<RwLock<ExecutionContext>>,
+    /// Per-branch ExecutionContext cache. `"main"` is always present.
+    branch_contexts: Arc<BranchContextCache>,
     /// Outer lock allows swapping the registry (for WASM registration on load).
     /// Inner Arc allows cheap cloning for passing to the evaluator.
     components: Arc<RwLock<Arc<ComponentRegistry>>>,
@@ -391,7 +435,7 @@ impl EigeniusService {
     pub fn with_components(components: ComponentRegistry) -> Result<Self, String> {
         let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
         Ok(Self {
-            context: Arc::new(RwLock::new(ctx)),
+            branch_contexts: Arc::new(BranchContextCache::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store: Arc::new(InMemoryTraceStore::new()),
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
@@ -432,7 +476,7 @@ impl EigeniusService {
             Arc::new(crate::task::BackendTaskStore::new(Arc::clone(&backend)));
 
         Ok(Self {
-            context: Arc::new(RwLock::new(ctx)),
+            branch_contexts: Arc::new(BranchContextCache::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
@@ -467,7 +511,7 @@ impl EigeniusService {
     ) -> Result<Self, String> {
         let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap failed: {e}"))?;
         Ok(Self {
-            context: Arc::new(RwLock::new(ctx)),
+            branch_contexts: Arc::new(BranchContextCache::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
             institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
@@ -513,6 +557,58 @@ impl EigeniusService {
         self.session.read().await.session_id
     }
 
+    /// Look up — and lazy-build — the `ExecutionContext` for `branch`.
+    ///
+    /// Phase 14g per-branch dispatch. `"main"` is always present (seeded
+    /// at construction). Other branches are loaded on first reference by
+    /// reading `backend.get_branch(name)` and rehydrating the chain via
+    /// `load_chain_from`.
+    ///
+    /// Returns:
+    /// - `Status::not_found` when the branch ref doesn't exist.
+    /// - `Status::failed_precondition` when the in-memory variant is
+    ///   asked for any branch other than `"main"`.
+    async fn get_branch_context(
+        &self,
+        branch: &str,
+    ) -> Result<Arc<RwLock<ExecutionContext>>, Status> {
+        // Hot path: cache hit.
+        {
+            let cache = self.branch_contexts.contexts.read().await;
+            if let Some(ctx) = cache.get(branch) {
+                return Ok(Arc::clone(ctx));
+            }
+        }
+
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "branch {branch:?} not available: in-memory mode only serves {DEFAULT_BRANCH:?}"
+            ))
+        })?;
+
+        // Slow path: write-lock + double-check + lazy build.
+        let mut cache = self.branch_contexts.contexts.write().await;
+        if let Some(ctx) = cache.get(branch) {
+            return Ok(Arc::clone(ctx));
+        }
+        let head_id = backend
+            .get_branch(branch)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+            .ok_or_else(|| Status::not_found(format!("branch {branch:?} does not exist")))?;
+        let storage = LayerStorage::with_persistent(Arc::clone(backend));
+        let info = backend
+            .load_chain_from(&head_id)
+            .map_err(|e| Status::internal(format!("load_chain_from failed: {e}")))?
+            .ok_or_else(|| {
+                Status::not_found(format!("branch {branch:?} head {head_id} not in store"))
+            })?;
+        let head = build_chain(info, storage.clone());
+        let ctx = ExecutionContext::new(head, branch, ExecutionMode::ReadWrite, storage);
+        let ctx_arc = Arc::new(RwLock::new(ctx));
+        cache.insert(branch.to_string(), Arc::clone(&ctx_arc));
+        Ok(ctx_arc)
+    }
+
     /// Persist a freshly-committed layer through the backend, if one is
     /// attached. No-op otherwise. See D13 §5.
     ///
@@ -520,14 +616,25 @@ impl EigeniusService {
     /// can surface it to clients without crashing the server.
     /// Resolve the target layer for a read RPC (D21 §3.6 `at_layer`).
     ///
-    /// Empty / invalid hex falls back to the session's active top
-    /// (`context.head()`). When `at_layer` is set and a backend is
-    /// attached, reconstructs the layer chain rooted at that id. Errors
-    /// propagate as `Status::invalid_argument` / `Status::not_found`
-    /// so the client sees a clear failure rather than a silent fallback.
-    async fn resolve_read_layer(&self, at_layer: &str) -> Result<Arc<crate::layer::Layer>, Status> {
+    /// Empty / invalid hex falls back to the named branch's head (or
+    /// `"main"` if `branch` is also empty). When `at_layer` is set and
+    /// a backend is attached, reconstructs the layer chain rooted at
+    /// that id. `at_layer` and `branch` are mutually exclusive — if
+    /// both are set, returns `Status::invalid_argument`.
+    async fn resolve_read_layer(
+        &self,
+        at_layer: &str,
+        branch: &str,
+    ) -> Result<Arc<crate::layer::Layer>, Status> {
+        if !at_layer.is_empty() && !branch.is_empty() {
+            return Err(Status::invalid_argument(
+                "at_layer and branch are mutually exclusive",
+            ));
+        }
         if at_layer.is_empty() {
-            let ctx = self.context.read().await;
+            let branch_name = resolve_branch_name(branch);
+            let ctx_arc = self.get_branch_context(branch_name).await?;
+            let ctx = ctx_arc.read().await;
             return Ok(Arc::clone(ctx.head()));
         }
         let backend = self.backend.as_ref().ok_or_else(|| {
@@ -566,7 +673,11 @@ impl EigeniusService {
         }
     }
 
-    fn persist_layer_if_backend(&self, layer: &crate::layer::Layer) -> Option<ValidationError> {
+    fn persist_layer_if_backend(
+        &self,
+        branch: &str,
+        layer: &crate::layer::Layer,
+    ) -> Option<ValidationError> {
         let backend = self.backend.as_ref()?;
         if let Err(e) = backend.store_layer(layer) {
             tracing::warn!(
@@ -584,15 +695,14 @@ impl EigeniusService {
                 severity: "error".to_string(),
             });
         }
-        // Phase 14g: advance `branch:main` to the new layer via the
-        // lattice's CAS primitive. The expected old head is the new
-        // layer's parent (we just committed a child of the previous
-        // head). Single-branch model for now; ExecutionContext-aware
-        // current-branch tracking is a follow-up.
+        // Phase 14g/14g-ii: advance the request's branch to the new
+        // layer via the lattice's CAS primitive. The expected old head
+        // is the new layer's parent (we just committed a child of the
+        // previous branch head).
         let expected_old = layer.parent().map(|p| p.id().clone());
-        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        let storage = LayerStorage::with_persistent(Arc::clone(backend));
         match crate::lattice::update_branch(
-            "main",
+            branch,
             expected_old,
             layer.id().clone(),
             crate::lattice::ConflictPolicy::AllowTrivial,
@@ -603,8 +713,9 @@ impl EigeniusService {
                 tracing::debug!(
                     { field::OPERATION } = operation::LAYER_COMMIT,
                     { field::LAYER_ID } = %layer.id(),
+                    branch = branch,
                     persisted = true,
-                    "layer persisted to backend and branch:main advanced"
+                    "layer persisted to backend and branch advanced"
                 );
                 None
             }
@@ -613,8 +724,9 @@ impl EigeniusService {
                     { field::OPERATION } = operation::LAYER_COMMIT,
                     { field::ERROR_KIND } = "branch_update_failed",
                     { field::LAYER_ID } = %layer.id(),
+                    branch = branch,
                     { field::ERROR_MESSAGE } = %e,
-                    "failed to advance branch:main"
+                    "failed to advance branch"
                 );
                 Some(ValidationError {
                     resource_iri: String::new(),
@@ -865,9 +977,21 @@ impl EigeniusService {
     /// server at startup when a persistent backend is attached.
     pub async fn rehydrate_wasm_from_chain(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
-        let head = {
-            let ctx = self.context.read().await;
-            Arc::clone(ctx.head())
+        let head = match self.get_branch_context(DEFAULT_BRANCH).await {
+            Ok(ctx_arc) => {
+                let ctx = ctx_arc.read().await;
+                Arc::clone(ctx.head())
+            }
+            Err(status) => {
+                errors.push(ValidationError {
+                    resource_iri: String::new(),
+                    property_iri: String::new(),
+                    rule: "rehydrate".to_string(),
+                    message: format!("get main context: {status}"),
+                    severity: "error".to_string(),
+                });
+                return errors;
+            }
         };
         // Collect root-to-head order so earlier layers register first.
         let mut chain: Vec<Arc<crate::layer::Layer>> = Vec::new();
@@ -934,9 +1058,15 @@ impl EigeniusService {
     /// stamping (D6b §6), and trace-layer commit.
     async fn execute_program(
         &self,
+        branch: &str,
         program: Resource,
         input: Resource,
     ) -> Result<Response<RunProgramResponse>, Status> {
+        // Resolve the per-branch ExecutionContext up front. Same Arc is
+        // used for the layer-head snapshot below (task pin), the eval
+        // step (read), and the trace-layer commit (write).
+        let ctx_arc = self.get_branch_context(branch).await?;
+
         // D21 §3.1: allocate a task for this invocation. When a task
         // store is attached (persistent backend), the record is
         // persisted on entry and again on completion so a mid-flight
@@ -949,7 +1079,7 @@ impl EigeniusService {
                 let session_id = self.session.read().await.session_id;
                 let task_id = uuid::Uuid::new_v4();
                 let layer_head = {
-                    let ctx = self.context.read().await;
+                    let ctx = ctx_arc.read().await;
                     ctx.head().id().clone()
                 };
                 let program_iri = program
@@ -984,7 +1114,7 @@ impl EigeniusService {
         // Execute via NbE in IO mode
         let started_at_ms = now_millis();
         let exec_result = {
-            let ctx = self.context.read().await;
+            let ctx = ctx_arc.read().await;
             let components = Arc::clone(&*self.components.read().await);
             // Pass an empty institution registry — the pre-Phase-9b-iii
             // RunProgram path already did this; fiber queries go
@@ -1118,7 +1248,7 @@ impl EigeniusService {
 
         // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
         let result_layer_head = {
-            let mut ctx = self.context.write().await;
+            let mut ctx = ctx_arc.write().await;
             // Add ProgramTrace
             if let Err(e) = ctx.add_resource(trace_resource) {
                 tracing::warn!(
@@ -1140,7 +1270,7 @@ impl EigeniusService {
                     // Best-effort persist of the trace layer. A failure here
                     // logs but doesn't fail the RunProgram call — the output
                     // is still valid, the trace just isn't durable.
-                    if let Some(err) = self.persist_layer_if_backend(&layer) {
+                    if let Some(err) = self.persist_layer_if_backend(branch, &layer) {
                         tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "trace_persist_failed",
@@ -1200,16 +1330,19 @@ impl EigeniusKernel for EigeniusService {
     async fn load(&self, request: Request<LoadRequest>) -> Result<Response<LoadResponse>, Status> {
         let mut guard = RpcGuard::start(operation::RPC_LOAD);
         let req = request.into_inner();
+        let branch = resolve_branch_name(&req.branch).to_string();
         tracing::debug!(
             { field::OPERATION } = operation::RPC_LOAD,
             { field::CONTENT_TYPE } = %req.content_type,
             { field::SIZE_BYTES } = req.resources.len(),
+            branch = %branch,
             "load payload"
         );
         let resources = Self::parse_resources(&req.resources, &req.content_type)?;
         let count = resources.len() as u32;
 
-        let mut ctx = self.context.write().await;
+        let ctx_arc = self.get_branch_context(&branch).await?;
+        let mut ctx = ctx_arc.write().await;
         for resource in resources {
             ctx.add_resource(resource)
                 .map_err(|e| Status::failed_precondition(format!("load error: {e}")))?;
@@ -1226,10 +1359,11 @@ impl EigeniusKernel for EigeniusService {
                         { field::OPERATION } = operation::LAYER_COMMIT,
                         { field::LAYER_ID } = %layer_id,
                         { field::COUNT } = count,
+                        branch = %branch,
                         "layer committed"
                     );
                     drop(ctx);
-                    if let Some(err) = self.persist_layer_if_backend(&layer) {
+                    if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
                         errors.push(err);
                     }
                     // Scan the newly committed layer for WASM components/institutions.
@@ -1240,7 +1374,7 @@ impl EigeniusKernel for EigeniusService {
                     // Commit the published institution classes as a follow-up layer
                     // so they become queryable via EigenQL / inspect. Closes #15.
                     if !published.is_empty() {
-                        let mut ctx = self.context.write().await;
+                        let mut ctx = ctx_arc.write().await;
                         for resource in published {
                             if let Err(e) = ctx.add_resource(resource) {
                                 errors.push(ValidationError {
@@ -1258,7 +1392,9 @@ impl EigeniusKernel for EigeniusService {
                             match ctx.commit("institution_classes") {
                                 Ok(extra) => {
                                     drop(ctx);
-                                    if let Some(err) = self.persist_layer_if_backend(&extra) {
+                                    if let Some(err) =
+                                        self.persist_layer_if_backend(&branch, &extra)
+                                    {
                                         errors.push(err);
                                     }
                                 }
@@ -1331,6 +1467,7 @@ impl EigeniusKernel for EigeniusService {
             errors,
             layer_id,
             resource_count: count,
+            branch,
         };
         if !response.success {
             guard.fail("validation_failed");
@@ -1357,7 +1494,7 @@ impl EigeniusKernel for EigeniusService {
         let iri = Iri::parse(&req.iri)
             .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
 
-        let layer = self.resolve_read_layer(&req.at_layer).await?;
+        let layer = self.resolve_read_layer(&req.at_layer, &req.branch).await?;
         match layer.resolve(&iri) {
             Some(resource) => Ok(Response::new(InspectResponse {
                 found: true,
@@ -1381,8 +1518,10 @@ impl EigeniusKernel for EigeniusService {
             { field::SIZE_BYTES } = req.eigenql.len(),
             "query payload"
         );
-        let layer = self.resolve_read_layer(&req.at_layer).await?;
-        let ctx = self.context.read().await;
+        let layer = self.resolve_read_layer(&req.at_layer, &req.branch).await?;
+        let branch_name = resolve_branch_name(&req.branch).to_string();
+        let ctx_arc = self.get_branch_context(&branch_name).await?;
+        let ctx = ctx_arc.read().await;
         let institutions = self.institutions.read().await;
 
         let runtime = query::evaluate::FiberRuntime {
@@ -1430,7 +1569,8 @@ impl EigeniusKernel for EigeniusService {
             .next()
             .ok_or_else(|| Status::invalid_argument("no program resource"))?;
 
-        let ctx = self.context.read().await;
+        let ctx_arc = self.get_branch_context(DEFAULT_BRANCH).await?;
+        let ctx = ctx_arc.read().await;
 
         match expr::parse_program(&program, ctx.head()) {
             Ok((_term, typ)) => {
@@ -1549,7 +1689,8 @@ impl EigeniusKernel for EigeniusService {
             .next()
             .ok_or_else(|| Status::invalid_argument("no input resource"))?;
 
-        self.execute_program(program, input).await
+        let branch = resolve_branch_name(&req.branch).to_string();
+        self.execute_program(&branch, program, input).await
     }
 
     async fn run_program_by_iri(
@@ -1576,7 +1717,7 @@ impl EigeniusKernel for EigeniusService {
         let input_iri = Iri::parse(&req.input_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid input_iri: {e}")))?;
 
-        let layer = self.resolve_read_layer(&req.at_layer).await?;
+        let layer = self.resolve_read_layer(&req.at_layer, &req.branch).await?;
         let program = layer
             .resolve(&program_iri)
             .map(|arc| (*arc).clone())
@@ -1590,7 +1731,8 @@ impl EigeniusKernel for EigeniusService {
                 Status::not_found(format!("input resource not found: {}", req.input_iri))
             })?;
 
-        self.execute_program(program, input).await
+        let branch = resolve_branch_name(&req.branch).to_string();
+        self.execute_program(&branch, program, input).await
     }
 
     async fn reflect(
@@ -1616,7 +1758,9 @@ impl EigeniusKernel for EigeniusService {
             .unwrap_or_default();
 
         // Commit all trace resources to a new layer
-        let mut ctx = self.context.write().await;
+        let branch = resolve_branch_name(&req.branch).to_string();
+        let ctx_arc = self.get_branch_context(&branch).await?;
+        let mut ctx = ctx_arc.write().await;
         for resource in resources {
             ctx.add_resource(resource)
                 .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
@@ -1624,7 +1768,8 @@ impl EigeniusKernel for EigeniusService {
         let layer = ctx
             .commit("reflect")
             .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
-        if let Some(err) = self.persist_layer_if_backend(&layer) {
+        drop(ctx);
+        if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
             return Err(Status::internal(format!(
                 "reflect persist failed: {}",
                 err.message
@@ -1645,7 +1790,8 @@ impl EigeniusKernel for EigeniusService {
         // `info` filter, so frequent probes don't add log noise but
         // remain inspectable when debugging readiness/liveness.
         let _guard = RpcGuard::start(operation::RPC_HEALTH);
-        let ctx = self.context.read().await;
+        let ctx_arc = self.get_branch_context(DEFAULT_BRANCH).await?;
+        let ctx = ctx_arc.read().await;
         let resource_count = ctx.head().iter_all_resources().count() as u64;
 
         // D21 §6 resume observability — populated by the resume
@@ -1689,7 +1835,8 @@ impl EigeniusKernel for EigeniusService {
             .next()
             .ok_or_else(|| Status::invalid_argument("no query resource"))?;
 
-        let ctx = self.context.read().await;
+        let ctx_arc = self.get_branch_context(DEFAULT_BRANCH).await?;
+        let ctx = ctx_arc.read().await;
         match reasoner.query(&query, &ctx) {
             Ok(result) => Ok(Response::new(FiberQueryResponse {
                 success: true,
@@ -1732,7 +1879,8 @@ impl EigeniusKernel for EigeniusService {
             resources.extend(parsed);
         }
 
-        let ctx = self.context.read().await;
+        let ctx_arc = self.get_branch_context(DEFAULT_BRANCH).await?;
+        let ctx = ctx_arc.read().await;
         match reasoner.discover_morphisms(&resources, &ctx) {
             Ok(morphisms) => {
                 let serialized: Vec<Vec<u8>> =
@@ -1766,7 +1914,7 @@ impl EigeniusKernel for EigeniusService {
         // would branch. For 9b-iii we validate + ignore.
         let req = request.into_inner();
         if !req.at_layer.is_empty() {
-            let _ = self.resolve_read_layer(&req.at_layer).await?;
+            let _ = self.resolve_read_layer(&req.at_layer, "").await?;
         }
         let institutions = self.institutions.read().await;
         let infos: Vec<proto::InstitutionInfo> = institutions
@@ -1807,7 +1955,7 @@ impl EigeniusKernel for EigeniusService {
         let class_iri = Iri::parse(&req.class_iri)
             .map_err(|e| Status::invalid_argument(format!("invalid IRI: {e}")))?;
 
-        let layer = self.resolve_read_layer(&req.at_layer).await?;
+        let layer = self.resolve_read_layer(&req.at_layer, "").await?;
         match crate::program::schema::schema_for_class(&class_iri, &layer) {
             Ok((schema, _table)) => Ok(Response::new(GetSchemaResponse {
                 success: true,
@@ -1952,7 +2100,7 @@ impl EigeniusKernel for EigeniusService {
     ) -> Result<Response<LayerTopologyResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_LAYER_TOPOLOGY);
         let req = request.into_inner();
-        let layer = self.resolve_read_layer(&req.root_layer).await?;
+        let layer = self.resolve_read_layer(&req.root_layer, "").await?;
         let topo = topology::walk(&layer, req.max_depth, req.include_resources);
         tracing::debug!(
             { field::OPERATION } = operation::RPC_LAYER_TOPOLOGY,

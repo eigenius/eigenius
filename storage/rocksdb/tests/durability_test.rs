@@ -123,6 +123,7 @@ async fn install_and_dispatch(service: &EigeniusService) {
             resources: institution_install_json().into_bytes(),
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
+            branch: String::new(),
         }))
         .await
         .expect("load rpc")
@@ -134,6 +135,7 @@ async fn install_and_dispatch(service: &EigeniusService) {
         .inspect(Request::new(InspectRequest {
             at_layer: String::new(),
             iri: REFINEMENT_CLASS.to_string(),
+            branch: String::new(),
         }))
         .await
         .expect("inspect rpc")
@@ -179,6 +181,7 @@ async fn dispatch_only(service: &EigeniusService) {
         .inspect(Request::new(InspectRequest {
             at_layer: String::new(),
             iri: REFINEMENT_CLASS.to_string(),
+            branch: String::new(),
         }))
         .await
         .expect("inspect rpc")
