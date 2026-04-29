@@ -745,6 +745,10 @@ fn eval_expression(
             let v = eval_expression(operand, binding, layer, runtime)?;
             eval_unary(*op, &v)
         }
+        Expression::VerdictPredicate { kind, operand } => {
+            let v = eval_expression(operand, binding, layer, runtime)?;
+            eval_verdict_predicate(*kind, &v)
+        }
         Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
         Expression::FunctionCall { name, args } => {
             let arg_vals: Result<Vec<Value>, QueryError> = args
@@ -991,6 +995,35 @@ fn eval_unary(op: UnaryOp, val: &Value) -> Result<Value, QueryError> {
     }
 }
 
+/// Project a `Verdict`-typed value to `Boolean` per a postfix predicate
+/// (D2 v2 §3.7 / §3.8). The operand is expected to be a Verdict
+/// resource (`Value::Embedded`) carrying `ctor_name`. Returns `true`
+/// iff the constructor matches the predicate.
+fn eval_verdict_predicate(
+    kind: crate::query::ast::VerdictPredicate,
+    val: &Value,
+) -> Result<Value, QueryError> {
+    let resource = match val {
+        Value::Embedded(r) => r.as_ref(),
+        other => {
+            return Err(QueryError::evaluation(format!(
+                "{kw} expects a Verdict-typed operand; got {other:?}",
+                kw = kind.ctor_name(),
+            )));
+        }
+    };
+    let ctor_iri = Iri::parse(wk::CTOR_NAME).expect("well-known IRI");
+    let ctor = resource
+        .get(&ctor_iri)
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            QueryError::evaluation(
+                "Verdict postfix predicate operand carries no `ctor_name` property",
+            )
+        })?;
+    Ok(Value::Boolean(ctor == kind.ctor_name()))
+}
+
 fn literal_to_value(lit: &Literal) -> Value {
     match lit {
         Literal::String(s) => Value::String(s.clone()),
@@ -1014,6 +1047,7 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
             expr_has_aggregate(left) || expr_has_aggregate(right)
         }
         Expression::Unary { operand, .. } => expr_has_aggregate(operand),
+        Expression::VerdictPredicate { operand, .. } => expr_has_aggregate(operand),
         Expression::FunctionCall { args, .. } => args.iter().any(expr_has_aggregate),
         _ => false,
     }
@@ -1790,5 +1824,118 @@ mod tests {
         let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("unknown") || msg.contains("function"));
+    }
+
+    // ─── D2 v2 §3.7 / §3.8 — postfix Verdict predicate ─────────────────
+
+    #[test]
+    fn parser_accepts_postfix_verdict_predicates() {
+        // The grammar verdict_term ::= primary_expr (verdict_predicate)?
+        // sits between unary and primary. All three postfix tokens must
+        // parse, AND combinations across postfix-projected operands must
+        // still parse.
+        let source = r#"
+            MATCH ?x {}
+            WHERE cap:q_positive(42) HOLDS
+              AND cap:other(?x) FAILS
+              AND cap:third(?x) UNDECIDABLE
+            RETURN [] { ok: ?x }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let _program = parser::parse(tokens).expect("parse postfix predicates");
+    }
+
+    #[test]
+    fn parser_postfix_binds_tighter_than_not() {
+        // `NOT qc:check(?x) HOLDS` should parse as `NOT (qc:check(?x) HOLDS)`,
+        // not `(NOT qc:check(?x)) HOLDS`. Verify by inspecting the AST shape.
+        use crate::query::ast::{Expression, UnaryOp, VerdictPredicate};
+        let source = r#"
+            MATCH ?x {}
+            WHERE NOT cap:q_positive(?x) HOLDS
+            RETURN [] { ok: ?x }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse NOT-postfix");
+        let cond = program
+            .query
+            .body
+            .conditions
+            .first()
+            .expect("WHERE condition");
+        match cond {
+            Expression::Unary { op, operand } => {
+                assert_eq!(*op, UnaryOp::Not);
+                match operand.as_ref() {
+                    Expression::VerdictPredicate { kind, .. } => {
+                        assert_eq!(*kind, VerdictPredicate::Holds);
+                    }
+                    other => panic!("expected `NOT (qc HOLDS)`, got NOT followed by {other:?}"),
+                }
+            }
+            other => panic!("expected `NOT …`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn postfix_holds_projects_verdict_to_boolean() {
+        // Build a Verdict resource with ctor_name = "Holds" and project
+        // it through each of the three postfix predicates.
+        use crate::query::ast::{Expression, VerdictPredicate};
+        let mut verdict = Resource::new_embedded();
+        verdict.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
+        );
+        verdict.set(
+            Iri::parse(wk::CTOR_NAME).unwrap(),
+            Value::String("Holds".into()),
+        );
+        let layer = Arc::new(LayerBuilder::new("postfix-test", None).build());
+        let runtime = FiberRuntime::default();
+        let mut binding: BTreeMap<String, Value> = BTreeMap::new();
+        binding.insert("v".into(), Value::Embedded(Box::new(verdict)));
+
+        let var_v = Expression::Variable(crate::query::ast::Variable { name: "v".into() });
+        let project = |kind: VerdictPredicate| -> Value {
+            eval_expression(
+                &Expression::VerdictPredicate {
+                    kind,
+                    operand: Box::new(var_v.clone()),
+                },
+                &binding,
+                &layer,
+                runtime,
+            )
+            .expect("eval verdict predicate")
+        };
+        assert_eq!(project(VerdictPredicate::Holds), Value::Boolean(true));
+        assert_eq!(project(VerdictPredicate::Fails), Value::Boolean(false));
+        assert_eq!(
+            project(VerdictPredicate::Undecidable),
+            Value::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn postfix_predicate_rejects_non_verdict_operand() {
+        // A non-Verdict operand (e.g. an Integer) should error with a
+        // type-mismatch evaluation error rather than silently returning
+        // false. Type-checker enforcement of this rule lands as part of
+        // §5.9 rule coverage; the runtime guard is the floor.
+        use crate::query::ast::{Expression, Literal, VerdictPredicate};
+        let layer = Arc::new(LayerBuilder::new("postfix-test", None).build());
+        let runtime = FiberRuntime::default();
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::VerdictPredicate {
+            kind: VerdictPredicate::Holds,
+            operand: Box::new(Expression::Literal(Literal::Integer(42))),
+        };
+        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Verdict-typed operand"),
+            "unexpected message: {msg}"
+        );
     }
 }

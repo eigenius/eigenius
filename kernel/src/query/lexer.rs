@@ -47,6 +47,10 @@ pub enum TokenKind {
     // FIBER-clause keywords (D2 §3.3.1, §3.5)
     Fiber,
     Institution,
+    // Postfix Verdict predicates (D2 v2 §3.7, §3.8)
+    Holds,
+    Fails,
+    Undecidable,
 
     // Built-in functions
     DateFn,
@@ -597,6 +601,9 @@ impl<'a> Lexer<'a> {
             "OFFSET" => TokenKind::Offset,
             "FIBER" => TokenKind::Fiber,
             "INSTITUTION" => TokenKind::Institution,
+            "HOLDS" => TokenKind::Holds,
+            "FAILS" => TokenKind::Fails,
+            "UNDECIDABLE" => TokenKind::Undecidable,
             // Functions
             "DATE" => TokenKind::DateFn,
             "TIMESTAMP" => TokenKind::TimestampFn,

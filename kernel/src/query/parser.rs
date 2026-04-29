@@ -632,8 +632,28 @@ impl Parser {
                     operand: Box::new(operand),
                 })
             }
-            _ => self.parse_primary_expr(),
+            _ => self.parse_verdict_term(),
         }
+    }
+
+    /// `verdict_term ::= primary_expr (verdict_predicate)?`. The postfix
+    /// Verdict predicate (HOLDS / FAILS / UNDECIDABLE) is non-associative
+    /// — `?v HOLDS FAILS` is rejected by the consume-once shape below
+    /// (the second predicate keyword would not match any continuation
+    /// in the grammar above this position).
+    fn parse_verdict_term(&mut self) -> Result<Expression, QueryError> {
+        let primary = self.parse_primary_expr()?;
+        let kind = match self.peek() {
+            TokenKind::Holds => crate::query::ast::VerdictPredicate::Holds,
+            TokenKind::Fails => crate::query::ast::VerdictPredicate::Fails,
+            TokenKind::Undecidable => crate::query::ast::VerdictPredicate::Undecidable,
+            _ => return Ok(primary),
+        };
+        self.advance();
+        Ok(Expression::VerdictPredicate {
+            kind,
+            operand: Box::new(primary),
+        })
     }
 
     fn parse_primary_expr(&mut self) -> Result<Expression, QueryError> {

@@ -160,6 +160,9 @@ fn check_expression_variables(
         Expression::Unary { operand, .. } => {
             check_expression_variables(operand, bound, errors);
         }
+        Expression::VerdictPredicate { operand, .. } => {
+            check_expression_variables(operand, bound, errors);
+        }
         Expression::NotExists(var) => {
             if !bound.contains(&var.name) {
                 errors.push(QueryError::type_check(
@@ -252,6 +255,7 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
             expr_has_aggregate(left) || expr_has_aggregate(right)
         }
         Expression::Unary { operand, .. } => expr_has_aggregate(operand),
+        Expression::VerdictPredicate { operand, .. } => expr_has_aggregate(operand),
         Expression::FunctionCall { args, .. } => args.iter().any(expr_has_aggregate),
         Expression::Array(elements) => elements.iter().any(expr_has_aggregate),
         _ => false,

@@ -209,6 +209,14 @@ pub enum Expression {
         op: UnaryOp,
         operand: Box<Expression>,
     },
+    /// Postfix Verdict projection (D2 v2 §3.7 / §3.8): `?v HOLDS`,
+    /// `?v FAILS`, `?v UNDECIDABLE`. The operand must evaluate to a
+    /// `Verdict`-typed resource carrying `ctor_name`; the result is a
+    /// `Boolean` true iff the constructor matches.
+    VerdictPredicate {
+        kind: VerdictPredicate,
+        operand: Box<Expression>,
+    },
     NotExists(Variable),
     FunctionCall {
         name: String,
@@ -261,6 +269,25 @@ pub enum UnaryOp {
     Not,
     Pos,
     Neg,
+}
+
+/// Postfix Verdict predicates (D2 v2 §3.7 / §3.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerdictPredicate {
+    Holds,
+    Fails,
+    Undecidable,
+}
+
+impl VerdictPredicate {
+    /// Constructor-name string the predicate matches against.
+    pub fn ctor_name(self) -> &'static str {
+        match self {
+            VerdictPredicate::Holds => "Holds",
+            VerdictPredicate::Fails => "Fails",
+            VerdictPredicate::Undecidable => "Undecidable",
+        }
+    }
 }
 
 /// Aggregate operators.
