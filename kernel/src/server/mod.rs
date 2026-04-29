@@ -1963,6 +1963,192 @@ impl EigeniusKernel for EigeniusService {
         );
         Ok(Response::new(topo))
     }
+
+    async fn list_branches(
+        &self,
+        _request: Request<ListBranchesRequest>,
+    ) -> Result<Response<ListBranchesResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_LIST_BRANCHES);
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+        let branches = backend
+            .list_branches()
+            .map_err(|e| Status::internal(format!("list_branches failed: {e}")))?;
+        let branches = branches
+            .into_iter()
+            .map(|(name, head)| BranchInfo {
+                name,
+                head_layer: hex::encode(head.0),
+            })
+            .collect();
+        Ok(Response::new(ListBranchesResponse { branches }))
+    }
+
+    async fn get_branch(
+        &self,
+        request: Request<GetBranchRequest>,
+    ) -> Result<Response<GetBranchResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_GET_BRANCH);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+        match backend
+            .get_branch(&req.name)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+        {
+            Some(head) => Ok(Response::new(GetBranchResponse {
+                found: true,
+                head_layer: hex::encode(head.0),
+            })),
+            None => Ok(Response::new(GetBranchResponse {
+                found: false,
+                head_layer: String::new(),
+            })),
+        }
+    }
+
+    async fn create_branch(
+        &self,
+        request: Request<CreateBranchRequest>,
+    ) -> Result<Response<CreateBranchResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_CREATE_BRANCH);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+        // Validate from_layer is a known layer.
+        let bytes = hex::decode(&req.from_layer)
+            .map_err(|e| Status::invalid_argument(format!("from_layer not valid hex: {e}")))?;
+        if bytes.len() != 32 {
+            return Err(Status::invalid_argument(
+                "from_layer must be a 32-byte SHA-256 (64 hex chars)",
+            ));
+        }
+        let mut id = [0u8; 32];
+        id.copy_from_slice(&bytes);
+        let from_layer = crate::layer::LayerId(id);
+        match backend.load_chain_from(&from_layer) {
+            Ok(Some(_)) => {}
+            Ok(None) | Err(crate::storage::StorageError::NotFound(_)) => {
+                return Err(Status::not_found(format!(
+                    "from_layer {} not in store",
+                    req.from_layer
+                )))
+            }
+            Err(e) => return Err(Status::internal(format!("load_chain_from failed: {e}"))),
+        }
+
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        match crate::lattice::update_branch(
+            &req.name,
+            None,
+            from_layer.clone(),
+            crate::lattice::ConflictPolicy::StrictFastForward,
+            storage,
+            backend.as_ref(),
+        ) {
+            Ok(crate::lattice::UpdateOutcome::FastForward) => {
+                Ok(Response::new(CreateBranchResponse {
+                    success: true,
+                    head_layer: hex::encode(from_layer.0),
+                    error: String::new(),
+                }))
+            }
+            Ok(_) => unreachable!(
+                "CreateBranch passes None expected_old_head; only FastForward or error possible"
+            ),
+            Err(crate::lattice::BranchUpdateError::InvalidBranchName(_)) => {
+                Err(Status::invalid_argument(format!(
+                    "invalid branch name: {:?} (must match [A-Za-z0-9_-]+, max 256 chars)",
+                    req.name
+                )))
+            }
+            Err(crate::lattice::BranchUpdateError::StrictFastForwardViolation { .. }) => {
+                // Branch already exists.
+                Ok(Response::new(CreateBranchResponse {
+                    success: false,
+                    head_layer: String::new(),
+                    error: format!("branch {:?} already exists", req.name),
+                }))
+            }
+            Err(crate::lattice::BranchUpdateError::Storage(e)) => {
+                Err(Status::internal(format!("storage error: {e}")))
+            }
+        }
+    }
+
+    async fn delete_branch(
+        &self,
+        request: Request<DeleteBranchRequest>,
+    ) -> Result<Response<DeleteBranchResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_DELETE_BRANCH);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        // Gather active task pins for the CheckPins safety policy. With
+        // force=true we skip this scan entirely.
+        let pins: Vec<crate::layer::LayerId> = if req.force {
+            Vec::new()
+        } else if let Some(store) = self.task_store.as_ref() {
+            let session_id = self.session.read().await.session_id;
+            match store.list_tasks(&session_id) {
+                Ok(records) => records
+                    .into_iter()
+                    .filter(|r| !r.status.is_terminal())
+                    .map(|r| r.layer_head)
+                    .collect(),
+                Err(e) => return Err(Status::internal(format!("list_tasks failed: {e}"))),
+            }
+        } else {
+            Vec::new()
+        };
+
+        let safety = if req.force {
+            crate::lattice::PruneSafety::Force
+        } else {
+            crate::lattice::PruneSafety::CheckPins(&pins)
+        };
+
+        match crate::lattice::prune_branch(&req.name, safety, backend.as_ref()) {
+            Ok(crate::lattice::PruneOutcome::Pruned { previous_head }) => {
+                Ok(Response::new(DeleteBranchResponse {
+                    success: true,
+                    deleted: true,
+                    previous_head: hex::encode(previous_head.0),
+                    error: String::new(),
+                }))
+            }
+            Ok(crate::lattice::PruneOutcome::NotFound) => Ok(Response::new(DeleteBranchResponse {
+                success: true,
+                deleted: false,
+                previous_head: String::new(),
+                error: String::new(),
+            })),
+            Err(crate::lattice::PruneError::InvalidBranchName(_)) => {
+                Err(Status::invalid_argument(format!(
+                    "invalid branch name: {:?} (must match [A-Za-z0-9_-]+, max 256 chars)",
+                    req.name
+                )))
+            }
+            Err(crate::lattice::PruneError::InUse { branch, head }) => {
+                Ok(Response::new(DeleteBranchResponse {
+                    success: false,
+                    deleted: false,
+                    previous_head: String::new(),
+                    error: format!(
+                        "branch {branch:?} is in use (head {head} matches an active task pin); pass force=true to delete anyway",
+                    ),
+                }))
+            }
+            Err(crate::lattice::PruneError::Storage(e)) => {
+                Err(Status::internal(format!("storage error: {e}")))
+            }
+        }
+    }
 }
 
 // `NotebookService` is defined in the proto and generates Rust server

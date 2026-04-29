@@ -166,8 +166,52 @@ enum Commands {
         command: TaskCommands,
     },
 
+    /// Manage branch refs (Phase 14g). Remote mode only — branches
+    /// require a persistent backend.
+    Branch {
+        #[command(subcommand)]
+        command: BranchCommands,
+    },
+
     /// Show version and build info
     Version,
+}
+
+#[derive(Subcommand)]
+enum BranchCommands {
+    /// List every branch ref with its current head
+    List,
+
+    /// Show a single branch's current head
+    Show {
+        /// Branch name
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
+    /// Create a new branch pointing at an existing layer
+    Create {
+        /// Branch name (must match [A-Za-z0-9_-]+)
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Hex-encoded LayerId to start the branch from
+        #[arg(long, value_name = "LAYER_ID")]
+        from: String,
+    },
+
+    /// Delete a branch ref. Layers reachable only through this branch
+    /// are reclaimed by the next GC pass.
+    Delete {
+        /// Branch name
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Skip the safety check that refuses to prune a branch whose
+        /// head matches an active task pin
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -313,6 +357,7 @@ async fn main() {
                 remote_capability(endpoint, command, cli.json).await
             }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
+            Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -361,6 +406,10 @@ async fn main() {
         }
         Commands::Tasks { .. } => {
             eprintln!("'tasks' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Branch { .. } => {
+            eprintln!("'branch' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Db { command } => cmd_db(command),
@@ -1307,6 +1356,144 @@ async fn remote_task_cancel(endpoint: &str, task_id: &str, json_output: bool) {
             } else {
                 eprintln!("Cancel failed: {}", resp.error);
                 std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// --- Branch subcommand ---
+
+async fn remote_branch(endpoint: &str, command: BranchCommands, json: bool) {
+    match command {
+        BranchCommands::List => remote_branch_list(endpoint, json).await,
+        BranchCommands::Show { name } => remote_branch_show(endpoint, &name, json).await,
+        BranchCommands::Create { name, from } => {
+            remote_branch_create(endpoint, &name, &from, json).await
+        }
+        BranchCommands::Delete { name, force } => {
+            remote_branch_delete(endpoint, &name, force, json).await
+        }
+    }
+}
+
+async fn remote_branch_list(endpoint: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::ListBranchesRequest {};
+    match client.list_branches(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let items: Vec<serde_json::Value> = resp
+                    .branches
+                    .iter()
+                    .map(|b| serde_json::json!({"name": b.name, "head_layer": b.head_layer}))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&items).unwrap());
+            } else if resp.branches.is_empty() {
+                println!("No branches.");
+            } else {
+                println!("{:<32}  HEAD", "NAME");
+                for b in &resp.branches {
+                    println!("{:<32}  {}", b.name, b.head_layer);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_branch_show(endpoint: &str, name: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::GetBranchRequest {
+        name: name.to_string(),
+    };
+    match client.get_branch(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "found": resp.found,
+                    "name": name,
+                    "head_layer": resp.head_layer,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if resp.found {
+                println!("{name}: {}", resp.head_layer);
+            } else {
+                eprintln!("Branch not found: {name}");
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_branch_create(endpoint: &str, name: &str, from: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::CreateBranchRequest {
+        name: name.to_string(),
+        from_layer: from.to_string(),
+    };
+    match client.create_branch(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "name": name,
+                    "head_layer": resp.head_layer,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if resp.success {
+                println!("Created branch {name} at {}", resp.head_layer);
+            } else {
+                eprintln!("Create failed: {}", resp.error);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_branch_delete(endpoint: &str, name: &str, force: bool, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::DeleteBranchRequest {
+        name: name.to_string(),
+        force,
+    };
+    match client.delete_branch(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "deleted": resp.deleted,
+                    "name": name,
+                    "previous_head": resp.previous_head,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if !resp.success {
+                eprintln!("Delete failed: {}", resp.error);
+                std::process::exit(1);
+            } else if resp.deleted {
+                println!("Deleted branch {name} (was at {})", resp.previous_head);
+            } else {
+                println!("Branch {name} did not exist");
             }
         }
         Err(e) => {
