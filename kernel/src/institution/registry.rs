@@ -79,7 +79,7 @@ pub struct ImportFormatEntry {
 /// Operational profile of a `QueryClass` (D14 §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DispatchRole {
-    /// Explicit invocation — EigenQL FIBER clause or RunFiberQuery RPC.
+    /// Explicit invocation — EigenQL FIBER clause (D2 v2 §3.5).
     OnDemand,
     /// Fired automatically on Load when a resource of the bound query
     /// class enters the chain. Result class must be `Verdict`.

@@ -29,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file eigenius.proto.
  */
 export const file_eigenius: GenFile = /*@__PURE__*/
-  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iLwoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIxCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJXCg1RdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEAoIZG9jdW1lbnQYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJEg0KBWVycm9yGAQgASgJIj8KFlZhbGlkYXRlUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkibAoXVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USDQoFdmFsaWQYASABKAgSLAoGZXJyb3JzGAIgAygLMhwuZWlnZW5pdXMudjEuVmFsaWRhdGlvbkVycm9yEhQKDHByb2dyYW1fdHlwZRgDIAEoCSJJChFSdW5Qcm9ncmFtUmVxdWVzdBIPCgdwcm9ncmFtGAEgASgMEg0KBWlucHV0GAIgASgMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSKHAQoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkSDwoHdGFza19pZBgFIAEoCSJSChZSdW5Qcm9ncmFtQnlJcmlSZXF1ZXN0EhMKC3Byb2dyYW1faXJpGAEgASgJEhEKCWlucHV0X2lyaRgCIAEoCRIQCghhdF9sYXllchgDIAEoCSI1Cg5SZWZsZWN0UmVxdWVzdBINCgV0cmFjZRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkiNQoPUmVmbGVjdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJdHJhY2VfaXJpGAIgASgJIg8KDUhlYWx0aFJlcXVlc3QikwEKDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBBIaChJyZXN1bWVfaW5fcHJvZ3Jlc3MYBSABKAgSFgoOdGFza3NfcmVzdW1pbmcYBiABKA0iegocUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEhMKC3dhc21fYmluYXJ5GAIgASgMEhIKCmZ1ZWxfbGltaXQYAyABKAQSGgoSbWVtb3J5X2xpbWl0X3BhZ2VzGAQgASgEIj8KHVJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDQoFZXJyb3IYAiABKAkiYAoQQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEg0KBWlucHV0GAIgASgMEhAKCGFyZ3VtZW50GAMgASgMEhQKDGNvbnRlbnRfdHlwZRgEIAEoCSJzChFDb21wb25lbnRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBm91dHB1dBgCIAEoDBINCgVlcnJvchgDIAEoCRIuCgdtZXRyaWNzGAQgASgLMh0uZWlnZW5pdXMudjEuQ29tcG9uZW50TWV0cmljcyJ5ChBDb21wb25lbnRNZXRyaWNzEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhUKDXByb21wdF90b2tlbnMYAyABKAMSGQoRY29tcGxldGlvbl90b2tlbnMYBCABKAMSEgoKbGF0ZW5jeV9tcxgFIAEoAyJRChFGaWJlclF1ZXJ5UmVxdWVzdBIXCg9pbnN0aXR1dGlvbl9pcmkYASABKAkSDQoFcXVlcnkYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJIkQKEkZpYmVyUXVlcnlSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBnJlc3VsdBgCIAEoDBINCgVlcnJvchgDIAEoCSJcChhEaXNjb3Zlck1vcnBoaXNtc1JlcXVlc3QSFwoPaW5zdGl0dXRpb25faXJpGAEgASgJEhEKCXJlc291cmNlcxgCIAMoDBIUCgxjb250ZW50X3R5cGUYAyABKAkiTgoZRGlzY292ZXJNb3JwaGlzbXNSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhEKCW1vcnBoaXNtcxgCIAMoDBINCgVlcnJvchgDIAEoCSIrChdMaXN0SW5zdGl0dXRpb25zUmVxdWVzdBIQCghhdF9sYXllchgBIAEoCSJOChhMaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USMgoMaW5zdGl0dXRpb25zGAEgAygLMhwuZWlnZW5pdXMudjEuSW5zdGl0dXRpb25JbmZvIlkKD0luc3RpdHV0aW9uSW5mbxILCgNpcmkYASABKAkSDAoEbmFtZRgCIAEoCRIWCg5tb3JwaGlzbV90eXBlcxgDIAMoCRITCgtxdWVyeV90eXBlcxgEIAMoCSI3ChBHZXRTY2hlbWFSZXF1ZXN0EhEKCWNsYXNzX2lyaRgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJIChFHZXRTY2hlbWFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhMKC2pzb25fc2NoZW1hGAIgASgJEg0KBWVycm9yGAMgASgJIqYCCghUYXNrSW5mbxIPCgd0YXNrX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEwoLcHJvZ3JhbV9pcmkYAyABKAkSEQoJaW5wdXRfaXJpGAQgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpsYXllcl9oZWFkGAYgASgJEhAKCHN0ZXBfc2VxGAcgASgEEhgKEGxhdGVzdF90cmFjZV9zZXEYCCABKAQSHAoUbGFzdF9jaGVja3BvaW50X3N0ZXAYCSABKAkSGQoRcmVzdWx0X2xheWVyX2hlYWQYCiABKAkSFQoNY3JlYXRlZF9hdF9tcxgLIAEoAxIVCg11cGRhdGVkX2F0X21zGAwgASgDEhYKDnJldGFpbl9mb3JldmVyGA0gASgIIhIKEExpc3RUYXNrc1JlcXVlc3QiOQoRTGlzdFRhc2tzUmVzcG9uc2USJAoFdGFza3MYASADKAsyFS5laWdlbml1cy52MS5UYXNrSW5mbyInChRHZXRUYXNrU3RhdHVzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIksKFUdldFRhc2tTdGF0dXNSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIjCgR0YXNrGAIgASgLMhUuZWlnZW5pdXMudjEuVGFza0luZm8iJAoRQ2FuY2VsVGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCSJEChJDYW5jZWxUYXNrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIOCgZzdGF0dXMYAiABKAkSDQoFZXJyb3IYAyABKAkibgoPVmFsaWRhdGlvbkVycm9yEhQKDHJlc291cmNlX2lyaRgBIAEoCRIUCgxwcm9wZXJ0eV9pcmkYAiABKAkSDAoEcnVsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJEhAKCHNldmVyaXR5GAUgASgJIlgKFExheWVyVG9wb2xvZ3lSZXF1ZXN0EhIKCnJvb3RfbGF5ZXIYASABKAkSEQoJbWF4X2RlcHRoGAIgASgNEhkKEWluY2x1ZGVfcmVzb3VyY2VzGAMgASgIImsKFUxheWVyVG9wb2xvZ3lSZXNwb25zZRIoCgVub2RlcxgBIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZRIoCgVlZGdlcxgCIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5RWRnZSKxAQoMVG9wb2xvZ3lOb2RlEgoKAmlkGAEgASgJEiMKBGtpbmQYAiABKA4yFS5laWdlbml1cy52MS5Ob2RlS2luZBINCgVsYWJlbBgDIAEoCRIzCgVhdHRycxgEIAMoCzIkLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZS5BdHRyc0VudHJ5GiwKCkF0dHJzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASK2AQoMVG9wb2xvZ3lFZGdlEg4KBnNvdXJjZRgBIAEoCRIOCgZ0YXJnZXQYAiABKAkSIwoEa2luZBgDIAEoDjIVLmVpZ2VuaXVzLnYxLkVkZ2VLaW5kEjMKBWF0dHJzGAQgAygLMiQuZWlnZW5pdXMudjEuVG9wb2xvZ3lFZGdlLkF0dHJzRW50cnkaLAoKQXR0cnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBKpoBCghOb2RlS2luZBIZChVOT0RFX0tJTkRfVU5TUEVDSUZJRUQQABITCg9OT0RFX0tJTkRfTEFZRVIQARITCg9OT0RFX0tJTkRfQ0xBU1MQAhIWChJOT0RFX0tJTkRfUFJPUEVSVFkQAxIWChJOT0RFX0tJTkRfUkVTT1VSQ0UQBBIZChVOT0RFX0tJTkRfSU5TVElUVVRJT04QBSriAQoIRWRnZUtpbmQSGQoVRURHRV9LSU5EX1VOU1BFQ0lGSUVEEAASGgoWRURHRV9LSU5EX1BBUkVOVF9MQVlFUhABEhIKDkVER0VfS0lORF9JU19BEAISGQoVRURHRV9LSU5EX1NVQkNMQVNTX09GEAMSFgoSRURHRV9LSU5EX1JFUVVJUkVTEAQSGAoURURHRV9LSU5EX1JFQ09NTUVORFMQBRIaChZFREdFX0tJTkRfUFJPUEVSVFlfUkVGEAYSIgoeRURHRV9LSU5EX0lOU1RJVFVUSU9OX0RFQ0xBUkVTEAcyjQoKDkVpZ2VuaXVzS2VybmVsEjsKBExvYWQSGC5laWdlbml1cy52MS5Mb2FkUmVxdWVzdBoZLmVpZ2VuaXVzLnYxLkxvYWRSZXNwb25zZRJECgdJbnNwZWN0EhsuZWlnZW5pdXMudjEuSW5zcGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5JbnNwZWN0UmVzcG9uc2USPgoFUXVlcnkSGS5laWdlbml1cy52MS5RdWVyeVJlcXVlc3QaGi5laWdlbml1cy52MS5RdWVyeVJlc3BvbnNlElwKD1ZhbGlkYXRlUHJvZ3JhbRIjLmVpZ2VuaXVzLnYxLlZhbGlkYXRlUHJvZ3JhbVJlcXVlc3QaJC5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXNwb25zZRJNCgpSdW5Qcm9ncmFtEh4uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlcXVlc3QaHy5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVzcG9uc2USVwoPUnVuUHJvZ3JhbUJ5SXJpEiMuZWlnZW5pdXMudjEuUnVuUHJvZ3JhbUJ5SXJpUmVxdWVzdBofLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXNwb25zZRJECgdSZWZsZWN0EhsuZWlnZW5pdXMudjEuUmVmbGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5SZWZsZWN0UmVzcG9uc2USQQoGSGVhbHRoEhouZWlnZW5pdXMudjEuSGVhbHRoUmVxdWVzdBobLmVpZ2VuaXVzLnYxLkhlYWx0aFJlc3BvbnNlEk0KCkZpYmVyUXVlcnkSHi5laWdlbml1cy52MS5GaWJlclF1ZXJ5UmVxdWVzdBofLmVpZ2VuaXVzLnYxLkZpYmVyUXVlcnlSZXNwb25zZRJiChFEaXNjb3Zlck1vcnBoaXNtcxIlLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVxdWVzdBomLmVpZ2VuaXVzLnYxLkRpc2NvdmVyTW9ycGhpc21zUmVzcG9uc2USXwoQTGlzdEluc3RpdHV0aW9ucxIkLmVpZ2VuaXVzLnYxLkxpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0GiUuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1Jlc3BvbnNlEkoKCUdldFNjaGVtYRIdLmVpZ2VuaXVzLnYxLkdldFNjaGVtYVJlcXVlc3QaHi5laWdlbml1cy52MS5HZXRTY2hlbWFSZXNwb25zZRJKCglMaXN0VGFza3MSHS5laWdlbml1cy52MS5MaXN0VGFza3NSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuTGlzdFRhc2tzUmVzcG9uc2USVgoNR2V0VGFza1N0YXR1cxIhLmVpZ2VuaXVzLnYxLkdldFRhc2tTdGF0dXNSZXF1ZXN0GiIuZWlnZW5pdXMudjEuR2V0VGFza1N0YXR1c1Jlc3BvbnNlEk0KCkNhbmNlbFRhc2sSHi5laWdlbml1cy52MS5DYW5jZWxUYXNrUmVxdWVzdBofLmVpZ2VuaXVzLnYxLkNhbmNlbFRhc2tSZXNwb25zZRJWCg1MYXllclRvcG9sb2d5EiEuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlcXVlc3QaIi5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVzcG9uc2UyzQEKEUNvbXBvbmVudEV4ZWN1dG9yEkgKB0V4ZWN1dGUSHS5laWdlbml1cy52MS5Db21wb25lbnRSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVzcG9uc2USbgoVUmVnaXN0ZXJXYXNtQ29tcG9uZW50EikuZWlnZW5pdXMudjEuUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBoqLmVpZ2VuaXVzLnYxLlJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlMmkKD05vdGVib29rU2VydmljZRJWCg1MYXllclRvcG9sb2d5EiEuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlcXVlc3QaIi5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiSwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCCJ3CgxMb2FkUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISEAoIbGF5ZXJfaWQYAyABKAkSFgoOcmVzb3VyY2VfY291bnQYBCABKA0iLwoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJIjIKD0luc3BlY3RSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIQCghyZXNvdXJjZRgCIAEoDCIxCgxRdWVyeVJlcXVlc3QSDwoHZWlnZW5xbBgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJXCg1RdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEAoIZG9jdW1lbnQYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJEg0KBWVycm9yGAQgASgJIj8KFlZhbGlkYXRlUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkibAoXVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USDQoFdmFsaWQYASABKAgSLAoGZXJyb3JzGAIgAygLMhwuZWlnZW5pdXMudjEuVmFsaWRhdGlvbkVycm9yEhQKDHByb2dyYW1fdHlwZRgDIAEoCSJJChFSdW5Qcm9ncmFtUmVxdWVzdBIPCgdwcm9ncmFtGAEgASgMEg0KBWlucHV0GAIgASgMEhQKDGNvbnRlbnRfdHlwZRgDIAEoCSKHAQoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkSDwoHdGFza19pZBgFIAEoCSJSChZSdW5Qcm9ncmFtQnlJcmlSZXF1ZXN0EhMKC3Byb2dyYW1faXJpGAEgASgJEhEKCWlucHV0X2lyaRgCIAEoCRIQCghhdF9sYXllchgDIAEoCSI1Cg5SZWZsZWN0UmVxdWVzdBINCgV0cmFjZRgBIAEoDBIUCgxjb250ZW50X3R5cGUYAiABKAkiNQoPUmVmbGVjdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEQoJdHJhY2VfaXJpGAIgASgJIg8KDUhlYWx0aFJlcXVlc3QikwEKDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBBIaChJyZXN1bWVfaW5fcHJvZ3Jlc3MYBSABKAgSFgoOdGFza3NfcmVzdW1pbmcYBiABKA0iegocUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEhMKC3dhc21fYmluYXJ5GAIgASgMEhIKCmZ1ZWxfbGltaXQYAyABKAQSGgoSbWVtb3J5X2xpbWl0X3BhZ2VzGAQgASgEIj8KHVJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDQoFZXJyb3IYAiABKAkiYAoQQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEg0KBWlucHV0GAIgASgMEhAKCGFyZ3VtZW50GAMgASgMEhQKDGNvbnRlbnRfdHlwZRgEIAEoCSJzChFDb21wb25lbnRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBm91dHB1dBgCIAEoDBINCgVlcnJvchgDIAEoCRIuCgdtZXRyaWNzGAQgASgLMh0uZWlnZW5pdXMudjEuQ29tcG9uZW50TWV0cmljcyJ5ChBDb21wb25lbnRNZXRyaWNzEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhUKDXByb21wdF90b2tlbnMYAyABKAMSGQoRY29tcGxldGlvbl90b2tlbnMYBCABKAMSEgoKbGF0ZW5jeV9tcxgFIAEoAyIrChdMaXN0SW5zdGl0dXRpb25zUmVxdWVzdBIQCghhdF9sYXllchgBIAEoCSJOChhMaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USMgoMaW5zdGl0dXRpb25zGAEgAygLMhwuZWlnZW5pdXMudjEuSW5zdGl0dXRpb25JbmZvIkEKD0luc3RpdHV0aW9uSW5mbxILCgNpcmkYASABKAkSDAoEbmFtZRgCIAEoCRITCgtxdWVyeV90eXBlcxgDIAMoCSI3ChBHZXRTY2hlbWFSZXF1ZXN0EhEKCWNsYXNzX2lyaRgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJIChFHZXRTY2hlbWFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhMKC2pzb25fc2NoZW1hGAIgASgJEg0KBWVycm9yGAMgASgJIqYCCghUYXNrSW5mbxIPCgd0YXNrX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEwoLcHJvZ3JhbV9pcmkYAyABKAkSEQoJaW5wdXRfaXJpGAQgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpsYXllcl9oZWFkGAYgASgJEhAKCHN0ZXBfc2VxGAcgASgEEhgKEGxhdGVzdF90cmFjZV9zZXEYCCABKAQSHAoUbGFzdF9jaGVja3BvaW50X3N0ZXAYCSABKAkSGQoRcmVzdWx0X2xheWVyX2hlYWQYCiABKAkSFQoNY3JlYXRlZF9hdF9tcxgLIAEoAxIVCg11cGRhdGVkX2F0X21zGAwgASgDEhYKDnJldGFpbl9mb3JldmVyGA0gASgIIhIKEExpc3RUYXNrc1JlcXVlc3QiOQoRTGlzdFRhc2tzUmVzcG9uc2USJAoFdGFza3MYASADKAsyFS5laWdlbml1cy52MS5UYXNrSW5mbyInChRHZXRUYXNrU3RhdHVzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIksKFUdldFRhc2tTdGF0dXNSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIjCgR0YXNrGAIgASgLMhUuZWlnZW5pdXMudjEuVGFza0luZm8iJAoRQ2FuY2VsVGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCSJEChJDYW5jZWxUYXNrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIOCgZzdGF0dXMYAiABKAkSDQoFZXJyb3IYAyABKAkibgoPVmFsaWRhdGlvbkVycm9yEhQKDHJlc291cmNlX2lyaRgBIAEoCRIUCgxwcm9wZXJ0eV9pcmkYAiABKAkSDAoEcnVsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJEhAKCHNldmVyaXR5GAUgASgJIlgKFExheWVyVG9wb2xvZ3lSZXF1ZXN0EhIKCnJvb3RfbGF5ZXIYASABKAkSEQoJbWF4X2RlcHRoGAIgASgNEhkKEWluY2x1ZGVfcmVzb3VyY2VzGAMgASgIImsKFUxheWVyVG9wb2xvZ3lSZXNwb25zZRIoCgVub2RlcxgBIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZRIoCgVlZGdlcxgCIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5RWRnZSKxAQoMVG9wb2xvZ3lOb2RlEgoKAmlkGAEgASgJEiMKBGtpbmQYAiABKA4yFS5laWdlbml1cy52MS5Ob2RlS2luZBINCgVsYWJlbBgDIAEoCRIzCgVhdHRycxgEIAMoCzIkLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZS5BdHRyc0VudHJ5GiwKCkF0dHJzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASK2AQoMVG9wb2xvZ3lFZGdlEg4KBnNvdXJjZRgBIAEoCRIOCgZ0YXJnZXQYAiABKAkSIwoEa2luZBgDIAEoDjIVLmVpZ2VuaXVzLnYxLkVkZ2VLaW5kEjMKBWF0dHJzGAQgAygLMiQuZWlnZW5pdXMudjEuVG9wb2xvZ3lFZGdlLkF0dHJzRW50cnkaLAoKQXR0cnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBKpoBCghOb2RlS2luZBIZChVOT0RFX0tJTkRfVU5TUEVDSUZJRUQQABITCg9OT0RFX0tJTkRfTEFZRVIQARITCg9OT0RFX0tJTkRfQ0xBU1MQAhIWChJOT0RFX0tJTkRfUFJPUEVSVFkQAxIWChJOT0RFX0tJTkRfUkVTT1VSQ0UQBBIZChVOT0RFX0tJTkRfSU5TVElUVVRJT04QBSriAQoIRWRnZUtpbmQSGQoVRURHRV9LSU5EX1VOU1BFQ0lGSUVEEAASGgoWRURHRV9LSU5EX1BBUkVOVF9MQVlFUhABEhIKDkVER0VfS0lORF9JU19BEAISGQoVRURHRV9LSU5EX1NVQkNMQVNTX09GEAMSFgoSRURHRV9LSU5EX1JFUVVJUkVTEAQSGAoURURHRV9LSU5EX1JFQ09NTUVORFMQBRIaChZFREdFX0tJTkRfUFJPUEVSVFlfUkVGEAYSIgoeRURHRV9LSU5EX0lOU1RJVFVUSU9OX0RFQ0xBUkVTEAcy2ggKDkVpZ2VuaXVzS2VybmVsEjsKBExvYWQSGC5laWdlbml1cy52MS5Mb2FkUmVxdWVzdBoZLmVpZ2VuaXVzLnYxLkxvYWRSZXNwb25zZRJECgdJbnNwZWN0EhsuZWlnZW5pdXMudjEuSW5zcGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5JbnNwZWN0UmVzcG9uc2USPgoFUXVlcnkSGS5laWdlbml1cy52MS5RdWVyeVJlcXVlc3QaGi5laWdlbml1cy52MS5RdWVyeVJlc3BvbnNlElwKD1ZhbGlkYXRlUHJvZ3JhbRIjLmVpZ2VuaXVzLnYxLlZhbGlkYXRlUHJvZ3JhbVJlcXVlc3QaJC5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXNwb25zZRJNCgpSdW5Qcm9ncmFtEh4uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlcXVlc3QaHy5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVzcG9uc2USVwoPUnVuUHJvZ3JhbUJ5SXJpEiMuZWlnZW5pdXMudjEuUnVuUHJvZ3JhbUJ5SXJpUmVxdWVzdBofLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXNwb25zZRJECgdSZWZsZWN0EhsuZWlnZW5pdXMudjEuUmVmbGVjdFJlcXVlc3QaHC5laWdlbml1cy52MS5SZWZsZWN0UmVzcG9uc2USQQoGSGVhbHRoEhouZWlnZW5pdXMudjEuSGVhbHRoUmVxdWVzdBobLmVpZ2VuaXVzLnYxLkhlYWx0aFJlc3BvbnNlEl8KEExpc3RJbnN0aXR1dGlvbnMSJC5laWdlbml1cy52MS5MaXN0SW5zdGl0dXRpb25zUmVxdWVzdBolLmVpZ2VuaXVzLnYxLkxpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRJKCglHZXRTY2hlbWESHS5laWdlbml1cy52MS5HZXRTY2hlbWFSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuR2V0U2NoZW1hUmVzcG9uc2USSgoJTGlzdFRhc2tzEh0uZWlnZW5pdXMudjEuTGlzdFRhc2tzUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkxpc3RUYXNrc1Jlc3BvbnNlElYKDUdldFRhc2tTdGF0dXMSIS5laWdlbml1cy52MS5HZXRUYXNrU3RhdHVzUmVxdWVzdBoiLmVpZ2VuaXVzLnYxLkdldFRhc2tTdGF0dXNSZXNwb25zZRJNCgpDYW5jZWxUYXNrEh4uZWlnZW5pdXMudjEuQ2FuY2VsVGFza1JlcXVlc3QaHy5laWdlbml1cy52MS5DYW5jZWxUYXNrUmVzcG9uc2USVgoNTGF5ZXJUb3BvbG9neRIhLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXF1ZXN0GiIuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlc3BvbnNlMs0BChFDb21wb25lbnRFeGVjdXRvchJICgdFeGVjdXRlEh0uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkNvbXBvbmVudFJlc3BvbnNlEm4KFVJlZ2lzdGVyV2FzbUNvbXBvbmVudBIpLmVpZ2VuaXVzLnYxLlJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlcXVlc3QaKi5laWdlbml1cy52MS5SZWdpc3Rlcldhc21Db21wb25lbnRSZXNwb25zZTJpCg9Ob3RlYm9va1NlcnZpY2USVgoNTGF5ZXJUb3BvbG9neRIhLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXF1ZXN0GiIuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message eigenius.v1.LoadRequest
@@ -662,126 +662,6 @@ export const ComponentMetricsSchema: GenMessage<ComponentMetrics> = /*@__PURE__*
   messageDesc(file_eigenius, 19);
 
 /**
- * @generated from message eigenius.v1.FiberQueryRequest
- */
-export type FiberQueryRequest = Message<"eigenius.v1.FiberQueryRequest"> & {
-  /**
-   * Which institution to dispatch to
-   *
-   * @generated from field: string institution_iri = 1;
-   */
-  institutionIri: string;
-
-  /**
-   * Query resource as CBOR or Eigon-JSON
-   *
-   * @generated from field: bytes query = 2;
-   */
-  query: Uint8Array;
-
-  /**
-   * @generated from field: string content_type = 3;
-   */
-  contentType: string;
-};
-
-/**
- * Describes the message eigenius.v1.FiberQueryRequest.
- * Use `create(FiberQueryRequestSchema)` to create a new message.
- */
-export const FiberQueryRequestSchema: GenMessage<FiberQueryRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 20);
-
-/**
- * @generated from message eigenius.v1.FiberQueryResponse
- */
-export type FiberQueryResponse = Message<"eigenius.v1.FiberQueryResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
-
-  /**
-   * Result resource as CBOR
-   *
-   * @generated from field: bytes result = 2;
-   */
-  result: Uint8Array;
-
-  /**
-   * @generated from field: string error = 3;
-   */
-  error: string;
-};
-
-/**
- * Describes the message eigenius.v1.FiberQueryResponse.
- * Use `create(FiberQueryResponseSchema)` to create a new message.
- */
-export const FiberQueryResponseSchema: GenMessage<FiberQueryResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 21);
-
-/**
- * @generated from message eigenius.v1.DiscoverMorphismsRequest
- */
-export type DiscoverMorphismsRequest = Message<"eigenius.v1.DiscoverMorphismsRequest"> & {
-  /**
-   * Which institution to dispatch to
-   *
-   * @generated from field: string institution_iri = 1;
-   */
-  institutionIri: string;
-
-  /**
-   * Resources to analyze, as CBOR
-   *
-   * @generated from field: repeated bytes resources = 2;
-   */
-  resources: Uint8Array[];
-
-  /**
-   * @generated from field: string content_type = 3;
-   */
-  contentType: string;
-};
-
-/**
- * Describes the message eigenius.v1.DiscoverMorphismsRequest.
- * Use `create(DiscoverMorphismsRequestSchema)` to create a new message.
- */
-export const DiscoverMorphismsRequestSchema: GenMessage<DiscoverMorphismsRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 22);
-
-/**
- * @generated from message eigenius.v1.DiscoverMorphismsResponse
- */
-export type DiscoverMorphismsResponse = Message<"eigenius.v1.DiscoverMorphismsResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
-
-  /**
-   * Discovered morphism resources as CBOR
-   *
-   * @generated from field: repeated bytes morphisms = 2;
-   */
-  morphisms: Uint8Array[];
-
-  /**
-   * @generated from field: string error = 3;
-   */
-  error: string;
-};
-
-/**
- * Describes the message eigenius.v1.DiscoverMorphismsResponse.
- * Use `create(DiscoverMorphismsResponseSchema)` to create a new message.
- */
-export const DiscoverMorphismsResponseSchema: GenMessage<DiscoverMorphismsResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 23);
-
-/**
  * @generated from message eigenius.v1.ListInstitutionsRequest
  */
 export type ListInstitutionsRequest = Message<"eigenius.v1.ListInstitutionsRequest"> & {
@@ -799,7 +679,7 @@ export type ListInstitutionsRequest = Message<"eigenius.v1.ListInstitutionsReque
  * Use `create(ListInstitutionsRequestSchema)` to create a new message.
  */
 export const ListInstitutionsRequestSchema: GenMessage<ListInstitutionsRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 24);
+  messageDesc(file_eigenius, 20);
 
 /**
  * @generated from message eigenius.v1.ListInstitutionsResponse
@@ -816,7 +696,7 @@ export type ListInstitutionsResponse = Message<"eigenius.v1.ListInstitutionsResp
  * Use `create(ListInstitutionsResponseSchema)` to create a new message.
  */
 export const ListInstitutionsResponseSchema: GenMessage<ListInstitutionsResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 25);
+  messageDesc(file_eigenius, 21);
 
 /**
  * @generated from message eigenius.v1.InstitutionInfo
@@ -833,16 +713,11 @@ export type InstitutionInfo = Message<"eigenius.v1.InstitutionInfo"> & {
   name: string;
 
   /**
-   * IRIs of declared morphism classes
+   * QueryClass input-class IRIs declared by this institution. Each
+   * entry corresponds to a `QueryClass` resource whose
+   * `institution_ref` points at this institution.
    *
-   * @generated from field: repeated string morphism_types = 3;
-   */
-  morphismTypes: string[];
-
-  /**
-   * IRIs of declared query classes
-   *
-   * @generated from field: repeated string query_types = 4;
+   * @generated from field: repeated string query_types = 3;
    */
   queryTypes: string[];
 };
@@ -852,7 +727,7 @@ export type InstitutionInfo = Message<"eigenius.v1.InstitutionInfo"> & {
  * Use `create(InstitutionInfoSchema)` to create a new message.
  */
 export const InstitutionInfoSchema: GenMessage<InstitutionInfo> = /*@__PURE__*/
-  messageDesc(file_eigenius, 26);
+  messageDesc(file_eigenius, 22);
 
 /**
  * @generated from message eigenius.v1.GetSchemaRequest
@@ -878,7 +753,7 @@ export type GetSchemaRequest = Message<"eigenius.v1.GetSchemaRequest"> & {
  * Use `create(GetSchemaRequestSchema)` to create a new message.
  */
 export const GetSchemaRequestSchema: GenMessage<GetSchemaRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 27);
+  messageDesc(file_eigenius, 23);
 
 /**
  * @generated from message eigenius.v1.GetSchemaResponse
@@ -909,7 +784,7 @@ export type GetSchemaResponse = Message<"eigenius.v1.GetSchemaResponse"> & {
  * Use `create(GetSchemaResponseSchema)` to create a new message.
  */
 export const GetSchemaResponseSchema: GenMessage<GetSchemaResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 28);
+  messageDesc(file_eigenius, 24);
 
 /**
  * @generated from message eigenius.v1.TaskInfo
@@ -1002,7 +877,7 @@ export type TaskInfo = Message<"eigenius.v1.TaskInfo"> & {
  * Use `create(TaskInfoSchema)` to create a new message.
  */
 export const TaskInfoSchema: GenMessage<TaskInfo> = /*@__PURE__*/
-  messageDesc(file_eigenius, 29);
+  messageDesc(file_eigenius, 25);
 
 /**
  * @generated from message eigenius.v1.ListTasksRequest
@@ -1015,7 +890,7 @@ export type ListTasksRequest = Message<"eigenius.v1.ListTasksRequest"> & {
  * Use `create(ListTasksRequestSchema)` to create a new message.
  */
 export const ListTasksRequestSchema: GenMessage<ListTasksRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 30);
+  messageDesc(file_eigenius, 26);
 
 /**
  * @generated from message eigenius.v1.ListTasksResponse
@@ -1032,7 +907,7 @@ export type ListTasksResponse = Message<"eigenius.v1.ListTasksResponse"> & {
  * Use `create(ListTasksResponseSchema)` to create a new message.
  */
 export const ListTasksResponseSchema: GenMessage<ListTasksResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 31);
+  messageDesc(file_eigenius, 27);
 
 /**
  * @generated from message eigenius.v1.GetTaskStatusRequest
@@ -1051,7 +926,7 @@ export type GetTaskStatusRequest = Message<"eigenius.v1.GetTaskStatusRequest"> &
  * Use `create(GetTaskStatusRequestSchema)` to create a new message.
  */
 export const GetTaskStatusRequestSchema: GenMessage<GetTaskStatusRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 32);
+  messageDesc(file_eigenius, 28);
 
 /**
  * @generated from message eigenius.v1.GetTaskStatusResponse
@@ -1073,7 +948,7 @@ export type GetTaskStatusResponse = Message<"eigenius.v1.GetTaskStatusResponse">
  * Use `create(GetTaskStatusResponseSchema)` to create a new message.
  */
 export const GetTaskStatusResponseSchema: GenMessage<GetTaskStatusResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 33);
+  messageDesc(file_eigenius, 29);
 
 /**
  * @generated from message eigenius.v1.CancelTaskRequest
@@ -1092,7 +967,7 @@ export type CancelTaskRequest = Message<"eigenius.v1.CancelTaskRequest"> & {
  * Use `create(CancelTaskRequestSchema)` to create a new message.
  */
 export const CancelTaskRequestSchema: GenMessage<CancelTaskRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 34);
+  messageDesc(file_eigenius, 30);
 
 /**
  * @generated from message eigenius.v1.CancelTaskResponse
@@ -1126,7 +1001,7 @@ export type CancelTaskResponse = Message<"eigenius.v1.CancelTaskResponse"> & {
  * Use `create(CancelTaskResponseSchema)` to create a new message.
  */
 export const CancelTaskResponseSchema: GenMessage<CancelTaskResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 35);
+  messageDesc(file_eigenius, 31);
 
 /**
  * @generated from message eigenius.v1.ValidationError
@@ -1163,7 +1038,7 @@ export type ValidationError = Message<"eigenius.v1.ValidationError"> & {
  * Use `create(ValidationErrorSchema)` to create a new message.
  */
 export const ValidationErrorSchema: GenMessage<ValidationError> = /*@__PURE__*/
-  messageDesc(file_eigenius, 36);
+  messageDesc(file_eigenius, 32);
 
 /**
  * @generated from message eigenius.v1.LayerTopologyRequest
@@ -1203,7 +1078,7 @@ export type LayerTopologyRequest = Message<"eigenius.v1.LayerTopologyRequest"> &
  * Use `create(LayerTopologyRequestSchema)` to create a new message.
  */
 export const LayerTopologyRequestSchema: GenMessage<LayerTopologyRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 37);
+  messageDesc(file_eigenius, 33);
 
 /**
  * @generated from message eigenius.v1.LayerTopologyResponse
@@ -1225,7 +1100,7 @@ export type LayerTopologyResponse = Message<"eigenius.v1.LayerTopologyResponse">
  * Use `create(LayerTopologyResponseSchema)` to create a new message.
  */
 export const LayerTopologyResponseSchema: GenMessage<LayerTopologyResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 38);
+  messageDesc(file_eigenius, 34);
 
 /**
  * @generated from message eigenius.v1.TopologyNode
@@ -1268,7 +1143,7 @@ export type TopologyNode = Message<"eigenius.v1.TopologyNode"> & {
  * Use `create(TopologyNodeSchema)` to create a new message.
  */
 export const TopologyNodeSchema: GenMessage<TopologyNode> = /*@__PURE__*/
-  messageDesc(file_eigenius, 39);
+  messageDesc(file_eigenius, 35);
 
 /**
  * @generated from message eigenius.v1.TopologyEdge
@@ -1304,7 +1179,7 @@ export type TopologyEdge = Message<"eigenius.v1.TopologyEdge"> & {
  * Use `create(TopologyEdgeSchema)` to create a new message.
  */
 export const TopologyEdgeSchema: GenMessage<TopologyEdge> = /*@__PURE__*/
-  messageDesc(file_eigenius, 40);
+  messageDesc(file_eigenius, 36);
 
 /**
  * @generated from enum eigenius.v1.NodeKind
@@ -1506,27 +1381,11 @@ export const EigeniusKernel: GenService<{
     output: typeof HealthResponseSchema;
   },
   /**
-   * Execute a fiber query against a registered institution.
-   *
-   * @generated from rpc eigenius.v1.EigeniusKernel.FiberQuery
-   */
-  fiberQuery: {
-    methodKind: "unary";
-    input: typeof FiberQueryRequestSchema;
-    output: typeof FiberQueryResponseSchema;
-  },
-  /**
-   * Discover morphisms between resources within an institution's fiber.
-   *
-   * @generated from rpc eigenius.v1.EigeniusKernel.DiscoverMorphisms
-   */
-  discoverMorphisms: {
-    methodKind: "unary";
-    input: typeof DiscoverMorphismsRequestSchema;
-    output: typeof DiscoverMorphismsResponseSchema;
-  },
-  /**
-   * List registered institutions and their declared fiber structure.
+   * List indexed institutions and the QueryClasses each declares (D14).
+   * FIBER queries against an institution's QueryClasses ride on the
+   * regular Query RPC via the FIBER clause (D2 v2 §3.5); per-RPC
+   * dispatch primitives from the D10 era (FiberQuery, DiscoverMorphisms)
+   * were retired in Phase 12 with no D14 equivalent.
    *
    * @generated from rpc eigenius.v1.EigeniusKernel.ListInstitutions
    */

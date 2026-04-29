@@ -1657,45 +1657,6 @@ impl EigeniusKernel for EigeniusService {
         }))
     }
 
-    async fn fiber_query(
-        &self,
-        request: Request<FiberQueryRequest>,
-    ) -> Result<Response<FiberQueryResponse>, Status> {
-        let mut guard = RpcGuard::start(operation::RPC_FIBER_QUERY);
-        let req = request.into_inner();
-        tracing::debug!(
-            { field::OPERATION } = operation::RPC_FIBER_QUERY,
-            { field::INSTITUTION_IRI } = %req.institution_iri,
-            "fiber_query target"
-        );
-        // FiberQuery as a top-level RPC was a Phase-11d shape that
-        // dispatched a single institution.query. Under D14 the canonical
-        // path is the EigenQL Query RPC with a FIBER clause, which
-        // resolves a QueryClass through the InstitutionIndex and runs
-        // through Institution::query (D2 v2 §3.5 / §6.12). The RPC is
-        // retained for proto compatibility but no longer routes through
-        // a registry; the proto surface is a follow-on cleanup task.
-        let _ = (req, &mut guard);
-        Err(Status::unimplemented(
-            "FiberQuery RPC is superseded by Query + FIBER under D14; see D2 §3.5",
-        ))
-    }
-
-    async fn discover_morphisms(
-        &self,
-        request: Request<DiscoverMorphismsRequest>,
-    ) -> Result<Response<DiscoverMorphismsResponse>, Status> {
-        let mut guard = RpcGuard::start(operation::RPC_DISCOVER_MORPHISMS);
-        let _ = (request, &mut guard);
-        // No D14 equivalent. The Phase-11d FiberReasoner::discover_morphisms
-        // primitive was subsumed by ordinary QueryClass dispatch — a
-        // user-defined QueryClass returning a list of resources does
-        // the same work, surfaced via FIBER.
-        Err(Status::unimplemented(
-            "DiscoverMorphisms RPC has no D14 equivalent; declare a QueryClass and dispatch via FIBER",
-        ))
-    }
-
     async fn list_institutions(
         &self,
         request: Request<ListInstitutionsRequest>,
@@ -1705,11 +1666,10 @@ impl EigeniusKernel for EigeniusService {
         if !req.at_layer.is_empty() {
             let _ = self.resolve_read_layer(&req.at_layer).await?;
         }
-        // D14 list-from-index. The proto's `morphism_types` and
-        // `query_types` slots are populated from QueryClass entries
-        // grouped by institution_ref; comorphisms / formats are not
-        // surfaced through this RPC (a future proto revision can
-        // expand the surface).
+        // D14 list-from-index. Each `InstitutionInfo` carries the
+        // QueryClass input-class IRIs declared by the institution.
+        // Comorphisms / formats are not surfaced through this RPC
+        // (a future proto revision can expand the surface).
         let index = Arc::clone(&*self.institution_index.read().await);
         let mut infos: Vec<proto::InstitutionInfo> = index
             .institutions()
@@ -1722,7 +1682,6 @@ impl EigeniusKernel for EigeniusService {
                 proto::InstitutionInfo {
                     iri: inst.iri.as_str().to_string(),
                     name: inst.name.clone(),
-                    morphism_types: Vec::new(),
                     query_types,
                 }
             })

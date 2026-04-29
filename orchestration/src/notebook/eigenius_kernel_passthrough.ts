@@ -130,11 +130,13 @@ export function registerEigeniusKernelPassthrough(
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path
-    //   fiberQuery      — Phase 3 (FIBER cell type)
-    //   discoverMorphisms — out of MVP scope
     //   getSchema       — Phase 5 (schema-aware visualisation)
     //   listTasks / getTaskStatus / cancelTask — Phase 6 (task UI)
     //   layerTopology   — exposed via NotebookService instead
+    //
+    // FIBER queries ride on the regular Query RPC under D14 (D2 v2 §3.5),
+    // so a notebook FIBER cell would dispatch via Query rather than a
+    // dedicated RPC.
     //
     // Add an entry here when the corresponding notebook feature is
     // ready to consume it.
