@@ -523,6 +523,8 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 | [Lean 4 as Institution](docs/design/lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
+| [Runtime Substrate](docs/design/runtime-substrate.md) | Language-agnostic substrate for embedding scientific-computation runtimes (Julia, Python, R, …) into Eigenius. Resource classes, image-vs-graph boundary, container-digest-anchored deployment, mirror generators. |
+| [Julia Institutions](docs/design/julia-institutions.md) | Julia as the first runtime-substrate instance, plus three reference institutions wrapping Julia libraries with their own fibers: `Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`. The future Lean / Julia bridge. |
 
 ## License
 
