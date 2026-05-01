@@ -207,7 +207,10 @@ mod tests {
             Value::String("Rex".into()),
         );
 
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let registry = Arc::new(ComponentRegistry::default());
 
         let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
@@ -244,7 +247,10 @@ mod tests {
             Value::String("Rex".into()),
         );
 
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let registry = Arc::new(ComponentRegistry::default());
         let trace_store: Arc<dyn TraceStore> = Arc::new(InMemoryTraceStore::new());
 
@@ -280,7 +286,10 @@ mod tests {
             Value::String("val".into()),
         );
 
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let registry = Arc::new(ComponentRegistry::default());
 
         let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
@@ -313,7 +322,10 @@ mod tests {
             Value::String("val".into()),
         );
 
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let registry = Arc::new(ComponentRegistry::default());
 
         let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
@@ -368,7 +380,10 @@ mod tests {
             Value::String("val".into()),
         );
 
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let registry = Arc::new(ComponentRegistry::default());
 
         let result = execute_program_nbe(&program, &input, layer, registry, None);

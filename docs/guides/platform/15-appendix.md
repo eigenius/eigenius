@@ -66,7 +66,8 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`storage/memory/`](../../../storage/memory/) — in-memory backend (default for `serve` without `--db`)
 - [`storage/rocksdb/`](../../../storage/rocksdb/) — RocksDB backend (`serve --db`)
 - [`storage/tikv/`](../../../storage/tikv/) — TiKV backend (placeholder)
-- [`storage/indexing/`](../../../storage/indexing/) — SPO/POS/OPS triple index construction
+- [`kernel/src/layer/index.rs`](../../../kernel/src/layer/index.rs) — per-layer triple index trait + in-memory impl (Phase 14h)
+- [`storage/rocksdb/src/triple_index.rs`](../../../storage/rocksdb/src/triple_index.rs) — RocksDB-backed triple index (Phase 14h)
 
 ### WASM runtime and SDK
 

@@ -88,13 +88,14 @@ async fn resume_sweep_completes_injected_running_task() {
 
     // Drive persistence through bootstrap + commit so the backend has
     // a real head to resolve against.
-    let mut ctx = eigenius_kernel::bootstrap::bootstrap_persistent(backend.as_ref()).unwrap();
+    let mut ctx = eigenius_kernel::bootstrap::bootstrap_persistent(Arc::clone(&backend)).unwrap();
     for r in [thing_class(), payload(), identity_program()] {
         ctx.add_resource(r).unwrap();
     }
     let layer = ctx.commit("test_setup").unwrap();
     backend.store_layer(&layer).unwrap();
-    backend.set_head(layer.id()).unwrap();
+    // Phase 14g: branches replace the legacy single-head pointer.
+    backend.put_branch("main", layer.id()).unwrap();
     let pinned_head = layer.id().clone();
 
     // Inject a Running task pointing at that program.
@@ -157,7 +158,7 @@ async fn resume_sweep_fails_task_when_pinned_layer_missing() {
     let backend: Arc<dyn PersistentBackend> = store;
 
     // Just the seed layers — no user-loaded content.
-    let _ = eigenius_kernel::bootstrap::bootstrap_persistent(backend.as_ref()).unwrap();
+    let _ = eigenius_kernel::bootstrap::bootstrap_persistent(Arc::clone(&backend)).unwrap();
 
     let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
     let task_id = Uuid::from_u128(0x9b_1113_4002);
@@ -200,7 +201,7 @@ async fn resume_sweep_ignores_terminal_tasks() {
     let tmp = TempDir::new().unwrap();
     let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
     let backend: Arc<dyn PersistentBackend> = store;
-    let _ = bootstrap::bootstrap_persistent(backend.as_ref()).unwrap();
+    let _ = bootstrap::bootstrap_persistent(Arc::clone(&backend)).unwrap();
 
     let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
     let session_id = Uuid::nil();

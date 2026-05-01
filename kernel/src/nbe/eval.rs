@@ -1902,13 +1902,18 @@ fn try_d14_decide(
     );
 
     let head = ctx.layer().cloned().unwrap_or_else(|| {
-        Arc::new(crate::layer::LayerBuilder::new("__decide_empty_layer__", None).build())
-    });
-    let exec_ctx = crate::context::ExecutionContext::new(
-        head,
-        "__decide__",
-        crate::context::ExecutionMode::ReadOnly,
-    );
+                Arc::new(
+                    crate::layer::LayerBuilder::new("__decide_empty_layer__", None)
+                        .build(crate::layer::LayerStorage::in_memory()),
+                )
+            });
+            let storage = head.storage().clone();
+            let exec_ctx = crate::context::ExecutionContext::new(
+                head,
+                "__decide__",
+                crate::context::ExecutionMode::ReadOnly,
+                storage,
+            );
 
     // Component-implemented QueryClasses go through extract → component
     // → reify; institution-runtime ones land in `Institution::query`.
@@ -2240,7 +2245,10 @@ mod tests {
     /// Build a minimal IO evaluation context for traced tests.
     fn io_ctx() -> EvalCtx {
         EvalCtx::IO {
-            layer: std::sync::Arc::new(crate::layer::LayerBuilder::new("empty", None).build()),
+            layer: std::sync::Arc::new(
+                crate::layer::LayerBuilder::new("empty", None)
+                    .build(crate::layer::LayerStorage::in_memory()),
+            ),
             registry: std::sync::Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),

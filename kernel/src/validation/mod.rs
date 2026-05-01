@@ -83,7 +83,8 @@ impl<'a> Validator<'a> {
     /// Validate all resources in this layer.
     pub fn validate(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
-        for resource in self.layer.resources().values() {
+        for arc_resource in self.layer.iter_resources().map(|(_, r)| r) {
+            let resource: &Resource = &arc_resource;
             errors.extend(self.validate_resource(resource));
         }
         errors
@@ -127,7 +128,8 @@ impl<'a> Validator<'a> {
             // Look up the property definition
             let prop_def = self.layer.resolve(prop_iri);
 
-            if let Some(prop_def) = prop_def {
+            if let Some(prop_def_arc) = prop_def {
+                let prop_def: &Resource = &prop_def_arc;
                 // Rule 10: Domain checking
                 errors.extend(self.check_domain(prop_def, resource, prop_iri, &res_id));
 
@@ -577,7 +579,7 @@ impl<'a> Validator<'a> {
                 Value::String(ref_str) => {
                     if let Ok(ref_iri) = Iri::parse(ref_str) {
                         if let Some(referenced) = self.layer.resolve(&ref_iri) {
-                            if !self.is_instance_of_any(referenced, &allowed_refs) {
+                            if !self.is_instance_of_any(&referenced, &allowed_refs) {
                                 errors.push(ValidationError {
                                     resource_id: res_id.clone(),
                                     property: Some(prop_iri.clone()),
@@ -985,7 +987,7 @@ impl<'a> Validator<'a> {
                 Some(d) => d,
                 None => continue,
             };
-            let dt = match self.get_data_type_str(prop_def) {
+            let dt = match self.get_data_type_str(&prop_def) {
                 Some(s) => s,
                 None => continue,
             };
@@ -1182,7 +1184,7 @@ mod tests {
         for r in resources {
             builder.add_resource(r).unwrap();
         }
-        Arc::new(builder.build())
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1220,7 +1222,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1247,7 +1249,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1278,7 +1280,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1311,7 +1313,7 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -1416,7 +1418,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1454,7 +1456,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
         let my_errors: Vec<_> = errors
@@ -1512,7 +1514,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1552,7 +1554,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1586,7 +1588,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1616,7 +1618,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1648,7 +1650,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1695,7 +1697,7 @@ mod tests {
             ))
             .unwrap();
 
-        Arc::new(builder.build())
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
@@ -1725,7 +1727,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1765,7 +1767,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1806,7 +1808,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1845,7 +1847,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1872,7 +1874,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1927,7 +1929,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -1969,7 +1971,7 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build();
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
         let validator = Validator::new(&layer);
         let errors = validator.validate();
 
@@ -2018,7 +2020,7 @@ mod tests {
             ],
         );
         top.add_resource(bad_class).unwrap();
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -2075,7 +2077,7 @@ mod tests {
         );
         top.add_resource(prop).unwrap();
         top.add_resource(class).unwrap();
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -2111,7 +2113,7 @@ mod tests {
             ],
         );
         top.add_resource(bad_prop).unwrap();
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
@@ -2451,7 +2453,7 @@ mod tests {
         );
         top.add_resource(instance).unwrap();
         top.add_resource(bad_prop).unwrap();
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();

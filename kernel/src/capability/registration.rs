@@ -120,7 +120,8 @@ pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> S
 
     let impl_prop = Iri::parse("urn:eigenius:program:component:implementation").unwrap();
 
-    for resource in layer.resources().values() {
+    for arc_resource in layer.iter_resources().map(|(_, r)| r) {
+        let resource: &Resource = &arc_resource;
         let id = match resource.id() {
             Some(i) => i.as_str().to_string(),
             None => continue, // Only top-level resources can be registered

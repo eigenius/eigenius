@@ -45,6 +45,10 @@ enum Commands {
         /// Path to Eigon-JSON file
         #[arg(value_name = "FILE")]
         file: String,
+
+        /// Branch to commit into (defaults to "main"). Remote mode only.
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Validate an Eigon-JSON file without loading
@@ -67,8 +71,13 @@ enum Commands {
         /// Evaluate the query against a specific LayerId (hex-encoded SHA-256)
         /// instead of the session's active top (D21 §3.6). Useful for
         /// reaching a forked task result layer. Remote mode only.
-        #[arg(long, value_name = "LAYER_ID")]
+        #[arg(long, value_name = "LAYER_ID", conflicts_with = "branch")]
         at_layer: Option<String>,
+
+        /// Pin reads to this branch's current head. Mutually exclusive
+        /// with --at-layer. Remote mode only.
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Type-check a program
@@ -92,6 +101,10 @@ enum Commands {
         /// Path to input file (Eigon-JSON or ESL)
         #[arg(value_name = "INPUT_FILE")]
         input_file: String,
+
+        /// Branch the trace layer commits into (defaults to "main").
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Print a resource by IRI
@@ -103,8 +116,13 @@ enum Commands {
         /// Resolve against a specific LayerId (hex-encoded SHA-256)
         /// instead of the session's active top (D21 §3.6). Remote
         /// mode only.
-        #[arg(long, value_name = "LAYER_ID")]
+        #[arg(long, value_name = "LAYER_ID", conflicts_with = "branch")]
         at_layer: Option<String>,
+
+        /// Pin reads to this branch's current head. Mutually exclusive
+        /// with --at-layer. Remote mode only.
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
     },
 
     /// Start the gRPC server
@@ -166,8 +184,52 @@ enum Commands {
         command: TaskCommands,
     },
 
+    /// Manage branch refs (Phase 14g). Remote mode only — branches
+    /// require a persistent backend.
+    Branch {
+        #[command(subcommand)]
+        command: BranchCommands,
+    },
+
     /// Show version and build info
     Version,
+}
+
+#[derive(Subcommand)]
+enum BranchCommands {
+    /// List every branch ref with its current head
+    List,
+
+    /// Show a single branch's current head
+    Show {
+        /// Branch name
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
+    /// Create a new branch pointing at an existing layer
+    Create {
+        /// Branch name (must match [A-Za-z0-9_-]+)
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Hex-encoded LayerId to start the branch from
+        #[arg(long, value_name = "LAYER_ID")]
+        from: String,
+    },
+
+    /// Delete a branch ref. Layers reachable only through this branch
+    /// are reclaimed by the next GC pass.
+    Delete {
+        /// Branch name
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Skip the safety check that refuses to prune a branch whose
+        /// head matches an active task pin
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -290,20 +352,52 @@ async fn main() {
     // Remote mode: delegate to gRPC client
     if let Some(ref endpoint) = cli.endpoint {
         match cli.command {
-            Commands::Inspect { iri, at_layer } => {
-                remote_inspect(endpoint, &iri, at_layer.as_deref(), cli.json).await
+            Commands::Inspect {
+                iri,
+                at_layer,
+                branch,
+            } => {
+                remote_inspect(
+                    endpoint,
+                    &iri,
+                    at_layer.as_deref(),
+                    branch.as_deref(),
+                    cli.json,
+                )
+                .await
             }
             Commands::Query {
                 query,
                 file: _,
                 at_layer,
-            } => remote_query(endpoint, &query, at_layer.as_deref(), cli.json).await,
+                branch,
+            } => {
+                remote_query(
+                    endpoint,
+                    &query,
+                    at_layer.as_deref(),
+                    branch.as_deref(),
+                    cli.json,
+                )
+                .await
+            }
             Commands::Run {
                 program_file,
                 input_file,
-                ..
-            } => remote_run(endpoint, &program_file, &input_file, cli.json).await,
-            Commands::Load { file } => remote_load(endpoint, &file, cli.json).await,
+                branch,
+            } => {
+                remote_run(
+                    endpoint,
+                    &program_file,
+                    &input_file,
+                    branch.as_deref(),
+                    cli.json,
+                )
+                .await
+            }
+            Commands::Load { file, branch } => {
+                remote_load(endpoint, &file, branch.as_deref(), cli.json).await
+            }
             Commands::Reflect { file } => remote_reflect(endpoint, &file, cli.json).await,
             Commands::ListInstitutions => remote_list_institutions(endpoint, cli.json).await,
             Commands::GetSchema { class_iri } => {
@@ -313,6 +407,7 @@ async fn main() {
                 remote_capability(endpoint, command, cli.json).await
             }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
+            Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -327,7 +422,7 @@ async fn main() {
 
     // Local mode: embedded kernel
     match cli.command {
-        Commands::Load { file } => cmd_load(&file, cli.json),
+        Commands::Load { file, .. } => cmd_load(&file, cli.json),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
         Commands::Query { query, file, .. } => cmd_query(&query, file.as_deref(), cli.json),
         Commands::ProgramValidate {
@@ -361,6 +456,10 @@ async fn main() {
         }
         Commands::Tasks { .. } => {
             eprintln!("'tasks' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Branch { .. } => {
+            eprintln!("'branch' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Db { command } => cmd_db(command),
@@ -589,7 +688,7 @@ fn cmd_validate(file: &str, json_output: bool) {
             std::process::exit(1);
         }
     }
-    let layer = builder.build();
+    let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
 
     // Validate
     let validator = Validator::new(&layer);
@@ -634,7 +733,7 @@ fn cmd_inspect(iri_str: &str, json_output: bool) {
 
     match ctx.resolve(&iri) {
         Some(resource) => {
-            let json = eigon_json::serialize_resource(resource);
+            let json = eigon_json::serialize_resource(&resource);
             if json_output {
                 println!("{}", serde_json::to_string(&json).unwrap());
             } else {
@@ -765,10 +864,18 @@ fn cmd_db(command: DbCommands) {
             }
             println!("Total resources: {total_resources}");
 
-            match store.get_head() {
-                Ok(Some(head)) => println!("Head: {head}"),
-                Ok(None) => println!("Head: (none)"),
-                Err(e) => println!("Head: error ({e})"),
+            // Phase 14g: branches replace the single-head pointer.
+            // List all known branches and their heads.
+            use eigenius_kernel::storage::PersistentBackend;
+            match PersistentBackend::list_branches(&store) {
+                Ok(branches) if branches.is_empty() => println!("Branches: (none)"),
+                Ok(branches) => {
+                    println!("Branches:");
+                    for (name, head) in branches {
+                        println!("  {name}: {head}");
+                    }
+                }
+                Err(e) => println!("Branches: error ({e})"),
             }
         }
         DbCommands::Compact { path } => {
@@ -801,9 +908,8 @@ fn cmd_db(command: DbCommands) {
             for layer_id in &layers {
                 let layer = rt.block_on(store.load_layer(layer_id)).unwrap();
                 let resources: Vec<serde_json::Value> = layer
-                    .resources()
-                    .values()
-                    .map(eigon_json::serialize_resource)
+                    .iter_resources()
+                    .map(|(_, r)| eigon_json::serialize_resource(&r))
                     .collect();
 
                 let json = serde_json::to_string_pretty(&resources).unwrap();
@@ -816,7 +922,7 @@ fn cmd_db(command: DbCommands) {
                 println!(
                     "Exported layer {} ({} resources) → {}",
                     layer_id,
-                    layer.resources().len(),
+                    layer.defined_iris().len(),
                     file_path.display()
                 );
             }
@@ -907,12 +1013,19 @@ async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport
         .max_encoding_message_size(128 * 1024 * 1024)
 }
 
-async fn remote_inspect(endpoint: &str, iri_str: &str, at_layer: Option<&str>, json_output: bool) {
+async fn remote_inspect(
+    endpoint: &str,
+    iri_str: &str,
+    at_layer: Option<&str>,
+    branch: Option<&str>,
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::InspectRequest {
         at_layer: at_layer.unwrap_or("").to_string(),
         iri: iri_str.to_string(),
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.inspect(request).await {
@@ -943,12 +1056,19 @@ async fn remote_inspect(endpoint: &str, iri_str: &str, at_layer: Option<&str>, j
     }
 }
 
-async fn remote_query(endpoint: &str, eigenql: &str, at_layer: Option<&str>, json_output: bool) {
+async fn remote_query(
+    endpoint: &str,
+    eigenql: &str,
+    at_layer: Option<&str>,
+    branch: Option<&str>,
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     let request = eigenius_kernel::server::proto::QueryRequest {
         at_layer: at_layer.unwrap_or("").to_string(),
         eigenql: eigenql.to_string(),
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.query(request).await {
@@ -984,7 +1104,13 @@ async fn remote_query(endpoint: &str, eigenql: &str, at_layer: Option<&str>, jso
     }
 }
 
-async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_output: bool) {
+async fn remote_run(
+    endpoint: &str,
+    program_file: &str,
+    input_file: &str,
+    branch: Option<&str>,
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     // Compile ESL files client-side since program and input may have different formats
@@ -995,6 +1121,7 @@ async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_o
         program: program_data,
         input: input_data,
         content_type: "application/eigon+json".to_string(),
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.run_program(request).await {
@@ -1028,7 +1155,7 @@ async fn remote_run(endpoint: &str, program_file: &str, input_file: &str, json_o
     }
 }
 
-async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
+async fn remote_load(endpoint: &str, file: &str, branch: Option<&str>, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
     let data = std::fs::read(file).unwrap_or_else(|e| {
@@ -1041,6 +1168,7 @@ async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
         resources: data,
         content_type,
         auto_commit: true,
+        branch: branch.unwrap_or("").to_string(),
     };
 
     match client.load(request).await {
@@ -1049,13 +1177,13 @@ async fn remote_load(endpoint: &str, file: &str, json_output: bool) {
             if resp.success {
                 if json_output {
                     println!(
-                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\"}}",
-                        resp.resource_count, resp.layer_id
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\"}}",
+                        resp.resource_count, resp.layer_id, resp.branch
                     );
                 } else {
                     println!(
-                        "Loaded {} resource(s). Layer: {}",
-                        resp.resource_count, resp.layer_id
+                        "Loaded {} resource(s) into branch {}. Layer: {}",
+                        resp.resource_count, resp.branch, resp.layer_id
                     );
                 }
             } else {
@@ -1081,6 +1209,7 @@ async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
     let request = eigenius_kernel::server::proto::ReflectRequest {
         trace: data,
         content_type: "application/eigon+json".to_string(),
+        branch: String::new(),
     };
 
     match client.reflect(request).await {
@@ -1305,6 +1434,144 @@ async fn remote_task_cancel(endpoint: &str, task_id: &str, json_output: bool) {
     }
 }
 
+// --- Branch subcommand ---
+
+async fn remote_branch(endpoint: &str, command: BranchCommands, json: bool) {
+    match command {
+        BranchCommands::List => remote_branch_list(endpoint, json).await,
+        BranchCommands::Show { name } => remote_branch_show(endpoint, &name, json).await,
+        BranchCommands::Create { name, from } => {
+            remote_branch_create(endpoint, &name, &from, json).await
+        }
+        BranchCommands::Delete { name, force } => {
+            remote_branch_delete(endpoint, &name, force, json).await
+        }
+    }
+}
+
+async fn remote_branch_list(endpoint: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::ListBranchesRequest {};
+    match client.list_branches(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let items: Vec<serde_json::Value> = resp
+                    .branches
+                    .iter()
+                    .map(|b| serde_json::json!({"name": b.name, "head_layer": b.head_layer}))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&items).unwrap());
+            } else if resp.branches.is_empty() {
+                println!("No branches.");
+            } else {
+                println!("{:<32}  HEAD", "NAME");
+                for b in &resp.branches {
+                    println!("{:<32}  {}", b.name, b.head_layer);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_branch_show(endpoint: &str, name: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::GetBranchRequest {
+        name: name.to_string(),
+    };
+    match client.get_branch(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "found": resp.found,
+                    "name": name,
+                    "head_layer": resp.head_layer,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if resp.found {
+                println!("{name}: {}", resp.head_layer);
+            } else {
+                eprintln!("Branch not found: {name}");
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_branch_create(endpoint: &str, name: &str, from: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::CreateBranchRequest {
+        name: name.to_string(),
+        from_layer: from.to_string(),
+    };
+    match client.create_branch(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "name": name,
+                    "head_layer": resp.head_layer,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if resp.success {
+                println!("Created branch {name} at {}", resp.head_layer);
+            } else {
+                eprintln!("Create failed: {}", resp.error);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_branch_delete(endpoint: &str, name: &str, force: bool, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::DeleteBranchRequest {
+        name: name.to_string(),
+        force,
+    };
+    match client.delete_branch(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "deleted": resp.deleted,
+                    "name": name,
+                    "previous_head": resp.previous_head,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if !resp.success {
+                eprintln!("Delete failed: {}", resp.error);
+                std::process::exit(1);
+            } else if resp.deleted {
+                println!("Deleted branch {name} (was at {})", resp.previous_head);
+            } else {
+                println!("Branch {name} did not exist");
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 async fn remote_capability(endpoint: &str, command: CapabilityCommands, json: bool) {
     match command {
         CapabilityCommands::List => remote_capability_list(endpoint, json).await,
@@ -1423,6 +1690,7 @@ async fn run_query(
         .query(eigenius_kernel::server::proto::QueryRequest {
             at_layer: String::new(),
             eigenql: eigenql.to_string(),
+            branch: String::new(),
         })
         .await
     {
@@ -1548,6 +1816,7 @@ async fn remote_capability_inspect(endpoint: &str, iri: &str, json: bool) {
     let request = eigenius_kernel::server::proto::InspectRequest {
         at_layer: String::new(),
         iri: iri.to_string(),
+        branch: String::new(),
     };
 
     match client.inspect(request).await {
@@ -1693,6 +1962,7 @@ async fn remote_capability_install(
         resources: resource_json.into_bytes(),
         content_type: "application/eigon+json".to_string(),
         auto_commit: true,
+        branch: String::new(),
     };
 
     match client.load(request).await {
@@ -1941,6 +2211,7 @@ async fn remote_capability_test(
                 program: program_json.into_bytes(),
                 input: input_json,
                 content_type: "application/eigon+json".to_string(),
+                branch: String::new(),
             })
             .await
         {

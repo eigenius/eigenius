@@ -27,7 +27,7 @@ use crate::ontology::resource::{Resource, Value};
 use crate::program::component::BuiltinComponent;
 
 fn empty_layer() -> crate::layer::Layer {
-    crate::layer::LayerBuilder::new("empty", None).build()
+    crate::layer::LayerBuilder::new("empty", None).build(crate::layer::LayerStorage::in_memory())
 }
 
 #[test]

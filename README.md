@@ -120,6 +120,85 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 docker compose down
 ```
 
+#### Inspecting the kernel's persistent state
+
+The kernel writes its RocksDB store to a named docker volume (`eigenius_db`)
+mounted at `/var/lib/eigenius/db` inside the kernel container. The volume
+survives `docker compose down`; use `docker compose down -v` to wipe it (the
+next `up` re-seeds at schema v1).
+
+```bash
+# Peek at the on-disk RocksDB files via the running kernel container
+docker compose exec kernel ls -la /var/lib/eigenius/db
+docker compose exec kernel du -sh /var/lib/eigenius/db
+
+# Or attach a throwaway alpine container with just the volume mounted
+# (useful when the kernel container won't start):
+docker run --rm -it -v eigenius_eigenius_db:/data alpine sh
+# inside: ls -la /data ; du -sh /data ; exit
+
+# Show what docker thinks it knows about the volume
+docker volume ls | grep eigenius_db
+docker volume inspect eigenius_eigenius_db
+
+# Inspect platform state through the kernel API (preferred — RocksDB's SST
+# files are not directly readable; go through the kernel surface):
+eigenius --endpoint http://localhost:50051 branch list
+eigenius --endpoint http://localhost:50051 branch show main
+
+# Reset the dev DB and start fresh:
+docker compose down -v          # wipes the volume
+docker compose up -d            # next `up` re-seeds at schema v1
+```
+
+The volume name on the host is `<project>_eigenius_db` — typically
+`eigenius_eigenius_db` if you run from the repo root. See
+[D24 — Schema Versioning](docs/design/d24-schema-versioning.md) for what
+gets stamped at seed time and why a `down -v` reset is sometimes needed
+after a kernel upgrade.
+
+#### Reading the kernel logs
+
+The kernel uses [`tracing`](https://docs.rs/tracing/) and emits structured
+JSON when running in docker (no TTY). Standard `docker compose logs`
+controls visibility; `RUST_LOG` and `EIGENIUS_LOG_FORMAT` control verbosity
+and shape.
+
+```bash
+# All kernel logs since startup
+docker compose logs kernel
+
+# Follow (Ctrl-C to stop)
+docker compose logs -f kernel
+
+# Last N lines, then exit
+docker compose logs --tail=100 kernel
+
+# Bounded by time
+docker compose logs --since 5m kernel
+
+# Both services side-by-side
+docker compose logs -f kernel orchestrator
+
+# Pipe structured JSON through jq
+docker compose logs --no-log-prefix kernel | jq 'select(.fields.operation)'
+
+# Just RPC failures
+docker compose logs --no-log-prefix kernel | jq 'select(.fields.error_kind)'
+```
+
+For more verbose output during debugging, add to the `kernel.environment`
+block in `docker-compose.yml`:
+
+```yaml
+- RUST_LOG=eigenius_kernel=debug,info
+- EIGENIUS_LOG_FORMAT=pretty   # human-readable instead of JSON
+```
+
+`eigenius_kernel=debug` turns on per-RPC and per-chain-walk events; `info`
+keeps the rest of the workspace at the default level. `trace` is rarely
+useful — that's where high-volume per-resource events live.
+
 ## Repository Structure
 
 ```
@@ -439,6 +518,8 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized termination via bounded binders, self-referential parameterised codata, productivity by typing |
 | [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |
 | [D22: Notebook UX and TypeScript SDK](docs/design/d22-notebook-and-typescript-sdk.md) | The React notebook, the `Eigen` SDK, the notebook ontology, content-addressed publish |
+| [D23: Out-of-Core Layer Architecture](docs/design/d23-out-of-core-layer-architecture.md) | Phase 14: topology/content split, per-layer blooms, branches + CAS, multi-parent merges, GC, per-layer triple index |
+| [D24: Schema Versioning Policy](docs/design/d24-schema-versioning.md) | On-disk schema versioning: kernel `SCHEMA_VERSION`, migration framework, boot-time check, contributor checklist. Companion: [Schema Changelog](docs/design/schema-changelog.md). |
 | [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
 | [Lean 4 as Institution](docs/design/lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |

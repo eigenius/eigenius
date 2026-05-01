@@ -16,10 +16,20 @@
 // See D22 §5 and the `README.md` in this directory.
 
 export {
+  type BranchInfo,
+  type CreateBranchOptions,
+  type CreateBranchResponse,
+  type DeleteBranchOptions,
+  type DeleteBranchResponse,
   Eigen,
   type EigenOptions,
+  type GetBranchResponse,
+  type InspectOptions,
   type LayerTopologyOptions,
   type LoadOptions,
+  type QueryOptions,
+  type ReflectResponse,
+  type RunProgramByIriOptions,
   type RunProgramOptions,
   type SourceContentType,
 } from "./src/client.ts";
@@ -41,8 +51,8 @@ export {
   type CellType,
   type EigonResource,
   type NotebookJson,
-  type NotebookMetaJson,
   notebookJsonToResources,
+  type NotebookMetaJson,
   type ProgramRunCellJson,
   type PublishOutput,
   resourcesToNotebookJson,

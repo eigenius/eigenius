@@ -77,3 +77,10 @@ export const KERNEL_PASSTHROUGH_GET_SCHEMA = "orchestrator.kernel.get_schema";
 export const KERNEL_PASSTHROUGH_LIST_INSTITUTIONS =
   "orchestrator.kernel.list_institutions";
 export const KERNEL_PASSTHROUGH_HEALTH = "orchestrator.kernel.health";
+export const KERNEL_PASSTHROUGH_LIST_BRANCHES =
+  "orchestrator.kernel.list_branches";
+export const KERNEL_PASSTHROUGH_GET_BRANCH = "orchestrator.kernel.get_branch";
+export const KERNEL_PASSTHROUGH_CREATE_BRANCH =
+  "orchestrator.kernel.create_branch";
+export const KERNEL_PASSTHROUGH_DELETE_BRANCH =
+  "orchestrator.kernel.delete_branch";

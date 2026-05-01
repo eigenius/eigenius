@@ -27,9 +27,8 @@ eigenius/
 │   └── Cargo.toml
 ├── storage/                   # Storage backend implementations
 │   ├── tikv/                  # TiKV backend crate (§10.7)
-│   ├── rocksdb/               # RocksDB embedded storage backend
-│   ├── memory/                # In-memory backend (testing)
-│   └── indexing/              # SPO/POS/OPS triple index construction (§10.8)
+│   ├── rocksdb/               # RocksDB embedded storage backend (incl. RocksTripleIndex per D23 §5.9)
+│   └── memory/                # In-memory backend (testing)
 ├── orchestration/             # Deno/TypeScript orchestration layer (§2.2)
 │   ├── src/
 │   │   ├── program/            # Program execution engine (§12)
@@ -155,7 +154,7 @@ The following decisions have been made and documented in **design doc D1** (`doc
   - Stratified evaluation ordering for negated patterns
 - Built-in functions: DATE, TIMESTAMP, REGEX, LENGTH, CONTAINS, CONCAT
 - Aggregate functions: COUNT, SUM, AVG, MIN, MAX
-- Triple index construction on layer commit: SPO/POS/OPS indexes built as in-memory BTreeMap structures, used by the query evaluator for efficient pattern matching
+- Triple index construction on layer commit: per-layer POS index (D23 §5.9 / Phase 14h) populated by `LayerBuilder::build` and consulted by the query evaluator's `scan_chain` for indexed pattern matching
 - CLI `query` command: takes an EigenQL program string, evaluates it against the current layer chain, prints typed results
 - Structured query error reporting with position, phase (lexer/parser/type_check/stratification/evaluation), rule, and message
 
@@ -286,7 +285,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 - **Integration test:** Start kernel service with in-memory backend, send Load/Query/Validate RPCs via CLI, verify correct responses.
 - **TiKV round-trip:** Start kernel with TiKV backend, load ontology, commit layers, restart kernel, verify data persists and queries return correct results.
-- **Index correctness:** Load 1,000 resources, verify SPO/POS/OPS indexes in TiKV produce the same query results as the in-memory backend.
+- **Index correctness:** Load 1,000 resources, verify the per-layer POS index in RocksDB produces the same query results as the in-memory backend.
 - **Container build:** Docker build succeeds, container starts, health check passes.
 - **Azure deployment smoke test:** Deploy to ContainerApps staging environment, run the CLI integration test suite against the deployed endpoint.
 - **Concurrent access:** Two CLI sessions loading resources and querying concurrently against the same kernel service — no corruption, snapshot isolation holds.
@@ -923,13 +922,15 @@ The D10-era surface is fully retired:
 ### Phase 14 — Sub-milestones
 
 - **14a — Topology / content split (~1 week).** In-memory DAG of `LayerId → parent[s]`, branch heads, named refs. Resource content moves to a cache keyed by `(LayerId, IRI)`. Naïve top-down lookup walks the topology and falls through to the storage backend on cache miss; correctness first, performance later.
-- **14b — Per-head shadowing index (~1.5 weeks).** Persistent `IRI → highest_defining_layer` index per branch head, maintained incrementally on commit (same atomic write batch as the layer itself). Bloom-filter front end for negative answers. Reduces lookup from O(depth) probes to one. Time-travel queries reconstruct an "as-of-L" view via per-named-head checkpoints + on-demand rewind.
-- **14c — Two-pool cache + eviction (~1 week).** Active-head pool (entries that are currently the top per the active head's shadowing index) vs. historical pool (entries shadowed in every active head, only reachable via time-travel or trace dereferences). ARC inside each pool; historical pool evicted first under memory pressure.
+- **14b — Per-layer shadowing bloom + bloom cache (~1.5 weeks).** Each layer carries a bloom filter over its `defined_iris`, computed at commit and persisted as `bloom:<layer_id>` (CBOR) in the same atomic write batch as the rest of the layer. Blooms page through a bounded `BloomCache` (mirrors `ResourceCache`'s shape). `Layer::resolve` walks the chain head→root using the cached blooms to skip non-defining layers, only probing cache/backend at layers the bloom flags. Per-layer (not per-head) keeps the kernel a pure DAG: no per-head index to maintain on commit/branch/merge; multi-parent merges (14e and Phase 15) just inherit. Trade-off: O(chain_depth × bloom_check) instead of O(1) per-head lookup; bloom checks are in-memory hash ops measured in tens of ns. See D23 §5.2 for rationale.
+- **14c — Two-pool cache + eviction (~1 week).** Active-head pool (entries that are top-of-stack for the active head per the §5.2.2 chain walk) vs. historical pool (entries shadowed by a higher layer in every active head, only reachable via time-travel or trace dereferences). ARC inside each pool; historical pool evicted first under memory pressure.
 - **14d — `commit_layer` + `update_branch` with CAS (~1.5 weeks).** The two stateless write primitives that anchor the lattice. `commit_layer(parent, content)` appends an immutable layer to the DAG; `update_branch(branch, expected_old, new_head)` advances a branch ref via CAS with a `FastForward | NeedsWitnessedMerge` outcome (trivial merge ships in 14e). Pin is just a parameter; no kernel-side `Session`, `PromotionService`, or scratch-chain abstraction — clients (CLI / notebook / task runner / SDK) orchestrate. D21's `TaskRecord.layer_head` is already the per-task pin and needs no structural change.
 - **14e — Trivial merge in `update_branch` + branch read surface (~2 weeks).** Extend `update_branch` with the `TrivialMerge` outcome: when the caller's chain and the branch's current head modify disjoint sets of IRIs since their lowest common ancestor, the kernel produces a multi-parent merge layer automatically and CAS-updates the branch to point at it. Witnessed merges (real conflicts) still return `NeedsWitnessedMerge` for Phase 15 to handle. Also lands `BranchManager` read/list/delete surface, the `auto-*` naming convention for client-saved divergent chains, and a small additive `outcome: BranchUpdateOutcome` field on D21's `TaskRecord` so users can see whether a task fast-forwarded, trivially merged, or needs witnessed-merge resolution. The trivial-merge case handles the majority of real-world divergence in dev workflows; without it Phase 14 ships with a sharp usability cliff for any concurrent activity.
+
+  Documented client convention shipped alongside 14e (in the task runner / SDK, not the kernel): **per-task recovery branch** named `recovery-{task_id}`. On task launch, the runner creates the recovery branch pinned to the launch-point layer; each task commit advances it via `update_branch(... StrictFastForward)`. On successful completion, the runner attempts to advance the *target* branch from the recovery branch's head and prunes the recovery branch on success. On failure (or `NeedsWitnessedMerge`), the recovery branch stays for inspection. The kernel doesn't model this — `TaskRecord` derives the recovery branch name from `task_id`, no new persisted field — but 14e is the right milestone to document the convention since this is the first phase where trivial merge makes the publish-step viable end-to-end. Read-only tasks skip the recovery-branch dance entirely.
 - **14f — Reachability-based GC (~2 weeks).** Mark-and-sweep over the resource graph. Roots: pinned branch heads, active sessions, resources referenced by reflection-ontology traces, verified-knowledge claims. Background task with backpressure; configurable triggers (size threshold, idle interval).
 - **14g — Branch pruning (~1 week).** `eigenius db prune <branch>` removes a branch from the topology; GC sweeps anything reachable only through it. Rejects pruning of branches with active sessions.
-- **14h — Indexed resource access for queries (~1.5 weeks).** Wire the existing SPO/POS/OPS indexes from `storage/indexing/` through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes an indexed lookup against the storage backend instead of a full BTreeMap scan. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap.
+- **14h — Indexed resource access for queries (~1.5 weeks).** Implement the per-layer triple index (D23 §5.9) and wire it through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes a POS prefix scan against the storage backend instead of a full chain scan, with chain-membership filtering and a bloom-walk shadow check (matching §5.2's per-layer model) to dedupe across the DAG. POS-only in v1 (the three hot sites need only `(p, o) → s`); SPO/OPS deferred. IRI-valued objects only (`Property.data_type ∈ {resource, resource_array}`); literal-typed properties post-filter the index-narrowed candidate set. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap. The previously-stubbed `storage/indexing/` crate is superseded by the new in-kernel implementation in `kernel/src/layer/index.rs` and the RocksDB-backed impl in `storage/rocksdb/src/triple_index.rs`.
 
 ### Phase 14 — Key design questions
 
@@ -937,15 +938,17 @@ The D10-era surface is fully retired:
 - **Trace pinning:** does an active reflection-ontology trace pin its referenced resources from GC? Default instinct: yes — the epistemic guarantee depends on the chain being readable. Implies traces have explicit lifetime / expiration policy.
 - **Migration vs. shadowing:** when an ontology migration rewrites resources via comorphism (Phase 15), does the new resource shadow the old, or supersede it? Different GC semantics either way.
 - **Branch identity:** content hash, user label, both? Answers propagate to Phase 15's merge command.
-- **Time-travel checkpoint cadence:** checkpoint at every named head only, or at fixed intervals? Storage cost vs. rewind cost trade-off.
-- **Index regeneration on merge:** Phase 15's merge creates a new layer; its shadowing index has to be computed. Incremental from parents or full rebuild?
+- **Bloom FPR vs. storage trade:** D23 §5.2 sets a 1% FPR default at commit time. Heavy-resolve workloads may want lower FPR (more storage, fewer spurious probes); negligible-resolve workloads may want higher FPR. Decide whether to expose this as a per-DB config knob or keep it baked at the kernel default.
+- **Pathological chain depth:** the per-layer-bloom design's worst case is deep chains (10⁴+ layers) where bloom-walk dominates resolve cost. D23 §5.2.7 sketches an optional roll-up index as the mitigation; defer until a workload demonstrates need.
 
 ### Phase 14 — References
 
 - D13 §8, §11 — drift-refusal and single-session boundary this phase generalises
-- D21 §3.6 — `--at-layer` queries (the time-travel surface that constrains the checkpoint scheme)
-- `storage/indexing/` — existing SPO/POS/OPS index implementation Phase 14h plugs into
-- D23 (to be written) — Out-of-Core Layer Architecture
+- D21 §3.6 — `--at-layer` queries (time-travel surface; D23 §5.6 shows it reuses the standard `Layer::resolve` rooted at L)
+- `kernel/src/layer/index.rs` — `TripleIndex` trait + `MemoryTripleIndex` + chain-walk helpers (Phase 14h)
+- `storage/rocksdb/src/triple_index.rs` — RocksDB-backed `TripleIndex` (Phase 14h)
+- `storage/indexing/` — pre-14h stub crate, superseded; can be removed
+- D23 — Out-of-Core Layer Architecture
 
 ---
 
@@ -1019,7 +1022,44 @@ The D10-era surface is fully retired:
 
 ---
 
-## Phase 17 — Specialty Institutions
+## Phase 17 — Chain Consolidation
+
+**Goal:** Reshape sequential runs of layers into shorter equivalent ones, without losing the per-IRI top-of-stack semantics consumers depend on. Long-lived databases accumulate depth (many small commits per session, fine-grained edits during exploration), and Phase 14b's per-layer bloom design degrades on chains beyond ~10⁴ layers because resolve walks them all. Consolidation is the structural fix; the alternative — a periodically-materialised roll-up index alongside the per-layer blooms (D23 §5.2.7) — speeds up resolve but doesn't reduce storage cost or shorten chains.
+
+This is distinct from merge (which combines parallel branches; doesn't reduce depth) and from GC (which removes unreachable layers; doesn't restructure reachable ones). Consolidation is the "git squash" analog at the typed-knowledge-graph level.
+
+**Duration estimate:** 2–4 weeks (closer to 4 if trace re-pinning and consolidate-across-merge land in scope).
+
+**Prerequisites:** Phase 14 (the DAG model and bloom-cache resolve are what consolidation operates on), Phase 15 (witnessed merge — needed to consolidate across a merge node, since the consolidated layer must preserve any conflict-resolution decisions the merge encoded).
+
+**Motivation:** Consider a notebook session that produces 200 small commits while iterating on a derivation. The session ends; the result is one effective state. With Phase 14, the chain stays 200 layers deep — every read pays a 200-layer bloom walk plus storage holds 200 small `topo:`/`bloom:`/`layer:` entries. Consolidation collapses the run into one layer that's resolve-equivalent to the topmost: same per-IRI top-of-stack values, same parent pointer (the one before the consolidated range began). The 199 collapsed layers become collectable by GC at the next pass.
+
+### Phase 17 — Deliverables
+
+- **`consolidate_chain(from: LayerId, to: LayerId) -> Result<LayerId, ConsolidateError>` API.** Takes a contiguous ancestral range `from..=to` (`from` must be an ancestor of `to`, no merge nodes in between for v1) and produces a single new layer with `parent = from.parent`, content = the range's top-of-stack values per IRI. Returns the new layer id; the caller updates whatever branch ref previously pointed at `to`.
+- **Top-of-stack computation.** Walk `from..=to` head→root, materialising the merged view per the existing `iter_all_resources` semantics. The consolidated layer's `defined_iris` is the union of the range's `defined_iris`. Per-IRI value comes from the topmost layer in the range that defines it.
+- **Trace re-pinning policy.** Traces (D21) pin specific `(LayerId, Iri)` pairs. When a pinned layer is consolidated away, the pin needs to either (a) re-point at the consolidated layer if the IRI's value is preserved, (b) be invalidated, or (c) keep the pinned layer alive (effectively blocking consolidation for traced layers). Default for v1: option (c) — refuse to consolidate ranges that contain trace-pinned resources. Less aggressive but safer; (a)/(b) are post-v1 refinements.
+- **Atomic commit.** The consolidation writes the new layer (`topo:`, `bloom:`, `layer:<id>:res:*`, chain pointer) in one `WriteBatch` (per D23 §6.3 — the same atomicity contract every commit honors). The old layers stay in place until GC sweeps them; consolidation does not delete.
+- **`eigenius db consolidate <from>..<to>` CLI.** Operator surface for triggering consolidation of an ancestral range.
+- **Bloom cache eviction for consolidated-out layers.** Whatever entries the bloom cache held for the now-collected range are dropped via `evict_layer`. Same hook as GC.
+
+### Phase 17 — Key design questions
+
+- **Consolidate across merge nodes?** v1 says no (linear ancestral range only). Multi-parent consolidation needs to decide what the consolidated layer's parents are — the merge node's parents? The lowest common ancestor? This is its own design discussion.
+- **Consolidation interaction with witnessed merge.** A consolidated layer that absorbs a merge layer needs to carry forward the comorphism witness (Phase 15) the merge used to resolve a conflict. The consolidated representation is "as if the conflict had been resolved this way from the start" — the witness is still required to justify the resolution. Per the prerequisite on Phase 15.
+- **Trace pin policy.** Refuse-to-consolidate (v1) is conservative. Re-pin-on-consolidate is more aggressive but requires the trace store to know about consolidation events.
+- **Should consolidation be automatic?** Some systems consolidate background (Postgres VACUUM analog), others require explicit user action (git rebase). v1 ships explicit-only; auto-consolidation policies are post-v1.
+
+### Phase 17 — References
+
+- D23 §5.2.7 — the deferred "deep chain" performance concern that motivates this phase
+- D21 — Task Traces and Checkpointing (trace pin re-pointing semantics)
+- Phase 15 — Witnessed Layer Reconciliation (comorphism witness preservation across consolidation)
+- D25 (to be written) — Chain Consolidation specification
+
+---
+
+## Phase 18 — Specialty Institutions
 
 **Goal:** Proof-assistant and solver institutions extend the platform's reach. Lean 4 is the canonical first example. Others (SMT solvers like Z3, possibly Coq, possibly TLA+) follow the same pattern with their own fiber reasoners.
 
@@ -1029,20 +1069,20 @@ The D10-era surface is fully retired:
 
 **Drives:** `docs/design/lean-4-as-institution.md` (existing sketch).
 
-### Phase 17 — Deliverables (per institution)
+### Phase 18 — Deliverables (per institution)
 
 - **Fiber declaration:** morphism types the institution understands (for Lean: proofs, reductions, elaborations), query types it answers (e.g., "is this proposition provable?").
 - **Reasoner implementation:** WASM-hosted for Lean-in-WASM if feasible; subprocess-hosted via nanoda_lib integration as a practical first cut.
 - **Comorphism specifications:** per Phase 11d/12, how Lean's natural numbers relate to Mini-TT's Nat, how Lean's Prop relates to Mini-TT's Type(0), etc. Many small comorphisms.
 - **Worked example:** a life-science or engineering claim proved in Lean, with the proof registered as a verified morphism on a class.
 
-### Phase 17 — Open questions (carried from `lean-4-as-institution.md`)
+### Phase 18 — Open questions (carried from `lean-4-as-institution.md`)
 
 - `verified_in` witness extension (§16.4 / `lean-4-as-institution.md` open question 9) — deferred until a consumer requests it.
 - Hosting model: WASM (sandboxed, matches other institutions) vs. subprocess (matches Lean's normal operating model, avoids wasm-lean complexity). Decision pending empirical data on both options.
 - Trust policy for Lean proofs: how much of the Lean environment is "ambient trust" vs. reproducible per-proof?
 
-### Phase 17 — References
+### Phase 18 — References
 
 - `docs/design/lean-4-as-institution.md` — extended sketch, nanoda_lib as reference
 - `docs/design/life-science-requirements.md` §16.4 — verified_in witness extension
@@ -1079,15 +1119,16 @@ The following design documents must be written and reviewed before the phase tha
 | D19 | **Inductive Types in Mini-TT** | **DRAFT** — `docs/design/d19-inductive-types.md`. Single (non-mutual, non-nested) strictly-positive inductive types + sized types (#16). Declaration form, positivity checker, recursor/eliminator derivation, iota-reduction, sized termination for inductive/coinductive interaction. Deferred: mutual (#20), nested (#21), indexed families (#22). | Phase 11b | Draft |
 | D20 | **Layer Reconciliation via Comorphisms** | Category-theoretic treatment of layer merging. Common-ancestor invariants, comorphism witnesses as merge proofs, conflict resolution via the witness, the `migrate` and `db merge` commands. Supersedes D13's v1 drift-refusal. Builds on the DAG primitive that lands in Phase 14. Draws on D10's institution protocol and the `Comorphism` ontology class introduced in Phase 11d. | Phase 15 | 12–16 pages |
 | D21 | **Task Traces and Checkpointing** | **COMPLETED** — `docs/design/d21-task-traces-and-checkpointing.md`. Per-task positional `(session_id, task_id, step_seq)` trace keys replace the Phase-9a content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state atomically via `write_batch`. `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs + `at_layer` on read RPCs. Startup resume sweep (`ResumeConfig`, `ResumeState`) rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks with bounded parallelism. Single hardwired session (`Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion. | Phase 9b-iii | Done |
-| D23 | **Out-of-Core Layer Architecture** | Topology / content split, per-head shadowing index, two-pool ARC cache, time-travel checkpoint scheme, DAG branching primitive, multi-session writes, reachability-based GC with trace pinning, branch pruning, indexed resource access for queries. The structural rework that lifts the kernel's working-set bound from "graph size" to "cache size." | Phase 14 | 12–16 pages |
+| D23 | **Out-of-Core Layer Architecture** | Topology / content split, per-layer shadowing bloom + bounded `BloomCache`, two-pool ARC cache, time-travel as standard resolve rooted at the target layer, DAG branching primitive, multi-session writes, reachability-based GC with trace pinning, branch pruning, indexed resource access for queries. The structural rework that lifts the kernel's working-set bound from "graph size" to "cache size." | Phase 14 | 12–16 pages |
 | D24 | **Out-of-Core Query Execution** | Buffer-pool abstraction over the storage backend, hash join with spill, external sort, spillable group-by accumulators, spill-aware cost model, per-query memory budget. The operator-side rewrite that lets EigenQL handle result sets larger than memory. Builds on D23's storage abstractions. | Phase 16 | 8–10 pages |
+| D25 | **Chain Consolidation** | Squash a contiguous ancestral range of layers into one resolve-equivalent layer to reduce chain depth and storage cost. Top-of-stack computation across the range, atomic commit of the consolidated layer, trace re-pinning policy, interaction with witnessed merge (consolidating across merge nodes preserves the comorphism witness). The lifecycle operation that addresses the deep-chain pathology D23 §5.2.7 flags as a deferred concern. Distinct from merge (combines branches) and GC (drops unreachable layers). | Phase 17 | 8–10 pages |
 
 **Reference documents** (analysis rather than specification):
 
 | File | Purpose |
 |------|---------|
 | `docs/design/life-science-requirements.md` | Systematic audit of life-science representation needs. Drives the Phase 10–12 sequencing and is the source of record for which kernel extensions each shape requires. |
-| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 17. |
+| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 18. |
 
 ---
 

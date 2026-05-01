@@ -85,6 +85,28 @@ service EigeniusKernel {
   // JSX boxes-and-arrows) and the Phase 5 full-topology graph
   // (`@xyflow/react`) consume the same response.
   rpc LayerTopology(LayerTopologyRequest) returns (LayerTopologyResponse);
+
+  // --- Branch refs (Phase 14g / D23 §5.5) ---
+  //
+  // Branches are named pointers into the layer DAG. Reads pin via
+  // `at_layer`; writes commit through these RPCs. Branch names match
+  // `[A-Za-z0-9_-]+` (max 256 chars).
+
+  // Enumerate every branch ref as (name, head LayerId) pairs.
+  rpc ListBranches(ListBranchesRequest) returns (ListBranchesResponse);
+
+  // Resolve a branch name to its current head and chain depth.
+  rpc GetBranch(GetBranchRequest) returns (GetBranchResponse);
+
+  // Create a new branch pointing at `from_layer`. Fails if a branch
+  // with this name already exists, or if `from_layer` is unknown.
+  rpc CreateBranch(CreateBranchRequest) returns (CreateBranchResponse);
+
+  // Remove a branch ref. Layers reachable only through the deleted
+  // branch are reclaimed by the next GC pass — the ref itself is
+  // gone immediately. With `force=false`, refuses to prune a branch
+  // whose head matches an active task pin.
+  rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
 }
 
 // --- Load ---
@@ -93,6 +115,9 @@ message LoadRequest {
   bytes resources = 1;          // Resources as CBOR or Eigon-JSON
   string content_type = 2;      // "application/cbor" or "application/eigon+json"
   bool auto_commit = 3;         // Commit after successful validation
+  // Branch to commit into (Phase 14g). Empty defaults to "main".
+  // Branch must already exist — create with CreateBranch first.
+  string branch = 4;
 }
 
 message LoadResponse {
@@ -100,6 +125,8 @@ message LoadResponse {
   repeated ValidationError errors = 2;
   string layer_id = 3;          // Set if auto_commit succeeded
   uint32 resource_count = 4;
+  // Echoes the branch this Load committed to (defaults to "main").
+  string branch = 5;
 }
 
 // --- Inspect ---
@@ -110,6 +137,9 @@ message InspectRequest {
   // instead of the session's active top (D21 §3.6). Empty = active top.
   // Useful for inspecting forked task result layers.
   string at_layer = 2;
+  // Optional branch name (Phase 14g). Pin reads to this branch's
+  // current head. Mutually exclusive with `at_layer`. Empty = "main".
+  string branch = 3;
 }
 
 message InspectResponse {
@@ -124,6 +154,9 @@ message QueryRequest {
   // Optional hex-encoded LayerId to evaluate the query against a
   // specific layer instead of the session's active top (D21 §3.6).
   string at_layer = 2;
+  // Optional branch name (Phase 14g). Pin reads to this branch's
+  // current head. Mutually exclusive with `at_layer`. Empty = "main".
+  string branch = 3;
 }
 
 message QueryResponse {
@@ -157,6 +190,8 @@ message RunProgramRequest {
   bytes program = 1;            // Program as CBOR or Eigon-JSON
   bytes input = 2;              // Input as CBOR or Eigon-JSON
   string content_type = 3;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  string branch = 4;
 }
 
 message RunProgramResponse {
@@ -177,6 +212,9 @@ message RunProgramByIriRequest {
   // Optional hex-encoded LayerId to pin both reads to a specific layer
   // instead of the session's active top (D21 §3.6). Empty = active top.
   string at_layer = 3;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  // Reads still respect `at_layer` independently of `branch`.
+  string branch = 4;
 }
 
 // --- Reflect ---
@@ -184,6 +222,8 @@ message RunProgramByIriRequest {
 message ReflectRequest {
   bytes trace = 1;
   string content_type = 2;
+  // Branch the trace layer commits into (Phase 14g). Empty = "main".
+  string branch = 3;
 }
 
 message ReflectResponse {
@@ -414,6 +454,61 @@ enum EdgeKind {
   EDGE_KIND_RECOMMENDS = 5;         // class → recommended property
   EDGE_KIND_PROPERTY_REF = 6;       // property → referenced class (via class_types)
   EDGE_KIND_INSTITUTION_DECLARES = 7; // institution → declared class
+}
+
+// --- Branch refs (Phase 14g / D23 §5.5) ---
+
+message BranchInfo {
+  string name = 1;          // matches [A-Za-z0-9_-]+
+  string head_layer = 2;    // hex-encoded LayerId
+}
+
+message ListBranchesRequest {}
+
+message ListBranchesResponse {
+  repeated BranchInfo branches = 1;
+}
+
+message GetBranchRequest {
+  string name = 1;
+}
+
+message GetBranchResponse {
+  bool found = 1;
+  // Set when found=true; hex-encoded LayerId of the branch's current head.
+  string head_layer = 2;
+}
+
+message CreateBranchRequest {
+  string name = 1;          // must match [A-Za-z0-9_-]+
+  // Hex-encoded LayerId to start the branch from. Must be a known layer.
+  string from_layer = 2;
+}
+
+message CreateBranchResponse {
+  bool success = 1;
+  // Echo of the created branch's head; empty on failure.
+  string head_layer = 2;
+  string error = 3;         // populated when !success
+}
+
+message DeleteBranchRequest {
+  string name = 1;
+  // When false, refuse to prune if the branch's head matches an active
+  // task pin (lattice::PruneSafety::CheckPins). When true, delete
+  // unconditionally (PruneSafety::Force).
+  bool force = 2;
+}
+
+message DeleteBranchResponse {
+  bool success = 1;
+  // True when the branch existed and was deleted; false when it didn't
+  // exist (still success=true). When success=false, see `error`.
+  bool deleted = 2;
+  // Hex-encoded LayerId the branch pointed at before deletion (when
+  // deleted=true); empty otherwise.
+  string previous_head = 3;
+  string error = 4;
 }
 
 // --- NotebookService (D22 §3.2) ---

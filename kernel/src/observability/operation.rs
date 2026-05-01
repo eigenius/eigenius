@@ -43,6 +43,10 @@ pub const RPC_CANCEL_TASK: &str = "kernel.rpc.cancel_task";
 pub const RPC_CAPABILITY_INSTALL: &str = "kernel.rpc.capability_install";
 pub const RPC_CAPABILITY_LIST: &str = "kernel.rpc.capability_list";
 pub const RPC_CAPABILITY_REMOVE: &str = "kernel.rpc.capability_remove";
+pub const RPC_LIST_BRANCHES: &str = "kernel.rpc.list_branches";
+pub const RPC_GET_BRANCH: &str = "kernel.rpc.get_branch";
+pub const RPC_CREATE_BRANCH: &str = "kernel.rpc.create_branch";
+pub const RPC_DELETE_BRANCH: &str = "kernel.rpc.delete_branch";
 
 // --- Layer ---
 
