@@ -734,12 +734,14 @@ mod tests {
         cm.set(iri(wk::EXACT), Value::Boolean(false));
         b.add_resource(cm).unwrap();
 
-        std::sync::Arc::new(b.build())
+        std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]
     fn empty_layer_yields_empty_index() {
-        let layer = std::sync::Arc::new(LayerBuilder::new("empty", None).build());
+        let layer = std::sync::Arc::new(
+            LayerBuilder::new("empty", None).build(crate::layer::LayerStorage::in_memory()),
+        );
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(idx.is_empty());
         assert!(errors.is_empty());
@@ -841,7 +843,7 @@ mod tests {
         // transformation deliberately omitted
         b.add_resource(cm).unwrap();
 
-        let layer = std::sync::Arc::new(b.build());
+        let layer = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
 
         // Well-formed Institution still indexed.
@@ -879,7 +881,7 @@ mod tests {
             );
             b.add_resource(qc).unwrap();
         }
-        let layer = std::sync::Arc::new(b.build());
+        let layer = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
 
         // First Decidable wins; second emits an error.

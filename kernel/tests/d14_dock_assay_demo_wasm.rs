@@ -42,7 +42,7 @@ use eigenius_kernel::capability::registration::{
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::registry::InstitutionIndex;
 use eigenius_kernel::institution::runtime::InstitutionRuntime;
-use eigenius_kernel::layer::{Layer, LayerBuilder};
+use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -108,7 +108,7 @@ fn embed_wasm(bytes: &[u8]) -> Value {
 /// auto-registration scan in `build_wasm_institution_runtime` and
 /// `scan_and_register` then picks up the WASM variants and constructs
 /// the runtime + registry exactly as `EigeniusService` does on commit.
-fn build_demo_layer() -> Arc<Layer> {
+fn build_demo_layer() -> (Arc<Layer>, LayerStorage) {
     let ctx = bootstrap::bootstrap().expect("bootstrap kernel");
     let parent = Arc::clone(ctx.head());
 
@@ -116,7 +116,7 @@ fn build_demo_layer() -> Arc<Layer> {
     for r in eigon_json::parse_document(DEMO_ONTOLOGY).expect("parse demo ontology") {
         base_builder.add_resource(r).expect("add demo resource");
     }
-    let base_layer = Arc::new(base_builder.build());
+    let base_layer = Arc::new(base_builder.build(LayerStorage::in_memory()));
 
     let mut wasm_builder = LayerBuilder::new("d14-dock-assay-wasm", Some(base_layer));
     wasm_builder
@@ -129,7 +129,8 @@ fn build_demo_layer() -> Arc<Layer> {
         .add_resource(wasm_component(ARRHENIUS_COMPONENT_IRI, ARRHENIUS_FIXTURE))
         .expect("add Arrhenius WASM override");
 
-    Arc::new(wasm_builder.build())
+    let storage = LayerStorage::in_memory();
+    (Arc::new(wasm_builder.build(storage.clone())), storage)
 }
 
 fn wasm_institution(inst_iri: &str, name: &str, bytes: &[u8]) -> Resource {
@@ -225,15 +226,15 @@ fn build_demo_components(layer: &Layer) -> Arc<ComponentRegistry> {
     Arc::new(registry)
 }
 
-fn build_exec_ctx(layer: Arc<Layer>) -> ExecutionContext {
-    ExecutionContext::new(layer, "d14-wasm-demo", ExecutionMode::ReadOnly)
+fn build_exec_ctx(layer: Arc<Layer>, storage: LayerStorage) -> ExecutionContext {
+    ExecutionContext::new(layer, "d14-wasm-demo", ExecutionMode::ReadOnly, storage)
 }
 
 // ─── 1. Comorphism translation through the WASM host bridge ────────────
 
 #[test]
 fn wasm_comorphism_translates_dock_to_assay() {
-    let layer = build_demo_layer();
+    let (layer, _storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime(&layer);
     let components = build_demo_components(&layer);
@@ -253,7 +254,7 @@ fn wasm_comorphism_translates_dock_to_assay() {
     for r in user_resources {
         user_builder.add_resource(r).expect("add user resource");
     }
-    let program_layer = Arc::new(user_builder.build());
+    let program_layer = Arc::new(user_builder.build(LayerStorage::in_memory()));
 
     let mut input = Resource::new(iri("urn:eigenius:demo:d14:wasm_input1"));
     input.set(
@@ -309,7 +310,7 @@ fn run_within_tolerance(
     use eigenius_kernel::nbe::term::{Constraint, Exp};
     use std::sync::Mutex;
 
-    let layer = build_demo_layer();
+    let (layer, _storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime(&layer);
     let components = build_demo_components(&layer);
@@ -370,10 +371,10 @@ fn wasm_decidable_fails_outside_tolerance() {
 fn wasm_auto_on_load_fires_on_assay_prediction() {
     use eigenius_kernel::institution::dispatch::dispatch_auto_on_load_for_resource;
 
-    let layer = build_demo_layer();
+    let (layer, storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime(&layer);
-    let exec_ctx = build_exec_ctx(Arc::clone(&layer));
+    let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
     let mut good = Resource::new(iri("urn:eigenius:demo:d14:wasm_good"));
     good.set(

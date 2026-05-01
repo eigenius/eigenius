@@ -1745,7 +1745,7 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let layer = b.build();
+        let layer = b.build(crate::layer::LayerStorage::in_memory());
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "fixture index errors: {errors:?}");
         Arc::new(idx)

@@ -288,7 +288,8 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let layer = Arc::new(b.build());
+        let storage = crate::layer::LayerStorage::in_memory();
+        let layer = Arc::new(b.build(storage.clone()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "{errors:?}");
         let idx = Arc::new(idx);
@@ -302,7 +303,7 @@ mod tests {
             .unwrap();
         let runtime = Arc::new(runtime);
 
-        let exec_ctx = ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly);
+        let exec_ctx = ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage);
         (idx, runtime, exec_ctx)
     }
 
@@ -373,7 +374,7 @@ mod tests {
             Value::Array(vec![Value::String("urn:eigenius:test:auto:Subject".into())]),
         );
         b.add_resource(r2).unwrap();
-        let layer = Arc::new(b.build());
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
         let errs = dispatch_auto_on_load_for_layer(&layer, &idx, &runtime, &ctx);
         assert_eq!(
@@ -445,7 +446,8 @@ mod tests {
             Value::String("urn:eigenius:test:auto:inst".into()),
         );
         b.add_resource(qc).unwrap();
-        let layer = Arc::new(b.build());
+        let storage = crate::layer::LayerStorage::in_memory();
+        let layer = Arc::new(b.build(storage.clone()));
         let (idx, _) = InstitutionIndex::from_layer(&layer);
         let mut runtime = InstitutionRuntime::new();
         runtime
@@ -453,7 +455,7 @@ mod tests {
                 iri: iri("urn:eigenius:test:auto:inst"),
             }))
             .unwrap();
-        let ctx = ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly);
+        let ctx = ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage);
 
         let errs = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
         assert_eq!(errs.len(), 1);

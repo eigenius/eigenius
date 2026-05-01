@@ -45,7 +45,7 @@ use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::institution::registry::InstitutionIndex;
 use eigenius_kernel::institution::runtime::{Institution, InstitutionRuntime};
-use eigenius_kernel::layer::{Layer, LayerBuilder};
+use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
@@ -115,8 +115,10 @@ fn float_payload_resource(value: f64) -> Resource {
     r
 }
 
-/// Build the demo layer on top of the bootstrap chain.
-fn build_demo_layer() -> Arc<Layer> {
+/// Build the demo layer on top of the bootstrap chain. Returns the
+/// layer paired with its `LayerStorage` so callers can thread the
+/// same storage into a derived `ExecutionContext`.
+fn build_demo_layer() -> (Arc<Layer>, LayerStorage) {
     let ctx = bootstrap::bootstrap().expect("bootstrap kernel");
     let parent = Arc::clone(ctx.head());
     let mut builder = LayerBuilder::new(DEMO_LAYER_NAME, Some(parent));
@@ -124,7 +126,8 @@ fn build_demo_layer() -> Arc<Layer> {
     for r in resources {
         builder.add_resource(r).expect("add demo resource");
     }
-    Arc::new(builder.build())
+    let storage = LayerStorage::in_memory();
+    (Arc::new(builder.build(storage.clone())), storage)
 }
 
 /// Build the InstitutionIndex from the demo layer chain.
@@ -156,8 +159,8 @@ fn build_demo_components() -> Arc<ComponentRegistry> {
     Arc::new(registry)
 }
 
-fn build_exec_ctx(layer: Arc<Layer>) -> ExecutionContext {
-    ExecutionContext::new(layer, "d14-demo", ExecutionMode::ReadOnly)
+fn build_exec_ctx(layer: Arc<Layer>, storage: LayerStorage) -> ExecutionContext {
+    ExecutionContext::new(layer, "d14-demo", ExecutionMode::ReadOnly, storage)
 }
 
 // ─── Dock institution ──────────────────────────────────────────────────
@@ -423,7 +426,7 @@ impl BuiltinComponent for ArrheniusComponent {
 /// the resulting IC₅₀ is positive so the invariant Holds.
 #[test]
 fn comorphism_translates_dock_to_assay() {
-    let layer = build_demo_layer();
+    let (layer, _storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime();
     let components = build_demo_components();
@@ -443,7 +446,7 @@ fn comorphism_translates_dock_to_assay() {
     for r in user_resources {
         user_builder.add_resource(r).expect("add user resource");
     }
-    let program_layer = Arc::new(user_builder.build());
+    let program_layer = Arc::new(user_builder.build(LayerStorage::in_memory()));
 
     // Build a sample DockingResult: ΔG = -8.5 kcal/mol.
     let mut input = Resource::new(iri("urn:eigenius:demo:d14:input1"));
@@ -495,7 +498,7 @@ fn run_within_tolerance(predicted: f64, target: f64, tolerance: f64) -> Val {
     use eigenius_kernel::nbe::eval::{eval_ctx, EvalCtx};
     use eigenius_kernel::nbe::term::{Constraint, Exp, PrimitiveType};
 
-    let layer = build_demo_layer();
+    let (layer, _storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime();
     let components = build_demo_components();
@@ -567,10 +570,10 @@ fn decidable_query_class_fails_outside_tolerance() {
 fn auto_on_load_fires_on_assay_prediction() {
     use eigenius_kernel::institution::dispatch::dispatch_auto_on_load_for_resource;
 
-    let layer = build_demo_layer();
+    let (layer, storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime();
-    let exec_ctx = build_exec_ctx(Arc::clone(&layer));
+    let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
     // Healthy AssayPrediction — IC₅₀ = 250 nM.
     let mut good = Resource::new(iri("urn:eigenius:demo:d14:good_prediction"));
@@ -617,11 +620,11 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
     use eigenius_kernel::query::ast::{Expression, Name};
     use std::collections::BTreeMap;
 
-    let layer = build_demo_layer();
+    let (layer, storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime();
     let components = build_demo_components();
-    let exec_ctx = build_exec_ctx(Arc::clone(&layer));
+    let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
     // Build a sample DockingResult and bind it to ?d in the binding.
     let dock_iri = iri("urn:eigenius:demo:d14:input1");
@@ -674,8 +677,8 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
 
 /// Build a data layer with a sample DockingResult resource the
 /// EigenQL queries can MATCH against.
-fn build_demo_data_layer() -> Arc<Layer> {
-    let demo = build_demo_layer();
+fn build_demo_data_layer() -> (Arc<Layer>, LayerStorage) {
+    let (demo, _) = build_demo_layer();
     let mut builder = LayerBuilder::new("d14-demo-data", Some(demo));
     let mut docking = Resource::new(iri("urn:eigenius:demo:d14:dock-result-1"));
     docking.set(
@@ -684,7 +687,8 @@ fn build_demo_data_layer() -> Arc<Layer> {
     );
     docking.set(iri(DELTA_G_PROP), Value::Float(-8.5));
     builder.add_resource(docking).expect("add docking resource");
-    Arc::new(builder.build())
+    let storage = LayerStorage::in_memory();
+    (Arc::new(builder.build(storage.clone())), storage)
 }
 
 /// Sanity check: the demo data layer's DockingResult is matchable
@@ -693,7 +697,7 @@ fn build_demo_data_layer() -> Arc<Layer> {
 #[test]
 fn eigenql_match_finds_demo_docking_result() {
     use eigenius_kernel::query;
-    let data = build_demo_data_layer();
+    let (data, _storage) = build_demo_data_layer();
     let runtime = query::evaluate::FiberRuntime::default();
     let source = r#"
         MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
@@ -722,11 +726,11 @@ fn eigenql_match_finds_demo_docking_result() {
 #[test]
 fn eigenql_fiber_coercion_only_produces_verdict_binding() {
     use eigenius_kernel::query;
-    let data = build_demo_data_layer();
+    let (data, storage) = build_demo_data_layer();
     let index = build_demo_index(&data);
     let inst_runtime = build_demo_runtime();
     let components = build_demo_components();
-    let exec_ctx = build_exec_ctx(Arc::clone(&data));
+    let exec_ctx = build_exec_ctx(Arc::clone(&data), storage);
     let runtime = query::evaluate::FiberRuntime {
         index: Some(&index),
         runtime: Some(&inst_runtime),
@@ -775,11 +779,11 @@ fn eigenql_fiber_coercion_only_produces_verdict_binding() {
 fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
     use eigenius_kernel::query;
 
-    let data = build_demo_data_layer();
+    let (data, storage) = build_demo_data_layer();
     let index = build_demo_index(&data);
     let runtime = build_demo_runtime();
     let components = build_demo_components();
-    let exec_ctx = build_exec_ctx(Arc::clone(&data));
+    let exec_ctx = build_exec_ctx(Arc::clone(&data), storage);
 
     let runtime = query::evaluate::FiberRuntime {
         index: Some(&index),
@@ -830,11 +834,11 @@ fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
 fn eigenql_postfix_fails_drops_holding_row() {
     use eigenius_kernel::query;
 
-    let data = build_demo_data_layer();
+    let (data, storage) = build_demo_data_layer();
     let index = build_demo_index(&data);
     let runtime = build_demo_runtime();
     let components = build_demo_components();
-    let exec_ctx = build_exec_ctx(Arc::clone(&data));
+    let exec_ctx = build_exec_ctx(Arc::clone(&data), storage);
 
     let runtime = query::evaluate::FiberRuntime {
         index: Some(&index),
@@ -882,11 +886,11 @@ fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
     use eigenius_kernel::query::ast::{Expression, Name};
     use std::collections::BTreeMap;
 
-    let layer = build_demo_layer();
+    let (layer, storage) = build_demo_layer();
     let index = build_demo_index(&layer);
     let runtime = build_demo_runtime();
     let components = build_demo_components();
-    let exec_ctx = build_exec_ctx(Arc::clone(&layer));
+    let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
     let dock_iri = iri("urn:eigenius:demo:d14:input1");
     let mut docking = Resource::new(dock_iri);

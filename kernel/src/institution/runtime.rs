@@ -229,8 +229,14 @@ mod tests {
     }
 
     fn make_ctx() -> ExecutionContext {
-        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build());
-        ExecutionContext::new(layer, "test", crate::context::ExecutionMode::ReadOnly)
+        let storage = crate::layer::LayerStorage::in_memory();
+        let layer = Arc::new(crate::layer::LayerBuilder::new("empty", None).build(storage.clone()));
+        ExecutionContext::new(
+            layer,
+            "test",
+            crate::context::ExecutionMode::ReadOnly,
+            storage,
+        )
     }
 
     #[test]

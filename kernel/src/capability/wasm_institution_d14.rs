@@ -311,8 +311,9 @@ mod tests {
     }
 
     fn make_ctx() -> ExecutionContext {
-        let layer = Arc::new(LayerBuilder::new("empty", None).build());
-        ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly)
+        let storage = crate::layer::LayerStorage::in_memory();
+        let layer = Arc::new(LayerBuilder::new("empty", None).build(storage.clone()));
+        ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage)
     }
 
     fn load_echo() -> WasmInstitution {

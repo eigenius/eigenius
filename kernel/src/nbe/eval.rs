@@ -3415,7 +3415,7 @@ mod tests {
         );
         b.add_resource(comorphism).unwrap();
 
-        Arc::new(b.build())
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
     }
 
     fn build_d14_pipeline_ctx(log: Arc<Mutex<Vec<String>>>) -> (EvalCtx, Arc<InstitutionIndex>) {
@@ -3535,7 +3535,7 @@ mod tests {
             crate::ontology::resource::Value::String("urn:eigenius:test:d14_pipe:import".into()),
         );
         top.add_resource(orphan).unwrap();
-        let new_layer = Arc::new(top.build());
+        let new_layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         // Re-derive the index over the new chain so it picks up the
         // orphan comorphism.
@@ -3674,7 +3674,7 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let layer = Arc::new(b.build());
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "{errors:?}");
 
@@ -3747,7 +3747,10 @@ mod tests {
         // Constraint IRI not in the D14 index → fallback to legacy
         // institutions registry. With neither configured the legacy
         // path returns Undecidable (passthrough).
-        let layer = Arc::new(crate::layer::LayerBuilder::new("test", None).build());
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("test", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
         let (idx, _) = InstitutionIndex::from_layer(&layer);
         let ctx = EvalCtx::IO {
             layer,

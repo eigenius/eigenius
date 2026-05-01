@@ -4029,7 +4029,7 @@ mod tests {
             RVal::String(inst_iri.into()),
         );
         b.add_resource(qc).unwrap();
-        let layer = Arc::new(b.build());
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "{errors:?}");

@@ -2044,8 +2044,11 @@ mod tests {
         Arc::new(runtime)
     }
 
-    fn q_exec_ctx(layer: Arc<crate::layer::Layer>) -> ExecutionContext {
-        ExecutionContext::new(layer, "q_test", ExecutionMode::ReadOnly)
+    fn q_exec_ctx(
+        layer: Arc<crate::layer::Layer>,
+        storage: crate::layer::LayerStorage,
+    ) -> ExecutionContext {
+        ExecutionContext::new(layer, "q_test", ExecutionMode::ReadOnly, storage)
     }
 
     #[test]
@@ -2076,8 +2079,8 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(storage));
-        let exec_ctx = q_exec_ctx(Arc::clone(&layer));
+        let layer = Arc::new(builder.build(storage.clone()));
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer), storage);
 
         let runtime = FiberRuntime {
             index: Some(&index),
@@ -2137,8 +2140,8 @@ mod tests {
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(storage));
-        let exec_ctx = q_exec_ctx(Arc::clone(&layer));
+        let layer = Arc::new(builder.build(storage.clone()));
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer), storage);
 
         let runtime = FiberRuntime {
             index: Some(&index),
