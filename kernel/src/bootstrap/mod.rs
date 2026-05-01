@@ -763,10 +763,13 @@ mod tests {
         let ctx = bootstrap().unwrap();
         for class in [
             "Institution",
-            "FiberMorphism",
-            "FiberQuery",
-            "StructuralProperty",
-            "PropertyKind",
+            "ExportFormat",
+            "ImportFormat",
+            "QueryClass",
+            "Comorphism",
+            "Verdict",
+            "RuntimeKind",
+            "DispatchRole",
         ] {
             let iri = Iri::parse(&format!("urn:eigenius:institution:{class}")).unwrap();
             assert!(
@@ -777,14 +780,14 @@ mod tests {
     }
 
     #[test]
-    fn can_resolve_property_kinds() {
+    fn can_resolve_dispatch_roles() {
         let ctx = bootstrap().unwrap();
-        for kind in ["reflexive", "transitive", "symmetric", "antisymmetric"] {
+        for role in ["on_demand", "auto_on_load", "decidable"] {
             let iri =
-                Iri::parse(&format!("urn:eigenius:institution:property_kinds:{kind}")).unwrap();
+                Iri::parse(&format!("urn:eigenius:institution:dispatch_roles:{role}")).unwrap();
             assert!(
                 ctx.resolve(&iri).is_some(),
-                "should resolve property kind {kind}"
+                "should resolve dispatch role {role}"
             );
         }
     }

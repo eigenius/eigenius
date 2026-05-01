@@ -29,16 +29,17 @@ pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
     compile_file_with_institutions(file, None)
 }
 
-/// Compile an ESL AST with access to an institution registry
-/// (Phase 11e). When provided, function-call-shaped references whose
-/// function IRI classifies as a registered comorphism or decide
-/// predicate are emitted as specialized program resources (decoded
+/// Compile an ESL AST with access to a D14 [`InstitutionIndex`]. When
+/// provided, function-call-shaped references whose function IRI
+/// classifies as a registered Decidable QueryClass or a declared
+/// Comorphism are emitted as specialized program resources (decoded
 /// by `program::expr` into the corresponding kernel AST node). When
-/// absent, all function calls emit plain `Apply` resources — the
-/// pre-11e behaviour.
+/// absent, all function calls emit plain `Apply` resources.
+///
+/// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
 pub fn compile_file_with_institutions(
     file: &ast::File,
-    institutions: Option<std::sync::Arc<crate::institution::InstitutionRegistry>>,
+    institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
@@ -79,10 +80,11 @@ struct Compiler {
     /// Built in `collect_ctor_table` before any declaration is compiled,
     /// so expression compilation can resolve bare ctor references.
     ctors: BTreeMap<String, String>,
-    /// Optional institution registry (Phase 11e) — when present,
-    /// drives compile-time classification of function-call IRIs as
-    /// `DecidePredicate` or `Comorphism` capabilities.
-    institutions: Option<std::sync::Arc<crate::institution::InstitutionRegistry>>,
+    /// Optional D14 institution index — when present, drives
+    /// compile-time classification of function-call IRIs as a
+    /// Decidable QueryClass call or a Comorphism invocation, emitting
+    /// specialized program resources instead of plain `Apply`.
+    institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
 }
 
 /// Resolve a function-name reference in an ESL `Apply` to its full
@@ -861,17 +863,18 @@ impl Compiler {
                     }
                 }
 
-                // Phase 11e — institution capability classification.
-                // When the function resolves to a registered
-                // comorphism or decide-predicate IRI, emit a
-                // specialized program resource. Otherwise fall
+                // D14 institution capability classification (D14 §6.2,
+                // §9.2). When the function resolves to a Decidable
+                // QueryClass or a Comorphism declared in the chain,
+                // emit a specialized program resource. Otherwise fall
                 // through to ordinary component-dispatch.
                 //
                 // The parser collapses `ns:local` function names
                 // into a bare `Expr::Var { name: "ns:local" }` with
                 // `QualifiedName.namespace = None`, so we split on
                 // the first `:` and look up the namespace ourselves.
-                if let Some(registry) = &self.institutions {
+                if let Some(index) = &self.institutions {
+                    use crate::institution::registry::DispatchRole;
                     let resolved_func_iri = resolve_apply_function(
                         function.namespace.as_deref(),
                         &function.name,
@@ -879,40 +882,38 @@ impl Compiler {
                     );
                     if let Some(func_iri_str) = resolved_func_iri {
                         if let Ok(func_iri_parsed) = Iri::parse(&func_iri_str) {
-                            match registry.classify(&func_iri_parsed) {
-                                Some(crate::institution::InstitutionCapability::Comorphism) => {
-                                    if args.len() != 1 || component_argument.is_some() {
-                                        return Err(EslError::compiler(
-                                            Some(pos.clone()),
-                                            format!(
-                                                "comorphism `{}` expects exactly 1 source \
-                                                 argument, got {} positional arg(s){}",
-                                                func_iri_str,
-                                                args.len(),
-                                                if component_argument.is_some() {
-                                                    " plus a configuration block"
-                                                } else {
-                                                    ""
-                                                }
-                                            ),
-                                        ));
-                                    }
-                                    let src_r = self.compile_expr(&args[0])?;
-                                    let mut r = Resource::new_embedded();
-                                    set_is_a(&mut r, "urn:eigenius:program:ComorphismInvokeApply");
-                                    r.set(
-                                        iri("urn:eigenius:program:function"),
-                                        Value::String(func_iri_str),
-                                    );
-                                    r.set(
-                                        iri("urn:eigenius:program:source"),
-                                        Value::Embedded(Box::new(src_r)),
-                                    );
-                                    return Ok(r);
+                            if index.comorphism(&func_iri_parsed).is_some() {
+                                if args.len() != 1 || component_argument.is_some() {
+                                    return Err(EslError::compiler(
+                                        Some(pos.clone()),
+                                        format!(
+                                            "comorphism `{}` expects exactly 1 source \
+                                             argument, got {} positional arg(s){}",
+                                            func_iri_str,
+                                            args.len(),
+                                            if component_argument.is_some() {
+                                                " plus a configuration block"
+                                            } else {
+                                                ""
+                                            }
+                                        ),
+                                    ));
                                 }
-                                Some(
-                                    crate::institution::InstitutionCapability::DecidePredicate,
-                                ) => {
+                                let src_r = self.compile_expr(&args[0])?;
+                                let mut r = Resource::new_embedded();
+                                set_is_a(&mut r, "urn:eigenius:program:ComorphismInvokeApply");
+                                r.set(
+                                    iri("urn:eigenius:program:function"),
+                                    Value::String(func_iri_str),
+                                );
+                                r.set(
+                                    iri("urn:eigenius:program:source"),
+                                    Value::Embedded(Box::new(src_r)),
+                                );
+                                return Ok(r);
+                            }
+                            if let Some(qc) = index.query_class(&func_iri_parsed) {
+                                if qc.dispatch_roles.contains(&DispatchRole::Decidable) {
                                     if component_argument.is_some() {
                                         return Err(EslError::compiler(
                                             Some(pos.clone()),
@@ -941,7 +942,6 @@ impl Compiler {
                                     );
                                     return Ok(r);
                                 }
-                                None => {}
                             }
                         }
                     }

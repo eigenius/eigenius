@@ -1,80 +1,84 @@
 # 7. FIBER clauses
 
-`FIBER` clauses extend a query with reasoning delegated to a registered institution. The specification is in [D2 §3.5 + §5.8 + §6.12](../../design/d2-eigenql-specification.md); the implementation is [`apply_fiber_clause`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`.
+`FIBER` clauses extend a query with reasoning delegated to a registered institution. The specification is in [D2 §3.5 + §5.8 + §6.12](../../design/d2-eigenql-specification.md); the underlying institution model is [D14](../../design/d14-institution-realisation.md). The implementation is [`apply_fiber_clause`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`.
 
-The pattern: you declare an institution alias, ask the institution to perform a typed query, and bind the response resource to a variable that subsequent clauses can match against.
+The pattern: you declare an institution alias, name an `OnDemand` `QueryClass`, supply property-shaped param bindings (with optional comorphism coercion in param values), and bind the response resource to a variable that subsequent clauses can match against.
 
 ## 7.1. Anatomy
 
 ```
-UsingInstitution ::= 'USING' 'INSTITUTION' StringLit 'AS' ident
+UsingInstitution    ::= 'USING' 'INSTITUTION' StringLit 'AS' ident
 
-FiberClause ::= 'FIBER' institution_ref ':' QueryClass
-                '{' ParamBinding (',' ParamBinding)* '}'
-                'AS' Variable
+FiberClause         ::= 'FIBER' institution_ref ':' QueryClass
+                        '{' ParamBinding (',' ParamBinding)* '}'
+                        'AS' Variable
 
-ParamBinding ::= Name ':' Expression
+ParamBinding        ::= Name ':' ParamValue
+ParamValue          ::= Expression | ComorphismCoercion
+ComorphismCoercion  ::= QualifiedName '(' Expression ')'
 ```
 
-Where `institution_ref` is either an alias (`ShortName`) or an inline full IRI (`FullIri`).
+Where `institution_ref` is either an alias (`ShortName`) or an inline full IRI (`FullIri`). The QueryClass referenced by the clause must declare `OnDemand` in its `dispatch_role` set (D14 §6.2).
 
 ```eigenql
-USING INSTITUTION "urn:eigenius:institutions:docking" AS dock
+USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
 
-FIBER dock:PredictBinding {
-    compound: ?cpd,
-    receptor: ?rec
-} AS ?pred
+FIBER assay:validate_prediction {
+    candidate: ?p
+} AS ?check
 ```
 
 **`USING INSTITUTION`** introduces the alias at the top of a `MatchPart`. Aliases are scoped to their `MatchPart` and must be unique within that scope; re-declaring is a type error (`duplicate_using_institution_alias`).
 
 **`FIBER`** performs the dispatch. Its three parts:
 
-1. **`institution:query_class`** — who to ask and what question class.
-2. **`{ param: value, ... }`** — the query resource's property bindings.
+1. **`institution:query_class`** — who to ask and which `OnDemand` `QueryClass`.
+2. **`{ param: value, ... }`** — the input resource's property bindings. A `value` is either a regular expression, or a comorphism coercion (`comorphism_iri(source)`) that runs the four-step extract → transform → reify pipeline inline. See §7.5 below.
 3. **`AS ?var`** — where to put the response IRI in the current binding.
 
 ## 7.2. Evaluation walk-through
 
 For each binding in the current binding set, `apply_fiber_clause`:
 
-1. **Resolves the institution**. Alias lookup in `aliases: BTreeMap<&str, &Iri>`, or direct IRI if the clause gave one inline. The institution must be registered in the `InstitutionRegistry`; otherwise `"no institution registered for IRI '...'"`.
-2. **Resolves the query class**. `ShortName` → class IRI in the layer; `FullIri` → used as-is. Must be a `Class`.
-3. **Builds a query resource**. Starts with `is_a: [query_class_iri]`. For each `param`:
-   - The param name is resolved to a property IRI via [`build_param_iri_table`](../../../kernel/src/query/evaluate.rs) (walks the class's `requires` ∪ `recommends` looking for `short_name` matches).
-   - The value is evaluated with the current binding via [`eval_expression`](../../../kernel/src/query/evaluate.rs) — so expressions in param slots see the binding exactly as `WHERE` would.
-   - The resulting `(property_iri, value)` pair is set on the query resource.
-4. **Dispatches**. Calls `reasoner.query(&query_resource, ctx)` on the institution. The reasoner returns a new `Resource` — its response.
-5. **Stamps the response**. The response gets a deterministic IRI via `fp.fiber_response_iri(clause_idx, binding_idx)` — stable per (query text, clause, binding). This lets subsequent queries against the same inputs produce the same overlay resource identity.
-6. **Attaches to the overlay**. The stamped resource is pushed into `FiberOverlay::entries` — visible to all subsequent pattern matching in this query only.
-7. **Extends the binding**. `?pred` is bound to the response IRI as a `Value::String`.
+1. **Resolves the institution and QueryClass.** Alias lookup against the `MatchPart`'s `USING INSTITUTION` aliases (or inline IRI). The QueryClass IRI is resolved through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs); the cited QueryClass's `institution_ref` must equal the aliased / inline institution (`fiber_institution_mismatch` if not), and `OnDemand` must be among its `dispatch_role` values (`fiber_query_class_not_on_demand` if not).
+2. **Builds an input resource.** Starts with `is_a: [QueryClass.query_class]` (the input class declared by the QueryClass). For each `param`:
+   - The param name is resolved to a property IRI by walking the input class's `requires` ∪ `recommends` looking for `short_name` matches; full-IRI param names pass through.
+   - If the value is a regular expression, it's evaluated with the current binding.
+   - If the value is a comorphism coercion, the kernel runs the four-step pipeline (§7.5) and uses the reified target-class resource as the property's value.
+3. **Dispatches.** Looks up the QueryClass's `institution_ref` in the [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) and calls `Institution::query(query_handler, input_resource, ctx)` (D14 §8). The institution returns a result resource.
+4. **Stamps the response.** The response gets a deterministic IRI via `fp.fiber_response_iri(clause_idx, binding_idx)` — stable per (query text, clause, binding). Subsequent runs against the same inputs produce the same overlay resource identity.
+5. **Attaches to the overlay.** The stamped resource is pushed into the `FiberOverlay` — visible to all subsequent pattern matching in this query only.
+6. **Extends the binding.** `?check` is bound to the response IRI as a `Value::String`.
 
-Step 7 is why subsequent `MATCH` clauses can reference `?pred` just like any resource:
+Step 6 is why subsequent clauses can reference `?check` just like any resource:
 
 ```eigenql
-FIBER dock:PredictBinding { compound: ?cpd } AS ?pred
-MATCH Prediction(?pred) {
-    affinity: ?aff
-}
+FIBER assay:validate_prediction { candidate: ?p } AS ?check
+WHERE ?check HOLDS
 ```
 
-The second `MATCH` sees `?pred` as bound, looks up the resource in the overlay (or layer, but the overlay wins for this IRI since it's deterministic per-query), and unifies.
+The `WHERE` clause uses a postfix Verdict predicate (§8.4) to project the bound Verdict response to a Boolean — see [chapter 8](08-institutions.md) for the full Verdict surface.
 
 ## 7.3. Requirements on the runtime
 
-`FIBER` clauses require both fields of `FiberRuntime` to be present:
+`FIBER` clauses require the [`FiberRuntime`](../../../kernel/src/query/evaluate.rs) to carry the D14 dispatch handles:
 
 ```rust
 pub struct FiberRuntime<'a> {
-    pub institutions: Option<&'a InstitutionRegistry>,
+    pub index: Option<&'a InstitutionIndex>,
+    pub runtime: Option<&'a InstitutionRuntime>,
+    pub components: Option<&'a ComponentRegistry>,
+    pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
 }
 ```
 
-If `institutions` is `None` the clause errors with `"FIBER requires an institution registry — not available in this execution context"`. If `ctx` is `None`, `"FIBER requires an execution context — not available in this execution context"`.
+- `index` and `runtime` are required for any FIBER clause: the index resolves the QueryClass and the runtime answers the dispatch.
+- `components` is required when any FIBER param value uses comorphism coercion (§7.5) — the four-step pipeline applies the comorphism's transformation Component, which lives in the component registry. v1 restricts the cited transformation to `Pure` or `Read` capability levels.
+- `ctx` is required for any FIBER clause; the institution's handler may need read access to the layer chain through the execution context.
+- `overlay` is populated automatically as preceding FIBER clauses add their responses; you don't pass it in.
 
-Queries executed via the convenience `execute(program_str, layer)` (no runtime) **cannot use `FIBER`**. Use `execute_with(program_str, layer, FiberRuntime { institutions: Some(reg), ctx: Some(exec_ctx) })` when your query needs it.
+Queries executed via the convenience `execute(program_str, layer)` (no runtime) **cannot use `FIBER`** — it constructs a `FiberRuntime::default()` with all fields `None` and dispatch errors at the first FIBER clause. Use `execute_with(program_str, layer, FiberRuntime { … })` when your query needs FIBER dispatch.
 
 ## 7.4. The transient overlay
 
@@ -86,31 +90,63 @@ The overlay model (D2 §6.12) isolates FIBER responses from the persistent layer
 
 This lets queries use institution reasoning without side effects. Two successive runs of the same query produce identical results only if the institution's `query()` is deterministic — the overlay IRIs themselves are stable because `fp.fiber_response_iri` is deterministic, but the institution is free to return different responses.
 
-## 7.5. FIBER vs. decide vs. comorphism
+## 7.5. Comorphism coercion in param values
 
-Three ways a query can involve an institution. They have different shapes and semantics:
+A FIBER param value can be a *comorphism coercion* — `comorphism_iri(source_expression)` — which runs the four-step pipeline (D14 §9.3) inline and uses the reified target-class resource as the property's value:
+
+```eigenql
+USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+
+MATCH DockingResult(?d) { delta_g: ?dg }
+FIBER assay:validate_prediction {
+    candidate: dock_to_assay(?d)
+} AS ?check
+WHERE ?check HOLDS
+```
+
+Here `dock_to_assay` is a `Comorphism` resource (D14 §4.5). At evaluation:
+
+1. The kernel resolves the comorphism in the `InstitutionIndex` (read `export_format`, `transformation`, `import_format`).
+2. **Extract.** Calls the source institution's `Institution::extract_typed(export_format.procedure, ?d, ctx)` → typed payload of the export's `payload_type`.
+3. **Transform.** Applies the transformation Component to the payload via the kernel's component evaluator → typed payload of the import's `payload_type`. The Component must be registered in the `FiberRuntime.components` and its `capability_level` must be `Pure` or `Read` (see §7.3).
+4. **Reify.** Calls the target institution's `Institution::reify(import_format.procedure, payload, ctx)` → the target-class resource.
+
+The reified resource is set as the property's value on the FIBER's input resource.
+
+The type checker validates that the cited comorphism's import-side `to_class` matches (or is a subclass of) the QueryClass's expected class type for that property (`comorphism_coercion_class_mismatch` if not), and that the transformation Component is `Pure` or `Read` (`comorphism_io_not_supported_in_v1` if `IO` — D2 v1 restriction).
+
+Comorphisms are *not* available in expression position elsewhere in EigenQL — only inside FIBER param values. See [chapter 8](08-institutions.md) for the full classification table.
+
+## 7.6. FIBER vs. Decidable vs. comorphism coercion
+
+Three ways an EigenQL query can involve an institution. They have different shapes and semantics:
 
 | Mechanism | Syntax | Returns | When to use |
 |---|---|---|---|
-| `FIBER` clause | `FIBER inst:QueryClass { params } AS ?var` | Binds a response resource | When the institution's result is a structured resource with multiple properties that subsequent clauses want to pattern-match |
-| Decide predicate | `inst:predicate(args)` in `WHERE` | `Value::Boolean` | When you just want yes/no filtering |
-| Comorphism | `inst:translate(source)` in `RETURN` | `Value::Embedded(resource)` | When you need to translate a resource across an institution boundary and include the result in output |
+| Decidable QueryClass | `inst:predicate(args) HOLDS` (or `FAILS`/`UNDECIDABLE`) in `WHERE`/`RETURN` | `Verdict` projected to Boolean by the postfix predicate | Yes/no filtering with explicit handling of Undecidable |
+| `FIBER` clause | `FIBER inst:QueryClass { params } AS ?var` | Binds an institution-returned response resource (whose class is the QueryClass's `result_class`) | Multi-property responses; the bound variable participates in later pattern matching |
+| Comorphism coercion | `param: comorphism_iri(source)` inside a FIBER param block | A target-class resource set on the FIBER's input | Crossing an institution boundary into the FIBER's input vocabulary |
 
-A query can mix all three. FIBER is the most powerful shape because the bound variable participates in later pattern matching; decide/comorphism are simpler calls that produce one value.
+A query can mix all three. FIBER is the most powerful shape because the bound variable participates in later pattern matching; Decidable is the simplest call that produces a single Verdict; comorphism coercion is the controlled boundary-crossing form.
 
-## 7.6. Type-checking rules
+## 7.7. Type-checking rules
 
 The type checker ([kernel/src/query/type_check.rs](../../../kernel/src/query/type_check.rs)) validates:
 
 - **`undeclared_institution_alias`** — the alias in `FIBER alias:Q { … }` wasn't declared with `USING INSTITUTION`.
 - **`duplicate_using_institution_alias`** — two `USING INSTITUTION` clauses in the same `MatchPart` use the same alias.
 - **`fiber_query_class_not_class`** — the query class IRI doesn't resolve, or resolves to something that isn't a `Class`.
+- **`fiber_query_class_not_on_demand`** — the QueryClass is declared but its `dispatch_role` set doesn't include `OnDemand`.
+- **`fiber_institution_mismatch`** — the QueryClass's `institution_ref` doesn't match the alias / inline IRI in the FIBER clause.
 - **`fiber_param_short_name_unresolved`** — a param short name isn't a property that `requires` or `recommends` declares on the query class.
 - **`fiber_missing_required_param`** — a `requires` property of the query class wasn't supplied in the param list.
+- **`comorphism_coercion_class_mismatch`** — a comorphism coercion's import-side `to_class` doesn't satisfy the FIBER input class's expected type for that property.
+- **`comorphism_io_not_supported_in_v1`** — a comorphism's transformation Component requires `IO` capability.
+- **`unknown_comorphism`** — a comorphism coercion references an IRI that isn't a registered `Comorphism`.
 
 The check runs before evaluation, so malformed FIBER clauses fail fast at compile time.
 
-## 7.7. Determinism and the response IRI
+## 7.8. Determinism and the response IRI
 
 Response IRIs are generated by [`QueryFingerprint::fiber_response_iri(clause_idx, binding_idx)`](../../../kernel/src/query/document.rs) — a deterministic function of the query text (hashed to a fingerprint), the clause index within the query, and the binding index within the clause's iteration.
 
@@ -122,36 +158,38 @@ This matters because:
 
 The response IRI format is `urn:eigenius:query:gen:<8-hex>:fiber:<clause>:<binding>`.
 
-## 7.8. Example: multi-step institution query
+## 7.9. Example: comorphism coercion + Verdict postfix
+
+Drawn from the M8 worked example ([`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs)) — chains a comorphism coercion through a FIBER `OnDemand` QueryClass and projects the resulting Verdict to a Boolean filter:
 
 ```eigenql
-USING "urn:eigenius:example:Compound"
-USING INSTITUTION "urn:eigenius:institutions:docking" AS dock
-USING INSTITUTION "urn:eigenius:institutions:assay" AS assay
+USING "urn:eigenius:demo:d14:DockingResult"
+USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
 
-MATCH Compound(?c) {
-    smiles: ?smiles
+MATCH DockingResult(?d) {
+    "urn:eigenius:demo:d14:delta_g": ?dg
 }
-FIBER dock:PredictBinding {
-    compound: ?c
-} AS ?pred
-FIBER assay:EstimateIC50 {
-    docking_prediction: ?pred
-} AS ?ic50
-
-RETURN [CombinedPrediction] {
-    compound: ?c,
-    docking_pred: ?pred,
-    assay_estimate: ?ic50
+FIBER assay:validate_prediction {
+    candidate: dock_to_assay(?d)
+} AS ?check
+WHERE ?check HOLDS
+RETURN [] {
+    docking: ?d,
+    delta_g: ?dg
 }
 ```
 
-For each compound: ask the docking institution to predict binding affinity, then pass that prediction to the assay institution to estimate IC₅₀. Both responses flow into the result row.
+For each docking result the kernel:
+
+1. Runs `dock_to_assay`'s four-step pipeline — extract ΔG via the dock institution, apply the Arrhenius transformation Component, reify an `AssayPrediction` via the assay institution.
+2. Synthesises the FIBER input as `validate_prediction`'s declared input class with `candidate` set to that prediction.
+3. Calls `assay`'s `query` handler for `validate_prediction` — returns a `Verdict` resource.
+4. Projects the Verdict via `?check HOLDS` — keeps rows where the assay institution accepts the predicted IC₅₀ as physically plausible.
 
 Behaviour notes:
 
-- The second `FIBER` sees `?pred` (bound by the first) as a regular variable — the overlay response is referenceable by IRI anywhere a resource would be expected.
-- If `?c` yields 100 bindings, 100 `PredictBinding` dispatches + 100 `EstimateIC50` dispatches happen sequentially. FIBER is not batched yet.
+- The Verdict bound to `?check` lives in the overlay — it's referenceable by IRI as a regular resource, not just through the postfix predicate.
+- If `?d` yields N bindings, N four-step pipelines + N `validate_prediction` dispatches run sequentially. FIBER is not batched yet.
 
 ---
 

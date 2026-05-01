@@ -82,7 +82,7 @@ The expected output shape — a `PatentBrief` resource with a structured `analys
 
 Source: [`demo/wasm/run.sh`](../../../demo/wasm/run.sh).
 
-Exercises the Phase 8 WASM hosting path end-to-end with three WASM extensions:
+Exercises the WASM hosting path end-to-end with two WASM components (one Pure, one IO):
 
 ```bash
 ./demo/wasm/run.sh
@@ -96,12 +96,11 @@ Steps:
 | 0 | Health-check the orchestrator | Same as the basic demo |
 | 1 | Install [`wasm-doc-validator`](../../../examples/wasm-doc-validator/) into the kernel | Pure component, registered at `urn:example:components:DocValidator` |
 | 2 | Install [`wasm-http-shout`](../../../examples/wasm-http-shout/) into the orchestrator | IO component, dispatches `CompleteText` from inside WASM |
-| 3 | Install [`wasm-ordering-institution`](../../../examples/wasm-ordering-institution/) into the kernel | Institution implementing `Refinement` morphisms and `ConvergenceQuery` queries |
-| 4 | `capability test` each capability with sample input | Verifies typed dispatch end-to-end |
+| 3 | `capability test` each capability with sample input | Verifies typed dispatch end-to-end |
 
-This demo is the smoke test for the WASM extension surface. After running it, three new capabilities are registered in the live kernel (and orchestrator) — `capability list` shows all three, and you can invoke them from your own programs.
+This demo is the smoke test for the WASM extension surface for components. After running it, two new capabilities are registered in the live kernel (and orchestrator) — `capability list` shows both, and you can invoke them from your own programs.
 
-The three WASM examples are walked through in detail in [chapter 9](09-wasm-components.md) and [chapter 10](10-wasm-institutions.md).
+For D14 institutions (the dock-assay worked example): see [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs), which exercises the full WASM-institution surface end-to-end via auto-registration from the layer chain. Both WASM extension paths are walked through in [chapter 9](09-wasm-components.md) (components) and [chapter 10](10-wasm-institutions.md) (institutions).
 
 ## 8.4. Running the demos as smoke tests
 

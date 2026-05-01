@@ -35,14 +35,16 @@ pub fn compile(source: &str) -> Result<Vec<Resource>, Vec<error::EslError>> {
     compile::compile_file(&file)
 }
 
-/// Compile an ESL source string with access to an institution
-/// registry (Phase 11e). When provided, function-call IRIs in
-/// program bodies that classify as registered comorphisms or decide
-/// predicates are routed to the corresponding kernel capability via
+/// Compile an ESL source string with access to a D14
+/// [`InstitutionIndex`]. When provided, function-call IRIs in program
+/// bodies that classify as Decidable QueryClasses or declared
+/// Comorphisms are routed to the corresponding kernel capability via
 /// specialized program resources.
+///
+/// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
 pub fn compile_with_institutions(
     source: &str,
-    institutions: std::sync::Arc<crate::institution::InstitutionRegistry>,
+    institutions: std::sync::Arc<crate::institution::registry::InstitutionIndex>,
 ) -> Result<Vec<Resource>, Vec<error::EslError>> {
     let tokens = lexer::tokenize(source).map_err(|e| vec![e])?;
     let file = parser::parse(&tokens).map_err(|e| vec![e])?;

@@ -1,32 +1,72 @@
 # 10. Building WASM institutions
 
-Institutions are domain-specific reasoning modules — fiber reasoners over the knowledge graph. The same WASM hosting machinery that runs components also hosts institutions, but against a different WIT world (`eigenius-institution`) with a different surface (`fiber-declaration`, `query`, `validate-morphism`, `discover-morphisms`, plus optional `decide` and `translate`).
+Institutions are domain-specific reasoning systems — typed reasoners that contribute structured fibres to the knowledge graph. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md)) they are *declared* as ontology resources committed to the layer chain (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) and *implemented* as a runtime that handles boundary translations and any opaque reasoning. The same WASM hosting machinery that runs components also hosts institutions, but against the dedicated `eigenius-institution-d14` WIT world (D14 §12).
 
-Cross-link: this chapter is the **implementer** view. The **user** view (how programs and queries invoke institutions) is in [ESL chapter 9](../esl/09-institutions.md) and [EigenQL chapter 8](../eigenql/08-institutions.md).
+Cross-link: this chapter is the **implementer** view. The **user** view (how programs and queries invoke institutions) is in [ESL §9](../esl/09-institutions.md) and [EigenQL §8](../eigenql/08-institutions.md).
 
-## 10.1. The institution model
+## 10.1. The institution model under D14
 
-An institution declares (at registration time) the morphism classes and query classes it answers, and implements four required operations:
-
-| Operation | Purpose |
-|---|---|
-| `fiber-declaration` | Returns metadata: institution IRI, name, morphism/query/comorphism types, decide procedures |
-| `query` | Answers a typed query resource (the `FIBER` clause's request) |
-| `validate-morphism` | Domain-specific morphism validation (returns `valid`/`invalid`/`undecidable`) |
-| `discover-morphisms` | Infers new morphisms from a given resource set |
-
-Plus two optional operations from Phase 11c–11d:
+A WASM institution exports three operations to the kernel:
 
 | Operation | Purpose |
 |---|---|
-| `decide` | Evaluates a registered decide-predicate IRI against args; returns `Holds`/`Fails`/`Undecidable` |
-| `translate` | Translates a resource across an institution boundary via a registered comorphism IRI |
+| `extract-typed` | Boundary: read a source-class resource and emit a Mini-TT-typed payload (the `S` of a comorphism, or the input side of a Component-implemented QueryClass). |
+| `reify` | Boundary: take a Mini-TT-typed payload and construct a target-class resource (the `T` of a comorphism, or the output side of a Component-implemented QueryClass). |
+| `query` | Optional escape hatch: answer an institution-defined query by returning a result resource. Required only for QueryClasses whose `query_handler` is the institution's own procedure (not a Component IRI). |
 
-The full kernel-side trait is [`FiberReasoner`](../../../kernel/src/institution/mod.rs); the WASM-side surface is [`wit/eigenius-component.wit`](../../../wit/eigenius-component.wit) under the `eigenius-institution` world.
+These are the only methods. No `fiber_declaration()`, no `validate-morphism`, no `discover-morphisms` — the four-method D10 trichotomy collapses into "boundary translation + optional reasoning". Operational profile (validates on Load? answers EigenQL FIBER? gets called from `NativeDecide`?) is determined by the QueryClass's `dispatch_role` set on the chain, not by which method the kernel calls.
 
-## 10.2. Project setup
+The trait surface on the kernel side ([`kernel/src/institution/runtime.rs`](../../../kernel/src/institution/runtime.rs)):
 
-Same `cargo-component` pattern as components. The `Cargo.toml` selects the institution world:
+```rust
+pub trait Institution: Send + Sync {
+    fn institution_iri(&self) -> &Iri;
+
+    fn extract_typed(
+        &self,
+        procedure_iri: &Iri,
+        resource: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<Val, InstitutionError>;
+
+    fn reify(
+        &self,
+        procedure_iri: &Iri,
+        value: &Val,
+        ctx: &ExecutionContext,
+    ) -> Result<Resource, InstitutionError>;
+
+    /// Optional. Default returns NotImplemented.
+    fn query(
+        &self,
+        procedure_iri: &Iri,
+        input: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<Resource, InstitutionError> { … }
+}
+```
+
+The WASM-host bridge that implements this trait against a Wasmtime-loaded binary is [`WasmInstitution`](../../../kernel/src/capability/wasm_institution_d14.rs).
+
+## 10.2. The ontology-first principle
+
+Every concept the institution exposes is a typed Resource on the chain. The kernel's [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) is built by scanning that chain (D14 §3, §9). For a WASM institution, the typical packaging is a WASM binary plus a sibling Eigon-JSON document declaring the institution's surface; the two are loaded together and the kernel auto-registers the binary against the `Institution` resource it finds (see §10.4).
+
+The five resource shapes (D14 §4):
+
+| Shape | Properties | What it does |
+|---|---|---|
+| `Institution` | `institution_iri`, `name`, `runtime`, optional `wasm_binary` | Identifies the institution and tells the kernel how to reach it. `runtime: wasm` + inline `wasm_binary` (base64 or `hex:` prefix) makes it auto-register. |
+| `ExportFormat` | `from_class`, `payload_type`, `institution_ref`, `procedure` | "When you need a Float-typed view of a `DockingResult`, call procedure `extract_dg`." |
+| `ImportFormat` | `to_class`, `payload_type`, `institution_ref`, `procedure` | "To construct an `AssayPrediction` from a Float, call procedure `reify_ic50`." |
+| `QueryClass` | `query_class`, `result_class`, `dispatch_role`, `query_handler`, `institution_ref` | The institution's typed function. `dispatch_role` is one or more of `OnDemand` (FIBER), `AutoOnLoad` (Load gate), `Decidable` (NativeDecide). |
+| `Comorphism` | `export_format`, `transformation`, `import_format`, `exact` | The triadic translation across an institution boundary; the transformation is a Mini-TT Component IRI. |
+
+The `Comorphism`'s well-typedness is checked at commit time (D14 §4.5): the `transformation`'s signature must equal `(payload_type(export_format)) → (payload_type(import_format))`. Mismatches are rejected by structural validation.
+
+## 10.3. Project setup
+
+A D14 institution is a `cargo-component` crate targeting the `eigenius-institution-d14` world. Skeleton `Cargo.toml`:
 
 ```toml
 [package]
@@ -45,275 +85,185 @@ crate-type = ["cdylib"]
 package = "eigenius:component"
 
 [package.metadata.component.target]
-world = "eigenius-institution"
+world = "eigenius-institution-d14"
 path = "<repo>/wit"
 ```
 
-The SDK provides institution-specific helpers in [`sdk/wasm-sdk/src/institution.rs`](../../../sdk/wasm-sdk/src/institution.rs):
+The SDK provides [resource builders](../../../sdk/wasm-sdk/src/institution.rs) for each declaration shape:
 
-- `FiberDeclaration` — builder for the resource the kernel expects from `fiber-declaration`.
-- `MorphismValidation` — Rust-side enum mirroring the `validation-result` WIT enum (`Valid`, `Invalid(String)`, `Undecidable`).
+- `InstitutionDecl`, `ExportFormatDecl`, `ImportFormatDecl`, `QueryClassDecl`, `ComorphismDecl` — each exposes a typed builder API and emits a typed Resource on `.build()`.
+- `RuntimeKind` (Wasm / External / InProcess) and `DispatchRole` (OnDemand / AutoOnLoad / Decidable) for the enum-valued properties.
 
-## 10.3. Implementing the four required operations
+These are *for guest-side use* (you can use them inside the WASM crate to construct your declaration document) but they are equally usable from the host or from any tool that builds Eigon documents. Declaration construction has no kernel-side magic; the resources can also be hand-written in JSON (the dock-assay demo's [`dock-assay.json`](../../../ontologies/examples/d14-dock-assay/dock-assay.json) does exactly this).
 
-The Guest trait that `wit-bindgen::generate!` creates has methods for each operation. Stubbed shape:
+## 10.4. Implementing the three operations
+
+The Guest trait that `wit-bindgen::generate!` creates has three exports. The dock side of the M8 demo ([`examples/wasm-d14-dock/src/lib.rs`](../../../examples/wasm-d14-dock/src/lib.rs)) implements only `extract_typed`:
 
 ```rust
-use eigenius_wasm_sdk::institution::FiberDeclaration;
 use eigenius_wasm_sdk::{Resource, Value};
 
-wit_bindgen::generate!({ path: "../../wit", world: "eigenius-institution" });
+wit_bindgen::generate!({
+    path: "../../wit",
+    world: "eigenius-institution-d14",
+});
 
-struct MyInstitution;
+const DELTA_G_PROP: &str = "urn:eigenius:demo:d14:delta_g";
+const VALUE_PROP: &str = "urn:eigenius:core:value";
+const EXTRACT_DG_PROC: &str = "urn:eigenius:demo:d14:proc:extract_dg";
 
-impl Guest for MyInstitution {
-    fn fiber_declaration() -> Vec<u8> {
-        // Build morphism class resources
-        let mut my_morphism = Resource::with_id("urn:example:institutions:MyMorphism");
-        my_morphism.set_is_a(["urn:eigenius:core:Class"]);
-        // ... set short_name, description, requires ...
+struct DockInstitution;
 
-        let decl = FiberDeclaration {
-            institution_iri: "urn:example:institutions:MyInst".into(),
-            name: "My Institution".into(),
-            morphism_types: vec![my_morphism],
-            query_types: vec![],
-            structural_properties: vec![],
-        };
-        decl.into_resource().to_cbor()
+impl Guest for DockInstitution {
+    fn extract_typed(procedure_iri: String, input: Vec<u8>) -> Result<Vec<u8>, String> {
+        if procedure_iri != EXTRACT_DG_PROC {
+            return Err(format!("dock does not implement `{procedure_iri}`"));
+        }
+        let resource = Resource::from_cbor(&input).map_err(|e| format!("parse: {e}"))?;
+        let delta_g = resource
+            .get(DELTA_G_PROP)
+            .and_then(|v| v.as_float())
+            .ok_or_else(|| "DockingResult missing delta_g".to_string())?;
+
+        // The Mini-TT typed-value carrier shape: a single-Float wrapper resource.
+        let mut wrapper = Resource::new();
+        wrapper.set(VALUE_PROP, Value::Float(delta_g));
+        Ok(wrapper.to_cbor())
     }
 
-    fn query(q: Vec<u8>) -> Result<Vec<u8>, String> {
-        let query = Resource::from_cbor(&q).map_err(|e| format!("parse: {e}"))?;
-        // ... handle the query, build response ...
-        let mut response = Resource::new();
-        // ... set response fields ...
-        Ok(response.to_cbor())
+    fn reify(procedure_iri: String, _value: Vec<u8>) -> Result<Vec<u8>, String> {
+        Err(format!("dock does not implement reify (`{procedure_iri}`)"))
     }
 
-    fn validate_morphism(m: Vec<u8>) -> ValidationResult {
-        let morphism = match Resource::from_cbor(&m) {
-            Ok(r) => r,
-            Err(_) => return ValidationResult::Invalid,
-        };
-        // ... domain-specific check ...
-        if /* valid */ { ValidationResult::Valid }
-        else { ValidationResult::Invalid }
-    }
-
-    fn discover_morphisms(_resources: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>, String> {
-        Ok(vec![])  // Implement morphism discovery if applicable
+    fn query(procedure_iri: String, _input: Vec<u8>) -> Result<Vec<u8>, String> {
+        Err(format!("dock does not implement query (`{procedure_iri}`)"))
     }
 }
 
-export!(MyInstitution);
+export!(DockInstitution);
 ```
 
-Most institutions don't need `discover_morphisms` (it's for systems that infer relationships from existing resources); returning an empty Vec is the inert default.
-
-## 10.4. Worked example: ordering institution
-
-Source: [`examples/wasm-ordering-institution/`](../../../examples/wasm-ordering-institution/).
-
-Domain: refinement steps in iterative computations. Declares two classes:
-
-- **`Refinement`** — a morphism between two results, carrying `source`, `target`, `delta` properties.
-- **`ConvergenceQuery`** — asks whether the latest refinement step converged below a tolerance, with `tolerance` and `latest_delta` parameters.
-
-### `fiber_declaration`
-
-The institution declares both classes plus the institution metadata. Excerpt:
+The assay side ([`examples/wasm-d14-assay/src/lib.rs`](../../../examples/wasm-d14-assay/src/lib.rs)) is the dual — it implements `reify` (constructing an `AssayPrediction` from a Float-payload) plus `query` to handle three QueryClasses (`within_tolerance` Decidable, `assay_prediction_validity` AutoOnLoad, `validate_prediction` OnDemand). It dispatches on `procedure_iri` inside `query`:
 
 ```rust
-fn fiber_declaration() -> Vec<u8> {
-    let mut refinement = Resource::with_id(REFINEMENT_CLASS);
-    refinement.set_is_a(["urn:eigenius:core:Class"]);
-    refinement.set("urn:eigenius:core:short_name", Value::String("Refinement".into()));
-    refinement.set("urn:eigenius:core:requires", Value::Array(vec![
-        Value::String(SOURCE.into()),
-        Value::String(TARGET.into()),
-        Value::String(DELTA.into()),
-    ]));
-
-    let mut query_class = Resource::with_id(CONVERGENCE_QUERY_CLASS);
-    query_class.set_is_a(["urn:eigenius:core:Class"]);
-    query_class.set("urn:eigenius:core:short_name", Value::String("ConvergenceQuery".into()));
-    query_class.set("urn:eigenius:core:requires", Value::Array(vec![
-        Value::String(TOLERANCE.into()),
-        Value::String(LATEST_DELTA.into()),
-    ]));
-
-    let decl = FiberDeclaration {
-        institution_iri: INSTITUTION_IRI.into(),
-        name: "WASM Ordering Institution".into(),
-        morphism_types: vec![refinement],
-        query_types: vec![query_class],
-        structural_properties: vec![],
+fn query(procedure_iri: String, input: Vec<u8>) -> Result<Vec<u8>, String> {
+    let resource = Resource::from_cbor(&input).map_err(|e| format!("parse: {e}"))?;
+    let ctor = match procedure_iri.as_str() {
+        WITHIN_TOLERANCE_PROC => within_tolerance_verdict(&resource),
+        CHECK_ASSAY_PREDICTION_PROC => assay_prediction_verdict(&resource),
+        VALIDATE_PREDICTION_PROC => {
+            let candidate = resource.get(CANDIDATE_PROP).and_then(|v| v.as_embedded())
+                .ok_or("validate_prediction: candidate missing")?;
+            assay_prediction_verdict(candidate)
+        }
+        other => return Err(format!("assay does not implement `{other}`")),
     };
-    decl.into_resource().to_cbor()
+    Ok(verdict_resource(ctor).to_cbor())
 }
 ```
 
-The kernel parses this declaration at registration time and:
+The full dock-assay ontology that ties these together (Institution + ExportFormat + ImportFormat + 3× QueryClass + Comorphism + supporting classes) lives in [`ontologies/examples/d14-dock-assay/dock-assay.json`](../../../ontologies/examples/d14-dock-assay/dock-assay.json). The same JSON drives both the in-process test ([`d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs)) and the WASM-hosted test ([`d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)) — the WASM test layers a child layer on top with `runtime: wasm` + inline `wasm_binary` overrides.
 
-- Indexes `Refinement` in its **morphism dispatch table** — any morphism resource with `is_a` including `Refinement` routes to this institution.
-- Indexes `ConvergenceQuery` in its **query dispatch table** — any `FIBER` clause naming this query class routes here.
+### 10.4.1. Verdict result resources
 
-### `validate_morphism`
+QueryClasses with `result_class: urn:eigenius:institution:Verdict` return a Verdict-shaped resource. Construct it with `is_a: [Verdict]` and `urn:eigenius:core:ctor_name` set to one of `Holds`, `Fails`, `Undecidable`. The kernel reads `ctor_name` to project the verdict (D14 §6.1).
 
 ```rust
-fn validate_morphism(m: Vec<u8>) -> ValidationResult {
-    let morphism = Resource::from_cbor(&m).expect("parse morphism");
-    let delta = morphism.get_float(DELTA).unwrap_or(0.0);
-    if delta > 0.0 { ValidationResult::Valid }
-    else { ValidationResult::Invalid }
+fn verdict_resource(ctor: &str) -> Resource {
+    let mut r = Resource::new();
+    r.set("urn:eigenius:core:is_a",
+          Value::Array(vec![Value::String("urn:eigenius:institution:Verdict".into())]));
+    r.set("urn:eigenius:core:ctor_name", Value::String(ctor.into()));
+    r
 }
 ```
 
-A simple domain rule: refinements must have strictly positive `delta`.
+### 10.4.2. Mini-TT typed-value carrier shape
 
-### `query`
+`extract_typed` and `reify` exchange CBOR-encoded Mini-TT typed values (`typed-value` in the WIT world — distinct from `resource-data` even though the on-the-wire form is the same). The kernel marshals primitives like `Float` as a single-property wrapper resource carrying the value at `urn:eigenius:core:value`. The dock and assay implementations both work with this shape: dock wraps `Float(delta_g)` into a wrapper on extract; assay reads the wrapper's first Float on reify. The Arrhenius transformation Component ([`examples/wasm-d14-arrhenius/src/lib.rs`](../../../examples/wasm-d14-arrhenius/src/lib.rs)) follows the same convention.
 
-```rust
-fn query(q: Vec<u8>) -> Result<Vec<u8>, String> {
-    let query = Resource::from_cbor(&q).map_err(|e| format!("parse query: {e}"))?;
-    let tolerance = query.get_float(TOLERANCE).ok_or("missing tolerance")?;
-    let latest_delta = query.get_float(LATEST_DELTA).ok_or("missing latest_delta")?;
+For richer types — tuples, records, inductive values — the SDK provides round-trip helpers between Rust types and `typed-value`. (See the SDK's `typed_value` module.)
 
-    let converged = latest_delta <= tolerance;
+## 10.5. Auto-registration from the layer chain
 
-    let mut response = Resource::new();
-    response.set(CONVERGED, Value::Boolean(converged));
-    response.set(CHECKED_DELTA, Value::Float(latest_delta));
-    response.set(CHECKED_TOLERANCE, Value::Float(tolerance));
-    Ok(response.to_cbor())
+Under D14, the kernel doesn't need a bespoke `capability install --kind institution` flow — `Institution` declarations on the chain are automatically registered in the `InstitutionRuntime` at commit time. The mechanism ([`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs)) walks every `Institution` resource whose `runtime` is `urn:eigenius:institution:runtimes:wasm`, decodes the inline `wasm_binary` (base64 or `hex:` prefix), and constructs a `WasmInstitution` keyed by the institution IRI.
+
+Concretely, an `Institution` declaration with WASM packaging looks like:
+
+```json
+{
+  "@id": "urn:eigenius:demo:d14:dock",
+  "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+  "urn:eigenius:institution:institution_iri": "urn:eigenius:demo:d14:dock",
+  "urn:eigenius:institution:institution_name": "Dock",
+  "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:wasm",
+  "urn:eigenius:institution:wasm_binary": "hex:<long-hex-string>"
 }
 ```
 
-Plain answer to the convergence question, with the input parameters echoed back as part of the response (useful for downstream pattern matching in EigenQL).
+When this is loaded into the kernel via `eigenius load`, the EigeniusService's per-commit hook rebuilds both the `InstitutionIndex` (from the new ExportFormat / ImportFormat / QueryClass / Comorphism declarations) and the `InstitutionRuntime` (from the WASM binaries). All ESL programs and EigenQL queries that reference the institution's IRIs are immediately routed through it.
 
-When this institution is registered and EigenQL runs:
+In-process and external runtimes (`runtime: in_process` or `runtime: external`) are skipped by the auto-registration scan — those are the caller's responsibility and remain a programmatic concern (kernel-embedded Rust integrations or out-of-process gRPC services, respectively).
 
-```eigenql
-USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
-
-MATCH Refinement(?m) { latest_delta: ?d, target: ?t }
-FIBER  ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
-MATCH  ?conv { "urn:eigenius:test:wasm:converged": ?c }
-WHERE  ?c = true
-RETURN [] { m: ?m, t: ?t }
-```
-
-…the `FIBER` clause dispatches one query per binding through this institution's `query` function.
-
-## 10.5. Installing, listing, testing
+## 10.6. Building, loading, and inspecting
 
 ```bash
-# Build
-cd examples/wasm-ordering-institution
+# Build the WASM crate
+cd examples/wasm-d14-dock
 cargo component build
 
-# Install
-eigenius --endpoint http://localhost:50051 capability install \
-    target/wasm32-unknown-unknown/debug/eigenius_wasm_ordering_institution.wasm \
-    --as-iri urn:eigenius:test:wasm:ordering \
-    --kind institution \
-    --capability pure
+# Build sibling institutions and the transformation Component
+cd ../wasm-d14-assay && cargo component build && cd -
+cd examples/wasm-d14-arrhenius && cargo component build && cd -
 
-# Verify
-eigenius --endpoint http://localhost:50051 list-institutions
+# Load the declaration document (Institution + ExportFormat + … +
+# Comorphism + supporting classes). Auto-registration kicks in on commit.
+cargo run -q -p eigenius-cli -- \
+    --endpoint http://localhost:50051 \
+    load ontologies/examples/d14-dock-assay/dock-assay.json
 
-# Test fiber query
-cat > /tmp/conv-query.json <<'EOF'
-{
-  "@id": "urn:example:queries:test1",
-  "urn:eigenius:core:is_a": ["urn:eigenius:test:wasm:ConvergenceQuery"],
-  "urn:eigenius:test:wasm:tolerance": 0.01,
-  "urn:eigenius:test:wasm:latest_delta": 0.005
-}
-EOF
-eigenius --endpoint http://localhost:50051 capability test \
-    urn:eigenius:test:wasm:ordering \
-    --input /tmp/conv-query.json \
-    --mode query
+# List registered institutions (kernel logs each one at info level on
+# rebuild — see the EigeniusService::rebuild_institution_index hook).
 ```
 
-The two `--mode` choices for institutions:
+For development the easiest path is to use the existing `just build-wasm` target plus the dock-assay test as a fixture-driven harness. The WASM test ([`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)) builds a layer with `runtime: wasm` + inline `wasm_binary` overrides for each institution and the transformation Component, runs `build_wasm_institution_runtime` and `scan_and_register`, and exercises the four-step pipeline + Decidable + AutoOnLoad dispatch end-to-end. Reading that test is the fastest way to internalise the surface.
 
-| Mode | Dispatches |
-|---|---|
-| `query` (default) | `query` operation — runs a fiber query |
-| `discover` | `discover-morphisms` operation — infers morphisms from the input resources |
+## 10.7. Native (in-process) institutions
 
-## 10.6. Native institutions (without WASM)
-
-For institutions that need full Rust dependencies, performance-critical paths, or first-party integration with the kernel, you can write a **native institution** as a Rust crate that links into the kernel directly.
-
-The native trait is [`FiberReasoner`](../../../kernel/src/institution/mod.rs):
-
-```rust
-pub trait FiberReasoner: Send + Sync {
-    fn fiber_declaration(&self) -> FiberDeclaration;
-    fn query(&self, query: &Resource, ctx: &ExecutionContext)
-        -> Result<Resource, InstitutionError>;
-    fn validate_morphism(&self, morphism: &Resource, ctx: &ExecutionContext)
-        -> Result<MorphismValidation, InstitutionError>;
-    fn discover_morphisms(&self, resources: &[Resource], ctx: &ExecutionContext)
-        -> Result<Vec<Resource>, InstitutionError>;
-
-    // Optional (Phase 11c–d):
-    fn decide(&self, iri: &Iri, args: &[Value], ctx: &ExecutionContext)
-        -> Result<DecResult, InstitutionError> { ... }
-    fn translate(&self, iri: &Iri, source: &Resource, ctx: &ExecutionContext)
-        -> Result<Resource, InstitutionError> { ... }
-}
-```
+For institutions that need full Rust dependencies, performance-critical paths, or first-party integration with the kernel, you can implement the `Institution` trait directly as a Rust struct linked into the kernel binary. Declare with `runtime: urn:eigenius:institution:runtimes:in_process`; the auto-registration scan will skip it; register the `Box<dyn Institution>` programmatically via `InstitutionRuntime::register` at startup.
 
 Trade-offs vs. WASM:
 
-| Aspect | WASM institution | Native institution |
+| Aspect | WASM institution | In-process institution |
 |---|---|---|
 | Sandboxed | Yes (Wasmtime) | No |
 | Fuel/memory limits | Yes | No |
 | Portability | Single `.wasm` binary | Per-platform crate |
 | Dependency tree | Restricted (no_std-ish) | Full Cargo dependency tree |
-| Performance | WASM JIT overhead per call | Direct Rust calls |
-| Hot-installable | Yes (via `capability install`) | No (compiled into the kernel binary) |
+| Performance | Wasmtime overhead per call | Direct Rust calls |
+| Hot-installable | Yes (auto-registration on commit) | No (compiled into the kernel binary) |
 | Best for | Untrusted / 3rd-party reasoners | First-party reasoners with heavy dependencies |
 
-Native institutions are registered at kernel startup via [`InstitutionRegistry::register`](../../../kernel/src/institution/mod.rs). To register a custom native institution, you'd modify the kernel binary (or run a fork). For most use cases, WASM is the right path.
+For most use cases, WASM is the right path. Native institutions are appropriate when the institution's reasoning code is already a kernel-internal Rust crate and the sandboxing / fuel discipline isn't worth the marshalling overhead.
 
-## 10.7. Phase 11c: decide procedures
-
-If your institution declares decide procedures in `decide_procedures`, programs can call them by qualified name (`cap:within_tolerance(input.delta, 0.1)`) and EigenQL queries can use them in `WHERE` clauses. The `decide` operation gets called at type-check time (Check capability mode) and/or runtime (IO mode).
-
-Three-valued result:
-
-| Result | Effect in `WHERE` / type-check |
-|---|---|
-| `Holds` | Predicate passes |
-| `Fails` | Predicate rejects (filter out / type-check failure) |
-| `Undecidable` | Defer to runtime (in check mode) or treat as `false` (in `WHERE`) |
-
-Cross-link: [ESL chapter 9](../esl/09-institutions.md), [EigenQL chapter 8](../eigenql/08-institutions.md).
-
-## 10.8. Phase 11d: comorphisms
-
-If your institution declares comorphism types in `comorphism_types`, the `translate` operation gets called when programs invoke the comorphism by qualified name (`cap:dock_to_assay(docking_result)`).
-
-Comorphisms take exactly one source resource and return one resource. The compiler enforces this arity rule.
-
-## 10.9. The institution chapter cross-references
+## 10.8. Cross-references
 
 For the *user* perspective on what institutions look like from the surface languages:
 
-- **[ESL chapter 9 — Institutions in ESL](../esl/09-institutions.md)** — invoking decide predicates and comorphisms from program bodies.
-- **[EigenQL chapter 7 — FIBER clauses](../eigenql/07-fiber-clauses.md)** — invoking institution queries from EigenQL.
-- **[EigenQL chapter 8 — Institutions in EigenQL](../eigenql/08-institutions.md)** — the classification table that ESL and EigenQL share.
+- [**ESL §9 — Institutions in ESL**](../esl/09-institutions.md) — invoking Decidable QueryClasses from program bodies; how comorphisms surface (and don't) in ESL.
+- [**EigenQL §7 — FIBER clauses**](../eigenql/07-fiber-clauses.md) — invoking OnDemand QueryClasses from EigenQL.
+- [**EigenQL §8 — Institutions in EigenQL**](../eigenql/08-institutions.md) — the full classification table, postfix Verdict predicates, comorphism coercion in FIBER params.
 
 For the *protocol* specification:
 
-- **[D10 Grothendieck institution protocol](../../design/d10-grothendieck-institution-protocol.md)** — full design rationale.
+- [**D14 — Institution Realisation**](../../design/d14-institution-realisation.md) — the canonical reference for the institution surface in Eigenius. (Supersedes D10.)
+- [**D12 — WASM extensibility**](../../design/d12-wasm-extensibility.md) — the underlying WASM hosting machinery that institutions share with components.
+
+For example code:
+
+- [`examples/wasm-d14-dock/`](../../../examples/wasm-d14-dock/), [`examples/wasm-d14-assay/`](../../../examples/wasm-d14-assay/), [`examples/wasm-d14-arrhenius/`](../../../examples/wasm-d14-arrhenius/) — the M8 worked example.
+- [`examples/wasm-d14-echo/`](../../../examples/wasm-d14-echo/) — the smallest viable D14 institution (smoke test of the WIT bindings).
+- [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs) and [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs) — end-to-end harnesses.
 
 ---
 

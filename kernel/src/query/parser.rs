@@ -340,7 +340,31 @@ impl Parser {
         let name = self.parse_name()?;
         self.expect(&TokenKind::Colon)?;
         let expression = self.parse_expression()?;
-        Ok(ParamBinding { name, expression })
+        // D2 v2 §3.5 — disambiguate comorphism coercion from a plain
+        // expression. A single-arg qualified-name function call in
+        // FIBER param value position is treated as a comorphism
+        // coercion (the type checker validates it actually resolves
+        // to a Comorphism declaration). Anything else is a plain
+        // expression.
+        let value = match expression {
+            Expression::FunctionCall {
+                name: fname,
+                mut args,
+            } if fname.contains(':') && args.len() == 1 => {
+                let source = args.pop().expect("len == 1 checked above");
+                let coercion = if let Ok(iri) = Iri::parse(&fname) {
+                    crate::query::ast::Name::FullIri(iri)
+                } else {
+                    crate::query::ast::Name::ShortName(fname)
+                };
+                crate::query::ast::ParamValue::Comorphism {
+                    name: coercion,
+                    source,
+                }
+            }
+            other => crate::query::ast::ParamValue::Expression(other),
+        };
+        Ok(ParamBinding { name, value })
     }
 
     fn parse_match_clause(&mut self) -> Result<Vec<Pattern>, QueryError> {
@@ -632,8 +656,28 @@ impl Parser {
                     operand: Box::new(operand),
                 })
             }
-            _ => self.parse_primary_expr(),
+            _ => self.parse_verdict_term(),
         }
+    }
+
+    /// `verdict_term ::= primary_expr (verdict_predicate)?`. The postfix
+    /// Verdict predicate (HOLDS / FAILS / UNDECIDABLE) is non-associative
+    /// — `?v HOLDS FAILS` is rejected by the consume-once shape below
+    /// (the second predicate keyword would not match any continuation
+    /// in the grammar above this position).
+    fn parse_verdict_term(&mut self) -> Result<Expression, QueryError> {
+        let primary = self.parse_primary_expr()?;
+        let kind = match self.peek() {
+            TokenKind::Holds => crate::query::ast::VerdictPredicate::Holds,
+            TokenKind::Fails => crate::query::ast::VerdictPredicate::Fails,
+            TokenKind::Undecidable => crate::query::ast::VerdictPredicate::Undecidable,
+            _ => return Ok(primary),
+        };
+        self.advance();
+        Ok(Expression::VerdictPredicate {
+            kind,
+            operand: Box::new(primary),
+        })
     }
 
     fn parse_primary_expr(&mut self) -> Result<Expression, QueryError> {
@@ -721,10 +765,22 @@ impl Parser {
                 }
             }
 
-            // String literal
+            // String literal — and, if directly followed by `(`, a
+            // function call whose name is the literal IRI string. This
+            // matches D2 v2 §3.5 / §3.8's `qualified_name ::= IDENTIFIER ':' IDENTIFIER | STRING`,
+            // allowing comorphism coercion / decide-predicate calls
+            // written with a full quoted IRI rather than a namespace
+            // alias.
             TokenKind::StringLit(_) => {
                 let s = self.parse_string_lit()?;
-                Ok(Expression::Literal(Literal::String(s)))
+                if self.at(&TokenKind::LParen) {
+                    self.advance();
+                    let args = self.parse_expression_list()?;
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Expression::FunctionCall { name: s, args })
+                } else {
+                    Ok(Expression::Literal(Literal::String(s)))
+                }
             }
 
             // Number literal

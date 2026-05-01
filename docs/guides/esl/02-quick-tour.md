@@ -111,9 +111,9 @@ The trailing `{ ... }` desugars to an embedded resource passed to the component 
 
 Source: [`compile_component_shorthand`](../../../kernel/src/esl/compile.rs).
 
-## 2.6. Institution-dispatched decide predicate
+## 2.6. Institution-dispatched Decidable QueryClass
 
-Programs can invoke institution-registered capabilities by qualified name. The compiler classifies the IRI through the institution registry (`InstitutionRegistry::classify`) and emits the right kernel form.
+Programs can invoke an institution's `Decidable` `QueryClass` by qualified name. The compiler classifies the IRI through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) (derived from the layer chain under D14) and emits the right kernel form.
 
 ```esl
 namespace core = "urn:eigenius:core";
@@ -128,21 +128,20 @@ property ex:name : core:string {
 }
 
 program ex:decide_program : ex:Thing -> ex:Thing {
-    cap:cap_decide(input, input)
+    let v : urn:eigenius:institution:Verdict = cap:cap_decide(input, input);
+    input
 }
 ```
 
-When the compiler is given access to an institution registry where `urn:eigenius:test:cap_decide` is a registered decide predicate, the call `cap:cap_decide(input, input)` compiles to `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)` — a kernel form that delegates the boolean decision to the institution at evaluate time.
+When the compiler is given an `InstitutionIndex` where `urn:eigenius:test:cap_decide` is a Decidable `QueryClass`, the call compiles to `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)` — a kernel form that delegates to the institution's `Institution::query(query_handler, …, ctx)` and reduces the surrounding term according to the returned `Verdict` (`Holds` → `Refl(v)`, `Fails` → failing neutral, `Undecidable` → passthrough).
 
 Compile call:
 
 ```rust
-esl::compile_with_institutions(source, registry)
+esl::compile_with_institutions(source, institution_index)
 ```
 
-Without the registry, the same call compiles to a regular `Exp::App` and fails at runtime with `unknown function`. See [chapter 9](09-institutions.md) for the full institution surface.
-
-Source: [`esl_decide_predicate_compiles_and_decodes`](../../../kernel/src/program/expr.rs).
+Without the index, the same call falls through to component dispatch and fails at runtime with `unknown function`. See [chapter 9](09-institutions.md) for the full institution surface.
 
 ---
 

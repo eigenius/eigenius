@@ -106,7 +106,7 @@ const institutions = await eigen.listInstitutions();
 ok(`${institutions.length} institution(s) registered`);
 for (const inst of institutions) {
   console.log(
-    `    - ${inst.iri} (${inst.morphismTypes.length} morphism type(s), ${inst.queryTypes.length} query type(s))`,
+    `    - ${inst.iri} (${inst.queryTypes.length} query type(s))`,
   );
 }
 console.log();

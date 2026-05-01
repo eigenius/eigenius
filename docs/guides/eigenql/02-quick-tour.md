@@ -118,57 +118,60 @@ RETURN [] {
 
 ## 2.6. FIBER clause: dispatch into an institution
 
-Ask a registered institution for additional reasoning over a binding.
+Ask a registered institution to evaluate an `OnDemand` `QueryClass` and bind the response.
 
 ```eigenql
-USING "urn:eigenius:example:Assay"
-USING INSTITUTION "urn:eigenius:institutions:docking" AS dock
+USING "urn:eigenius:demo:d14:DockingResult"
+USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
 
-MATCH Assay(?a) {
-    "urn:eigenius:example:compound": ?cpd
+MATCH DockingResult(?d) {
+    "urn:eigenius:demo:d14:delta_g": ?dg
 }
-FIBER dock:PredictBinding {
-    compound: ?cpd
-} AS ?pred
+FIBER assay:validate_prediction {
+    candidate: dock_to_assay(?d)
+} AS ?check
 
-RETURN [Prediction] {
-    compound: ?cpd,
-    predicted_affinity: ?pred
-}
-```
-
-**What happens**:
-
-- `USING INSTITUTION "urn:..." AS dock` declares a short alias `dock` for the `docking` institution.
-- `FIBER dock:PredictBinding { compound: ?cpd } AS ?pred` builds a `PredictBinding` query resource with `compound` bound to the value of `?cpd`, dispatches it to the `docking` institution's `query()` method, and binds the response to `?pred` (which refers to the response IRI in subsequent clauses).
-- The response is attached to a transient **overlay** (D2 §6.12) that's discarded when the query finishes — it does not persist to the layer.
-- `RETURN [Prediction]` tags each row with the `Prediction` class.
-
-Running this requires `FiberRuntime::institutions` populated; otherwise the `FIBER` clause errors at dispatch time. See [chapter 7](07-fiber-clauses.md) for full details.
-
-## 2.7. Institution-dispatched decide predicate in `WHERE`
-
-Filter bindings using a domain predicate answered by an institution.
-
-```eigenql
-USING "urn:eigenius:example:Docking"
-
-MATCH Docking(?d) {
-    "urn:eigenius:example:delta_g": ?dg
-}
-WHERE docking:within_tolerance(?dg, 2.0)
+WHERE ?check HOLDS
 RETURN [] {
     delta_g: ?dg
 }
 ```
 
-**What happens** (Phase 11e.2):
+**What happens**:
 
-- `docking:within_tolerance(?dg, 2.0)` is a qualified-name function call. Because it contains `:`, the evaluator parses it as an IRI (`urn:eigenius:docking:within_tolerance`) and consults the institution registry via [`InstitutionRegistry::classify`](../../../kernel/src/institution/mod.rs).
-- When the IRI classifies as a `DecidePredicate`, the evaluator calls `FiberReasoner::decide(iri, args, ctx)` — the institution returns `DecResult::Holds` (include the binding), `DecResult::Fails` (drop the binding), or `DecResult::Undecidable` (also dropped, for `WHERE`'s boolean semantics).
-- Returns `Value::Boolean(true)` for `Holds` and `false` otherwise.
+- `USING INSTITUTION "urn:..." AS assay` aliases the assay institution within this `MatchPart`.
+- The FIBER param value `dock_to_assay(?d)` is a **comorphism coercion** — the kernel runs the four-step pipeline (extract ΔG via the dock institution → apply the Arrhenius transformation Component → reify an `AssayPrediction` via the assay institution) and uses the reified resource as the `candidate` property.
+- `FIBER assay:validate_prediction { … } AS ?check` builds the QueryClass's input resource, calls the assay institution's `query` handler, and binds the returned `Verdict` to `?check`. The response lives in a transient overlay (D2 §6.12) discarded when the query finishes.
+- `WHERE ?check HOLDS` projects the bound Verdict to a Boolean — keeps rows where the assay institution accepted the prediction.
 
-A comorphism invocation in `RETURN` works symmetrically and produces a `Value::Embedded(resource)` — see [chapter 8](08-institutions.md).
+This requires the `FiberRuntime` to carry an `InstitutionIndex` + `InstitutionRuntime` + `ComponentRegistry`; without them the FIBER clause errors at dispatch time. See [chapter 7](07-fiber-clauses.md) and the M8 worked example in [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs).
+
+## 2.7. Decidable QueryClass in `WHERE`
+
+Filter bindings using a domain predicate answered by an institution. Under D14 the call returns a `Verdict` (not a Boolean); a postfix `HOLDS` (or `FAILS` / `UNDECIDABLE`) projects it.
+
+```eigenql
+USING "urn:eigenius:demo:d14:WithinToleranceInput"
+
+MATCH WithinToleranceInput(?wt) {
+    "urn:eigenius:demo:d14:predicted_ic50": ?p,
+    "urn:eigenius:demo:d14:target_ic50":    ?t,
+    "urn:eigenius:demo:d14:tolerance":      ?tol
+}
+WHERE assay:within_tolerance(?p, ?t, ?tol) HOLDS
+RETURN [] {
+    predicted: ?p,
+    target: ?t
+}
+```
+
+**What happens**:
+
+- `assay:within_tolerance(...)` is a qualified-name function call. The evaluator resolves the IRI in the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs); it classifies as a `Decidable` `QueryClass`, dispatching as `Exp::NativeDecide`.
+- The kernel marshals the positional args into a synthetic input resource (args attached as `urn:eigenius:institution:decide_args`), calls `Institution::query(query_handler, input, ctx)` on the assay institution, and reads the returned Verdict's `ctor_name`.
+- The postfix `HOLDS` projects the Verdict to a Boolean: `true` when `ctor_name == "Holds"`, `false` otherwise.
+
+A bare Verdict in Boolean position (`WHERE assay:within_tolerance(…)` with no postfix) is a static type error (`bare_verdict_in_boolean_position`) — the conversion is always explicit. See [chapter 8](08-institutions.md) for the full Verdict surface.
 
 ---
 

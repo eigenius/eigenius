@@ -129,6 +129,12 @@ pub mod eigenius {
             use super::super::super::_rt;
             /// A CBOR-encoded Eigon resource.
             pub type ResourceData = _rt::Vec<u8>;
+            /// A CBOR-encoded Mini-TT typed value (D14 §11). Distinct from
+            /// `resource-data` even though the wire form is the same: a typed
+            /// value inhabits a Mini-TT type (primitive, tuple, inductive,
+            /// codata) and is the payload exchanged between the source-side
+            /// extract, the Component middle, and the target-side reify.
+            pub type TypedValue = _rt::Vec<u8>;
             /// An IRI string.
             pub type Iri = _rt::String;
             /// Result of a component execution.
@@ -493,25 +499,26 @@ pub(crate) use __export_eigenius_component_io_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 816] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xa4\x05\x01A\x02\x01\
-A\x13\x01B\x06\x01p}\x04\0\x0dresource-data\x03\0\0\x01s\x04\0\x03iri\x03\0\x02\x01\
-r\x01\x06output\x01\x04\0\x10component-result\x03\0\x04\x03\0\x1eeigenius:compon\
-ent/types@0.1.0\x05\0\x02\x03\0\0\x0dresource-data\x03\0\x0dresource-data\x03\0\x01\
-\x02\x03\0\0\x03iri\x03\0\x03iri\x03\0\x03\x02\x03\0\0\x10component-result\x03\0\
-\x10component-result\x03\0\x05\x01B\x07\x02\x03\x02\x01\x01\x04\0\x0dresource-da\
-ta\x03\0\0\x02\x03\x02\x01\x03\x04\0\x03iri\x03\0\x02\x01k\x01\x01@\x01\x03iri\x03\
-\0\x04\x04\0\x07resolve\x01\x05\x03\0$eigenius:component/read-access@0.1.0\x05\x07\
-\x01B\x06\x02\x03\x02\x01\x01\x04\0\x0dresource-data\x03\0\0\x01p\x01\x01j\x01\x02\
-\x01s\x01@\x01\x07eigenqls\0\x03\x04\0\x05query\x01\x04\x03\0%eigenius:component\
-/query-access@0.1.0\x05\x08\x01B\x07\x02\x03\x02\x01\x01\x04\0\x0dresource-data\x03\
-\0\0\x02\x03\x02\x01\x03\x04\0\x03iri\x03\0\x02\x01j\x01\x01\x01s\x01@\x03\x0dco\
-mponent-iri\x03\x05input\x01\x08argument\x01\0\x04\x04\0\x12dispatch-component\x01\
-\x05\x03\0\"eigenius:component/io-access@0.1.0\x05\x09\x01j\x01\x06\x01s\x01@\x02\
-\x05input\x02\x08argument\x02\0\x0a\x04\0\x07execute\x01\x0b\x01@\0\0\x04\x04\0\x0d\
-component-iri\x01\x0c\x04\0.eigenius:component/eigenius-component-io@0.1.0\x04\0\
-\x0b\x1b\x01\0\x15eigenius-component-io\x03\0\0\0G\x09producers\x01\x0cprocessed\
--by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 836] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xb8\x05\x01A\x02\x01\
+A\x13\x01B\x08\x01p}\x04\0\x0dresource-data\x03\0\0\x01p}\x04\0\x0btyped-value\x03\
+\0\x02\x01s\x04\0\x03iri\x03\0\x04\x01r\x01\x06output\x01\x04\0\x10component-res\
+ult\x03\0\x06\x03\0\x1eeigenius:component/types@0.1.0\x05\0\x02\x03\0\0\x0dresou\
+rce-data\x03\0\x0dresource-data\x03\0\x01\x02\x03\0\0\x03iri\x03\0\x03iri\x03\0\x03\
+\x02\x03\0\0\x10component-result\x03\0\x10component-result\x03\0\x05\x01B\x07\x02\
+\x03\x02\x01\x01\x04\0\x0dresource-data\x03\0\0\x02\x03\x02\x01\x03\x04\0\x03iri\
+\x03\0\x02\x01k\x01\x01@\x01\x03iri\x03\0\x04\x04\0\x07resolve\x01\x05\x03\0$eig\
+enius:component/read-access@0.1.0\x05\x07\x01B\x06\x02\x03\x02\x01\x01\x04\0\x0d\
+resource-data\x03\0\0\x01p\x01\x01j\x01\x02\x01s\x01@\x01\x07eigenqls\0\x03\x04\0\
+\x05query\x01\x04\x03\0%eigenius:component/query-access@0.1.0\x05\x08\x01B\x07\x02\
+\x03\x02\x01\x01\x04\0\x0dresource-data\x03\0\0\x02\x03\x02\x01\x03\x04\0\x03iri\
+\x03\0\x02\x01j\x01\x01\x01s\x01@\x03\x0dcomponent-iri\x03\x05input\x01\x08argum\
+ent\x01\0\x04\x04\0\x12dispatch-component\x01\x05\x03\0\"eigenius:component/io-a\
+ccess@0.1.0\x05\x09\x01j\x01\x06\x01s\x01@\x02\x05input\x02\x08argument\x02\0\x0a\
+\x04\0\x07execute\x01\x0b\x01@\0\0\x04\x04\0\x0dcomponent-iri\x01\x0c\x04\0.eige\
+nius:component/eigenius-component-io@0.1.0\x04\0\x0b\x1b\x01\0\x15eigenius-compo\
+nent-io\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.22\
+7.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

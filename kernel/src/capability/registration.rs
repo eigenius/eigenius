@@ -30,10 +30,12 @@
 //! `wasm_binary_ref` (blob store IRI) is reserved for future use.
 
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
-use super::wasm_institution::WasmFiberReasoner;
+use super::wasm_institution_d14::WasmInstitution;
+use crate::institution::runtime::{Institution, InstitutionRuntime};
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
+use crate::ontology::well_known as wk;
 use crate::program::component::ComponentRegistry;
 
 /// Protected namespace prefixes. Domain-supplied WASM modules cannot register
@@ -98,24 +100,25 @@ pub struct PendingIoComponent {
 #[derive(Default)]
 pub struct ScanResult {
     pub report: RegistrationReport,
-    pub wasm_institutions: Vec<WasmFiberReasoner>,
     pub pending_io_components: Vec<PendingIoComponent>,
 }
 
-/// Walk a Layer looking for WASM component and institution resources.
+/// Walk a Layer looking for WASM component resources.
 ///
 /// - Pure/read components are loaded and registered in `components` (kernel host).
 /// - IO components are collected as `PendingIoComponent` entries for the caller
 ///   to forward to the orchestrator (kernel can't host IO).
-/// - Institutions are returned as `WasmFiberReasoner` instances (kernel host).
 ///
 /// Resources without `implementation = "wasm"` are ignored — they are
 /// handled by the regular built-in or remote component path.
+///
+/// Institution declarations under D14 are plain ontology resources scanned
+/// elsewhere (see [`crate::institution::registry::InstitutionIndex`]); this
+/// scanner does not handle them.
 pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> ScanResult {
     let mut result = ScanResult::default();
 
     let impl_prop = Iri::parse("urn:eigenius:program:component:implementation").unwrap();
-    let inst_impl_prop = Iri::parse("urn:eigenius:institution:implementation").unwrap();
 
     for arc_resource in layer.iter_resources().map(|(_, r)| r) {
         let resource: &Resource = &arc_resource;
@@ -183,43 +186,86 @@ pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> S
                 continue;
             }
         }
+    }
 
-        // Institution: has institution:implementation = "wasm"
-        if let Some(Value::String(s)) = resource.get(&inst_impl_prop) {
-            if s == "wasm" {
-                match load_wasm_institution(resource, layer) {
-                    Ok(reasoner) => {
-                        if let Err(e) = check_namespace(&id) {
-                            result.report.errors.push(RegistrationError {
-                                resource_iri: id,
-                                message: e,
-                            });
-                        } else {
-                            let decl_iri = reasoner.institution_iri().as_str().to_string();
-                            if decl_iri != id {
-                                result.report.warnings.push(RegistrationWarning {
-                                    resource_iri: id.clone(),
-                                    message: format!(
-                                        "WASM binary declares IRI '{decl_iri}' which differs from resource @id '{id}' — using binary's IRI",
-                                    ),
-                                });
-                            }
-                            result.wasm_institutions.push(reasoner);
-                            result.report.institutions_registered.push(decl_iri);
-                        }
-                    }
-                    Err(e) => {
-                        result.report.errors.push(RegistrationError {
-                            resource_iri: id,
-                            message: e,
-                        });
-                    }
+    result
+}
+
+/// Walk the layer chain for D14 Institution declarations whose
+/// `runtime` is `urn:eigenius:institution:runtimes:wasm` and build an
+/// [`InstitutionRuntime`] populated with [`WasmInstitution`] instances
+/// for each. In-process / external runtime declarations are skipped —
+/// the caller is responsible for registering those programmatically.
+///
+/// Resources are merged across the chain; the topmost declaration for
+/// each institution IRI wins (so a child layer can override a parent
+/// layer's `runtime: in_process` declaration with `runtime: wasm` +
+/// `wasm_binary`).
+pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, RegistrationReport) {
+    let mut report = RegistrationReport::default();
+    let mut runtime = InstitutionRuntime::new();
+
+    let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
+    let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
+
+    for (iri, resource) in layer.iter_all_resources() {
+        if !resource.is_instance_of(&institution_class_iri) {
+            continue;
+        }
+        let runtime_kind = match resource.get(&runtime_prop) {
+            Some(Value::String(s)) if s == wk::RUNTIME_WASM => s,
+            _ => continue, // not WASM-runtime — caller's responsibility
+        };
+        let _ = runtime_kind;
+
+        match load_wasm_institution(&resource, &iri, layer) {
+            Ok(wasm_inst) => {
+                let inst_iri = wasm_inst.institution_iri().clone();
+                if let Err(e) = runtime.register(Box::new(wasm_inst)) {
+                    report.errors.push(RegistrationError {
+                        resource_iri: iri.as_str().to_string(),
+                        message: format!("InstitutionRuntime::register failed: {e}"),
+                    });
+                    continue;
                 }
+                report
+                    .institutions_registered
+                    .push(inst_iri.as_str().to_string());
+            }
+            Err(e) => {
+                report.errors.push(RegistrationError {
+                    resource_iri: iri.as_str().to_string(),
+                    message: e,
+                });
             }
         }
     }
 
-    result
+    (runtime, report)
+}
+
+/// Load a WASM institution from an Institution resource declaring
+/// `runtime: wasm` + `wasm_binary`.
+fn load_wasm_institution(
+    resource: &Resource,
+    iri: &Iri,
+    layer: &Layer,
+) -> Result<WasmInstitution, String> {
+    let bytes = extract_wasm_bytes(
+        resource,
+        "urn:eigenius:institution:wasm_binary",
+        "urn:eigenius:institution:wasm_binary_ref",
+        layer,
+    )?;
+    let config = extract_config(
+        resource,
+        "urn:eigenius:institution:fuel_limit",
+        "urn:eigenius:institution:memory_limit_pages",
+    );
+    // The institution's IRI is its @id — same as the resource IRI.
+    // The InstitutionRuntime keys by this; D14 dispatch resolves a
+    // QueryClass's `institution_ref` against this key.
+    WasmInstitution::from_bytes(iri.clone(), &bytes, config)
 }
 
 /// Load a WASM component from a resource.
@@ -238,22 +284,6 @@ fn load_wasm_component(resource: &Resource, layer: &Layer) -> Result<WasmCompone
         "urn:eigenius:program:component:memory_limit_pages",
     );
     WasmComponent::from_bytes(&bytes, level, config)
-}
-
-/// Load a WASM fiber reasoner from an institution resource.
-fn load_wasm_institution(resource: &Resource, layer: &Layer) -> Result<WasmFiberReasoner, String> {
-    let bytes = extract_wasm_bytes(
-        resource,
-        "urn:eigenius:institution:wasm_binary",
-        "urn:eigenius:institution:wasm_binary_ref",
-        layer,
-    )?;
-    let config = extract_config(
-        resource,
-        "urn:eigenius:institution:fuel_limit",
-        "urn:eigenius:institution:memory_limit_pages",
-    );
-    WasmFiberReasoner::from_bytes(&bytes, config)
 }
 
 /// Extract WASM binary bytes from a resource, trying inline first then blob ref.

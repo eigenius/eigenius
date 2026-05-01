@@ -35,6 +35,7 @@
 //! ```
 
 pub mod institution;
+pub mod iri;
 
 use std::collections::BTreeMap;
 

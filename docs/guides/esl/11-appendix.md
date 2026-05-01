@@ -104,7 +104,7 @@ QualifiedName::= Identifier ':' Identifier
               |  Identifier                          (* bare; resolved by context *)
 ```
 
-**Phase 11e.1 addition**: `ApplyExpr` with a `QualifiedName` whose IRI classifies through the institution registry as a decide predicate or comorphism dispatches as the corresponding kernel form ([§9.2](09-institutions.md), [§5.2.3](05-expressions.md), [§5.2.4](05-expressions.md)).
+**D14 addition**: `ApplyExpr` with a `QualifiedName` whose IRI classifies through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) as a `Decidable` `QueryClass` dispatches as `Exp::NativeDecide` (returning a `Verdict`) — see [§9.3](09-institutions.md). Comorphisms are not callable from ESL expression position under D14; they surface only inside EigenQL FIBER param coercion.
 
 **Phase 11h addition**: brace-delimited bounded binders in constructor argument and codata observation positions. The three accepted shapes are tabulated in [§4.5](04-declarations.md).
 
@@ -152,12 +152,12 @@ pub fn compile(source: &str) -> Result<Vec<Resource>, Vec<EslError>>;
 
 pub fn compile_with_institutions(
     source: &str,
-    institutions: Arc<InstitutionRegistry>,
+    index: Arc<InstitutionIndex>,
 ) -> Result<Vec<Resource>, Vec<EslError>>;
 ```
 
 - `compile` — base path. Use for ontologies, resources, and programs that do not invoke institution-dispatched function calls.
-- `compile_with_institutions` — required for programs that use `cap:predicate(...)` or `cap:translate(...)` — the registry is consulted at compile time to classify the IRI as a decide predicate or comorphism. Without the registry, the compile would fall through to ordinary component dispatch and fail at runtime with `unknown function`.
+- `compile_with_institutions` — required for programs that use `cap:predicate(...)` calls referencing a `Decidable` `QueryClass`. The `InstitutionIndex` is derived from the layer chain (`InstitutionIndex::from_layer`); the compiler consults it to classify the IRI. Without the index, the compile falls through to ordinary component dispatch and fails at runtime with `unknown function`.
 
 ## 11.5. Kernel capability modes
 
@@ -176,7 +176,7 @@ Constructed via the [`EvalCtx`](../../../kernel/src/nbe/eval.rs) variants. See [
 - [D18 Ontology-as-types resolution](../../design/d18-ontology-as-types-resolution.md) — the bridge specified in [chapter 6](06-resources-types-and-the-layer.md)
 - [D19 Inductive and sized types](../../design/d19-inductive-types.md) — type theory underpinning [chapter 4](04-declarations.md) (data/codata) and [chapter 7](07-type-theory-primer.md)
 - [D11 Codata, streams, and resumable execution](../../design/d11-codata-streams.md) — coinductive type design
-- [D10 Grothendieck institution protocol](../../design/d10-grothendieck-institution-protocol.md) — institution mechanism dispatched in [chapter 9](09-institutions.md)
+- [D14 Institution Realisation](../../design/d14-institution-realisation.md) — institution mechanism dispatched in [chapter 9](09-institutions.md). Supersedes D10.
 - [D1 Eigon serialization format](../../design/d1-eigon-serialization-format.md) — the resource model ESL compiles to
 - [EigenQL user guide](../eigenql/README.md) — the query-language companion sharing the same institution classification
 
@@ -204,12 +204,17 @@ All implementation referenced in this guide:
 - [`kernel/src/nbe/readback.rs`](../../../kernel/src/nbe/readback.rs) — readback from `Val` to normal-form `Exp`
 - [`kernel/src/nbe/positivity.rs`](../../../kernel/src/nbe/positivity.rs) — positivity check for inductive types
 
-**Institutions:**
-- [`kernel/src/institution/mod.rs`](../../../kernel/src/institution/mod.rs) — `FiberReasoner`, `InstitutionRegistry`, `DecResult`, `InstitutionCapability`
-- [`kernel/src/institution/error.rs`](../../../kernel/src/institution/error.rs) — `InstitutionError`, `MorphismValidation`
+**Institutions (D14):**
+- [`kernel/src/institution/runtime.rs`](../../../kernel/src/institution/runtime.rs) — `Institution` trait, `InstitutionRuntime`
+- [`kernel/src/institution/registry.rs`](../../../kernel/src/institution/registry.rs) — `InstitutionIndex` (derived from chain scan)
+- [`kernel/src/institution/dispatch.rs`](../../../kernel/src/institution/dispatch.rs) — `AutoOnLoad` dispatch
+- [`kernel/src/institution/error.rs`](../../../kernel/src/institution/error.rs) — `InstitutionError`
+- [`kernel/src/capability/registration.rs`](../../../kernel/src/capability/registration.rs) — auto-registration from chain scan
+- [`kernel/src/capability/wasm_institution_d14.rs`](../../../kernel/src/capability/wasm_institution_d14.rs) — host bridge to the `eigenius-institution-d14` WIT world
 
-**Core ontology:**
-- [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) — shipped definitions of `Class`, `Property`, `InductiveType`, `CodataType`, `Comorphism`, etc.
+**Core / institution ontology:**
+- [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) — shipped definitions of `Class`, `Property`, `InductiveType`, `CodataType`, `Verdict`, etc.
+- [`ontologies/institution/institution-ontology.json`](../../../ontologies/institution/institution-ontology.json) — `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`
 
 ---
 

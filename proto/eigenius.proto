@@ -55,13 +55,11 @@ service EigeniusKernel {
   // Health check.
   rpc Health(HealthRequest) returns (HealthResponse);
 
-  // Execute a fiber query against a registered institution.
-  rpc FiberQuery(FiberQueryRequest) returns (FiberQueryResponse);
-
-  // Discover morphisms between resources within an institution's fiber.
-  rpc DiscoverMorphisms(DiscoverMorphismsRequest) returns (DiscoverMorphismsResponse);
-
-  // List registered institutions and their declared fiber structure.
+  // List indexed institutions and the QueryClasses each declares (D14).
+  // FIBER queries against an institution's QueryClasses ride on the
+  // regular Query RPC via the FIBER clause (D2 v2 §3.5); per-RPC
+  // dispatch primitives from the D10 era (FiberQuery, DiscoverMorphisms)
+  // were retired in Phase 12 with no D14 equivalent.
   rpc ListInstitutions(ListInstitutionsRequest) returns (ListInstitutionsResponse);
 
   // Generate a JSON Schema for an ontology class.
@@ -297,31 +295,7 @@ message ComponentMetrics {
   int64 latency_ms = 5;
 }
 
-// --- Institution Protocol ---
-
-message FiberQueryRequest {
-  string institution_iri = 1;   // Which institution to dispatch to
-  bytes query = 2;              // Query resource as CBOR or Eigon-JSON
-  string content_type = 3;
-}
-
-message FiberQueryResponse {
-  bool success = 1;
-  bytes result = 2;             // Result resource as CBOR
-  string error = 3;
-}
-
-message DiscoverMorphismsRequest {
-  string institution_iri = 1;   // Which institution to dispatch to
-  repeated bytes resources = 2; // Resources to analyze, as CBOR
-  string content_type = 3;
-}
-
-message DiscoverMorphismsResponse {
-  bool success = 1;
-  repeated bytes morphisms = 2; // Discovered morphism resources as CBOR
-  string error = 3;
-}
+// --- Institution Protocol (D14) ---
 
 message ListInstitutionsRequest {
   // Optional hex-encoded LayerId to read against a specific layer
@@ -336,8 +310,10 @@ message ListInstitutionsResponse {
 message InstitutionInfo {
   string iri = 1;
   string name = 2;
-  repeated string morphism_types = 3;  // IRIs of declared morphism classes
-  repeated string query_types = 4;     // IRIs of declared query classes
+  // QueryClass input-class IRIs declared by this institution. Each
+  // entry corresponds to a `QueryClass` resource whose
+  // `institution_ref` points at this institution.
+  repeated string query_types = 3;
 }
 
 // --- GetSchema ---

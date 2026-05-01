@@ -53,9 +53,9 @@ That query returns a row for every `Class` resource in the layer chain, binding 
 
 More complex queries can:
 
-- Interleave `FIBER` clauses that dispatch to an institution and bind the response (D10 §6)
-- Invoke **decide predicates** registered by institutions (Phase 11e.2): `cap:within_tolerance(delta, 0.1)` in a `WHERE` filter
-- Invoke **comorphisms** that translate resources across institution boundaries: `cap:dock_to_assay(docking_result)` in a `RETURN` expression
+- Interleave `FIBER` clauses that dispatch to an institution `OnDemand` `QueryClass` and bind the response (D14 §9)
+- Invoke **Decidable QueryClasses** registered by institutions: `cap:within_tolerance(delta, 0.1) HOLDS` in a `WHERE` filter — returns a `Verdict` projected to a Boolean by the postfix predicate
+- **Coerce values across institution boundaries** inside FIBER param values: `param: comorphism_iri(source)` runs the four-step extract → transform → reify pipeline (D14 §9.3) inline
 - Derive new relations with `DEFINE ... FROM` (including recursion through stratified negation)
 - Aggregate with `GROUP BY` + `COUNT` / `SUM` / `AVG` / `MIN` / `MAX`
 - Sort, limit, and deduplicate results
@@ -70,7 +70,7 @@ Each chapter is self-contained and linked to the corresponding implementation fi
 - **[5. Pattern matching](05-pattern-matching.md)** — `MATCH`, subjects, property patterns, negation
 - **[6. Expressions](06-expressions.md)** — every `Expression` variant with its evaluation rule
 - **[7. FIBER clauses](07-fiber-clauses.md)** — institution dispatch via the transient overlay
-- **[8. Institutions](08-institutions.md)** — decide predicates, comorphisms, capability classification
+- **[8. Institutions](08-institutions.md)** — Decidable QueryClasses, postfix Verdict predicates, comorphism coercion, the D14 classification table
 - **[9. Stratification](09-stratification.md)** — recursion + negation semantics
 - **[10. Result format](10-result-format.md)** — how `RETURN` shapes become Eigon documents
 - **[11. Error messages](11-error-messages.md)** — common errors and how to fix them
@@ -85,7 +85,7 @@ Each chapter is self-contained and linked to the corresponding implementation fi
 
 ## Prerequisites
 
-The guide assumes familiarity with the Eigon serialization format ([D1](../../design/d1-eigon-serialization-format.md) — resources, IRIs, properties, embedded values) and the institution protocol ([D10](../../design/d10-grothendieck-institution-protocol.md) — fiber reasoners, morphisms, queries). Reading [D2](../../design/d2-eigenql-specification.md) is helpful but not required; this guide re-derives the query semantics from the implementation and cites D2 where the spec is authoritative (grammar appendix, result-document shape).
+The guide assumes familiarity with the Eigon serialization format ([D1](../../design/d1-eigon-serialization-format.md) — resources, IRIs, properties, embedded values) and the institution protocol ([D14 Institution Realisation](../../design/d14-institution-realisation.md) — institutions as ontology declarations + boundary trait, comorphisms as triadic translations, the Verdict shape). Reading [D2](../../design/d2-eigenql-specification.md) is helpful but not required; this guide re-derives the query semantics from the implementation and cites D2 where the spec is authoritative (grammar appendix, result-document shape).
 
 ---
 

@@ -86,7 +86,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
 | 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓, 11d ✓, 11e.1 ✓, 11e.2 ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class, ESL + EigenQL institution-capability surface |
 | D22 | Notebook & TypeScript SDK | ✓ | React notebook SPA + `@eigenius/client` SDK, served by the orchestrator at `/notebooks/`; six cell types incl. form-based charts; content-addressed publish-to-layer |
-| 12 | Worked Examples | | Domain institution examples (FEA, biopharma) as WASM modules |
+| 12 | D14 Institutions | M1–M8 ✓; WASM-pkg / EigenQL-surface / docs / proto-cleanup pending | D14 institution realisation replaces D10; dock→assay worked example; comorphisms via four-step pipeline; Verdict-shaped Decidable + AutoOnLoad dispatch |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
 | 15 | Specialty Institutions | | Lean 4, SMT solvers, domain-specific proof institutions |
@@ -386,9 +386,9 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 **Duration estimate:** 6–8 weeks.
 
-**Status:** Core protocol complete. `FiberReasoner` trait, `InstitutionRegistry` with dispatch routing, `ComorphismRegistry`, morphism validation dispatch in the validator, fiber query dispatch through NbE, institution ontology (FiberMorphism, FiberQuery, StructuralProperty, PropertyKind), gRPC RPCs (FiberQuery, DiscoverMorphisms, ListInstitutions), CLI `list-institutions` command. Test institution (ordering/refinement with transitivity validation, 5 tests). Bootstrap loads four layers: core → program → reflection → institution. See `docs/design/d10-grothendieck-institution-protocol.md`.
+**Status:** Core protocol complete; **superseded by [D14](d14-institution-realisation.md) in Phase 12.** The original D10 surface (`FiberReasoner` trait, `InstitutionRegistry`, `ComorphismRegistry`, in-validator morphism dispatch, `FiberQuery` / `DiscoverMorphisms` / `ListInstitutions` RPCs, the ordering test institution) has been retired. Phase 12 replaced it with the D14 ontology-first realisation (`InstitutionIndex` over chain-declared institutions / formats / queries / comorphisms; `InstitutionRuntime` of `Institution` trait impls; Verdict-shaped Decidable + AutoOnLoad QueryClasses; four-step comorphism pipeline). The deliverables list below is preserved as historical record; the actual current shape lives in the Phase 12 section.
 
-**Deferred:** Fully worked domain examples (mechanical engineering, biopharma) require WASM sandboxing for domain-specific fiber reasoners — deferred to Phase 12.
+**Deferred:** Fully worked domain examples (mechanical engineering, biopharma) require WASM sandboxing for domain-specific institutions — deferred to Phase 12, then refocused under D14 onto a single dock→assay worked example with optional second domains as follow-on (see Phase 12).
 
 ### 9.1 Deliverables
 
@@ -456,7 +456,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 - Capability SDK: a Rust crate that capability authors compile to WASM. Provides typed bindings for reading resources from the execution context, emitting results, and declaring required external access.
 - Capability registration via ontology: a domain layer can register a WASM module as a capability for a custom class.
 - Domain ontology loading: load a third-party ontology layer that defines custom classes, properties, and WASM-sandboxed capabilities. Verify that it cannot shadow Foundation Layer capabilities (§9.5).
-- WASM fiber reasoners: institution `FiberReasoner` implementations as WASM modules, using the same import/export interface as other capabilities.
+- WASM institutions: domain institution implementations as WASM modules, using the WASM Component Model. (Originally framed as `FiberReasoner` impls; re-targeted to D14's `Institution` trait + `eigenius-institution-d14` WIT world in Phase 12. The `wasm_institution_d14.rs` host bridge was added in Phase 12 M4.)
 - CLI `capability` subcommand: list registered capabilities, inspect a capability's type signature, test-invoke a capability.
 - Example domain ontology: a "Legal Document" ontology with a custom validator that checks document structure — delivered as a worked example and integration test.
 
@@ -477,7 +477,7 @@ Note: Azure deployment (Bicep templates, CI/CD) deferred to Phase 4, when the or
 
 **Duration estimate:** 5–7 weeks total, split into two internal milestones.
 
-**Prerequisites:** Phase 5 (traces + NbE), Phase 8 (WASM). Institution wiring (`validate_with_institutions` in the Load path, institution registration into `start_server`) moved into Phase 12 (Worked Examples) since it only becomes testable once real institutions exist — 9a's institution re-registration handles the kernel-side plumbing that survives restart.
+**Prerequisites:** Phase 5 (traces + NbE), Phase 8 (WASM). Institution wiring originally framed as `validate_with_institutions` in the Load path was rebuilt under D14 in Phase 12 as AutoOnLoad QueryClass dispatch + the `commit_with_validation` head-promote-then-revert-on-failure semantics; institution registration into `start_server` lives as the per-commit `rebuild_institution_index` hook plus boot-time index/runtime construction. 9a's WASM-component re-registration handles the kernel-side plumbing that survives restart.
 
 The phase decomposes into two milestones that are separately reviewable:
 
@@ -629,51 +629,47 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ### Phase 11c — Institution-registered decision procedures — ✓
 
-**Status:** Complete.
+**Status:** Complete; **dispatch backbone re-targeted under D14 in Phase 12.** `Constraint::Institution { iri, args }` and `DecResult` survive; the procedural `FiberReasoner::decide` it dispatched to was retired and replaced with Decidable QueryClass dispatch via `Institution::query` + Verdict parsing (D14 §9.2). The check-time escalation (`EvalCtx::Check`, `CheckCtx::with_institutions_d14`) survives, now carrying `InstitutionIndex` + `InstitutionRuntime` instead of an `InstitutionRegistry`.
 
 - `Constraint::Institution { iri, args }` variant on `Constraint` ([kernel/src/nbe/term.rs](../../kernel/src/nbe/term.rs)) — institution-dispatched predicates carry an IRI and a vector of argument expressions.
-- `FiberReasoner::decide(constraint_iri, args, ctx) -> DecResult` method with `Undecidable` default ([kernel/src/institution/mod.rs](../../kernel/src/institution/mod.rs)). Institutions opt in by overriding; silent default means existing reasoners don't break.
-- `DecResult { Holds, Fails, Undecidable }` — three-valued so institutions can distinguish "predicate is false" from "can't determine at check time."
-- `EvalCtx::Check { layer, institutions }` variant — a check-time evaluation mode that carries an institution registry but not the full IO apparatus (no component registry, no trace store). The type-checker escalates from `EvalCtx::Pure` to `EvalCtx::Check` when a registry is attached.
-- `CheckCtx` gains an optional `Arc<InstitutionRegistry>` (`with_institutions`) and a `ctx.eval(...)` method routing internal evals through `EvalCtx::Check`. This is the plumbing that makes institution-dispatched constraints fire at check time rather than at runtime — exactly what the plan specified.
+- `DecResult { Holds, Fails, Undecidable }` — three-valued so institutions can distinguish "predicate is false" from "can't determine at check time." Originally returned by `FiberReasoner::decide`; under D14 it's the kernel-internal tag produced by parsing a Verdict resource (`parse_verdict`) returned by `Institution::query`.
+- `EvalCtx::Check` variant — a check-time evaluation mode carrying `InstitutionIndex` + `InstitutionRuntime` (originally `InstitutionRegistry`, retired). The type-checker escalates from `EvalCtx::Pure` to `EvalCtx::Check` when the index/runtime are attached.
+- `CheckCtx` gains optional D14 `institution_index` + `institution_runtime` fields (`with_institutions_d14` builder) and a `ctx.eval(...)` method routing internal evals through `EvalCtx::Check`. This is the plumbing that makes institution-dispatched constraints fire at check time rather than at runtime.
 - `val_to_resource_value` extended to marshal `Val::InductiveVal` to an embedded resource (ctor name as `is_a`, positional args under `ctor_arg_{i}`). Combined with the existing Phase 11a bridge for `Val::List` and cons-pair chains, this gives institutions concrete life-science argument shapes — scalars, ensembles, Pose-like inductive values — without ad-hoc marshalling.
-- 8 new tests: default-Undecidable (no registry), Holds→Refl, Fails→failing neutral, Undecidable→passthrough neutral, unregistered-IRI→Undecidable, scalar/list/InductiveVal arg roundtrip through the bridge, and a full check-time integration test.
-- **Explicit non-goals shipped as-is:** no ESL surface syntax for institution-dispatched constraints yet; no counter-examples on `Fails`. Both are additive and deferrable until a real institution drives the need.
+- Test coverage: default-Undecidable (no index), Holds→Refl, Fails→failing neutral, Undecidable→passthrough neutral, scalar/list/InductiveVal arg roundtrip through the bridge, full check-time integration test. Originally 8 tests against the FiberReasoner-shaped `FakeInstitution`; migrated in Phase 12 B1 to a D14 `Institution`-shaped fixture reading `decide_args` and returning Verdict resources.
+- **Explicit non-goals shipped as-is:** no counter-examples on `Fails`. ESL surface syntax now exists (Phase 11e.1 below), retargeted to the D14 classifier in Phase 12 B4a.
 
 ### Phase 11d — `Comorphism` as an ontology class — ✓
 
-**Status:** Complete.
+**Status:** Complete; **shape replaced under D14 in Phase 12.** The `Comorphism` ontology class and `Exp::InstitutionInvoke` AST node survive; the procedural `FiberReasoner::translate` it dispatched to was retired and replaced with the four-step pipeline (extract_typed → transformation Component → reify) keyed by the new triadic Comorphism shape `(export_format, transformation, import_format, exact)`. The original `(source_institution, target_institution, translation_procedure)` shape is gone.
 
-- `urn:eigenius:institution:Comorphism` class in the core ontology with required properties `source_institution`, `target_institution`, `translation_procedure`.
-- `FiberDeclaration.comorphism_types: Vec<Resource>` — institutions declare their outgoing comorphisms at registration.
-- `InstitutionRegistry.comorphism_dispatch: BTreeMap<Iri, Iri>` maps both Comorphism IRI and its `translation_procedure` IRI to the declaring institution; `institution_for_comorphism()` / `comorphism_institution_iri()` accessors.
-- `FiberReasoner::translate(comorphism_iri, source, ctx) -> Result<Resource, _>` method with default error. Mirrors Phase 11c's `decide` pattern.
-- `Exp::InstitutionInvoke { comorphism_iri, source }` kernel AST node with eval arm dispatching via `EvalCtx`'s institution registry. Without a registry, produces a passthrough neutral — analogous to Phase 11c's undecidable fallback. Readback not added (the expression evaluates or produces a neutral; normal form readback isn't required for this variant yet).
-- 6 new tests: comorphism dispatch-table population (both IRI and procedure IRI), translate dispatch, default-translate-UnknownType error, eval-through-registry, no-registry-passthrough, unknown-comorphism-error.
-- **Explicit non-goals shipped as-is:** no ESL surface syntax for `InstitutionInvoke`; no comorphism composition (ρ₁ ∘ ρ₂); no backward translation; no typed translation signatures. All additive; Phase 15 reconciliation can invoke translate via Rust directly without any of these.
+- `urn:eigenius:institution:Comorphism` class in the institution ontology, now with required properties `export_format`, `transformation`, `import_format`, `exact` (D14 §4.5). The original `source_institution` / `target_institution` / `translation_procedure` properties were removed in Phase 12 M1.
+- `FiberDeclaration.comorphism_types` (the procedural-registration field) is gone. Comorphisms now ride into the chain as ordinary ontology resources, indexed by `InstitutionIndex` (Phase 12 M2).
+- `InstitutionIndex.comorphism(iri)` lookup replaced the old `InstitutionRegistry.institution_for_comorphism()` / `comorphism_institution_iri()` accessors.
+- `Exp::InstitutionInvoke { comorphism_iri, source }` kernel AST node — eval dispatches via the four-step pipeline (`try_d14_institution_invoke`) under D14, with the post-translation validation invariant (D14 §9.3 step 5) firing AutoOnLoad QueryClasses on the reified target. Without an attached index/runtime (bare-Pure mode), reduces to a passthrough neutral so the conversion checker can compare two invocations structurally.
+- Test coverage: comorphism index ingest, four-step pipeline end-to-end (PipelineLogger fixture in `nbe::eval` tests; dock→assay worked example in `kernel/tests/d14_dock_assay_demo.rs`), unknown-comorphism error, no-index passthrough, post-translation invariant rejecting invalid translations.
+- **Explicit non-goals shipped as-is:** no comorphism composition (ρ₁ ∘ ρ₂) — D14 §5.2 deliberately excludes it; no backward translation. ESL surface (`f(x)` → `Exp::InstitutionInvoke`) ships under Phase 11e.1, retargeted to the D14 classifier in Phase 12 B4a. EigenQL surface for comorphism dispatch ships as FIBER param coercion under D2 v2.
 
 ### Phase 11e.1 — ESL surface for institution capabilities — ✓
 
-**Status:** Complete.
+**Status:** Complete; **classifier ported under D14 in Phase 12 B4a.** The ESL surface (`cap:comorphism(src)` → `Exp::InstitutionInvoke`; `cap:decide(a, b)` → `Exp::NativeDecide(Constraint::Institution, Unit)`) survives. The classifier consulted to make those routing decisions changed: `InstitutionRegistry::classify` was retired and replaced with `InstitutionIndex.comorphism(iri).is_some()` and `InstitutionIndex.query_class(iri)` checked for `DispatchRole::Decidable`.
 
-- `FiberDeclaration.decide_procedures: Vec<Iri>` + `InstitutionRegistry.decide_dispatch` (Phase 11c's decide was reachable only from Rust; 11e.1 adds the explicit declaration needed for compile-time classification).
-- `InstitutionCapability` enum and `InstitutionRegistry::classify(iri)` — returns `Some(DecidePredicate | Comorphism)` or `None`. Used by ESL compile (and future EigenQL compile) to dispatch a function-call IRI to the right kernel AST form.
-- `esl::compile_with_institutions(source, Arc<InstitutionRegistry>)` entry point + `Compiler.institutions` field threading the registry into compilation.
-- Compile-time classification in the `Apply` arm: function IRI registered as Comorphism → emits `ComorphismInvokeApply` resource; registered as DecidePredicate → emits `DecideApply` resource; unclassified → falls through to ordinary component dispatch (pre-11e behaviour preserved).
-- `program::expr` decoders for `ComorphismInvokeApply` → `Exp::InstitutionInvoke`, and `DecideApply` → `Exp::NativeDecide(Constraint::Institution, Unit)`.
-- 4 new tests: ESL `cap:comorphism(src)` compiles to `InstitutionInvoke`; ESL `cap:decide(a, b)` compiles to `NativeDecide(Institution)`; comorphism called with wrong arity errors at compile; no-registry path compiles to plain `Apply` (backward-compatible).
+- ESL surface: `compile_with_institutions(source, Arc<InstitutionIndex>)` entry point. `Compiler.institutions: Option<Arc<InstitutionIndex>>` drives compile-time classification in the `Apply` arm.
+- Classification rules: function IRI is a Comorphism declaration → emits `ComorphismInvokeApply` resource; QueryClass declaration with `Decidable` dispatch role → emits `DecideApply`; otherwise falls through to ordinary component dispatch.
+- `program::expr` decoders for `ComorphismInvokeApply` → `Exp::InstitutionInvoke`, and `DecideApply` → `Exp::NativeDecide(Constraint::Institution, Unit)` (unchanged).
+- Test coverage: ESL `cap:comorphism(src)` compiles to `InstitutionInvoke`; ESL `cap:decide(a, b)` compiles to `NativeDecide(Institution)`; comorphism called with wrong arity errors at compile; no-index path compiles to plain `Apply` (backward-compatible).
 - **Explicit non-goals:** `decide` result binding (still uses `Exp::Unit` as witness); typed argument signatures for predicates; ESL syntax for comorphism composition.
 
 ### Phase 11e.2 — EigenQL surface for institution capabilities — ✓
 
-**Status:** Complete.
+**Status:** Complete; **dispatch ported under D14 in Phase 12 B4b, semantics revised in D2 v2.** EigenQL accepts `ns:local(args)` qualified-name function calls in expression position. Under D14 these dispatch only as Decidable QueryClass invocations and return a typed `Verdict` (no longer Boolean). Comorphism dispatch in expression position was dropped — comorphisms surface as FIBER parameter coercions instead (D2 v2 §3.5). The postfix `HOLDS` / `FAILS` / `UNDECIDABLE` Verdict projection sugar lives in the open D2 v2 surface implementation milestone (see Phase 12).
 
-- EigenQL parser now accepts `ns:local(args)` qualified-name function calls in expression position — previously only the hardcoded builtins (DATE, LENGTH, etc.) could take the function-call form.
-- `eval_expression` threads an optional `&InstitutionRegistry` through the call chain; `FunctionCall` dispatch attempts institution classification (via the `InstitutionRegistry::classify` added in 11e.1) before falling through to the builtin function table.
-- `dispatch_institution_call` helper: `DecidePredicate` → `reasoner.decide(iri, args, ctx)` → `Value::Boolean(Holds)`; `Comorphism` → `reasoner.translate(iri, source, ctx)` → `Value::Embedded(result)`.
-- Boolean semantics in `WHERE` clauses: decide-predicate Holds retains the binding, Fails/Undecidable drops it. Comorphism invocations slot into `RETURN` / binding positions as resource values.
-- 4 new tests: parser accepts qualified calls; `WHERE cap:positive(n)` filters by decide result; `cap:translate(source)` returns a comorphism-translated resource; unknown IRI falls through to builtin-dispatch error.
-- **Explicit non-goals:** no namespace-alias declaration in EigenQL syntax (users write full IRIs); no decide-result binding to a variable (boolean only); no type-level classification at parse time.
+- EigenQL parser accepts `ns:local(args)` qualified-name function calls (unchanged).
+- `eval_expression` threads `FiberRuntime { index, runtime, ctx }` through the call chain; `FunctionCall` dispatch routes to `try_dispatch_decidable` against the `InstitutionIndex` before falling through to the builtin function table.
+- `try_dispatch_decidable`: looks up the IRI as a Decidable QueryClass; marshals positional arguments onto a `decide_args` array on a synthetic input resource; calls `Institution::query`; returns the resulting Verdict resource as `Value::Embedded`.
+- WHERE / Boolean-position semantics under D2 v2: a Verdict-typed expression is no longer auto-collapsed; the user applies a postfix predicate (`?v HOLDS`) to project. Bare Verdict in Boolean position is a type error (`bare_verdict_in_boolean_position`). Comorphism dispatch in expression position is gone (`f(x)` returning a translated resource is no longer a thing — use FIBER param coercion instead).
+- Test coverage: parser accepts qualified calls; Decidable call returns Verdict resource (asserts `ctor_name`); unknown IRI falls through to builtin-dispatch error. (The original 4-test `Boolean(Holds)` semantics + comorphism-in-expression test were retired in B4b.)
+- **Explicit non-goals:** no namespace-alias declaration in EigenQL syntax (users write full IRIs); no type-level classification at parse time. Postfix Verdict predicates and FIBER comorphism coercion are tracked under the D2 v2 surface implementation milestone in Phase 12.
 
 ### Phase 11 — Test plan
 
@@ -720,29 +716,161 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ---
 
-## Phase 12 — Worked Institution Examples
+## Phase 12 — D14 Institution Realisation
 
-**Goal:** Fully worked domain examples demonstrating the Grothendieck institution protocol with WASM-sandboxed fiber reasoners. Placed after Phase 11 because the ambitious cross-institution queries depend on Phase 11d (`Comorphism` as ontology class), and the deep morphism-composition queries depend on Phase 11b (inductive types).
+**Goal:** Replace the D10 institution surface with [D14](d14-institution-realisation.md)'s ontology-first realisation, retire the legacy types, and ship a worked example that exercises the full surface end-to-end — the four-step comorphism pipeline, Decidable QueryClass dispatch at type-check time, and AutoOnLoad QueryClass dispatch on Load.
 
-**Duration estimate:** 3–4 weeks.
+**Duration estimate:** 6–8 weeks.
 
-**Prerequisites:** Phase 6 (institution protocol), Phase 8 (WASM extensibility), Phase 10 (ontology-as-types so EigenQL queries over institution classes type-check cleanly), Phase 11 (in full — d for comorphism translations, b for deep composition queries, c for domain-predicate decide reductions).
+**Prerequisites:** Phase 6 (institution protocol — the surface being retired), Phase 8 (WASM extensibility), Phase 10 (ontology-as-types so EigenQL queries over institution classes type-check cleanly), Phase 11 (in full — d for comorphism translations, b for inductive types underpinning Verdict, c for the `Constraint::Institution` AST node).
 
-### Phase 12 — Deliverables
+D14 supersedes [D10](d10-grothendieck-institution-protocol.md). Phase 12 adopts D14 as its scope; the D10-era plan that previously occupied this slot ("two domain examples each as a WASM-sandboxed FiberReasoner") was abandoned mid-flight in favour of fixing the structural shape first. The D14 redesign replaced the procedural `FiberReasoner` trait + `InstitutionRegistry` with a derived `InstitutionIndex` over chain-declared institution / format / query / comorphism resources, plus an `InstitutionRuntime` of `Institution` trait implementations.
 
-- **Mechanical engineering example:** FEA institution with `MeshRefinement` morphisms, convergence queries, and mesh topology validation. CAD institution with `ParametricVariation` morphisms. GenAI institution with `ParetoDominance` morphisms and Pareto front queries. Cross-institution query: "for each GenAI candidate, find the finest-mesh FEA result and check if safety factor > 2.0."
-- **Biopharmaceutical R&D example:** Docking institution with `ConformationalProximity` and `ReScoring` morphisms, ensemble queries. ADMET institution with `ModelAgreement` morphisms, disagreement queries. Assay institution with `ReplicateRelationship` morphisms. PK institution with `CompartmentRefinement` morphisms. Comorphism: docking ΔG → assay IC₅₀ translation.
-- Each institution implemented as a WASM module via the capability SDK (Phase 8).
-- Wire `validate_with_institutions` into the Load RPC path (deferred from Phase 6 — no real institutions to test against until now).
-- Wire institution registration into `start_server` (analogous to component registration; note Phase 9a already handles the restart-side plumbing).
-- Integration tests exercising cross-institution queries and comorphism translations.
-- Documentation: each example as a tutorial with ontology definitions, fiber reasoner implementation, and sample queries.
+### Phase 12 — D14 milestones (D14 §13.4)
+
+D14 sequences eight milestones M1–M8 covering the redesign. All eight have landed against the kernel; the WASM packaging and EigenQL surface enrichment of M8 remain open and are tracked below.
+
+#### M1 — Ontology shape + well-known IRIs + Verdict — ✓
+
+**Status:** Complete.
+
+- Institution ontology revised: `Verdict` inductive type (constructors `Holds | Fails | Undecidable`); `RuntimeKind`, `DispatchRole`, `ExportFormat`, `ImportFormat`, `QueryClass` classes; `Comorphism` re-shaped as the triadic (export_format, transformation, import_format, exact) tuple from D14 §4.5. Comorphism's old (source_institution, target_institution, translation_procedure) shape removed.
+- Well-known IRI constants in `kernel/src/ontology/well_known.rs`: `EXPORT_FORMAT_CLASS`, `IMPORT_FORMAT_CLASS`, `QUERY_CLASS_CLASS`, `VERDICT`, dispatch-role IRIs, ctor-name constants for the three Verdict constructors.
+
+#### M2 — InstitutionIndex (chain-scan derived registry) — ✓
+
+**Status:** Complete.
+
+- `kernel/src/institution/registry.rs` — `InstitutionIndex` builds from `from_layer(&Layer)`, walking the chain and ingesting every Institution / ExportFormat / ImportFormat / QueryClass / Comorphism declaration. Per-resource parse errors collected and returned alongside the index so callers can surface them as validation problems.
+- Dispatch sub-indexes: `auto_on_load_by_class`, `on_demand_by_class`, `decidable_by_class`, `procedures` (procedure IRI → declaring institution + ProcedureKind).
+- Lookup API: `query_class(iri)`, `comorphism(iri)`, `auto_on_load_for(class_iri)`, `decidable_for(class_iri)`, `procedure(iri)`, `institutions()` iterator.
+
+#### M3 — Institution trait + InstitutionRuntime — ✓
+
+**Status:** Complete.
+
+- `kernel/src/institution/runtime.rs` — `Institution` trait with three methods: `extract_typed(procedure, source, ctx) → Val`, `reify(procedure, val, ctx) → Resource`, `query(procedure, input, ctx) → Resource`. `InstitutionRuntime` keys `Box<dyn Institution>` by institution IRI.
+- Comorphism well-formedness validation (validation Rule 15): every Comorphism resource's `export_format`, `transformation`, and `import_format` references must resolve in the chain. Surfaces as a structural validation error.
+- Dead `kernel/src/institution/comorphism.rs` deleted; the Comorphism shape now lives entirely as ontology data + the dispatch path in `nbe/eval.rs`.
+
+#### M4 — WIT world + SDK update + WASM host bridge — ✓
+
+**Status:** Complete.
+
+- `wit/eigenius-component.wit` — `eigenius-institution-d14` world with `extract-typed`, `reify`, `query` exports; the legacy `eigenius-institution` world removed alongside the legacy SDK builders.
+- SDK (`sdk/wasm-sdk/src/institution.rs`): D14 declaration builders for `InstitutionDecl`, `ExportFormatDecl`, `ImportFormatDecl`, `QueryClassDecl`, `ComorphismDecl`. Legacy `FiberDeclaration` / `MorphismValidation` builders removed.
+- Host bridge `kernel/src/capability/wasm_institution_d14.rs` — `WasmInstitution` implements the `Institution` trait via Wasmtime calls into the D14 WIT exports. M4 marshalling restriction: only `Val::ResourceVal` is exchanged across the WASM boundary. The `examples/wasm-d14-echo/` smoke fixture verifies the host bridge round-trips inputs with provenance.
+
+#### M5 — `Exp::InstitutionInvoke` four-step pipeline — ✓
+
+**Status:** Complete.
+
+- `kernel/src/nbe/eval.rs::try_d14_institution_invoke` runs the four-step pipeline (D14 §9.3): resolve the Comorphism in the InstitutionIndex; call source institution's `extract_typed` with the ExportFormat procedure; apply the `transformation` Component; call target institution's `reify` with the ImportFormat procedure; run the post-translation validation invariant (D14 §9.3 step 5) by firing AutoOnLoad QueryClasses bound to the produced target class.
+- IO mode required (the transformation Component dispatches through the kernel's `ComponentRegistry`). Bare-Pure mode reduces `Exp::InstitutionInvoke` to a passthrough neutral so the conversion checker can compare two invocations structurally.
+
+#### M6 — `Exp::NativeDecide` Decidable QueryClass dispatch — ✓
+
+**Status:** Complete.
+
+- `kernel/src/nbe/eval.rs::try_d14_decide` resolves the constraint IRI as a Decidable QueryClass in the InstitutionIndex; marshals positional arguments onto a `decide_args` array on a synthetic input resource of the QueryClass's input class; dispatches via `Institution::query` against the institution registered at the QueryClass's `institution_ref`; parses the returned Verdict resource into `DecResult` (D14 §9.2).
+- ESL surface: `f(x, y)` where `f` is a Decidable QueryClass IRI compiles to `Exp::NativeDecide(Constraint::Institution{..}, Unit)` via `kernel/src/esl/compile.rs`'s D14 classifier.
+- EigenQL surface: qualified-name function calls dispatch through `kernel/src/query/evaluate.rs::try_dispatch_decidable` and return a `Verdict`-typed value (no longer Boolean — D2 v2 §3.8). The post-fix `HOLDS` projection sugar is part of the open D2 v2 surface implementation below.
+
+#### M7 — AutoOnLoad dispatch + post-translation invariant — ✓
+
+**Status:** Complete.
+
+- `kernel/src/institution/dispatch.rs::dispatch_auto_on_load_for_resource` and `…_for_layer` — fire AutoOnLoad QueryClasses bound to a resource's class, parse the Verdict, surface `Fails` as a typed `ValidationError`. `Holds` and `Undecidable` accept silently.
+- `kernel/src/context/mod.rs::commit_with_validation` — atomic head-promote-then-revert-on-failure semantics for AutoOnLoad commit gating. The Load RPC routes through this so a `Fails` Verdict aborts the commit before the layer becomes visible.
+- Post-translation invariant: `try_d14_institution_invoke` (M5) calls `dispatch_auto_on_load_for_resource` on the reified target resource. A failing AutoOnLoad surfaces as a comorphism-implementation bug rather than a silent commit of an invalid translation.
+
+#### M8 — Worked-example demo (kernel-level) — ✓
+
+**Status:** Phase 1 (kernel surface) complete.
+
+- `ontologies/examples/d14-dock-assay/dock-assay.json` — the dock→assay scenario from D14 §5.1: `Dock` and `Assay` Institutions, `DockingResult` and `AssayPrediction` classes, `WithinToleranceInput` class, `ef_dock_to_dg` ExportFormat, `if_assay_from_ic50` ImportFormat, `cm_arrhenius` transformation Component, `dock_to_assay` Comorphism, `within_tolerance` Decidable QueryClass, `assay_prediction_validity` AutoOnLoad QueryClass.
+- `kernel/tests/d14_dock_assay_demo.rs` — integration test wiring two in-process Rust `Institution` impls (Dock, Assay) and a `BuiltinComponent` for the Arrhenius approximation `IC₅₀ ≈ exp(-ΔG/RT)·1e⁹`. Four `#[test]` cases — comorphism translation, Decidable holds-in-tolerance, Decidable fails-outside-tolerance, AutoOnLoad on Load — exercising every D14 dispatch path against a real-domain example.
+- Phase-2 enrichment (WASM packaging, EigenQL queries) is open work tracked below.
+
+### Phase 12 — D14 retirement (B1–B4) — ✓
+
+The D10-era surface is fully retired:
+
+- **B1** — Test fixtures migrated off the legacy `FiberReasoner` trait to the D14 `Institution` trait.
+- **B2** — `EigeniusService` wired with `InstitutionIndex` + `InstitutionRuntime`; per-commit index rebuild; commit gating through `commit_with_validation`; M5 four-step pipeline dispatch attached to `Exp::InstitutionInvoke` evaluation.
+- **B3** — Legacy `WasmFiberReasoner` host code, `wasm-ordering-institution` example crate + fixture, `eigenius-institution` legacy WIT world, `wasm_institution.rs`, the legacy fiber-query durability test, all removed.
+- **B4a** — `kernel/src/esl/compile.rs::classify` ported from `InstitutionRegistry::classify` to `InstitutionIndex` (decide → Decidable QueryClass, comorphism → Comorphism declaration).
+- **B4b** — `kernel/src/query/evaluate.rs` FIBER-clause evaluator + qualified-name expression dispatch ported to D14: `FiberRuntime` carries `InstitutionIndex` + `InstitutionRuntime` + `ExecutionContext`; `apply_fiber_clause` dispatches via `Institution::query` against an OnDemand QueryClass; qualified-name expressions return Verdict-typed values via `try_dispatch_decidable`.
+- **B4c** — Legacy fallback branches in `Exp::InstitutionInvoke` and `decide_constraint` deleted. Only the D14 dispatch paths remain.
+- **B4d/e** — `FiberReasoner` trait, `InstitutionRegistry` + impl + `Default`, `FiberDeclaration`, `InstitutionInfo`, `InstitutionCapability`, `MorphismValidation`, `validate_with_institutions`, `EvalCtx::institutions` field, `CheckCtx::institutions` field, `EigeniusService::institutions` field, `dispatch_fiber_query`, the `Exp::App` IO-branch institution-dispatch logic, SDK builders, well-known IRI constants for the legacy Comorphism shape, the `FiberQuery` and `DiscoverMorphisms` RPCs (stubbed as `Status::unimplemented`), `ListInstitutions` RPC ported to read from `InstitutionIndex` — all retired in one coordinated sweep.
+
+### Phase 12 — Open work
+
+#### M8 enrichment — WASM packaging of the dock-assay demo
+
+**Status:** Pending.
+
+- Two new WASM crates targeting the `eigenius-institution-d14` WIT world: `examples/wasm-d14-dock` (extract-typed reads `delta_g`) and `examples/wasm-d14-assay` (reify constructs an `AssayPrediction`; query handles both the `within_tolerance` Decidable and the `assay_prediction_validity` AutoOnLoad QueryClass).
+- One pure WASM Component crate `examples/wasm-d14-arrhenius` implementing the `cm_arrhenius` transformation against the `eigenius-component` WIT world.
+- Ontology revisions to switch the Dock and Assay `Institution` declarations from `runtime: in_process` to `runtime: wasm` with `wasm_binary` (or `wasm_binary_ref`) populated; switch the `cm_arrhenius` Component declaration to point at its WASM binary.
+- Build and CI plumbing: workspace `Cargo.toml` exclude list, `justfile`, `.github/workflows/ci.yml` (cache key + build steps), ontology fixture-build script.
+- A second integration test exercising the same four scenarios as `d14_dock_assay_demo.rs` end-to-end through WASM (verifying the host bridge plus `WasmInstitution` plus `WasmComponent` plumbing routes correctly under a real domain).
+
+#### D2 v2 EigenQL surface implementation
+
+**Status:** Pending. Spec authoritative ([D2](d2-eigenql-specification.md) v2 §3.3.1, §3.5, §3.7, §3.8, §5.7–5.9, §6.12, §6.13, §7, §9). Implementation:
+
+- Lexer additions: `HOLDS`, `FAILS`, `UNDECIDABLE` keyword tokens.
+- AST: `ParamBinding.value: ParamValue` sum type with `Expression` and `Comorphism { name, source }` variants; `Expression::VerdictPredicate { kind, operand }` variant.
+- Parser: `comorphism_coercion` recognised inside FIBER param value position; `verdict_term ::= primary_expr (verdict_predicate)?` postfix shape inserted between unary and primary in the precedence chain.
+- Type checker: every D14 rule from D2 §5.7–5.9 — `using_institution_unresolved`, `fiber_query_class_not_query_class`, `fiber_query_class_not_on_demand`, `fiber_institution_mismatch`, `fiber_param_short_name_unresolved`, `fiber_missing_required_param`, `comorphism_unresolved`, `comorphism_target_mismatch`, `comorphism_io_not_supported_in_v1`, `comorphism_target_class_mismatch`, `comorphism_source_not_resource`, `qualified_call_not_decidable`, `verdict_predicate_non_verdict_operand`, `bare_verdict_in_boolean_position`.
+- Evaluator: comorphism coercion in FIBER params runs the four-step pipeline inline per D2 §6.12 (Pure/Read transformation only — IO is rejected at type-check); postfix predicate reads `ctor_name` off the operand and projects to Boolean.
+
+#### Demo enrichment with EigenQL surface
+
+**Status:** Pending. Blocked on the D2 v2 surface implementation above. Once that lands, the dock-assay demo gets a parallel EigenQL exercise:
+
+- A FIBER-comorphism-coercion query (`FIBER assay:within_tolerance { predicted_ic50: dock:dock_to_assay(?d), … } AS ?v WHERE ?v HOLDS RETURN [] { d: ?d }`) showing the natural surface promised by D2 v2 §3.5.
+- Postfix-predicate examples in WHERE and RETURN positions covering `HOLDS`, `FAILS`, `UNDECIDABLE`.
+- Multi-FIBER chain showing one institution's Verdict feeding the next clause.
+- Integration tests via the EigenQL evaluator alongside the existing kernel-level tests.
+
+#### Docs/guides D14 rewrite
+
+**Status:** Pending. Coordinated rewrite of every guide page that still teaches the legacy surface:
+
+- `docs/guides/platform/10-wasm-institutions.md` — full rewrite around the D14 `Institution` trait + `eigenius-institution-d14` WIT world + the M8 worked example.
+- `docs/guides/platform/03-building-and-testing.md`, `08-demos.md`, `09-wasm-components.md`, `15-appendix.md`, `README.md`, `01-introduction.md`, `12-troubleshooting.md` — D14-vocabulary updates and example-listing fixes.
+- `docs/guides/esl/09-institutions.md`, `eigenql/08-institutions.md` — full rewrites on the D14 trait and D2 v2 surface.
+- `docs/guides/esl/01-introduction.md`, `11-appendix.md`, `eigenql/02-quick-tour.md`, `04-program-structure.md`, `06-expressions.md`, `11-error-messages.md`, `12-appendix.md` — focused updates around dispatch, decide semantics, and Verdict projection.
+
+#### Proto cleanup
+
+**Status:** Pending. The kernel currently serves `FiberQuery` and `DiscoverMorphisms` as `Status::unimplemented` stubs (no D14 equivalent — superseded by Query+FIBER and by user-defined OnDemand QueryClasses respectively). Cleanup:
+
+- Drop both RPCs from `proto/eigenius.proto`.
+- Remove the stub implementations from `kernel/src/server/mod.rs`.
+- Sweep the orchestrator + TypeScript client SDK + design docs for references.
+- Re-evaluate the `morphism_types` field on `proto::InstitutionInfo` (currently empty under D14; either rename, drop, or expand the surface).
+
+#### Optional second worked domain
+
+**Status:** Deferred — not required for Phase 12 closure. The D10-era plan called for two domain examples (mechanical engineering and biopharma). Phase 12 ships one (dock-assay) end-to-end through the full D14 surface; a second domain (mechanical engineering FEA/CAD/GenAI per the D10-era description, or another life-science scenario) can land once the dock-assay path is fully WASM-packaged and EigenQL-enriched.
+
+### Phase 12 — Test plan
+
+- Kernel-level: `kernel/tests/d14_dock_assay_demo.rs` exercises every D14 dispatch path (four-step comorphism, Decidable, AutoOnLoad) against the worked example. ✓
+- WASM-level: a parallel integration test loading the institutions + transformation through the kernel WASM-component install path will exercise the same scenarios end-to-end. (Open work, with the WASM packaging milestone above.)
+- Surface-level: D2 v2 spec rules each get a focused parser/typecheck/evaluator test as part of the surface implementation; the D2 v2 §8.13 (Decidable + postfix) and §8.14 (FIBER comorphism coercion) examples become integration tests. (Open work.)
+- Negative coverage: malformed declarations (missing required fields) parsed via `InstitutionIndex::from_layer` produce typed `IndexError`s; AutoOnLoad `Fails` produces a typed `ValidationError`; comorphism `Fails` post-translation aborts with a typed `EvalError`. ✓
 
 ### Phase 12 — References
 
-- `docs/papers/eigenius-institutions.tex` §5 (mechanical engineering) and §6 (biopharma)
-- `docs/design/d10-grothendieck-institution-protocol.md` §9 (worked examples)
-- `docs/design/life-science-requirements.md` §10, §11 — representational shapes these examples exercise
+- [D14 — Institution Realisation](d14-institution-realisation.md) — the canonical specification for the work in this phase.
+- [D2 — EigenQL Specification](d2-eigenql-specification.md) — v2 revision aligned to D14 (institution surface, FIBER comorphism coercion, postfix Verdict predicate).
+- [D10 — Grothendieck Institution Protocol](d10-grothendieck-institution-protocol.md) — superseded by D14 (the file is a redirect).
+- `docs/papers/eigenius-institutions.tex` — categorical motivation; §5/§6 worked examples are still useful for picking a second domain (mechanical engineering / additional biopharma scenarios) when the Phase-12 closure work demands it.
+- `docs/design/life-science-requirements.md` §10, §11 — representational shapes the dock-assay example (and any future second domain) covers.
 
 ---
 
@@ -847,12 +975,13 @@ The phase decomposes into two milestones that are separately reviewable:
 
 - **Witness sufficiency:** does a single `Comorphism` resource suffice to resolve a multi-IRI conflict, or do we need a per-IRI witness map?
 - **Witness composition:** if branches A and B were each previously merged via different comorphisms, does merging A with B compose the witnesses?
-- **Merge layer validation:** runs through `validate_with_institutions` (Phase 12a) or treated as a special case?
-- **Active WASM institutions during merge:** institutions re-register against the merged layer as in D13's RESUME path?
+- **Merge layer validation:** runs through D14 AutoOnLoad QueryClass dispatch + `commit_with_validation` (Phase 12) or treated as a special case?
+- **Active WASM institutions during merge:** institutions re-register against the merged layer as in D13's RESUME path? Under D14 the `InstitutionIndex` is rebuilt per-commit, so a successful merge produces a fresh index over the merged chain naturally.
 
 ### Phase 15 — References
 
-- D10 — Grothendieck institutions, comorphisms, the category-theoretic vocabulary
+- D14 — Institution Realisation (canonical institution surface; supersedes D10)
+- D10 — Grothendieck institutions, comorphisms, the category-theoretic vocabulary (superseded by D14; retained as historical motivation)
 - D13 §8, §11 — drift-refusal and single-session boundary
 - `docs/design/life-science-requirements.md` §11 (cross-institution claims) — consumer of Comorphism class
 - D20 (to be written) — Layer Reconciliation via Comorphisms
@@ -977,11 +1106,12 @@ The following design documents must be written and reviewed before the phase tha
 | D7 | **ESL Surface Syntax** | **COMPLETED** — `docs/design/d7-esl-surface-syntax.md`. Two-layer design (HCL-style structural + ML-style expressions), namespace aliases, program/class/property/resource syntax, EBNF grammar | Phase 4.5 | Done |
 | D8 | **CompleteJson Component** | **IMPLEMENTED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping with bijectivity check in ValidateProgram. Enums (`allows_only`), nested objects (`class_types`), union types (multiple `class_types` with `_type` discriminator). Template data type for prompt validation. `GetSchema` RPC. Patent demo end-to-end | Phase 7 | Done |
 | D9 | **NbE/Executor Unification** | **COMPLETED** — `docs/design/d9-nbe-unification-and-type-extensions.md`. Capability modes (Pure/Read/IO), type theory extensions (Id, DecEq, NativeDecide, universes), complete ground type resolution, trace storage architecture, crash recovery, trace pruning (proofs-as-programs) | Phase 5 | Done |
-| D10 | **Grothendieck Institution Protocol** | **COMPLETED** — `docs/design/d10-grothendieck-institution-protocol.md`. FiberReasoner trait, InstitutionRegistry, ComorphismRegistry, morphism validation dispatch, fiber query dispatch, institution ontology, Eigon as shared signature category, Mini-TT as kernel service (not institution), Lean 4 as verification institution | Phase 6 | Done |
+| D10 | **Grothendieck Institution Protocol** | **SUPERSEDED by D14** — `docs/design/d10-grothendieck-institution-protocol.md` is a redirect to D14. Original D10 surface (FiberReasoner, InstitutionRegistry, ComorphismRegistry, validator-side morphism dispatch, FiberQuery/DiscoverMorphisms RPCs) retired in Phase 12. Categorical motivation (Eigon as shared signature category, Mini-TT as kernel service, Lean as verification institution) survives in D14. | Phase 6 (orig) / Phase 12 (D14 redo) | Done |
 | D11 | **Codata, Streams, and Resumable Execution** | **COMPLETED** — `docs/design/d11-codata-streams.md`. Coinductive types via copatterns (Abel et al. 2013), stream semantics, tasks as codata, trace-driven replay, concurrent task model, ESL codata syntax, guardedness checking | Phase 9b | Done |
-| D12 | **WASM Extensibility** | WASM module lifecycle, host function interface (kernel → WASM), resource serialization across the boundary (Eigon-CBOR), capability levels → WASM import sets (pure/read/IO), integration with `ComponentRegistry` and `FiberReasoner`, registration via ontology resources, fuel/memory limits, SDK crate design. Merges the previously separate D12 (Capability SDK) and D13 (Wire Format) — the interface and wire format are inseparable. Resolves §14 open question on capability protocol | Phase 8 | 14–18 pages |
+| D12 | **WASM Extensibility** | WASM module lifecycle, host function interface (kernel → WASM), resource serialization across the boundary (Eigon-CBOR), capability levels → WASM import sets (pure/read/IO), integration with `ComponentRegistry` and (under D14) the `Institution` trait via the `eigenius-institution-d14` WIT world, registration via ontology resources, fuel/memory limits, SDK crate design. Merges the previously separate D12 (Capability SDK) and D13 (Wire Format) — the interface and wire format are inseparable. Resolves §14 open question on capability protocol | Phase 8 | 14–18 pages |
 | D13 | **Durable Kernel State** | **COMPLETED** — `docs/design/d13-durable-kernel-state.md`. `serve --db` flag, seeded bootstrap with drift-refusal, commit-through to `RocksStore`, WASM + institution re-registration on restart, persistent trace store via `BackendTraceStore`. Prerequisite for D11/Phase 9b. (The previous D13 — Wire Format — was merged into D12.) | Phase 9a | Done |
-| D14 | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions) | Phase 13 | 10–15 pages |
+| D14 | **Institution Realisation** | **COMPLETED** — `docs/design/d14-institution-realisation.md`. Ontology-first replacement for D10's procedural institution surface. Triadic Comorphism (export_format, transformation, import_format, exact); InstitutionIndex derived from chain scan; InstitutionRuntime of Institution trait impls; Verdict-shaped QueryClasses with OnDemand / AutoOnLoad / Decidable dispatch roles; four-step comorphism pipeline; post-translation validation invariant. | Phase 12 | Done |
+| D14b | **Security Model** | Authentication, authorization, namespace delegation policy, namespace delegation depth, capability trust chain and authenticity (resolves §6.4, §13.2, and §14 open questions). Originally slated for D14; renumbered when D14 was taken by Institution Realisation. | Phase 13 | 10–15 pages |
 | D15 | **Ontology Versioning & Evolution** | Semantic versioning policy for ontology layers, backward compatibility rules, ontology combination semantics, ESL extension mechanism (resolves §13.1 and §14 open questions) | Phase 6+ | 8–10 pages |
 | D16 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 13 | 6–8 pages |
 | D17 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 8 | 6–8 pages |
