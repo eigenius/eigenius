@@ -23,15 +23,14 @@ The semicolon between the let and body is mandatory — it's how the parser know
 
 ## 5.2. Function application — `f(args)`
 
-Function application is the most overloaded form in ESL. Depending on what `function` resolves to, it dispatches to one of five paths:
+Function application is the most overloaded form in ESL. Depending on what `function` resolves to, it dispatches to one of four paths:
 
 1. **Inductive constructor** — `function` is the bare name of a constructor declared by `data`.
 2. **Component** — `function` is a component name resolved against the registered component set.
-3. **Institution decide predicate** — `function` is a qualified name `cap:predicate` that classifies as a registered decide procedure (Phase 11e.1).
-4. **Institution comorphism** — `function` is a qualified name `cap:translate` that classifies as a registered comorphism (Phase 11e.1).
-5. **Direct lambda application** — `function` is a lambda or other higher-order expression.
+3. **Decidable QueryClass** — `function` is a qualified name `cap:predicate` that classifies through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) as a `Decidable` `QueryClass` (D14).
+4. **Direct lambda application** — `function` is a lambda or other higher-order expression.
 
-The compiler picks the path. For the first four, it emits a specialised resource shape; for the fifth, it falls through to the generic `program:Apply`.
+The compiler picks the path. For the first three, it emits a specialised resource shape; for the fourth, it falls through to the generic `program:Apply`. Comorphisms are *not* expression-position calls under D14 — they are declarations consumed by EigenQL FIBER param coercion (see §5.2.4).
 
 ### 5.2.1. Constructor application
 
@@ -66,33 +65,29 @@ The optional trailing `{ ... }` config block becomes a `component_argument` reso
 
 See [chapter 8](08-capability-modes.md) for the per-mode behaviour.
 
-### 5.2.3. Decide-predicate application
+### 5.2.3. Decidable QueryClass application
 
 ```esl
 cap:within_tolerance(input, 0.1)
 ```
 
-When the qualified name `cap:within_tolerance` classifies through the institution registry as a `DecidePredicate`, the compiler emits `program:DecideApply` carrying the IRI and an `arguments` array of any positional args. The kernel form is `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)`.
+When the qualified name `cap:within_tolerance` classifies through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) as a `Decidable` `QueryClass`, the compiler emits `program:DecideApply` carrying the IRI and an `arguments` array of any positional args. The kernel form is `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)`.
 
-**Type-check.** Result type is `Bool`. Args are not statically checked — the institution validates them at call time.
+**Type-check.** Result type is `Verdict` (the inductive type with constructors `Holds | Fails | Undecidable`, D14 §6.1). Args are not statically checked — the institution validates them at call time.
 
-**Evaluation.** In `Check` or `IO` mode (any mode with an institution registry), invokes `reasoner.decide(iri, args, ctx)` and maps the three-valued result to a boolean (`Holds → true`, `Fails`/`Undecidable → false`).
+**Evaluation.** In `Check` or `IO` mode (any mode with an `InstitutionIndex` + `InstitutionRuntime`), invokes `Institution::query(query_handler, synthetic_input, ctx)` and reduces the surrounding `NativeDecide` based on the returned Verdict's `ctor_name`: `Holds` → `Refl(v)`, `Fails` → failing neutral, `Undecidable` → passthrough neutral.
 
 A trailing config block on a decide call is a compile error.
 
-### 5.2.4. Comorphism application
+### 5.2.4. Comorphisms — declaration-only in ESL
 
-```esl
-cap:dock_to_assay(docking_result)
-```
+Under D14 a `Comorphism` is a typed ontology resource (not a callable function). ESL has no expression-position syntax for comorphism dispatch — `cap:dock_to_assay(input)` is *not* a valid call form. Three ways to use a comorphism from ESL:
 
-When the qualified name classifies as a `Comorphism`, the compiler emits `program:ComorphismInvokeApply` carrying the IRI and a single `source` resource. The kernel form is `Exp::InstitutionInvoke { iri, source }`.
+1. **Apply the transformation Component directly** — the comorphism's `transformation` is an ordinary Mini-TT Component. If your program already has the typed payload, call it: `let ic50 : core:float = cm_arrhenius(delta_g);`.
+2. **Translate inside an EigenQL `FIBER`** — comorphism coercion in FIBER param values runs the four-step extract → transform → reify pipeline (see [EigenQL §7.5](../eigenql/07-fiber-clauses.md) and [§8.6](../eigenql/08-institutions.md)).
+3. **Wrap as a Component-implemented OnDemand QueryClass and dispatch via FIBER.** A QueryClass whose `implementation` is a Component IRI runs `extract → component → reify` automatically; EigenQL FIBER is the surface that reaches it.
 
-**Arity rule.** Comorphisms take exactly one positional argument. Two args, or one positional plus a config block, errors with `"comorphism 'X' expects exactly 1 source argument, got N"`.
-
-**Type-check.** Result type is the institution's declared response class.
-
-**Evaluation.** Invokes `reasoner.translate(iri, source, ctx)`, returning an embedded resource.
+See [chapter 9](09-institutions.md) for the rationale.
 
 ### 5.2.5. Generic apply
 

@@ -36,7 +36,7 @@ The most-used reference chapters are:
 
 9. **[Building WASM components](09-wasm-components.md)** — pure / read-capability / IO components via `wasm-cbor-echo`, `wasm-doc-validator`, `wasm-read-query-probe`, `wasm-http-shout`. Build with `cargo-component`, install with `eigenius capability install`.
 
-10. **[Building WASM institutions](10-wasm-institutions.md)** — `FiberReasoner` implementations via `wasm-ordering-institution`. Native institution alternative for non-sandboxed cases.
+10. **[Building WASM institutions](10-wasm-institutions.md)** — D14 `Institution` trait implementations against the `eigenius-institution-d14` WIT world (`extract-typed` / `reify` / `query`). Auto-registration of WASM institutions from chain scan via `runtime: wasm` + inline `wasm_binary`. Walked through with the M8 dock-assay worked example. In-process institution alternative for non-sandboxed cases.
 
 11. **[Deployment](11-deployment.md)** — Docker Compose (production-quality today), Azure ContainerApps via Bicep (preliminary; templates exist but haven't been deployed end-to-end yet), embedding the kernel as a library.
 
@@ -54,6 +54,7 @@ The most-used reference chapters are:
 - [**EigenQL user guide**](../eigenql/README.md) — surface syntax for queries
 - [**D13 Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec
 - [**D12 WASM extensibility**](../../design/d12-wasm-extensibility.md) — capability levels and host imports
+- [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10), the protocol contract for chapter 10
 - [**D6 Execution architecture**](../../design/d6-execution-architecture.md) — kernel ↔ orchestrator boundary
 
 The full design-document set lives in [`docs/design/`](../../design/).

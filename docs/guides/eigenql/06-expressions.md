@@ -2,16 +2,7 @@
 
 Expressions appear in `WHERE` conditions, `RETURN` values, `GROUP BY` keys, `ORDER BY` sort keys, and `FIBER` param bindings. They produce a `Value` — the same resource-value type used by Eigon resources: string, integer, float, boolean, array, or embedded resource.
 
-The expression AST is the `Expression` enum in [kernel/src/query/ast.rs](../../../kernel/src/query/ast.rs); the evaluator is [`eval_expression`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`. Evaluator signature:
-
-```rust
-fn eval_expression(
-    expr: &Expression,
-    binding: &Binding,
-    layer: &Layer,
-    institutions: Option<&InstitutionRegistry>,
-) -> Result<Value, QueryError>
-```
+The expression AST is the `Expression` enum in [kernel/src/query/ast.rs](../../../kernel/src/query/ast.rs); the evaluator is [`eval_expression`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`. The evaluator threads through the [`FiberRuntime`](../../../kernel/src/query/evaluate.rs) so that institution-dispatched calls and postfix Verdict predicates can resolve against the `InstitutionIndex` + `InstitutionRuntime` and the FIBER overlay.
 
 A binding is a `BTreeMap<String, Value>` — the current variable environment from the surrounding `MATCH` / `FIBER` clauses.
 
@@ -138,37 +129,36 @@ Expression::FunctionCall { name: String, args: Vec<Expression> }
 
 A function call has three dispatch paths, tried in order:
 
-1. **Institution-dispatched capability** (Phase 11e.2) — if `name` contains `:` and parses as a valid IRI, look it up in the `InstitutionRegistry`. If it classifies as `DecidePredicate` or `Comorphism`, dispatch there (§6.6.1).
-2. **Built-in function** (§6.6.2) — fall through to [`functions::call_function`](../../../kernel/src/query/functions.rs), which dispatches on the name to a hard-coded table (`DATE`, `LENGTH`, etc.).
+1. **Built-in function** — match against a closed set: `DATE`, `TIMESTAMP`, `REGEX`, `LENGTH`, `CONTAINS`, `CONCAT` (§6.6.2). Aggregate functions (`COUNT`, `SUM`, …) parse as a separate `Aggregate` AST node and are covered in §6.7.
+2. **Institution-dispatched Decidable QueryClass** — if `name` is a qualified name (`ns:local`) that resolves to a `Decidable` `QueryClass` in the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs), dispatch as `Exp::NativeDecide` (§6.6.1).
 3. **Error** — if neither path matches, `call_function` returns `"unknown function: {name}"`.
 
-### 6.6.1. Institution-dispatched capabilities
+### 6.6.1. Decidable QueryClass dispatch
 
-When the function name is a qualified IRI like `cap:within_tolerance`, the evaluator parses the colon-separated form as an IRI and consults [`InstitutionRegistry::classify`](../../../kernel/src/institution/mod.rs). Two classifications matter:
-
-**Decide predicate**
+When the function name is a qualified name like `cap:within_tolerance` and resolves to a `Decidable` `QueryClass`, the call evaluates to a `Verdict` value (D14 §6.1) — not a Boolean. To use the result as a Boolean, apply a postfix Verdict predicate:
 
 ```eigenql
-WHERE docking:within_tolerance(?delta, 2.0)
-```
-
-The evaluator calls `FiberReasoner::decide(iri, &args, &ctx)`. The three-valued result becomes a boolean:
-
-- `DecResult::Holds` → `Value::Boolean(true)`
-- `DecResult::Fails` → `Value::Boolean(false)`
-- `DecResult::Undecidable` → `Value::Boolean(false)` (falls out of `WHERE` filters; use a direct call with explicit branching if you need three-valued semantics)
-
-**Comorphism translation**
-
-```eigenql
+WHERE docking:within_tolerance(?delta, 2.0) HOLDS       -- Boolean true iff Holds
+WHERE NOT docking:within_tolerance(?delta, 2.0) HOLDS   -- "Fails or Undecidable"
 RETURN [] {
-    assay_pred: docking:dock_to_assay(?docking_result)
+    is_valid: docking:within_tolerance(?delta, 2.0) HOLDS
 }
 ```
 
-The evaluator calls `FiberReasoner::translate(iri, source_resource, &ctx)`. Expects exactly one argument (a resource). Returns `Value::Embedded(translated_resource)`. Passing more than one argument is a compile-time-style evaluation error.
+Mechanics:
 
-Both paths require the `FiberRuntime` (and therefore `execute_with`) to have supplied an `InstitutionRegistry`. Without one, the IRI falls through to builtin dispatch — which errors.
+- The kernel resolves the constraint IRI in the `InstitutionIndex`, marshals the positional args into a synthetic input resource (the args attached as `urn:eigenius:institution:decide_args`), looks up the QueryClass's `institution_ref` in the `InstitutionRuntime`, and calls `Institution::query(query_handler, input, ctx)`.
+- The institution returns a Verdict resource with `urn:eigenius:core:ctor_name` set to one of `Holds`, `Fails`, `Undecidable`.
+- The postfix predicate (`HOLDS` / `FAILS` / `UNDECIDABLE`) projects the Verdict to a Boolean.
+
+A bare Verdict-typed expression in Boolean position (a `qualified_call` not followed by a postfix predicate, used inside `WHERE`/`AND`/`OR`/`NOT`) is a static type error (`bare_verdict_in_boolean_position`). The conversion is always explicit.
+
+The postfix predicate's operand type is checked by the static type checker (`verdict_predicate_non_verdict_operand`) — only two source forms produce a `Verdict`:
+
+1. A `qualified_call` resolving to a Decidable QueryClass.
+2. A variable bound by a `FIBER` clause whose `result_class` is `urn:eigenius:institution:Verdict`.
+
+**Comorphisms are not callable from expression position** under D14 — comorphism dispatch surfaces only inside FIBER param value coercion (see [chapter 7 §7.5](07-fiber-clauses.md) and [chapter 8 §8.6](08-institutions.md)).
 
 For the full institution surface, see [chapter 8](08-institutions.md).
 
@@ -259,16 +249,17 @@ Object literals in expression position are **not yet supported** by the evaluato
 From tightest to loosest binding, implemented as the [`parse_*_expr`](../../../kernel/src/query/parser.rs) ladder:
 
 1. **Primary**: literals, variables, function calls, aggregates, arrays, parenthesized, dot-paths
-2. **Power** (`**`) — right-associative
+2. **Postfix Verdict predicate** (`HOLDS`, `FAILS`, `UNDECIDABLE`) — non-associative
 3. **Unary** (`NOT`, `+`, `-`, `NOT EXISTS`)
-4. **Multiplicative** (`*`, `/`, `%`)
-5. **Additive** (`+`, `-`, `\|\|`)
-6. **Relational** (`<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`)
-7. **Equality** (`=`, `<>`)
-8. **AND**
-9. **OR**
+4. **Power** (`**`) — left-associative (parser quirk; parenthesise stacked exponents)
+5. **Multiplicative** (`*`, `/`, `%`)
+6. **Additive** (`+`, `-`, `\|\|`)
+7. **Relational** (`<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `NOT LIKE`)
+8. **Equality** (`=`, `<>`)
+9. **AND**
+10. **OR**
 
-Parentheses override precedence: `(?a + ?b) * ?c`.
+The postfix Verdict predicate sits between primary and unary so that `NOT qc:check(?x) HOLDS` parses as `NOT (qc:check(?x) HOLDS)`. Parentheses override precedence: `(?a + ?b) * ?c`.
 
 ---
 

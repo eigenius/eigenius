@@ -1252,7 +1252,6 @@ async fn remote_list_institutions(endpoint: &str, json_output: bool) {
                         serde_json::json!({
                             "iri": i.iri,
                             "name": i.name,
-                            "morphism_types": i.morphism_types,
                             "query_types": i.query_types,
                         })
                     })
@@ -1264,9 +1263,6 @@ async fn remote_list_institutions(endpoint: &str, json_output: bool) {
                 println!("Registered institutions:");
                 for inst in &resp.institutions {
                     println!("  {} ({})", inst.name, inst.iri);
-                    for mt in &inst.morphism_types {
-                        println!("    morphism: {mt}");
-                    }
                     for qt in &inst.query_types {
                         println!("    query:    {qt}");
                     }
@@ -2177,69 +2173,20 @@ async fn remote_capability_test(
     let input_json = read_as_json(input_file);
 
     if is_institution {
-        let req = if mode == "discover" {
-            eigenius_kernel::server::proto::DiscoverMorphismsRequest {
-                institution_iri: iri.to_string(),
-                resources: vec![input_json],
-                content_type: "application/eigon+json".to_string(),
-            }
-        } else {
-            let response = client
-                .fiber_query(eigenius_kernel::server::proto::FiberQueryRequest {
-                    institution_iri: iri.to_string(),
-                    query: input_json,
-                    content_type: "application/eigon+json".to_string(),
-                })
-                .await;
-            match response {
-                Ok(r) => {
-                    let resp = r.into_inner();
-                    if resp.success {
-                        print_test_result(&resp.result, json);
-                    } else {
-                        eprintln!("Fiber query failed: {}", resp.error);
-                        std::process::exit(1);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("gRPC error: {e}");
-                    std::process::exit(1);
-                }
-            }
-            return;
-        };
-        match client.discover_morphisms(req).await {
-            Ok(r) => {
-                let resp = r.into_inner();
-                if resp.success {
-                    if json {
-                        let parsed: Vec<serde_json::Value> = resp
-                            .morphisms
-                            .iter()
-                            .filter_map(|m| {
-                                eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(m)
-                                    .ok()
-                                    .map(|r| {
-                                        eigenius_kernel::ontology::eigon_json::serialize_resource(
-                                            &r,
-                                        )
-                                    })
-                            })
-                            .collect();
-                        println!("{}", serde_json::to_string_pretty(&parsed).unwrap());
-                    } else {
-                        println!("Discovered {} morphism(s)", resp.morphisms.len());
-                    }
-                } else {
-                    eprintln!("Discover morphisms failed: {}", resp.error);
-                    std::process::exit(1);
-                }
-            }
-            Err(e) => {
-                eprintln!("gRPC error: {e}");
-                std::process::exit(1);
-            }
-        }
+        // Under D14 there is no per-institution dispatch RPC. Per-RPC
+        // FiberQuery / DiscoverMorphisms primitives from the D10 era
+        // were retired in Phase 12. To exercise an institution's
+        // QueryClasses, write an EigenQL FIBER query and submit it via
+        // the Query RPC (D2 v2 §3.5). `eigenius capability test` no
+        // longer supports direct institution invocation.
+        let _ = mode;
+        eprintln!(
+            "`capability test` cannot directly invoke an institution under D14.\n\
+             Write an EigenQL FIBER query against one of this institution's QueryClasses\n\
+             and submit it via `eigenius query` instead — see D2 v2 §3.5.\n\
+             Institution: {iri}"
+        );
+        std::process::exit(1);
     } else {
         // Component: wrap in a trivial program that applies the component to input
         let program_json = format!(

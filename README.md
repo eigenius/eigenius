@@ -40,7 +40,7 @@ Three task-first guides plus a consolidated bibliography, all grounded in the im
 
 Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
 
-## Current Status: Phases 0–11e + D22 Notebook & SDK Complete
+## Current Status: Phases 0–11e + D22 Notebook & SDK + D14 Institution Realisation Complete
 
 The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
 
@@ -68,9 +68,11 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Resolve ontology classes as kernel types on demand via the layer chain (Phase 10, D18)
 - Type-check inductive types with bounded binders for sized termination, plus self-referential parameterised codata for productivity by typing (Phase 11b, D19)
 - Use `Map` and `Reduce` as type-level primitives with structural-recursion termination (Phase 11a)
-- Fire institution-registered decide procedures at type-check time via property constraints (Phase 11c)
-- Declare cross-institution `Comorphism` translations as first-class ontology resources, invocable from program bodies and from EigenQL (Phase 11d, 11e.1, 11e.2)
-- Dispatch qualified-name function calls (`cap:predicate(...)`, `cap:translate(...)`) through a single institution-classification table shared by ESL and EigenQL (Phase 11e)
+- Declare institutions, export/import boundary formats, query classes, and triadic comorphisms as ontology resources committed to the layer chain (D14 §3–§5)
+- Fire `Decidable` `QueryClass`es at type-check time, returning a `Verdict` projected to the kernel's reduction (`Holds` → `Refl(v)`, `Fails` → failing neutral, `Undecidable` → passthrough) (D14 §9.2)
+- Auto-register WASM institutions from layer scan: any `Institution` resource with `runtime: wasm` + inline `wasm_binary` is hosted by the kernel without an explicit install step (D14 §3, registration code in `kernel/src/capability/registration.rs`)
+- Dispatch qualified-name function calls through a single `InstitutionIndex` shared by ESL and EigenQL (D14 §9.5); ESL emits `Exp::NativeDecide` returning `Verdict`; EigenQL adds postfix `HOLDS` / `FAILS` / `UNDECIDABLE` to project to Boolean
+- Run cross-institution comorphism coercion inline inside FIBER param values (`param: comorphism_iri(source)`) — a four-step extract → transform → reify pipeline (D14 §9.3)
 - Run locally via three terminals or Docker Compose
 - Drive the platform from a React notebook (six cell types: markdown, ESL, EigenQL, TypeScript, program-run, and form-based chart cells covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area; auto-rendered outputs; layer-stack and per-layer topology graph visualisations; cell-order Run / Run-from-here / Run-to-here with stale markers; collapse/expand; content-addressed publish-to-layer with a queryable Open dialog; bundled into the orchestrator image and served at `/notebooks/`)
 - Use the same kernel from any TypeScript runtime via `@eigenius/client` — a typed SDK over the Connect-RPC surface (browser, Deno, Node)
@@ -89,12 +91,12 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
 - **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to Mini-TT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
 - **Epistemic Model** — four categories (declared, observed, derived, verified) enforced via base classes in the reflection ontology. Reasoning traces mirror the expression tree and serve as memoization cache.
-- **Grothendieck Institutions** — domain-specific reasoning systems contribute structured fibers to the knowledge graph. Each institution provides its own sentences, models, satisfaction relation, and internal morphisms via the `FiberReasoner` trait. Cross-institution queries and comorphism translations.
-- **WASM Extensibility** — untrusted capabilities run sandboxed via Wasmtime. Components and institution fiber reasoners can be delivered as WASM modules with fuel/memory limits. Capability SDK for authors.
+- **Grothendieck Institutions (D14)** — domain-specific reasoning systems contribute structured fibres to the knowledge graph. Each institution is *declared* as ontology resources (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) committed to the layer chain, and *implemented* via the three-method `Institution` trait (`extract_typed` / `reify` / `query`). Comorphisms are triadic — source-side export + cross-institution Mini-TT transformation + target-side import — with optional `exact: bool` Satisfaction-Condition annotation. The category-theoretic Grothendieck construction emerges from declared comorphisms; the kernel provides the dispatch and well-typedness machinery.
+- **WASM Extensibility** — untrusted capabilities run sandboxed via Wasmtime. Components and D14 institutions can be delivered as WASM modules with fuel/memory limits. WASM institutions targeting the `eigenius-institution-d14` WIT world auto-register from chain scan when their declaration carries `runtime: wasm` + `wasm_binary`. SDK builders for the five declaration shapes.
 - **Durable State** — `eigenius serve --db <path>` persists layers, traces, and WASM capabilities in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
 - **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
-Next phase: Phase 12 (Worked Institution Examples — life-science worked examples drawing on the Phase 11 inductive/codata/institution-dispatch surface).
+Phase 12 in progress: D14 Institution Realisation landed (M1–M8 milestones complete — ontology shapes, derived registry, trait surface, WIT world + SDK rewrite, four-step `Exp::InstitutionInvoke` pipeline, `NativeDecide` dispatch, AutoOnLoad on Load, the M8 dock-assay worked example end-to-end through both in-process and WASM-hosted variants). Next: docs sweep + further worked examples drawing on the Phase 11 inductive/codata/institution-dispatch surface.
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
@@ -208,7 +210,8 @@ kernel/          Rust kernel crate
   src/nbe/         Mini-TT type theory: terms, values, eval, readback, type checker
   src/program/     Program model: expression parser, ground type resolution, executor
   src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON
-  src/capability/  WASM capability hosting, ComponentRegistry, FiberReasoner dispatch
+  src/capability/  WASM capability hosting, ComponentRegistry, WasmInstitution (D14), chain-scan auto-registration
+  src/institution/ D14 Institution trait, InstitutionIndex (chain-derived), InstitutionRuntime, AutoOnLoad dispatch
   src/context/     ExecutionContext (snapshot isolation, read/write control)
   src/bootstrap/   Ontology loader and system initialization (4 bootstrap layers)
   src/storage/     Storage interface traits (LayerStore, ResourceStore)
@@ -226,14 +229,17 @@ examples/        WASM capability examples (excluded from workspace, built with c
   wasm-cbor-echo/            CBOR echo component
   wasm-doc-validator/        Document validation component
   wasm-http-shout/           IO component with HTTP dispatch
-  wasm-ordering-institution/ Ordering institution fiber reasoner
   wasm-read-query-probe/     Read-capability query probe
+  wasm-d14-echo/             Minimum-viable D14 institution (smoke test of WIT bindings)
+  wasm-d14-dock/             Dock institution for the M8 worked example
+  wasm-d14-assay/            Assay institution for the M8 worked example
+  wasm-d14-arrhenius/        Arrhenius transformation Component (the m of dock_to_assay)
 cli/             Command-line interface (load, validate, query, run, serve, tasks, capability, ...)
 ontologies/      Ontology definitions
   core/            Core ontology (core-ontology.json) — self-describing bootstrap
   program/         Program ontology (program-ontology.json) — expression classes, components
   reflection/      Reflection ontology (reasoning traces, derivation, epistemic status)
-  institution/     Institution ontology (FiberReasoner registration, fiber structure)
+  institution/     Institution ontology (D14: Institution / ExportFormat / ImportFormat / QueryClass / Comorphism / Verdict)
   notebook/        Notebook ontology (Notebook + Cell + CellType — backs `Publish` from the UI)
   examples/        Example ontologies and programs
 notebooks/       React notebook SPA (D22 — six cell types incl. charts, layer/topology graphs, publish-to-layer) — bundled into the orchestrator image
@@ -504,10 +510,10 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D7: ESL Surface Syntax](docs/design/d7-esl-surface-syntax.md) | Two-layer design: HCL-style structural + ML-style expressions |
 | [D8: CompleteJson Component](docs/design/d8-complete-json-component.md) | Structured LLM output via JSON Schema from ontology classes |
 | [D9: NbE Unification](docs/design/d9-nbe-unification-and-type-extensions.md) | Capability modes, type theory extensions, ground type resolution, trace storage |
-| [D10: Grothendieck Institutions](docs/design/d10-grothendieck-institution-protocol.md) | FiberReasoner trait, institution registry, comorphisms, fiber query dispatch |
 | [D11: Codata and Streams](docs/design/d11-codata-streams.md) | Coinductive types, stream semantics, tasks as codata, guardedness checking |
 | [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | WASM module lifecycle, host imports, capability levels, fuel/memory limits |
 | [D13: Durable Kernel State](docs/design/d13-durable-kernel-state.md) | `serve --db` flag, seeded bootstrap, drift-refusal, restart re-registration |
+| [D14: Institution Realisation](docs/design/d14-institution-realisation.md) | Institution trait (extract_typed/reify/query), ontology-first declarations, triadic comorphisms, Verdict shape, dispatch model. Supersedes D10. |
 | [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` layer-chain resolution, `CheckCtx`, inference-mode rules |
 | [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized termination via bounded binders, self-referential parameterised codata, productivity by typing |
 | [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |

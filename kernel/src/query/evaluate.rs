@@ -15,7 +15,8 @@
 //! EigenQL evaluator: pattern matching, fixpoint, aggregation, result shaping.
 
 use crate::context::ExecutionContext;
-use crate::institution::InstitutionRegistry;
+use crate::institution::registry::{DispatchRole, InstitutionIndex};
+use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::{is_indexable_predicate, scan_chain, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -26,12 +27,31 @@ use crate::query::error::QueryError;
 use crate::query::functions::{self, like_match, to_f64, values_compare, values_equal};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Runtime resources available to FIBER clause evaluation. `None` means
-/// FIBER clauses will be rejected (e.g. CLI local-only queries that have
-/// no registered institutions).
+/// Runtime resources available to FIBER clause evaluation under D14.
+/// Both `index` and `runtime` must be `Some` for FIBER dispatch to
+/// succeed; `None` for either means FIBER clauses error at dispatch
+/// time (typical of CLI local-only queries with no kernel runtime).
 #[derive(Default, Clone, Copy)]
 pub struct FiberRuntime<'a> {
-    pub institutions: Option<&'a InstitutionRegistry>,
+    /// Derived index over institution / QueryClass / Comorphism /
+    /// ExportFormat / ImportFormat declarations in the layer chain.
+    pub index: Option<&'a InstitutionIndex>,
+    /// `Institution` trait implementations keyed by institution IRI.
+    pub runtime: Option<&'a InstitutionRuntime>,
+    /// Kernel ComponentRegistry, used only by FIBER comorphism
+    /// coercion (D2 v2 §3.5 / §6.12) to dispatch the transformation
+    /// Component step of the four-step pipeline. Coercion errors at
+    /// evaluation time when this is `None`. v1 restricts the cited
+    /// transformation Component to Pure or Read capability levels.
+    pub components: Option<&'a crate::program::component::ComponentRegistry>,
+    /// Query-scoped transient overlay populated by FIBER clauses with
+    /// their response resources (D2 v2 §6.12). Threaded into the
+    /// expression evaluator so postfix Verdict predicates and
+    /// resource-typed projections can resolve a FIBER-bound `?var`
+    /// (held as the synthesized response IRI) back to the actual
+    /// response resource. `None` outside of FIBER-bearing match
+    /// parts.
+    pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
 }
 
@@ -121,7 +141,7 @@ pub fn evaluate(
             &program.query.result,
             &bindings,
             layer,
-            runtime.institutions,
+            runtime,
         )?;
     }
 
@@ -140,7 +160,7 @@ pub fn evaluate(
                 &program.query.result,
                 layer,
                 fp,
-                runtime.institutions,
+                runtime,
             )?;
             resources.push(resource);
         }
@@ -203,7 +223,9 @@ fn evaluate_match_part(
     if !part.conditions.is_empty() {
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer, None)
+                // DEFINE bodies have no FIBER access; the institution
+                // surface is unavailable here.
+                eval_expression(cond, b, layer, FiberRuntime::default())
                     .and_then(|v| {
                         v.as_boolean().ok_or_else(|| {
                             QueryError::evaluation("WHERE condition must be boolean")
@@ -259,9 +281,17 @@ fn evaluate_match_part_with_fiber(
     }
 
     if !part.conditions.is_empty() {
+        // Thread the FIBER overlay into expression eval so postfix
+        // Verdict predicates and resource-typed projections can
+        // resolve a `?var` bound to a FIBER-synthesized response IRI
+        // back to the response resource.
+        let where_runtime = FiberRuntime {
+            overlay: Some(&overlay.entries),
+            ..runtime
+        };
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer, runtime.institutions)
+                eval_expression(cond, b, layer, where_runtime)
                     .and_then(|v| {
                         v.as_boolean().ok_or_else(|| {
                             QueryError::evaluation("WHERE condition must be boolean")
@@ -291,9 +321,18 @@ fn apply_fiber_clause(
     overlay: &mut FiberOverlay,
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
-    let institutions = runtime.institutions.ok_or_else(|| {
+    // D14 dispatch (D2 §6.12): FIBER requires both halves of the
+    // institution machinery — the InstitutionIndex (resolves the
+    // QueryClass) and the InstitutionRuntime (supplies the
+    // Institution trait impl).
+    let index = runtime.index.ok_or_else(|| {
         QueryError::evaluation(
-            "FIBER requires an institution registry — not available in this execution context",
+            "FIBER requires an institution index — not available in this execution context",
+        )
+    })?;
+    let inst_runtime = runtime.runtime.ok_or_else(|| {
+        QueryError::evaluation(
+            "FIBER requires an institution runtime — not available in this execution context",
         )
     })?;
     let ctx = runtime.ctx.ok_or_else(|| {
@@ -302,33 +341,57 @@ fn apply_fiber_clause(
         )
     })?;
 
-    let inst_iri = resolve_fiber_institution(&fc.institution, aliases)?;
-    let reasoner = institutions.get(&inst_iri).ok_or_else(|| {
-        QueryError::evaluation(format!("no institution registered for IRI '{inst_iri}'"))
+    let aliased_inst_iri = resolve_fiber_institution(&fc.institution, aliases)?;
+
+    // Resolve the QueryClass IRI from the AST. Short names look up the
+    // resource in the layer by short_name and use its @id; full IRIs
+    // are used directly. Either way, the resolved IRI must be an
+    // indexed QueryClass entry.
+    let query_class_iri = resolve_query_class_iri(&fc.query_class, layer)?;
+    let qc_entry = index.query_class(&query_class_iri).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "FIBER query class '{query_class_iri}' is not a registered QueryClass"
+        ))
     })?;
 
-    let query_class_iri = match &fc.query_class {
-        Name::FullIri(iri) => iri.clone(),
-        Name::ShortName(name) => resolve_name_to_class_iri(layer, name).ok_or_else(|| {
-            QueryError::evaluation(format!(
-                "FIBER query class '{name}' not resolvable in layer"
-            ))
-        })?,
-    };
+    // D2 v2 §5.8 step 3 — runtime-checked echo of the type rule:
+    // FIBER dispatches only OnDemand QueryClasses.
+    if !qc_entry.dispatch_roles.contains(&DispatchRole::OnDemand) {
+        return Err(QueryError::evaluation(format!(
+            "FIBER query class '{query_class_iri}' has no OnDemand dispatch role"
+        )));
+    }
+
+    // D2 v2 §5.8 step 4 — institution agreement.
+    if qc_entry.institution_ref != aliased_inst_iri {
+        return Err(QueryError::evaluation(format!(
+            "FIBER cites institution '{aliased_inst_iri}' but QueryClass '{query_class_iri}' \
+             declares institution_ref '{}'",
+            qc_entry.institution_ref
+        )));
+    }
+
+    let institution = inst_runtime.get(&qc_entry.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "institution '{}' not registered in runtime",
+            qc_entry.institution_ref
+        ))
+    })?;
 
     // Build per-class param IRI resolution table (short_name → Iri)
-    // from the class's requires ∪ recommends.
-    let short_to_iri = build_param_iri_table(layer, &query_class_iri);
+    // from the QueryClass input class's requires ∪ recommends.
+    let short_to_iri = build_param_iri_table(layer, &qc_entry.query_class);
 
     let is_a_iri = Iri::parse(wk::IS_A).unwrap();
 
     let mut extended = Vec::with_capacity(existing.len());
     for (binding_idx, binding) in existing.iter().enumerate() {
-        // Construct the query resource.
+        // Construct the input resource. is_a is the QueryClass's
+        // declared input class (D2 §6.12 step 3).
         let mut query_res = Resource::new_embedded();
         query_res.set(
             is_a_iri.clone(),
-            Value::Array(vec![Value::ResourceRef(query_class_iri.clone())]),
+            Value::Array(vec![Value::ResourceRef(qc_entry.query_class.clone())]),
         );
 
         for param in &fc.params {
@@ -336,18 +399,41 @@ fn apply_fiber_clause(
                 Name::FullIri(iri) => iri.clone(),
                 Name::ShortName(short) => short_to_iri.get(short).cloned().ok_or_else(|| {
                     QueryError::evaluation(format!(
-                        "FIBER param '{short}' unresolvable against query class '{query_class_iri}'"
+                        "FIBER param '{short}' unresolvable against query class '{}'",
+                        qc_entry.query_class
                     ))
                 })?,
             };
-            let value = eval_expression(&param.expression, binding, layer, runtime.institutions)?;
+            let value = match &param.value {
+                ParamValue::Expression(expr) => eval_expression(expr, binding, layer, runtime)?,
+                ParamValue::Comorphism { name, source } => {
+                    let components = runtime.components.ok_or_else(|| {
+                        QueryError::evaluation(
+                            "FIBER comorphism coercion requires a ComponentRegistry — not \
+                             available in this execution context",
+                        )
+                    })?;
+                    eval_comorphism_coercion(
+                        name,
+                        source,
+                        binding,
+                        layer,
+                        index,
+                        inst_runtime,
+                        components,
+                        ctx,
+                    )?
+                }
+            };
             query_res.set(param_iri, value);
         }
 
-        // Dispatch.
-        let response = reasoner.query(&query_res, ctx).map_err(|e| {
-            QueryError::evaluation(format!("fiber dispatch failed (clause {clause_idx}): {e}"))
-        })?;
+        // Dispatch via D14 Institution::query.
+        let response = institution
+            .query(&qc_entry.query_handler, &query_res, ctx)
+            .map_err(|e| {
+                QueryError::evaluation(format!("fiber dispatch failed (clause {clause_idx}): {e}"))
+            })?;
 
         // Stamp response with a synthesized @id + attach to overlay.
         let response_iri = fp.fiber_response_iri(clause_idx, binding_idx);
@@ -386,20 +472,202 @@ fn resolve_fiber_institution(
     }
 }
 
-fn resolve_name_to_class_iri(layer: &Layer, short: &str) -> Option<Iri> {
-    let class_iri = Iri::parse(wk::CLASS).unwrap();
-    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-    for (iri, res) in layer.iter_all_resources() {
-        if !res.is_instance_of(&class_iri) {
-            continue;
+/// Run the four-step comorphism pipeline for a FIBER param coercion
+/// (D2 v2 §3.5 / §6.12). Mirrors the kernel-side
+/// [`crate::nbe::eval::try_d14_institution_invoke`] but operates on
+/// EigenQL `Value`s and dispatches the transformation Component
+/// directly via `BuiltinComponent::execute` — v1 restricts coercion
+/// transformations to Pure/Read so we don't need IO mode plumbing.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_comorphism_coercion(
+    name: &Name,
+    source: &Expression,
+    binding: &Binding,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    inst_runtime: &InstitutionRuntime,
+    components: &crate::program::component::ComponentRegistry,
+    ctx: &ExecutionContext,
+) -> Result<Value, QueryError> {
+    // Resolve the comorphism by name / IRI to its index entry.
+    let comorphism_iri = match name {
+        Name::FullIri(i) => i.clone(),
+        Name::ShortName(short) => Iri::parse(short).map_err(|_| {
+            QueryError::evaluation(format!(
+                "comorphism_coercion: '{short}' is not a parseable IRI"
+            ))
+        })?,
+    };
+    let comorphism = index.comorphism(&comorphism_iri).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}` not registered in InstitutionIndex"
+        ))
+    })?;
+
+    // Source-side institution lookup.
+    let export = index
+        .export_format(&comorphism.export_format)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: export_format `{}` not in InstitutionIndex",
+                comorphism.export_format
+            ))
+        })?;
+    let source_inst = inst_runtime.get(&export.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: source institution `{}` not registered in runtime",
+            export.institution_ref
+        ))
+    })?;
+
+    // Evaluate the source expression against the current binding;
+    // unwrap an Embedded resource or dereference a String → IRI →
+    // resource lookup. Other primitive values are wrapped on a
+    // single core:value property.
+    let source_value = eval_expression(source, binding, layer, FiberRuntime::default())?;
+    let source_resource = value_to_source_resource(&source_value, layer);
+
+    // Step 2 — extract typed payload via the source institution.
+    let typed_source = source_inst
+        .extract_typed(&export.procedure, &source_resource, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: extract_typed via `{}` failed: {e}",
+                export.procedure
+            ))
+        })?;
+    let typed_resource = match typed_source {
+        crate::nbe::val::Val::ResourceVal(r) => *r,
+        other => {
+            return Err(QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: extract_typed returned {other:?}, but the \
+                 EigenQL four-step pipeline only marshals ResourceVal payloads in v1"
+            )));
         }
-        if let Some(Value::String(s)) = res.get(&short_prop) {
-            if s == short {
-                return Some(iri.clone());
+    };
+
+    // Step 3 — apply the transformation Component.
+    let component = components
+        .get(comorphism.transformation.as_str())
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: transformation Component `{}` not registered",
+                comorphism.transformation
+            ))
+        })?;
+    let transformed_resource = component
+        .execute(&typed_resource, None, layer)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: transformation `{}` failed: {e}",
+                comorphism.transformation
+            ))
+        })?
+        .output;
+
+    // Step 4 — target-side institution reify.
+    let import = index
+        .import_format(&comorphism.import_format)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: import_format `{}` not in InstitutionIndex",
+                comorphism.import_format
+            ))
+        })?;
+    let target_inst = inst_runtime.get(&import.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: target institution `{}` not registered in runtime",
+            import.institution_ref
+        ))
+    })?;
+    let transformed_val = crate::nbe::val::Val::ResourceVal(Box::new(transformed_resource));
+    let target_resource = target_inst
+        .reify(&import.procedure, &transformed_val, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: reify via `{}` failed: {e}",
+                import.procedure
+            ))
+        })?;
+
+    // Post-translation validation invariant (D14 §9.3 step 5).
+    let post_errors = crate::institution::dispatch::dispatch_auto_on_load_for_resource(
+        &target_resource,
+        index,
+        inst_runtime,
+        ctx,
+    );
+    if !post_errors.is_empty() {
+        let reasons = post_errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: post-translation validation rejected the reified \
+             resource: {reasons}"
+        )));
+    }
+
+    Ok(Value::Embedded(Box::new(target_resource)))
+}
+
+/// Convert a FIBER param-coercion source `Value` to a Resource.
+/// Embedded values pass through; IRI-shaped Strings dereference
+/// against the layer; all other shapes are wrapped on a single
+/// `core:value` property.
+fn value_to_source_resource(value: &Value, layer: &Layer) -> Resource {
+    match value {
+        Value::Embedded(r) => r.as_ref().clone(),
+        Value::String(s) => {
+            if let Ok(iri) = Iri::parse(s) {
+                if let Some(r) = layer.resolve(&iri) {
+                    return (*r).clone();
+                }
             }
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                Value::String(s.clone()),
+            );
+            r
+        }
+        other => {
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                other.clone(),
+            );
+            r
         }
     }
-    None
+}
+
+/// Resolve a `FIBER fc.query_class` reference (short name or full IRI)
+/// to a QueryClass declaration's IRI. Short-name lookup walks the
+/// layer for a resource with matching `short_name` whose `is_a`
+/// includes `urn:eigenius:institution:QueryClass`.
+fn resolve_query_class_iri(name: &Name, layer: &Layer) -> Result<Iri, QueryError> {
+    match name {
+        Name::FullIri(iri) => Ok(iri.clone()),
+        Name::ShortName(short) => {
+            let qc_class_iri = Iri::parse(wk::QUERY_CLASS_CLASS).unwrap();
+            let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+            for (iri, res) in layer.iter_all_resources() {
+                if !res.is_instance_of(&qc_class_iri) {
+                    continue;
+                }
+                if let Some(Value::String(s)) = res.get(&short_prop) {
+                    if s == short {
+                        return Ok(iri.clone());
+                    }
+                }
+            }
+            Err(QueryError::evaluation(format!(
+                "FIBER query class '{short}' not resolvable in layer (no QueryClass resource with that short_name)"
+            )))
+        }
+    }
 }
 
 fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri> {
@@ -739,7 +1007,7 @@ fn eval_expression(
     expr: &Expression,
     binding: &Binding,
     layer: &Layer,
-    institutions: Option<&InstitutionRegistry>,
+    runtime: FiberRuntime<'_>,
 ) -> Result<Value, QueryError> {
     match expr {
         Expression::Literal(lit) => Ok(literal_to_value(lit)),
@@ -748,38 +1016,36 @@ fn eval_expression(
             .cloned()
             .ok_or_else(|| QueryError::evaluation(format!("unbound variable: ?{}", var.name))),
         Expression::Binary { op, left, right } => {
-            let l = eval_expression(left, binding, layer, institutions)?;
-            let r = eval_expression(right, binding, layer, institutions)?;
+            let l = eval_expression(left, binding, layer, runtime)?;
+            let r = eval_expression(right, binding, layer, runtime)?;
             eval_binary(*op, &l, &r)
         }
         Expression::Unary { op, operand } => {
-            let v = eval_expression(operand, binding, layer, institutions)?;
+            let v = eval_expression(operand, binding, layer, runtime)?;
             eval_unary(*op, &v)
+        }
+        Expression::VerdictPredicate { kind, operand } => {
+            let v = eval_expression(operand, binding, layer, runtime)?;
+            eval_verdict_predicate(*kind, &v, layer, runtime)
         }
         Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
         Expression::FunctionCall { name, args } => {
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
-                .map(|a| eval_expression(a, binding, layer, institutions))
+                .map(|a| eval_expression(a, binding, layer, runtime))
                 .collect();
             let arg_vals = arg_vals?;
-            // Phase 11e.2: qualified-name function calls (containing
-            // a `:`) may classify as institution-dispatched
-            // capabilities. Attempt institution dispatch first; fall
-            // back to builtin dispatch if the IRI isn't registered
-            // or the registry isn't available.
+            // D2 §3.8: qualified-name function calls dispatch as a
+            // Decidable QueryClass invocation. The result is a
+            // Verdict-typed resource (Value::Embedded). Comorphism
+            // dispatch in expression position is not supported under
+            // D14 — comorphisms surface only as FIBER param coercion
+            // (D2 §3.5).
             if name.contains(':') {
-                if let Some(registry) = institutions {
-                    if let Ok(iri_parsed) = Iri::parse(name) {
-                        if let Some(cap) = registry.classify(&iri_parsed) {
-                            return dispatch_institution_call(
-                                cap,
-                                &iri_parsed,
-                                &arg_vals,
-                                layer,
-                                registry,
-                            );
-                        }
+                if let Ok(iri_parsed) = Iri::parse(name) {
+                    if let Some(verdict) = try_dispatch_decidable(&iri_parsed, &arg_vals, runtime)?
+                    {
+                        return Ok(verdict);
                     }
                 }
             }
@@ -856,7 +1122,7 @@ fn eval_expression(
         Expression::Array(elements) => {
             let vals: Result<Vec<Value>, QueryError> = elements
                 .iter()
-                .map(|e| eval_expression(e, binding, layer, institutions))
+                .map(|e| eval_expression(e, binding, layer, runtime))
                 .collect();
             Ok(Value::Array(vals?))
         }
@@ -1008,6 +1274,74 @@ fn eval_unary(op: UnaryOp, val: &Value) -> Result<Value, QueryError> {
     }
 }
 
+/// Project a `Verdict`-typed value to `Boolean` per a postfix predicate
+/// (D2 v2 §3.7 / §3.8). The operand is one of:
+///
+/// - `Value::Embedded(verdict)` — the Verdict resource directly.
+/// - `Value::String(iri)` / `Value::ResourceRef(iri)` — a synthesized
+///   IRI (typically from a FIBER `AS ?var` binding) that resolves to
+///   the response resource through the runtime's transient overlay or
+///   the layer chain.
+fn eval_verdict_predicate(
+    kind: crate::query::ast::VerdictPredicate,
+    val: &Value,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    let resolved: Resource;
+    let resource: &Resource = match val {
+        Value::Embedded(r) => r.as_ref(),
+        Value::String(s) => {
+            resolved = resolve_iri_string(s, layer, runtime).ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "{kw} operand IRI `{s}` does not resolve to a resource (FIBER overlay or layer chain)",
+                    kw = kind.ctor_name(),
+                ))
+            })?;
+            &resolved
+        }
+        Value::ResourceRef(iri) => {
+            resolved = resolve_iri_string(iri.as_str(), layer, runtime).ok_or_else(|| {
+                QueryError::evaluation(format!(
+                    "{kw} operand IRI `{iri}` does not resolve to a resource",
+                    kw = kind.ctor_name(),
+                ))
+            })?;
+            &resolved
+        }
+        other => {
+            return Err(QueryError::evaluation(format!(
+                "{kw} expects a Verdict-typed operand; got {other:?}",
+                kw = kind.ctor_name(),
+            )));
+        }
+    };
+    let ctor_iri = Iri::parse(wk::CTOR_NAME).expect("well-known IRI");
+    let ctor = resource
+        .get(&ctor_iri)
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            QueryError::evaluation(
+                "Verdict postfix predicate operand carries no `ctor_name` property",
+            )
+        })?;
+    Ok(Value::Boolean(ctor == kind.ctor_name()))
+}
+
+/// Resolve a String IRI to a Resource — checks the FiberOverlay first
+/// (so FIBER-bound responses are visible) then walks the layer chain.
+fn resolve_iri_string(s: &str, layer: &Layer, runtime: FiberRuntime<'_>) -> Option<Resource> {
+    let iri = Iri::parse(s).ok()?;
+    if let Some(overlay) = runtime.overlay {
+        for (entry_iri, entry_resource) in overlay {
+            if entry_iri == &iri {
+                return Some(entry_resource.clone());
+            }
+        }
+    }
+    layer.resolve(&iri).map(|r| (*r).clone())
+}
+
 fn literal_to_value(lit: &Literal) -> Value {
     match lit {
         Literal::String(s) => Value::String(s.clone()),
@@ -1031,74 +1365,76 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
             expr_has_aggregate(left) || expr_has_aggregate(right)
         }
         Expression::Unary { operand, .. } => expr_has_aggregate(operand),
+        Expression::VerdictPredicate { operand, .. } => expr_has_aggregate(operand),
         Expression::FunctionCall { args, .. } => args.iter().any(expr_has_aggregate),
         _ => false,
     }
 }
 
-/// Dispatch a function-call IRI classified as an institution
-/// capability to `FiberReasoner::decide` / `::translate` (Phase
-/// 11e.2). Decide predicates produce a boolean; comorphisms produce
-/// a resource value.
-fn dispatch_institution_call(
-    capability: crate::institution::InstitutionCapability,
+/// Try to dispatch a qualified-name call as a Decidable QueryClass
+/// invocation (D2 §3.8 / §6.13). Returns:
+///
+/// - `Ok(Some(verdict))` if the IRI resolved to a Decidable QueryClass
+///   and dispatch ran end-to-end. The Verdict is returned as a
+///   `Value::Embedded` resource carrying `is_a = [Verdict]` and
+///   `ctor_name`.
+/// - `Ok(None)` if the index/runtime aren't attached, the IRI doesn't
+///   resolve to a QueryClass, or the resolved QueryClass has no
+///   Decidable role. The caller falls through to builtin function
+///   dispatch (which raises `unknown function`).
+/// - `Err(_)` if the index *did* find a Decidable QueryClass but a
+///   downstream step failed (missing institution registration,
+///   handler failure, etc.). A configured-but-broken QueryClass is a
+///   structural error, not a reason to silently fall through.
+///
+/// Comorphism dispatch is not available in expression position under
+/// D14; comorphisms surface only as FIBER param coercion (D2 §3.5).
+fn try_dispatch_decidable(
     iri: &Iri,
     args: &[Value],
-    layer: &Layer,
-    registry: &InstitutionRegistry,
-) -> Result<Value, QueryError> {
-    use crate::institution::{DecResult, InstitutionCapability};
-    // Build a fresh ExecutionContext for the call — mirrors the
-    // kernel's NativeDecide / InstitutionInvoke behaviour.
-    let head = std::sync::Arc::new(layer.clone());
-    let storage = head.storage().clone();
-    let exec_ctx = crate::context::ExecutionContext::new(
-        head,
-        "__eigenql_dispatch__",
-        crate::context::ExecutionMode::ReadOnly,
-        storage,
-    );
-    match capability {
-        InstitutionCapability::DecidePredicate => {
-            let reasoner = registry.institution_for_decide(iri).ok_or_else(|| {
-                QueryError::evaluation(format!(
-                    "decide procedure `{iri}` classified but no institution registered"
-                ))
-            })?;
-            let result = reasoner
-                .decide(iri, args, &exec_ctx)
-                .map_err(|e| QueryError::evaluation(format!("decide `{iri}` failed: {e}")))?;
-            Ok(Value::Boolean(matches!(result, DecResult::Holds)))
-        }
-        InstitutionCapability::Comorphism => {
-            if args.len() != 1 {
-                return Err(QueryError::evaluation(format!(
-                    "comorphism `{iri}` expects exactly 1 source argument, got {}",
-                    args.len()
-                )));
-            }
-            let reasoner = registry.institution_for_comorphism(iri).ok_or_else(|| {
-                QueryError::evaluation(format!(
-                    "comorphism `{iri}` classified but no institution registered"
-                ))
-            })?;
-            let source = match &args[0] {
-                Value::Embedded(r) => (**r).clone(),
-                other => {
-                    let mut r = Resource::new_embedded();
-                    r.set(
-                        Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
-                        other.clone(),
-                    );
-                    r
-                }
-            };
-            let translated = reasoner.translate(iri, &source, &exec_ctx).map_err(|e| {
-                QueryError::evaluation(format!("comorphism `{iri}` translate failed: {e}"))
-            })?;
-            Ok(Value::Embedded(Box::new(translated)))
-        }
+    runtime: FiberRuntime<'_>,
+) -> Result<Option<Value>, QueryError> {
+    let (Some(index), Some(inst_runtime), Some(ctx)) =
+        (runtime.index, runtime.runtime, runtime.ctx)
+    else {
+        return Ok(None);
+    };
+    let Some(qc_entry) = index.query_class(iri) else {
+        return Ok(None);
+    };
+    if !qc_entry.dispatch_roles.contains(&DispatchRole::Decidable) {
+        return Ok(None);
     }
+    let institution = inst_runtime.get(&qc_entry.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "Decidable QueryClass `{iri}` declares institution `{}` not registered in runtime",
+            qc_entry.institution_ref
+        ))
+    })?;
+
+    // Marshal positional args onto a synthetic input resource of the
+    // QueryClass's input class (D14 §9.2, mirrored by the kernel-side
+    // `try_d14_decide`).
+    let mut input = Resource::new_embedded();
+    input.set(
+        Iri::parse(wk::IS_A).expect("well-known IRI"),
+        Value::Array(vec![Value::String(qc_entry.query_class.as_str().into())]),
+    );
+    input.set(
+        Iri::parse("urn:eigenius:institution:decide_args").expect("well-known IRI"),
+        Value::Array(args.to_vec()),
+    );
+
+    let result = institution
+        .query(&qc_entry.query_handler, &input, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "Decidable QueryClass `{iri}` handler `{}` failed: {e}",
+                qc_entry.query_handler
+            ))
+        })?;
+
+    Ok(Some(Value::Embedded(Box::new(result))))
 }
 
 /// Apply GROUP BY and aggregation.
@@ -1107,7 +1443,7 @@ fn apply_group_by(
     result: &[ReturnItem],
     bindings: &[Binding],
     layer: &Layer,
-    institutions: Option<&InstitutionRegistry>,
+    runtime: FiberRuntime<'_>,
 ) -> Result<Vec<Binding>, QueryError> {
     // Group bindings by their group key values
     let mut groups: BTreeMap<Vec<String>, Vec<&Binding>> = BTreeMap::new();
@@ -1116,7 +1452,7 @@ fn apply_group_by(
         let key: Vec<String> = group_by
             .iter()
             .map(|expr| {
-                eval_expression(expr, binding, layer, institutions)
+                eval_expression(expr, binding, layer, runtime)
                     .map(|v| format!("{v:?}"))
                     .unwrap_or_default()
             })
@@ -1131,7 +1467,7 @@ fn apply_group_by(
         // Compute aggregates
         for item in result {
             if let Some((agg_name, agg_val)) =
-                eval_aggregate(&item.expression, group, layer, institutions)?
+                eval_aggregate(&item.expression, group, layer, runtime)?
             {
                 binding.insert(agg_name, agg_val);
             }
@@ -1148,12 +1484,12 @@ fn eval_aggregate(
     expr: &Expression,
     group: &[&Binding],
     layer: &Layer,
-    institutions: Option<&InstitutionRegistry>,
+    runtime: FiberRuntime<'_>,
 ) -> Result<Option<(String, Value)>, QueryError> {
     if let Expression::Aggregate { op, arg } = expr {
         let values: Vec<Value> = group
             .iter()
-            .filter_map(|b| eval_expression(arg, b, layer, institutions).ok())
+            .filter_map(|b| eval_expression(arg, b, layer, runtime).ok())
             .collect();
 
         let result = match op {
@@ -1205,7 +1541,7 @@ fn shape_result(
     items: &[ReturnItem],
     layer: &Layer,
     fp: &QueryFingerprint,
-    institutions: Option<&InstitutionRegistry>,
+    runtime: FiberRuntime<'_>,
 ) -> Result<Resource, QueryError> {
     let mut resource = Resource::new_embedded(); // Result resources don't get @id
 
@@ -1236,7 +1572,7 @@ fn shape_result(
                 let agg_key = format!("__agg_{op:?}");
                 binding.get(&agg_key).cloned().unwrap_or(Value::Integer(0))
             }
-            _ => eval_expression(&item.expression, binding, layer, institutions)
+            _ => eval_expression(&item.expression, binding, layer, runtime)
                 .map_err(|e| QueryError::evaluation(format!("in RETURN: {e}")))?,
         };
 
@@ -1579,95 +1915,137 @@ mod tests {
         assert!(!results.is_empty());
     }
 
-    // --- Phase 11e.2: institution-capability surface for EigenQL ---
+    // --- D14: institution-dispatch surface for EigenQL ---
 
-    use crate::institution::error::{InstitutionError, MorphismValidation};
-    use crate::institution::{DecResult, FiberDeclaration, FiberReasoner, InstitutionRegistry};
+    use crate::context::ExecutionMode;
+    use crate::institution::error::InstitutionError;
+    use crate::institution::registry::InstitutionIndex;
+    use crate::institution::runtime::{Institution, InstitutionRuntime};
+    use crate::nbe::val::Val;
 
-    /// Test institution declaring one decide predicate and one
-    /// comorphism. Decide returns Holds for Integer args > 0.
-    /// Comorphism translates any source to a fixed marker resource.
+    const Q_INST_IRI: &str = "urn:eigenius:test:q_inst";
+    const Q_POSITIVE_IRI: &str = "urn:eigenius:test:q_positive";
+    const Q_INPUT_CLASS_IRI: &str = "urn:eigenius:test:QPositiveInput";
+    const Q_HANDLER_IRI: &str = "urn:eigenius:test:proc:q_positive";
+
+    /// Test institution implementing one Decidable QueryClass.
+    /// `q_positive` returns Holds for the first positive Integer in
+    /// `decide_args`, Fails otherwise.
     struct QueryCapInst;
 
-    impl FiberReasoner for QueryCapInst {
-        fn fiber_declaration(&self) -> FiberDeclaration {
-            let decide_iri = Iri::parse("urn:eigenius:test:q_positive").unwrap();
-            let comorphism_iri = Iri::parse("urn:eigenius:test:q_translate").unwrap();
-
-            let mut cm = Resource::new(comorphism_iri.clone());
-            cm.set(
-                Iri::parse(wk::IS_A).unwrap(),
-                Value::Array(vec![Value::String(wk::COMORPHISM.to_string())]),
-            );
-            cm.set(
-                Iri::parse(wk::SOURCE_INSTITUTION).unwrap(),
-                Value::String("urn:eigenius:test:q_inst".to_string()),
-            );
-            cm.set(
-                Iri::parse(wk::TARGET_INSTITUTION).unwrap(),
-                Value::String("urn:eigenius:test:target".to_string()),
-            );
-            cm.set(
-                Iri::parse(wk::TRANSLATION_PROCEDURE).unwrap(),
-                Value::String(comorphism_iri.as_str().to_string()),
-            );
-            FiberDeclaration {
-                institution_iri: Iri::parse("urn:eigenius:test:q_inst").unwrap(),
-                name: "QueryCapInst".to_string(),
-                morphism_types: vec![],
-                query_types: vec![],
-                structural_properties: vec![],
-                comorphism_types: vec![cm],
-                decide_procedures: vec![decide_iri],
-            }
+    impl Institution for QueryCapInst {
+        fn institution_iri(&self) -> &Iri {
+            static INST: std::sync::OnceLock<Iri> = std::sync::OnceLock::new();
+            INST.get_or_init(|| Iri::parse(Q_INST_IRI).unwrap())
+        }
+        fn extract_typed(
+            &self,
+            _: &Iri,
+            _: &Resource,
+            _: &ExecutionContext,
+        ) -> Result<Val, InstitutionError> {
+            unreachable!("test fixture only implements query")
+        }
+        fn reify(
+            &self,
+            _: &Iri,
+            _: &Val,
+            _: &ExecutionContext,
+        ) -> Result<Resource, InstitutionError> {
+            unreachable!("test fixture only implements query")
         }
         fn query(
             &self,
-            _q: &Resource,
+            _procedure_iri: &Iri,
+            input: &Resource,
             _ctx: &ExecutionContext,
         ) -> Result<Resource, InstitutionError> {
-            unreachable!()
+            // Read decide_args off the synthesized input resource.
+            let args_iri = Iri::parse("urn:eigenius:institution:decide_args").unwrap();
+            let ok = match input.get(&args_iri) {
+                Some(Value::Array(items)) => items
+                    .first()
+                    .and_then(|v| v.as_integer())
+                    .is_some_and(|n| n > 0),
+                _ => false,
+            };
+            // Build a Verdict response carrying ctor_name.
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
+            );
+            r.set(
+                Iri::parse(wk::CTOR_NAME).unwrap(),
+                Value::String(if ok { "Holds" } else { "Fails" }.into()),
+            );
+            Ok(r)
         }
-        fn validate_morphism(
-            &self,
-            _m: &Resource,
-            _ctx: &ExecutionContext,
-        ) -> Result<MorphismValidation, InstitutionError> {
-            unreachable!()
-        }
-        fn discover_morphisms(
-            &self,
-            _rs: &[Resource],
-            _ctx: &ExecutionContext,
-        ) -> Result<Vec<Resource>, InstitutionError> {
-            unreachable!()
-        }
-        fn decide(
-            &self,
-            _iri: &Iri,
-            args: &[Value],
-            _ctx: &ExecutionContext,
-        ) -> Result<DecResult, InstitutionError> {
-            let ok = args
-                .first()
-                .and_then(|v| v.as_integer())
-                .is_some_and(|n| n > 0);
-            Ok(if ok {
-                DecResult::Holds
-            } else {
-                DecResult::Fails
-            })
-        }
-        fn translate(
-            &self,
-            _iri: &Iri,
-            _source: &Resource,
-            _ctx: &ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
-            Ok(Resource::new(
-                Iri::parse("urn:eigenius:test:q_translated").unwrap(),
-            ))
-        }
+    }
+
+    /// Build an InstitutionIndex carrying a single Decidable QueryClass
+    /// (q_positive) declared by the test institution.
+    fn q_index() -> Arc<InstitutionIndex> {
+        let mut b = LayerBuilder::new("q_test", None);
+
+        let mut inst = Resource::new(Iri::parse(Q_INST_IRI).unwrap());
+        inst.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:institution:Institution".to_string(),
+            )]),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_iri").unwrap(),
+            Value::String(Q_INST_IRI.to_string()),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_name").unwrap(),
+            Value::String("QueryCapInst".to_string()),
+        );
+        b.add_resource(inst).unwrap();
+
+        let mut qc = Resource::new(Iri::parse(Q_POSITIVE_IRI).unwrap());
+        qc.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::QUERY_CLASS_CLASS.to_string())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
+            Value::String(Q_INPUT_CLASS_IRI.to_string()),
+        );
+        qc.set(
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            Value::String(wk::VERDICT.to_string()),
+        );
+        qc.set(
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
+            Value::Array(vec![Value::String(wk::DISPATCH_DECIDABLE.to_string())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
+            Value::String(Q_HANDLER_IRI.to_string()),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            Value::String(Q_INST_IRI.to_string()),
+        );
+        b.add_resource(qc).unwrap();
+
+        let layer = b.build(crate::layer::LayerStorage::in_memory());
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "fixture index errors: {errors:?}");
+        Arc::new(idx)
+    }
+
+    fn q_runtime() -> Arc<InstitutionRuntime> {
+        let mut runtime = InstitutionRuntime::new();
+        runtime.register(Box::new(QueryCapInst)).unwrap();
+        Arc::new(runtime)
+    }
+
+    fn q_exec_ctx(layer: Arc<crate::layer::Layer>) -> ExecutionContext {
+        ExecutionContext::new(layer, "q_test", ExecutionMode::ReadOnly)
     }
 
     #[test]
@@ -1684,21 +2062,30 @@ mod tests {
     }
 
     #[test]
-    fn where_clause_decide_dispatch_filters_by_boolean() {
-        // WHERE cap:q_positive(n) returns true for positive ints,
-        // false otherwise. Use the registry-enabled query path.
-        let mut reg = InstitutionRegistry::new();
-        reg.register_rehydrated(Box::new(QueryCapInst)).unwrap();
+    fn where_clause_decide_dispatch_returns_verdict() {
+        // Under D14, a Decidable QueryClass call returns a Verdict
+        // resource (not a Boolean). The postfix predicate (D2 §3.8)
+        // is what projects to Boolean — a separate parser concern.
+        let index = q_index();
+        let inst_runtime = q_runtime();
 
-        // Minimal layer — just the core ontology. WHERE runs on an
-        // empty initial binding plus a literal-only expression.
+        let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let layer = Arc::new(builder.build(storage));
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer));
+
+        let runtime = FiberRuntime {
+            index: Some(&index),
+            runtime: Some(&inst_runtime),
+            components: None,
+            overlay: None,
+            ctx: Some(&exec_ctx),
+        };
 
         // Use FunctionCall directly at eval_expression level for a
         // focused test — the full-query integration would need more
@@ -1706,75 +2093,262 @@ mod tests {
         // dispatch path.
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {
-            name: "urn:eigenius:test:q_positive".to_string(),
+            name: Q_POSITIVE_IRI.to_string(),
             args: vec![Expression::Literal(Literal::Integer(42))],
         };
-        let v = eval_expression(&expr, &binding, &layer, Some(&reg)).expect("eval");
-        assert_eq!(v, Value::Boolean(true));
+        let v = eval_expression(&expr, &binding, &layer, runtime).expect("eval");
+        let verdict = match v {
+            Value::Embedded(r) => r,
+            other => panic!("expected embedded Verdict, got {other:?}"),
+        };
+        let ctor = verdict
+            .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+            .and_then(|v| v.as_str().map(str::to_owned));
+        assert_eq!(ctor.as_deref(), Some("Holds"));
 
-        // Negative arg — decide returns Fails → Bool false.
+        // Negative arg → Fails.
         let expr_neg = Expression::FunctionCall {
-            name: "urn:eigenius:test:q_positive".to_string(),
+            name: Q_POSITIVE_IRI.to_string(),
             args: vec![Expression::Literal(Literal::Integer(-5))],
         };
-        let v = eval_expression(&expr_neg, &binding, &layer, Some(&reg)).expect("eval");
-        assert_eq!(v, Value::Boolean(false));
-    }
-
-    #[test]
-    fn comorphism_dispatch_produces_translated_resource() {
-        let mut reg = InstitutionRegistry::new();
-        reg.register_rehydrated(Box::new(QueryCapInst)).unwrap();
-
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let core_resources = eigon_json::parse_document(core_json).unwrap();
-        let mut builder = LayerBuilder::new("core", None);
-        for r in core_resources {
-            builder.add_resource(r).unwrap();
-        }
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "urn:eigenius:test:q_translate".to_string(),
-            args: vec![Expression::Literal(Literal::String(
-                "urn:eigenius:test:some_src".to_string(),
-            ))],
+        let v = eval_expression(&expr_neg, &binding, &layer, runtime).expect("eval");
+        let verdict = match v {
+            Value::Embedded(r) => r,
+            other => panic!("expected embedded Verdict, got {other:?}"),
         };
-        let v = eval_expression(&expr, &binding, &layer, Some(&reg)).expect("eval");
-        match v {
-            Value::Embedded(r) => {
-                assert_eq!(
-                    r.id().map(|i| i.as_str()),
-                    Some("urn:eigenius:test:q_translated")
-                );
-            }
-            other => panic!("expected embedded translated resource, got {other:?}"),
-        }
+        let ctor = verdict
+            .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+            .and_then(|v| v.as_str().map(str::to_owned));
+        assert_eq!(ctor.as_deref(), Some("Fails"));
     }
 
     #[test]
     fn unknown_iri_falls_through_to_builtin_error() {
-        // An IRI that isn't registered as either decide or
-        // comorphism falls through to `functions::call_function`,
-        // which errors with "no such function."
-        let reg = InstitutionRegistry::new();
+        // An IRI that doesn't resolve to a Decidable QueryClass falls
+        // through to `functions::call_function`, which errors with
+        // "no such function."
+        let index = q_index();
+        let inst_runtime = q_runtime();
+
+        let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let layer = Arc::new(builder.build(storage));
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer));
+
+        let runtime = FiberRuntime {
+            index: Some(&index),
+            runtime: Some(&inst_runtime),
+            components: None,
+            overlay: None,
+            ctx: Some(&exec_ctx),
+        };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {
             name: "urn:eigenius:test:unknown_fn".to_string(),
             args: vec![],
         };
-        let err = eval_expression(&expr, &binding, &layer, Some(&reg)).unwrap_err();
+        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
         let msg = format!("{err}");
-        // Builtin dispatch rejects unknown function names.
         assert!(msg.contains("unknown") || msg.contains("function"));
+    }
+
+    // ─── D2 v2 §3.7 / §3.8 — postfix Verdict predicate ─────────────────
+
+    #[test]
+    fn parser_accepts_postfix_verdict_predicates() {
+        // The grammar verdict_term ::= primary_expr (verdict_predicate)?
+        // sits between unary and primary. All three postfix tokens must
+        // parse, AND combinations across postfix-projected operands must
+        // still parse.
+        let source = r#"
+            MATCH ?x {}
+            WHERE cap:q_positive(42) HOLDS
+              AND cap:other(?x) FAILS
+              AND cap:third(?x) UNDECIDABLE
+            RETURN [] { ok: ?x }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let _program = parser::parse(tokens).expect("parse postfix predicates");
+    }
+
+    #[test]
+    fn parser_postfix_binds_tighter_than_not() {
+        // `NOT qc:check(?x) HOLDS` should parse as `NOT (qc:check(?x) HOLDS)`,
+        // not `(NOT qc:check(?x)) HOLDS`. Verify by inspecting the AST shape.
+        use crate::query::ast::{Expression, UnaryOp, VerdictPredicate};
+        let source = r#"
+            MATCH ?x {}
+            WHERE NOT cap:q_positive(?x) HOLDS
+            RETURN [] { ok: ?x }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse NOT-postfix");
+        let cond = program
+            .query
+            .body
+            .conditions
+            .first()
+            .expect("WHERE condition");
+        match cond {
+            Expression::Unary { op, operand } => {
+                assert_eq!(*op, UnaryOp::Not);
+                match operand.as_ref() {
+                    Expression::VerdictPredicate { kind, .. } => {
+                        assert_eq!(*kind, VerdictPredicate::Holds);
+                    }
+                    other => panic!("expected `NOT (qc HOLDS)`, got NOT followed by {other:?}"),
+                }
+            }
+            other => panic!("expected `NOT …`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn postfix_holds_projects_verdict_to_boolean() {
+        // Build a Verdict resource with ctor_name = "Holds" and project
+        // it through each of the three postfix predicates.
+        use crate::query::ast::{Expression, VerdictPredicate};
+        let mut verdict = Resource::new_embedded();
+        verdict.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
+        );
+        verdict.set(
+            Iri::parse(wk::CTOR_NAME).unwrap(),
+            Value::String("Holds".into()),
+        );
+        let layer = Arc::new(
+            LayerBuilder::new("postfix-test", None).build(crate::layer::LayerStorage::in_memory()),
+        );
+        let runtime = FiberRuntime::default();
+        let mut binding: BTreeMap<String, Value> = BTreeMap::new();
+        binding.insert("v".into(), Value::Embedded(Box::new(verdict)));
+
+        let var_v = Expression::Variable(crate::query::ast::Variable { name: "v".into() });
+        let project = |kind: VerdictPredicate| -> Value {
+            eval_expression(
+                &Expression::VerdictPredicate {
+                    kind,
+                    operand: Box::new(var_v.clone()),
+                },
+                &binding,
+                &layer,
+                runtime,
+            )
+            .expect("eval verdict predicate")
+        };
+        assert_eq!(project(VerdictPredicate::Holds), Value::Boolean(true));
+        assert_eq!(project(VerdictPredicate::Fails), Value::Boolean(false));
+        assert_eq!(
+            project(VerdictPredicate::Undecidable),
+            Value::Boolean(false)
+        );
+    }
+
+    // ─── D2 v2 §3.5 — comorphism coercion in FIBER param values ────────
+
+    #[test]
+    fn parser_recognises_comorphism_coercion_in_fiber_param() {
+        // A single-arg qualified-name function call in FIBER param value
+        // position is a comorphism coercion: parser produces
+        // ParamValue::Comorphism { name, source }, not
+        // ParamValue::Expression(FunctionCall).
+        use crate::query::ast::{Clause, ParamValue};
+        let source = r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?d {}
+            FIBER assay:within_tolerance {
+                predicted_ic50: dock:dock_to_assay(?d)
+            } AS ?v
+            RETURN [] { d: ?d }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse FIBER + coercion");
+        let fiber = program
+            .query
+            .body
+            .clauses
+            .iter()
+            .find_map(|c| match c {
+                Clause::Fiber(fc) => Some(fc),
+                _ => None,
+            })
+            .expect("FIBER clause");
+        let predicted = fiber
+            .params
+            .iter()
+            .find(|p| matches!(&p.name, Name::ShortName(s) if s == "predicted_ic50"))
+            .expect("predicted_ic50 param");
+        match &predicted.value {
+            ParamValue::Comorphism { name, .. } => match name {
+                Name::ShortName(s) => assert_eq!(s, "dock:dock_to_assay"),
+                Name::FullIri(i) => assert_eq!(i.as_str(), "dock:dock_to_assay"),
+            },
+            other => panic!("expected ParamValue::Comorphism, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_treats_multi_arg_qualified_call_as_expression() {
+        // Multi-arg qualified-name function calls stay as Expression
+        // in FIBER param value position (comorphisms are unary by
+        // construction).
+        use crate::query::ast::{Clause, Expression, ParamValue};
+        let source = r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?d {}
+            FIBER assay:within_tolerance {
+                predicted_ic50: cap:multi(?d, 1.0)
+            } AS ?v
+            RETURN [] { d: ?d }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse FIBER + multi-arg");
+        let fiber = program
+            .query
+            .body
+            .clauses
+            .iter()
+            .find_map(|c| match c {
+                Clause::Fiber(fc) => Some(fc),
+                _ => None,
+            })
+            .expect("FIBER clause");
+        match &fiber.params[0].value {
+            ParamValue::Expression(Expression::FunctionCall { args, .. }) => {
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected ParamValue::Expression(FunctionCall), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn postfix_predicate_rejects_non_verdict_operand() {
+        // A non-Verdict operand (e.g. an Integer) should error with a
+        // type-mismatch evaluation error rather than silently returning
+        // false. Type-checker enforcement of this rule lands as part of
+        // §5.9 rule coverage; the runtime guard is the floor.
+        use crate::query::ast::{Expression, Literal, VerdictPredicate};
+        let layer = Arc::new(
+            LayerBuilder::new("postfix-test", None).build(crate::layer::LayerStorage::in_memory()),
+        );
+        let runtime = FiberRuntime::default();
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::VerdictPredicate {
+            kind: VerdictPredicate::Holds,
+            operand: Box::new(Expression::Literal(Literal::Integer(42))),
+        };
+        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Verdict-typed operand"),
+            "unexpected message: {msg}"
+        );
     }
 }

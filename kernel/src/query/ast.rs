@@ -101,11 +101,28 @@ pub struct FiberClause {
     pub binding: Variable,
 }
 
-/// A single `name: expression` param inside a FIBER clause's braces.
+/// A single `name: <value>` param inside a FIBER clause's braces. The
+/// value is either a plain expression or a comorphism coercion
+/// (D2 v2 §3.5).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamBinding {
     pub name: Name,
-    pub expression: Expression,
+    pub value: ParamValue,
+}
+
+/// Two shapes for a FIBER param value (D2 v2 §3.5 / §4):
+///
+/// - `Expression(e)` — the value is the result of evaluating `e`
+///   against the current binding (literal, variable, scalar function
+///   call, dot-path, …).
+/// - `Comorphism { name, source }` — `name(source)` runs the named
+///   comorphism's four-step pipeline (extract_typed → transformation
+///   → reify) inline, and the reified target resource is used as the
+///   param value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParamValue {
+    Expression(Expression),
+    Comorphism { name: Name, source: Expression },
 }
 
 /// A complete query with all clauses.
@@ -209,6 +226,14 @@ pub enum Expression {
         op: UnaryOp,
         operand: Box<Expression>,
     },
+    /// Postfix Verdict projection (D2 v2 §3.7 / §3.8): `?v HOLDS`,
+    /// `?v FAILS`, `?v UNDECIDABLE`. The operand must evaluate to a
+    /// `Verdict`-typed resource carrying `ctor_name`; the result is a
+    /// `Boolean` true iff the constructor matches.
+    VerdictPredicate {
+        kind: VerdictPredicate,
+        operand: Box<Expression>,
+    },
     NotExists(Variable),
     FunctionCall {
         name: String,
@@ -261,6 +286,25 @@ pub enum UnaryOp {
     Not,
     Pos,
     Neg,
+}
+
+/// Postfix Verdict predicates (D2 v2 §3.7 / §3.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerdictPredicate {
+    Holds,
+    Fails,
+    Undecidable,
+}
+
+impl VerdictPredicate {
+    /// Constructor-name string the predicate matches against.
+    pub fn ctor_name(self) -> &'static str {
+        match self {
+            VerdictPredicate::Holds => "Holds",
+            VerdictPredicate::Fails => "Fails",
+            VerdictPredicate::Undecidable => "Undecidable",
+        }
+    }
 }
 
 /// Aggregate operators.

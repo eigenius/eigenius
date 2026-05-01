@@ -51,7 +51,7 @@ You'll touch the platform through one of six interfaces depending on what you're
 
 5. **The kernel as a library** — for embedding the kernel in another Rust process. Add `eigenius_kernel` as a Cargo dependency and use the modules under [`kernel/src/`](../../../kernel/src/) directly. This is what the kernel server itself does — the gRPC layer is a thin wrapper over the in-process API.
 
-6. **WASM extensions** — for adding domain-specific dispatch logic. Custom components and institutions are built as WASM binaries against the [`eigenius-component`](../../../wit/eigenius-component.wit) and `eigenius-institution` WIT worlds, using the [`eigenius-wasm-sdk`](../../../sdk/wasm-sdk/) crate. Installed at runtime via `eigenius capability install`. See [chapter 9](09-wasm-components.md) and [chapter 10](10-wasm-institutions.md).
+6. **WASM extensions** — for adding domain-specific dispatch logic. Custom components and institutions are built as WASM binaries against the [`eigenius-component`](../../../wit/eigenius-component.wit) and `eigenius-institution-d14` WIT worlds, using the [`eigenius-wasm-sdk`](../../../sdk/wasm-sdk/) crate. Components are installed via `eigenius capability install`; D14 institutions auto-register from chain scan when their `Institution` declaration carries `runtime: wasm` + inline `wasm_binary`. See [chapter 9](09-wasm-components.md) and [chapter 10](10-wasm-institutions.md).
 
 ## 1.3. The five bootstrap layers
 

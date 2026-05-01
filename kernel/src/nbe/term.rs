@@ -202,20 +202,22 @@ pub enum Exp {
     /// full declaration at evaluation time).
     CodataType(Arc<CodataDecl>, Vec<Exp>),
 
-    /// Cross-institution translation via a declared comorphism
-    /// (Phase 11d, D10 §6).
+    /// Cross-institution translation via a declared comorphism (D14 §9.3).
     ///
-    /// `comorphism_iri` identifies a `Comorphism` resource in the
-    /// institution registry; `source` is the expression producing
-    /// the source-institution resource to translate. Evaluation
-    /// looks up the declaring institution via
-    /// `InstitutionRegistry::institution_for_comorphism`, calls
-    /// `FiberReasoner::translate(iri, source_resource, ctx)`, and
-    /// wraps the resulting resource as `Val::ResourceVal`.
+    /// `comorphism_iri` identifies a `Comorphism` resource indexed by
+    /// the [`InstitutionIndex`]; `source` is the expression producing
+    /// the source-institution resource to translate. Evaluation runs
+    /// the four-step pipeline — extract → transformation Component →
+    /// reify — and wraps the resulting target-class resource as
+    /// `Val::ResourceVal`.
     ///
-    /// Without an institution registry in scope (bare `EvalCtx::Pure`)
-    /// the expression stays as a passthrough neutral — runtime
-    /// callers attach the registry via `EvalCtx::IO` or `Check`.
+    /// Without a D14 institution index/runtime attached (bare
+    /// `EvalCtx::Pure` used at type-check time), the expression
+    /// reduces to a passthrough neutral so the conversion checker can
+    /// compare two `InstitutionInvoke`s structurally. Runtime callers
+    /// attach the index/runtime via `EvalCtx::IO` or `Check`.
+    ///
+    /// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
     InstitutionInvoke {
         comorphism_iri: Iri,
         source: Box<Exp>,
@@ -321,16 +323,19 @@ pub enum Constraint {
     Pattern(String),
     /// String matches a format (date, datetime, uuid, etc.)
     Format(String),
-    /// Institution-dispatched constraint (Phase 11c, life-science §16.3).
+    /// Institution-dispatched constraint (D14 §9.2).
     ///
-    /// The check-time reducer looks up `iri` in the current
-    /// institution registry; if found, evaluates `args` to values,
-    /// marshals them through `val_to_resource_value`, and calls
-    /// `FiberReasoner::decide(iri, resources, ctx)`. The institution
-    /// returns `DecResult::Holds` (reduce to `Refl`), `Fails` (a
-    /// failing neutral, blocking subsequent reduction), or
-    /// `Undecidable` / not-registered (stay as a passthrough
-    /// neutral). See [`crate::institution::DecResult`].
+    /// The check-time reducer looks up `iri` as a Decidable QueryClass
+    /// in the [`InstitutionIndex`]; if found, evaluates `args` to
+    /// values, marshals them as a `decide_args` array onto a synthetic
+    /// input resource, and dispatches via `Institution::query`. The
+    /// returned `Verdict` resource is parsed into a [`DecResult`]:
+    /// `Holds` reduces the surrounding `NativeDecide` to `Refl`,
+    /// `Fails` emits a failing neutral, and `Undecidable` (or no
+    /// matching QueryClass) stays as a passthrough neutral.
+    ///
+    /// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
+    /// [`DecResult`]: crate::institution::DecResult
     Institution { iri: Iri, args: Vec<Exp> },
 }
 

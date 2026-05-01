@@ -11,9 +11,12 @@ members = [
 ]
 exclude = [
     "examples/wasm-cbor-echo",
+    "examples/wasm-d14-arrhenius",
+    "examples/wasm-d14-assay",
+    "examples/wasm-d14-dock",
+    "examples/wasm-d14-echo",
     "examples/wasm-doc-validator",
     "examples/wasm-http-shout",
-    "examples/wasm-ordering-institution",
     "examples/wasm-read-query-probe",
     "orchestration/native",
     "spikes/napi-rs-async",

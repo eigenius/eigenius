@@ -301,12 +301,13 @@ async fn resume_one_task(
         Arc::clone(&task_store),
     ));
 
-    let result = crate::program::eval_io::execute_program_nbe_with_institutions(
+    let result = crate::program::eval_io::execute_program_nbe_with_institutions_d14(
         &program,
         &input,
         layer,
         components,
-        Arc::new(crate::institution::InstitutionRegistry::new()),
+        None,
+        None,
         Some(trace_store),
         Some(tc),
     );
@@ -387,7 +388,14 @@ pub struct EigeniusService {
     /// Inner Arc allows cheap cloning for passing to the evaluator.
     components: Arc<RwLock<Arc<ComponentRegistry>>>,
     trace_store: Arc<dyn TraceStore>,
-    institutions: Arc<RwLock<crate::institution::InstitutionRegistry>>,
+    /// D14 institution index — derived view of the layer chain rebuilt
+    /// after every commit. Outer lock allows swapping; inner Arc lets
+    /// the evaluator clone cheaply when constructing `EvalCtx::IO`.
+    institution_index: Arc<RwLock<Arc<crate::institution::registry::InstitutionIndex>>>,
+    /// D14 institution runtime — `Box<dyn Institution>` per
+    /// institution IRI. Populated when D14-shaped WASM institutions
+    /// are installed (B3+ wiring); otherwise empty.
+    institution_runtime: Arc<RwLock<Arc<crate::institution::runtime::InstitutionRuntime>>>,
     /// Optional persistent backend. When present, committed layers,
     /// the seed manifest, and trace state all live here; absent means
     /// the server is in-memory-only (the pre-Phase-9a behaviour).
@@ -438,7 +446,12 @@ impl EigeniusService {
             branch_contexts: Arc::new(BranchContextCache::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store: Arc::new(InMemoryTraceStore::new()),
-            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            institution_index: Arc::new(RwLock::new(Arc::new(
+                crate::institution::registry::InstitutionIndex::new(),
+            ))),
+            institution_runtime: Arc::new(RwLock::new(Arc::new(
+                crate::institution::runtime::InstitutionRuntime::new(),
+            ))),
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -479,7 +492,12 @@ impl EigeniusService {
             branch_contexts: Arc::new(BranchContextCache::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
-            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            institution_index: Arc::new(RwLock::new(Arc::new(
+                crate::institution::registry::InstitutionIndex::new(),
+            ))),
+            institution_runtime: Arc::new(RwLock::new(Arc::new(
+                crate::institution::runtime::InstitutionRuntime::new(),
+            ))),
             backend: Some(backend),
             task_store: Some(task_store),
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -514,7 +532,12 @@ impl EigeniusService {
             branch_contexts: Arc::new(BranchContextCache::new(ctx)),
             components: Arc::new(RwLock::new(Arc::new(components))),
             trace_store,
-            institutions: Arc::new(RwLock::new(crate::institution::InstitutionRegistry::new())),
+            institution_index: Arc::new(RwLock::new(Arc::new(
+                crate::institution::registry::InstitutionIndex::new(),
+            ))),
+            institution_runtime: Arc::new(RwLock::new(Arc::new(
+                crate::institution::runtime::InstitutionRuntime::new(),
+            ))),
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -777,14 +800,77 @@ impl EigeniusService {
     /// commit these to a follow-up layer so they become queryable.
     /// RESUME callers should instead use
     /// [`Self::rehydrate_wasm_from_layer`] which skips publishing.
+    /// Rebuild the D14 [`InstitutionIndex`] from the given layer
+    /// (which is the new head of the chain). Called after every
+    /// successful commit + after Phase 9a rehydration.
+    ///
+    /// Walks the entire chain from the supplied layer downward; any
+    /// per-resource parse errors are logged at warn-level and skipped
+    /// (the well-formed entries still index — same shape as the
+    /// existing capability-scan flow).
+    ///
+    /// Also rebuilds the [`InstitutionRuntime`] by scanning the chain
+    /// for Institution declarations whose `runtime` is
+    /// `urn:eigenius:institution:runtimes:wasm` and constructing a
+    /// [`WasmInstitution`] for each. In-process / external runtime
+    /// declarations are skipped — those callers register
+    /// programmatically via the runtime API. This closes the
+    /// "ontology-first" loop for WASM institutions: declaring an
+    /// Institution + `wasm_binary` in the chain auto-installs its
+    /// dispatcher on commit.
+    ///
+    /// [`InstitutionRuntime`]: crate::institution::runtime::InstitutionRuntime
+    /// [`WasmInstitution`]: crate::capability::wasm_institution_d14::WasmInstitution
+    async fn rebuild_institution_index(&self, layer: &crate::layer::Layer) {
+        let (idx, errors) = crate::institution::registry::InstitutionIndex::from_layer(layer);
+        for err in &errors {
+            tracing::warn!(
+                { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                kind = err.kind,
+                resource_iri = err
+                    .resource_iri
+                    .as_ref()
+                    .map(|i| i.as_str())
+                    .unwrap_or(""),
+                { field::ERROR_MESSAGE } = %err.reason,
+                "institution-index parse error"
+            );
+        }
+        *self.institution_index.write().await = Arc::new(idx);
+
+        // Rebuild the runtime from chain-declared WASM institutions.
+        let (runtime, report) =
+            crate::capability::registration::build_wasm_institution_runtime(layer);
+        for err in &report.errors {
+            tracing::warn!(
+                { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                resource_iri = %err.resource_iri,
+                { field::ERROR_MESSAGE } = %err.message,
+                "WASM institution registration error"
+            );
+        }
+        for inst_iri in &report.institutions_registered {
+            tracing::info!(
+                { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                { field::INSTITUTION_IRI } = %inst_iri,
+                host = "kernel",
+                "registered WASM institution"
+            );
+        }
+        *self.institution_runtime.write().await = Arc::new(runtime);
+    }
+
+    /// Walk a newly committed layer and register every WASM component
+    /// (kernel-hosted or IO-class) declared therein. WASM-institution
+    /// registration is **no longer** performed here — D14 institutions
+    /// register through the chain via the [`InstitutionIndex`] +
+    /// [`InstitutionRuntime`] populated by [`Self::rebuild_institution_index`].
     async fn register_wasm_from_layer(
         &self,
         layer: &crate::layer::Layer,
         errors: &mut Vec<ValidationError>,
     ) -> Vec<Resource> {
         // Build a new ComponentRegistry layered on top of the current one.
-        // This avoids needing `BuiltinComponent: Clone` — the parent Arc
-        // is shared, new WASM entries are added to the child.
         let mut new_registry = {
             let current = self.components.read().await;
             ComponentRegistry::new_with_parent(Arc::clone(&current))
@@ -852,47 +938,20 @@ impl EigeniusService {
             *guard = Arc::new(new_registry);
         }
 
-        // Register institutions. Collect the declared class/property
-        // resources each institution publishes so the caller can commit
-        // them in a follow-up layer. Closes #15 when paired with the
-        // Load-path commit below.
-        let mut published_resources: Vec<Resource> = Vec::new();
-        if !scan_result.wasm_institutions.is_empty() {
-            let mut institutions = self.institutions.write().await;
-            for reasoner in scan_result.wasm_institutions {
-                let iri = reasoner.institution_iri().as_str().to_string();
-                match institutions.register(Box::new(reasoner)) {
-                    Ok(declared) => {
-                        tracing::info!(
-                            { field::OPERATION } = operation::INSTITUTION_REGISTER,
-                            { field::INSTITUTION_IRI } = %iri,
-                            { field::COUNT } = declared.len(),
-                            "registered WASM institution"
-                        );
-                        published_resources.extend(declared);
-                    }
-                    Err(e) => {
-                        errors.push(ValidationError {
-                            resource_iri: iri,
-                            property_iri: String::new(),
-                            rule: "wasm_registration".to_string(),
-                            message: format!("institution registration failed: {e}"),
-                            severity: "error".to_string(),
-                        });
-                    }
-                }
-            }
-        }
-        published_resources
+        // No institution-published resources under D14 — declarations
+        // ride into the chain as ordinary Eigon resources. Returns an
+        // empty Vec for source-compatibility with the Load handler's
+        // follow-up-commit logic (which is now a no-op).
+        Vec::new()
     }
 
     /// RESUME counterpart of [`Self::register_wasm_from_layer`]. Walks a
-    /// rehydrated layer and re-registers every WASM component /
-    /// institution it finds, **without** re-publishing institution
-    /// declared classes — those are already in the persisted chain.
-    /// IO components are forwarded to the orchestrator again (same
-    /// semantics as fresh install; the orchestrator may reject if it
-    /// already has the component).
+    /// rehydrated layer and re-registers every WASM component it
+    /// finds. IO components are forwarded to the orchestrator again
+    /// (same semantics as fresh install; the orchestrator may reject
+    /// if it already has the component). WASM institutions register
+    /// via D14 (chain scan + InstitutionRuntime) — no per-layer
+    /// rehydration call here.
     async fn rehydrate_wasm_from_layer(
         &self,
         layer: &crate::layer::Layer,
@@ -946,29 +1005,6 @@ impl EigeniusService {
         if any_kernel_component_added {
             let mut guard = self.components.write().await;
             *guard = Arc::new(new_registry);
-        }
-
-        if !scan_result.wasm_institutions.is_empty() {
-            let mut institutions = self.institutions.write().await;
-            for reasoner in scan_result.wasm_institutions {
-                let iri = reasoner.institution_iri().as_str().to_string();
-                if let Err(e) = institutions.register_rehydrated(Box::new(reasoner)) {
-                    errors.push(ValidationError {
-                        resource_iri: iri,
-                        property_iri: String::new(),
-                        rule: "wasm_rehydrate".to_string(),
-                        message: format!("institution rehydrate failed: {e}"),
-                        severity: "error".to_string(),
-                    });
-                } else {
-                    tracing::info!(
-                        { field::OPERATION } = operation::INSTITUTION_REGISTER,
-                        { field::INSTITUTION_IRI } = %iri,
-                        rehydrated = true,
-                        "rehydrated WASM institution"
-                    );
-                }
-            }
         }
     }
 
@@ -1116,16 +1152,15 @@ impl EigeniusService {
         let exec_result = {
             let ctx = ctx_arc.read().await;
             let components = Arc::clone(&*self.components.read().await);
-            // Pass an empty institution registry — the pre-Phase-9b-iii
-            // RunProgram path already did this; fiber queries go
-            // through the FiberQuery RPC, not through program
-            // dispatch. Preserves existing behaviour.
-            match crate::program::eval_io::execute_program_nbe_with_institutions(
+            let index = Arc::clone(&*self.institution_index.read().await);
+            let runtime = Arc::clone(&*self.institution_runtime.read().await);
+            match crate::program::eval_io::execute_program_nbe_with_institutions_d14(
                 &program,
                 &input,
                 Arc::clone(ctx.head()),
                 components,
-                Arc::new(crate::institution::InstitutionRegistry::new()),
+                Some(index),
+                Some(runtime),
                 Some(Arc::clone(&self.trace_store)),
                 task_context.clone(),
             ) {
@@ -1352,7 +1387,15 @@ impl EigeniusKernel for EigeniusService {
         let mut errors = Vec::new();
 
         if req.auto_commit {
-            match ctx.commit("loaded") {
+            // Snapshot the current D14 institution index + runtime to
+            // pass to commit_with_validation. Newly committed
+            // resources are gated by AutoOnLoad QueryClasses already
+            // declared in the chain; QueryClasses declared in the
+            // same Load batch take effect on subsequent loads (the
+            // index gets rebuilt below).
+            let index_snapshot = Arc::clone(&*self.institution_index.read().await);
+            let runtime_snapshot = Arc::clone(&*self.institution_runtime.read().await);
+            match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
                 Ok(layer) => {
                     layer_id = layer.id().to_string();
                     tracing::info!(
@@ -1366,6 +1409,10 @@ impl EigeniusKernel for EigeniusService {
                     if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
                         errors.push(err);
                     }
+                    // Rebuild the D14 institution index from the new
+                    // chain so subsequent commits see the just-loaded
+                    // declarations.
+                    self.rebuild_institution_index(&layer).await;
                     // Scan the newly committed layer for WASM components/institutions.
                     // For institutions, this returns the declared morphism / query
                     // class resources that the registration produced.
@@ -1397,6 +1444,7 @@ impl EigeniusKernel for EigeniusService {
                                     {
                                         errors.push(err);
                                     }
+                                    self.rebuild_institution_index(&extra).await;
                                 }
                                 Err(e) => {
                                     errors.push(ValidationError {
@@ -1522,10 +1570,15 @@ impl EigeniusKernel for EigeniusService {
         let branch_name = resolve_branch_name(&req.branch).to_string();
         let ctx_arc = self.get_branch_context(&branch_name).await?;
         let ctx = ctx_arc.read().await;
-        let institutions = self.institutions.read().await;
+        let index = Arc::clone(&*self.institution_index.read().await);
+        let inst_runtime = Arc::clone(&*self.institution_runtime.read().await);
+        let components = Arc::clone(&*self.components.read().await);
 
         let runtime = query::evaluate::FiberRuntime {
-            institutions: Some(&institutions),
+            index: Some(&index),
+            runtime: Some(&inst_runtime),
+            components: Some(&components),
+            overlay: None,
             ctx: Some(&ctx),
         };
 
@@ -1810,131 +1863,36 @@ impl EigeniusKernel for EigeniusService {
         }))
     }
 
-    async fn fiber_query(
-        &self,
-        request: Request<FiberQueryRequest>,
-    ) -> Result<Response<FiberQueryResponse>, Status> {
-        let mut guard = RpcGuard::start(operation::RPC_FIBER_QUERY);
-        let req = request.into_inner();
-        tracing::debug!(
-            { field::OPERATION } = operation::RPC_FIBER_QUERY,
-            { field::INSTITUTION_IRI } = %req.institution_iri,
-            "fiber_query target"
-        );
-        let inst_iri = Iri::parse(&req.institution_iri)
-            .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
-
-        let institutions = self.institutions.read().await;
-        let reasoner = institutions
-            .get(&inst_iri)
-            .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
-
-        let query_resources = Self::parse_resources(&req.query, &req.content_type)?;
-        let query = query_resources
-            .into_iter()
-            .next()
-            .ok_or_else(|| Status::invalid_argument("no query resource"))?;
-
-        let ctx_arc = self.get_branch_context(DEFAULT_BRANCH).await?;
-        let ctx = ctx_arc.read().await;
-        match reasoner.query(&query, &ctx) {
-            Ok(result) => Ok(Response::new(FiberQueryResponse {
-                success: true,
-                result: Self::serialize_resource(&result),
-                error: String::new(),
-            })),
-            Err(e) => {
-                guard.fail("fiber_query_failed");
-                Ok(Response::new(FiberQueryResponse {
-                    success: false,
-                    result: Vec::new(),
-                    error: format!("{e}"),
-                }))
-            }
-        }
-    }
-
-    async fn discover_morphisms(
-        &self,
-        request: Request<DiscoverMorphismsRequest>,
-    ) -> Result<Response<DiscoverMorphismsResponse>, Status> {
-        let mut guard = RpcGuard::start(operation::RPC_DISCOVER_MORPHISMS);
-        let req = request.into_inner();
-        tracing::debug!(
-            { field::OPERATION } = operation::RPC_DISCOVER_MORPHISMS,
-            { field::INSTITUTION_IRI } = %req.institution_iri,
-            "discover_morphisms target"
-        );
-        let inst_iri = Iri::parse(&req.institution_iri)
-            .map_err(|e| Status::invalid_argument(format!("invalid institution IRI: {e}")))?;
-
-        let institutions = self.institutions.read().await;
-        let reasoner = institutions
-            .get(&inst_iri)
-            .ok_or_else(|| Status::not_found(format!("institution not found: {inst_iri}")))?;
-
-        let mut resources = Vec::new();
-        for data in &req.resources {
-            let parsed = Self::parse_resources(data, &req.content_type)?;
-            resources.extend(parsed);
-        }
-
-        let ctx_arc = self.get_branch_context(DEFAULT_BRANCH).await?;
-        let ctx = ctx_arc.read().await;
-        match reasoner.discover_morphisms(&resources, &ctx) {
-            Ok(morphisms) => {
-                let serialized: Vec<Vec<u8>> =
-                    morphisms.iter().map(Self::serialize_resource).collect();
-                Ok(Response::new(DiscoverMorphismsResponse {
-                    success: true,
-                    morphisms: serialized,
-                    error: String::new(),
-                }))
-            }
-            Err(e) => {
-                guard.fail("discover_morphisms_failed");
-                Ok(Response::new(DiscoverMorphismsResponse {
-                    success: false,
-                    morphisms: Vec::new(),
-                    error: format!("{e}"),
-                }))
-            }
-        }
-    }
-
     async fn list_institutions(
         &self,
         request: Request<ListInstitutionsRequest>,
     ) -> Result<Response<ListInstitutionsResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_LIST_INSTITUTIONS);
-        // `at_layer` is accepted but currently has no effect —
-        // institutions live in a kernel-global runtime registry, not
-        // in the layer chain. If Phase 14 ever introduces per-session
-        // institution scoping, this is where the layer-aware lookup
-        // would branch. For 9b-iii we validate + ignore.
         let req = request.into_inner();
         if !req.at_layer.is_empty() {
             let _ = self.resolve_read_layer(&req.at_layer, "").await?;
         }
-        let institutions = self.institutions.read().await;
-        let infos: Vec<proto::InstitutionInfo> = institutions
-            .list()
-            .iter()
-            .map(|info| proto::InstitutionInfo {
-                iri: info.iri.as_str().to_string(),
-                name: info.name.clone(),
-                morphism_types: info
-                    .morphism_type_iris
-                    .iter()
-                    .map(|i| i.as_str().to_string())
-                    .collect(),
-                query_types: info
-                    .query_type_iris
-                    .iter()
-                    .map(|i| i.as_str().to_string())
-                    .collect(),
+        // D14 list-from-index. Each `InstitutionInfo` carries the
+        // QueryClass input-class IRIs declared by the institution.
+        // Comorphisms / formats are not surfaced through this RPC
+        // (a future proto revision can expand the surface).
+        let index = Arc::clone(&*self.institution_index.read().await);
+        let mut infos: Vec<proto::InstitutionInfo> = index
+            .institutions()
+            .map(|inst| {
+                let query_types: Vec<String> = index
+                    .query_classes()
+                    .filter(|qc| qc.institution_ref == inst.iri)
+                    .map(|qc| qc.query_class.as_str().to_string())
+                    .collect();
+                proto::InstitutionInfo {
+                    iri: inst.iri.as_str().to_string(),
+                    name: inst.name.clone(),
+                    query_types,
+                }
             })
             .collect();
+        infos.sort_by(|a, b| a.iri.cmp(&b.iri));
 
         Ok(Response::new(ListInstitutionsResponse {
             institutions: infos,
@@ -2422,6 +2380,16 @@ pub async fn start_server(
             );
         }
     }
+
+    // Build the D14 institution index from the bootstrap / rehydrated
+    // chain so subsequent Loads dispatch AutoOnLoad QueryClasses
+    // declared in the persisted chain.
+    let ctx_arc = service
+        .get_branch_context(DEFAULT_BRANCH)
+        .await
+        .expect("default branch context");
+    let head = Arc::clone(ctx_arc.read().await.head());
+    service.rebuild_institution_index(&head).await;
 
     // Background task resume sweep (D21 §6). Runs detached so the
     // gRPC listener is available immediately; clients can poll

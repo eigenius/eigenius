@@ -1663,124 +1663,99 @@ mod tests {
         );
     }
 
-    // --- Phase 11e: ESL surface for institution capabilities ---
+    // --- D14: ESL surface for institution capabilities ---
 
-    use crate::institution::error::{InstitutionError, MorphismValidation};
-    use crate::institution::{DecResult, FiberDeclaration, FiberReasoner, InstitutionRegistry};
-    use std::sync::Mutex;
+    use crate::institution::registry::InstitutionIndex;
+    use crate::ontology::well_known as wk;
 
-    /// Test institution declaring both a comorphism and a decide
-    /// predicate, recording the calls it receives.
-    struct CapInstitution {
-        institution_iri: Iri,
-        comorphism_iri: Iri,
-        decide_iri: Iri,
-        decide_calls: Mutex<Vec<Vec<Value>>>,
-        translate_calls: Mutex<Vec<String>>,
-    }
+    const CAP_INSTITUTION_IRI: &str = "urn:eigenius:test:cap_inst";
+    const CAP_COMORPHISM_IRI: &str = "urn:eigenius:test:cap_comorphism";
+    const CAP_DECIDE_IRI: &str = "urn:eigenius:test:cap_decide";
 
-    impl CapInstitution {
-        fn new() -> Arc<Self> {
-            Arc::new(Self {
-                institution_iri: Iri::parse("urn:eigenius:test:cap_inst").unwrap(),
-                comorphism_iri: Iri::parse("urn:eigenius:test:cap_comorphism").unwrap(),
-                decide_iri: Iri::parse("urn:eigenius:test:cap_decide").unwrap(),
-                decide_calls: Mutex::new(Vec::new()),
-                translate_calls: Mutex::new(Vec::new()),
-            })
-        }
-    }
+    /// Build an InstitutionIndex carrying one Comorphism and one
+    /// Decidable QueryClass — the two declaration shapes the ESL
+    /// classifier needs to specialize call-site emission against.
+    fn cap_index() -> Arc<InstitutionIndex> {
+        let mut b = LayerBuilder::new("cap_test", None);
 
-    impl FiberReasoner for Arc<CapInstitution> {
-        fn fiber_declaration(&self) -> FiberDeclaration {
-            let mut cm = Resource::new(self.comorphism_iri.clone());
-            cm.set(
-                Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
-                Value::Array(vec![Value::String(
-                    crate::ontology::well_known::COMORPHISM.to_string(),
-                )]),
-            );
-            cm.set(
-                Iri::parse(crate::ontology::well_known::SOURCE_INSTITUTION).unwrap(),
-                Value::String(self.institution_iri.as_str().to_string()),
-            );
-            cm.set(
-                Iri::parse(crate::ontology::well_known::TARGET_INSTITUTION).unwrap(),
-                Value::String("urn:eigenius:test:target".to_string()),
-            );
-            cm.set(
-                Iri::parse(crate::ontology::well_known::TRANSLATION_PROCEDURE).unwrap(),
-                Value::String(self.comorphism_iri.as_str().to_string()),
-            );
-            FiberDeclaration {
-                institution_iri: self.institution_iri.clone(),
-                name: "CapInstitution".to_string(),
-                morphism_types: vec![],
-                query_types: vec![],
-                structural_properties: vec![],
-                comorphism_types: vec![cm],
-                decide_procedures: vec![self.decide_iri.clone()],
-            }
-        }
-        fn query(
-            &self,
-            _q: &Resource,
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
-            unreachable!()
-        }
-        fn validate_morphism(
-            &self,
-            _m: &Resource,
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<MorphismValidation, InstitutionError> {
-            unreachable!()
-        }
-        fn discover_morphisms(
-            &self,
-            _rs: &[Resource],
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<Vec<Resource>, InstitutionError> {
-            unreachable!()
-        }
-        fn decide(
-            &self,
-            _iri: &Iri,
-            args: &[Value],
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<DecResult, InstitutionError> {
-            self.decide_calls.lock().unwrap().push(args.to_vec());
-            Ok(DecResult::Holds)
-        }
-        fn translate(
-            &self,
-            _iri: &Iri,
-            source: &Resource,
-            _ctx: &crate::context::ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
-            let src_id = source
-                .id()
-                .map(|i| i.as_str().to_string())
-                .unwrap_or_default();
-            self.translate_calls.lock().unwrap().push(src_id);
-            Ok(Resource::new(
-                Iri::parse("urn:eigenius:test:translated_out").unwrap(),
-            ))
-        }
-    }
+        // Institution declaration.
+        let mut inst = Resource::new(Iri::parse(CAP_INSTITUTION_IRI).unwrap());
+        inst.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:institution:Institution".to_string(),
+            )]),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_iri").unwrap(),
+            Value::String(CAP_INSTITUTION_IRI.to_string()),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_name").unwrap(),
+            Value::String("CapInstitution".to_string()),
+        );
+        b.add_resource(inst).unwrap();
 
-    fn registry_with_cap(inst: Arc<CapInstitution>) -> Arc<InstitutionRegistry> {
-        let mut reg = InstitutionRegistry::new();
-        reg.register_rehydrated(Box::new(inst)).unwrap();
-        Arc::new(reg)
+        // Comorphism — minimal but well-formed.
+        let mut cm = Resource::new(Iri::parse(CAP_COMORPHISM_IRI).unwrap());
+        cm.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::COMORPHISM.to_string())]),
+        );
+        cm.set(
+            Iri::parse(wk::EXPORT_FORMAT).unwrap(),
+            Value::String("urn:eigenius:test:cap_export".to_string()),
+        );
+        cm.set(
+            Iri::parse(wk::TRANSFORMATION).unwrap(),
+            Value::String("urn:eigenius:test:cap_transform".to_string()),
+        );
+        cm.set(
+            Iri::parse(wk::IMPORT_FORMAT).unwrap(),
+            Value::String("urn:eigenius:test:cap_import".to_string()),
+        );
+        cm.set(Iri::parse(wk::EXACT).unwrap(), Value::Boolean(true));
+        b.add_resource(cm).unwrap();
+
+        // Decidable QueryClass — its @id is the IRI source code calls.
+        let mut qc = Resource::new(Iri::parse(CAP_DECIDE_IRI).unwrap());
+        qc.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::QUERY_CLASS_CLASS.to_string())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
+            Value::String("urn:eigenius:test:CapInput".to_string()),
+        );
+        qc.set(
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            Value::String(wk::VERDICT.to_string()),
+        );
+        qc.set(
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
+            Value::Array(vec![Value::String(wk::DISPATCH_DECIDABLE.to_string())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
+            Value::String("urn:eigenius:test:cap_decide_handler".to_string()),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            Value::String(CAP_INSTITUTION_IRI.to_string()),
+        );
+        b.add_resource(qc).unwrap();
+
+        let layer = b.build();
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "fixture index errors: {errors:?}");
+        Arc::new(idx)
     }
 
     #[test]
     fn esl_comorphism_invoke_compiles_and_decodes() {
         // ESL source invoking the comorphism via component-call
         // syntax: `cap:cap_comorphism(source)`.
-        let inst = CapInstitution::new();
-        let reg = registry_with_cap(inst.clone());
+        let idx = cap_index();
 
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
@@ -1807,7 +1782,7 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_with_institutions(source, reg.clone()).expect("compile");
+            crate::esl::compile_with_institutions(source, idx.clone()).expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -1821,7 +1796,7 @@ mod tests {
         match term {
             Exp::Lam(_, body) => match *body {
                 Exp::InstitutionInvoke { comorphism_iri, .. } => {
-                    assert_eq!(comorphism_iri.as_str(), "urn:eigenius:test:cap_comorphism");
+                    assert_eq!(comorphism_iri.as_str(), CAP_COMORPHISM_IRI);
                 }
                 other => panic!("expected InstitutionInvoke body, got {other:?}"),
             },
@@ -1833,8 +1808,7 @@ mod tests {
     fn esl_decide_predicate_compiles_and_decodes() {
         // ESL source invoking the decide predicate with N args:
         // `cap:cap_decide(input, input)` — args are positional.
-        let inst = CapInstitution::new();
-        let reg = registry_with_cap(inst.clone());
+        let idx = cap_index();
 
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
@@ -1861,7 +1835,7 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_with_institutions(source, reg.clone()).expect("compile");
+            crate::esl::compile_with_institutions(source, idx.clone()).expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -1878,7 +1852,7 @@ mod tests {
                     crate::nbe::term::Constraint::Institution { iri, args },
                     _value,
                 ) => {
-                    assert_eq!(iri.as_str(), "urn:eigenius:test:cap_decide");
+                    assert_eq!(iri.as_str(), CAP_DECIDE_IRI);
                     assert_eq!(args.len(), 2);
                 }
                 other => panic!("expected NativeDecide(Institution) body, got {other:?}"),
@@ -1892,8 +1866,7 @@ mod tests {
         // A comorphism takes exactly 1 source arg. Two positional
         // args (which would be legal for a component under the
         // legacy arity sugar) must error.
-        let inst = CapInstitution::new();
-        let reg = registry_with_cap(inst);
+        let idx = cap_index();
 
         let source = r#"
             namespace core = "urn:eigenius:core";
@@ -1907,7 +1880,7 @@ mod tests {
                 cap:cap_comorphism(input, input)
             }
         "#;
-        let result = crate::esl::compile_with_institutions(source, reg);
+        let result = crate::esl::compile_with_institutions(source, idx);
         let errors = result.unwrap_err();
         assert!(
             errors.iter().any(|e| e.to_string().contains("comorphism"))

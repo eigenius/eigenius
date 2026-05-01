@@ -158,9 +158,9 @@ The general rule for constraint firing during type-check:
 - A property carries zero or more `Constraint` values.
 - When a value flows through a position typed by that property, the type-checker iterates the constraints and dispatches each one to its appropriate decide procedure.
 - Built-in constraints (`min_value`, `max_length`, regex patterns) have built-in decide procedures.
-- **Institution-registered decide procedures** ([chapter 9](09-institutions.md)) are called the same way — the kernel sees a `Constraint::Institution { iri, args }` and dispatches via `InstitutionRegistry::institution_for_decide` to the registered reasoner.
+- **Institution-registered Decidable QueryClasses** ([chapter 9](09-institutions.md)) are called the same way — the kernel sees a `Constraint::Institution { iri, args }`, resolves the QueryClass in the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs), and dispatches `Institution::query(query_handler, synthetic_input, ctx)` on the registered runtime.
 
-The capability mode required is **`Check`** — `Read` plus institution registry access. In `Pure` mode, constraints can't fire (no layer); in `Read`, they can fire only for the built-in ones; in `Check`, the institution-registered ones fire too.
+The capability mode required is **`Check`** — `Read` plus institution-index + institution-runtime access. In `Pure` mode, constraints can't fire (no layer); in `Read`, they can fire only for the built-in ones; in `Check`, the institution-registered ones fire too.
 
 This chapter has been the *what* and *why* of the bridge. The capability-mode chapter ([chapter 8](08-capability-modes.md)) covers the *when* in operational terms.
 

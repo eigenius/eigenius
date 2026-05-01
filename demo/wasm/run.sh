@@ -16,11 +16,12 @@
 
 # WASM Extensibility Demo
 #
-# Exercises the Phase 8 WASM hosting path end-to-end:
+# Exercises the WASM hosting path end-to-end:
 #   1. Installs a pure WASM component (doc validator) into the kernel
 #   2. Installs an IO WASM component (http shout) into the orchestrator
-#   3. Installs a WASM institution (ordering) into the kernel
-#   4. Invokes each via `capability test` and shows typed results
+#   3. Invokes each via `capability test` and shows typed results
+#
+# A D14 institution demo will land separately (see D14 §13.4 M8).
 #
 # Prerequisites:
 #   - The kernel and orchestrator are running (Docker Compose or three terminals)
@@ -45,7 +46,6 @@ fi
 
 DOC_VALIDATOR_WASM="$REPO_DIR/examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm"
 HTTP_SHOUT_WASM="$REPO_DIR/examples/wasm-http-shout/target/wasm32-unknown-unknown/debug/eigenius_wasm_http_shout.wasm"
-ORDERING_WASM="$REPO_DIR/examples/wasm-ordering-institution/target/wasm32-unknown-unknown/debug/eigenius_wasm_ordering_institution.wasm"
 
 build_if_missing() {
   local wasm_path="$1"
@@ -61,10 +61,9 @@ echo "Kernel:       $ENDPOINT"
 echo "Orchestrator: $ORCHESTRATOR"
 echo
 
-# Pre-flight: make sure all three WASM binaries exist
+# Pre-flight: make sure all WASM binaries exist
 build_if_missing "$DOC_VALIDATOR_WASM" "$REPO_DIR/examples/wasm-doc-validator"
 build_if_missing "$HTTP_SHOUT_WASM" "$REPO_DIR/examples/wasm-http-shout"
-build_if_missing "$ORDERING_WASM" "$REPO_DIR/examples/wasm-ordering-institution"
 echo
 
 # Health check the orchestrator
@@ -147,35 +146,10 @@ $EIGENIUS --endpoint "$ENDPOINT" capability test \
 echo
 
 # =============================================================================
-# WASM institution: ordering (hosted in the kernel)
-# =============================================================================
-
-echo "--- Step 6: Install WASM institution (ordering, kernel-hosted) ---"
-$EIGENIUS --endpoint "$ENDPOINT" capability install \
-  "$ORDERING_WASM" \
-  --as-iri urn:eigenius:test:wasm:ordering \
-  --kind institution
-echo
-
-cat > /tmp/conv-query.json <<'EOF'
-{
-  "@id": "urn:example:query:conv1",
-  "urn:eigenius:core:is_a": ["urn:eigenius:test:wasm:ConvergenceQuery"],
-  "urn:eigenius:test:wasm:tolerance": 0.01,
-  "urn:eigenius:test:wasm:latest_delta": 0.001
-}
-EOF
-
-echo "--- Step 7: Test convergence query (parameterized fiber query) ---"
-$EIGENIUS --endpoint "$ENDPOINT" capability test \
-  urn:eigenius:test:wasm:ordering --input /tmp/conv-query.json
-echo
-
-# =============================================================================
 # Summary
 # =============================================================================
 
-echo "--- Step 8: List all registered capabilities ---"
+echo "--- Step 6: List all registered capabilities ---"
 $EIGENIUS --endpoint "$ENDPOINT" capability list
 echo
 
@@ -184,4 +158,5 @@ echo "What was demonstrated:"
 echo "  - Pure WASM component hosted in the kernel (doc validator)"
 echo "  - IO WASM component hosted in the orchestrator (http shout)"
 echo "    dispatching to CompleteText via the io-access host import"
-echo "  - WASM institution with parameterized fiber queries (ordering)"
+echo
+echo "(D14 institution demo is forthcoming — see docs/design/d14-institution-realisation.md §13.4 M8.)"

@@ -5,6 +5,13 @@ interface types {
     /// A CBOR-encoded Eigon resource.
     type resource-data = list<u8>;
 
+    /// A CBOR-encoded Mini-TT typed value (D14 §11). Distinct from
+    /// `resource-data` even though the wire form is the same: a typed
+    /// value inhabits a Mini-TT type (primitive, tuple, inductive,
+    /// codata) and is the payload exchanged between the source-side
+    /// extract, the Component middle, and the target-side reify.
+    type typed-value = list<u8>;
+
     /// An IRI string.
     type iri = string;
 
@@ -90,7 +97,10 @@ interface institution-types {
     }
 }
 
-/// A WASM fiber reasoner for a Grothendieck institution. Hosted in the kernel.
+/// A WASM fiber reasoner for the legacy `FiberReasoner` protocol
+/// (pre-D14). Retained while the migration to D14 is in flight; M5–M8
+/// of the D14 plan retire this world along with its host bridge and
+/// the `wasm-ordering-institution` example.
 world eigenius-institution {
     import read-access;
     import query-access;
@@ -114,4 +124,69 @@ world eigenius-institution {
     /// Returns a list of new morphism resources (CBOR-encoded).
     export discover-morphisms: func(resources: list<resource-data>)
         -> result<list<resource-data>, string>;
+}
+
+/// A WASM institution targeting the D14 dispatch surface (D14 §8 / §11).
+///
+/// Three exports — two mandatory boundary methods and one optional
+/// reasoning method:
+///
+/// - `extract-typed` and `reify` translate between the institution's
+///   resource form and the typed Mini-TT payload form the kernel
+///   manipulates internally. Always required.
+/// - `query` is the institution's escape hatch for QueryClasses whose
+///   implementation is opaque code. QueryClasses whose `query_handler`
+///   IRI resolves to a kernel-registered Component are dispatched
+///   entirely through Mini-TT and never call this method. Default
+///   guests may export it as a stub returning `not-implemented`.
+///
+/// `procedure-iri` is the dispatch key the kernel passes — declared on
+/// the corresponding `ExportFormat` / `ImportFormat` / `QueryClass`
+/// resource. The same institution may handle many procedures and
+/// dispatch internally on the IRI.
+///
+/// All declaration data — Institution metadata, ExportFormat /
+/// ImportFormat / QueryClass / Comorphism resources — lives in the
+/// layer chain (D14 §3, ontology-first). The WASM component is *only*
+/// the implementation; declarations ride alongside as Eigon-JSON or
+/// Eigon-CBOR.
+world eigenius-institution-d14 {
+    import read-access;
+    import query-access;
+
+    use types.{resource-data, typed-value, iri};
+
+    /// Boundary: extract a typed Mini-TT value from a resource via a
+    /// procedure declared by an `ExportFormat` resource owned by this
+    /// institution. The returned `typed-value` must inhabit the type
+    /// declared by the matching `ExportFormat.payload_type`.
+    /// (Parameter `input` is a CBOR-encoded `resource-data` — the
+    /// keyword `resource` is reserved in WIT.)
+    export extract-typed: func(
+        procedure-iri: iri,
+        input: resource-data,
+    ) -> result<typed-value, string>;
+
+    /// Boundary: construct a target-class resource from a typed value
+    /// via a procedure declared by an `ImportFormat` resource owned by
+    /// this institution. The input `typed-value` is guaranteed to
+    /// inhabit the type declared by the matching
+    /// `ImportFormat.payload_type`.
+    export reify: func(
+        procedure-iri: iri,
+        value: typed-value,
+    ) -> result<resource-data, string>;
+
+    /// Apply an institution-defined query — input resource of one
+    /// class, output resource of another. Subsumes the prior
+    /// validate-morphism / decide / discover-morphisms tripartite; the
+    /// dispatch role is determined by the `QueryClass` declaration on
+    /// the chain, not by which export the kernel chose to call.
+    /// Optional: stub-export institutions whose QueryClasses are all
+    /// Component-implemented return an error indicating the
+    /// procedure is not handled at runtime.
+    export query: func(
+        procedure-iri: iri,
+        input: resource-data,
+    ) -> result<resource-data, string>;
 }
