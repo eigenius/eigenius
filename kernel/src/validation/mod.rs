@@ -2243,7 +2243,7 @@ mod tests {
         ))
         .unwrap();
 
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
         let validator = Validator::new(&layer);
         let comorphism_errors: Vec<_> = validator
             .validate()
@@ -2289,7 +2289,7 @@ mod tests {
         ))
         .unwrap();
 
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
         let validator = Validator::new(&layer);
         let errors = validator.validate();
         let dangling: Vec<_> = errors
@@ -2348,7 +2348,7 @@ mod tests {
         ))
         .unwrap();
 
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
         let validator = Validator::new(&layer);
         let errors = validator.validate();
         let mismatched: Vec<_> = errors
@@ -2395,7 +2395,7 @@ mod tests {
         ))
         .unwrap();
 
-        let layer = Arc::new(top.build());
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
         let validator = Validator::new(&layer);
         let errors = validator.validate();
         let dangling: Vec<_> = errors

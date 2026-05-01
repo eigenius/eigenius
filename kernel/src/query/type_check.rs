@@ -1083,7 +1083,7 @@ mod tests {
         for r in eigon_json::parse_document(demo_ontology).expect("parse demo") {
             builder.add_resource(r).expect("add demo resource");
         }
-        Arc::new(builder.build())
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
     #[test]

@@ -490,8 +490,10 @@ mod tests {
         Arc<crate::layer::Layer>,
         Arc<InstitutionIndex>,
         Arc<InstitutionRuntime>,
+        LayerStorage,
     ) {
-        let core = build_core_layer();
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
         let mut b = LayerBuilder::new("test", Some(core));
 
         let inst_iri = "urn:eigenius:test:cwv:inst";
@@ -527,18 +529,18 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let layer = Arc::new(b.build());
+        let layer = Arc::new(b.build(storage.clone()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "{errors:?}");
         let mut runtime = InstitutionRuntime::new();
         runtime.register(Box::new(AlwaysFails)).unwrap();
-        (layer, Arc::new(idx), Arc::new(runtime))
+        (layer, Arc::new(idx), Arc::new(runtime), storage)
     }
 
     #[test]
     fn commit_with_validation_accepts_when_no_auto_on_load_class_matches() {
-        let (chain, idx, runtime) = build_cwv_setup();
-        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite);
+        let (chain, idx, runtime, storage) = build_cwv_setup();
+        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite, storage);
 
         // Resource of an unrelated class — no AutoOnLoad matches.
         ctx.add_resource(make_resource(
@@ -558,9 +560,9 @@ mod tests {
 
     #[test]
     fn commit_with_validation_rejects_when_auto_on_load_returns_fails() {
-        let (chain, idx, runtime) = build_cwv_setup();
+        let (chain, idx, runtime, storage) = build_cwv_setup();
         let prior_head_id = chain.id().to_string();
-        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite);
+        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite, storage);
 
         ctx.add_resource(make_resource(
             "urn:eigenius:test:cwv:bad",
