@@ -15,8 +15,9 @@
 //! EigenQL evaluator: pattern matching, fixpoint, aggregation, result shaping.
 
 use crate::context::ExecutionContext;
-use crate::institution::InstitutionRegistry;
-use crate::layer::Layer;
+use crate::institution::registry::{DispatchRole, InstitutionIndex};
+use crate::institution::runtime::InstitutionRuntime;
+use crate::layer::{is_indexable_predicate, scan_chain, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
@@ -471,20 +472,202 @@ fn resolve_fiber_institution(
     }
 }
 
-fn resolve_name_to_class_iri(layer: &Layer, short: &str) -> Option<Iri> {
-    let class_iri = Iri::parse(wk::CLASS).unwrap();
-    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-    for (iri, res) in layer.all_resources() {
-        if !res.is_instance_of(&class_iri) {
-            continue;
+/// Run the four-step comorphism pipeline for a FIBER param coercion
+/// (D2 v2 §3.5 / §6.12). Mirrors the kernel-side
+/// [`crate::nbe::eval::try_d14_institution_invoke`] but operates on
+/// EigenQL `Value`s and dispatches the transformation Component
+/// directly via `BuiltinComponent::execute` — v1 restricts coercion
+/// transformations to Pure/Read so we don't need IO mode plumbing.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_comorphism_coercion(
+    name: &Name,
+    source: &Expression,
+    binding: &Binding,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    inst_runtime: &InstitutionRuntime,
+    components: &crate::program::component::ComponentRegistry,
+    ctx: &ExecutionContext,
+) -> Result<Value, QueryError> {
+    // Resolve the comorphism by name / IRI to its index entry.
+    let comorphism_iri = match name {
+        Name::FullIri(i) => i.clone(),
+        Name::ShortName(short) => Iri::parse(short).map_err(|_| {
+            QueryError::evaluation(format!(
+                "comorphism_coercion: '{short}' is not a parseable IRI"
+            ))
+        })?,
+    };
+    let comorphism = index.comorphism(&comorphism_iri).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}` not registered in InstitutionIndex"
+        ))
+    })?;
+
+    // Source-side institution lookup.
+    let export = index
+        .export_format(&comorphism.export_format)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: export_format `{}` not in InstitutionIndex",
+                comorphism.export_format
+            ))
+        })?;
+    let source_inst = inst_runtime.get(&export.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: source institution `{}` not registered in runtime",
+            export.institution_ref
+        ))
+    })?;
+
+    // Evaluate the source expression against the current binding;
+    // unwrap an Embedded resource or dereference a String → IRI →
+    // resource lookup. Other primitive values are wrapped on a
+    // single core:value property.
+    let source_value = eval_expression(source, binding, layer, FiberRuntime::default())?;
+    let source_resource = value_to_source_resource(&source_value, layer);
+
+    // Step 2 — extract typed payload via the source institution.
+    let typed_source = source_inst
+        .extract_typed(&export.procedure, &source_resource, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: extract_typed via `{}` failed: {e}",
+                export.procedure
+            ))
+        })?;
+    let typed_resource = match typed_source {
+        crate::nbe::val::Val::ResourceVal(r) => *r,
+        other => {
+            return Err(QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: extract_typed returned {other:?}, but the \
+                 EigenQL four-step pipeline only marshals ResourceVal payloads in v1"
+            )));
         }
-        if let Some(Value::String(s)) = res.get(&short_prop) {
-            if s == short {
-                return Some(iri.clone());
+    };
+
+    // Step 3 — apply the transformation Component.
+    let component = components
+        .get(comorphism.transformation.as_str())
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: transformation Component `{}` not registered",
+                comorphism.transformation
+            ))
+        })?;
+    let transformed_resource = component
+        .execute(&typed_resource, None, layer)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: transformation `{}` failed: {e}",
+                comorphism.transformation
+            ))
+        })?
+        .output;
+
+    // Step 4 — target-side institution reify.
+    let import = index
+        .import_format(&comorphism.import_format)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: import_format `{}` not in InstitutionIndex",
+                comorphism.import_format
+            ))
+        })?;
+    let target_inst = inst_runtime.get(&import.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: target institution `{}` not registered in runtime",
+            import.institution_ref
+        ))
+    })?;
+    let transformed_val = crate::nbe::val::Val::ResourceVal(Box::new(transformed_resource));
+    let target_resource = target_inst
+        .reify(&import.procedure, &transformed_val, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "comorphism `{comorphism_iri}`: reify via `{}` failed: {e}",
+                import.procedure
+            ))
+        })?;
+
+    // Post-translation validation invariant (D14 §9.3 step 5).
+    let post_errors = crate::institution::dispatch::dispatch_auto_on_load_for_resource(
+        &target_resource,
+        index,
+        inst_runtime,
+        ctx,
+    );
+    if !post_errors.is_empty() {
+        let reasons = post_errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(QueryError::evaluation(format!(
+            "comorphism `{comorphism_iri}`: post-translation validation rejected the reified \
+             resource: {reasons}"
+        )));
+    }
+
+    Ok(Value::Embedded(Box::new(target_resource)))
+}
+
+/// Convert a FIBER param-coercion source `Value` to a Resource.
+/// Embedded values pass through; IRI-shaped Strings dereference
+/// against the layer; all other shapes are wrapped on a single
+/// `core:value` property.
+fn value_to_source_resource(value: &Value, layer: &Layer) -> Resource {
+    match value {
+        Value::Embedded(r) => r.as_ref().clone(),
+        Value::String(s) => {
+            if let Ok(iri) = Iri::parse(s) {
+                if let Some(r) = layer.resolve(&iri) {
+                    return (*r).clone();
+                }
             }
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                Value::String(s.clone()),
+            );
+            r
+        }
+        other => {
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
+                other.clone(),
+            );
+            r
         }
     }
-    None
+}
+
+/// Resolve a `FIBER fc.query_class` reference (short name or full IRI)
+/// to a QueryClass declaration's IRI. Short-name lookup walks the
+/// layer for a resource with matching `short_name` whose `is_a`
+/// includes `urn:eigenius:institution:QueryClass`.
+fn resolve_query_class_iri(name: &Name, layer: &Layer) -> Result<Iri, QueryError> {
+    match name {
+        Name::FullIri(iri) => Ok(iri.clone()),
+        Name::ShortName(short) => {
+            let qc_class_iri = Iri::parse(wk::QUERY_CLASS_CLASS).unwrap();
+            let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+            for (iri, res) in layer.iter_all_resources() {
+                if !res.is_instance_of(&qc_class_iri) {
+                    continue;
+                }
+                if let Some(Value::String(s)) = res.get(&short_prop) {
+                    if s == short {
+                        return Ok(iri.clone());
+                    }
+                }
+            }
+            Err(QueryError::evaluation(format!(
+                "FIBER query class '{short}' not resolvable in layer (no QueryClass resource with that short_name)"
+            )))
+        }
+    }
 }
 
 fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri> {
@@ -1156,7 +1339,7 @@ fn resolve_iri_string(s: &str, layer: &Layer, runtime: FiberRuntime<'_>) -> Opti
             }
         }
     }
-    layer.resolve(&iri).cloned()
+    layer.resolve(&iri).map(|r| (*r).clone())
 }
 
 fn literal_to_value(lit: &Literal) -> Value {
@@ -1209,59 +1392,49 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
 fn try_dispatch_decidable(
     iri: &Iri,
     args: &[Value],
-    layer: &Layer,
-    registry: &InstitutionRegistry,
-) -> Result<Value, QueryError> {
-    use crate::institution::{DecResult, InstitutionCapability};
-    // Build a fresh ExecutionContext for the call — mirrors the
-    // kernel's NativeDecide / InstitutionInvoke behaviour.
-    let head = std::sync::Arc::new(layer.clone());
-    let exec_ctx = crate::context::ExecutionContext::new(
-        head,
-        "__eigenql_dispatch__",
-        crate::context::ExecutionMode::ReadOnly,
-    );
-    match capability {
-        InstitutionCapability::DecidePredicate => {
-            let reasoner = registry.institution_for_decide(iri).ok_or_else(|| {
-                QueryError::evaluation(format!(
-                    "decide procedure `{iri}` classified but no institution registered"
-                ))
-            })?;
-            let result = reasoner
-                .decide(iri, args, &exec_ctx)
-                .map_err(|e| QueryError::evaluation(format!("decide `{iri}` failed: {e}")))?;
-            Ok(Value::Boolean(matches!(result, DecResult::Holds)))
-        }
-        InstitutionCapability::Comorphism => {
-            if args.len() != 1 {
-                return Err(QueryError::evaluation(format!(
-                    "comorphism `{iri}` expects exactly 1 source argument, got {}",
-                    args.len()
-                )));
-            }
-            let reasoner = registry.institution_for_comorphism(iri).ok_or_else(|| {
-                QueryError::evaluation(format!(
-                    "comorphism `{iri}` classified but no institution registered"
-                ))
-            })?;
-            let source = match &args[0] {
-                Value::Embedded(r) => (**r).clone(),
-                other => {
-                    let mut r = Resource::new_embedded();
-                    r.set(
-                        Iri::parse("urn:eigenius:core:value").expect("well-known IRI"),
-                        other.clone(),
-                    );
-                    r
-                }
-            };
-            let translated = reasoner.translate(iri, &source, &exec_ctx).map_err(|e| {
-                QueryError::evaluation(format!("comorphism `{iri}` translate failed: {e}"))
-            })?;
-            Ok(Value::Embedded(Box::new(translated)))
-        }
+    runtime: FiberRuntime<'_>,
+) -> Result<Option<Value>, QueryError> {
+    let (Some(index), Some(inst_runtime), Some(ctx)) =
+        (runtime.index, runtime.runtime, runtime.ctx)
+    else {
+        return Ok(None);
+    };
+    let Some(qc_entry) = index.query_class(iri) else {
+        return Ok(None);
+    };
+    if !qc_entry.dispatch_roles.contains(&DispatchRole::Decidable) {
+        return Ok(None);
     }
+    let institution = inst_runtime.get(&qc_entry.institution_ref).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "Decidable QueryClass `{iri}` declares institution `{}` not registered in runtime",
+            qc_entry.institution_ref
+        ))
+    })?;
+
+    // Marshal positional args onto a synthetic input resource of the
+    // QueryClass's input class (D14 §9.2, mirrored by the kernel-side
+    // `try_d14_decide`).
+    let mut input = Resource::new_embedded();
+    input.set(
+        Iri::parse(wk::IS_A).expect("well-known IRI"),
+        Value::Array(vec![Value::String(qc_entry.query_class.as_str().into())]),
+    );
+    input.set(
+        Iri::parse("urn:eigenius:institution:decide_args").expect("well-known IRI"),
+        Value::Array(args.to_vec()),
+    );
+
+    let result = institution
+        .query(&qc_entry.query_handler, &input, ctx)
+        .map_err(|e| {
+            QueryError::evaluation(format!(
+                "Decidable QueryClass `{iri}` handler `{}` failed: {e}",
+                qc_entry.query_handler
+            ))
+        })?;
+
+    Ok(Some(Value::Embedded(Box::new(result))))
 }
 
 /// Apply GROUP BY and aggregation.
@@ -1859,7 +2032,7 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let layer = b.build();
+        let layer = b.build(crate::layer::LayerStorage::in_memory());
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "fixture index errors: {errors:?}");
         Arc::new(idx)
@@ -1896,13 +2069,23 @@ mod tests {
         let index = q_index();
         let inst_runtime = q_runtime();
 
+        let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build());
+        let layer = Arc::new(builder.build(storage));
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer));
+
+        let runtime = FiberRuntime {
+            index: Some(&index),
+            runtime: Some(&inst_runtime),
+            components: None,
+            overlay: None,
+            ctx: Some(&exec_ctx),
+        };
 
         // Use FunctionCall directly at eval_expression level for a
         // focused test — the full-query integration would need more
@@ -1947,13 +2130,23 @@ mod tests {
         let index = q_index();
         let inst_runtime = q_runtime();
 
+        let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
         for r in core_resources {
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build());
+        let layer = Arc::new(builder.build(storage));
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer));
+
+        let runtime = FiberRuntime {
+            index: Some(&index),
+            runtime: Some(&inst_runtime),
+            components: None,
+            overlay: None,
+            ctx: Some(&exec_ctx),
+        };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::FunctionCall {
@@ -2030,7 +2223,9 @@ mod tests {
             Iri::parse(wk::CTOR_NAME).unwrap(),
             Value::String("Holds".into()),
         );
-        let layer = Arc::new(LayerBuilder::new("postfix-test", None).build());
+        let layer = Arc::new(
+            LayerBuilder::new("postfix-test", None).build(crate::layer::LayerStorage::in_memory()),
+        );
         let runtime = FiberRuntime::default();
         let mut binding: BTreeMap<String, Value> = BTreeMap::new();
         binding.insert("v".into(), Value::Embedded(Box::new(verdict)));
@@ -2100,19 +2295,50 @@ mod tests {
     }
 
     #[test]
-    fn unknown_iri_falls_through_to_builtin_error() {
-        // An IRI that isn't registered as either decide or
-        // comorphism falls through to `functions::call_function`,
-        // which errors with "no such function."
-        let reg = InstitutionRegistry::new();
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let core_resources = eigon_json::parse_document(core_json).unwrap();
-        let mut builder = LayerBuilder::new("core", None);
-        for r in core_resources {
-            builder.add_resource(r).unwrap();
+    fn parser_treats_multi_arg_qualified_call_as_expression() {
+        // Multi-arg qualified-name function calls stay as Expression
+        // in FIBER param value position (comorphisms are unary by
+        // construction).
+        use crate::query::ast::{Clause, Expression, ParamValue};
+        let source = r#"
+            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            MATCH ?d {}
+            FIBER assay:within_tolerance {
+                predicted_ic50: cap:multi(?d, 1.0)
+            } AS ?v
+            RETURN [] { d: ?d }
+        "#;
+        let tokens = tokenize(source).unwrap();
+        let program = parser::parse(tokens).expect("parse FIBER + multi-arg");
+        let fiber = program
+            .query
+            .body
+            .clauses
+            .iter()
+            .find_map(|c| match c {
+                Clause::Fiber(fc) => Some(fc),
+                _ => None,
+            })
+            .expect("FIBER clause");
+        match &fiber.params[0].value {
+            ParamValue::Expression(Expression::FunctionCall { args, .. }) => {
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected ParamValue::Expression(FunctionCall), got {other:?}"),
         }
-        let layer = Arc::new(builder.build());
+    }
 
+    #[test]
+    fn postfix_predicate_rejects_non_verdict_operand() {
+        // A non-Verdict operand (e.g. an Integer) should error with a
+        // type-mismatch evaluation error rather than silently returning
+        // false. Type-checker enforcement of this rule lands as part of
+        // §5.9 rule coverage; the runtime guard is the floor.
+        use crate::query::ast::{Expression, Literal, VerdictPredicate};
+        let layer = Arc::new(
+            LayerBuilder::new("postfix-test", None).build(crate::layer::LayerStorage::in_memory()),
+        );
+        let runtime = FiberRuntime::default();
         let binding: BTreeMap<String, Value> = BTreeMap::new();
         let expr = Expression::VerdictPredicate {
             kind: VerdictPredicate::Holds,

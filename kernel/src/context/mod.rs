@@ -240,7 +240,7 @@ impl ExecutionContext {
             &mut self.working,
             LayerBuilder::new(name, Some(Arc::clone(&self.head))),
         );
-        let new_layer = Arc::new(working.build());
+        let new_layer = Arc::new(working.build(self.storage.clone()));
 
         // Structural validation first — institutions assume well-formed
         // morphism resources (D14 §9.1).
@@ -262,6 +262,7 @@ impl ExecutionContext {
             Arc::clone(&new_layer),
             "__validate__",
             ExecutionMode::ReadOnly,
+            self.storage.clone(),
         );
         let auto_errors = crate::institution::dispatch::dispatch_auto_on_load_for_layer(
             &new_layer, index, runtime, &snapshot,

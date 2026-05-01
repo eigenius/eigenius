@@ -381,15 +381,39 @@ fn check_fiber_clauses(
         //    short_name.
         let qc_iri = match &fc.query_class {
             Name::FullIri(iri) => Some(iri.clone()),
-            Name::ShortName(name) => resolve_short_name_to_class(layer, name),
+            Name::ShortName(short) => resolve_short_name_to_query_class(layer, short),
+        };
+        let qc_entry = qc_iri.as_ref().and_then(|i| index.query_class(i));
+        let qc_entry = match qc_entry {
+            Some(e) => e,
+            None => {
+                errors.push(QueryError::type_check(
+                    "fiber_query_class_not_query_class",
+                    format!(
+                        "FIBER query class '{}' does not resolve to an indexed QueryClass declaration",
+                        query_class_name_display(&fc.query_class)
+                    ),
+                ));
+                continue;
+            }
         };
 
-        let class_resource = query_class_iri
-            .as_ref()
-            .and_then(|iri| layer.resolve(iri).cloned());
+        // 3. QueryClass must include OnDemand in its dispatch_role set.
+        if !qc_entry.dispatch_roles.contains(&DispatchRole::OnDemand) {
+            errors.push(QueryError::type_check(
+                "fiber_query_class_not_on_demand",
+                format!(
+                    "FIBER query class '{}' has no OnDemand dispatch role — \
+                     declare on_demand on the QueryClass to allow FIBER dispatch",
+                    qc_entry.iri
+                ),
+            ));
+        }
 
-        if let Some(ref cr) = class_resource {
-            if !cr.is_instance_of(&class_iri) {
+        // 4. The QueryClass's institution_ref must equal the aliased
+        //    institution.
+        if let Some(ref aliased) = aliased_inst_iri {
+            if qc_entry.institution_ref != *aliased {
                 errors.push(QueryError::type_check(
                     "fiber_institution_mismatch",
                     format!(
@@ -879,8 +903,8 @@ fn resolve_short_name_to_query_class(layer: &Layer, short: &str) -> Option<Iri> 
     use crate::ontology::resource::Value;
     let qc_class_iri = Iri::parse(wk::QUERY_CLASS_CLASS).unwrap();
     let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-    for (iri, res) in layer.all_resources() {
-        if !res.is_instance_of(&class_iri) {
+    for (iri, res) in layer.iter_all_resources() {
+        if !res.is_instance_of(&qc_class_iri) {
             continue;
         }
         if let Some(Value::String(s)) = res.get(&short_prop) {

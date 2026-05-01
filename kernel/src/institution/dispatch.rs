@@ -144,9 +144,9 @@ pub fn dispatch_auto_on_load_for_layer(
     ctx: &ExecutionContext,
 ) -> Vec<ValidationError> {
     let mut errors = Vec::new();
-    for resource in layer.resources().values() {
+    for (_iri, resource) in layer.iter_resources() {
         errors.extend(dispatch_auto_on_load_for_resource(
-            resource, index, runtime, ctx,
+            &resource, index, runtime, ctx,
         ));
     }
     errors

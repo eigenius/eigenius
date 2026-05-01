@@ -238,7 +238,7 @@ fn link_read_access(linker: &mut Linker<HostState>) -> Result<(), String> {
             };
             match ctx.data().layer.resolve(&iri) {
                 Some(resource) => {
-                    let cbor = eigon_cbor::serialize_resource(resource);
+                    let cbor = eigon_cbor::serialize_resource(&resource);
                     let bytes_val = WasmVal::List(cbor.into_iter().map(WasmVal::U8).collect());
                     results[0] = WasmVal::Option(Some(Box::new(bytes_val)));
                 }

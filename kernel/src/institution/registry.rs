@@ -187,8 +187,8 @@ impl InstitutionIndex {
         let mut idx = Self::new();
         let mut errors = Vec::new();
 
-        for (_iri, resource) in layer.all_resources() {
-            idx.ingest(resource, &mut errors);
+        for (_iri, resource) in layer.iter_all_resources() {
+            idx.ingest(&resource, &mut errors);
         }
 
         (idx, errors)

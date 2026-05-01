@@ -1276,13 +1276,17 @@ fn try_d14_institution_invoke(
         }
     };
 
+    let storage = crate::layer::LayerStorage::in_memory();
     let head = ctx.layer().cloned().unwrap_or_else(|| {
-        Arc::new(crate::layer::LayerBuilder::new("__invoke_empty_layer__", None).build())
+        Arc::new(
+            crate::layer::LayerBuilder::new("__invoke_empty_layer__", None).build(storage.clone()),
+        )
     });
     let exec_ctx = crate::context::ExecutionContext::new(
         head,
         "__invoke__",
         crate::context::ExecutionMode::ReadOnly,
+        storage,
     );
 
     // Step 2: extract typed payload from source-side resource.

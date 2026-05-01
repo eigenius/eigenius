@@ -208,7 +208,7 @@ pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, Reg
     let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
     let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
 
-    for (iri, resource) in layer.all_resources() {
+    for (iri, resource) in layer.iter_all_resources() {
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
@@ -218,7 +218,7 @@ pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, Reg
         };
         let _ = runtime_kind;
 
-        match load_wasm_institution(resource, iri, layer) {
+        match load_wasm_institution(&resource, &iri, layer) {
             Ok(wasm_inst) => {
                 let inst_iri = wasm_inst.institution_iri().clone();
                 if let Err(e) = runtime.register(Box::new(wasm_inst)) {
