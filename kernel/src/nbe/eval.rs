@@ -1906,18 +1906,18 @@ fn try_d14_decide(
     );
 
     let head = ctx.layer().cloned().unwrap_or_else(|| {
-                Arc::new(
-                    crate::layer::LayerBuilder::new("__decide_empty_layer__", None)
-                        .build(crate::layer::LayerStorage::in_memory()),
-                )
-            });
-            let storage = head.storage().clone();
-            let exec_ctx = crate::context::ExecutionContext::new(
-                head,
-                "__decide__",
-                crate::context::ExecutionMode::ReadOnly,
-                storage,
-            );
+        Arc::new(
+            crate::layer::LayerBuilder::new("__decide_empty_layer__", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        )
+    });
+    let storage = head.storage().clone();
+    let exec_ctx = crate::context::ExecutionContext::new(
+        head,
+        "__decide__",
+        crate::context::ExecutionMode::ReadOnly,
+        storage,
+    );
 
     // Component-implemented QueryClasses go through extract → component
     // → reify; institution-runtime ones land in `Institution::query`.
