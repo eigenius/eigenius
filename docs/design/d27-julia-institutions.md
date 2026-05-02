@@ -1,7 +1,7 @@
 # Julia Institutions
 
 **Status:** Draft — outline for the design specification
-**Scope:** What it takes to bring Julia up as the first concrete instance of the [runtime substrate](d26-runtime-substrate.md), and to register specific Julia libraries as Eigenius institutions on top of it under the [D14 institution protocol](d14-institution-realisation.md). Covers the Julia-specific resource subclasses, the `eigon-julia-gen` mirror generator, three reference institutions (`Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`), and the future Lean / Julia bridge.
+**Scope:** What it takes to bring Julia up as the first concrete instance of the [runtime substrate](d26-runtime-substrate.md), and to register specific Julia libraries as Eigenius institutions on top of it under the [D14 institution protocol](d14-institution-realisation.md). Covers the Julia-specific resource subclasses, the `eigon-julia-gen` mirror generator, five reference institutions (`Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` ODEs), and the future Lean / Julia bridge.
 **Related:** [`d14-institution-realisation.md`](d14-institution-realisation.md) (the institution protocol — typed declarations, trait surface, dispatch model, Verdict, Comorphism shape — that each Julia institution instantiates), [`d26-runtime-substrate.md`](d26-runtime-substrate.md) (the language-agnostic substrate this layers on), [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) (the proof-bearing institution the Julia integration eventually pairs with), `boundary-contracts.md` (meta-spec context — under D14 the per-institution `BoundaryContract` collapses into typed declarations + Verdict; see §5)
 
 ## 1. Purpose and scope
@@ -12,10 +12,12 @@ This document covers what comes after: **what makes Julia interesting beyond "an
 
 - The Julia-specific subclasses of the substrate's parent resource classes (`JuliaScript extends RuntimeScript`, etc.).
 - The `eigon-julia-gen` mirror generator and its faithful-translation specification.
-- Three reference institutions wrapping Julia libraries that implement formal reasoning systems with their own fibers:
+- Five reference institutions wrapping Julia libraries that implement formal reasoning systems with their own fibers:
   - **`Symbolics` / `ModelingToolkit`** — symbolic algebra, equation simplification, substitution.
   - **`JuMP`** — optimisation with solver-side certificates.
   - **`IntervalArithmetic`** — rigorous numerical bounds.
+  - **`Catalyst`** — chemical reaction networks (conservation laws, deficiency theorems, mass-action / jump kinetics).
+  - **`DiffEq`** — ODE solving with integration certificates (v1 scope: ODEs only).
 - The future Lean / Julia bridge — once both integrations are mature, a Julia computation produces a *derived* result and a Lean proof asserts a property of the algorithm or its bounds.
 
 ### 1.1 Why Julia first
@@ -283,17 +285,110 @@ The institution registers per-solver: `eigenius-julia-jump-highs`, `eigenius-jul
 
 Interval-arithmetic outputs are operationally stronger than ordinary numerical results — the bounds hold by construction. Under D14's epistemic categorisation ([D14 §7.1](d14-institution-realisation.md)) they remain *derived* (they depend on Julia and the library, not a machine-checked proof). Promotion to *verified* requires pairing with Lean — see §6.2. The Decidable role on `qc_intv_validate_bounded_by` lets a user program write a typed predicate `BoundedBy(v, [lo, hi])` and have the kernel reduce it operationally; the resulting `Refl` witness is grounded in the institution's worker, not a Lean proof, so the epistemic level is still *derived*.
 
-### 4.4 Other Julia institutions worth considering
+### 4.4 `Catalyst` — chemical reaction networks
 
-Each is its own design exercise; this document scopes only the three above.
+Catalyst is structurally interesting for an institution because reaction networks aren't just symbolic ODEs — the *network* has its own algebraic structure: stoichiometry, conservation laws, deficiency theorems, mass-action vs. propensity-based kinetics. That structure is the institution's fibre. Promoted to a first-class reference institution because the life-science use cases (PK / PD, signaling pathways, metabolic networks) lean on it heavily.
 
-- **`SciML` / `DifferentialEquations.jl`** — ODE / PDE / DAE solvers. Could be substrate components (one solve, derived output) or a real institution (the "ODE solution" fiber has structure: convergence proofs, error bounds, step refinement).
-- **`Catalyst.jl`** — chemical reaction networks.
+#### 4.4.1 Resource classes
+
+- **`ReactionNetwork`** — typed network: species, reactions, rate laws, parameters.
+- **`ConservationLaw`** — typed linear invariant on species (a vector in the left-nullspace of the stoichiometry matrix). Auto-validated on commit by recomputing the conservation matrix and checking the claimed law lies in its row span.
+- **`SteadyState`** — relates `(network, parameter_assignment, species_concentrations)`. Auto-validated on commit by re-solving the steady-state system at the given parameters.
+- **`MassActionKinetics`** / **`JumpProcessSemantics`** — discriminator-style markers for the dynamical interpretation a network should compile under.
+- **`DeficiencyZero`** / **`DeficiencyOne`** — relations witnessing classical deficiency theorems. Auto-validated.
+
+#### 4.4.2 ExportFormats / ImportFormats
+
+| Direction | IRI | Payload type | Procedure |
+|---|---|---|---|
+| Export from `ReactionNetwork` | `ef_cat_network` | `CatalystNetworkRepr` | `urn:eigenius:catalyst:extract_network` |
+| Export from `ConservationLaw` | `ef_cat_conservation_law` | `(NetworkRepr, Vec<Coef>)` | `urn:eigenius:catalyst:extract_conservation_law` |
+| Import to `SteadyState` | `if_cat_steady_state` | `(NetworkRepr, Params, Vec<Float>)` | `urn:eigenius:catalyst:reify_steady_state` |
+| Import to `OdeSystemRepr` (handoff to DiffEq) | `if_cat_to_ode` | `OdeSystemRepr` | `urn:eigenius:catalyst:reify_ode` |
+
+#### 4.4.3 QueryClasses
+
+| QueryClass | `query_class` | `result_class` | `dispatch_role` | Implementation |
+|---|---|---|---|---|
+| `qc_cat_validate_conservation_law` | `ConservationLaw` | `Verdict` | `AutoOnLoad` | institution-runtime — re-derives the network's conservation matrix and checks the claimed law. |
+| `qc_cat_validate_steady_state` | `SteadyState` | `Verdict` | `AutoOnLoad` | institution-runtime — re-solves at the given parameters. |
+| `qc_cat_compute_steady_states` | `CatalystSteadyStateInput` | `SteadyStateSet` | `OnDemand` | institution-runtime. |
+| `qc_cat_to_ode` | `ReactionNetwork` | `OdeSystemRepr` | `OnDemand` | institution-runtime — the bridge into the DiffEq institution (§4.5). |
+| `qc_cat_check_deficiency` | `ReactionNetwork` | `Verdict` | `OnDemand`, `Decidable` | institution-runtime. |
+| `qc_cat_extract_invariants` | `ReactionNetwork` | `ConservationLawSet` | `OnDemand` | institution-runtime. |
+
+#### 4.4.4 Comorphism into Symbolics / ModelingToolkit
+
+Catalyst is built on top of ModelingToolkit; a `ReactionNetwork → ODESystem` translation is a built-in capability of the library. Under D14 we declare this as a typed `Comorphism` resource so the cross-fibre move is a tracked translation rather than an ad-hoc Julia call. Sketch:
+
+```
+Comorphism ρ_catalyst_to_mtk
+  export_format:  ef_cat_network
+  transformation: cm_catalyst_network_to_mtk_ode  (Julia component)
+  import_format:  if_mtk_ode_system
+  exact: true
+  description: "Mass-action-kinetics translation from a reaction network
+                to a Modelling-Toolkit ODE system."
+```
+
+#### 4.4.5 Why this is an institution
+
+The fibre has structural invariants — linear conservation laws are independent of parameters; deficiency is a topological invariant of the network; steady-state existence has structural sufficient conditions — that EigenQL `FIBER` queries can traverse. Substrate components alone would just return numbers; the institutional shape is what lets a downstream program reason about "all networks satisfying conservation law L" or "all deficiency-zero networks in this layer."
+
+### 4.5 `DifferentialEquations.jl` — ODE solving
+
+The "ODE solution" fibre has structure: convergence proofs, error bounds, step refinement, sensitivity analysis. Promoted to a first-class reference institution because life-science PK / mechanistic modelling cannot be served by substrate components alone — solutions need to be *typed claims* ("this trajectory is the solution to that compartmental model"), not just byte streams.
+
+**v1 scope: ODEs only.** SDEs, DAEs, DDEs, jump processes, and hybrid systems are deferred to follow-on work; the full DiffEq surface is enormous and the bread-and-butter life-science modelling (PK compartmental models, mechanistic dose-response, steady-state cell-cycle) is ~95% deterministic ODE. SDE / jump-process kinetics warrant a separate institution when low-copy-number stochastic kinetics are the consumer.
+
+#### 4.5.1 Resource classes
+
+- **`OdeSystem`** — typed system: equations, parameters, state variables, jacobian (optional).
+- **`OdeSolution`** — relates `(system, parameter_assignment, initial_conditions, time_span, integrator, trajectory)`. The trajectory is content-addressed; the integrator records solver, tolerance, step strategy.
+- **`IntegrationCertificate`** — relates `(solution, tolerance, error_bound)`. Auto-validated on commit by re-running the integrator and confirming the claimed bound holds.
+- **`BoundedError`** — relates `(solution, norm, bound)`. Auto-validated.
+- **`ParameterFit`** — relates `(system, observations, fitted_parameters, residual)`. Auto-validated by re-fitting (subject to non-determinism caveats — see verdict diagnostics §5.1).
+
+#### 4.5.2 ExportFormats / ImportFormats
+
+| Direction | IRI | Payload type | Procedure |
+|---|---|---|---|
+| Export from `OdeSystem` | `ef_diffeq_system` | `OdeSystemRepr` | `urn:eigenius:diffeq:extract_system` |
+| Import to `OdeSolution` | `if_diffeq_solution` | `(OdeSystemRepr, Params, ICs, TimeSpan, Trajectory, IntegratorMeta)` | `urn:eigenius:diffeq:reify_solution` |
+| Import to `IntegrationCertificate` | `if_diffeq_certificate` | `(SolutionRef, Tolerance, ErrorBound)` | `urn:eigenius:diffeq:reify_certificate` |
+| Import to `ProvesBoundOn` (handoff to IntervalArithmetic) | `if_diffeq_to_interval_bound` | `(FunctionRepr, IntervalRepr, IntervalRepr)` | `urn:eigenius:diffeq:reify_to_interval_bound` |
+
+#### 4.5.3 QueryClasses
+
+| QueryClass | `query_class` | `result_class` | `dispatch_role` | Implementation |
+|---|---|---|---|---|
+| `qc_diffeq_validate_solution` | `OdeSolution` | `Verdict` | `AutoOnLoad` | institution-runtime — re-integrates and confirms within tolerance. |
+| `qc_diffeq_validate_certificate` | `IntegrationCertificate` | `Verdict` | `AutoOnLoad` | institution-runtime. |
+| `qc_diffeq_solve` | `DiffEqSolveInput` (system + params + ic + time span) | `OdeSolution` | `OnDemand` | institution-runtime. |
+| `qc_diffeq_steady_state` | `OdeSystem` (with parameters) | `SteadyState` | `OnDemand` | institution-runtime. |
+| `qc_diffeq_continuation` | `DiffEqContinuationInput` | `ParameterSweepSet` | `OnDemand` | institution-runtime — parameter sweep with bifurcation tracking. |
+| `qc_diffeq_sensitivity` | `OdeSolution` | `SensitivityReport` | `OnDemand` | institution-runtime. |
+
+#### 4.5.4 Comorphisms in and out
+
+- **From `Catalyst` (§4.4):** `ReactionNetwork → OdeSystem` via `ρ_catalyst_to_mtk` (and `ρ_mtk_to_diffeq`), or directly via a Catalyst → DiffEq comorphism if Catalyst's mass-action kinetics translate to a DiffEq problem without a MTK round-trip.
+- **From `Symbolics`/`ModelingToolkit` (§4.1):** `ODESystem → OdeSystem` is a direct compilation step in the libraries; under D14 it's a typed Comorphism.
+- **To `IntervalArithmetic` (§4.3):** given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is the bridge for *operationally verified* PK / signaling predictions: bounds that hold by construction, not just by tolerance.
+
+#### 4.5.5 Why an institution and not just a substrate component
+
+A substrate component runs an integrator and returns a trajectory. An institution makes the *trajectory* a typed claim ("this is the solution to that system at those parameters within that tolerance"), validatable on commit, queryable through FIBER, composable with other institutions via Comorphism. The integration-certificate pattern (a re-checkable bound) is operationally similar to JuMP's certificate model — it's why the fibre has structure rather than just numbers.
+
+### 4.6 Other Julia institutions worth considering
+
+Each is its own design exercise; this document scopes only the five in §4.1–4.5.
+
+- **SDE / DAE / jump-process subsets of `DifferentialEquations.jl`** — first follow-on to §4.5 once stochastic kinetics or differential-algebraic systems land as a domain need.
 - **`Turing.jl`** — probabilistic programming. Bayesian-inference institution. Morphism types around posteriors and credible intervals are interesting and not yet thought through carefully.
 - **`Manopt.jl`** — optimisation on Riemannian manifolds.
 - **`HomotopyContinuation.jl`** — algebraic-geometry root finding with certified tracking.
 
-When demand for one of these crystallises, it gets its own design doc and crate, plugging into `eigenius-julia` the same way the three reference institutions do.
+When demand for one of these crystallises, it gets its own design doc and crate, plugging into `eigenius-julia` the same way the five reference institutions do.
 
 ## 5. Verdict shape, error taxonomy, and runtime properties per institution
 
@@ -476,9 +571,21 @@ Depends on D14 milestones M1–M7 ([D14 §13.4](d14-institution-realisation.md))
 
 **Scope:** Open-ended, driven by deployment needs.
 
-### Phase G — Lean / Julia bridge
+### Phase G — Fourth institution: `Catalyst`
 
-The mirror-equivalence check (§6.1). Joint `EigonFFI` + `JuliaPackageMirror` consistency tests. Worked example: a Julia FEA stress analysis paired with a Lean proof of the analysis pipeline's correctness.
+`eigenius-julia-catalyst`. Promoted to a first-class reference institution because life-science PK / signaling pathways / metabolic networks lean on reaction-network modelling heavily. Declarations from §4.4: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, mass-action / jump-process markers, `DeficiencyZero` / `DeficiencyOne`. AutoOnLoad QueryClasses validate conservation laws and steady states on commit. Comorphism into Symbolics/MTK lands as a typed D14 Comorphism resource so the cross-fibre move is tracked. Demo: a notebook that declares a reaction network, derives conservation laws via `qc_cat_extract_invariants`, computes a steady state, validates it on commit, and hands off to Phase H for time-domain integration.
+
+**Scope:** Medium.
+
+### Phase H — Fifth institution: `DifferentialEquations.jl` — ODEs only
+
+`eigenius-julia-diffeq`. **v1 scope: ODEs only**; SDEs / DAEs / jump processes are deferred follow-ons. Declarations from §4.5: `OdeSystem`, `OdeSolution`, `IntegrationCertificate`, `BoundedError`, `ParameterFit`. AutoOnLoad QueryClasses validate solutions and certificates by re-integration. Comorphisms in from Phase D (MTK → DiffEq) and Phase G (Catalyst → DiffEq); comorphism out to Phase F (DiffEq → IntervalArithmetic) for operationally-verified bounds. Demo: a two-compartment PK model declared as a Catalyst reaction network, compiled to an `OdeSystem`, integrated to produce an `OdeSolution`, validated on commit, optionally bounded via interval extension.
+
+**Scope:** Medium-to-Large. The integration-certificate machinery and the comorphism plumbing both land here; the worked life-science demos in Phase 21 (implementation plan) lean on this milestone.
+
+### Phase I — Lean / Julia bridge
+
+The mirror-equivalence check (§6.1). Joint `EigonFFI` + `JuliaPackageMirror` consistency tests. Worked example: a Julia FEA stress analysis (or PK trajectory) paired with a Lean proof of the analysis pipeline's correctness or of the trajectory's interval bounds.
 
 **Scope:** Medium. Mostly the cross-integration work; both substrates are by then mature.
 
@@ -522,9 +629,10 @@ The substrate's open questions (substrate doc §14) apply directly. Julia-specif
 - **`Symbolics.jl` + `ModelingToolkit.jl`** — Phase D. Output: `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo` morphisms.
 - **`JuMP`** — Phase E. Output: `OptimisesTo`, `Infeasible`, `BoundedBy`.
 - **`IntervalArithmetic.jl`** — Phase F. Output: `BoundedBy(value, interval)`, `ProvesBoundOn(function, domain, interval)`.
-- **`SciML` / `DifferentialEquations.jl`** — likely fourth, when domain demand exists.
-- **`Catalyst.jl`** — domain-specific institution.
-- **`Turing.jl`** — probabilistic programming. Bayesian-inference institution.
+- **`Catalyst.jl`** — Phase G. Output: `ConservationLaw`, `SteadyState`, `DeficiencyZero`/`DeficiencyOne` morphisms; comorphism into Symbolics/MTK and (via §4.5) into DiffEq.
+- **`DifferentialEquations.jl` (ODEs only)** — Phase H. Output: `OdeSolution`, `IntegrationCertificate`, `BoundedError`; comorphism into IntervalArithmetic for *operationally verified* PK / signaling bounds.
+- **SDE / DAE / jump-process subsets of `DifferentialEquations.jl`** — follow-on; lands when stochastic or differential-algebraic kinetics become a domain need.
+- **`Turing.jl`** — probabilistic programming. Bayesian-inference institution; deferred until a posterior-over-PK-parameters use case asks for it.
 
 ### A.3 Cross-language considerations
 
