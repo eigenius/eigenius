@@ -1,12 +1,12 @@
 # Julia Institutions
 
 **Status:** Draft — outline for the design specification
-**Scope:** What it takes to bring Julia up as the first concrete instance of the [runtime substrate](runtime-substrate.md), and to register specific Julia libraries as Eigenius institutions on top of it under the [D14 institution protocol](d14-institution-realisation.md). Covers the Julia-specific resource subclasses, the `eigon-julia-gen` mirror generator, three reference institutions (`Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`), and the future Lean / Julia bridge.
-**Related:** [`d14-institution-realisation.md`](d14-institution-realisation.md) (the institution protocol — typed declarations, trait surface, dispatch model, Verdict, Comorphism shape — that each Julia institution instantiates), [`runtime-substrate.md`](runtime-substrate.md) (the language-agnostic substrate this layers on), [`lean-4-as-institution.md`](lean-4-as-institution.md) (the proof-bearing institution the Julia integration eventually pairs with), `boundary-contracts.md` (meta-spec context — under D14 the per-institution `BoundaryContract` collapses into typed declarations + Verdict; see §5)
+**Scope:** What it takes to bring Julia up as the first concrete instance of the [runtime substrate](d26-runtime-substrate.md), and to register specific Julia libraries as Eigenius institutions on top of it under the [D14 institution protocol](d14-institution-realisation.md). Covers the Julia-specific resource subclasses, the `eigon-julia-gen` mirror generator, three reference institutions (`Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`), and the future Lean / Julia bridge.
+**Related:** [`d14-institution-realisation.md`](d14-institution-realisation.md) (the institution protocol — typed declarations, trait surface, dispatch model, Verdict, Comorphism shape — that each Julia institution instantiates), [`d26-runtime-substrate.md`](d26-runtime-substrate.md) (the language-agnostic substrate this layers on), [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) (the proof-bearing institution the Julia integration eventually pairs with), `boundary-contracts.md` (meta-spec context — under D14 the per-institution `BoundaryContract` collapses into typed declarations + Verdict; see §5)
 
 ## 1. Purpose and scope
 
-The runtime substrate ([`runtime-substrate.md`](runtime-substrate.md)) is what makes Julia code executable inside Eigenius with full provenance — `RunRuntimeScript` and `CallRuntimeMethod` components, content-addressed `RuntimeScript` and `RuntimePackage` resources, OCI-image-pinned `RuntimeEnvironment` resources, all the boundary-check and worker-pool machinery. That gets Julia onto the platform.
+The runtime substrate ([`d26-runtime-substrate.md`](d26-runtime-substrate.md)) is what makes Julia code executable inside Eigenius with full provenance — `RunRuntimeScript` and `CallRuntimeMethod` components, content-addressed `RuntimeScript` and `RuntimePackage` resources, OCI-image-pinned `RuntimeEnvironment` resources, all the boundary-check and worker-pool machinery. That gets Julia onto the platform.
 
 This document covers what comes after: **what makes Julia interesting beyond "another runtime."** Specifically:
 
@@ -324,7 +324,7 @@ Advisory; not declared in any single resource. Operators rely on these for capac
 | Effects | Read-only against the chain; substrate-level network/filesystem policy applies. | Read-only. | Read-only. |
 | Resource bounds | Per-call wall-clock and memory caps; cap violation → `SymbolicTimeout`. | Per-call wall-clock cap; for solvers with explicit time-limit support, the cap is forwarded to the solver. | Per-call wall-clock cap. |
 
-These properties surface in trace metadata (the substrate's `RuntimeInvocation` provenance — see [`runtime-substrate.md`](runtime-substrate.md) §5.5) and in the verdict's auxiliary fields, not in a separate per-institution contract document.
+These properties surface in trace metadata (the substrate's `RuntimeInvocation` provenance — see [`d26-runtime-substrate.md`](d26-runtime-substrate.md) §5.5) and in the verdict's auxiliary fields, not in a separate per-institution contract document.
 
 ## 6. The Lean / Julia bridge (future work)
 
@@ -334,7 +334,7 @@ Once both integrations are mature, a natural pattern: a Julia computation produc
 
 Lean's `EigonFFI` and Julia's `JuliaPackageMirror` for the same Eigon class need to be structurally aligned, so a claim about a `StressResult` in Lean is recognisable as a claim about the same `StressResult` Julia produced. Because both generators are deterministic and content-anchored to the same layer chain, a small "mirror equivalence" check at the institution boundary suffices: confirm the Lean mirror and the Julia mirror were generated from the same `source_layer` and that the relevant class has byte-identical structure in both.
 
-Now that Lean's authoring side leverages the same runtime substrate as Julia ([`lean-4-as-institution.md`](lean-4-as-institution.md) §2.3), this check is mechanically simple: `JuliaPackageMirror` and `LeanPackageMirror` both extend `RuntimePackageMirror`, so structural equivalence reduces to a comparison on the parent type's `source_layer` and `mirrored_classes` properties. The bridge crate doesn't need language-specific knowledge to verify alignment.
+Now that Lean's authoring side leverages the same runtime substrate as Julia ([`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) §2.3), this check is mechanically simple: `JuliaPackageMirror` and `LeanPackageMirror` both extend `RuntimePackageMirror`, so structural equivalence reduces to a comparison on the parent type's `source_layer` and `mirrored_classes` properties. The bridge crate doesn't need language-specific knowledge to verify alignment.
 
 ### 6.2 Verification of `IntervalArithmetic` outputs — concrete D14 `Comorphism`
 
@@ -432,7 +432,7 @@ end
 
 ### 7.3 RPC
 
-Per the substrate, CBOR on the wire. Julia side uses [`CBOR.jl`](https://github.com/saolsen/CBOR.jl) for marshalling. Dispatched-method recording uses `which()` to capture the actual method resolved by Julia's dispatcher.
+Per the substrate, CBOR on the wire. Julia side uses [`CBOR.jl`](https://github.com/JuliaIO/CBOR.jl) for marshalling. Dispatched-method recording uses `which()` to capture the actual method resolved by Julia's dispatcher.
 
 ## 8. Phased implementation plan
 
@@ -502,7 +502,7 @@ The substrate's open questions (substrate doc §14) apply directly. Julia-specif
 
 ---
 
-*This outline complements [`runtime-substrate.md`](runtime-substrate.md) and [`d14-institution-realisation.md`](d14-institution-realisation.md). The substrate doc covers the language-agnostic machinery; D14 covers the institution protocol; this doc covers the Julia-specific layer plus the per-institution declarations that make Julia interesting beyond "another runtime." With D14 in place, no per-institution contract document is needed — the typed declarations and trait implementation are the contract. The next deliverables are the faithful-translation specification for `eigon-julia-gen` and the per-institution worker bootstraps, alongside the implementation work.*
+*This outline complements [`d26-runtime-substrate.md`](d26-runtime-substrate.md) and [`d14-institution-realisation.md`](d14-institution-realisation.md). The substrate doc covers the language-agnostic machinery; D14 covers the institution protocol; this doc covers the Julia-specific layer plus the per-institution declarations that make Julia interesting beyond "another runtime." With D14 in place, no per-institution contract document is needed — the typed declarations and trait implementation are the contract. The next deliverables are the faithful-translation specification for `eigon-julia-gen` and the per-institution worker bootstraps, alongside the implementation work.*
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status:** Draft — outline for the design specification
 **Scope:** What it takes to make Lean 4 a registered institution within Eigenius, contributing the *verified* epistemic level to the knowledge graph by realising the [D14](d14-institution-realisation.md) institution protocol.
-**Related:** [`d14-institution-realisation.md`](d14-institution-realisation.md) (the institution protocol this doc instantiates — D14 specifies the trait surface, the five typed resource shapes, and the dispatch model; this doc fills in the Lean-specific surface), [`runtime-substrate.md`](runtime-substrate.md) (substrate the Lean *authoring*-side toolchain runs on; the verification side stays in-process — see §2.3), `boundary-contracts.md` (meta-spec context — note that under D14 the per-institution `BoundaryContract` collapses into the typed declarations of §4 plus the Verdict shape; see §9 for the migration)
+**Related:** [`d14-institution-realisation.md`](d14-institution-realisation.md) (the institution protocol this doc instantiates — D14 specifies the trait surface, the five typed resource shapes, and the dispatch model; this doc fills in the Lean-specific surface), [`d26-runtime-substrate.md`](d26-runtime-substrate.md) (substrate the Lean *authoring*-side toolchain runs on; the verification side stays in-process — see §2.3), `boundary-contracts.md` (meta-spec context — note that under D14 the per-institution `BoundaryContract` collapses into the typed declarations of §4 plus the Verdict shape; see §9 for the migration)
 
 ## 1. Purpose and scope
 
@@ -40,7 +40,7 @@ In D14 vocabulary, Option B is the choice that the `ProofCheck` QueryClass's `im
 
 - The Eigenius kernel: unchanged. Does not grow by a single line.
 - The Lean verification institution's TCB: the Rust-native Lean term checker, the `EigonFFI` correspondence library (Section 5), and the serialization layer that moves proof terms between Lean and Eigenius.
-- The Lean authoring-side workflows (export, generation, environment instantiation) run on top of the runtime substrate's TCB ([`runtime-substrate.md`](runtime-substrate.md) §2.3). That TCB is broader than the verification side's, but the artifacts it produces (proof terms, `EigonFFI` libraries, environment images) are themselves re-checked or content-anchored before any *verified* claim depends on them. The factoring is detailed in §2.3.
+- The Lean authoring-side workflows (export, generation, environment instantiation) run on top of the runtime substrate's TCB ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §2.3). That TCB is broader than the verification side's, but the artifacts it produces (proof terms, `EigonFFI` libraries, environment images) are themselves re-checked or content-anchored before any *verified* claim depends on them. The factoring is detailed in §2.3.
 - Blast radius of a bug in the Lean checker: confined to the Lean institution's fiber. Cannot invalidate *derived* conclusions or corrupt the ontology.
 
 ### 2.3 Substrate factoring: hosted authoring vs in-process verification
@@ -56,11 +56,11 @@ The factoring is therefore:
 |---|---|---|
 | `lean4export <project>` → `LeanProofTerm` resource | Substrate-hosted (`RunLeanExport` component) | Operationally reproducible; needs pinned Lean toolchain; benefits from image-digest anchoring |
 | `eigon-ffi-gen --layer L` → `GeneratedLibrary` resource | Substrate-hosted (`RunEigonFFIGen` component, or a substrate-hosted `RunRuntimeScript` against a `lean-tools` env) | Same reasons; deterministic generator pinned by image digest |
-| `LeanEnvironment` image build | Substrate's image-build pipeline ([`runtime-substrate.md`](runtime-substrate.md) §9.2) | Same as any other `RuntimeEnvironment` image build |
+| `LeanEnvironment` image build | Substrate's image-build pipeline ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §9.2) | Same as any other `RuntimeEnvironment` image build |
 | Term checking via nanoda_lib | In-process Rust call from `eigenius-lean` | Trust surface must be small; no IPC, no Lean toolchain at runtime; result is the *verified* warrant the rest of Eigenius depends on |
 | Three-part correspondence check (§5.5) | In-process Rust call | Load-bearing for soundness; must run alongside term checking |
 
-This split is asymmetric on purpose. The authoring side produces operationally-reproducible artifacts whose value is "we ran this exact pinned tool against this exact pinned input and got these bytes" — the substrate's posture exactly. The verification side produces a mathematically-reproducible verdict whose value is "we re-checked this proof term against its proposition and environment and the kernel rules accepted it" — a posture the substrate cannot offer because it cannot in-process re-check. See [`runtime-substrate.md`](runtime-substrate.md) §2.2 for the substrate-side framing.
+This split is asymmetric on purpose. The authoring side produces operationally-reproducible artifacts whose value is "we ran this exact pinned tool against this exact pinned input and got these bytes" — the substrate's posture exactly. The verification side produces a mathematically-reproducible verdict whose value is "we re-checked this proof term against its proposition and environment and the kernel rules accepted it" — a posture the substrate cannot offer because it cannot in-process re-check. See [`d26-runtime-substrate.md`](d26-runtime-substrate.md) §2.2 for the substrate-side framing.
 
 What this gives the integration:
 
@@ -335,7 +335,7 @@ Mathlib is large. A naive "load the environment per request" design is non-viabl
 
 ### 7.1 `LeanEnvironment` extends `RuntimeEnvironment`
 
-A `LeanEnvironment` is a typed Eigon resource that subclasses the substrate's [`RuntimeEnvironment`](runtime-substrate.md) ([`runtime-substrate.md`](runtime-substrate.md) §5.3). It is immutable, content-addressed, and image-digest-anchored on the same terms as Julia's `JuliaEnvironment`.
+A `LeanEnvironment` is a typed Eigon resource that subclasses the substrate's [`RuntimeEnvironment`](runtime-substrate.md) ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §5.3). It is immutable, content-addressed, and image-digest-anchored on the same terms as Julia's `JuliaEnvironment`.
 
 | Property | Inherited / new | Purpose |
 |---|---|---|
@@ -361,7 +361,7 @@ Institution registrations pin the `LeanEnvironment` IRI (and therefore the image
 
 ### 7.3 Caching
 
-The substrate's worker pool ([`runtime-substrate.md`](runtime-substrate.md) §8) handles environment caching for the *authoring* side: warm Lean toolchain workers per environment digest, LRU eviction, image pull cache. The verification side holds nanoda_lib's parsed environment representation in a separate in-process LRU cache indexed by `LeanEnvironment` IRI; first checking request loads from the resource bytes (or from a baked artifact in the corresponding image, fast path), subsequent requests are served from cache. Eviction is policy-driven; default is "keep the working set Mathlib's worth fits in memory."
+The substrate's worker pool ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §8) handles environment caching for the *authoring* side: warm Lean toolchain workers per environment digest, LRU eviction, image pull cache. The verification side holds nanoda_lib's parsed environment representation in a separate in-process LRU cache indexed by `LeanEnvironment` IRI; first checking request loads from the resource bytes (or from a baked artifact in the corresponding image, fast path), subsequent requests are served from cache. Eviction is policy-driven; default is "keep the working set Mathlib's worth fits in memory."
 
 ### 7.4 Environment diffing
 
@@ -482,7 +482,7 @@ Scope is given as t-shirt sizes (Small / Medium / Large / Open-ended) rather tha
 
 Integration of nanoda_lib into the `eigenius-lean` crate. Minimal `Institution` trait implementation ([D14 §8](d14-institution-realisation.md)) with `extract_typed` for `ef_lean_proof_payload` and `query` dispatching `urn:eigenius:lean:proof_check` to nanoda_lib. The `Institution`, ExportFormat, and `qc_proof_check` QueryClass declarations land as ordinary chain resources committed at registration time; the kernel's D14 dispatch fires the AutoOnLoad QueryClass on `LeanProofTerm` Loads. Toy propositions only — propositions stated directly about primitive types, no `EigonFFI` yet. Demonstrates end-to-end: a `LeanProofTerm` resource enters the chain, AutoOnLoad fires, nanoda_lib re-checks, `Verdict::Holds` admits the resource, the kernel tags it *verified*.
 
-Phase A depends on D14 milestones M1–M5 ([D14 §13.4](d14-institution-realisation.md)) and substrate Phase A (the substrate skeleton — see [`runtime-substrate.md`](runtime-substrate.md) §13). The substrate side, the verification side, and the D14 dispatch land together; none of the three alone can prove out the integration.
+Phase A depends on D14 milestones M1–M5 ([D14 §13.4](d14-institution-realisation.md)) and substrate Phase A (the substrate skeleton — see [`d26-runtime-substrate.md`](d26-runtime-substrate.md) §13). The substrate side, the verification side, and the D14 dispatch land together; none of the three alone can prove out the integration.
 
 Phase A's authoring side is the simplest substrate consumer: a `LeanEnvironment` image with the pinned Lean toolchain, a `RunLeanExport` substrate component that invokes `lean4export` against a `LeanProject`, and a hand-written test project producing toy proof terms.
 
@@ -494,7 +494,7 @@ Optional fallback: if either nanoda_lib integration or substrate dispatch hits u
 
 First version of the `eigon-ffi-gen` generator: deterministic implementation, faithful-translation specification authored in parallel, `LeanPackageMirror` resource committed back to Eigenius as part of each generation. First generated `EigonFFI` library mirroring Core Ontology types. The `mirror_reference` field on `LeanProofTerm` resources is exercised; the three-part correspondence check (§5.5) becomes the body of `urn:eigenius:lean:proof_check`'s handler, including the layer-ancestry logic that gives compositionality under layer extension.
 
-The generator runs inside the substrate from Phase B onward (substrate-hosted `RunEigonFFIGen` against the `lean-tools` `LeanEnvironment`). Its determinism is verified by re-running and comparing content hashes, exactly the way the substrate's image-build pipeline verifies determinism for any of its hosted runtimes ([`runtime-substrate.md`](runtime-substrate.md) §9.2). This depends on substrate Phase B (mirror anchoring + boundary check).
+The generator runs inside the substrate from Phase B onward (substrate-hosted `RunEigonFFIGen` against the `lean-tools` `LeanEnvironment`). Its determinism is verified by re-running and comparing content hashes, exactly the way the substrate's image-build pipeline verifies determinism for any of its hosted runtimes ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §9.2). This depends on substrate Phase B (mirror anchoring + boundary check).
 
 The `qc_which_axioms`, `qc_proof_size`, `qc_environment_diff` OnDemand QueryClasses can land in Phase B opportunistically — they share the trait method dispatch that Phase A established, so adding them is a matter of authoring the QueryClass declarations and the procedure handlers.
 
@@ -502,7 +502,7 @@ The `qc_which_axioms`, `qc_proof_size`, `qc_environment_diff` OnDemand QueryClas
 
 ### Phase C — Integration hardening and checker operational maturity
 
-Performance work: profiling against realistic proof sizes, identifying hotspots in the dispatch path, tuning trace-cache policy. In-process environment caching infrastructure (the verification side's nanoda_lib environment cache). Substrate-side environment management is handled by substrate Phase C ([`runtime-substrate.md`](runtime-substrate.md) §13) and arrives "for free" — `LeanEnvironment` images get worker pools, LRU eviction, and image-pull caching from the substrate without per-language work. Upstream tracking protocol with nanoda_lib: establishing how Eigenius follows Lean kernel changes propagated through nanoda_lib, and what the version-pinning discipline looks like. Optional follow-on (recommended in Section 8.1): introduction of Lean4Lean as a secondary cross-checker per the Venn-diagram soundness argument.
+Performance work: profiling against realistic proof sizes, identifying hotspots in the dispatch path, tuning trace-cache policy. In-process environment caching infrastructure (the verification side's nanoda_lib environment cache). Substrate-side environment management is handled by substrate Phase C ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §13) and arrives "for free" — `LeanEnvironment` images get worker pools, LRU eviction, and image-pull caching from the substrate without per-language work. Upstream tracking protocol with nanoda_lib: establishing how Eigenius follows Lean kernel changes propagated through nanoda_lib, and what the version-pinning discipline looks like. Optional follow-on (recommended in Section 8.1): introduction of Lean4Lean as a secondary cross-checker per the Venn-diagram soundness argument.
 
 **Scope:** Large. Smaller than the original framing because substrate's worker pool + image pipeline removes the bespoke environment-management work; the remaining engineering is verification-side optimisation and upstream-tracking discipline.
 
