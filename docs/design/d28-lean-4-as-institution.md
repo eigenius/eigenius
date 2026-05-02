@@ -47,7 +47,7 @@ In D14 vocabulary, Option B is the choice that the `ProofCheck` QueryClass's `im
 
 The Lean integration touches the platform in two distinct places, and they have different trust postures:
 
-- **Authoring side** — running `lean4export` against a Lean project, generating `EigonFFI` libraries with `eigon-ffi-gen`, instantiating `LeanEnvironment` images with the pinned Lean toolchain + Mathlib + dependencies. These are **language-toolchain workflows**: pin a runtime, run a tool, capture the output as a graph resource. They are exactly what the [runtime substrate](runtime-substrate.md) is for.
+- **Authoring side** — running `lean4export` against a Lean project, generating `EigonFFI` libraries with `eigon-ffi-gen`, instantiating `LeanEnvironment` images with the pinned Lean toolchain + Mathlib + dependencies. These are **language-toolchain workflows**: pin a runtime, run a tool, capture the output as a graph resource. They are exactly what the [runtime substrate](d26-runtime-substrate.md) is for.
 - **Verification side** — re-checking exported proof terms via nanoda_lib (the `qc_proof_check` AutoOnLoad QueryClass implementation, §3.3), performing the three-part correspondence check (§5.5), promoting the `LeanProofTerm` resource's epistemic status to *verified* on `Verdict::Holds`. This is **kernel-level term checking**: a small, auditable Rust crate with a tightly bounded TCB. It runs in-process inside the Eigenius orchestrator, exactly where the verification trust posture demands.
 
 The factoring is therefore:
@@ -115,7 +115,7 @@ Per [D14 §4.4 and §6](d14-institution-realisation.md), the Lean institution's 
 
 The Lean institution declares **no ImportFormats and no Comorphisms in v1**. Lean is a *verification* institution: it consumes proof terms and produces verdicts. It does not act as the *target* of any cross-institution comorphism in v1, because turning some other institution's typed payload into a Lean proof would require synthesising a proof — beyond v1 scope.
 
-Future work (see also [`julia-institutions.md`](julia-institutions.md) §6.2): a `Comorphism` from a Julia `IntervalArithmetic.BoundedBy` to a `LeanProofTerm` whose proposition asserts the same bound; the transformation Component would package the interval data + the Lean proof obligation; an `ImportFormat` on the Lean side would construct the resulting `LeanProofTerm`. The proof itself would still need to be supplied externally — the comorphism is plumbing for the structurally-aligned bridge, not a proof generator.
+Future work (see also [`d27-julia-institutions.md`](d27-julia-institutions.md) §6.2): a `Comorphism` from a Julia `IntervalArithmetic.BoundedBy` to a `LeanProofTerm` whose proposition asserts the same bound; the transformation Component would package the interval data + the Lean proof obligation; an `ImportFormat` on the Lean side would construct the resulting `LeanProofTerm`. The proof itself would still need to be supplied externally — the comorphism is plumbing for the structurally-aligned bridge, not a proof generator.
 
 ### 3.5 Structural properties (advisory, not kernel-enforced)
 
@@ -335,7 +335,7 @@ Mathlib is large. A naive "load the environment per request" design is non-viabl
 
 ### 7.1 `LeanEnvironment` extends `RuntimeEnvironment`
 
-A `LeanEnvironment` is a typed Eigon resource that subclasses the substrate's [`RuntimeEnvironment`](runtime-substrate.md) ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §5.3). It is immutable, content-addressed, and image-digest-anchored on the same terms as Julia's `JuliaEnvironment`.
+A `LeanEnvironment` is a typed Eigon resource that subclasses the substrate's [`RuntimeEnvironment`](d26-runtime-substrate.md) ([`d26-runtime-substrate.md`](d26-runtime-substrate.md) §5.3). It is immutable, content-addressed, and image-digest-anchored on the same terms as Julia's `JuliaEnvironment`.
 
 | Property | Inherited / new | Purpose |
 |---|---|---|

@@ -22,12 +22,12 @@ For most users, the notebook is the lowest-friction first touch — it's the Rea
 
 ## [Design documents →](design/README.md)
 
-The architecture specification and design documents (D1–D22):
+The architecture specification and design documents (D1–D28):
 
 - **[architecture-v0.3.md](design/architecture-v0.3.md)** — current architecture specification.
-- **[implementation-plan.md](design/implementation-plan.md)** — phased build plan (Phases 0–15).
-- **D1–D22** — per-subsystem design notes: Eigon serialization (D1), EigenQL (D2), program model (D3), storage encoding (D4), gRPC API (D5), execution architecture (D6/D6b), ESL surface (D7), structured LLM output (D8), NbE and type extensions (D9), codata (D11), WASM extensibility (D12), durable kernel state (D13), **institutions (D14, supersedes D10)**, ontology-as-types (D18), inductive and sized types (D19), task traces (D21), notebook UX and TypeScript SDK (D22).
-- Plus standalone notes: [Lean 4 as institution](design/lean-4-as-institution.md), [life-science requirements](design/life-science-requirements.md), [boundary contracts](design/boundary-contracts.md), [vision](design/vision.md), [manifesto](design/manifesto.md).
+- **[implementation-plan.md](design/implementation-plan.md)** — phased build plan (Phases 0–21).
+- **D1–D28** — per-subsystem design notes: Eigon serialization (D1), EigenQL (D2), program model (D3), storage encoding (D4), gRPC API (D5), execution architecture (D6/D6b), ESL surface (D7), structured LLM output (D8), NbE and type extensions (D9), codata (D11), WASM extensibility (D12), durable kernel state (D13), **institutions (D14, supersedes D10)**, ontology-as-types (D18), inductive and sized types (D19), task traces (D21), notebook UX and TypeScript SDK (D22), runtime substrate (D26), Julia institutions (D27), Lean 4 as verification institution (D28).
+- Plus standalone notes: [life-science requirements](design/life-science-requirements.md), [boundary contracts](design/boundary-contracts.md), [vision](design/vision.md), [manifesto](design/manifesto.md).
 
 The design documents are spec-first. They define what should exist and why; the user guides explain what does exist and how to use it.
 

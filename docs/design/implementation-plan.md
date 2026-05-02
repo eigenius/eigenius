@@ -88,8 +88,14 @@ The build is organized into phases. Each phase produces a working system that ca
 | D22 | Notebook & TypeScript SDK | ✓ | React notebook SPA + `@eigenius/client` SDK, served by the orchestrator at `/notebooks/`; six cell types incl. form-based charts; content-addressed publish-to-layer |
 | 12 | D14 Institutions | M1–M8 ✓; WASM-pkg / EigenQL-surface / docs / proto-cleanup pending | D14 institution realisation replaces D10; dock→assay worked example; comorphisms via four-step pipeline; Verdict-shaped Decidable + AutoOnLoad dispatch |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
-| 14 | Reconciliation | | Multi-session, layer merging via comorphism witnesses |
-| 15 | Specialty Institutions | | Lean 4, SMT solvers, domain-specific proof institutions |
+| 14 | Out-of-Core Layer | 14a–14h ✓; 14i (notebook surface + GC triggers) pending | Topology/content split, per-layer bloom + bloom cache, two-pool ARC, DAG branching, multi-session writes, reachability GC, indexed query path |
+| 15 | Witnessed Reconciliation | | Witnessed merge via comorphism witness; ontology migration as a degenerate witnessed merge |
+| 16 | Out-of-Core Query Execution | | Buffer-pool over storage, hash-join with spill, external sort, spillable group-by, per-query memory budget |
+| 17 | Chain Consolidation | | Squash a contiguous ancestral range into a resolve-equivalent layer; "git squash" for the typed knowledge graph |
+| 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; image-build pipeline; worker pool; sandbox; CBOR + RFC 8746 wire format |
+| 19 | Julia Institutions | | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs) |
+| 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
+| 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
 
 ---
 
@@ -560,7 +566,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - Enforcement point: resource ingestion in the layer system (not Mini-TT term forms). A resource at epistemic level N that references a resource at level ≥ N is rejected with a clear error.
 - Mini-TT checker: tighten universe-rule handling so attempts to construct self-referential meta-claims fail at check time (before runtime).
 - Integration with D6b trace schema: a ProgramTrace at level 2 references only resources at level ≤ 1.
-- nanoda_lib (see `lean-4-as-institution.md`) as reference for how universe checking integrates with type equality — Eigenius's needs are simpler (three fixed levels vs. Lean's universe polymorphism).
+- nanoda_lib (see `d28-lean-4-as-institution.md`) as reference for how universe checking integrates with type equality — Eigenius's needs are simpler (three fixed levels vs. Lean's universe polymorphism).
 
 ### Phase 10c — Robustness: typed errors, lossy conversions, allocator hygiene ✓ — ~1 week
 
@@ -582,7 +588,7 @@ The phase decomposes into two milestones that are separately reviewable:
 
 - `docs/design/life-science-requirements.md` §19 (recommended sequencing), §16.2 (stratification), §16.3 (decision procedures — deferred to Phase 11)
 - `docs/design/d9-nbe-unification-and-type-extensions.md` — Mini-TT surface this extends
-- `docs/design/lean-4-as-institution.md` — nanoda_lib design references
+- `docs/design/d28-lean-4-as-institution.md` — nanoda_lib design references
 - D18 (to be written) — Ontology-as-Types Resolution
 
 ---
@@ -681,7 +687,7 @@ The phase decomposes into two milestones that are separately reviewable:
 ### Phase 11 — References
 
 - `docs/design/life-science-requirements.md` §16 (required extensions), §18 (prioritization), §19 (sequencing)
-- `docs/design/lean-4-as-institution.md` — nanoda reference, especially Appendix A
+- `docs/design/d28-lean-4-as-institution.md` — nanoda reference, especially Appendix A
 - D19 (`docs/design/d19-inductive-types.md`) — Inductive Types + Sized Types in Mini-TT
 
 ---
@@ -931,6 +937,10 @@ The D10-era surface is fully retired:
 - **14f — Reachability-based GC (~2 weeks).** Mark-and-sweep over the resource graph. Roots: pinned branch heads, active sessions, resources referenced by reflection-ontology traces, verified-knowledge claims. Background task with backpressure; configurable triggers (size threshold, idle interval).
 - **14g — Branch pruning (~1 week).** `eigenius db prune <branch>` removes a branch from the topology; GC sweeps anything reachable only through it. Rejects pruning of branches with active sessions.
 - **14h — Indexed resource access for queries (~1.5 weeks).** Implement the per-layer triple index (D23 §5.9) and wire it through the EigenQL evaluator's pattern-matching path. `MATCH ?x : Class { prop = ?v }` becomes a POS prefix scan against the storage backend instead of a full chain scan, with chain-membership filtering and a bloom-walk shadow check (matching §5.2's per-layer model) to dedupe across the DAG. POS-only in v1 (the three hot sites need only `(p, o) → s`); SPO/OPS deferred. IRI-valued objects only (`Property.data_type ∈ {resource, resource_array}`); literal-typed properties post-filter the index-narrowed candidate set. Result-set processing (joins, sorts, group-by) stays in memory — operator spill is Phase 16. After this lands, queries continue to work; the read-side working set just shifts off-heap. The previously-stubbed `storage/indexing/` crate is superseded by the new in-kernel implementation in `kernel/src/layer/index.rs` and the RocksDB-backed impl in `storage/rocksdb/src/triple_index.rs`.
+- **14i — Notebook surface for branches & trivial merge + GC trigger wiring (~2 weeks).** *Pending.* 14a–14h shipped the kernel mechanics; this milestone closes the visibility gap so users see what the kernel is doing. Three independent strands:
+  - **Notebook branch surface.** The notebook SPA renders the branch DAG (current head, divergent `auto-*` branches, recovery branches per task), exposes branch switching in the UI, and threads the chosen branch through `Run from here…` / `Run to here…`. Trivial-merge outcomes from Phase 14e's `update_branch` surface as labelled merge nodes on the topology graph and as MessageBar summaries when a task run trivially merges into the user's branch. `NeedsWitnessedMerge` outcomes display the conflicting IRIs and prepare the link into the (still-pending) Phase 15 witnessed-merge command.
+  - **TypeScript SDK additions.** `@eigenius/client` gains `branches.list()`, `branches.head(name)`, `branches.subscribe(name)`, `tasks.outcome(taskId)` so the notebook can fetch the data above without ad-hoc EigenQL.
+  - **GC trigger wiring.** Phase 14f's reachability GC implementation already exists; this milestone exposes the triggers as kernel config — size threshold (default a few GiB of unreachable bytes), idle interval (default 1h), manual `eigenius db gc` CLI command. Trigger evaluation runs as a low-priority background task with backpressure; `Health` reports `gc_in_progress` and last-sweep statistics. `eigenius db stats` extends with branch count, layer count, reachable / unreachable byte estimates, last GC sweep timestamp + reclaimed bytes.
 
 ### Phase 14 — Key design questions
 
@@ -1059,34 +1069,236 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 
 ---
 
-## Phase 18 — Specialty Institutions
+## Phase 18 — Runtime Substrate
 
-**Goal:** Proof-assistant and solver institutions extend the platform's reach. Lean 4 is the canonical first example. Others (SMT solvers like Z3, possibly Coq, possibly TLA+) follow the same pattern with their own fiber reasoners.
+**Goal:** Stand up the language-agnostic substrate that hosts external language toolchains inside Eigenius with full provenance. Pinned `RuntimeEnvironment` images, content-addressed `RuntimeScript` and `RuntimePackage` resources, the `LanguageRuntime` trait that per-language crates implement, the `RunRuntimeScript` / `CallRuntimeMethod` substrate components. No language implementations yet — this phase delivers the trait + the plumbing. Julia (Phase 19) and Lean's authoring side (Phase 20) layer on top.
 
-**Duration estimate:** open-ended per institution; each is roughly 2–4 weeks after prerequisites are in place.
+**Duration estimate:** 6–8 weeks total, three internal milestones aligned with [D26](d26-runtime-substrate.md) §13.
 
-**Prerequisites:** Phase 8 (WASM or subprocess hosting), Phase 11b (inductive types — Lean's claim to fame; an institution can't produce useful inductive results if Mini-TT can't represent them).
+**Prerequisites:** Phase 8 (WASM as the contrast point — the substrate is a sibling, not a replacement, for fine-grained untrusted capability hosting), Phase 9a (durable kernel state — substrate resources persist across restart), Phase 12 (D14 — substrate components dispatch through the existing `ComponentExecutor`; per-language institutions surface as D14 institutions in Phase 19+).
 
-**Drives:** `docs/design/lean-4-as-institution.md` (existing sketch).
+**Drives:** [D26 — Runtime Substrate](d26-runtime-substrate.md). Enables Phase 19 (Julia) and Phase 20 (Lean's authoring-side workflows).
 
-### Phase 18 — Deliverables (per institution)
+### Phase 18a — Substrate skeleton (~3 weeks)
 
-- **Fiber declaration:** morphism types the institution understands (for Lean: proofs, reductions, elaborations), query types it answers (e.g., "is this proposition provable?").
-- **Reasoner implementation:** WASM-hosted for Lean-in-WASM if feasible; subprocess-hosted via nanoda_lib integration as a practical first cut.
-- **Comorphism specifications:** per Phase 11d/12, how Lean's natural numbers relate to Mini-TT's Nat, how Lean's Prop relates to Mini-TT's Type(0), etc. Many small comorphisms.
-- **Worked example:** a life-science or engineering claim proved in Lean, with the proof registered as a verified morphism on a class.
+- New crate `eigenius-runtime-substrate` with the `LanguageRuntime` trait and parent ontology resource classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`).
+- Worker RPC framing using CBOR with RFC 8746 typed-array tags (matching the rest of Eigenius's serialization). JSON bootstrap path retained for first-language Phase A debugging only.
+- `RunRuntimeScript` and `CallRuntimeMethod` substrate components registered through the existing `ComponentExecutor` plumbing; `IO`-tagged.
+- `DispatchedTo` morphism class as a structural-metadata morphism on `RuntimeInvocation`.
+- Orchestrator-side wiring: the new crate plugs into the existing `ComponentRegistry`; no new gRPC RPCs.
 
-### Phase 18 — Open questions (carried from `lean-4-as-institution.md`)
+### Phase 18b — Mirror anchoring + boundary check (~2 weeks)
 
-- `verified_in` witness extension (§16.4 / `lean-4-as-institution.md` open question 9) — deferred until a consumer requests it.
-- Hosting model: WASM (sandboxed, matches other institutions) vs. subprocess (matches Lean's normal operating model, avoids wasm-lean complexity). Decision pending empirical data on both options.
-- Trust policy for Lean proofs: how much of the Lean environment is "ambient trust" vs. reproducible per-proof?
+- Boundary check (D26 §7.5): mirror resolution, input shape check, method-signature check on every `RunRuntimeScript` / `CallRuntimeMethod` dispatch.
+- Mirror-anchor compositionality logic: a `RuntimePackageMirror` anchored to layer L₀ is valid for invocations against descendant layers iff the mirrored classes are byte-identical; otherwise the substrate rejects with `MirrorVersionMismatch`.
+- Per-language mirror-generator integration points (the substrate hosts the generator; per-language crates supply the generator binary).
+
+### Phase 18c — Image-build pipeline + worker pool + sandbox (~3 weeks)
+
+- Deterministic image-build pipeline (D26 §9.2): compose Dockerfile from per-language fragments + shared base layers, materialise `included_packages` and the mirror archive into the build context, invoke `buildah` deterministically, push to registry, capture digest.
+- In-image build provenance baked into `/etc/eigenius-runtime-env/`; worker bootstrap performs the start-time cross-check (D26 §9.3).
+- Multi-environment worker pool with LRU eviction (D26 §8.2). Image-pull cache.
+- OS-level sandbox: Linux namespaces + cgroups; per-invocation tempdir; configurable wall-clock and memory caps; syscall allow-list.
+- `numerical_metadata` recording on `RuntimeInvocation` (BLAS lib, FMA flag, GPU determinism flags, host kernel).
+
+### Phase 18 — Test plan
+
+- Smoke language test: a minimal `eigenius-test-runtime` crate wraps `bash -c` as a "language" so the substrate skeleton can be exercised end-to-end without dragging in a real interpreter. Round-trips a `RunRuntimeScript` invocation, produces a `RuntimeInvocation` with full provenance, demonstrates worker bootstrap cross-check fires on misconfiguration.
+- Boundary-check coverage: missing mirror class, mirror anchored to non-ancestral layer, method-signature mismatch — all produce typed errors before reaching the worker.
+- Image determinism: building the same `RuntimeEnvironment` resource twice produces byte-identical OCI images (modulo build timestamp, which is normalised).
+- Sandbox isolation: a script attempting to access disallowed paths or syscalls is killed; resource-limit violations surface as structured errors.
 
 ### Phase 18 — References
 
-- `docs/design/lean-4-as-institution.md` — extended sketch, nanoda_lib as reference
-- `docs/design/life-science-requirements.md` §16.4 — verified_in witness extension
-- D10 — institution protocol (the contract Lean plays)
+- [D26 — Runtime Substrate](d26-runtime-substrate.md) — full specification
+- D12 — WASM extensibility (the contrast: WASM for fine-grained untrusted, substrate for trusted-but-tracked language toolchains)
+- D14 — institution realisation (per-language crates layer institution declarations on top of substrate components)
+
+---
+
+## Phase 19 — Julia Substrate Instance + Reference Institutions
+
+**Goal:** Bring up Julia as the first concrete substrate instance, ship `eigon-julia-gen` as a deterministic mirror generator, and register five reference institutions under D14: `Symbolics`/`ModelingToolkit` (symbolic algebra), `JuMP` (optimisation), `IntervalArithmetic` (rigorous bounds), `Catalyst` (chemical reaction networks), `DiffEq` (ODE solving). Provides the computational footing for life-science worked examples in Phase 21.
+
+**Duration estimate:** 18–22 weeks total, eight internal milestones aligned with [D27](d27-julia-institutions.md) §8.
+
+**Prerequisites:** Phase 11b (inductive types — `Verdict`-shaped payloads and inductive-shaped term representations need them), Phase 12 (D14 — each Julia institution is a D14 institution), Phase 18 (runtime substrate).
+
+**Drives:** [D27 — Julia Institutions](d27-julia-institutions.md). Enables [`life-science-requirements.md`](life-science-requirements.md) worked examples in Phase 21 (PK ODEs, ML ensemble bounds, certified intervals, reaction-network dynamics).
+
+### Phase 19a — Julia substrate proof of concept (~2 weeks)
+
+- `eigenius-julia` crate implements `LanguageRuntime`. One persistent Julia worker per process; no pool yet. JSON-on-the-wire bootstrap (Phase 19b replaces with CBOR).
+- Demonstrates: a `JuliaScript` resource committed to the chain, dispatched via `RunRuntimeScript`, producing a `JuliaInvocation` provenance record. `image_digest` left empty (deployment shape (c) — Julia bundled into the orchestrator image).
+- Validates the substrate shape against a real language; flushes out anything missing in Phase 18a.
+
+### Phase 19b — `eigon-julia-gen` mirror generator (~3 weeks)
+
+- Deterministic Julia mirror generator. Faithful-translation specification authored in parallel as a design doc (D29, see Design Documents §9).
+- `JuliaPackageMirror` resources committed back to the chain.
+- `CallRuntimeMethod` (Julia variant) using mirror-struct dispatch.
+- Wire format flips to CBOR with RFC 8746 typed-array tags.
+
+### Phase 19c — Per-environment images + worker pool (~3 weeks)
+
+- Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated.
+- Multi-environment worker pool with LRU eviction (substrate-side; this milestone exercises and tunes it for Julia).
+- `JuliaPackagePin` resources committed alongside the verbatim `Manifest.toml` for graph-side queryability.
+
+### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~3 weeks)
+
+- `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes; ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
+- End-to-end demo: a notebook that loads physical-system equations, gets them simplified via `qc_symb_simplify`, runs a numerical solve via a substrate component.
+
+### Phase 19e — `JuMP` institution (~2 weeks)
+
+- `eigenius-julia-jump` per-solver registrations: HiGHS (default), GLPK, Ipopt; Gurobi if licensed. Each is a separate `Institution` resource referencing its own `JuliaEnvironment`.
+- Declarations from D27 §4.2: `OptimisationProblem`, `OptimisesTo`, `Infeasible`, `BoundedBy` resource classes; AutoOnLoad certificate-validation QueryClasses; OnDemand `qc_jump_solve`; Decidable `qc_jump_is_infeasible`.
+- Demo: a constrained design problem solved by the institution; solver certificate re-checked on commit.
+
+### Phase 19f — `IntervalArithmetic` institution + numerical hardening (~3 weeks)
+
+- `eigenius-julia-intervals` crate. Declarations from D27 §4.3: `BoundedBy(value, interval)`, `ProvesBoundOn(function, domain, interval)`, `ContainsRoot` resource classes; Decidable role on `qc_intv_validate_bounded_by` so user programs can write `Exp::NativeDecide` predicates that reduce operationally.
+- Strict-determinism mode: BLAS pinning, FMA off, refusal to run on non-conforming hosts.
+- Cross-host reproducibility verification tooling: re-run an invocation on a different host, surface `numerical_metadata` divergences.
+
+### Phase 19g — `Catalyst.jl` institution (~3 weeks)
+
+- `eigenius-julia-catalyst` crate. Declarations promoted from D27 §4.4 (Catalyst is now a first-class reference institution given the life-science focus on PK / signaling pathways / metabolic networks).
+- Resource classes: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `MassActionKinetics` / `JumpProcessSemantics` markers, `DeficiencyZero` / `DeficiencyOne` relations.
+- ExportFormats / ImportFormats: extract a `ReactionNetwork` into a `CatalystNetworkRepr` Mini-TT payload; reify steady-state and conservation-law results.
+- QueryClasses: `qc_cat_validate_conservation_law` (`AutoOnLoad`), `qc_cat_validate_steady_state` (`AutoOnLoad`), `qc_cat_compute_steady_states` (`OnDemand`), `qc_cat_to_ode` (`OnDemand`) producing an `OdeSystemRepr` for handoff to Phase 19h, `qc_cat_check_deficiency` (`OnDemand`, `Decidable`).
+- Comorphism into Symbolics/MTK: declared as a typed D14 Comorphism so the cross-fibre move from a reaction network to its symbolic ODE form is a tracked translation.
+- Why an institution and not just a substrate component: the fibre has structural invariants (linear conservation laws, deficiency classes, mass-action equivalence) that EigenQL FIBER queries can traverse; substrate components alone would just return numbers without the typed-relation status.
+
+### Phase 19h — `DifferentialEquations.jl` institution — ODEs only (~3 weeks)
+
+- `eigenius-julia-diffeq` crate. **v1 scope: ODEs only.** SDEs, DAEs, DDEs, jump processes, and hybrid systems are deferred to follow-on milestones (19i and beyond) to be triggered by domain demand.
+- Resource classes: `OdeSystem(equations, parameters, state_variables)`, `OdeSolution(system, parameters, initial_conditions, trajectory, integrator)`, `IntegrationCertificate(solution, tolerance, error_bound)`, `BoundedError(solution, norm, bound)`, `ParameterFit(system, observations, fitted_parameters, residual)`.
+- ExportFormats / ImportFormats: extract an `OdeSystem` into the solver's representation; reify trajectory and certificate results back as typed resources.
+- QueryClasses: `qc_diffeq_validate_solution` (`AutoOnLoad` — re-integrates and confirms within tolerance), `qc_diffeq_validate_certificate` (`AutoOnLoad`), `qc_diffeq_solve(system, params, ic, [t0, t1])` (`OnDemand`), `qc_diffeq_steady_state` (`OnDemand`), `qc_diffeq_continuation` (parameter sweeps; `OnDemand`), `qc_diffeq_sensitivity` (`OnDemand`).
+- Comorphisms in: from Phase 19g (Catalyst → DiffEq) and from Phase 19d (MTK → DiffEq) — both directly supported by the Julia libraries; under D14 they're typed Comorphism resources.
+- Comorphisms out: to Phase 19f (DiffEq → IntervalArithmetic) — given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is one of the bridges Phase 21 needs for *operationally verified* PK predictions.
+- Why ODEs only in v1: bread-and-butter life-science modelling (PK compartmental models, mechanistic dose-response, steady-state cell-cycle) is ~95% deterministic ODE; SDEs / jump processes are warranted only for low-copy-number stochastic kinetics, which can land when a domain consumer asks.
+
+### Phase 19 — Test plan
+
+- Per-institution: AutoOnLoad-on-commit acceptance and rejection, OnDemand FIBER queries, Decidable `Exp::NativeDecide` reduction (where applicable).
+- Cross-institution within Julia: a notebook that calls Symbolics to simplify a problem, JuMP to solve a parameter-fit, Catalyst to express the dynamics, DiffEq to integrate, IntervalArithmetic to bound the solution residual.
+- Catalyst → DiffEq comorphism: a `ReactionNetwork` resource translates through `qc_cat_to_ode` into an `OdeSystem`; the resulting `OdeSolution` AutoOnLoad-validates against the original network.
+- Mirror-anchor regression: a layer that modifies a class used by an existing `JuliaPackageMirror` triggers `MirrorVersionMismatch` on subsequent dispatch.
+- Numerical reproducibility: same image + inputs + seed on the same host yields bit-identical output; on different hosts yields semantically equivalent output with `numerical_metadata` divergence flagged.
+
+### Phase 19 — References
+
+- [D27 — Julia Institutions](d27-julia-institutions.md) — full specification
+- [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate this layers on
+- D14 — institution protocol (each Julia institution is a D14 institution)
+- D29 (to be written) — Faithful translation specification for `eigon-julia-gen`
+
+---
+
+## Phase 20 — Lean 4 Verification Institution
+
+**Goal:** Register Lean 4 as Eigenius's first verification institution under D14, contributing the *verified* epistemic level. Authoring-side workflows (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment` instantiation) run on the runtime substrate; the verification side (proof-term re-check via nanoda_lib) stays in-process for trust-surface reasons. Future verification institutions (Rocq, Isabelle/HOL, SMT checkers) follow the same factoring.
+
+**Duration estimate:** 14–18 weeks total, five internal milestones aligned with [D28](d28-lean-4-as-institution.md) §11.
+
+**Prerequisites:** Phase 11b (inductive types — Lean's primary export shape; an institution can't re-check proofs about inductive structures Mini-TT can't represent), Phase 12 (D14 — Lean is registered as a D14 institution), Phase 18 (runtime substrate — authoring side runs here), Phase 19a (substrate validated against Julia first; Lean is the second forcing function on the substrate's abstractions).
+
+**Drives:** [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md).
+
+### Phase 20a — Proof of concept (~3 weeks)
+
+- `eigenius-lean` crate with the verification side: nanoda_lib wrapper, the `Institution` trait skeleton, `extract_typed` for `ef_lean_proof_payload`, `query` dispatching `urn:eigenius:lean:proof_check` to nanoda_lib.
+- `eigenius-lean-runtime` crate (or sibling within `eigenius-lean`) with the authoring side: `LanguageRuntime` impl, Dockerfile fragments installing `elan` + pinned Lean toolchain + Lake, worker bootstrap exposing `lean4export` as an RPC entry point.
+- `Institution`, ExportFormat, `qc_proof_check` QueryClass declarations land as ordinary chain resources.
+- Toy propositions only (no `EigonFFI` yet — propositions stated about primitive types).
+- Demonstrates: a `LeanProofTerm` resource enters the chain, AutoOnLoad fires, nanoda_lib re-checks, `Verdict::Holds` admits the resource and tags it *verified*.
+
+### Phase 20b — `EigonFFI`, the generator, and real propositions (~5 weeks)
+
+- `eigon-ffi-gen` deterministic generator implementation. Faithful-translation specification authored in parallel as a design doc (D30).
+- Generator runs as a substrate component (`RunEigonFFIGen`, against a `lean-tools` `LeanEnvironment` image) — its determinism and content-hash provenance ride on the substrate's image-pinning.
+- First generated `EigonFFI` library mirroring Core Ontology types.
+- Three-part correspondence check (D28 §5.5): proof validity, mirror correspondence, anchor consistency. Becomes the body of `urn:eigenius:lean:proof_check`'s handler.
+- `qc_which_axioms`, `qc_proof_size`, `qc_environment_diff` OnDemand QueryClasses land opportunistically.
+
+### Phase 20c — Integration hardening + checker operational maturity (~3 weeks)
+
+- In-process `LeanEnvironment` cache (the verification-side cache holding nanoda_lib's parsed environments; substrate-side worker-pool caching for the authoring side already exists from Phase 18c).
+- Performance profiling against realistic proof sizes; trace-cache policy tuning.
+- Upstream-tracking protocol with nanoda_lib (how Eigenius follows Lean kernel changes propagated through nanoda_lib; version-pinning discipline).
+- Optional: introduction of Lean4Lean as a secondary cross-checker per the Venn-diagram soundness argument.
+
+### Phase 20d — Mathlib-dependent proofs (~5 weeks)
+
+- Extension of `EigonFFI` and environment management to support proofs depending on Mathlib.
+- Environment-diff tooling beyond image-digest equality.
+- Resource-bound enforcement at production scale.
+
+### Phase 20e — Production hardening (open-ended)
+
+- WASM sandboxing of the verification-side checker if benchmarks justify it (D28 §8.3).
+- Full error-diagnostic preservation through the verdict trail.
+- Audit tooling that walks the closed audit chain (D28 §5.7).
+- Regulatory-facing query surfaces.
+
+### Phase 20 — Open questions (carried from D28)
+
+- `verified_in` witness extension (D28 §12 question 9 / `life-science-requirements.md` §16.4) — defer until a concrete consumer asks for it.
+- Axiom allow-list policy (D28 §12 question 2) — pick the standard set (`propext`, `Classical.choice`, `Quot.sound`, `Lean.trustCompiler`) for v1; per-deployment override later.
+- Parallel verification institutions (D28 §12 question 5) — when Rocq or Isabelle/HOL land, dispatch by explicit IRI; user-level preference is post-v1.
+
+### Phase 20 — Test plan
+
+- Toy proof end-to-end (Phase 20a): a `LeanProofTerm` resource for `1 + 1 = 2` enters the chain, AutoOnLoad fires, nanoda_lib admits, kernel tags *verified*.
+- `EigonFFI`-anchored proof (Phase 20b): a proof about a Core Ontology resource, with `mirror_reference` and `claim_layer_hash` populated, exercises the three-part correspondence check.
+- Compositionality regression: a proof anchored to layer L₀ remains valid for a claim in layer L₁ ⊒ L₀ when L₁ doesn't modify the mirrored classes; rejected when L₁ modifies them.
+- Mathlib-scale proof (Phase 20d): a proof depending on Mathlib lemmas re-checks within configured wall-clock and memory bounds.
+- Lean4Lean cross-check (Phase 20c, optional): both checkers agree on a sample of proofs; disagreements flagged.
+
+### Phase 20 — References
+
+- [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md) — full specification
+- [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate the authoring side runs on
+- D14 — institution protocol
+- D30 (to be written) — Faithful translation specification for `eigon-ffi-gen`
+
+---
+
+## Phase 21 — Life-Science Worked Examples
+
+**Goal:** Bring up the four life-science institutions outlined in [`life-science-requirements.md`](life-science-requirements.md) (`I_Dock`, `I_ADMET`, `I_Assay`, `I_PK`) end-to-end through real Julia institutions, real Lean proofs (where the *verified* warrant is wanted), and the EigenQL surface. Validates the platform against the original life-science motivation; produces the worked examples cited throughout the design corpus (the EIG-0042 cross-fiber discrepancy, the dock→assay comorphism translation, the PK ODE bound proof).
+
+**Duration estimate:** open-ended; each life-science institution is roughly 3–5 weeks given the prerequisites are in place.
+
+**Prerequisites:** Phase 11 (inductive types + Map/Reduce + decide procedures + Comorphism class — all of [`life-science-requirements.md`](life-science-requirements.md) §16's Tier 1 + Tier 2), Phase 19 (Julia institutions: 19g Catalyst for reaction-network dynamics, 19h DiffEq for ODE integration, 19f IntervalArithmetic for certified bounds, 19d Symbolics for derivation, 19e JuMP for parameter fitting). Phase 20 (Lean) is required only for the *verified* path on life-science computations; the *derived*-only path for the four institutions doesn't strictly need it.
+
+**Drives:** [`life-science-requirements.md`](life-science-requirements.md). Capstone for the platform vision laid out in the original requirements doc.
+
+### Phase 21 — Deliverables (per institution)
+
+- **`I_Dock` institution:** typed declarations for poses, scoring functions, conformational families; AutoOnLoad QueryClasses validating pose-scoring consistency and ensemble representativeness; OnDemand queries for "best pose by score" / "structural neighbours within RMSD ε".
+- **`I_ADMET` institution:** structure-to-property mappings, ML ensemble predictions with confidence bounds; AutoOnLoad QueryClasses gating prediction admission on ensemble disagreement thresholds.
+- **`I_Assay` institution:** typed assay protocols, dose-response curves, replicate relationships; AutoOnLoad QueryClasses validating curve-fit goodness; OnDemand queries for "compounds active in assay X" / "EC₅₀ for compound Y".
+- **`I_PK` institution:** compartmental models declared as `ReactionNetwork` (Phase 19g) compiled to `OdeSystem` (Phase 19h); AutoOnLoad QueryClasses validating ODE solutions against measured concentrations within tolerance; OnDemand `qc_pk_predict_cmax` / `qc_pk_predict_auc` etc.
+- **Cross-institution comorphisms:** `Dock → Assay` (binding affinity ΔG → predicted IC₅₀), `ADMET → PK` (predicted clearance → compartmental parameters), `PK → IntervalArithmetic` (PK trajectory → certified concentration bounds via interval extension); declared as D14 `Comorphism` resources.
+- **Worked notebook:** the EIG-0042 cross-fiber discrepancy scenario from [`life-science-requirements.md`](life-science-requirements.md) §1, end-to-end through the four institutions and the comorphism translations.
+
+### Phase 21 — Open scope items
+
+- Bayesian inference (`Turing.jl`) for posterior over PK parameters; deferred until a domain demand is concrete.
+- SDE / jump-process kinetics (Phase 19i+) for stochastic low-copy-number signaling pathways; deferred.
+- Algorithm-correctness Lean proofs for life-science computations (the [D27](d27-julia-institutions.md) §6.3 bridge); deferred.
+- Domain ontology curation (compound libraries, target families, assay panels); a Phase 21 follow-on rather than core.
+
+### Phase 21 — References
+
+- [`life-science-requirements.md`](life-science-requirements.md) — driving requirements
+- [D27 — Julia Institutions](d27-julia-institutions.md) — Julia institutions this builds on
+- [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md) — verification track for the life-science claims that warrant it
+- [D26 — Runtime Substrate](d26-runtime-substrate.md) — what the Julia + Lean tracks both ride on
 
 ---
 
@@ -1122,13 +1334,17 @@ The following design documents must be written and reviewed before the phase tha
 | D23 | **Out-of-Core Layer Architecture** | Topology / content split, per-layer shadowing bloom + bounded `BloomCache`, two-pool ARC cache, time-travel as standard resolve rooted at the target layer, DAG branching primitive, multi-session writes, reachability-based GC with trace pinning, branch pruning, indexed resource access for queries. The structural rework that lifts the kernel's working-set bound from "graph size" to "cache size." | Phase 14 | 12–16 pages |
 | D24 | **Out-of-Core Query Execution** | Buffer-pool abstraction over the storage backend, hash join with spill, external sort, spillable group-by accumulators, spill-aware cost model, per-query memory budget. The operator-side rewrite that lets EigenQL handle result sets larger than memory. Builds on D23's storage abstractions. | Phase 16 | 8–10 pages |
 | D25 | **Chain Consolidation** | Squash a contiguous ancestral range of layers into one resolve-equivalent layer to reduce chain depth and storage cost. Top-of-stack computation across the range, atomic commit of the consolidated layer, trace re-pinning policy, interaction with witnessed merge (consolidating across merge nodes preserves the comorphism witness). The lifecycle operation that addresses the deep-chain pathology D23 §5.2.7 flags as a deferred concern. Distinct from merge (combines branches) and GC (drops unreachable layers). | Phase 17 | 8–10 pages |
+| D26 | **Runtime Substrate** | **DRAFT** — `docs/design/d26-runtime-substrate.md`. Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. `LanguageRuntime` trait, parent ontology classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`), image-vs-graph boundary, deterministic image-build pipeline with digest capture, worker pool + sandbox, mirror-anchor compositionality, `RunRuntimeScript` / `CallRuntimeMethod` substrate components. Cross-language wire format = CBOR + RFC 8746 typed-array tags. | Phase 18 | Draft |
+| D27 | **Julia Institutions** | **DRAFT** — `docs/design/d27-julia-institutions.md`. First concrete substrate instance plus reference institutions wrapping Julia libraries under D14. `JuliaScript` / `JuliaPackage` / `JuliaEnvironment` / `JuliaPackageMirror` / `JuliaInvocation` / `JuliaMethodSignature` / `JuliaPackagePin` subclasses. `eigon-julia-gen` mirror generator. Five reference institutions: `Symbolics`/`ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` (ODEs). Future Lean / Julia bridge sketch (interval-bound proof obligations). | Phase 19 | Draft |
+| D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
+| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19b | 8–12 pages |
+| D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
 
 **Reference documents** (analysis rather than specification):
 
 | File | Purpose |
 |------|---------|
-| `docs/design/life-science-requirements.md` | Systematic audit of life-science representation needs. Drives the Phase 10–12 sequencing and is the source of record for which kernel extensions each shape requires. |
-| `docs/design/lean-4-as-institution.md` | Extended sketch of Lean 4 as an Eigenius institution. Primary reference for nanoda_lib integration patterns and the `verified_in` witness discussion. Drives Phase 18. |
+| `docs/design/life-science-requirements.md` | Systematic audit of life-science representation needs. Drives the Phase 10–12 kernel-extension sequencing, the Phase 19 Julia-institution selection (Catalyst + DiffEq for PK / signaling, IntervalArithmetic for certified bounds), and the Phase 21 worked-example shape. Source of record for which kernel and institution extensions each life-science shape requires. |
 
 ---
 

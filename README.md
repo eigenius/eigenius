@@ -536,9 +536,9 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D24: Schema Versioning Policy](docs/design/d24-schema-versioning.md) | On-disk schema versioning: kernel `SCHEMA_VERSION`, migration framework, boot-time check, contributor checklist. Companion: [Schema Changelog](docs/design/schema-changelog.md). |
 | [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
 | [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
-| [Lean 4 as Institution](docs/design/lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
-| [Runtime Substrate](docs/design/runtime-substrate.md) | Language-agnostic substrate for embedding scientific-computation runtimes (Julia, Python, R, …) into Eigenius. Resource classes, image-vs-graph boundary, container-digest-anchored deployment, mirror generators. |
-| [Julia Institutions](docs/design/julia-institutions.md) | Julia as the first runtime-substrate instance, plus three reference institutions wrapping Julia libraries with their own fibers: `Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`. The future Lean / Julia bridge. |
+| [D26: Runtime Substrate](docs/design/d26-runtime-substrate.md) | Language-agnostic substrate for embedding scientific-computation runtimes (Julia, Python, R, …) into Eigenius. Resource classes, image-vs-graph boundary, container-digest-anchored deployment, mirror generators. |
+| [D27: Julia Institutions](docs/design/d27-julia-institutions.md) | Julia as the first runtime-substrate instance, plus three reference institutions wrapping Julia libraries with their own fibers: `Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`. The future Lean / Julia bridge. |
+| [D28: Lean 4 as Verification Institution](docs/design/d28-lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
 
 ## License
 

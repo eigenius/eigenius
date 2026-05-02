@@ -88,6 +88,6 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D14 Institution Realisation](../design/d14-institution-realisation.md) — institution mechanism dispatched in both guides (supersedes D10)
 - [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 13 + 14
 
-The full set (D1–D22 plus standalone notes including the [Lean 4 as institution](../design/lean-4-as-institution.md) integration plan) lives at [`docs/design/`](../design/).
+The full set (D1–D28 — including [D26 Runtime Substrate](../design/d26-runtime-substrate.md), [D27 Julia Institutions](../design/d27-julia-institutions.md), and [D28 Lean 4 as Verification Institution](../design/d28-lean-4-as-institution.md) — plus standalone notes) lives at [`docs/design/`](../design/).
 
 Source code: [github.com/eigenius/eigenius](https://github.com/eigenius/eigenius).

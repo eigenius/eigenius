@@ -348,7 +348,7 @@ check_infer(IdJ([a, c, d, x, y, p]), ctx) =
 ```
 
 This is the messiest case; punting the detailed typing rule to
-nanoda_lib's `IdJ` handling (see `lean-4-as-institution.md`).
+nanoda_lib's `IdJ` handling (see `d28-lean-4-as-institution.md`).
 
 ### 6.5 `Refl(a)`
 
@@ -530,7 +530,7 @@ the uncached version. No changes to `ground.rs` required for §5.
   names this as Phase 10 step 1.
 - `docs/design/life-science-requirements.md` §16.2 — universe
   stratification (Phase 10b, separate document forthcoming).
-- `docs/design/lean-4-as-institution.md` — nanoda_lib's IdJ and
+- `docs/design/d28-lean-4-as-institution.md` — nanoda_lib's IdJ and
   type-inference approach, used as a reference for §6.4.
 - `kernel/src/nbe/check.rs` — `find_sigma_field`, `check_infer`,
   `check`, `check_type`, `check_decl`.
