@@ -15,6 +15,19 @@ The platform maintains four epistemic categories: **declared** knowledge (human 
 > is to close those quality gaps rather aggressively. Feel free
 > to submit issues in the discussion forum or directly as issue.
 
+Key features that we still need to wire up:
+
+- Completion of storage graph management and versioning. Branching and
+  trivial merges have been implemented but are not yet exposed in the
+  notebook interface. Conflict resolution and layer compaction still
+  need to be implemented. Garbage collection across graph layers has been
+  implemented, but it has yet to be integrated into the application 
+  life-cycle.
+- The runtime substrate for integrating third-party programming languages
+  (e.g. Julia, Lean-4, Python) still need to be implemented and integrated
+  into the Eigenius stack. In addition, we need to provide institution-level
+  integration into appropriate languages (Julia [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl) and [`JuMP`](https://jump.dev/); Lean-4 as theorem prover).
+
 ## The notebook — start here
 
 For most users, the notebook is the most accessible way to use the platform. It is a React SPA the orchestrator serves at `http://localhost:8080/notebooks/`; cells run ESL, EigenQL, TypeScript, and program invocations against the live kernel; outputs auto-render as typed inspectors, result tables, layer-stack diagrams, and program-trace trees.
@@ -25,7 +38,8 @@ For most users, the notebook is the most accessible way to use the platform. It 
 
 If you have the docker stack up (`docker compose up -d`), the notebook is already there — it's bundled into the orchestrator image at build time and serves alongside the RPC paths on the same origin. Open the URL above and the patent-analysis demo loads on first mount; click **Run all** and watch ESL compile + commit a layer, EigenQL produce a result table, and the program-run cell drive the kernel through a two-step LLM pipeline (`CompleteJson` → structured patent analysis, `CompleteText` → plain-language summary) with the resulting brief and an interactive trace tree rendered side-by-side.
 
-See **[chapter 13 — Notebook](docs/guides/platform/13-notebook.md)** for the full reference.
+See **[chapter 13 — Notebook](docs/guides/platform/13-notebook.md)** for the full reference. The graphing capabilities of the notework interface can
+be explored by importing the [Kinase Assay](notebooks/examples/kinase-screening.json) example.
 
 The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/)) is usable programmatically from any TypeScript runtime — see **[chapter 14 — TypeScript SDK](docs/guides/platform/14-typescript-sdk.md)**.
 
