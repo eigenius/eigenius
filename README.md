@@ -19,7 +19,7 @@ Key features that we still need to wire up:
 
 - Completion of storage graph management and versioning. [Branching and
   trivial merges have been implemented but are not yet exposed in the
-  notebook interface](docs/design/d23-out-of-core-layer-architecture.md). [Layer reconsiliation](docs/design/d20-layer-reconciliation.md) and [chain consolidation](docs/design/d25-chain-consolidation.md) still
+  notebook interface](docs/design/d23-out-of-core-layer-architecture.md). [Layer reconciliation](docs/design/d20-layer-reconciliation.md) and [chain consolidation](docs/design/d25-chain-consolidation.md) still
   need to be implemented. [Garbage collection across graph layers has been
   implemented](docs/design/d23-out-of-core-layer-architecture.md), but it has yet to be integrated into the application 
   life-cycle.
