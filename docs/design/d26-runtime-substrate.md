@@ -1,14 +1,14 @@
 # Runtime Substrate
 
 **Status:** Draft — outline for the design specification
-**Scope:** A language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. Defines the trait, the resource classes, the image-vs-graph boundary, the deployment model, and the CLI surface. Julia is the first concrete instance for the *derived*-knowledge path; the Lean integration's authoring-side workflow is the second consumer. Per-language design docs (e.g. [`julia-institutions.md`](julia-institutions.md), [`lean-4-as-institution.md`](lean-4-as-institution.md)) layer on top.
-**Related:** [`lean-4-as-institution.md`](lean-4-as-institution.md) (verification institution; substrate-hosted authoring + in-process verification), `boundary-contracts.md` (the meta-specification this outline instantiates), [`julia-institutions.md`](julia-institutions.md) (Julia-specific institutions wrapping this substrate)
+**Scope:** A language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. Defines the trait, the resource classes, the image-vs-graph boundary, the deployment model, and the CLI surface. Julia is the first concrete instance for the *derived*-knowledge path; the Lean integration's authoring-side workflow is the second consumer. Per-language design docs (e.g. [`d27-julia-institutions.md`](d27-julia-institutions.md), [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md)) layer on top.
+**Related:** [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) (verification institution; substrate-hosted authoring + in-process verification), `boundary-contracts.md` (the meta-specification this outline instantiates), [`d27-julia-institutions.md`](d27-julia-institutions.md) (Julia-specific institutions wrapping this substrate)
 
 ## 1. Purpose and scope
 
 Eigenius distinguishes *declared* knowledge (human assertion), *observed* knowledge (recorded with provenance), *derived* knowledge (produced by typed pipelines with traces), and *verified* knowledge (machine-checked proofs). Producing knowledge at any of these levels typically involves running an external language toolchain — a numerical-computing runtime, a proof-authoring environment, a symbolic-algebra system, a data-analysis stack. Different toolchains, same problem: how do you host them with the reproducibility guarantees the rest of Eigenius relies on?
 
-This substrate is the answer. It is the route to running *any* external language toolchain inside Eigenius such that every input, every dependency, every artifact produced is content-addressed, layer-anchored, and reproducible. Its primary consumer is *derived*-knowledge production — simulations, numerical analysis, optimisation, symbolic manipulation, parameter fitting, control-loop tuning, all the load-bearing computation that engineering and science actually do, regardless of which language a particular team writes their code in. Its secondary consumer is the *authoring* side of verification: Lean's `lean4export` toolchain, environment instantiation, and `EigonFFI` generation are themselves containerised language-toolchain workflows that benefit from the same provenance machinery (see [`lean-4-as-institution.md`](lean-4-as-institution.md) §2.3 for the substrate factoring).
+This substrate is the answer. It is the route to running *any* external language toolchain inside Eigenius such that every input, every dependency, every artifact produced is content-addressed, layer-anchored, and reproducible. Its primary consumer is *derived*-knowledge production — simulations, numerical analysis, optimisation, symbolic manipulation, parameter fitting, control-loop tuning, all the load-bearing computation that engineering and science actually do, regardless of which language a particular team writes their code in. Its secondary consumer is the *authoring* side of verification: Lean's `lean4export` toolchain, environment instantiation, and `EigonFFI` generation are themselves containerised language-toolchain workflows that benefit from the same provenance machinery (see [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) §2.3 for the substrate factoring).
 
 The substrate provides:
 
@@ -23,7 +23,7 @@ Without a shared substrate every language reinvents: the worker pool, the image-
 
 ### 1.2 Non-goals
 
-- The substrate does not produce *verified* knowledge. Its epistemic ceiling on hosted *computations* is *derived* with high-quality provenance. Stronger claims come from pairing substrate-hosted output with a verification institution. The Lean integration uses the substrate for its *authoring-side* workflows (proof export, environment instantiation, `EigonFFI` generation), but the proof-checking step itself stays in-process per the trust posture in [`lean-4-as-institution.md`](lean-4-as-institution.md) — that's not a substrate concern.
+- The substrate does not produce *verified* knowledge. Its epistemic ceiling on hosted *computations* is *derived* with high-quality provenance. Stronger claims come from pairing substrate-hosted output with a verification institution. The Lean integration uses the substrate for its *authoring-side* workflows (proof export, environment instantiation, `EigonFFI` generation), but the proof-checking step itself stays in-process per the trust posture in [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) — that's not a substrate concern.
 - The substrate is not a sandbox-as-a-service. It uses sandboxes (OS namespaces + cgroups, not WASM) but its job is provenance + dispatch, not containing untrusted code at scale. WASM remains the right host for fine-grained untrusted capabilities; this substrate is for trusted-but-tracked language toolchains.
 - The substrate is not a replacement for the existing IO-component model. `CompleteText`, `CompleteJson`, etc. continue to dispatch through the orchestrator. The substrate adds new component families on top.
 - This is not a privileged integration of any one language. Julia is the first concrete *derived*-side instance and Lean is the first concrete *authoring*-side instance, but the trait and the resource shape make no language-specific assumptions.
@@ -63,7 +63,7 @@ The integration is two-tier:
 
 The kernel speaks `FiberReasoner` and resource graph; the substrate speaks `LanguageRuntime`; the language crates speak both. Institutions sit on top of language crates and translate institution-protocol calls into substrate dispatches.
 
-`eigenius-lean` is the special case worth flagging: the crate has both an authoring side (containerised Lean toolchain hosting `lean4export`, environment instantiation, `EigonFFI` generation — a `LanguageRuntime` implementation) and a verification side (in-process nanoda_lib checker that does *not* go through the substrate). The split is explained in [`lean-4-as-institution.md`](lean-4-as-institution.md) §2.3. From the substrate's perspective, only the authoring side exists; the verification side is invisible.
+`eigenius-lean` is the special case worth flagging: the crate has both an authoring side (containerised Lean toolchain hosting `lean4export`, environment instantiation, `EigonFFI` generation — a `LanguageRuntime` implementation) and a verification side (in-process nanoda_lib checker that does *not* go through the substrate). The split is explained in [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) §2.3. From the substrate's perspective, only the authoring side exists; the verification side is invisible.
 
 ### 2.1 Substrate vs institution
 
@@ -71,7 +71,7 @@ A **substrate component** runs hosted code with provenance — typed input, type
 
 An **institution** sits on top of the substrate, wraps a *specific* library that implements its own formal reasoning, and contributes typed morphism / `FiberQuery` machinery. The substrate is what an institution dispatches *into*; the substrate itself never claims institution status.
 
-This factoring keeps each side honest: the substrate is a component family any team can use, while institutions are the locus of typed reasoning claims that downstream consumers can build on. See [`julia-institutions.md`](julia-institutions.md) for the institution-side discussion.
+This factoring keeps each side honest: the substrate is a component family any team can use, while institutions are the locus of typed reasoning claims that downstream consumers can build on. See [`d27-julia-institutions.md`](d27-julia-institutions.md) for the institution-side discussion.
 
 ### 2.2 Why no in-process re-checker for substrate-hosted computations
 
@@ -79,7 +79,7 @@ Lean *verification* re-checks proof terms in-process via nanoda_lib because Lean
 
 The substrate accepts this for hosted computations. It pins everything that can be pinned, records everything that can be recorded, and surfaces non-determinism explicitly when it occurs. The trust posture for substrate-hosted output is "we ran this exact pinned image with these exact pinned inputs and recorded the result"; the verdict is reproducible by re-running, not by re-checking.
 
-The Lean integration is the asymmetric case: its authoring-side workflows (proof-term *export*, `EigonFFI` generation, environment instantiation) run on the substrate exactly because they are operationally-reproducible artifacts that benefit from image pinning, while its verification side (proof-term *checking*) stays in-process for the trust-surface reasons in [`lean-4-as-institution.md`](lean-4-as-institution.md) §2.1. Other languages don't have this split because they don't have a verification side to begin with.
+The Lean integration is the asymmetric case: its authoring-side workflows (proof-term *export*, `EigonFFI` generation, environment instantiation) run on the substrate exactly because they are operationally-reproducible artifacts that benefit from image pinning, while its verification side (proof-term *checking*) stays in-process for the trust-surface reasons in [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) §2.1. Other languages don't have this split because they don't have a verification side to begin with.
 
 ### 2.3 Trusted computing base
 
@@ -607,7 +607,7 @@ T-shirt sizes, ordered by dependency. Per-language phases live in language-speci
 
 ### Phase A — Substrate skeleton
 
-`eigenius-runtime-substrate` crate with the `LanguageRuntime` trait, parent resource classes, basic worker RPC, and the orchestrator-side wiring. No language implementations yet; `eigenius-julia` Phase A (in [`julia-institutions.md`](julia-institutions.md)) lands against this.
+`eigenius-runtime-substrate` crate with the `LanguageRuntime` trait, parent resource classes, basic worker RPC, and the orchestrator-side wiring. No language implementations yet; `eigenius-julia` Phase A (in [`d27-julia-institutions.md`](d27-julia-institutions.md)) lands against this.
 
 **Scope:** Small. Scaffolding plus the RPC and provenance shape.
 
@@ -625,7 +625,7 @@ The deterministic build pipeline (§9.2), digest capture, in-image provenance, w
 
 ### Phase D — Cross-language readiness
 
-Once Julia is mature (per [`julia-institutions.md`](julia-institutions.md) Phase D-E), bring up a second language (Python is the obvious next target) using the substrate. Validates that the substrate's abstractions are right. Phase D's deliverable is the second-language proof-of-concept (a Python `RunRuntimeScript` working end-to-end), not full institution coverage.
+Once Julia is mature (per [`d27-julia-institutions.md`](d27-julia-institutions.md) Phase D-E), bring up a second language (Python is the obvious next target) using the substrate. Validates that the substrate's abstractions are right. Phase D's deliverable is the second-language proof-of-concept (a Python `RunRuntimeScript` working end-to-end), not full institution coverage.
 
 **Scope:** Medium. Mostly the language-specific work in a Python crate; substrate changes are lightweight.
 
@@ -685,6 +685,6 @@ WASM remains the right choice for arbitrary untrusted user code, fine-grained ca
 | TCB | Term checker + generator + correspondence | Substrate + per-language crate + per-institution wrapper + image pipeline |
 | Failure mode | Refuses bad proofs (binary verdict) | Reports invocation failure with diagnostics; reproducibility divergence visible in metadata |
 
-The two integrations complement each other. Substrate-hosted computations produce *derived* knowledge that Lean proofs can later assert properties about. The first concrete bridge is sketched in [`julia-institutions.md`](julia-institutions.md) §6.
+The two integrations complement each other. Substrate-hosted computations produce *derived* knowledge that Lean proofs can later assert properties about. The first concrete bridge is sketched in [`d27-julia-institutions.md`](d27-julia-institutions.md) §6.
 
 This appendix should be revisited when a third major integration lands (a second-language substrate, a second proof system, or a substantially different verification primitive) to verify the comparison framework still holds.
