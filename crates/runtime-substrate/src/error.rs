@@ -73,6 +73,15 @@ pub enum SpawnError {
     /// to spawn workers in this state.
     #[error("DooD bind-mount discipline violated: {0}")]
     DepotMountViolation(String),
+
+    /// `wait_with_timeout` was given a non-`None` timeout and the
+    /// worker did not exit within it. The spawner kills the worker
+    /// before returning so the caller can rely on the worker being
+    /// reaped on the way out. The dispatcher maps this to
+    /// [`crate::error::RunError::ResourceLimitExceeded`] with
+    /// [`crate::error::ResourceLimit::WallClock`] (D26 §8.3 / §11.1).
+    #[error("worker {handle_id} did not exit within {timeout_ms}ms; killed")]
+    WaitTimedOut { handle_id: String, timeout_ms: u64 },
 }
 
 /// Failure modes for `LanguageRuntime::run_script` and `call_method`.

@@ -138,7 +138,7 @@ fn evict_and_wait(spawner: &LocalSpawner, client: &mut WorkerRpcClient, handle: 
         matches!(resp, Response::Evicted),
         "expected Evicted, got {resp:?}"
     );
-    let status = spawner.wait(handle).expect("wait");
+    let status = spawner.wait_with_timeout(handle, None).expect("wait");
     assert!(
         status.success(),
         "worker exited with status {:?}",
@@ -275,7 +275,9 @@ fn worker_refuses_to_start_on_cross_check_hash_mismatch() {
     let spawner = LocalSpawner::new();
     let spec = build_spec_with_cross_check(&tempdir, "env-says-this", "file-says-that");
     let handle = spawner.spawn(spec).expect("spawn worker");
-    let status = spawner.wait(&handle).expect("wait for worker");
+    let status = spawner
+        .wait_with_timeout(&handle, None)
+        .expect("wait for worker");
     assert!(
         cross_check::is_cross_check_failure(status),
         "expected EXIT_CODE_CROSS_CHECK_FAILURE, got {:?}",
@@ -302,7 +304,9 @@ fn worker_refuses_to_start_when_cross_check_env_missing() {
     spec.env.remove(cross_check::ENV_DIGEST_VAR);
     spec.env.remove(cross_check::ENV_MANIFEST_HASH_VAR);
     let handle = spawner.spawn(spec).expect("spawn worker");
-    let status = spawner.wait(&handle).expect("wait for worker");
+    let status = spawner
+        .wait_with_timeout(&handle, None)
+        .expect("wait for worker");
     assert!(
         cross_check::is_cross_check_failure(status),
         "expected EXIT_CODE_CROSS_CHECK_FAILURE, got {:?}",
@@ -327,7 +331,9 @@ fn worker_refuses_to_start_when_in_image_file_missing() {
             .join(cross_check::MANIFEST_HASH_FILE),
     );
     let handle = spawner.spawn(spec).expect("spawn worker");
-    let status = spawner.wait(&handle).expect("wait for worker");
+    let status = spawner
+        .wait_with_timeout(&handle, None)
+        .expect("wait for worker");
     assert!(
         cross_check::is_cross_check_failure(status),
         "expected EXIT_CODE_CROSS_CHECK_FAILURE, got {:?}",

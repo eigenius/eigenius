@@ -155,13 +155,27 @@ fn build_host_config(inputs: &ContainerBuildInputs) -> HostConfig {
         network_mode: Some(inputs.network_mode.as_docker_string().to_string()),
         mounts: Some(mounts),
         memory,
-        // SecurityOpt left empty in 18c.3; 18c.4 fills in seccomp +
-        // AppArmor. Applying `no-new-privileges` here would also be
-        // reasonable but it's part of the same hardening pass.
-        security_opt: None,
+        security_opt: Some(build_security_opts(inputs.spec)),
         // Tmpfs / sysctls / ulimits left at defaults; no current need.
         ..Default::default()
     }
+}
+
+/// Assemble the `security_opt` Vec for `HostConfig`. Always sets
+/// `no-new-privileges:true` (D26 §8.3 defense-in-depth — defends
+/// against the rare kernel CVE around capability manipulation, free
+/// alongside `cap_drop: ALL`). Honours `WorkerSpec::seccomp_profile`
+/// when set; otherwise leaves Docker's built-in default seccomp profile
+/// in place (already substantially restrictive for trusted-but-tracked
+/// workloads per D26 §1.2). Per-language crates that ship a tighter
+/// profile populate `WorkerSpec::seccomp_profile` from their
+/// `LanguageRuntime::spawn_worker`.
+fn build_security_opts(spec: &WorkerSpec) -> Vec<String> {
+    let mut opts = vec!["no-new-privileges:true".to_string()];
+    if let Some(profile) = &spec.seccomp_profile {
+        opts.push(format!("seccomp={profile}"));
+    }
+    opts
 }
 
 /// Container-bookkeeping labels so substrate-spawned containers can be
@@ -351,6 +365,54 @@ mod tests {
     }
 
     #[test]
+    fn security_opt_always_carries_no_new_privileges() {
+        let s = spec(Some(dummy_digest()), vec!["bin"], BTreeMap::new());
+        let inputs = ContainerBuildInputs {
+            spec: &s,
+            tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
+            depot: Path::new("/var/lib/eigenius-runtime"),
+            network_mode: &NetworkMode::None,
+        };
+        let plan = build_create_options(&inputs).expect("build");
+        let opts = plan
+            .body
+            .host_config
+            .as_ref()
+            .and_then(|h| h.security_opt.as_ref())
+            .expect("security_opt");
+        assert!(
+            opts.iter().any(|o| o == "no-new-privileges:true"),
+            "expected no-new-privileges in security_opt, got {opts:?}"
+        );
+        assert!(
+            !opts.iter().any(|o| o.starts_with("seccomp=")),
+            "no seccomp profile was supplied — `seccomp=` should be absent so Docker's default applies"
+        );
+    }
+
+    #[test]
+    fn worker_spec_seccomp_profile_propagates_into_security_opt() {
+        let mut s = spec(Some(dummy_digest()), vec!["bin"], BTreeMap::new());
+        s.seccomp_profile = Some(r#"{"defaultAction":"SCMP_ACT_ERRNO"}"#.into());
+        let inputs = ContainerBuildInputs {
+            spec: &s,
+            tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
+            depot: Path::new("/var/lib/eigenius-runtime"),
+            network_mode: &NetworkMode::None,
+        };
+        let plan = build_create_options(&inputs).expect("build");
+        let opts = plan
+            .body
+            .host_config
+            .as_ref()
+            .and_then(|h| h.security_opt.as_ref())
+            .expect("security_opt");
+        assert!(opts
+            .iter()
+            .any(|o| o == r#"seccomp={"defaultAction":"SCMP_ACT_ERRNO"}"#));
+    }
+
+    #[test]
     fn substrate_labels_carry_version_and_image_digest() {
         let s = spec(Some(dummy_digest()), vec!["bin"], BTreeMap::new());
         let inputs = ContainerBuildInputs {
@@ -361,7 +423,10 @@ mod tests {
         };
         let plan = build_create_options(&inputs).expect("build");
         let labels = plan.body.labels.expect("labels");
-        assert_eq!(labels.get("eigenius.substrate").map(String::as_str), Some("1"));
+        assert_eq!(
+            labels.get("eigenius.substrate").map(String::as_str),
+            Some("1")
+        );
         assert_eq!(
             labels.get("eigenius.image_digest").map(String::as_str),
             Some(dummy_digest().as_str())

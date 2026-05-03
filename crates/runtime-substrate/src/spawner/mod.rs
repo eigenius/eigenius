@@ -50,6 +50,7 @@ use crate::error::SpawnError;
 use crate::types::{WorkerHandle, WorkerSpec};
 use std::os::unix::net::UnixStream;
 use std::process::ExitStatus;
+use std::time::Duration;
 
 /// Backend abstraction for the substrate's worker lifecycle.
 ///
@@ -72,8 +73,21 @@ pub trait WorkerSpawner: Send + Sync {
     /// for `LocalSpawner`).
     fn spawn(&self, spec: WorkerSpec) -> Result<WorkerHandle, SpawnError>;
 
-    /// Block until the worker exits, returning its exit status.
-    fn wait(&self, handle: &WorkerHandle) -> Result<ExitStatus, SpawnError>;
+    /// Block until the worker exits, returning its exit status. Bounded
+    /// by `timeout` if `Some` — on expiry the spawner kills the worker
+    /// and returns [`SpawnError::WaitTimedOut`]. `None` means wait
+    /// indefinitely (existing behaviour for callers that do not enforce
+    /// a wall-clock cap; tests, `Evict` shutdown, etc.).
+    ///
+    /// Implementors must guarantee that on the timeout path the worker
+    /// is reaped before the call returns — callers depend on
+    /// "WaitTimedOut implies the process is gone" for tempdir cleanup
+    /// and `auto_remove` accounting (D26 §8.3).
+    fn wait_with_timeout(
+        &self,
+        handle: &WorkerHandle,
+        timeout: Option<Duration>,
+    ) -> Result<ExitStatus, SpawnError>;
 
     /// Send a termination signal (`SIGTERM` then `SIGKILL` after a
     /// short grace period for `LocalSpawner`; `docker stop` for

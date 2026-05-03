@@ -160,7 +160,7 @@ fn spawn_wait_round_trip_against_alpine() {
         vec!["/bin/sh", "-c", "exit 0"],
     );
     let handle = spawner.spawn(spec).expect("spawn alpine");
-    let status = spawner.wait(&handle).expect("wait");
+    let status = spawner.wait_with_timeout(&handle, None).expect("wait");
     assert_eq!(
         status.code(),
         Some(0),
@@ -225,7 +225,7 @@ fn attach_uds_surfaces_cross_check_failure_when_container_exits_78() {
         other => panic!("unexpected error: {other:?}"),
     }
     // Drain the wait stream to free any daemon-side bookkeeping.
-    let _ = spawner.wait(&handle);
+    let _ = spawner.wait_with_timeout(&handle, None);
     let _ = std::fs::remove_dir_all(&depot);
 }
 
@@ -259,6 +259,51 @@ fn kill_terminates_running_container() {
     );
     let handle = spawner.spawn(spec).expect("spawn alpine");
     spawner.kill(&handle).expect("kill");
+    let _ = std::fs::remove_dir_all(&depot);
+}
+
+#[test]
+fn wait_with_timeout_kills_long_running_container() {
+    if !is_docker_available() {
+        eprintln!("Docker socket unavailable; skipping wait-timeout test");
+        return;
+    }
+    let depot = fresh_depot("wait-timeout");
+    let spawner = match DockerSpawner::new(DockerSpawnerConfig::new(depot.clone())) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("DockerSpawner construction failed (skipping): {e}");
+            return;
+        }
+    };
+    let digest = match ensure_test_image_present() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("could not stage test image (skipping): {e}");
+            return;
+        }
+    };
+    let tempdir = fresh_tempdir(&depot, "wait-timeout");
+    let spec = build_spec(
+        digest,
+        tempdir,
+        depot.clone(),
+        vec!["/bin/sh", "-c", "sleep 60"],
+    );
+    let handle = spawner.spawn(spec).expect("spawn alpine");
+    let err = spawner
+        .wait_with_timeout(&handle, Some(Duration::from_secs(1)))
+        .expect_err("must time out");
+    match err {
+        SpawnError::WaitTimedOut {
+            handle_id,
+            timeout_ms,
+        } => {
+            assert_eq!(handle_id, handle.id);
+            assert_eq!(timeout_ms, 1000);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
     let _ = std::fs::remove_dir_all(&depot);
 }
 

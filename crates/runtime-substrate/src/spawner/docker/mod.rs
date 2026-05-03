@@ -200,16 +200,47 @@ impl WorkerSpawner for DockerSpawner {
         })
     }
 
-    fn wait(&self, handle: &WorkerHandle) -> Result<ExitStatus, SpawnError> {
-        let exit_code = self
-            .runtime
-            .block_on(lifecycle::wait_container(&self.docker, &handle.id))?;
+    fn wait_with_timeout(
+        &self,
+        handle: &WorkerHandle,
+        timeout: Option<Duration>,
+    ) -> Result<ExitStatus, SpawnError> {
+        let result = self.runtime.block_on(async {
+            match timeout {
+                None => lifecycle::wait_container(&self.docker, &handle.id)
+                    .await
+                    .map(WaitOutcome::Exited),
+                Some(t) => match tokio::time::timeout(
+                    t,
+                    lifecycle::wait_container(&self.docker, &handle.id),
+                )
+                .await
+                {
+                    Ok(r) => r.map(WaitOutcome::Exited),
+                    Err(_elapsed) => {
+                        // Wall-clock cap reached. Kill the container so
+                        // the contract "WaitTimedOut implies the worker
+                        // is gone" holds, then reap exit (best-effort —
+                        // auto_remove may have already taken it).
+                        let _ = lifecycle::kill_container(&self.docker, &handle.id).await;
+                        let _ = lifecycle::wait_container(&self.docker, &handle.id).await;
+                        Ok(WaitOutcome::TimedOut)
+                    }
+                },
+            }
+        })?;
         // Reap bookkeeping; tempdir cleanup is the caller's choice (the
         // substrate's per-invocation contract is that tempdir contents
         // are inputs to the `RuntimeInvocation` resource, so the
         // dispatcher decides when to delete).
         let _ = self.forget(&handle.id);
-        Ok(exit_code_to_status(exit_code))
+        match result {
+            WaitOutcome::Exited(code) => Ok(exit_code_to_status(code)),
+            WaitOutcome::TimedOut => Err(SpawnError::WaitTimedOut {
+                handle_id: handle.id.clone(),
+                timeout_ms: timeout.map(|t| t.as_millis() as u64).unwrap_or_default(),
+            }),
+        }
     }
 
     fn kill(&self, handle: &WorkerHandle) -> Result<(), SpawnError> {
@@ -217,10 +248,19 @@ impl WorkerSpawner for DockerSpawner {
             .block_on(lifecycle::kill_container(&self.docker, &handle.id))?;
         // Best-effort wait so the container fully exits before we lose
         // bookkeeping. `auto_remove` will clean it up on the daemon
-        // side; we don't surface its exit code from `kill`.
-        let _ = self
-            .runtime
-            .block_on(lifecycle::wait_container(&self.docker, &handle.id));
+        // side; we don't surface its exit code from `kill`. Bounded
+        // tightly because `kill_container` already sent SIGKILL — if
+        // we're not reaped within a few seconds, something is deeply
+        // wrong on the daemon side and falling through is the right
+        // behavior (the WorkerHandle is gone from bookkeeping either
+        // way).
+        let _ = self.runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                lifecycle::wait_container(&self.docker, &handle.id),
+            )
+            .await
+        });
         let _ = self.forget(&handle.id);
         Ok(())
     }
@@ -273,6 +313,12 @@ impl WorkerSpawner for DockerSpawner {
     fn backend(&self) -> &'static str {
         BACKEND
     }
+}
+
+/// Outcome of the inner async wait — exit-with-code or hit-the-wall-clock-cap.
+enum WaitOutcome {
+    Exited(i64),
+    TimedOut,
 }
 
 /// Convert a Bollard-reported exit code to a [`std::process::ExitStatus`].

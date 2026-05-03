@@ -32,9 +32,33 @@ use crate::types::{WorkerHandle, WorkerSpec};
 use std::collections::HashMap;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, ExitStatus};
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
+use std::time::{Duration, Instant};
 
 const BACKEND: &str = "local";
+
+/// Polling cadence for [`LocalSpawner::wait_with_timeout`] when a
+/// timeout is set. Tighter cadence catches the worker exit faster but
+/// burns CPU; looser cadence delays cleanup. 50ms matches
+/// `DockerSpawner::attach_uds`.
+const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Emit the LocalSpawner security-posture warning once per process.
+/// D26 §8.3 — "the orchestrator emits a one-line warning at every
+/// dispatch under `LocalSpawner` so it cannot be silently used in
+/// production." Once-per-process is the right cadence: enough to alert
+/// an operator on first dispatch, no log spam thereafter.
+fn warn_local_spawner_once() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "eigenius-runtime-substrate: LocalSpawner active — no namespacing, \
+             no seccomp, no capability drop, no resource isolation beyond \
+             per-invocation tempdir + env. Dev/CI only. Production must use \
+             DockerSpawner (D26 §8.3)."
+        );
+    });
+}
 
 /// Host-subprocess implementation of [`WorkerSpawner`].
 ///
@@ -57,6 +81,7 @@ impl LocalSpawner {
 
 impl WorkerSpawner for LocalSpawner {
     fn spawn(&self, spec: WorkerSpec) -> Result<WorkerHandle, SpawnError> {
+        warn_local_spawner_once();
         if spec.image_digest.is_some() {
             return Err(SpawnError::SpawnFailed {
                 backend: BACKEND,
@@ -111,7 +136,11 @@ impl WorkerSpawner for LocalSpawner {
         })
     }
 
-    fn wait(&self, handle: &WorkerHandle) -> Result<ExitStatus, SpawnError> {
+    fn wait_with_timeout(
+        &self,
+        handle: &WorkerHandle,
+        timeout: Option<Duration>,
+    ) -> Result<ExitStatus, SpawnError> {
         let mut child = self
             .children
             .lock()
@@ -121,10 +150,13 @@ impl WorkerSpawner for LocalSpawner {
                 backend: BACKEND,
                 reason: format!("no spawned child for handle id `{}`", handle.id),
             })?;
-        child.wait().map_err(|e| SpawnError::SpawnFailed {
-            backend: BACKEND,
-            reason: format!("wait failed for handle id `{}`: {e}", handle.id),
-        })
+        match timeout {
+            None => child.wait().map_err(|e| SpawnError::SpawnFailed {
+                backend: BACKEND,
+                reason: format!("wait failed for handle id `{}`: {e}", handle.id),
+            }),
+            Some(t) => wait_polled(&mut child, &handle.id, t),
+        }
     }
 
     fn kill(&self, handle: &WorkerHandle) -> Result<(), SpawnError> {
@@ -157,6 +189,41 @@ impl WorkerSpawner for LocalSpawner {
 
     fn backend(&self) -> &'static str {
         BACKEND
+    }
+}
+
+/// Poll a child for `try_wait` completion until either it exits
+/// (returns `Ok(status)`) or `timeout` expires (kills the child,
+/// returns `Err(SpawnError::WaitTimedOut)`). On the timeout path the
+/// child is reaped before return so the caller can rely on
+/// "WaitTimedOut implies the process is gone."
+fn wait_polled(
+    child: &mut Child,
+    handle_id: &str,
+    timeout: Duration,
+) -> Result<ExitStatus, SpawnError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(SpawnError::WaitTimedOut {
+                        handle_id: handle_id.to_string(),
+                        timeout_ms: timeout.as_millis() as u64,
+                    });
+                }
+                std::thread::sleep(WAIT_POLL_INTERVAL);
+            }
+            Err(e) => {
+                return Err(SpawnError::SpawnFailed {
+                    backend: BACKEND,
+                    reason: format!("try_wait failed for handle id `{handle_id}`: {e}"),
+                });
+            }
+        }
     }
 }
 
@@ -206,7 +273,7 @@ mod tests {
             .spawn(spec_with(vec!["/bin/true"], dir.clone()))
             .expect("spawn /bin/true");
         assert_eq!(handle.backend, BACKEND);
-        let status = spawner.wait(&handle).expect("wait");
+        let status = spawner.wait_with_timeout(&handle, None).expect("wait");
         assert!(status.success());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -221,7 +288,9 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         spawner.kill(&handle).expect("kill");
         // After kill, wait should fail because the entry was removed.
-        let err = spawner.wait(&handle).expect_err("wait after kill");
+        let err = spawner
+            .wait_with_timeout(&handle, None)
+            .expect_err("wait after kill");
         assert!(matches!(err, SpawnError::SpawnFailed { .. }));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -237,7 +306,7 @@ mod tests {
         spec.env
             .insert("EIGENIUS_TEST_VAR".to_string(), "expected".to_string());
         let handle = spawner.spawn(spec).expect("spawn");
-        let status = spawner.wait(&handle).expect("wait");
+        let status = spawner.wait_with_timeout(&handle, None).expect("wait");
         assert!(status.success(), "child exited with {:?}", status.code());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -280,13 +349,51 @@ mod tests {
     }
 
     #[test]
+    fn wait_with_timeout_fires_and_kills_long_running_process() {
+        let dir = tempdir("wait_timeout");
+        let spawner = LocalSpawner::new();
+        let handle = spawner
+            .spawn(spec_with(vec!["/bin/sleep", "30"], dir.clone()))
+            .expect("spawn /bin/sleep");
+        let err = spawner
+            .wait_with_timeout(&handle, Some(Duration::from_millis(150)))
+            .expect_err("must time out");
+        match err {
+            SpawnError::WaitTimedOut {
+                handle_id,
+                timeout_ms,
+            } => {
+                assert_eq!(handle_id, handle.id);
+                assert_eq!(timeout_ms, 150);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wait_with_timeout_returns_status_when_process_exits_first() {
+        let dir = tempdir("wait_timeout_short");
+        let spawner = LocalSpawner::new();
+        let handle = spawner
+            .spawn(spec_with(vec!["/bin/true"], dir.clone()))
+            .expect("spawn /bin/true");
+        // Generous timeout — /bin/true exits in microseconds.
+        let status = spawner
+            .wait_with_timeout(&handle, Some(Duration::from_secs(5)))
+            .expect("wait");
+        assert!(status.success());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn nonzero_exit_status_surfaces() {
         let dir = tempdir("nonzero_exit");
         let spawner = LocalSpawner::new();
         let handle = spawner
             .spawn(spec_with(vec!["/bin/sh", "-c", "exit 7"], dir.clone()))
             .expect("spawn");
-        let status = spawner.wait(&handle).expect("wait");
+        let status = spawner.wait_with_timeout(&handle, None).expect("wait");
         assert_eq!(status.code(), Some(7));
         // Sanity-check Linux ExitStatus::from_raw round-trips.
         let _: ExitStatus = ExitStatusExt::from_raw(0);
