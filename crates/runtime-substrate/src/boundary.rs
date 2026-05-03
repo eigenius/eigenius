@@ -30,10 +30,29 @@
 //!
 //! The check is intentionally chain-agnostic: it talks to a
 //! [`ChainAccessor`] for all layer-related queries, so the substrate
-//! crate stays testable with synthetic chains. The kernel-side
-//! adapter that implements `ChainAccessor` against a real `Layer`
-//! lives in the kernel and is wired into the dispatch path in
-//! `eval.rs` — see Phase 18b's kernel-wiring commit.
+//! crate stays testable with synthetic chains. The substrate's
+//! orchestrator-side path uses this version (post-Phase-18b kernel
+//! wiring; until then the kernel runs its own copy pre-dispatch).
+//!
+//! ## ⚠️ Keep this in sync with `kernel/src/runtime/boundary.rs`
+//!
+//! The kernel ships a parallel implementation of the same D26 §7.5
+//! check that operates directly on `&Layer` and runs pre-dispatch.
+//! The two files share property-IRI constants, the three-rule order,
+//! the empty-mirror short-circuit, and the failure taxonomy (with
+//! different variant names: substrate uses [`RunError`], kernel uses
+//! `BoundaryError`).
+//!
+//! Why duplicate? The substrate crate already depends on the kernel
+//! for `Resource`/`Iri`, so a unified check would need both to depend
+//! on a third "boundary" crate that owns those types — a non-trivial
+//! restructure for ~150 lines of mirrored logic. Revisit if a third
+//! caller emerges.
+//!
+//! When you change one, change the other. If the check shape can
+//! diverge (e.g. the kernel side gains a defense-in-depth rule the
+//! substrate side doesn't need), document the divergence in both
+//! files.
 
 use crate::chain::ChainAccessor;
 use crate::error::RunError;
@@ -256,7 +275,6 @@ mod tests {
             }
             out
         }
-
     }
 
     impl ChainAccessor for FakeChain {
@@ -655,5 +673,4 @@ mod tests {
         let script = script_resource("urn:eigenius:test:env:e1", &["urn:eigenius:test:class:C"]);
         check_run_script(&script, &iri("urn:layer:l1"), &chain).expect("should pass");
     }
-
 }
