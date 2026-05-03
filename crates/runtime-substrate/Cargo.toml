@@ -6,9 +6,23 @@ license.workspace = true
 repository.workspace = true
 description = "Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. See D26."
 
+[features]
+# Enables the bash-c test runtime — a long-lived worker binary speaking
+# the substrate's CBOR RPC, used as the smoke-test fixture for the
+# substrate skeleton without dragging in a real interpreter. Default-on
+# so `cargo test` from a fresh checkout exercises it; production builds
+# can opt out via `--no-default-features`.
+default = ["test-runtime"]
+test-runtime = []
+
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
 thiserror.workspace = true
 serde.workspace = true
 serde_bytes = "0.11"
 ciborium = "0.2"
+
+[[bin]]
+name = "eigenius-test-worker"
+path = "src/bin/eigenius-test-worker.rs"
+required-features = ["test-runtime"]
