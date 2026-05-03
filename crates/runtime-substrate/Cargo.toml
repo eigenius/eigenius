@@ -7,3 +7,5 @@ repository.workspace = true
 description = "Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. See D26."
 
 [dependencies]
+eigenius-kernel = { path = "../../kernel" }
+thiserror.workspace = true

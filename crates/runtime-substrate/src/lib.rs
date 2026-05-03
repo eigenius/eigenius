@@ -16,7 +16,7 @@
 //!
 //! Language-agnostic substrate for hosting external language toolchains
 //! (Julia, Python, R, Lean's authoring side, …) inside Eigenius with full
-//! provenance. Consumers implement [`LanguageRuntime`] (TBD) to plug a
+//! provenance. Consumers implement [`LanguageRuntime`] to plug a
 //! concrete language in; the substrate provides the trait, the worker RPC
 //! framing, the boundary check, the image-vs-graph split, and the
 //! `RunRuntimeScript` / `CallRuntimeMethod` substrate components.
@@ -32,3 +32,11 @@
 //! See [D26 Runtime Substrate](../../../docs/design/d26-runtime-substrate.md)
 //! for the full specification and Phase 18 of the implementation plan
 //! for the milestones this crate maps onto.
+
+pub mod error;
+pub mod language_runtime;
+pub mod types;
+
+pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
+pub use language_runtime::LanguageRuntime;
+pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};

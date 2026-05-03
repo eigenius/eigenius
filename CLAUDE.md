@@ -23,12 +23,13 @@ Key design docs:
 ## Build
 
 ```bash
-source "$HOME/.cargo/env"
 cargo build                    # build workspace
 cargo test --workspace         # run all tests
 cargo fmt --all -- --check     # formatting (must pass cleanly)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets  # lint
 ```
+
+Cargo is already on `PATH` — do **not** prefix commands with `source "$HOME/.cargo/env" && …`. The compound form gets matched as a single literal by Claude Code's permission system and won't hit the `Bash(cargo …*)` allow rules, so it pointlessly prompts.
 
 Always run `cargo fmt --all` before committing. CI enforces formatting and will fail on unformatted code.
 
