@@ -20,7 +20,6 @@ eigenius-kernel = { path = "../../kernel" }
 thiserror.workspace = true
 serde.workspace = true
 serde_bytes = "0.11"
-serde_json.workspace = true
 ciborium = "0.2"
 
 [[bin]]

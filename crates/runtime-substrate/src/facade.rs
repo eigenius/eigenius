@@ -16,11 +16,13 @@
 //! calls when a `RunRuntimeScript` or `CallRuntimeMethod` IO component
 //! lands.
 //!
-//! The boundary uses Eigon-JSON strings (the same shape the kernel and
-//! orchestrator already speak across the existing `ComponentExecutor`
-//! gRPC dispatch). Inside the dispatcher, we parse to `Resource`,
-//! resolve the language runtime, and drive the [`LanguageRuntime`]
-//! trait. Output goes back as an Eigon-JSON string.
+//! The boundary uses Eigon-CBOR bytes — the same codec the kernel ↔
+//! orchestrator gRPC path uses post-Phase-18e and the same codec the
+//! worker RPC uses (D26 §8.1). The orchestrator-side TS handler
+//! receives JS objects from `component_executor.ts`, encodes them to
+//! Eigon-CBOR via `wasm/cbor.ts` (the existing cbor-x ↔ ciborium
+//! bridge), and hands the bytes to the addon. The addon forwards
+//! straight into this facade. No JSON in the substrate's data path.
 //!
 //! ## Phase 18a scope
 //!
@@ -35,7 +37,7 @@
 use crate::error::RunError;
 use crate::language_runtime::LanguageRuntime;
 use crate::registry::{LanguageRuntimeRegistry, RegistryError};
-use eigenius_kernel::ontology::eigon_json::{self, ParseError};
+use eigenius_kernel::ontology::eigon_cbor::{self, CborError};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use thiserror::Error;
@@ -45,12 +47,12 @@ const PROP_REQUIRES_ENVIRONMENT: &str = "urn:eigenius:runtime:requires_environme
 
 /// Failure modes for [`SubstrateDispatcher::dispatch_run_runtime_script`]
 /// and `dispatch_call_runtime_method`. Wraps lower-level errors with
-/// boundary-codec failures (`InvalidJson`) and dispatch-table lookup
+/// boundary-codec failures (`InvalidCbor`) and dispatch-table lookup
 /// failures (`UnknownLanguage`).
 #[derive(Debug, Error)]
 pub enum FacadeError {
-    #[error("invalid Eigon-JSON: {0}")]
-    InvalidJson(String),
+    #[error("invalid Eigon-CBOR: {0}")]
+    InvalidCbor(String),
 
     #[error("argument is missing the required `{0}` property")]
     MissingProperty(&'static str),
@@ -64,16 +66,13 @@ pub enum FacadeError {
     #[error("no LanguageRuntime registered for language `{0}`")]
     UnknownLanguage(String),
 
-    #[error("output Resource could not be serialized: {0}")]
-    SerializeOutput(String),
-
     #[error(transparent)]
     Run(#[from] RunError),
 }
 
-impl From<ParseError> for FacadeError {
-    fn from(value: ParseError) -> Self {
-        Self::InvalidJson(value.to_string())
+impl From<CborError> for FacadeError {
+    fn from(value: CborError) -> Self {
+        Self::InvalidCbor(value.to_string())
     }
 }
 
@@ -102,21 +101,21 @@ impl SubstrateDispatcher {
 
     /// Dispatch a `RunRuntimeScript` invocation.
     ///
-    /// - `input_json` — Eigon-JSON string for the input Resource that
+    /// - `input_cbor` — Eigon-CBOR bytes for the input Resource that
     ///   flows through the pipeline. Forwarded as the single input to
     ///   the language runtime.
-    /// - `argument_json` — Eigon-JSON string for the argument
-    ///   Resource. In Phase 18a this carries the inline `RuntimeScript`
-    ///   fields (language, source).
+    /// - `argument_cbor` — Eigon-CBOR bytes for the argument Resource.
+    ///   In Phase 18a this carries the inline `RuntimeScript` fields
+    ///   (language, source).
     ///
-    /// Returns the output Resource serialised as Eigon-JSON.
+    /// Returns the output Resource serialised as Eigon-CBOR.
     pub fn dispatch_run_runtime_script(
         &self,
-        input_json: &str,
-        argument_json: &str,
-    ) -> Result<String, FacadeError> {
-        let input = parse_resource(input_json)?;
-        let argument = parse_resource(argument_json)?;
+        input_cbor: &[u8],
+        argument_cbor: &[u8],
+    ) -> Result<Vec<u8>, FacadeError> {
+        let input = parse_resource(input_cbor)?;
+        let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
         let runtime = self
             .registry
@@ -132,7 +131,7 @@ impl SubstrateDispatcher {
             FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
         })?;
         let output = runtime.run_script(&worker, script, &[input])?;
-        serialize_resource(&output)
+        Ok(eigon_cbor::serialize_resource(&output))
     }
 
     /// Dispatch a `CallRuntimeMethod` invocation. Same pattern as
@@ -141,11 +140,11 @@ impl SubstrateDispatcher {
     /// `RuntimeMethodSignature`.
     pub fn dispatch_call_runtime_method(
         &self,
-        input_json: &str,
-        argument_json: &str,
-    ) -> Result<String, FacadeError> {
-        let input = parse_resource(input_json)?;
-        let argument = parse_resource(argument_json)?;
+        input_cbor: &[u8],
+        argument_cbor: &[u8],
+    ) -> Result<Vec<u8>, FacadeError> {
+        let input = parse_resource(input_cbor)?;
+        let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
         let runtime = self
             .registry
@@ -159,28 +158,25 @@ impl SubstrateDispatcher {
             FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
         })?;
         let output = runtime.call_method(&worker, signature, &[input])?;
-        serialize_resource(&output)
+        Ok(eigon_cbor::serialize_resource(&output))
     }
 }
 
-/// Accepts both the top-level shape (a JSON object) and an array
-/// containing one resource. Empty input is treated as an embedded
-/// Resource with no properties.
-fn parse_resource(json: &str) -> Result<Resource, FacadeError> {
-    let trimmed = json.trim();
-    if trimmed.is_empty() || trimmed == "{}" {
+/// Empty input is treated as an embedded Resource with no properties
+/// — convenience for callers that don't need to pass an input (e.g.
+/// the smoke test runtime). Otherwise the bytes are parsed as a
+/// CBOR-encoded Resource via the lenient parser (allows embedded
+/// resources without `@id`, which is the natural shape for component
+/// arguments).
+fn parse_resource(cbor: &[u8]) -> Result<Resource, FacadeError> {
+    if cbor.is_empty() {
         return Ok(Resource::new_embedded());
     }
-    eigon_json::parse_embedded(trimmed).map_err(FacadeError::from)
-}
-
-fn serialize_resource(r: &Resource) -> Result<String, FacadeError> {
-    let value = eigon_json::serialize_resource(r);
-    serde_json::to_string(&value).map_err(|e| FacadeError::SerializeOutput(e.to_string()))
+    eigon_cbor::parse_resource_lenient(cbor).map_err(FacadeError::from)
 }
 
 fn read_string_property(r: &Resource, prop_iri: &str) -> Result<String, FacadeError> {
-    let iri = Iri::parse(prop_iri).map_err(|e| FacadeError::InvalidJson(e.to_string()))?;
+    let iri = Iri::parse(prop_iri).map_err(|e| FacadeError::InvalidCbor(e.to_string()))?;
     match r.get(&iri) {
         Some(Value::String(s)) => Ok(s.clone()),
         Some(_) => Err(FacadeError::WrongPropertyType {
@@ -229,12 +225,20 @@ mod tests {
     //! available via env!() in integration test crates.
     use super::*;
 
+    fn argument_with(properties: &[(&str, &str)]) -> Vec<u8> {
+        let mut r = Resource::new_embedded();
+        for (iri, value) in properties {
+            r.set(Iri::parse(iri).unwrap(), Value::String(value.to_string()));
+        }
+        eigon_cbor::serialize_resource(&r)
+    }
+
     #[test]
     fn unknown_language_returns_typed_error() {
         let d = SubstrateDispatcher::new();
-        let argument = r#"{"urn:eigenius:runtime:language":"not-registered"}"#;
+        let argument = argument_with(&[("urn:eigenius:runtime:language", "not-registered")]);
         let err = d
-            .dispatch_run_runtime_script("{}", argument)
+            .dispatch_run_runtime_script(&[], &argument)
             .expect_err("should fail for unknown language");
         assert!(
             matches!(err, FacadeError::UnknownLanguage(ref l) if l == "not-registered"),
@@ -245,9 +249,9 @@ mod tests {
     #[test]
     fn missing_language_returns_typed_error() {
         let d = SubstrateDispatcher::new();
-        let argument = r#"{"urn:eigenius:runtime:source":"echo nope"}"#;
+        let argument = argument_with(&[("urn:eigenius:runtime:source", "echo nope")]);
         let err = d
-            .dispatch_run_runtime_script("{}", argument)
+            .dispatch_run_runtime_script(&[], &argument)
             .expect_err("should fail when language is missing");
         assert!(
             matches!(err, FacadeError::MissingProperty(p) if p == PROP_LANGUAGE),
@@ -256,11 +260,13 @@ mod tests {
     }
 
     #[test]
-    fn malformed_json_returns_invalid_json_error() {
+    fn malformed_cbor_returns_invalid_cbor_error() {
         let d = SubstrateDispatcher::new();
+        // 0xff alone is the CBOR break stop-code outside an
+        // indefinite-length context — not a valid top-level value.
         let err = d
-            .dispatch_run_runtime_script("{}", "{not-json}")
-            .expect_err("should fail on malformed JSON");
-        assert!(matches!(err, FacadeError::InvalidJson(_)), "got {err:?}");
+            .dispatch_run_runtime_script(&[], &[0xff])
+            .expect_err("should fail on malformed CBOR");
+        assert!(matches!(err, FacadeError::InvalidCbor(_)), "got {err:?}");
     }
 }
