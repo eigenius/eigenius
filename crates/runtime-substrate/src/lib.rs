@@ -1,0 +1,34 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Eigenius Runtime Substrate
+//!
+//! Language-agnostic substrate for hosting external language toolchains
+//! (Julia, Python, R, Lean's authoring side, …) inside Eigenius with full
+//! provenance. Consumers implement [`LanguageRuntime`] (TBD) to plug a
+//! concrete language in; the substrate provides the trait, the worker RPC
+//! framing, the boundary check, the image-vs-graph split, and the
+//! `RunRuntimeScript` / `CallRuntimeMethod` substrate components.
+//!
+//! The parent ontology classes (`RuntimeScript`, `RuntimePackage`,
+//! `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`,
+//! `RuntimePackagePin`, `RuntimeMethodSignature`, plus the `DispatchedTo`
+//! morphism class) are committed as Eigon resources by the kernel
+//! bootstrap from
+//! `ontologies/runtime/runtime-substrate-ontology.json`. Per-language
+//! crates commit subclasses of these in their own ontologies.
+//!
+//! See [D26 Runtime Substrate](../../../docs/design/d26-runtime-substrate.md)
+//! for the full specification and Phase 18 of the implementation plan
+//! for the milestones this crate maps onto.

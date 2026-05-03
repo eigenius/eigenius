@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "kernel",
+    "crates/runtime-substrate",
     "crates/wasm-runtime",
     "sdk/wasm-sdk",
     "storage/tikv",

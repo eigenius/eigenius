@@ -1,0 +1,9 @@
+[package]
+name = "eigenius-runtime-substrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. See D26."
+
+[dependencies]

@@ -1,0 +1,604 @@
+[
+  {
+    "@id": "urn:eigenius:runtime:RuntimeScript",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A single executable script authored by a user, dispatched into a pinned RuntimeEnvironment by the substrate's RunRuntimeScript component. The IRI is content-addressed from language + source + entry_point + entry_point_signature so that two notebooks publishing the same script produce the same IRI. See D26 §5.1.",
+    "urn:eigenius:core:short_name": "RuntimeScript",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:source",
+      "urn:eigenius:runtime:entry_point",
+      "urn:eigenius:runtime:entry_point_signature",
+      "urn:eigenius:runtime:requires_environment"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:requires_mirror_classes"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimePackage",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A user-authored library — a directory tree the user maintains separately from any registry, intended for reuse across scripts. Registry packages (Symbolics.jl, numpy, etc.) are not RuntimePackage resources; they are pinned by the language-specific lockfile inside RuntimeEnvironment. See D26 §5.2.",
+    "urn:eigenius:core:short_name": "RuntimePackage",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:package_name",
+      "urn:eigenius:runtime:package_version",
+      "urn:eigenius:runtime:manifest",
+      "urn:eigenius:runtime:source_tree"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:entry_points"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimeEnvironment",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "The unit of pinned reproducibility. References everything baked into the worker image — runtime version, lockfile-pinned registry packages, user packages, mirror, and (in production) the OCI image digest itself. See D26 §5.3.",
+    "urn:eigenius:core:short_name": "RuntimeEnvironment",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:runtime_version",
+      "urn:eigenius:runtime:lockfile"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:pinned_packages",
+      "urn:eigenius:runtime:included_packages",
+      "urn:eigenius:runtime:mirror_dependency",
+      "urn:eigenius:runtime:image_digest",
+      "urn:eigenius:runtime:image_reference"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimePackageMirror",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "The generated bridge between Eigon classes and the language's type system. Anchored to a specific source layer; valid for invocations against descendant layers iff the mirrored classes are byte-identical. See D26 §5.4 / §7.",
+    "urn:eigenius:core:short_name": "RuntimePackageMirror",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:source_layer",
+      "urn:eigenius:runtime:generator_identifier",
+      "urn:eigenius:runtime:generator_version",
+      "urn:eigenius:runtime:generator_content_hash",
+      "urn:eigenius:runtime:library_content_hash",
+      "urn:eigenius:runtime:library_content",
+      "urn:eigenius:runtime:mirrored_classes"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:generated_at"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimeInvocation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "The provenance closure for one execution. The invocation is reproducible — same output bytes — iff (script, environment, inputs, random_seed) resolve to the same content-hashed values on a re-run, against a host with matching numerical_metadata. The image digest pin makes 'same environment' objective. See D26 §5.5.",
+    "urn:eigenius:core:short_name": "RuntimeInvocation",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:script",
+      "urn:eigenius:runtime:environment",
+      "urn:eigenius:runtime:inputs",
+      "urn:eigenius:runtime:output",
+      "urn:eigenius:runtime:started_at",
+      "urn:eigenius:runtime:completed_at"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:image_digest",
+      "urn:eigenius:runtime:mirror",
+      "urn:eigenius:runtime:dispatched_to",
+      "urn:eigenius:runtime:random_seed",
+      "urn:eigenius:runtime:numerical_metadata",
+      "urn:eigenius:runtime:runtime_metrics"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimePackagePin",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Parsed Eigon view of one entry in a language's lockfile. The verbatim bytes live in RuntimeEnvironment.lockfile; the parsed projection is committed alongside as a set of RuntimePackagePin resources to support graph-side queries (find every env that pins X 5.4.x) without re-parsing the lockfile. Optional in v1; lands when the first query that needs it is written. See D26 §5.6.",
+    "urn:eigenius:core:short_name": "RuntimePackagePin",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:package_name",
+      "urn:eigenius:runtime:package_identifier",
+      "urn:eigenius:runtime:pinned_version",
+      "urn:eigenius:runtime:source_hash"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:source_origin",
+      "urn:eigenius:runtime:depended_on_by"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimeMethodSignature",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A declared dispatch contract: a method name plus typed input and output Eigon class IRIs. Used by CallRuntimeMethod to constrain dispatch and by the substrate's boundary check (D26 §7.5) to verify that the resolved method matches the declared signature. See D26 §5.7.",
+    "urn:eigenius:core:short_name": "RuntimeMethodSignature",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:language",
+      "urn:eigenius:runtime:method_name",
+      "urn:eigenius:runtime:input_types",
+      "urn:eigenius:runtime:output_type"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:method_package"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:DispatchedTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Structural-metadata morphism on RuntimeInvocation recording which method (in a multiple-dispatch language like Julia) handled the invocation. Re-running must dispatch the same method or it is flagged as a reproducibility failure. The substrate itself does not declare institution status; this is structural metadata, not a fiber-internal claim. See D26 §4.2.",
+    "urn:eigenius:core:short_name": "DispatchedTo",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:invocation",
+      "urn:eigenius:runtime:method_signature"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:language",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Language identifier (e.g., 'julia', 'python', 'lean'). Used to namespace IRIs and to dispatch to the per-language LanguageRuntime implementation registered with the substrate.",
+    "urn:eigenius:core:short_name": "language",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:runtime:RuntimeScript",
+      "urn:eigenius:runtime:RuntimePackage",
+      "urn:eigenius:runtime:RuntimeEnvironment",
+      "urn:eigenius:runtime:RuntimePackageMirror",
+      "urn:eigenius:runtime:RuntimeInvocation",
+      "urn:eigenius:runtime:RuntimePackagePin",
+      "urn:eigenius:runtime:RuntimeMethodSignature"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Script source text, embedded as a string. The substrate materialises this into the per-invocation tempdir before dispatch.",
+    "urn:eigenius:core:short_name": "source",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeScript"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:entry_point",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Declared entry point name within the script. The worker bootstrap dispatches into this name once the script is loaded.",
+    "urn:eigenius:core:short_name": "entry_point",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeScript"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:entry_point_signature",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of a RuntimeMethodSignature describing the entry point's input and output types in mirror-struct terms.",
+    "urn:eigenius:core:short_name": "entry_point_signature",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeScript"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:requires_environment",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of a RuntimeEnvironment the script declares as compatible. The substrate dispatches the script into a worker spawned from this environment's image.",
+    "urn:eigenius:core:short_name": "requires_environment",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeEnvironment"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeScript"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:requires_mirror_classes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "List of Eigon class IRIs the script's mirror-struct usage covers. The substrate's boundary check (D26 §7.5) verifies a mirror struct is available for each.",
+    "urn:eigenius:core:short_name": "requires_mirror_classes",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeScript"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:package_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Package name in the language's namespace.",
+    "urn:eigenius:core:short_name": "package_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:runtime:RuntimePackage",
+      "urn:eigenius:runtime:RuntimePackagePin"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:runtime:package_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Internal version string for a user-authored RuntimePackage. Distinct from RuntimePackagePin.pinned_version, which is the resolver's view of a registry-pinned package.",
+    "urn:eigenius:core:short_name": "package_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackage"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:manifest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Language-specific manifest for a user-authored package (Project.toml for Julia, pyproject.toml for Python, etc.). Verbatim bytes.",
+    "urn:eigenius:core:short_name": "manifest",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackage"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:source_tree",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Either an embedded archive (CBOR-encoded Vec<{path, content}>) for small packages, or a content-addressed reference to external storage for large ones. Opaque to the kernel; the substrate parses it.",
+    "urn:eigenius:core:short_name": "source_tree",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackage"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:entry_points",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "List of RuntimeMethodSignature IRIs the package exports. Used by CallRuntimeMethod to enumerate dispatch targets.",
+    "urn:eigenius:core:short_name": "entry_points",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackage"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:runtime_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Exact runtime version (e.g., '1.10.4' for Julia, '3.12.2' for Python). Pinned in the image; required for re-instantiation.",
+    "urn:eigenius:core:short_name": "runtime_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:lockfile",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Verbatim language-specific lockfile content (Manifest.toml for Julia, uv.lock for Python, etc.) pinning registry packages. The audit-and-replay anchor; feeds back into Pkg.instantiate / uv sync deterministically. The parsed Eigon view lives in pinned_packages.",
+    "urn:eigenius:core:short_name": "lockfile",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:pinned_packages",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Parsed Eigon view of the lockfile, as a list of RuntimePackagePin IRIs. Optional projection of `lockfile`; supports graph-side queries without re-parsing the lockfile bytes. Cannot drift from the lockfile because both come from the same source bytes.",
+    "urn:eigenius:core:short_name": "pinned_packages",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimePackagePin"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:included_packages",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "List of RuntimePackage IRIs (user-authored libraries) baked into the worker image at build time.",
+    "urn:eigenius:core:short_name": "included_packages",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimePackage"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:mirror_dependency",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the RuntimePackageMirror baked into the image.",
+    "urn:eigenius:core:short_name": "mirror_dependency",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimePackageMirror"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:image_digest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "OCI image digest (e.g. 'sha256:abc123…'). The primary reproducibility anchor at runtime. Empty for the dev-path (D26 §10.1 deployment shape (c)) and for invocations that did not run inside a container.",
+    "urn:eigenius:core:short_name": "image_digest",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:pattern": "^sha256:[a-f0-9]{64}$",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:runtime:RuntimeEnvironment",
+      "urn:eigenius:runtime:RuntimeInvocation"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:runtime:image_reference",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional human-readable image tag (e.g. 'registry.eigenius.io/runtime/julia-symbolics:1.4'). Advisory only; the digest is the authoritative anchor.",
+    "urn:eigenius:core:short_name": "image_reference",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:source_layer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the layer the mirror was generated from. The mirror is valid for invocations against descendant layers iff the mirrored classes have not changed.",
+    "urn:eigenius:core:short_name": "source_layer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:generator_identifier",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The eigon-<lang>-gen tool identifier (e.g. 'eigon-julia-gen', 'eigon-ffi-gen').",
+    "urn:eigenius:core:short_name": "generator_identifier",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:generator_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Mirror generator version string.",
+    "urn:eigenius:core:short_name": "generator_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:generator_content_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Content hash of the generator binary, pinning the exact tool used to produce this mirror. Closes the integrity chain — an auditor with the same generator binary can re-derive the mirror.",
+    "urn:eigenius:core:short_name": "generator_content_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:pattern": "^sha256:[a-f0-9]{64}$",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:library_content_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Content hash of the generated library source. Together with generator_content_hash and source_layer, makes the mirror byte-identical re-derivation possible.",
+    "urn:eigenius:core:short_name": "library_content_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:pattern": "^sha256:[a-f0-9]{64}$",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:library_content",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Either embedded source (small) or a content-addressed external reference (large). Opaque to the kernel; the substrate parses it.",
+    "urn:eigenius:core:short_name": "library_content",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:mirrored_classes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Eigon class IRIs this mirror covers. Used by the boundary check to confirm an input class has a corresponding mirror struct.",
+    "urn:eigenius:core:short_name": "mirrored_classes",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:generated_at",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Mirror generation timestamp. Advisory; reproducibility relies on content_hash, not timestamp.",
+    "urn:eigenius:core:short_name": "generated_at",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:script",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the dispatched RuntimeScript (or RuntimeMethodSignature for CallRuntimeMethod).",
+    "urn:eigenius:core:short_name": "script",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:runtime:RuntimeScript",
+      "urn:eigenius:runtime:RuntimeMethodSignature"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:environment",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the RuntimeEnvironment the invocation ran inside.",
+    "urn:eigenius:core:short_name": "environment",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeEnvironment"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:mirror",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the RuntimePackageMirror used at the boundary. Optional — invocations against runtimes without a typed mirror (e.g. the bash smoke runtime) leave this unset.",
+    "urn:eigenius:core:short_name": "mirror",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimePackageMirror"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:inputs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of input resource IRIs to the invocation.",
+    "urn:eigenius:core:short_name": "inputs",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:output",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the output resource produced by the invocation.",
+    "urn:eigenius:core:short_name": "output",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:dispatched_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The specific RuntimeMethodSignature resolved by language-side dispatch. Recorded so that re-runs can verify the same method handles the call (otherwise flagged as a reproducibility failure).",
+    "urn:eigenius:core:short_name": "dispatched_to",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:started_at",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Invocation start timestamp (worker dispatch).",
+    "urn:eigenius:core:short_name": "started_at",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:completed_at",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Invocation completion timestamp (worker exit, success or failure).",
+    "urn:eigenius:core:short_name": "completed_at",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:random_seed",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Random seed used by the invocation, if set or recorded. Open-ended structured shape so per-language seeds (integer, hex digest, base64) all fit.",
+    "urn:eigenius:core:short_name": "random_seed",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:numerical_metadata",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "BLAS lib, FMA flag, GPU determinism flags, host kernel — anything affecting reproducibility that is not pinned by the image digest. Captured at worker bootstrap.",
+    "urn:eigenius:core:short_name": "numerical_metadata",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:runtime_metrics",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Wall time, allocations, peak memory; advisory.",
+    "urn:eigenius:core:short_name": "runtime_metrics",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeInvocation"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:package_identifier",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Language-specific package identifier (UUID for Julia, name+version for npm, registry path for Python, etc.).",
+    "urn:eigenius:core:short_name": "package_identifier",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackagePin"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:pinned_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Resolver-pinned version (e.g. '5.4.2'). Distinct from RuntimePackage.package_version, which is a user-declared internal version.",
+    "urn:eigenius:core:short_name": "pinned_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackagePin"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:source_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Git tree hash, sdist hash, registry digest — language-specific. Identifies the exact bytes the resolver pinned.",
+    "urn:eigenius:core:short_name": "source_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackagePin"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:source_origin",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Registry URL, git URL, or local path; advisory only — the source_hash is the authoritative anchor.",
+    "urn:eigenius:core:short_name": "source_origin",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackagePin"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:depended_on_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Other RuntimePackagePin IRIs that depend on this one. Materialises the lockfile's dependency edges so the dependency tree is graph-traversable.",
+    "urn:eigenius:core:short_name": "depended_on_by",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimePackagePin"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackagePin"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:method_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The method's name in the language.",
+    "urn:eigenius:core:short_name": "method_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:input_types",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of Eigon class IRIs declaring the method's input types. The boundary check verifies the resolved method's argument types match these.",
+    "urn:eigenius:core:short_name": "input_types",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:output_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Eigon class IRI of the method's return type.",
+    "urn:eigenius:core:short_name": "output_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:method_package",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional IRI of the RuntimePackage the method belongs to. Absent for entry-point signatures of standalone scripts.",
+    "urn:eigenius:core:short_name": "method_package",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimePackage"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:invocation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The RuntimeInvocation that the DispatchedTo morphism is recorded against.",
+    "urn:eigenius:core:short_name": "invocation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeInvocation"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:DispatchedTo"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:method_signature",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The RuntimeMethodSignature that handled the dispatch.",
+    "urn:eigenius:core:short_name": "method_signature",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:DispatchedTo"]
+  }
+]
