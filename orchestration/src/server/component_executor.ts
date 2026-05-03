@@ -167,8 +167,10 @@ export function registerComponentExecutor(
 
   router.service(ComponentExecutor, {
     execute(req: ComponentRequest) {
-      return withRpcGuard(operation.COMPONENT_DISPATCH, (mark) =>
-        executeComponentRequest(req, registry, mark));
+      return withRpcGuard(
+        operation.COMPONENT_DISPATCH,
+        (mark) => executeComponentRequest(req, registry, mark),
+      );
     },
 
     registerWasmComponent(req: RegisterWasmComponentRequest) {
