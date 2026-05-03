@@ -37,6 +37,7 @@ import {
 } from "../gen/eigenius_pb.ts";
 import type {
   ComponentRequest,
+  ComponentResponse,
   RegisterWasmComponentRequest,
 } from "../gen/eigenius_pb.ts";
 import { ComponentRegistry } from "../components/registry.ts";
@@ -48,7 +49,11 @@ import {
 import type { WasmAddon } from "../wasm/loadAddon.ts";
 import { decodeResource, encodeResource } from "../wasm/cbor.ts";
 import * as log from "../observability/mod.ts";
-import { operation, withRpcGuard } from "../observability/mod.ts";
+import {
+  type FailMark,
+  operation,
+  withRpcGuard,
+} from "../observability/mod.ts";
 
 const TEXT_DECODER = new TextDecoder();
 const TEXT_ENCODER = new TextEncoder();
@@ -67,6 +72,88 @@ export interface ComponentExecutorDeps {
 }
 
 /**
+ * Per-request dispatcher for the ComponentExecutor service. Extracted
+ * from `registerComponentExecutor` so the codec-branching logic
+ * (Phase 18e: CBOR by default, JSON for backward compat) is unit-
+ * testable without a real Connect server.
+ *
+ * The CBOR / JSON branch is symmetric: the response is encoded in the
+ * same codec the request used, so a pre-18e kernel that sends JSON
+ * gets JSON back during a rolling upgrade.
+ */
+export async function executeComponentRequest(
+  req: ComponentRequest,
+  registry: ComponentRegistry,
+  mark: FailMark,
+): Promise<ComponentResponse> {
+  const componentIri = req.componentIri;
+
+  if (!registry.has(componentIri)) {
+    mark.fail("unknown_component");
+    return create(ComponentResponseSchema, {
+      success: false,
+      error: `No handler registered for component: ${componentIri}`,
+    });
+  }
+
+  try {
+    // Branch on content_type per the proto field. Phase 18e:
+    // kernels send Eigon-CBOR by default; the JSON path stays
+    // for backward compat (mismatched kernel/orchestrator
+    // versions during a rolling deploy). Empty content_type is
+    // treated as JSON since pre-18e clients didn't set it.
+    const useCbor = req.contentType === CONTENT_TYPE_CBOR;
+
+    let input: Record<string, unknown>;
+    let argument: Record<string, unknown>;
+    if (useCbor) {
+      input = decodeResource(req.input) as Record<string, unknown>;
+      argument = decodeResource(req.argument) as Record<string, unknown>;
+    } else {
+      const inputJson = TEXT_DECODER.decode(req.input);
+      const argumentJson = TEXT_DECODER.decode(req.argument);
+      input = inputJson ? JSON.parse(inputJson) : {};
+      argument = argumentJson ? JSON.parse(argumentJson) : {};
+    }
+
+    const result = await registry.execute(componentIri, {
+      input,
+      argument,
+    });
+
+    // Encode output in the same codec the request used so a
+    // pre-18e kernel still gets JSON back during a rolling
+    // upgrade.
+    const outputBytes = useCbor
+      ? encodeResource(result.output)
+      : TEXT_ENCODER.encode(JSON.stringify(result.output));
+
+    const response = create(ComponentResponseSchema, {
+      success: true,
+      output: outputBytes,
+    });
+
+    if (result.metrics) {
+      response.metrics = create(ComponentMetricsSchema, {
+        provider: result.metrics.provider,
+        model: result.metrics.model,
+        promptTokens: BigInt(result.metrics.promptTokens),
+        completionTokens: BigInt(result.metrics.completionTokens),
+        latencyMs: BigInt(result.metrics.latencyMs),
+      });
+    }
+
+    return response;
+  } catch (e) {
+    mark.fail("dispatch_failed");
+    return create(ComponentResponseSchema, {
+      success: false,
+      error: `Component execution failed: ${(e as Error).message}`,
+    });
+  }
+}
+
+/**
  * Register the ComponentExecutor service implementation on a Connect router.
  */
 export function registerComponentExecutor(
@@ -77,73 +164,8 @@ export function registerComponentExecutor(
 
   router.service(ComponentExecutor, {
     execute(req: ComponentRequest) {
-      return withRpcGuard(operation.COMPONENT_DISPATCH, async (mark) => {
-        const componentIri = req.componentIri;
-
-        if (!registry.has(componentIri)) {
-          mark.fail("unknown_component");
-          return create(ComponentResponseSchema, {
-            success: false,
-            error: `No handler registered for component: ${componentIri}`,
-          });
-        }
-
-        try {
-          // Branch on content_type per the proto field. Phase 18e:
-          // kernels send Eigon-CBOR by default; the JSON path stays
-          // for backward compat (mismatched kernel/orchestrator
-          // versions during a rolling deploy). Empty content_type is
-          // treated as JSON since pre-18e clients didn't set it.
-          const useCbor = req.contentType === CONTENT_TYPE_CBOR;
-
-          let input: Record<string, unknown>;
-          let argument: Record<string, unknown>;
-          if (useCbor) {
-            input = decodeResource(req.input) as Record<string, unknown>;
-            argument = decodeResource(req.argument) as Record<string, unknown>;
-          } else {
-            const inputJson = TEXT_DECODER.decode(req.input);
-            const argumentJson = TEXT_DECODER.decode(req.argument);
-            input = inputJson ? JSON.parse(inputJson) : {};
-            argument = argumentJson ? JSON.parse(argumentJson) : {};
-          }
-
-          const result = await registry.execute(componentIri, {
-            input,
-            argument,
-          });
-
-          // Encode output in the same codec the request used so a
-          // pre-18e kernel still gets JSON back during a rolling
-          // upgrade.
-          const outputBytes = useCbor
-            ? encodeResource(result.output)
-            : TEXT_ENCODER.encode(JSON.stringify(result.output));
-
-          const response = create(ComponentResponseSchema, {
-            success: true,
-            output: outputBytes,
-          });
-
-          if (result.metrics) {
-            response.metrics = create(ComponentMetricsSchema, {
-              provider: result.metrics.provider,
-              model: result.metrics.model,
-              promptTokens: BigInt(result.metrics.promptTokens),
-              completionTokens: BigInt(result.metrics.completionTokens),
-              latencyMs: BigInt(result.metrics.latencyMs),
-            });
-          }
-
-          return response;
-        } catch (e) {
-          mark.fail("dispatch_failed");
-          return create(ComponentResponseSchema, {
-            success: false,
-            error: `Component execution failed: ${(e as Error).message}`,
-          });
-        }
-      });
+      return withRpcGuard(operation.COMPONENT_DISPATCH, (mark) =>
+        executeComponentRequest(req, registry, mark));
     },
 
     registerWasmComponent(req: RegisterWasmComponentRequest) {

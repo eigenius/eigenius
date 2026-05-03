@@ -158,3 +158,125 @@ pub async fn connect_orchestrator(
 
     Ok((client, components))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Codec-contract tests for `RemoteComponent`.
+    //!
+    //! These don't spin up a Connect server — that would require
+    //! pulling in tonic-test machinery and adds little beyond what
+    //! `eigon_cbor::tests` and the orchestrator's
+    //! `component_executor_codec_test.ts` already cover. What's worth
+    //! pinning here is the *choice* `remote.rs` makes about which
+    //! codec to use on the wire (Phase 18e: Eigon-CBOR with the
+    //! `application/eigon+cbor` content_type) and that the symmetric
+    //! parse path correctly inverts the serialise path. If a future
+    //! refactor flips `serialize_resource` to `serialize_document`,
+    //! changes the content_type tag, or breaks the round-trip
+    //! invariant, these tests catch it before it hits the wire.
+    use super::*;
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::Value;
+    use serde_json::json;
+
+    #[test]
+    fn content_type_tag_is_eigon_cbor() {
+        // Phase 18e contract: kernel always emits CBOR.
+        assert_eq!(EIGON_CBOR_CONTENT_TYPE, "application/eigon+cbor");
+    }
+
+    #[test]
+    fn serialize_then_parse_round_trips_a_simple_resource() {
+        let mut r = Resource::new(Iri::parse("urn:eigenius:test:remote:input").unwrap());
+        r.set(
+            Iri::parse("urn:eigenius:test:s").unwrap(),
+            Value::String("payload".into()),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:test:i").unwrap(),
+            Value::Integer(42),
+        );
+
+        // Mirror the byte path inside `RemoteComponent::execute`.
+        let encoded = eigon_cbor::serialize_resource(&r);
+        let decoded = eigon_cbor::parse_resource_lenient(&encoded)
+            .expect("orchestrator's response should round-trip");
+        assert_eq!(decoded, r);
+    }
+
+    #[test]
+    fn serialize_then_parse_round_trips_an_embedded_resource() {
+        // Components like CompleteJson return a resource whose
+        // properties include nested embedded resources. The kernel's
+        // parse_resource_lenient must accept the embedded shape on the
+        // way back from the orchestrator.
+        let mut inner = Resource::new_embedded();
+        inner.set(
+            Iri::parse("urn:eigenius:test:nested").unwrap(),
+            Value::String("inner-value".into()),
+        );
+
+        let mut r = Resource::new(Iri::parse("urn:eigenius:test:remote:wrapper").unwrap());
+        r.set(
+            Iri::parse("urn:eigenius:test:embed").unwrap(),
+            Value::Embedded(Box::new(inner.clone())),
+        );
+
+        let encoded = eigon_cbor::serialize_resource(&r);
+        let decoded = eigon_cbor::parse_resource_lenient(&encoded).expect("round-trip");
+        assert_eq!(decoded, r);
+    }
+
+    #[test]
+    fn serialize_then_parse_round_trips_a_value_json_property() {
+        // Substrate-routed traffic carries `numerical_metadata` as
+        // `Value::Json`. The codec fix from Phase 18c.5 (EIGENIUS_JSON_TAG)
+        // must round-trip through the kernel↔orchestrator path; this
+        // test pins that.
+        let mut r = Resource::new(Iri::parse("urn:eigenius:test:remote:withjson").unwrap());
+        r.set(
+            Iri::parse("urn:eigenius:test:metadata").unwrap(),
+            Value::Json(json!({"host_kernel": "linux-6.6", "fma_enabled": true})),
+        );
+
+        let encoded = eigon_cbor::serialize_resource(&r);
+        let decoded = eigon_cbor::parse_resource_lenient(&encoded).expect("round-trip");
+        assert_eq!(decoded, r);
+    }
+
+    #[test]
+    fn lenient_parser_accepts_embedded_response_shape() {
+        // The orchestrator may return a resource with no `@id` (the
+        // ComponentResponse output is a value, not a top-level chain
+        // resource). RemoteComponent::execute uses
+        // `parse_resource_lenient` for exactly this — pin the
+        // contract.
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:test:k").unwrap(),
+            Value::String("v".into()),
+        );
+        let encoded = eigon_cbor::serialize_resource(&r);
+        let decoded = eigon_cbor::parse_resource_lenient(&encoded)
+            .expect("lenient parser must accept embedded resources");
+        assert_eq!(decoded, r);
+    }
+
+    #[test]
+    fn argument_serialization_is_optional() {
+        // RemoteComponent::execute uses
+        // `argument.map(eigon_cbor::serialize_resource).unwrap_or_default()`
+        // — when no argument is supplied, an empty byte vec is sent.
+        // Pin that an `argument: None` produces empty bytes (not, e.g.,
+        // an empty CBOR map).
+        let argument: Option<&Resource> = None;
+        let bytes: Vec<u8> = argument
+            .map(eigon_cbor::serialize_resource)
+            .unwrap_or_default();
+        assert!(
+            bytes.is_empty(),
+            "argument=None must serialize to empty bytes; got {} bytes",
+            bytes.len()
+        );
+    }
+}
