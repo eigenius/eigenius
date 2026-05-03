@@ -144,9 +144,12 @@ pub struct DockerfileFragments {
     /// Lines registering the `RuntimePackageMirror` archive with the
     /// language's package manager.
     pub install_mirror: Vec<String>,
-    /// Worker bootstrap command (e.g. `julia /opt/eigenius-worker.jl`).
-    /// Becomes the image's `CMD`.
-    pub bootstrap_command: String,
+    /// Worker bootstrap command — `[exe, arg1, arg2, ...]`. Becomes the
+    /// image's `CMD` in exec form (`CMD ["exe", "arg1", "arg2"]`) so
+    /// shell metacharacter handling is unambiguous and the bootstrap
+    /// process is PID 1 inside the container (signal forwarding, exit
+    /// code propagation).
+    pub bootstrap_command: Vec<String>,
 }
 
 #[cfg(test)]

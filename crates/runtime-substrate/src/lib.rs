@@ -37,6 +37,7 @@ pub mod boundary;
 pub mod chain;
 pub mod error;
 pub mod facade;
+pub mod image_build;
 pub mod language_runtime;
 pub mod mirror_generator;
 pub mod registry;
@@ -50,6 +51,11 @@ pub use boundary::{check_call_method, check_run_script};
 pub use chain::ChainAccessor;
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use facade::{FacadeError, SubstrateDispatcher};
+pub use image_build::{
+    compose_dockerfile, is_buildah_available, BuildContext, BuildContextSpec, BuildahImageBuilder,
+    DockerfileSpec, ImageBuilder, IncludedPackage, LanguageAsset, MirrorMaterialization,
+    PackageMaterialization,
+};
 pub use language_runtime::LanguageRuntime;
 pub use mirror_generator::{
     LibraryContent, LibraryFile, MirrorGenerationOutput, MirrorGenerationRequest, MirrorGenerator,
