@@ -9,3 +9,6 @@ description = "Language-agnostic substrate for hosting external language toolcha
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
 thiserror.workspace = true
+serde.workspace = true
+serde_bytes = "0.11"
+ciborium = "0.2"
