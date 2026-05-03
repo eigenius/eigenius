@@ -82,23 +82,31 @@ pub struct WorkerHandle {
 }
 
 /// Inputs to [`crate::spawner::WorkerSpawner::spawn`]. Carries everything
-/// a backend needs to materialise a worker process: the image to run,
-/// the host paths to bind-mount in (per D26 §9.5), the env vars used by
-/// the worker bootstrap cross-check (D26 §9.3), and the per-invocation
-/// resource caps that map to D26 §8.3 sandbox enforcement.
+/// a backend needs to materialise a worker process: the image (or
+/// command) to run, the host paths to bind-mount in (per D26 §9.5), the
+/// env vars used by the worker bootstrap cross-check (D26 §9.3), and
+/// the per-invocation resource caps that map to D26 §8.3 sandbox
+/// enforcement.
 ///
-/// Phase 18a uses a subset of these (paths + env + caps); the seccomp
-/// profile and capability set arrive with `DockerSpawner` in 18c.
+/// Phase 18a uses a subset of these (command + paths + env); the
+/// seccomp profile, capability set, and resource-cap enforcement arrive
+/// with `DockerSpawner` in 18c.
 #[derive(Debug, Clone)]
 pub struct WorkerSpec {
-    /// Image to spawn, by digest. `None` for `LocalSpawner` (no
-    /// container).
+    /// Image to spawn, by digest. Required for `DockerSpawner`. `None`
+    /// for `LocalSpawner` (no container; `command` is launched directly
+    /// on the host).
     pub image_digest: Option<ImageDigest>,
+    /// Worker bootstrap command — `[exe, arg1, arg2, ...]`. Required
+    /// for `LocalSpawner`. For `DockerSpawner`, an empty `Vec` defers
+    /// to the image's `CMD`; a non-empty `Vec` overrides it.
+    pub command: Vec<String>,
     /// Host path that becomes the worker's per-invocation tempdir
-    /// (read-write, mounted under the well-known depot path).
+    /// (read-write, mounted under the well-known depot path per
+    /// D26 §9.5). The substrate creates this directory before spawn.
     pub tempdir_host_path: PathBuf,
     /// Host path of the read-only runtime depot mount (per-language
-    /// caches, etc.). May be empty for backends that don't use a depot.
+    /// caches, etc.). `None` for backends that don't use a depot.
     pub depot_host_path: Option<PathBuf>,
     /// Environment variables passed to the worker. The substrate
     /// always populates `EIGENIUS_RUNTIME_ENV_DIGEST` and
@@ -106,9 +114,11 @@ pub struct WorkerSpec {
     /// (D26 §9.3).
     pub env: BTreeMap<String, String>,
     /// Wall-clock cap. `0` means "unbounded" (debug only — production
-    /// must always set a positive cap).
+    /// must always set a positive cap). Enforced by `DockerSpawner` via
+    /// container limits in 18c; `LocalSpawner` does not enforce in v1.
     pub max_wall_time_ms: u64,
     /// Memory cap in bytes. `0` means "unbounded" (debug only).
+    /// Enforcement same as `max_wall_time_ms`.
     pub max_memory_bytes: u64,
     /// Optional seccomp profile JSON applied via `HostConfig.security_opt`
     /// for `DockerSpawner` (D26 §8.3). Phase 18c populates this; ignored

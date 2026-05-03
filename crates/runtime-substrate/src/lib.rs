@@ -35,8 +35,10 @@
 
 pub mod error;
 pub mod language_runtime;
+pub mod spawner;
 pub mod types;
 
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use language_runtime::LanguageRuntime;
+pub use spawner::{DockerSpawner, LocalSpawner, WorkerSpawner};
 pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};
