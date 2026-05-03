@@ -415,11 +415,16 @@ When a `RunRuntimeScript` or `CallRuntimeMethod` invocation enters the substrate
 
 The full invocation flow then proceeds: marshall inputs into mirror struct values, dispatch into the worker, marshall the output back, construct the `RuntimeInvocation` provenance record.
 
-## 8. Worker pool and process model
+## 8. Worker process model
 
 ### 8.1 Process model
 
-One worker process per warm `RuntimeEnvironment`. Workers run inside an OS-level sandbox restricting filesystem access to a per-invocation working directory and a read-only mount of the runtime depot. Network access is governed by a per-environment policy.
+Workers run inside an OS-level sandbox restricting filesystem access to a per-invocation working directory and a read-only mount of the runtime depot. Network access is governed by a per-environment policy.
+
+The substrate supports two worker shapes, picked per language and per phase:
+
+- **Spawn-per-invocation** — each `RunRuntimeScript` / `CallRuntimeMethod` call spawns a fresh worker, runs the job, waits for completion or failure, surfaces the result, and the worker exits. The substrate ships this shape in v1. Simpler fault model (no inter-invocation state leak), no pool accounting, no idle/health bookkeeping. The per-invocation cost is one process spawn plus runtime startup; for languages with cheap startup (the smoke `bash` runtime, Python with no warm-up imports) this is the right shape long-term as well.
+- **Long-lived worker per warm `RuntimeEnvironment`** — an additional layer above spawn-per-invocation that caches `WorkerHandle`s by `image_digest` and dispatches subsequent invocations into already-warm processes. The substrate ships this when a language's startup cost forces it; Julia's ~30s cold-start (D27 Phase C) is the first concrete trigger. The pool is a separate component above the spawner trait (§8.2), not a different trait.
 
 Workers communicate with the orchestrator via a small RPC protocol over a Unix domain socket (containers) or local TCP (development). The protocol carries: `instantiate`, `register_mirror`, `dispatch_method`, `evict`, `health`. Marshalling on the wire is **CBOR** ([RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)), using **RFC 8746 typed-array tags** for large numerical arrays so FP / integer matrices avoid per-element type tags.
 
@@ -427,16 +432,29 @@ CBOR is the rest of Eigenius's serialization format — `LayerHandle`, `BloomFil
 
 Cross-language coverage: `ciborium` (Rust, already used internally), [`CBOR.jl`](https://github.com/saolsen/CBOR.jl) (Julia, maintained), [`cbor2`](https://pypi.org/project/cbor2/) (Python, mature). R support (`cbor` package) is weaker; the day R lands as a substrate the integration may need a Rust-side helper or a Cap'n-Proto-style sidecar. AWS DAX uses CBOR for the same cross-language reasons; the production envelope is well-charted.
 
-### 8.2 Worker lifecycle
+### 8.2 The `WorkerSpawner` trait
 
-The substrate maintains a worker pool. On invocation:
+Container/process lifecycle sits behind a small trait inside `eigenius-runtime-substrate`:
 
-1. Resolve the `RuntimeEnvironment` IRI; look up its `image_digest`.
-2. Look up an existing warm worker for that digest. If found, dispatch into it.
-3. If not, spawn a fresh worker container against the image; verify the worker's bootstrap cross-check passes (§10.3); register in the pool.
-4. Track usage; evict idle workers per a configurable LRU policy.
+```rust
+pub trait WorkerSpawner: Send + Sync {
+    fn spawn(&self, spec: WorkerSpec) -> Result<WorkerHandle, SpawnError>;
+    fn wait(&self, handle: &WorkerHandle) -> Result<ExitStatus, SpawnError>;
+    fn kill(&self, handle: &WorkerHandle) -> Result<(), SpawnError>;
+    fn attach_uds(&self, handle: &WorkerHandle) -> Result<UnixStream, SpawnError>;
+}
+```
 
-First-spawn latency is dominated by image pull + runtime warmup. The substrate caches pulled images locally so subsequent spawns against the same digest skip the pull.
+`WorkerSpec` carries the `image_digest`, the per-invocation tempdir host path, the runtime-depot mount, env vars (including the cross-check digest, §9.3), resource limits, and the seccomp profile. Per-language `LanguageRuntime::spawn_worker` impls call into the substrate's spawner indirectly — they don't see backend specifics.
+
+Backends planned:
+
+- **`LocalSpawner`** — spawns the worker as a host subprocess; no container. Used for dev, CI, and the substrate's smoke tests. Reduced sandbox (process-level rlimits + a temp dir; no namespacing). Operator gets a warning when used outside dev.
+- **`DockerSpawner`** — talks to the host Docker daemon over `/var/run/docker.sock` (DooD; §9.5) using the `bollard` crate. Production default on Linux.
+- **`PodmanSpawner`** — deferred. Same trait, rootless-friendly, no daemon. Lands when a deployment asks for it.
+- **k8s-aware backend** — deferred. The trait shape doesn't preclude it.
+
+Pool layering: when warm-worker reuse becomes worth its complexity, a `WorkerPool` wraps a `dyn WorkerSpawner` and caches handles by `image_digest`, with idle timeout, max size, and health-check eviction. The pool is *above* the trait, not inside it; spawner backends stay ignorant of pooling.
 
 ### 8.3 Sandboxing
 
@@ -446,9 +464,10 @@ Hosted-runtime scripts can be arbitrary code. The substrate constrains:
 - **Network.** Blocked unless the invocation is `IO`-tagged and the institution / environment registration permits it.
 - **Time.** Per-invocation wall-clock limit (declared in the contract; default a few minutes; institutions can raise it).
 - **Memory.** Per-invocation memory limit, enforced by cgroup; default a few GiB; institutions can raise it.
-- **Syscalls.** A small allow-list (open-relative, read, write to tempdir, mmap for BLAS, etc.).
+- **Syscalls.** A small allow-list (open-relative, read, write to tempdir, mmap for BLAS, etc.). For `DockerSpawner`, applied as a custom seccomp profile via `HostConfig.security_opt` — Docker's default profile is too permissive for the substrate's allow-list.
+- **Capabilities.** For `DockerSpawner`, `CapDrop: ["ALL"]` then re-add only what is needed. AppArmor profile applied where available.
 
-Defaults are restrictive; institutions and deployments relax them as needed. On Linux: namespaces + cgroups. On macOS / Windows: weaker analogs (sandbox-exec, app-containers); the substrate's coverage there is reduced and the operator gets a warning.
+Defaults are restrictive; institutions and deployments relax them as needed. On Linux with `DockerSpawner`: namespaces (mnt, pid, net, user) + cgroups v2 + seccomp + capability drop + AppArmor. With `LocalSpawner`: rlimits + per-invocation tempdir only — no namespacing, no syscall filtering. The orchestrator emits a one-line warning at every dispatch under `LocalSpawner` so it cannot be silently used in production. On macOS / Windows: weaker analogs (sandbox-exec, app-containers); coverage is reduced and the operator gets a warning.
 
 ### 8.4 Determinism and numerical reproducibility
 
@@ -484,6 +503,8 @@ The pipeline:
 5. Push to the configured registry, capture the digest from the registry's response.
 6. Commit the `RuntimeEnvironment` resource carrying the digest.
 
+The build path is `buildah`-driven — never via the run-side container client (§8.2). The two paths are independent: `buildah` produces images deterministically (`--timestamp 0`, ordered layer assembly); the run-side `WorkerSpawner` consumes them by digest. Conflating the two (e.g. driving builds through a Docker daemon client) sacrifices determinism for no operational gain.
+
 The image carries build-time provenance baked into `/etc/eigenius-runtime-env/`:
 
 ```
@@ -512,6 +533,20 @@ The cross-check is the load-bearing piece. If the env var says digest X and the 
 - **Audit closure.** Given a `RuntimeInvocation`, you have script + image digest + inputs + outputs. The image digest pulls a complete, byte-identical runtime + dependency stack; combined with the script and inputs, the invocation reproduces.
 - **Operational independence.** An auditor needs nothing from Eigenius's running infrastructure — the image is in an accessible OCI registry, the inputs and outputs are content-addressed Eigon resources, verification is a local pull + run.
 - **Upgrade discipline.** A new `RuntimeEnvironment` (different image digest) is a new resource. Existing `RuntimeInvocation`s remain reproducible against their original image even after the registry serves newer ones; the substrate doesn't implicitly upgrade.
+
+### 9.5 DooD bind-mount discipline and the orchestrator security boundary
+
+When the orchestrator runs in a container and spawns workers via `DockerSpawner`, the spawn pattern is **Docker-outside-of-Docker**: the orchestrator container talks to the host's Docker daemon (via a mounted `/var/run/docker.sock`) to spawn *sibling* workers — not nested ones. Sibling workers are cheap and observable from host tooling, but every path in the spawn request is interpreted against the *host* filesystem, not the orchestrator's container-local view. Without discipline this silently breaks bind mounts: a tempdir path the orchestrator constructs against its own filesystem is meaningless to the daemon.
+
+The substrate's discipline is three rules:
+
+1. **Single stable host path.** The substrate writes per-invocation tempdirs, the runtime depot, mirror archives, and any other worker-visible artifact under one well-known host path (e.g. `/var/lib/eigenius-runtime/`).
+2. **Same path inside the orchestrator.** That host path is bind-mounted into the orchestrator container at the *same* path. Paths the orchestrator constructs under that prefix are valid both in its own filesystem and on the host with no translation.
+3. **Refuse to start otherwise.** At `DockerSpawner` construction the substrate stats the depot path and verifies the bind-mount is present and points to the expected host inode. If it does not, the substrate refuses to come up rather than spawning workers that will silently see the wrong data.
+
+The depot path choice is a spec-level decision, not a deployment knob: changing it post-hoc breaks every `RuntimeInvocation`'s reproducibility against its original sandbox layout.
+
+**Security boundary acknowledgement.** Granting the orchestrator process access to `/var/run/docker.sock` is root-equivalent on the host: anyone who can drive RPCs into the orchestrator can spawn a privileged container that bind-mounts `/` from the host and pivots. Membership in the `docker` group is the same primitive — it is not a mitigation. The orchestrator host is therefore the substrate's security boundary: no multi-tenant co-tenancy, no untrusted RPC surfaces forwarded into it, no exposed substrate APIs that let an unauthenticated caller trigger arbitrary `RunRuntimeScript` invocations. The substrate enforces this in code at one place — the orchestrator startup logs the active spawner backend and prints a one-line security-posture reminder when `DockerSpawner` is selected — and in deployment docs everywhere else.
 
 ## 10. CLI surface
 
@@ -617,11 +652,15 @@ The boundary check (§7.5), mirror anchor verification, and the integration with
 
 **Scope:** Medium.
 
-### Phase C — Image build pipeline + worker pool + sandbox
+### Phase C — Image build pipeline + spawn-per-invocation + sandbox
 
-The deterministic build pipeline (§9.2), digest capture, in-image provenance, worker bootstrap cross-check. Multi-environment worker pool with LRU eviction. OS-level sandbox per worker. Resource-limit enforcement (cgroup-based on Linux). `numerical_metadata` recording.
+The deterministic build pipeline (§9.2), digest capture, in-image provenance, worker bootstrap cross-check. `DockerSpawner` implementation of `WorkerSpawner` (§8.2) using DooD per §9.5. OS-level sandbox per worker. Resource-limit enforcement (cgroup-based on Linux). `numerical_metadata` recording.
 
-**Scope:** Medium-to-Large. The pool, sandbox, and image pipeline are independent workstreams that all need to land before production deployment is viable.
+**Spawn-per-invocation in v1.** The substrate ships fresh-spawn-per-call as the only worker shape. The warm-worker pool (§8.1) defers to a per-language phase — Julia's cold-start cost (D27 Phase C) is the first concrete trigger.
+
+**Scope:** Medium. The sandbox and image pipeline are independent workstreams; both need to land before production deployment is viable.
+
+**Acceptance: end-to-end capstone.** Phase C closes with a hello-world round-trip against an upstream [official Julia image](https://hub.docker.com/_/julia) digest — substrate spawns the pinned `julia:*` container, runs a trivial script, captures stdout, commits a `RuntimeInvocation`. Deliberately uses an image the substrate did not build (the deterministic build pipeline is exercised separately) so the capstone is focused on the spawn / sandbox / provenance / boundary path. Detailed scope and criteria in [implementation-plan.md](implementation-plan.md) Phase 18d.
 
 ### Phase D — Cross-language readiness
 

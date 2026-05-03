@@ -1085,7 +1085,7 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 
 **Goal:** Stand up the language-agnostic substrate that hosts external language toolchains inside Eigenius with full provenance. Pinned `RuntimeEnvironment` images, content-addressed `RuntimeScript` and `RuntimePackage` resources, the `LanguageRuntime` trait that per-language crates implement, the `RunRuntimeScript` / `CallRuntimeMethod` substrate components. No language implementations yet — this phase delivers the trait + the plumbing. Julia (Phase 19) and Lean's authoring side (Phase 20) layer on top.
 
-**Duration estimate:** 6–8 weeks total, three internal milestones aligned with [D26](d26-runtime-substrate.md) §13.
+**Duration estimate:** 7–9 weeks total, four internal milestones aligned with [D26](d26-runtime-substrate.md) §13 (with the closing capstone landing as 18d).
 
 **Prerequisites:** Phase 8 (WASM as the contrast point — the substrate is a sibling, not a replacement, for fine-grained untrusted capability hosting), Phase 9a (durable kernel state — substrate resources persist across restart), Phase 12 (D14 — substrate components dispatch through the existing `ComponentExecutor`; per-language institutions surface as D14 institutions in Phase 19+).
 
@@ -1093,31 +1093,62 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 
 ### Phase 18a — Substrate skeleton (~3 weeks)
 
-- New crate `eigenius-runtime-substrate` with the `LanguageRuntime` trait and parent ontology resource classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`).
-- Worker RPC framing using CBOR with RFC 8746 typed-array tags (matching the rest of Eigenius's serialization). JSON bootstrap path retained for first-language Phase A debugging only.
+- New crate `eigenius-runtime-substrate` (workspace member at `crates/runtime-substrate`) with the `LanguageRuntime` trait and parent ontology resource classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`).
+- Parent ontology JSON at `ontologies/runtime/runtime-substrate-ontology.json` declaring the seven parent classes plus the `DispatchedTo` morphism class. Loaded at bootstrap alongside the institution ontology.
+- Worker RPC framing using CBOR with RFC 8746 typed-array tags (matching the rest of Eigenius's serialization), over a Unix domain socket. JSON-on-the-wire kept behind a `json-bootstrap` feature for first-language Phase A debugging only — not the production codec.
 - `RunRuntimeScript` and `CallRuntimeMethod` substrate components registered through the existing `ComponentExecutor` plumbing; `IO`-tagged.
 - `DispatchedTo` morphism class as a structural-metadata morphism on `RuntimeInvocation`.
-- Orchestrator-side wiring: the new crate plugs into the existing `ComponentRegistry`; no new gRPC RPCs.
+- `WorkerSpawner` trait (`spawn`, `wait`, `kill`, `attach_uds`) as the substrate's container/process-lifecycle seam — see Phase 18c for backend impls. Ships in 18a so the seam is in place from day one. `LocalSpawner` (host subprocess, no container) lands here as the default for dev / CI / smoke tests; `DockerSpawner` is a stub that errors out at construction with `not yet implemented (Phase 18c)`.
+- Orchestrator-side wiring: a new sibling napi addon (modeled on `orchestration/native`) hosts the substrate crate and exposes worker-management entry points to Deno; the new TS handlers register against the existing `ComponentRegistry`. No new gRPC RPCs in 18a.
 
 ### Phase 18b — Mirror anchoring + boundary check (~2 weeks)
 
 - Boundary check (D26 §7.5): mirror resolution, input shape check, method-signature check on every `RunRuntimeScript` / `CallRuntimeMethod` dispatch.
 - Mirror-anchor compositionality logic: a `RuntimePackageMirror` anchored to layer L₀ is valid for invocations against descendant layers iff the mirrored classes are byte-identical; otherwise the substrate rejects with `MirrorVersionMismatch`.
 - Per-language mirror-generator integration points (the substrate hosts the generator; per-language crates supply the generator binary).
+- Boundary check runs kernel-side (it reads chain ancestry and class definitions); the orchestrator-side substrate handler invokes it via a new `RuntimeSubstrate` gRPC service or by extending `ComponentExecutor` — decision to settle in-flight, not a structural lock-in.
 
-### Phase 18c — Image-build pipeline + worker pool + sandbox (~3 weeks)
+### Phase 18c — Image-build pipeline + spawn-per-invocation + sandbox (~2 weeks)
 
-- Deterministic image-build pipeline (D26 §9.2): compose Dockerfile from per-language fragments + shared base layers, materialise `included_packages` and the mirror archive into the build context, invoke `buildah` deterministically, push to registry, capture digest.
+- Deterministic image-build pipeline (D26 §9.2): compose Dockerfile from per-language fragments + shared base layers, materialise `included_packages` and the mirror archive into the build context, invoke `buildah` deterministically (build path is `buildah`-driven, never via the run-side container client), push to registry, capture digest.
 - In-image build provenance baked into `/etc/eigenius-runtime-env/`; worker bootstrap performs the start-time cross-check (D26 §9.3).
-- Multi-environment worker pool with LRU eviction (D26 §8.2). Image-pull cache.
-- OS-level sandbox: Linux namespaces + cgroups; per-invocation tempdir; configurable wall-clock and memory caps; syscall allow-list.
+- `DockerSpawner` implementation of `WorkerSpawner` using Bollard against the host Docker daemon (DooD: `/var/run/docker.sock` mounted into the orchestrator container, sibling-container model). Production default on Linux deployments. `PodmanSpawner` and a k8s-aware backend deferred — the trait makes either a contained add-on later.
+- DooD bind-mount discipline: the substrate writes per-invocation tempdirs and the runtime depot under a single, stable host path (e.g. `/var/lib/eigenius-runtime/`) bind-mounted into the orchestrator at the same location, so paths the substrate hands to workers are valid in both filesystems without translation. Enforced as a runtime assertion at `DockerSpawner` construction.
+- Security-boundary acknowledgement: granting the orchestrator process access to `/var/run/docker.sock` is root-equivalent on the host; deployment docs and a startup log line treat this as a spec-level constraint, not a footnote. The orchestrator host is the substrate's security boundary — no multi-tenant co-tenancy, no untrusted RPC surfaces forwarded to it.
+- **Spawn-per-invocation execution model.** Each `RunRuntimeScript` / `CallRuntimeMethod` call spawns a fresh container, runs the job, waits for completion or failure, surfaces the result, then the container exits (`auto_remove: true`). No worker pool, no warm-worker reuse, no LRU/idle/health-check machinery in v1. The Docker daemon's image-layer cache provides image-pull caching for free — subsequent invocations against the same digest skip the network hop without us writing pool code. The warm-worker pool defers to Phase 19c, where Julia's ~30s cold-start cost makes it cash in.
+- OS-level sandbox depth depends on the active spawner. **`DockerSpawner`** (Linux production): namespaces (mnt, pid, net, user) and cgroups v2 from Docker; capabilities dropped to minimum (`CapDrop: ["ALL"]`, then re-add only what's needed); custom seccomp profile shipped as a JSON file in the crate and applied via `HostConfig.security_opt` (Docker's default profile is too permissive for the substrate's allow-list); AppArmor where available. **`LocalSpawner`** (dev / CI): rlimits + per-invocation tempdir only, no namespacing; orchestrator logs a warning at every dispatch under LocalSpawner so it is never silently used in production. **macOS / Windows**: weaker analogs with operator warning per D26 §8.3.
 - `numerical_metadata` recording on `RuntimeInvocation` (BLAS lib, FMA flag, GPU determinism flags, host kernel).
+
+### Phase 18d — End-to-end Julia hello-world capstone (~1 week)
+
+The closing acceptance milestone for Phase 18. Exercises every architectural piece end-to-end with a real interpreter container, without committing to any of Phase 19's full Julia-integration scope (no `eigon-julia-gen`, no mirror generator, no institutions, no CBOR worker bootstrap, no `JuliaScript` subclass).
+
+**Setup.** A test fixture provides a tiny `LanguageRuntime` impl with `language_id() = "julia"`. It does not build its own image — it pins to a published digest of an [official Julia image](https://hub.docker.com/_/julia) (e.g. `julia:1.10-bookworm` resolved to `sha256:…`). This deliberately bypasses the deterministic build pipeline (which is exercised separately by 18c's image-determinism test) so the capstone validates the run path against an upstream image the substrate did not produce.
+
+**Round-trip.** Commit a `RuntimeEnvironment` resource pinning the Julia image digest (no `included_packages`, no mirror) and a `RuntimeScript` whose source reads stdin and writes a transformed payload to stdout (e.g. uppercase a string). Dispatch `RunRuntimeScript` with a single input resource. The substrate:
+
+1. Resolves script + environment from the chain.
+2. Asks `DockerSpawner` to spawn the pinned `julia:*` image as a sibling container, with the per-invocation tempdir bind-mounted from the host depot path (§A9 / D26 §9.5).
+3. Materialises the script into the tempdir; invokes `julia /tmp/inv-N/script.jl` inside the container.
+4. Captures stdout, packages it as the output resource, assembles a `RuntimeInvocation` with the pinned image digest echoed verbatim, and commits everything to the chain.
+
+**Acceptance criteria.**
+- `RuntimeInvocation.image_digest` matches the pinned digest verbatim.
+- The output resource carries the expected transformed payload.
+- The container is removed after exit (`auto_remove`).
+- The script cannot write outside its tempdir (sandbox check; an inner attempt fails with `SandboxViolation`).
+- A second invocation against the same environment skips the registry pull (Docker layer cache; observed via timing).
+- Re-running the same `(script, environment, inputs)` against the same host yields a byte-identical output resource (deterministic-by-environment per D26 §8.4).
+
+**Why this shape.** Using an upstream image instead of a substrate-built one keeps the capstone focused on the spawn / sandbox / provenance / boundary path. Using Julia rather than the `bash` smoke runtime ensures the substrate works against a real interpreter with non-trivial startup cost and an actual standard library — i.e. against the kind of runtime Phase 19 will host. When Phase 19 lands, the test fixture is replaced by `eigenius-julia` and the capstone test must continue to pass — making it the regression anchor between the two phases.
 
 ### Phase 18 — Test plan
 
-- Smoke language test: a minimal `eigenius-test-runtime` crate wraps `bash -c` as a "language" so the substrate skeleton can be exercised end-to-end without dragging in a real interpreter. Round-trips a `RunRuntimeScript` invocation, produces a `RuntimeInvocation` with full provenance, demonstrates worker bootstrap cross-check fires on misconfiguration.
+- Smoke language test: a `bash -c` test runtime feature-gated on `crates/runtime-substrate` (`test-runtime` feature) wraps a long-lived bash worker speaking the substrate's CBOR RPC, so the skeleton can be exercised end-to-end without dragging in a real interpreter. Round-trips a `RunRuntimeScript` invocation, produces a `RuntimeInvocation` with full provenance, demonstrates worker bootstrap cross-check fires on misconfiguration.
 - Boundary-check coverage: missing mirror class, mirror anchored to non-ancestral layer, method-signature mismatch — all produce typed errors before reaching the worker.
+- Spawner-variant matrix: each boundary-check / spawn-per-invocation / numerical-metadata test runs once against `LocalSpawner` (always) and once against `DockerSpawner` (gated on `--features docker-spawner` and a reachable Docker daemon; skipped in environments without one).
 - Image determinism: building the same `RuntimeEnvironment` resource twice produces byte-identical OCI images (modulo build timestamp, which is normalised).
+- DockerSpawner-specific: container `auto_remove` actually removes; bind-mount paths visible inside the container match what the substrate expected (DooD path-translation regression); custom seccomp profile blocks a known-disallowed syscall; capability drop is in effect; `EIGENIUS_RUNTIME_ENV_DIGEST` cross-check refuses a tampered image.
 - Sandbox isolation: a script attempting to access disallowed paths or syscalls is killed; resource-limit violations surface as structured errors.
 
 ### Phase 18 — References
@@ -1154,7 +1185,7 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 ### Phase 19c — Per-environment images + worker pool (~3 weeks)
 
 - Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated.
-- Multi-environment worker pool with LRU eviction (substrate-side; this milestone exercises and tunes it for Julia).
+- Multi-environment worker pool with LRU eviction lands here (deferred from Phase 18c — the substrate ships spawn-per-invocation in v1; the pool is justified by Julia's ~30s cold-start cost). Layered above the `WorkerSpawner` trait, not inside it: a `WorkerPool` that caches `WorkerHandle`s by `image_digest`, with idle timeout, max size, and health-check eviction. Substrate-side code so a future Python integration can reuse it without re-deriving.
 - `JuliaPackagePin` resources committed alongside the verbatim `Manifest.toml` for graph-side queryability.
 
 ### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~3 weeks)
