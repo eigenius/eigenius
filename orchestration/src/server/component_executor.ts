@@ -59,7 +59,10 @@ const TEXT_DECODER = new TextDecoder();
 const TEXT_ENCODER = new TextEncoder();
 
 const CONTENT_TYPE_CBOR = "application/eigon+cbor";
-const CONTENT_TYPE_JSON = "application/eigon+json";
+// JSON-fallback branch is keyed on `!== CONTENT_TYPE_CBOR` (anything
+// not CBOR — including the literal `application/eigon+json` and
+// pre-18e clients that send empty content_type — falls through to
+// JSON). No constant needed for the JSON tag.
 
 export interface ComponentExecutorDeps {
   registry: ComponentRegistry;
