@@ -57,15 +57,50 @@ fn build_argument(language: &str, source: &str) -> Vec<u8> {
 fn run_runtime_script_via_facade_round_trips_through_test_worker() {
     let d = dispatcher_with_test_runtime();
     let argument = build_argument("test", "echo facade-validated");
-    let output_cbor = d
+    let outcome = d
         .dispatch_run_runtime_script(&[], &argument)
         .expect("dispatch");
-    let output = eigon_cbor::parse_resource_lenient(&output_cbor).expect("decode output");
+    let output = eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
     let stdout = output
         .get(&Iri::parse("urn:eigenius:test:bash_stdout").unwrap())
         .and_then(Value::as_str)
         .expect("bash_stdout property on output");
     assert_eq!(stdout.trim(), "facade-validated");
+
+    // Phase 18c.5: the partial RuntimeInvocation carries the trace
+    // fields the substrate observed during the dispatch.
+    let inv = eigon_cbor::parse_resource_lenient(&outcome.partial_invocation_cbor)
+        .expect("decode partial invocation");
+    assert_eq!(
+        inv.get(&Iri::parse("urn:eigenius:runtime:language").unwrap())
+            .and_then(Value::as_str),
+        Some("test")
+    );
+    let started = inv
+        .get(&Iri::parse("urn:eigenius:runtime:started_at").unwrap())
+        .and_then(Value::as_str)
+        .expect("started_at present");
+    let completed = inv
+        .get(&Iri::parse("urn:eigenius:runtime:completed_at").unwrap())
+        .and_then(Value::as_str)
+        .expect("completed_at present");
+    assert!(
+        started <= completed,
+        "started {started} <= completed {completed}"
+    );
+    let metadata = inv
+        .get(&Iri::parse("urn:eigenius:runtime:numerical_metadata").unwrap())
+        .expect("numerical_metadata present");
+    match metadata {
+        Value::Json(json) => {
+            // The bash test worker reports `host_kernel = "test-runtime"`.
+            assert_eq!(
+                json.get("host_kernel").and_then(serde_json::Value::as_str),
+                Some("test-runtime"),
+            );
+        }
+        other => panic!("expected Value::Json for numerical_metadata, got {other:?}"),
+    }
 }
 
 #[test]

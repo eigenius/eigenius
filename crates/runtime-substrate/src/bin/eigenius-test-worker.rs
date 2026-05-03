@@ -86,26 +86,47 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut stream = match listener.accept() {
-        Ok((s, _addr)) => s,
-        Err(e) => {
-            eprintln!("eigenius-test-worker: accept failed: {e}");
-            return ExitCode::from(4);
+    // Accept connections in a loop. The substrate may open more than
+    // one connection per worker lifetime — e.g. Phase 18c.5 calls
+    // `Health` once over its own connection, then `DispatchMethod` over
+    // a second connection. Worker exits cleanly only on explicit
+    // `Evict` (or on signal).
+    loop {
+        let mut stream = match listener.accept() {
+            Ok((s, _addr)) => s,
+            Err(e) => {
+                eprintln!("eigenius-test-worker: accept failed: {e}");
+                return ExitCode::from(4);
+            }
+        };
+        match serve(&mut stream) {
+            ServeOutcome::EvictReceived => return ExitCode::SUCCESS,
+            ServeOutcome::ConnectionClosed => continue,
+            ServeOutcome::FatalError(code) => return ExitCode::from(code),
         }
-    };
-
-    serve(&mut stream)
+    }
 }
 
-fn serve(stream: &mut UnixStream) -> ExitCode {
+enum ServeOutcome {
+    /// Substrate sent `Evict` on this connection; worker exits cleanly.
+    EvictReceived,
+    /// Connection EOF without `Evict`; loop back and accept the next
+    /// connection. Multi-connection workers (Phase 18c.5+) rely on
+    /// this to keep the worker alive between Health and DispatchMethod
+    /// calls when those land on separate connections.
+    ConnectionClosed,
+    /// Recv / send failure on the wire; bubble up as a non-zero exit.
+    FatalError(u8),
+}
+
+fn serve(stream: &mut UnixStream) -> ServeOutcome {
     loop {
         let req = match server_recv_request(stream, MAX_FRAME_SIZE_DEFAULT) {
             Ok(Some(r)) => r,
-            // Clean EOF — the substrate dropped the connection.
-            Ok(None) => return ExitCode::SUCCESS,
+            Ok(None) => return ServeOutcome::ConnectionClosed,
             Err(e) => {
                 eprintln!("eigenius-test-worker: recv failed: {e}");
-                return ExitCode::from(5);
+                return ServeOutcome::FatalError(5);
             }
         };
 
@@ -113,10 +134,10 @@ fn serve(stream: &mut UnixStream) -> ExitCode {
         let resp = handle(req);
         if let Err(e) = server_send_response(stream, &resp) {
             eprintln!("eigenius-test-worker: send failed: {e}");
-            return ExitCode::from(6);
+            return ServeOutcome::FatalError(6);
         }
         if exit_after {
-            return ExitCode::SUCCESS;
+            return ServeOutcome::EvictReceived;
         }
     }
 }

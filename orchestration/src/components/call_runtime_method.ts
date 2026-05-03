@@ -57,12 +57,9 @@ export function createCallRuntimeMethodHandler(
       argument_bytes: argumentCbor.byteLength,
     });
 
-    let outputBytes: Uint8Array;
+    let outcome: { output: Uint8Array; partialInvocation: Uint8Array };
     try {
-      outputBytes = await addon.dispatchCallRuntimeMethod(
-        inputCbor,
-        argumentCbor,
-      );
+      outcome = await addon.dispatchCallRuntimeMethod(inputCbor, argumentCbor);
     } catch (e) {
       log.warn(
         operation.COMPONENT_DISPATCH,
@@ -78,10 +75,11 @@ export function createCallRuntimeMethodHandler(
 
     const latencyMs = Date.now() - startTime;
     log.info(operation.COMPONENT_DISPATCH, "CallRuntimeMethod completed", {
-      output_bytes: outputBytes.byteLength,
+      output_bytes: outcome.output.byteLength,
+      partial_invocation_bytes: outcome.partialInvocation.byteLength,
       latency_ms: latencyMs,
     });
 
-    return { output: decodeResource(outputBytes) };
+    return { output: decodeResource(outcome.output) };
   };
 }

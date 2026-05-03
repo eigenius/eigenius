@@ -29,6 +29,19 @@ import { createRequire } from "node:module";
 import * as log from "../observability/mod.ts";
 import { operation } from "../observability/mod.ts";
 
+/**
+ * Output of a substrate dispatch: the language runtime's output Resource
+ * plus a partial `RuntimeInvocation` Resource carrying the
+ * substrate-captured trace fields (numerical_metadata, started_at,
+ * completed_at, image_digest, language). The orchestrator forwards
+ * `output` downstream and completes / commits the partial invocation
+ * with the IRIs it knows after committing the output Resource. Phase
+ * 18c.5 / D26 §5.5. */
+export interface DispatchOutcome {
+  output: Uint8Array;
+  partialInvocation: Uint8Array;
+}
+
 export interface RuntimeSubstrateAddon {
   /** Register the bash-c TestLanguageRuntime under language_id="test".
    * `workerBinaryPath` must point at the substrate crate's
@@ -36,19 +49,21 @@ export interface RuntimeSubstrateAddon {
   registerTestLanguageRuntime(workerBinaryPath: string): void;
 
   /** Dispatch a `RunRuntimeScript` invocation. Both args are
-   * Eigon-CBOR `Buffer`s; returns the output Resource as Eigon-CBOR. */
+   * Eigon-CBOR `Buffer`s; returns the output Resource and a partial
+   * `RuntimeInvocation` Resource (Phase 18c.5 / D26 §5.5) carrying the
+   * substrate-captured trace fields. */
   dispatchRunRuntimeScript(
     input: Uint8Array,
     argument: Uint8Array,
-  ): Promise<Uint8Array>;
+  ): Promise<DispatchOutcome>;
 
   /** Dispatch a `CallRuntimeMethod` invocation. v1 errors against any
    * `JobSpawner`-backed runtime — service-lifecycle envs land in
-   * Phase 19a. */
+   * Phase 19a. Same outcome shape as `dispatchRunRuntimeScript`. */
   dispatchCallRuntimeMethod(
     input: Uint8Array,
     argument: Uint8Array,
-  ): Promise<Uint8Array>;
+  ): Promise<DispatchOutcome>;
 
   /** Language IDs of currently-registered runtimes. */
   listRegisteredLanguages(): string[];

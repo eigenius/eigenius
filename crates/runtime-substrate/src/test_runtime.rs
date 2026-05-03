@@ -31,7 +31,7 @@ use crate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
 use crate::error::{BuildError, RunError, SpawnError};
 use crate::language_runtime::LanguageRuntime;
 use crate::rpc::client::WorkerRpcClient;
-use crate::rpc::protocol::{Request, Response};
+use crate::rpc::protocol::{HealthInfo, Request, Response};
 use crate::spawner::{LocalSpawner, WorkerSpawner};
 use crate::types::{DockerfileFragments, ImageDigest, WorkerHandle, WorkerSpec};
 use eigenius_kernel::ontology::iri::Iri;
@@ -206,10 +206,18 @@ impl LanguageRuntime for TestLanguageRuntime {
             }
         };
 
-        // Drop the client without sending Evict — the worker sees a
-        // clean EOF on its next read and exits with success. Sending
-        // Evict here would race against the client drop and the worker
-        // would hit a Broken pipe trying to reply.
+        // Send Evict to terminate the worker cleanly. The worker now
+        // accepts multiple connections per lifetime (Phase 18c.5: query_health
+        // opens a separate connection from this one) and only exits on
+        // explicit Evict, so EOF-on-drop no longer suffices.
+        let evict_resp = client
+            .call(&Request::Evict)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("evict call: {e}")))?;
+        if !matches!(evict_resp, Response::Evicted) {
+            return Err(RunError::WorkerRpcFailed(format!(
+                "unexpected response to evict: {evict_resp:?}"
+            )));
+        }
         drop(client);
 
         Ok(build_output_resource(&invocation_id, stdout))
@@ -229,6 +237,25 @@ impl LanguageRuntime for TestLanguageRuntime {
 
     fn dockerfile_fragments(&self, _env: &Resource) -> DockerfileFragments {
         DockerfileFragments::default()
+    }
+
+    fn query_health(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError> {
+        let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| {
+            RunError::WorkerRpcFailed(format!("connect to worker UDS for health: {e}"))
+        })?;
+        let mut client = WorkerRpcClient::new(stream);
+        let resp = client
+            .call(&Request::Health)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("health call: {e}")))?;
+        // Drop the client cleanly without sending Evict — same protocol
+        // as `run_script` (worker sees EOF on next read and exits).
+        drop(client);
+        match resp {
+            Response::Health(info) => Ok(info),
+            other => Err(RunError::WorkerRpcFailed(format!(
+                "unexpected response to health: {other:?}"
+            ))),
+        }
     }
 }
 

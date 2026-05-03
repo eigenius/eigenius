@@ -35,8 +35,11 @@
 //!   arrives in 18b/c.
 
 use crate::error::RunError;
+use crate::invocation::DispatchTrace;
 use crate::language_runtime::LanguageRuntime;
 use crate::registry::{LanguageRuntimeRegistry, RegistryError};
+use crate::rpc::NumericalMetadata;
+use crate::types::WorkerHandle;
 use eigenius_kernel::ontology::eigon_cbor::{self, CborError};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -76,6 +79,21 @@ impl From<CborError> for FacadeError {
     }
 }
 
+/// Output of a substrate dispatch: the language runtime's output Resource
+/// (Eigon-CBOR bytes) plus a partial `RuntimeInvocation` Resource
+/// carrying the substrate-captured trace fields (Eigon-CBOR bytes).
+///
+/// Two artifacts because the orchestrator needs both: the output flows
+/// downstream as the component's logical result; the partial invocation
+/// gets completed (with `script` / `environment` / `inputs` / `output`
+/// IRIs the orchestrator knows from its commit machinery) and committed
+/// to the chain as provenance. See [`crate::invocation`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchOutcome {
+    pub output_cbor: Vec<u8>,
+    pub partial_invocation_cbor: Vec<u8>,
+}
+
 /// Substrate-side dispatcher. Holds the [`LanguageRuntimeRegistry`]
 /// and exposes the two component entry points the napi addon calls.
 #[derive(Default)]
@@ -108,12 +126,13 @@ impl SubstrateDispatcher {
     ///   In Phase 18a this carries the inline `RuntimeScript` fields
     ///   (language, source).
     ///
-    /// Returns the output Resource serialised as Eigon-CBOR.
+    /// Returns the output Resource and partial `RuntimeInvocation`
+    /// trace, both serialised as Eigon-CBOR. See [`DispatchOutcome`].
     pub fn dispatch_run_runtime_script(
         &self,
         input_cbor: &[u8],
         argument_cbor: &[u8],
-    ) -> Result<Vec<u8>, FacadeError> {
+    ) -> Result<DispatchOutcome, FacadeError> {
         let input = parse_resource(input_cbor)?;
         let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
@@ -130,8 +149,18 @@ impl SubstrateDispatcher {
         let worker = runtime.spawn_worker(&env, None).map_err(|e| {
             FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
         })?;
+        let numerical_metadata = capture_numerical_metadata(runtime, &worker);
+        let started_at = DispatchTrace::now_rfc3339();
         let output = runtime.run_script(&worker, script, &[input])?;
-        Ok(eigon_cbor::serialize_resource(&output))
+        let completed_at = DispatchTrace::now_rfc3339();
+        Ok(build_outcome(
+            &output,
+            &language,
+            None,
+            started_at,
+            completed_at,
+            numerical_metadata,
+        ))
     }
 
     /// Dispatch a `CallRuntimeMethod` invocation. Same pattern as
@@ -142,7 +171,7 @@ impl SubstrateDispatcher {
         &self,
         input_cbor: &[u8],
         argument_cbor: &[u8],
-    ) -> Result<Vec<u8>, FacadeError> {
+    ) -> Result<DispatchOutcome, FacadeError> {
         let input = parse_resource(input_cbor)?;
         let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
@@ -157,8 +186,61 @@ impl SubstrateDispatcher {
         let worker = runtime.spawn_worker(&env, None).map_err(|e| {
             FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
         })?;
+        let numerical_metadata = capture_numerical_metadata(runtime, &worker);
+        let started_at = DispatchTrace::now_rfc3339();
         let output = runtime.call_method(&worker, signature, &[input])?;
-        Ok(eigon_cbor::serialize_resource(&output))
+        let completed_at = DispatchTrace::now_rfc3339();
+        Ok(build_outcome(
+            &output,
+            &language,
+            None,
+            started_at,
+            completed_at,
+            numerical_metadata,
+        ))
+    }
+}
+
+/// Best-effort `Health` round-trip. A failure here logs to stderr and
+/// yields empty `NumericalMetadata` rather than failing the dispatch —
+/// trace integrity is best-effort, the dispatch contract is not.
+/// Phase 18c.5 / D26 §5.5.
+fn capture_numerical_metadata(
+    runtime: &dyn LanguageRuntime,
+    worker: &WorkerHandle,
+) -> NumericalMetadata {
+    match runtime.query_health(worker) {
+        Ok(info) => info.numerical_metadata,
+        Err(e) => {
+            eprintln!(
+                "eigenius-runtime-substrate: query_health failed for worker {} ({}): {e}; \
+                 dispatch will continue with empty NumericalMetadata",
+                worker.id, worker.backend
+            );
+            NumericalMetadata::default()
+        }
+    }
+}
+
+fn build_outcome(
+    output: &Resource,
+    language: &str,
+    image_digest: Option<crate::types::ImageDigest>,
+    started_at: String,
+    completed_at: String,
+    numerical_metadata: NumericalMetadata,
+) -> DispatchOutcome {
+    let trace = DispatchTrace {
+        language: language.to_string(),
+        image_digest,
+        started_at,
+        completed_at,
+        numerical_metadata,
+    };
+    let partial = trace.into_partial_invocation();
+    DispatchOutcome {
+        output_cbor: eigon_cbor::serialize_resource(output),
+        partial_invocation_cbor: eigon_cbor::serialize_resource(&partial),
     }
 }
 

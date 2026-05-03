@@ -61,12 +61,9 @@ export function createRunRuntimeScriptHandler(
       argument_bytes: argumentCbor.byteLength,
     });
 
-    let outputBytes: Uint8Array;
+    let outcome: { output: Uint8Array; partialInvocation: Uint8Array };
     try {
-      outputBytes = await addon.dispatchRunRuntimeScript(
-        inputCbor,
-        argumentCbor,
-      );
+      outcome = await addon.dispatchRunRuntimeScript(inputCbor, argumentCbor);
     } catch (e) {
       log.warn(
         operation.COMPONENT_DISPATCH,
@@ -81,11 +78,16 @@ export function createRunRuntimeScriptHandler(
     }
 
     const latencyMs = Date.now() - startTime;
+    // The partial RuntimeInvocation (numerical_metadata, timestamps,
+    // image digest) returns alongside the output. Full assembly +
+    // commit lands in a follow-up wiring task; for now we surface its
+    // size in telemetry so the trace is observable end-to-end.
     log.info(operation.COMPONENT_DISPATCH, "RunRuntimeScript completed", {
-      output_bytes: outputBytes.byteLength,
+      output_bytes: outcome.output.byteLength,
+      partial_invocation_bytes: outcome.partialInvocation.byteLength,
       latency_ms: latencyMs,
     });
 
-    return { output: decodeResource(outputBytes) };
+    return { output: decodeResource(outcome.output) };
   };
 }

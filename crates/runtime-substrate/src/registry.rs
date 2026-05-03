@@ -85,6 +85,7 @@ impl LanguageRuntimeRegistry {
 mod tests {
     use super::*;
     use crate::error::{BuildError, RunError, SpawnError};
+    use crate::rpc::HealthInfo;
     use crate::types::{DockerfileFragments, ImageDigest, WorkerHandle};
     use eigenius_kernel::ontology::resource::Resource;
 
@@ -129,6 +130,9 @@ mod tests {
         }
         fn dockerfile_fragments(&self, _: &Resource) -> DockerfileFragments {
             DockerfileFragments::default()
+        }
+        fn query_health(&self, _: &WorkerHandle) -> Result<HealthInfo, RunError> {
+            Ok(HealthInfo::default())
         }
     }
 

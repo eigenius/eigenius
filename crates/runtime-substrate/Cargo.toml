@@ -24,8 +24,13 @@ docker-spawner = ["dep:bollard", "dep:tokio", "dep:futures-util"]
 eigenius-kernel = { path = "../../kernel" }
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 serde_bytes = "0.11"
 ciborium = "0.2"
+# RFC3339 formatting for `started_at` / `completed_at` on
+# `RuntimeInvocation`. Tiny purpose-built crate (~30KB) — chrono and
+# `time` are heavier than warranted for this single formatter use.
+humantime = "2"
 # Docker-spawner backend (gated). Bollard exposes `default = [http, pipe]`
 # where `pipe` is the Unix-socket / named-pipe transport — needed for the
 # DooD `/var/run/docker.sock` access pattern (D26 §9.5).

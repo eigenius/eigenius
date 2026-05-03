@@ -42,6 +42,7 @@
 //!    means that future class additions don't churn the trait signature.
 
 use crate::error::{BuildError, RunError, SpawnError};
+use crate::rpc::HealthInfo;
 use crate::types::{DockerfileFragments, ImageDigest, WorkerHandle};
 use eigenius_kernel::ontology::resource::Resource;
 
@@ -154,4 +155,16 @@ pub trait LanguageRuntime: Send + Sync {
     /// `LocalSpawner`-only deployments that never run
     /// `build_environment_image`.
     fn dockerfile_fragments(&self, env: &Resource) -> DockerfileFragments;
+
+    /// Report the worker's bootstrap [`HealthInfo`] — substrate calls
+    /// this once per dispatch (Phase 18c.5) to capture
+    /// `numerical_metadata` for the resulting `RuntimeInvocation`
+    /// (D26 §5.5 / §9.3). Implementations open an RPC connection to
+    /// the worker and send `Request::Health`.
+    ///
+    /// No default impl: every language runtime must consciously decide
+    /// what to report. Empty `NumericalMetadata` is valid (the bash
+    /// test runtime, for instance, only reports `host_kernel`); silent
+    /// omission would just hide misconfigured workers from audits.
+    fn query_health(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError>;
 }

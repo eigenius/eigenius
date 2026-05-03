@@ -1323,6 +1323,62 @@ mod tests {
             );
         }
 
+        /// Phase 18c.5 / D26 §5.5: `Value::Json(Object)` and
+        /// `Value::Json(Array)` round-trip as `Value::Json` (tagged via
+        /// `EIGENIUS_JSON_TAG` on the wire). Scalars still flatten —
+        /// see `value_variants_round_trip_normalizations` above — but
+        /// non-scalar JSON shapes can't collapse safely (object keys
+        /// aren't IRIs; arrays would need empty-array discrimination)
+        /// so they preserve the `Value::Json` variant explicitly. This
+        /// test pins that asymmetric contract; if it fails, the codec
+        /// drifted away from "tag only objects/arrays."
+        #[test]
+        fn value_json_object_and_array_round_trip_as_json() {
+            let (store, _dir) = open_temp_store();
+
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "host_kernel".into(),
+                serde_json::Value::String("linux-6.6".into()),
+            );
+            obj.insert("fma_enabled".into(), serde_json::Value::Bool(true));
+            let object_val = serde_json::Value::Object(obj);
+            let array_val =
+                serde_json::Value::Array(vec![serde_json::json!(1), serde_json::json!("two")]);
+
+            let mut r = Resource::new(iri("urn:eigenius:test:json_shapes"));
+            r.set(
+                iri("urn:eigenius:test:metadata"),
+                Value::Json(object_val.clone()),
+            );
+            r.set(
+                iri("urn:eigenius:test:tensor_shape"),
+                Value::Json(array_val.clone()),
+            );
+
+            let mut builder = LayerBuilder::new("json-shapes", None);
+            builder.add_resource(r).unwrap();
+            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer_id = layer.id().clone();
+            PB::store_layer(&store, &layer).unwrap();
+
+            let loaded = ResourceBackend::load_resource(
+                &store,
+                &layer_id,
+                &iri("urn:eigenius:test:json_shapes"),
+            )
+            .expect("resource present");
+
+            assert_eq!(
+                loaded.get(&iri("urn:eigenius:test:metadata")),
+                Some(&Value::Json(object_val))
+            );
+            assert_eq!(
+                loaded.get(&iri("urn:eigenius:test:tensor_shape")),
+                Some(&Value::Json(array_val))
+            );
+        }
+
         /// Every resource in the core ontology must round-trip with full
         /// structural equality, not just preserved count. Catches any
         /// encoder/decoder regression that drops or mangles fields.

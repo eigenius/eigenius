@@ -49,12 +49,34 @@
 
 #![deny(clippy::all)]
 
-use eigenius_runtime_substrate::facade::SubstrateDispatcher;
+use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
 use eigenius_runtime_substrate::test_runtime::TestLanguageRuntime;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+
+/// Mirror of [`eigenius_runtime_substrate::facade::DispatchOutcome`] on
+/// the napi boundary. Phase 18c.5 split: dispatchers now return both
+/// the language-side output Resource and a partial `RuntimeInvocation`
+/// Resource carrying the substrate-captured trace (numerical_metadata,
+/// timestamps, image digest). The TS handler forwards the output
+/// downstream and routes the partial invocation toward provenance
+/// commit (D26 §5.5).
+#[napi(object)]
+pub struct JsDispatchOutcome {
+    pub output: Buffer,
+    pub partial_invocation: Buffer,
+}
+
+impl From<DispatchOutcome> for JsDispatchOutcome {
+    fn from(o: DispatchOutcome) -> Self {
+        Self {
+            output: Buffer::from(o.output_cbor),
+            partial_invocation: Buffer::from(o.partial_invocation_cbor),
+        }
+    }
+}
 
 static DISPATCHER: OnceLock<Mutex<SubstrateDispatcher>> = OnceLock::new();
 
@@ -85,9 +107,9 @@ fn into_napi_err(e: impl std::fmt::Display) -> Error {
 #[napi]
 pub fn register_test_language_runtime(worker_binary_path: String) -> Result<()> {
     let mut d = dispatcher().lock().map_err(lock_err)?;
-    d.register_language_runtime(Box::new(
-        TestLanguageRuntime::with_worker_binary(PathBuf::from(worker_binary_path)),
-    ))
+    d.register_language_runtime(Box::new(TestLanguageRuntime::with_worker_binary(
+        PathBuf::from(worker_binary_path),
+    )))
     .map_err(into_napi_err)
 }
 
@@ -95,10 +117,13 @@ pub fn register_test_language_runtime(worker_binary_path: String) -> Result<()> 
 /// the napi-rs tokio runtime on spawn / RPC; the inner work runs in a
 /// `spawn_blocking` task.
 #[napi]
-pub async fn dispatch_run_runtime_script(input: Buffer, argument: Buffer) -> Result<Buffer> {
+pub async fn dispatch_run_runtime_script(
+    input: Buffer,
+    argument: Buffer,
+) -> Result<JsDispatchOutcome> {
     let input_bytes = input.to_vec();
     let argument_bytes = argument.to_vec();
-    tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+    tokio::task::spawn_blocking(move || -> Result<DispatchOutcome> {
         let d = dispatcher().lock().map_err(lock_err)?;
         d.dispatch_run_runtime_script(&input_bytes, &argument_bytes)
             .map_err(into_napi_err)
@@ -110,7 +135,7 @@ pub async fn dispatch_run_runtime_script(input: Buffer, argument: Buffer) -> Res
             format!("dispatch_run_runtime_script join failed: {e}"),
         )
     })?
-    .map(Buffer::from)
+    .map(JsDispatchOutcome::from)
 }
 
 /// Dispatch a `CallRuntimeMethod` invocation. Same shape as
@@ -119,10 +144,13 @@ pub async fn dispatch_run_runtime_script(input: Buffer, argument: Buffer) -> Res
 /// requires a `lifecycle: Service` env (D26 §5.3.1) and the
 /// service-backed dispatcher lands in 19a.
 #[napi]
-pub async fn dispatch_call_runtime_method(input: Buffer, argument: Buffer) -> Result<Buffer> {
+pub async fn dispatch_call_runtime_method(
+    input: Buffer,
+    argument: Buffer,
+) -> Result<JsDispatchOutcome> {
     let input_bytes = input.to_vec();
     let argument_bytes = argument.to_vec();
-    tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+    tokio::task::spawn_blocking(move || -> Result<DispatchOutcome> {
         let d = dispatcher().lock().map_err(lock_err)?;
         d.dispatch_call_runtime_method(&input_bytes, &argument_bytes)
             .map_err(into_napi_err)
@@ -134,7 +162,7 @@ pub async fn dispatch_call_runtime_method(input: Buffer, argument: Buffer) -> Re
             format!("dispatch_call_runtime_method join failed: {e}"),
         )
     })?
-    .map(Buffer::from)
+    .map(JsDispatchOutcome::from)
 }
 
 /// List the language IDs of currently-registered runtimes. Useful for
