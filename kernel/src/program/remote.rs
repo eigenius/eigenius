@@ -25,7 +25,6 @@ use crate::program::component::{BuiltinComponent, ComponentResult};
 use crate::program::trace::ComponentMetrics;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use crate::server::proto::ComponentRequest;
-use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
@@ -98,27 +97,14 @@ impl BuiltinComponent for RemoteComponent {
             return Err(format!("remote component failed: {}", resp.error));
         }
 
-        // Deserialize output from the orchestrator. The wire is
-        // Eigon-CBOR per Phase 18e. First try the strict Eigon-resource
-        // parse — that's the path proper component handlers take. If
-        // the bytes don't form an Eigon resource (LLM short-name JSON
-        // before the orchestrator-side translation lands in 18e.2),
-        // fall back to opaque CBOR → serde_json::Value and stash on
-        // `raw_json` so `dispatch_component` (eval.rs) can apply its
-        // `ShortNameTable`.
-        let output = match eigon_cbor::parse_resource_lenient(&resp.output) {
-            Ok(r) => r,
-            Err(_) => {
-                let json_val: serde_json::Value = ciborium::from_reader(Cursor::new(&resp.output))
-                    .map_err(|e| format!("invalid CBOR output: {e}"))?;
-                let mut r = Resource::new_embedded();
-                r.set(
-                    crate::ontology::iri::Iri::parse("urn:eigenius:core:raw_json").unwrap(),
-                    crate::ontology::resource::Value::Json(json_val),
-                );
-                r
-            }
-        };
+        // Deserialize output from the orchestrator as an Eigon-CBOR
+        // resource. Phase 18e.2: the orchestrator's CompleteJson
+        // handler translates short-name LLM output to IRI-keyed shape
+        // before returning, so a non-Eigon-resource response now means
+        // the handler is broken — surface that as an error rather than
+        // wrapping the bytes as `raw_json`.
+        let output = eigon_cbor::parse_resource_lenient(&resp.output)
+            .map_err(|e| format!("orchestrator returned non-Eigon output: {e}"))?;
 
         // Extract metrics if present
         let metrics = resp.metrics.map(|m| ComponentMetrics {
