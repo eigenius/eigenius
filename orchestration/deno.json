@@ -6,6 +6,7 @@
     "start": "deno run --allow-net --allow-read --allow-ffi --allow-env --allow-sys --unstable-node-globals --unstable-detect-cjs src/main.ts",
     "test": "deno test --allow-net --allow-read --allow-ffi --allow-env --allow-sys --allow-run --unstable-node-globals --unstable-detect-cjs tests/",
     "build:addon": "cd native && npm install --silent && ./node_modules/.bin/napi build --platform --release",
+    "build:substrate-addon": "cd runtime-substrate-native && npm install --silent && ./node_modules/.bin/napi build --platform --release",
     "generate": "cd .. && PATH=$PWD/node_modules/.bin:$PATH buf generate",
     "lint": "deno lint",
     "fmt": "deno fmt --check"
