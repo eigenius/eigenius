@@ -35,6 +35,7 @@
 
 pub mod boundary;
 pub mod chain;
+pub mod cross_check;
 pub mod error;
 pub mod facade;
 pub mod image_build;
@@ -49,6 +50,12 @@ pub mod types;
 
 pub use boundary::{check_call_method, check_run_script};
 pub use chain::ChainAccessor;
+pub use cross_check::{
+    is_cross_check_failure, prepare_substrate_side, verify_in_worker, CrossCheckError,
+    CrossCheckOutcome, ProvenanceDirAction, SubstratePrepareError, DEFAULT_PROVENANCE_DIR,
+    ENV_DIGEST_VAR, ENV_MANIFEST_HASH_VAR, ENV_PROVENANCE_DIR_VAR, EXIT_CODE_CROSS_CHECK_FAILURE,
+    MANIFEST_HASH_FILE,
+};
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use facade::{FacadeError, SubstrateDispatcher};
 pub use image_build::{

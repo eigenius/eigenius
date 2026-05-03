@@ -33,9 +33,10 @@
 
 #![cfg(feature = "test-runtime")]
 
+use eigenius_runtime_substrate::cross_check::{self, prepare_substrate_side, ProvenanceDirAction};
 use eigenius_runtime_substrate::rpc::protocol::{Request, Response};
 use eigenius_runtime_substrate::spawner::{LocalSpawner, WorkerSpawner};
-use eigenius_runtime_substrate::types::{WorkerHandle, WorkerSpec};
+use eigenius_runtime_substrate::types::{ImageDigest, WorkerHandle, WorkerSpec};
 use eigenius_runtime_substrate::WorkerRpcClient;
 use serde_bytes::ByteBuf;
 use std::collections::BTreeMap;
@@ -63,20 +64,42 @@ fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_eigenius-test-worker"))
 }
 
+const TEST_DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const TEST_MANIFEST_HASH: &str = "test-manifest";
+
 fn build_spec(tempdir: &Path) -> WorkerSpec {
+    build_spec_with_cross_check(tempdir, TEST_MANIFEST_HASH, TEST_MANIFEST_HASH)
+}
+
+/// Build a spec where the env-supplied manifest hash and the in-image
+/// file's hash can be set independently — used by the cross-check
+/// failure tests below to produce a mismatch.
+fn build_spec_with_cross_check(
+    tempdir: &Path,
+    env_manifest_hash: &str,
+    in_image_manifest_hash: &str,
+) -> WorkerSpec {
     let uds = tempdir.join("worker.sock");
     let mut env = BTreeMap::new();
     env.insert(
         "EIGENIUS_TEST_WORKER_UDS".to_string(),
         uds.to_string_lossy().into_owned(),
     );
+    let prov_dir = tempdir.join("provenance");
+    let digest = ImageDigest::parse(TEST_DIGEST).expect("digest parses");
+    // Substrate-side helper writes the in-image hash; we then overwrite
+    // the env entry below if the test wants a deliberate mismatch.
+    let cross_check_env = prepare_substrate_side(
+        &digest,
+        in_image_manifest_hash,
+        &prov_dir,
+        ProvenanceDirAction::WriteFile,
+    )
+    .expect("cross-check setup");
+    env.extend(cross_check_env);
     env.insert(
-        "EIGENIUS_RUNTIME_ENV_DIGEST".to_string(),
-        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-    );
-    env.insert(
-        "EIGENIUS_RUNTIME_ENV_MANIFEST_HASH".to_string(),
-        "test-manifest".to_string(),
+        cross_check::ENV_MANIFEST_HASH_VAR.to_string(),
+        env_manifest_hash.to_string(),
     );
     // Inherit PATH so the worker can find /bin/bash without explicit
     // wiring. PATH is the only host-env passthrough; everything else
@@ -240,6 +263,76 @@ fn dispatch_returns_dispatch_failed_when_bash_exits_nonzero() {
     }
 
     evict_and_wait(&spawner, &mut client, &handle);
+    let _ = std::fs::remove_dir_all(&tempdir);
+}
+
+/// D26 §9.3: hash mismatch between the substrate-supplied env var and
+/// the in-image manifest-hash file makes the worker exit with the
+/// reserved cross-check failure code, before it ever binds the UDS.
+#[test]
+fn worker_refuses_to_start_on_cross_check_hash_mismatch() {
+    let tempdir = fresh_tempdir("xcheck_mismatch");
+    let spawner = LocalSpawner::new();
+    let spec = build_spec_with_cross_check(&tempdir, "env-says-this", "file-says-that");
+    let handle = spawner.spawn(spec).expect("spawn worker");
+    let status = spawner.wait(&handle).expect("wait for worker");
+    assert!(
+        cross_check::is_cross_check_failure(status),
+        "expected EXIT_CODE_CROSS_CHECK_FAILURE, got {:?}",
+        status.code()
+    );
+    // UDS must not have been bound — the worker exits before listen().
+    assert!(
+        !tempdir.join("worker.sock").exists(),
+        "worker should not have bound its UDS on cross-check failure"
+    );
+    let _ = std::fs::remove_dir_all(&tempdir);
+}
+
+/// D26 §9.3: the substrate must always set the cross-check env vars;
+/// a worker started without them refuses to come up. Same exit code as
+/// the mismatch case so callers don't need to distinguish.
+#[test]
+fn worker_refuses_to_start_when_cross_check_env_missing() {
+    let tempdir = fresh_tempdir("xcheck_no_env");
+    let spawner = LocalSpawner::new();
+    let mut spec = build_spec(&tempdir);
+    // Drop both substrate-supplied cross-check env vars; keep only the
+    // UDS path and PATH so the failure is unambiguously the cross-check.
+    spec.env.remove(cross_check::ENV_DIGEST_VAR);
+    spec.env.remove(cross_check::ENV_MANIFEST_HASH_VAR);
+    let handle = spawner.spawn(spec).expect("spawn worker");
+    let status = spawner.wait(&handle).expect("wait for worker");
+    assert!(
+        cross_check::is_cross_check_failure(status),
+        "expected EXIT_CODE_CROSS_CHECK_FAILURE, got {:?}",
+        status.code()
+    );
+    let _ = std::fs::remove_dir_all(&tempdir);
+}
+
+/// D26 §9.3: env vars set, in-image file missing — worker still
+/// refuses, since the substrate cannot prove it is talking to the image
+/// it thinks it is.
+#[test]
+fn worker_refuses_to_start_when_in_image_file_missing() {
+    let tempdir = fresh_tempdir("xcheck_no_file");
+    let spawner = LocalSpawner::new();
+    let spec = build_spec(&tempdir);
+    // Delete the file the substrate just wrote, simulating an image
+    // whose `/etc/eigenius-runtime-env/manifest-hash` is absent.
+    let _ = std::fs::remove_file(
+        tempdir
+            .join("provenance")
+            .join(cross_check::MANIFEST_HASH_FILE),
+    );
+    let handle = spawner.spawn(spec).expect("spawn worker");
+    let status = spawner.wait(&handle).expect("wait for worker");
+    assert!(
+        cross_check::is_cross_check_failure(status),
+        "expected EXIT_CODE_CROSS_CHECK_FAILURE, got {:?}",
+        status.code()
+    );
     let _ = std::fs::remove_dir_all(&tempdir);
 }
 

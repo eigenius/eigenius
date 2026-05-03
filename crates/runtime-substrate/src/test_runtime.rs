@@ -27,6 +27,7 @@
 //! test-only property so the smoke runtime cannot leak into production
 //! code that depends on it.
 
+use crate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
 use crate::error::{BuildError, RunError, SpawnError};
 use crate::language_runtime::LanguageRuntime;
 use crate::rpc::client::WorkerRpcClient;
@@ -47,6 +48,13 @@ const PROP_SOURCE: &str = "urn:eigenius:runtime:source";
 const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
 const PROP_TEST_BASH_STDOUT: &str = "urn:eigenius:test:bash_stdout";
 const UDS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Synthetic cross-check anchors used by the test runtime — there is no
+/// real built image under [`LocalSpawner`], so the digest and manifest
+/// hash are picked once and threaded through both sides of the
+/// cross-check so it always matches at startup.
+const TEST_IMAGE_DIGEST: &str =
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const TEST_MANIFEST_HASH: &str = "test-runtime-manifest";
 
 static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -110,6 +118,25 @@ impl LanguageRuntime for TestLanguageRuntime {
             "EIGENIUS_TEST_WORKER_UDS".to_string(),
             uds_path.to_string_lossy().into_owned(),
         );
+        // Cross-check (D26 §9.3): write the manifest-hash file into a
+        // host-visible provenance dir under the per-invocation tempdir
+        // and populate the matching env vars so the worker's startup
+        // check passes. `LocalSpawner` doesn't run a container so there
+        // is no `/etc/eigenius-runtime-env` — the override is required.
+        let prov_dir = tempdir.join("provenance");
+        let cross_check_digest =
+            ImageDigest::parse(TEST_IMAGE_DIGEST).expect("static test digest is well-formed");
+        let cross_check_env = prepare_substrate_side(
+            &cross_check_digest,
+            TEST_MANIFEST_HASH,
+            &prov_dir,
+            ProvenanceDirAction::WriteFile,
+        )
+        .map_err(|e| SpawnError::SpawnFailed {
+            backend: "test-runtime",
+            reason: format!("cross-check setup failed: {e}"),
+        })?;
+        env.extend(cross_check_env);
         // PATH passes through so the worker can find /bin/bash. Other
         // host-env values are deliberately not inherited so the test
         // surface stays deterministic.

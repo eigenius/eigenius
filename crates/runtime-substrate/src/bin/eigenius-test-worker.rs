@@ -33,9 +33,18 @@
 //! Configuration via env vars:
 //!
 //! - `EIGENIUS_TEST_WORKER_UDS` (required) — path the worker binds to
-//! - `EIGENIUS_RUNTIME_ENV_DIGEST` (optional) — echoed back on `health`
-//! - `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` (optional) — same
+//! - `EIGENIUS_RUNTIME_ENV_DIGEST` (required, D26 §9.3) — substrate-supplied
+//!   image digest. Echoed back on `health`.
+//! - `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` (required, D26 §9.3) — must
+//!   match the contents of `<prov_dir>/manifest-hash`.
+//! - `EIGENIUS_RUNTIME_ENV_DIR` (optional) — override for the in-image
+//!   provenance dir; tests under [`LocalSpawner`] set this so the worker
+//!   reads the host-visible manifest-hash file. Production omits it and
+//!   the worker falls back to `/etc/eigenius-runtime-env`.
 
+use eigenius_runtime_substrate::cross_check::{
+    self, CrossCheckError, EXIT_CODE_CROSS_CHECK_FAILURE,
+};
 use eigenius_runtime_substrate::rpc::client::{server_recv_request, server_send_response};
 use eigenius_runtime_substrate::rpc::codec::MAX_FRAME_SIZE_DEFAULT;
 use eigenius_runtime_substrate::rpc::protocol::{HealthInfo, NumericalMetadata, Request, Response};
@@ -46,6 +55,15 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 fn main() -> ExitCode {
+    // Cross-check first (D26 §9.3): if env vs in-image manifest hash
+    // disagree, refuse to start. The UDS is never created in that case,
+    // so any caller observing exit code EXIT_CODE_CROSS_CHECK_FAILURE
+    // (78) knows unambiguously that the bootstrap cross-check failed.
+    if let Err(e) = cross_check::verify_in_worker() {
+        report_cross_check_failure(&e);
+        return ExitCode::from(EXIT_CODE_CROSS_CHECK_FAILURE as u8);
+    }
+
     let uds_path = match env::var("EIGENIUS_TEST_WORKER_UDS") {
         Ok(p) => PathBuf::from(p),
         Err(_) => {
@@ -101,6 +119,10 @@ fn serve(stream: &mut UnixStream) -> ExitCode {
             return ExitCode::SUCCESS;
         }
     }
+}
+
+fn report_cross_check_failure(err: &CrossCheckError) {
+    eprintln!("eigenius-test-worker: bootstrap cross-check failed: {err}");
 }
 
 fn handle(req: Request) -> Response {
