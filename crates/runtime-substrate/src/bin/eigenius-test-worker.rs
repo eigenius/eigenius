@@ -85,6 +85,25 @@ fn main() -> ExitCode {
             return ExitCode::from(3);
         }
     };
+    // Make the socket world-rw so any caller UID can `connect()`. The
+    // substrate process runs as the host orchestrator's UID, which is
+    // typically not the container's UID — without this chmod, default
+    // umask (022) yields mode 755 on the socket, and the substrate's
+    // `connect()` returns EACCES because Unix-socket connect requires
+    // write permission. The socket lives inside a per-invocation
+    // tempdir whose own permissions remain caller-controlled, so this
+    // is the right granularity.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&uds_path, std::fs::Permissions::from_mode(0o666))
+        {
+            eprintln!(
+                "eigenius-test-worker: chmod 0o666 on {} failed: {e}",
+                uds_path.display()
+            );
+            return ExitCode::from(3);
+        }
+    }
 
     // Accept connections in a loop. The substrate may open more than
     // one connection per worker lifetime — e.g. Phase 18c.5 calls

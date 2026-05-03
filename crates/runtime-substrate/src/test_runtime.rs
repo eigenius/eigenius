@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `TestLanguageRuntime` — minimal `LanguageRuntime` impl wrapping the
+//! `TestLanguageRuntime` — **LocalSpawner-only test mock** wrapping the
 //! `eigenius-test-worker` binary as the bash-c smoke runtime.
 //!
 //! Feature-gated behind `test-runtime`. Used by the substrate's own
 //! integration tests and by downstream tests that want a fixture
 //! runtime without standing up Julia or another real interpreter.
+//! **Not for production use** — there is no image build path
+//! ([`build_environment_image`] explicitly errors), no container
+//! isolation, no resource caps; the worker runs as a host subprocess
+//! with the substrate's PATH inherited. The Docker-spawning analogue
+//! used to validate the substrate's full image-build → spawn → trace
+//! pipeline lives in [`crate::test_runtime_docker`] (Phase 18c.6).
 //!
 //! The runtime expects a `RuntimeScript` resource whose
 //! `urn:eigenius:runtime:source` property carries a bash one-liner.

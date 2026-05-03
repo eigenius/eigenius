@@ -31,6 +31,12 @@ ciborium = "0.2"
 # `RuntimeInvocation`. Tiny purpose-built crate (~30KB) — chrono and
 # `time` are heavier than warranted for this single formatter use.
 humantime = "2"
+# SHA-256 of the worker binary bytes — used by the Docker test runtime
+# (Phase 18c.6) as the manifest-hash anchor stamped into both the
+# built image's `/etc/eigenius-runtime-env/manifest-hash` and the
+# spawn-side `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` env var so the
+# bootstrap cross-check matches deterministically.
+sha2 = "0.10"
 # Docker-spawner backend (gated). Bollard exposes `default = [http, pipe]`
 # where `pipe` is the Unix-socket / named-pipe transport — needed for the
 # DooD `/var/run/docker.sock` access pattern (D26 §9.5).

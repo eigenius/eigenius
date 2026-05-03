@@ -151,7 +151,16 @@ fn build_host_config(inputs: &ContainerBuildInputs) -> HostConfig {
     };
     HostConfig {
         auto_remove: Some(true),
-        cap_drop: Some(vec!["ALL".to_string()]),
+        // No cap_drop. The substrate is *not* a sandbox-as-a-service
+        // (D26 §1.2) — its job is provenance + dispatch for trusted
+        // language toolchains, not containing untrusted code. Dropping
+        // capabilities by default would force every deployment to
+        // solve UID-alignment between container processes and host
+        // bind-mount owners, which is real ops work for zero benefit
+        // under the trusted-but-tracked threat model. If a future
+        // deployment scenario genuinely needs adversarial containment,
+        // add `cap_drop: Option<Vec<String>>` to `WorkerSpec` and let
+        // the caller opt in.
         network_mode: Some(inputs.network_mode.as_docker_string().to_string()),
         mounts: Some(mounts),
         memory,
@@ -162,14 +171,12 @@ fn build_host_config(inputs: &ContainerBuildInputs) -> HostConfig {
 }
 
 /// Assemble the `security_opt` Vec for `HostConfig`. Always sets
-/// `no-new-privileges:true` (D26 §8.3 defense-in-depth — defends
-/// against the rare kernel CVE around capability manipulation, free
-/// alongside `cap_drop: ALL`). Honours `WorkerSpec::seccomp_profile`
-/// when set; otherwise leaves Docker's built-in default seccomp profile
-/// in place (already substantially restrictive for trusted-but-tracked
-/// workloads per D26 §1.2). Per-language crates that ship a tighter
-/// profile populate `WorkerSpec::seccomp_profile` from their
-/// `LanguageRuntime::spawn_worker`.
+/// `no-new-privileges:true` — free defense-in-depth, no UID-alignment
+/// interaction. Honours `WorkerSpec::seccomp_profile` when set;
+/// otherwise leaves Docker's built-in default seccomp profile in place
+/// (substantially restrictive for trusted-but-tracked workloads per
+/// D26 §1.2). Per-language crates that ship a tighter profile populate
+/// `WorkerSpec::seccomp_profile` from their `LanguageRuntime::spawn_worker`.
 fn build_security_opts(spec: &WorkerSpec) -> Vec<String> {
     let mut opts = vec!["no-new-privileges:true".to_string()];
     if let Some(profile) = &spec.seccomp_profile {
@@ -290,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn host_config_carries_dood_binds_and_caps_and_no_network() {
+    fn host_config_carries_dood_binds_and_no_network() {
         let s = spec(Some(dummy_digest()), vec!["bin"], BTreeMap::new());
         let inputs = ContainerBuildInputs {
             spec: &s,
@@ -301,7 +308,12 @@ mod tests {
         let plan = build_create_options(&inputs).expect("build");
         let host = plan.body.host_config.as_ref().expect("host_config");
         assert_eq!(host.auto_remove, Some(true));
-        assert_eq!(host.cap_drop.as_deref(), Some(&["ALL".to_string()][..]));
+        // No cap_drop: substrate is not a sandbox-as-a-service (D26 §1.2).
+        // Regression guard against a well-meaning future re-add.
+        assert!(
+            host.cap_drop.is_none(),
+            "cap_drop must be absent — substrate is provenance + dispatch, not adversarial containment (D26 §1.2)",
+        );
         assert_eq!(host.network_mode.as_deref(), Some("none"));
         let mounts = host.mounts.as_ref().expect("mounts");
         assert_eq!(mounts.len(), 2);

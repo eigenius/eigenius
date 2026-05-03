@@ -110,6 +110,13 @@ pub struct LanguageAsset {
     pub source: PathBuf,
     /// File contents.
     pub content: Vec<u8>,
+    /// Optional explicit Unix mode (`0o755` etc.). Set when the asset
+    /// must be executable in the image — Dockerfile `COPY` preserves
+    /// the source-file mode, so worker binaries staged via this
+    /// mechanism need their executable bit set in the build context.
+    /// `None` falls back to whatever the platform's umask produces
+    /// from `std::fs::write` (typically `0o644`).
+    pub mode: Option<u32>,
 }
 
 /// A materialised build context — a `work_dir` populated with the layout
@@ -216,7 +223,29 @@ fn write_language_assets(work_dir: &Path, assets: &[LanguageAsset]) -> Result<()
             create_dir(parent)?;
         }
         write_file(&dest, &asset.content)?;
+        if let Some(mode) = asset.mode {
+            apply_mode(&dest, mode)?;
+        }
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn apply_mode(p: &Path, mode: u32) -> Result<(), BuildError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).map_err(|e| {
+        BuildError::EnvironmentBuildFailed(format!(
+            "failed to set mode {mode:o} on {}: {e}",
+            p.display()
+        ))
+    })
+}
+
+// Non-Unix targets (Windows / WASI) currently can't be substrate
+// build hosts — buildah requires a Linux host — so this branch is a
+// no-op rather than a build error.
+#[cfg(not(unix))]
+fn apply_mode(_p: &Path, _mode: u32) -> Result<(), BuildError> {
     Ok(())
 }
 
@@ -393,6 +422,7 @@ mod tests {
         let assets = vec![LanguageAsset {
             source: PathBuf::from("subdir/JuliaWorker.jl"),
             content: b"# worker".to_vec(),
+            mode: None,
         }];
         BuildContext::materialize(
             work.clone(),
@@ -407,6 +437,35 @@ mod tests {
         assert_eq!(
             read_str(&work.join("language/subdir/JuliaWorker.jl")),
             "# worker"
+        );
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn applies_explicit_mode_to_language_asset() {
+        use std::os::unix::fs::PermissionsExt;
+        let work = fresh_work_dir("language-mode");
+        let assets = vec![LanguageAsset {
+            source: PathBuf::from("worker"),
+            content: b"#!/bin/sh\necho ok\n".to_vec(),
+            mode: Some(0o755),
+        }];
+        BuildContext::materialize(
+            work.clone(),
+            &BuildContextSpec {
+                dockerfile: "FROM scratch\n".into(),
+                built_at: "stamp".into(),
+                language_assets: assets,
+                ..Default::default()
+            },
+        )
+        .expect("materialise");
+        let meta = std::fs::metadata(work.join("language/worker")).expect("stat");
+        assert_eq!(
+            meta.permissions().mode() & 0o7777,
+            0o755,
+            "language asset mode must be applied verbatim",
         );
         let _ = std::fs::remove_dir_all(&work);
     }

@@ -47,6 +47,8 @@ pub mod rpc;
 pub mod spawner;
 #[cfg(feature = "test-runtime")]
 pub mod test_runtime;
+#[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
+pub mod test_runtime_docker;
 pub mod types;
 
 pub use boundary::{check_call_method, check_run_script};
@@ -80,4 +82,6 @@ pub use spawner::{DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy};
 pub use spawner::{LocalSpawner, WorkerSpawner};
 #[cfg(feature = "test-runtime")]
 pub use test_runtime::TestLanguageRuntime;
+#[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
+pub use test_runtime_docker::TestLanguageRuntimeDocker;
 pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};
