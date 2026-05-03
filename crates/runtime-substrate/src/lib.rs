@@ -38,6 +38,7 @@ pub mod chain;
 pub mod error;
 pub mod facade;
 pub mod language_runtime;
+pub mod mirror_generator;
 pub mod registry;
 pub mod rpc;
 pub mod spawner;
@@ -50,6 +51,10 @@ pub use chain::ChainAccessor;
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use facade::{FacadeError, SubstrateDispatcher};
 pub use language_runtime::LanguageRuntime;
+pub use mirror_generator::{
+    LibraryContent, LibraryFile, MirrorGenerationOutput, MirrorGenerationRequest, MirrorGenerator,
+    MirrorGeneratorError, MirrorGeneratorRegistry, MirrorRegistryError,
+};
 pub use registry::{LanguageRuntimeRegistry, RegistryError};
 pub use rpc::{
     ClientError, FrameError, HealthInfo, NumericalMetadata, Request, Response, WorkerRpcClient,
