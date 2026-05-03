@@ -19,15 +19,23 @@
 //! via the ComponentExecutor gRPC service.
 
 use crate::layer::Layer;
-use crate::ontology::eigon_json;
+use crate::ontology::eigon_cbor;
 use crate::ontology::resource::Resource;
 use crate::program::component::{BuiltinComponent, ComponentResult};
 use crate::program::trace::ComponentMetrics;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use crate::server::proto::ComponentRequest;
+use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
+
+/// Content-type tag emitted on every outbound `ComponentRequest`. The
+/// orchestrator's `component_executor.ts` branches on this to pick its
+/// codec and echoes the same value on the response. D26 §8.1 / Phase
+/// 18e — the kernel ↔ orchestrator boundary is now CBOR; the proto's
+/// `content_type` field has carried the codec tag since day one.
+pub const EIGON_CBOR_CONTENT_TYPE: &str = "application/eigon+cbor";
 
 /// A component that dispatches execution to a remote orchestrator
 /// via the ComponentExecutor gRPC service.
@@ -59,17 +67,17 @@ impl BuiltinComponent for RemoteComponent {
         argument: Option<&Resource>,
         _layer: &Layer,
     ) -> Result<ComponentResult, String> {
-        // Serialize input and argument to Eigon-JSON
-        let input_json = eigon_json::serialize_resource(input).to_string();
-        let argument_json = argument
-            .map(|a| eigon_json::serialize_resource(a).to_string())
+        // Serialize input and argument to Eigon-CBOR (D26 §8.1 / Phase 18e).
+        let input_cbor = eigon_cbor::serialize_resource(input);
+        let argument_cbor = argument
+            .map(eigon_cbor::serialize_resource)
             .unwrap_or_default();
 
         let request = ComponentRequest {
             component_iri: self.component_iri.clone(),
-            input: input_json.into_bytes(),
-            argument: argument_json.into_bytes(),
-            content_type: "application/eigon+json".to_string(),
+            input: input_cbor,
+            argument: argument_cbor,
+            content_type: EIGON_CBOR_CONTENT_TYPE.to_string(),
         };
 
         // Block on the async gRPC call within the tokio runtime
@@ -90,28 +98,26 @@ impl BuiltinComponent for RemoteComponent {
             return Err(format!("remote component failed: {}", resp.error));
         }
 
-        // Deserialize output from the orchestrator.
-        // Try Eigon-JSON first (full IRIs). If that fails, the response likely
-        // uses short-name keys (e.g. CompleteJson LLM output) — store as raw JSON
-        // so dispatch_component can convert it via ShortNameTable.
-        let output_json =
-            String::from_utf8(resp.output).map_err(|e| format!("invalid UTF-8 output: {e}"))?;
-        let output = match eigon_json::parse_document(&output_json) {
-            Ok(mut resources) => resources.pop().unwrap_or_else(Resource::new_embedded),
-            Err(_) => match eigon_json::parse_embedded(&output_json) {
-                Ok(r) => r,
-                Err(_) => {
-                    // Short-name keys from LLM — store as raw JSON on a resource
-                    let json_val: serde_json::Value = serde_json::from_str(&output_json)
-                        .map_err(|e| format!("invalid JSON output: {e}"))?;
-                    let mut r = Resource::new_embedded();
-                    r.set(
-                        crate::ontology::iri::Iri::parse("urn:eigenius:core:raw_json").unwrap(),
-                        crate::ontology::resource::Value::Json(json_val),
-                    );
-                    r
-                }
-            },
+        // Deserialize output from the orchestrator. The wire is
+        // Eigon-CBOR per Phase 18e. First try the strict Eigon-resource
+        // parse — that's the path proper component handlers take. If
+        // the bytes don't form an Eigon resource (LLM short-name JSON
+        // before the orchestrator-side translation lands in 18e.2),
+        // fall back to opaque CBOR → serde_json::Value and stash on
+        // `raw_json` so `dispatch_component` (eval.rs) can apply its
+        // `ShortNameTable`.
+        let output = match eigon_cbor::parse_resource_lenient(&resp.output) {
+            Ok(r) => r,
+            Err(_) => {
+                let json_val: serde_json::Value = ciborium::from_reader(Cursor::new(&resp.output))
+                    .map_err(|e| format!("invalid CBOR output: {e}"))?;
+                let mut r = Resource::new_embedded();
+                r.set(
+                    crate::ontology::iri::Iri::parse("urn:eigenius:core:raw_json").unwrap(),
+                    crate::ontology::resource::Value::Json(json_val),
+                );
+                r
+            }
         };
 
         // Extract metrics if present

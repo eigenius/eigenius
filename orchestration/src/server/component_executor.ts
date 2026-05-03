@@ -46,10 +46,15 @@ import {
   type HostBridge,
 } from "../wasm/hostBridge.ts";
 import type { WasmAddon } from "../wasm/loadAddon.ts";
+import { decodeResource, encodeResource } from "../wasm/cbor.ts";
 import * as log from "../observability/mod.ts";
 import { operation, withRpcGuard } from "../observability/mod.ts";
 
 const TEXT_DECODER = new TextDecoder();
+const TEXT_ENCODER = new TextEncoder();
+
+const CONTENT_TYPE_CBOR = "application/eigon+cbor";
+const CONTENT_TYPE_JSON = "application/eigon+json";
 
 export interface ComponentExecutorDeps {
   registry: ComponentRegistry;
@@ -84,22 +89,36 @@ export function registerComponentExecutor(
         }
 
         try {
-          // Decode input and argument from bytes (Eigon-JSON)
-          const inputJson = TEXT_DECODER.decode(req.input);
-          const argumentJson = TEXT_DECODER.decode(req.argument);
+          // Branch on content_type per the proto field. Phase 18e:
+          // kernels send Eigon-CBOR by default; the JSON path stays
+          // for backward compat (mismatched kernel/orchestrator
+          // versions during a rolling deploy). Empty content_type is
+          // treated as JSON since pre-18e clients didn't set it.
+          const useCbor = req.contentType === CONTENT_TYPE_CBOR;
 
-          const input = inputJson ? JSON.parse(inputJson) : {};
-          const argument = argumentJson ? JSON.parse(argumentJson) : {};
+          let input: Record<string, unknown>;
+          let argument: Record<string, unknown>;
+          if (useCbor) {
+            input = decodeResource(req.input) as Record<string, unknown>;
+            argument = decodeResource(req.argument) as Record<string, unknown>;
+          } else {
+            const inputJson = TEXT_DECODER.decode(req.input);
+            const argumentJson = TEXT_DECODER.decode(req.argument);
+            input = inputJson ? JSON.parse(inputJson) : {};
+            argument = argumentJson ? JSON.parse(argumentJson) : {};
+          }
 
           const result = await registry.execute(componentIri, {
             input,
             argument,
           });
 
-          // Encode output back to Eigon-JSON bytes
-          const outputBytes = new TextEncoder().encode(
-            JSON.stringify(result.output),
-          );
+          // Encode output in the same codec the request used so a
+          // pre-18e kernel still gets JSON back during a rolling
+          // upgrade.
+          const outputBytes = useCbor
+            ? encodeResource(result.output)
+            : TEXT_ENCODER.encode(JSON.stringify(result.output));
 
           const response = create(ComponentResponseSchema, {
             success: true,
