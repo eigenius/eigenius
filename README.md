@@ -26,7 +26,7 @@ Key features that we still need to wire up:
 - The [runtime substrate](docs/design/d26-runtime-substrate.md) for integrating third-party programming languages
   (e.g. Julia, Lean-4, Python) still needs to be implemented and integrated
   into the Eigenius stack. In addition, we need to provide institution-level
-  integration into appropriate languages ([Julia](docs/design/d27-julia-institutions.md) [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl) and [`JuMP`](https://jump.dev/); [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md)).
+  integration into appropriate languages ([Julia Institutions](docs/design/d27-julia-institutions.md) [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) and [`JuMP`](https://jump.dev/); [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md)).
 
 ## The notebook — start here
 

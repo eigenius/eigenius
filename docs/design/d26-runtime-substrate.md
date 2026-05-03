@@ -210,8 +210,24 @@ The unit of pinned reproducibility. References everything baked into the worker 
 | `mirror_dependency` | IRI of the `RuntimePackageMirror` baked into the image. |
 | `image_digest` | OCI image digest (e.g. `sha256:abc123…`). The primary reproducibility anchor at runtime. Empty for the dev-path (deployment shape (c), §10.1). |
 | `image_reference` | Optional human-readable tag like `registry.eigenius.io/runtime/julia-symbolics:1.4`. Advisory. |
+| `lifecycle` | One of `Service` or `Job`. Selects the worker lifecycle (§8) and is required for `CallRuntimeMethod` envs. See §5.3.1. |
 
 The IRI is content-addressed from the above. The image digest is itself a function of the other fields plus a pinned base-image digest, so given a `RuntimeEnvironment` resource an auditor can re-derive the digest from the inputs. See §10 for the build pipeline.
+
+#### 5.3.1 `lifecycle` — Service vs Job
+
+`lifecycle` partitions envs along the dimension that matters for cloud deployment: long-lived request-routed workers (Service) versus run-to-completion ephemeral workers (Job). The substrate maps each onto distinct cloud primitives — Service to a Container App service / k8s Deployment / serverless platform; Job to a Container App Job / k8s Job. Local Docker Compose runs Service envs as compose services or DooD-launched warm sibling containers, and Job envs as DooD-launched per-invocation siblings.
+
+The two values:
+
+- **`Service`** — the env runs as a long-lived service. Workers are kept warm across many dispatches via the pool layered above the [`ServiceSpawner`](#82-spawner-traits-jobspawner-and-servicespawner) trait. Required for any env that backs `CallRuntimeMethod` (§4.1) — methods are typed library calls whose dispatch rate is too high to absorb a cold start each time. `RunRuntimeScript` also dispatches into a Service env; short scripts naturally land on a warm worker without any extra substrate machinery.
+- **`Job`** — the env spawns a fresh worker per dispatch via [`JobSpawner`](#82-spawner-traits-jobspawner-and-servicespawner). Only valid for `RunRuntimeScript`; rejected for `CallRuntimeMethod` at the boundary check. Right shape for genuinely long-running scripts (model training, multi-hour simulations) where the cold start is rounding error, and for one-off ad-hoc invocations where there is no warm worker to amortise into.
+
+**Serverless deployments are a Service env with min replicas ≤ 0** plus aggressive scale-to-zero rules. The substrate's code path is identical to a "regular" Service env — what changes is the operator's scaling configuration on the underlying cloud resource. The substrate stays at two lifecycles; cost-mode tuning belongs to the deployment layer.
+
+**Mixed-use envs.** A Service env may serve both `CallRuntimeMethod` and `RunRuntimeScript` simultaneously. Methods reach the warm pool; scripts dispatch into the same pool. This is the common case for institution-bearing envs (e.g. a Julia env serving both `Symbolics.simplify` method calls and ad-hoc bash-equivalent Julia scripts). The substrate does not require partitioning the worker pool by surface — methods and scripts share warm workers keyed on `image_digest`.
+
+**Why this is a property of the env, not the surface call.** The lifecycle decision is a function of the *environment's role* in the deployment topology — how often it's hit, what its cold-start cost is, what the cost profile of keeping it warm is. Different methods on the same env share the same answer; different scripts on the same env share the same answer. Tying the decision to the env keeps the substrate's surface area small and gives operators one knob per env rather than per call.
 
 ### 5.4 `RuntimePackageMirror`
 
@@ -417,44 +433,83 @@ The full invocation flow then proceeds: marshall inputs into mirror struct value
 
 ## 8. Worker process model
 
-### 8.1 Process model
+### 8.1 Process model — two lifecycles, declared per env
 
 Workers run inside an OS-level sandbox restricting filesystem access to a per-invocation working directory and a read-only mount of the runtime depot. Network access is governed by a per-environment policy.
 
-The substrate supports two worker shapes, picked per language and per phase:
+The substrate exposes **two worker lifecycles**, selected by [`RuntimeEnvironment.lifecycle`](#531-lifecycle--service-vs-job) and mapped to distinct cloud primitives:
 
-- **Spawn-per-invocation** — each `RunRuntimeScript` / `CallRuntimeMethod` call spawns a fresh worker, runs the job, waits for completion or failure, surfaces the result, and the worker exits. The substrate ships this shape in v1. Simpler fault model (no inter-invocation state leak), no pool accounting, no idle/health bookkeeping. The per-invocation cost is one process spawn plus runtime startup; for languages with cheap startup (the smoke `bash` runtime, Python with no warm-up imports) this is the right shape long-term as well.
-- **Long-lived worker per warm `RuntimeEnvironment`** — an additional layer above spawn-per-invocation that caches `WorkerHandle`s by `image_digest` and dispatches subsequent invocations into already-warm processes. The substrate ships this when a language's startup cost forces it; Julia's ~30s cold-start (D27 Phase C) is the first concrete trigger. The pool is a separate component above the spawner trait (§8.2), not a different trait.
+- **Service-backed dispatch** (`lifecycle: Service`) — long-lived workers per warm `RuntimeEnvironment`, kept around across many dispatches and request-routed. The pool layered above [`ServiceSpawner`](#82-spawner-traits-jobspawner-and-servicespawner) caches workers by `image_digest`, with idle timeout, max size, and health-check eviction. Required for any env that backs `CallRuntimeMethod` (D26 §4.1) — the dispatch rate of typed library calls (institution morphisms, ExportFormat / ImportFormat handlers, AutoOnLoad QueryClass invocations, `NativeDecide` reductions during type-checking) makes per-call cold-start untenable for languages with non-trivial startup. `RunRuntimeScript` against a Service env *also* dispatches through the warm pool — short scripts get pre-warmed worker latency without any extra substrate machinery.
+- **Job-backed dispatch** (`lifecycle: Job`) — fresh worker per dispatch, runs to completion, exits. Provided by [`JobSpawner`](#82-spawner-traits-jobspawner-and-servicespawner). Simpler fault model (no inter-invocation state leak), no pool accounting, no idle bookkeeping. Right shape for genuinely long-running scripts (model training, multi-hour simulations) where the cold start is rounding error, and for ad-hoc one-offs where there is no warm worker to amortise into. Only valid for `RunRuntimeScript`; `CallRuntimeMethod` against a Job env is rejected at the boundary check (D26 §7.5).
 
-Workers communicate with the orchestrator via a small RPC protocol over a Unix domain socket (containers) or local TCP (development). The protocol carries: `instantiate`, `register_mirror`, `dispatch_method`, `evict`, `health`. Marshalling on the wire is **CBOR** ([RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)), using **RFC 8746 typed-array tags** for large numerical arrays so FP / integer matrices avoid per-element type tags.
+**Serverless** is a Service env with `min_replicas: 0` plus aggressive scale-to-zero rules — same substrate code path, different operator-side scaling configuration. The substrate stays at two lifecycles; cost-mode tuning belongs to the deployment layer.
+
+**Mixed-use envs.** A Service env may serve `CallRuntimeMethod` *and* `RunRuntimeScript` simultaneously and share workers across both — methods and scripts dispatch into the same warm pool, keyed on `image_digest`. No partitioning by surface.
+
+**Cloud mapping.**
+
+| Lifecycle | Local Docker Compose | Azure Container Apps | k8s |
+|---|---|---|---|
+| `Service` | docker-compose service or DooD-launched warm sibling | Container App **service** + autoscaling rules | Deployment + Service (HPA / KEDA) |
+| `Job` | DooD-launched per call | Container App **Job** | Job |
+
+Workers communicate with the orchestrator via a small RPC protocol over a Unix domain socket (containers) or local TCP (development). The protocol carries: `instantiate`, `register_mirror`, `dispatch_method`, `evict`, `health`. Marshalling on the wire is **CBOR** ([RFC 8949](https://www.rfc-editor.org/rfc/rfc8949)), using **RFC 8746 typed-array tags** for large numerical arrays so FP / integer matrices avoid per-element type tags. (Note: `evict` is meaningful only for Service envs — Job envs exit on their own when the dispatched work completes.)
 
 CBOR is the rest of Eigenius's serialization format — `LayerHandle`, `BloomFilter`, `MigrationRecord`, every persisted resource is CBOR. Carrying that through to the wire eliminates a translation step at the boundary and lets `RuntimeInvocation` provenance records embed wire bytes directly without re-encoding. CBOR's deterministic-encoding mode (§4.2.1) also matches the kernel's content-addressing posture: byte-equal inputs produce byte-equal output, so the on-disk and in-flight representations of a value are identical.
 
 Cross-language coverage: `ciborium` (Rust, already used internally), [`CBOR.jl`](https://github.com/saolsen/CBOR.jl) (Julia, maintained), [`cbor2`](https://pypi.org/project/cbor2/) (Python, mature). R support (`cbor` package) is weaker; the day R lands as a substrate the integration may need a Rust-side helper or a Cap'n-Proto-style sidecar. AWS DAX uses CBOR for the same cross-language reasons; the production envelope is well-charted.
 
-### 8.2 The `WorkerSpawner` trait
+### 8.2 Spawner traits — `JobSpawner` and `ServiceSpawner`
 
-Container/process lifecycle sits behind a small trait inside `eigenius-runtime-substrate`:
+Container/process lifecycle sits behind two traits inside `eigenius-runtime-substrate`, one per worker lifecycle (§8.1). The split keeps the surface area honest: a Job backend should not be reachable through a path that expects a long-lived service, and vice versa.
 
 ```rust
-pub trait WorkerSpawner: Send + Sync {
+/// One-shot worker: spawn → run-to-completion → exit. Drives
+/// `RunRuntimeScript` against `lifecycle: Job` envs.
+pub trait JobSpawner: Send + Sync {
     fn spawn(&self, spec: WorkerSpec) -> Result<WorkerHandle, SpawnError>;
     fn wait(&self, handle: &WorkerHandle) -> Result<ExitStatus, SpawnError>;
     fn kill(&self, handle: &WorkerHandle) -> Result<(), SpawnError>;
     fn attach_uds(&self, handle: &WorkerHandle) -> Result<UnixStream, SpawnError>;
 }
+
+/// Long-lived service: get-or-start a worker pool for an env, lease
+/// individual handles for dispatches, drain on shutdown. Drives
+/// `CallRuntimeMethod` and `RunRuntimeScript` against
+/// `lifecycle: Service` envs.
+pub trait ServiceSpawner: Send + Sync {
+    /// Get-or-start the service backing an env. Idempotent: repeated
+    /// calls for the same `image_digest` return the same service.
+    fn ensure_service(&self, spec: WorkerSpec) -> Result<ServiceHandle, SpawnError>;
+    /// Lease a worker from the service for the duration of one
+    /// dispatch. The pool above this trait caches and reuses leases.
+    fn lease_worker(&self, service: &ServiceHandle) -> Result<WorkerHandle, SpawnError>;
+    /// Return a leased worker to the service.
+    fn release_worker(&self, service: &ServiceHandle, handle: WorkerHandle);
+    /// Graceful drain of the service: stop accepting new leases,
+    /// wait for in-flight, then tear down.
+    fn drain(&self, service: &ServiceHandle) -> Result<(), SpawnError>;
+    fn attach_uds(&self, handle: &WorkerHandle) -> Result<UnixStream, SpawnError>;
+}
 ```
 
-`WorkerSpec` carries the `image_digest`, the per-invocation tempdir host path, the runtime-depot mount, env vars (including the cross-check digest, §9.3), resource limits, and the seccomp profile. Per-language `LanguageRuntime::spawn_worker` impls call into the substrate's spawner indirectly — they don't see backend specifics.
+`WorkerSpec` carries the `image_digest`, the per-invocation tempdir host path, the runtime-depot mount, env vars (including the cross-check digest, §9.3), resource limits, and the seccomp profile. Per-language `LanguageRuntime::spawn_worker` impls call into whichever spawner matches the env's `lifecycle` indirectly — they don't see backend specifics.
 
-Backends planned:
+Backends:
 
-- **`LocalSpawner`** — spawns the worker as a host subprocess; no container. Used for dev, CI, and the substrate's smoke tests. Reduced sandbox (process-level rlimits + a temp dir; no namespacing). Operator gets a warning when used outside dev.
-- **`DockerSpawner`** — talks to the host Docker daemon over `/var/run/docker.sock` (DooD; §9.5) using the `bollard` crate. Production default on Linux.
-- **`PodmanSpawner`** — deferred. Same trait, rootless-friendly, no daemon. Lands when a deployment asks for it.
-- **k8s-aware backend** — deferred. The trait shape doesn't preclude it.
+| Backend | Realises | Use |
+|---|---|---|
+| `LocalJobSpawner` | `JobSpawner` | Dev, CI, smoke tests. Host subprocess, no container. Reduced sandbox. |
+| `DockerJobSpawner` | `JobSpawner` | Production Job envs on Linux via DooD (§9.5). |
+| `LocalServiceSpawner` | `ServiceSpawner` | Dev / CI Service envs. Long-lived host subprocess pool. |
+| `DockerServiceSpawner` | `ServiceSpawner` | Production Service envs on Linux. DooD-launched persistent service container per env. |
+| `K8sJobSpawner` | `JobSpawner` | Cloud — k8s Job per dispatch. Deferred. |
+| `K8sDeploymentSpawner` | `ServiceSpawner` | Cloud — k8s Deployment + Service per env, with HPA / KEDA. Deferred. |
+| `PodmanJobSpawner` / `PodmanServiceSpawner` | both | Rootless, no-daemon alternatives to the Docker backends. Deferred. |
 
-Pool layering: when warm-worker reuse becomes worth its complexity, a `WorkerPool` wraps a `dyn WorkerSpawner` and caches handles by `image_digest`, with idle timeout, max size, and health-check eviction. The pool is *above* the trait, not inside it; spawner backends stay ignorant of pooling.
+A backend may realise both traits where it makes sense (the `Local*` and `Docker*` variants share lower-level spawn logic). Service backends own pool / lease bookkeeping internally; the substrate's `LanguageRuntime` consumers see one consistent dispatch surface regardless.
+
+**Pool layering for Service backends.** A `WorkerPool` wraps a `dyn ServiceSpawner` and tracks lease state, idle timeout, max size, and health checks. The pool is *above* the trait, not inside it — replaceable independently of which backend is in use.
 
 ### 8.3 Sandboxing
 

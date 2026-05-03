@@ -34,16 +34,24 @@
 //! for the milestones this crate maps onto.
 
 pub mod error;
+pub mod facade;
 pub mod language_runtime;
+pub mod registry;
 pub mod rpc;
 pub mod spawner;
+#[cfg(feature = "test-runtime")]
+pub mod test_runtime;
 pub mod types;
 
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
+pub use facade::{FacadeError, SubstrateDispatcher};
 pub use language_runtime::LanguageRuntime;
+pub use registry::{LanguageRuntimeRegistry, RegistryError};
 pub use rpc::{
     ClientError, FrameError, HealthInfo, NumericalMetadata, Request, Response, WorkerRpcClient,
     MAX_FRAME_SIZE_DEFAULT,
 };
 pub use spawner::{DockerSpawner, LocalSpawner, WorkerSpawner};
+#[cfg(feature = "test-runtime")]
+pub use test_runtime::TestLanguageRuntime;
 pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};

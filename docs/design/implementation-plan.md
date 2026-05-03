@@ -92,7 +92,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 15 | Layer Reconciliation | | Six typed resolution strategies (Witness / Rename / KeepBoth / KeepOne / KeepNeither / Restructure); pushout-based merge; three-stage conflict taxonomy (schema / equation / instance); cascade impact analysis with user-ack gates |
 | 16 | Out-of-Core Query Execution | | Buffer-pool over storage, hash-join with spill, external sort, spillable group-by, per-query memory budget |
 | 17 | Chain Consolidation | | Squash a contiguous ancestral range into a resolve-equivalent layer; "git squash" for the typed knowledge graph |
-| 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; image-build pipeline; worker pool; sandbox; CBOR + RFC 8746 wire format |
+| 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; Service / Job lifecycle split (`JobSpawner` / `ServiceSpawner`); image-build pipeline; sandbox; CBOR + RFC 8746 wire format; CBOR consolidation across kernel ↔ orchestrator |
 | 19 | Julia Institutions | | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs) |
 | 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
 | 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
@@ -898,6 +898,23 @@ The D10-era surface is fully retired:
 - TiKV storage backend: optional alternative to RocksDB for horizontally scalable deployments. Same key encoding (D4), same API (`LayerStore`/`ResourceStore` traits). Configurable via environment variable.
 - Operational runbook: deployment procedures, scaling guidelines, backup/restore, incident response.
 
+### Phase 13 — Forward implications: substrate Service / Job lifecycle
+
+Phase 13 sets up the kernel + orchestrator deployment shape, but Phase 18+'s [runtime substrate](d26-runtime-substrate.md) introduces a second axis of cloud topology that this phase's tooling has to extend to cover:
+
+- **`RuntimeEnvironment` with `lifecycle: Service`** maps to a **Container App service** with autoscaling rules (`minReplicas` / `maxReplicas`, HTTP / KEDA scale rules; serverless-equivalent cost is `minReplicas: 0` plus aggressive scale-to-zero). On a future k8s deployment this is a Deployment + Service with HPA / KEDA. Each Service env is a separate cloud resource sharing the kernel-orchestrator deployment's Container Apps environment / cluster.
+- **`RuntimeEnvironment` with `lifecycle: Job`** maps to a **Container App Job** (manual or event-triggered execution) on Azure CA, or a k8s Job on a cluster. These are spawned per `RunRuntimeScript` dispatch and have no idle cost.
+
+Implications for Phase 13's Bicep / GHA tooling that should be planned in advance even though they are realised when Phase 18+ workloads land:
+
+- Bicep templates need a parameterised module for "register a runtime env as a Container App resource of the appropriate kind." A Service env produces a `Microsoft.App/containerApps` resource; a Job env produces `Microsoft.App/jobs`. The substrate's image-build pipeline (Phase 18c) writes the resulting `image_digest` into the env resource; Bicep consumes the digest to pin the image reference.
+- GHA release workflow needs a "publish runtime env" step distinct from "deploy kernel + orchestrator": each new substrate-built image gets pushed to ACR and the corresponding CA service / job updated. CI must not couple runtime-env releases to kernel releases — they cadence differently (per-language updates land much more often than kernel updates).
+- DAPR-side service discovery: the orchestrator needs to resolve Service-env workers by env IRI / image digest. On Azure CA this is per-resource hostnames inside the Container Apps environment; on k8s it's per-Service DNS. The substrate's `ServiceSpawner` backends (D26 §8.2 — `DockerServiceSpawner` for local DooD, `K8sDeploymentSpawner` later) read this discovery target from a deployment-supplied config. Phase 13 owns the config shape.
+- Observability must distinguish kernel/orchestrator metrics from substrate-worker metrics. A Service env is a long-lived resource with steady-state replicas, request rate, latency histograms; a Job env has run-count, run-duration, success rate. Different scrape targets, different dashboards. Phase 13 lays the metric-naming convention; Phase 18+ populates the dashboards as workloads land.
+- The Phase 13 deployment story is "kernel + orchestrator + DB"; the post-substrate story is "kernel + orchestrator + DB + N substrate runtime envs." Operational runbook should already use the language of "register a runtime env" so the post-Phase-18 ops surface is a natural extension.
+
+This is a *forward note*, not Phase 13 deliverables. The substrate's deployment integration ships with Phase 18c (Job-side) and Phase 19a (Service-side) and reuses Phase 13's primitives. Capturing the implications here so the Bicep / GHA tooling is shaped to extend cleanly rather than to need a refactor on Phase 18+ landing.
+
 ### Phase 13 — Test plan
 
 - Docker build succeeds for both images
@@ -1085,11 +1102,11 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 
 **Goal:** Stand up the language-agnostic substrate that hosts external language toolchains inside Eigenius with full provenance. Pinned `RuntimeEnvironment` images, content-addressed `RuntimeScript` and `RuntimePackage` resources, the `LanguageRuntime` trait that per-language crates implement, the `RunRuntimeScript` / `CallRuntimeMethod` substrate components. No language implementations yet — this phase delivers the trait + the plumbing. Julia (Phase 19) and Lean's authoring side (Phase 20) layer on top.
 
-**Duration estimate:** 7–9 weeks total, four internal milestones aligned with [D26](d26-runtime-substrate.md) §13 (with the closing capstone landing as 18d).
+**Duration estimate:** 8–10 weeks total, five internal milestones — 18a-c aligned with [D26](d26-runtime-substrate.md) §13, 18d is the closing capstone, 18e is a cross-cutting codec consolidation that the substrate work makes timely.
 
 **Prerequisites:** Phase 8 (WASM as the contrast point — the substrate is a sibling, not a replacement, for fine-grained untrusted capability hosting), Phase 9a (durable kernel state — substrate resources persist across restart), Phase 12 (D14 — substrate components dispatch through the existing `ComponentExecutor`; per-language institutions surface as D14 institutions in Phase 19+).
 
-**Drives:** [D26 — Runtime Substrate](d26-runtime-substrate.md). Enables Phase 19 (Julia) and Phase 20 (Lean's authoring-side workflows).
+**Drives:** [D26 — Runtime Substrate](d26-runtime-substrate.md). Enables Phase 19 (Julia) and Phase 20 (Lean's authoring-side workflows). Phase 18 ships the Job lifecycle end-to-end (18a–18d); the Service lifecycle is forced by Julia's startup cost and lands with Phase 19a.
 
 ### Phase 18a — Substrate skeleton (~3 weeks)
 
@@ -1115,7 +1132,7 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 - `DockerSpawner` implementation of `WorkerSpawner` using Bollard against the host Docker daemon (DooD: `/var/run/docker.sock` mounted into the orchestrator container, sibling-container model). Production default on Linux deployments. `PodmanSpawner` and a k8s-aware backend deferred — the trait makes either a contained add-on later.
 - DooD bind-mount discipline: the substrate writes per-invocation tempdirs and the runtime depot under a single, stable host path (e.g. `/var/lib/eigenius-runtime/`) bind-mounted into the orchestrator at the same location, so paths the substrate hands to workers are valid in both filesystems without translation. Enforced as a runtime assertion at `DockerSpawner` construction.
 - Security-boundary acknowledgement: granting the orchestrator process access to `/var/run/docker.sock` is root-equivalent on the host; deployment docs and a startup log line treat this as a spec-level constraint, not a footnote. The orchestrator host is the substrate's security boundary — no multi-tenant co-tenancy, no untrusted RPC surfaces forwarded to it.
-- **Spawn-per-invocation execution model.** Each `RunRuntimeScript` / `CallRuntimeMethod` call spawns a fresh container, runs the job, waits for completion or failure, surfaces the result, then the container exits (`auto_remove: true`). No worker pool, no warm-worker reuse, no LRU/idle/health-check machinery in v1. The Docker daemon's image-layer cache provides image-pull caching for free — subsequent invocations against the same digest skip the network hop without us writing pool code. The warm-worker pool defers to Phase 19c, where Julia's ~30s cold-start cost makes it cash in.
+- **Spawn-per-invocation execution model — for `lifecycle: Job` envs only.** Each `RunRuntimeScript` against a Job env spawns a fresh container, runs the job, waits for completion or failure, surfaces the result, then the container exits (`auto_remove: true`). No pool accounting, no idle/health-check machinery for the Job side. The Docker daemon's image-layer cache provides image-pull caching for free — subsequent invocations against the same digest skip the network hop without us writing pool code. **`CallRuntimeMethod` and `lifecycle: Service` envs are out of scope for 18c**: the service-backed dispatcher (D26 §8.1, §8.2) is wrong-architecture under spawn-per-invocation and lands in 19a alongside the first language that needs it (Julia). Phase 18c ships only the Job-side machinery — `JobSpawner` trait, `LocalJobSpawner`, `DockerJobSpawner` stub.
 - OS-level sandbox depth depends on the active spawner. **`DockerSpawner`** (Linux production): namespaces (mnt, pid, net, user) and cgroups v2 from Docker; capabilities dropped to minimum (`CapDrop: ["ALL"]`, then re-add only what's needed); custom seccomp profile shipped as a JSON file in the crate and applied via `HostConfig.security_opt` (Docker's default profile is too permissive for the substrate's allow-list); AppArmor where available. **`LocalSpawner`** (dev / CI): rlimits + per-invocation tempdir only, no namespacing; orchestrator logs a warning at every dispatch under LocalSpawner so it is never silently used in production. **macOS / Windows**: weaker analogs with operator warning per D26 §8.3.
 - `numerical_metadata` recording on `RuntimeInvocation` (BLAS lib, FMA flag, GPU determinism flags, host kernel).
 
@@ -1141,6 +1158,26 @@ The closing acceptance milestone for Phase 18. Exercises every architectural pie
 - Re-running the same `(script, environment, inputs)` against the same host yields a byte-identical output resource (deterministic-by-environment per D26 §8.4).
 
 **Why this shape.** Using an upstream image instead of a substrate-built one keeps the capstone focused on the spawn / sandbox / provenance / boundary path. Using Julia rather than the `bash` smoke runtime ensures the substrate works against a real interpreter with non-trivial startup cost and an actual standard library — i.e. against the kind of runtime Phase 19 will host. When Phase 19 lands, the test fixture is replaced by `eigenius-julia` and the capstone test must continue to pass — making it the regression anchor between the two phases.
+
+### Phase 18e — CBOR consolidation for kernel ↔ orchestrator (~1 week)
+
+Cross-cutting codec change: replace Eigon-JSON with Eigon-CBOR on the `ComponentExecutor` gRPC path so kernel ↔ orchestrator traffic is uniform with the rest of Eigenius (worker RPC per D26 §8.1, persistence per D13 / D24, every CBOR-encoded resource on disk).
+
+**Motivation.** Today the kernel-side dispatcher ([`kernel/src/program/remote.rs`](../../kernel/src/program/remote.rs)) serialises input/argument with `eigon_json::serialize_resource(..).to_string().into_bytes()` and tags `content_type = "application/eigon+json"`; the orchestrator side ([`orchestration/src/server/component_executor.ts`](../../orchestration/src/server/component_executor.ts)) `TextDecoder + JSON.parse`s it. Substrate-routed traffic then crosses *back* into CBOR for the worker RPC and *back again* into JSON for the response. End-to-end CBOR eliminates the JSON↔CBOR transitions, halves the codec surface area, and matches D26's "CBOR everywhere" framing.
+
+**Starting point — the proto already anticipates CBOR.** [`proto/eigenius.proto`](../../proto/eigenius.proto) already carries `content_type` fields on the relevant messages — `LoadRequest`, `QueryResponse`, `ValidateProgramRequest`, `RunProgramRequest`, `ReflectRequest`, and `ComponentRequest`. `ComponentRequest.content_type` is even commented as `"application/cbor" or "application/eigon+json"`. The schema is ready; this milestone just flips the default codec on each path and lights up the corresponding decoder at the receiver. Begin work by inventorying every site that reads / writes one of these `content_type`-carrying fields — both in the kernel and in the orchestrator — and audit which ones already branch on the value vs. silently assume JSON.
+
+**Scope.**
+- **Kernel side.** `program/remote.rs` switches to `eigon_cbor::serialize_resource(..)` and `eigon_cbor::parse_resource(..)`. `ComponentRequest.content_type` becomes `application/eigon+cbor`. The kernel reads the orchestrator's response as CBOR.
+- **Orchestrator side.** `component_executor.ts` uses a TS-side CBOR codec to decode `req.input` / `req.argument` into the JS-shaped objects handlers already receive, and re-encodes the handler's response as CBOR. The handler interface (`ComponentHandler`, `ComponentInput`, `ComponentOutput`) is unchanged — the codec change is internal to the executor. A TS-side CBOR library lands as a dep (candidates: `cbor-x`, `cborg`); selection is part of this milestone.
+- **WASM IO components.** Internal bridge already speaks CBOR; the orchestrator-side host bridge can pass bytes through directly instead of JSON-stringify-then-CBOR-encode. Net simplification.
+- **Backward compatibility.** Honour `content_type` per request: if the kernel writes `application/eigon+json`, the orchestrator falls back to the JSON path. Lets the change land in a single PR without a synchronised kernel/orchestrator deploy.
+- **Tests.** Existing component-executor unit tests update to expect CBOR; add a regression test covering the JSON-fallback path so the compatibility shim is exercised. `RemoteComponent` end-to-end tests round-trip a Resource through the new codec.
+- **Removal of the JSON path.** The fallback is staged for removal in a follow-up phase once all consumers (kernel, every per-language crate) have moved over. Deletion is *not* part of 18e — keeping the shim until consumers catch up is deliberate.
+
+**Why now / why in Phase 18.** The substrate's worker RPC introduced CBOR to the orchestrator process, so the TS-side CBOR machinery is already a forced dependency once 18a-18d land. Consolidating the kernel ↔ orchestrator codec at the same time keeps the codec story coherent rather than mixing JSON and CBOR across closely-related code paths. It is *not* gated on substrate work — could land independently — but the timing is right.
+
+**Out of scope.** Changes to the Eigon-JSON parser/serialiser themselves; changes to the proto schema beyond the `content_type` value; client-side breaking changes (kernel's TS bindings, if any, get the CBOR option but JSON stays available).
 
 ### Phase 18 — Test plan
 
@@ -1169,11 +1206,12 @@ The closing acceptance milestone for Phase 18. Exercises every architectural pie
 
 **Drives:** [D27 — Julia Institutions](d27-julia-institutions.md). Enables [`life-science-requirements.md`](life-science-requirements.md) worked examples in Phase 21 (PK ODEs, ML ensemble bounds, certified intervals, reaction-network dynamics).
 
-### Phase 19a — Julia substrate proof of concept (~2 weeks)
+### Phase 19a — Julia substrate proof of concept + Service lifecycle (~3 weeks)
 
-- `eigenius-julia` crate implements `LanguageRuntime`. One persistent Julia worker per process; no pool yet. JSON-on-the-wire bootstrap (Phase 19b replaces with CBOR).
-- Demonstrates: a `JuliaScript` resource committed to the chain, dispatched via `RunRuntimeScript`, producing a `JuliaInvocation` provenance record. `image_digest` left empty (deployment shape (c) — Julia bundled into the orchestrator image).
-- Validates the substrate shape against a real language; flushes out anything missing in Phase 18a.
+- `eigenius-julia` crate implements `LanguageRuntime`. Default Julia env declares `lifecycle: Service` (D26 §5.3.1) — Julia's ~30s cold start is the first concrete forcing function for the Service-backed dispatcher.
+- **Service-backed dispatcher lands here**, deferred from Phase 18c. New traits and backends per [D26 §8.2](d26-runtime-substrate.md): `ServiceSpawner`, `LocalServiceSpawner` (long-lived host subprocess pool), `DockerServiceSpawner` (DooD-launched persistent service container per env). Pool layered above the trait — lease/release worker handles, idle timeout, max size, health checks. `CallRuntimeMethod` becomes wireable for the first time in this phase.
+- Demonstrates: a `JuliaScript` resource committed to the chain, dispatched via `RunRuntimeScript`, producing a `JuliaInvocation` provenance record served by the warm pool; a `JuliaMethodSignature` (e.g. `Symbolics.simplify`) dispatched via `CallRuntimeMethod` against the same warm pool. `image_digest` left empty initially (deployment shape (c) — Julia bundled into the orchestrator image); 19c flips to shape (a).
+- Validates the substrate shape against a real language and against the Service-backed dispatcher both; flushes out anything missing in Phase 18a / 18c.
 
 ### Phase 19b — `eigon-julia-gen` mirror generator (~3 weeks)
 
@@ -1182,10 +1220,10 @@ The closing acceptance milestone for Phase 18. Exercises every architectural pie
 - `CallRuntimeMethod` (Julia variant) using mirror-struct dispatch.
 - Wire format flips to CBOR with RFC 8746 typed-array tags.
 
-### Phase 19c — Per-environment images + worker pool (~3 weeks)
+### Phase 19c — Per-environment images + pool tuning (~2 weeks)
 
-- Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated.
-- Multi-environment worker pool with LRU eviction lands here (deferred from Phase 18c — the substrate ships spawn-per-invocation in v1; the pool is justified by Julia's ~30s cold-start cost). Layered above the `WorkerSpawner` trait, not inside it: a `WorkerPool` that caches `WorkerHandle`s by `image_digest`, with idle timeout, max size, and health-check eviction. Substrate-side code so a future Python integration can reuse it without re-deriving.
+- Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated. Flips Julia from deployment shape (c) (bundled in orchestrator image, established in 19a) to shape (a) (per-env image).
+- Pool tuning for Julia at production scale — the `ServiceSpawner` trait + pool already shipped in 19a; this milestone exercises and tunes idle timeout, max size, and health-check policy against realistic Julia workloads (long-running notebook sessions, AutoOnLoad bursts on commit, Symbolics simplification floods during type-checking).
 - `JuliaPackagePin` resources committed alongside the verbatim `Manifest.toml` for graph-side queryability.
 
 ### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~3 weeks)

@@ -49,7 +49,8 @@
       "urn:eigenius:core:short_name",
       "urn:eigenius:runtime:language",
       "urn:eigenius:runtime:runtime_version",
-      "urn:eigenius:runtime:lockfile"
+      "urn:eigenius:runtime:lockfile",
+      "urn:eigenius:runtime:lifecycle"
     ],
     "urn:eigenius:core:recommends": [
       "urn:eigenius:core:description",
@@ -148,6 +149,17 @@
     "urn:eigenius:core:recommends": [
       "urn:eigenius:core:description",
       "urn:eigenius:runtime:method_package"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:RuntimeEnvironmentLifecycle",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Worker lifecycle for a RuntimeEnvironment — Service (long-lived, request-routed; pool-backed) or Job (run-to-completion, ephemeral). Maps onto cloud primitives: Service → Container Apps service / k8s Deployment / serverless platform; Job → Container Apps Job / k8s Job. See D26 §5.3.1 / §8.1.",
+    "urn:eigenius:core:short_name": "RuntimeEnvironmentLifecycle",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name"
     ]
   },
 
@@ -335,6 +347,32 @@
     "urn:eigenius:core:short_name": "image_reference",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:lifecycle",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Worker lifecycle declared by this RuntimeEnvironment — Service (long-lived, pool-backed; required for envs that back CallRuntimeMethod) or Job (run-to-completion, ephemeral; only valid for RunRuntimeScript). See D26 §5.3.1.",
+    "urn:eigenius:core:short_name": "lifecycle",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeEnvironmentLifecycle"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:runtime:lifecycle:Service",
+      "urn:eigenius:runtime:lifecycle:Job"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:lifecycle:Service",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeEnvironmentLifecycle"],
+    "urn:eigenius:core:description": "Long-lived service worker pool. Required for envs backing CallRuntimeMethod; serves RunRuntimeScript via warm-pool dispatch. Maps to Container Apps service / k8s Deployment + Service / serverless platforms. Scale-to-zero is min_replicas: 0 — same code path, deployment-side knob.",
+    "urn:eigenius:core:short_name": "Service"
+  },
+  {
+    "@id": "urn:eigenius:runtime:lifecycle:Job",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeEnvironmentLifecycle"],
+    "urn:eigenius:core:description": "Run-to-completion ephemeral worker. Only valid for RunRuntimeScript. Maps to Container Apps Job / k8s Job. CallRuntimeMethod against a Job env is rejected at the boundary check.",
+    "urn:eigenius:core:short_name": "Job"
   },
 
   {
