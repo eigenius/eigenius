@@ -33,6 +33,8 @@
 //! for the full specification and Phase 18 of the implementation plan
 //! for the milestones this crate maps onto.
 
+pub mod boundary;
+pub mod chain;
 pub mod error;
 pub mod facade;
 pub mod language_runtime;
@@ -43,6 +45,8 @@ pub mod spawner;
 pub mod test_runtime;
 pub mod types;
 
+pub use boundary::{check_call_method, check_run_script};
+pub use chain::ChainAccessor;
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use facade::{FacadeError, SubstrateDispatcher};
 pub use language_runtime::LanguageRuntime;

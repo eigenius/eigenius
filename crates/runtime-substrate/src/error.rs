@@ -79,12 +79,25 @@ pub enum SpawnError {
 /// Subsumes the run-side error variants from D26 §11.1.
 #[derive(Debug, Error)]
 pub enum RunError {
-    /// An input class IRI is not present in the resolved
-    /// `RuntimePackageMirror`, or the mirror is anchored to a layer that
-    /// is not ancestral to the invocation's claim layer. D26 §7.5 / §11.1.
+    /// A class declared on the mirror's `mirrored_classes` has been
+    /// redefined between the mirror's anchor layer and the
+    /// invocation's claim layer — the language-side mirror struct no
+    /// longer matches the kernel's class definition. D26 §7.5 / §11.1.
     #[error("mirror version mismatch: class `{class_iri}` (mirror anchor: {mirror_layer}, claim: {claim_layer})")]
     MirrorVersionMismatch {
         class_iri: String,
+        mirror_layer: String,
+        claim_layer: String,
+    },
+
+    /// The mirror's `source_layer` is not ancestral-to-or-equal-with
+    /// the invocation's claim layer — the two layer chains are
+    /// disjoint or the claim is upstream of the mirror. Distinct from
+    /// `MirrorVersionMismatch` (per-class change in a related chain)
+    /// because the failure mode is about chain compatibility, not a
+    /// specific class. D26 §7.5.
+    #[error("mirror anchor not ancestral: anchor {mirror_layer} is not an ancestor of or equal to claim {claim_layer}")]
+    MirrorAnchorNotAncestral {
         mirror_layer: String,
         claim_layer: String,
     },
