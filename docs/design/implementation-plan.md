@@ -1102,7 +1102,7 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 
 **Goal:** Stand up the language-agnostic substrate that hosts external language toolchains inside Eigenius with full provenance. Pinned `RuntimeEnvironment` images, content-addressed `RuntimeScript` and `RuntimePackage` resources, the `LanguageRuntime` trait that per-language crates implement, the `RunRuntimeScript` / `CallRuntimeMethod` substrate components. No language implementations yet — this phase delivers the trait + the plumbing. Julia (Phase 19) and Lean's authoring side (Phase 20) layer on top.
 
-**Duration estimate:** 8–10 weeks total, five internal milestones — 18a-c aligned with [D26](d26-runtime-substrate.md) §13, 18d is the closing capstone, 18e is a cross-cutting codec consolidation that the substrate work makes timely.
+**Duration estimate:** 8.5–10.5 weeks total, five internal milestones — 18a-c aligned with [D26](d26-runtime-substrate.md) §13, 18d is the closing capstone (a substrate-built image extending an upstream Julia base, ~1.5 weeks), 18e is a cross-cutting codec consolidation that the substrate work makes timely.
 
 **Prerequisites:** Phase 8 (WASM as the contrast point — the substrate is a sibling, not a replacement, for fine-grained untrusted capability hosting), Phase 9a (durable kernel state — substrate resources persist across restart), Phase 12 (D14 — substrate components dispatch through the existing `ComponentExecutor`; per-language institutions surface as D14 institutions in Phase 19+).
 
@@ -1136,28 +1136,44 @@ This is distinct from merge (which combines parallel branches; doesn't reduce de
 - OS-level sandbox depth depends on the active spawner. **`DockerSpawner`** (Linux production): namespaces (mnt, pid, net, user) and cgroups v2 from Docker; capabilities dropped to minimum (`CapDrop: ["ALL"]`, then re-add only what's needed); custom seccomp profile shipped as a JSON file in the crate and applied via `HostConfig.security_opt` (Docker's default profile is too permissive for the substrate's allow-list); AppArmor where available. **`LocalSpawner`** (dev / CI): rlimits + per-invocation tempdir only, no namespacing; orchestrator logs a warning at every dispatch under LocalSpawner so it is never silently used in production. **macOS / Windows**: weaker analogs with operator warning per D26 §8.3.
 - `numerical_metadata` recording on `RuntimeInvocation` (BLAS lib, FMA flag, GPU determinism flags, host kernel).
 
-### Phase 18d — End-to-end Julia hello-world capstone (~1 week)
+### Phase 18d — End-to-end Julia hello-world capstone (~1.5 weeks)
 
-The closing acceptance milestone for Phase 18. Exercises every architectural piece end-to-end with a real interpreter container, without committing to any of Phase 19's full Julia-integration scope (no `eigon-julia-gen`, no mirror generator, no institutions, no CBOR worker bootstrap, no `JuliaScript` subclass).
+The closing acceptance milestone for Phase 18 — the witness that ties every preceding sub-milestone together against a real interpreter. Stays out of Phase 19's full Julia-integration scope (no `eigon-julia-gen`, no mirror generator, no institutions, no `JuliaScript` subclass, no Service-lifecycle pool).
 
-**Setup.** A test fixture provides a tiny `LanguageRuntime` impl with `language_id() = "julia"`. It does not build its own image — it pins to a published digest of an [official Julia image](https://hub.docker.com/_/julia) (e.g. `julia:1.10-bookworm` resolved to `sha256:…`). This deliberately bypasses the deterministic build pipeline (which is exercised separately by 18c's image-determinism test) so the capstone validates the run path against an upstream image the substrate did not produce.
+**Setup.** A test fixture provides a tiny `LanguageRuntime` impl with `language_id() = "julia"`. It produces a *substrate-built* image that **extends** an [official Julia image](https://hub.docker.com/_/julia) — the upstream digest is the base, the substrate's build pipeline composes a Dockerfile on top:
 
-**Round-trip.** Commit a `RuntimeEnvironment` resource pinning the Julia image digest (no `included_packages`, no mirror) and a `RuntimeScript` whose source reads stdin and writes a transformed payload to stdout (e.g. uppercase a string). Dispatch `RunRuntimeScript` with a single input resource. The substrate:
+```dockerfile
+FROM julia:1.10-bookworm@sha256:<pinned-upstream-digest>
+COPY JuliaWorker.jl /opt/eigenius/
+RUN julia -e 'using Pkg; Pkg.add("CBOR"); Pkg.precompile()'
+COPY etc/eigenius-runtime-env/ /etc/eigenius-runtime-env/
+CMD ["julia", "/opt/eigenius/JuliaWorker.jl"]
+```
+
+`JuliaWorker.jl` is a minimal Julia worker (~100 lines) that reads `EIGENIUS_TEST_WORKER_UDS`, binds a Unix socket, speaks the substrate's CBOR RPC (length-prefixed frames, the five verbs `health` / `instantiate` / `register_mirror` / `dispatch_method` / `evict`) using `CBOR.jl`, and on `dispatch_method` evaluates the supplied Julia source. It's the Job-side counterpart of what `eigenius-julia`'s production worker will be — Phase 19a inherits it as a starting point.
+
+The build runs through 18c's pipeline: per-language fragments composed, `JuliaWorker.jl` materialised into the build context, in-image provenance baked into `/etc/eigenius-runtime-env/`, `buildah` produces a deterministic OCI image, the captured digest goes onto a `JuliaEnvironment` resource — *that* digest, not the upstream Julia digest, is what the runtime spawns against.
+
+**Round-trip.** Commit the `JuliaEnvironment` resource (with the substrate-built digest) and a `RuntimeScript` whose source is a Julia one-liner (e.g. `uppercase(read(stdin, String))`). Dispatch `RunRuntimeScript` with a single input resource. The substrate:
 
 1. Resolves script + environment from the chain.
-2. Asks `DockerSpawner` to spawn the pinned `julia:*` image as a sibling container, with the per-invocation tempdir bind-mounted from the host depot path (§A9 / D26 §9.5).
-3. Materialises the script into the tempdir; invokes `julia /tmp/inv-N/script.jl` inside the container.
-4. Captures stdout, packages it as the output resource, assembles a `RuntimeInvocation` with the pinned image digest echoed verbatim, and commits everything to the chain.
+2. Asks `DockerSpawner` to spawn the substrate-built image as a sibling container, with the per-invocation tempdir bind-mounted from the host depot path (§A9 / D26 §9.5).
+3. Worker bootstrap inside the container reads `EIGENIUS_RUNTIME_ENV_DIGEST`, cross-checks against `/etc/eigenius-runtime-env/manifest-hash`, then accepts the UDS connection.
+4. `JuliaWorker.jl` receives `dispatch_method` with the script source as the CBOR target, evaluates it, returns the output via CBOR.
+5. Substrate captures the output, assembles a `RuntimeInvocation` with the substrate-built image digest echoed verbatim, commits everything to the chain.
 
 **Acceptance criteria.**
-- `RuntimeInvocation.image_digest` matches the pinned digest verbatim.
+- `RuntimeInvocation.image_digest` matches the **substrate-built** digest (not the upstream Julia digest).
+- The substrate-built digest is deterministic — building the same `JuliaEnvironment` resource twice produces byte-identical OCI images.
+- In-image provenance files (`/etc/eigenius-runtime-env/{manifest-hash, mirror-iri, included-pkgs, built-at}`) are present and consistent with what the substrate stamped at build time.
+- Worker bootstrap cross-check fires: tampering with `EIGENIUS_RUNTIME_ENV_DIGEST` at spawn time produces `SpawnError::WorkerCrossCheckFailed` and the worker refuses to start.
 - The output resource carries the expected transformed payload.
 - The container is removed after exit (`auto_remove`).
 - The script cannot write outside its tempdir (sandbox check; an inner attempt fails with `SandboxViolation`).
 - A second invocation against the same environment skips the registry pull (Docker layer cache; observed via timing).
 - Re-running the same `(script, environment, inputs)` against the same host yields a byte-identical output resource (deterministic-by-environment per D26 §8.4).
 
-**Why this shape.** Using an upstream image instead of a substrate-built one keeps the capstone focused on the spawn / sandbox / provenance / boundary path. Using Julia rather than the `bash` smoke runtime ensures the substrate works against a real interpreter with non-trivial startup cost and an actual standard library — i.e. against the kind of runtime Phase 19 will host. When Phase 19 lands, the test fixture is replaced by `eigenius-julia` and the capstone test must continue to pass — making it the regression anchor between the two phases.
+**Why this shape.** Extending an upstream image rather than using one verbatim — or building from scratch — gives the capstone genuine end-to-end coverage: the substrate's build pipeline (18c), the worker bootstrap cross-check, the DooD bind-mount discipline, the spawn / sandbox / RPC path all fire under one test. Using Julia rather than the `bash` smoke runtime ensures the substrate works against a real interpreter with non-trivial startup cost and an actual standard library — i.e. against the kind of runtime Phase 19 will host. The upstream digest as base keeps the capstone focused on substrate machinery rather than language-toolchain installation. When Phase 19a lands, `JuliaWorker.jl` is the seed of `eigenius-julia`'s production worker, and this capstone test continues to pass against the production code — making it the regression anchor between the two phases.
 
 ### Phase 18e — CBOR consolidation for kernel ↔ orchestrator (~1 week)
 

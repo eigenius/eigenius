@@ -715,7 +715,7 @@ The deterministic build pipeline (§9.2), digest capture, in-image provenance, w
 
 **Scope:** Medium. The sandbox and image pipeline are independent workstreams; both need to land before production deployment is viable.
 
-**Acceptance: end-to-end capstone.** Phase C closes with a hello-world round-trip against an upstream [official Julia image](https://hub.docker.com/_/julia) digest — substrate spawns the pinned `julia:*` container, runs a trivial script, captures stdout, commits a `RuntimeInvocation`. Deliberately uses an image the substrate did not build (the deterministic build pipeline is exercised separately) so the capstone is focused on the spawn / sandbox / provenance / boundary path. Detailed scope and criteria in [implementation-plan.md](implementation-plan.md) Phase 18d.
+**Acceptance: end-to-end capstone.** Phase C closes with a hello-world round-trip against a *substrate-built* image that extends an [official Julia image](https://hub.docker.com/_/julia) digest as its base. The substrate's build pipeline composes a Dockerfile on top of the upstream digest — adding a minimal Julia worker (`JuliaWorker.jl`, ~100 lines, speaks the substrate's CBOR RPC) and the in-image provenance files — and `buildah` produces a deterministic OCI image. The capstone runtime spawns *that* digest (not the upstream Julia digest), and the round-trip exercises every architectural piece in one test: fragment composition, build context materialisation, deterministic image digest, provenance cross-check, DooD bind-mount discipline, spawn, RPC, sandbox, dispatch. Detailed scope and criteria in [implementation-plan.md](implementation-plan.md) Phase 18d.
 
 ### Phase D — Cross-language readiness
 
