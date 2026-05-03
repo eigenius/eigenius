@@ -38,10 +38,12 @@
 //! `image_digest`. The pool sits *above* this trait, not inside it —
 //! spawner backends stay ignorant of pooling.
 
+#[cfg(feature = "docker-spawner")]
 pub mod docker;
 pub mod local;
 
-pub use docker::DockerSpawner;
+#[cfg(feature = "docker-spawner")]
+pub use docker::{DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy};
 pub use local::LocalSpawner;
 
 use crate::error::SpawnError;

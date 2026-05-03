@@ -73,7 +73,9 @@ pub use rpc::{
     ClientError, FrameError, HealthInfo, NumericalMetadata, Request, Response, WorkerRpcClient,
     MAX_FRAME_SIZE_DEFAULT,
 };
-pub use spawner::{DockerSpawner, LocalSpawner, WorkerSpawner};
+#[cfg(feature = "docker-spawner")]
+pub use spawner::{DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy};
+pub use spawner::{LocalSpawner, WorkerSpawner};
 #[cfg(feature = "test-runtime")]
 pub use test_runtime::TestLanguageRuntime;
 pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};

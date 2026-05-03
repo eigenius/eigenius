@@ -14,6 +14,11 @@ description = "Language-agnostic substrate for hosting external language toolcha
 # can opt out via `--no-default-features`.
 default = ["test-runtime"]
 test-runtime = []
+# Enables `DockerSpawner` (Phase 18c.3): Bollard-backed
+# Docker-outside-of-Docker worker spawner. Pulls in `bollard` + a Tokio
+# runtime — gated so non-container deployments don't pay the dependency
+# weight. See [D26 §8.2](../../docs/design/d26-runtime-substrate.md).
+docker-spawner = ["dep:bollard", "dep:tokio", "dep:futures-util"]
 
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
@@ -21,6 +26,27 @@ thiserror.workspace = true
 serde.workspace = true
 serde_bytes = "0.11"
 ciborium = "0.2"
+# Docker-spawner backend (gated). Bollard exposes `default = [http, pipe]`
+# where `pipe` is the Unix-socket / named-pipe transport — needed for the
+# DooD `/var/run/docker.sock` access pattern (D26 §9.5).
+bollard = { version = "0.20", optional = true }
+# Local Tokio runtime — narrower features than the workspace-wide
+# `tokio = "full"` since DockerSpawner only needs a multi-thread runtime
+# for blocking on Bollard's async API plus timers + UDS for cross-check
+# polling.
+tokio = { version = "1", optional = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "net",
+] }
+# Stream extensions (`StreamExt::next`) for draining Bollard's
+# event-stream APIs. Already pulled transitively by Bollard; lifted to
+# a direct dep so the compiler sees the trait without leaning on
+# transitive feature unification.
+futures-util = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+] }
 
 [[bin]]
 name = "eigenius-test-worker"
