@@ -12,42 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `TestLanguageRuntimeDocker` — **DockerSpawner-only test fixture**
-//! that ties Phase 18c.1–18c.5 together: builds a real OCI image
-//! containing the `eigenius-test-worker` binary, spawns it via
-//! [`crate::spawner::DockerSpawner`], and runs the same bash-c
-//! protocol as [`crate::test_runtime::TestLanguageRuntime`]. This is
-//! the bash analogue of Phase 18d's Julia capstone.
+//! `TestLanguageRuntimeJulia` — Phase 18d capstone fixture. Same shape
+//! as [`crate::test_runtime_docker::TestLanguageRuntimeDocker`] but
+//! the worker is a real Julia interpreter instead of bash. Validates
+//! 18c.1–18c.6 against a non-trivial language with a real install
+//! step (`Pkg.instantiate` + `Pkg.precompile`) — the witness that the
+//! substrate's e2e plumbing works for a runtime with non-trivial
+//! cold-start cost and a real package manager.
 //!
-//! Feature-gated behind both `test-runtime` and `docker-spawner` —
-//! pulls in `buildah` (build path) and `bollard` (run path).
+//! Feature-gated behind both `test-runtime` and `docker-spawner`.
 //!
-//! ## What this validates end-to-end
+//! ## What this validates that the bash version doesn't
 //!
-//! - **18c.1** image-build pipeline composes a real Dockerfile and
-//!   invokes `buildah` against a glibc-compatible base (the recommended
-//!   `debian:bookworm-slim`; alpine doesn't work because the cargo-built
-//!   worker is dynamically linked against glibc).
-//! - **18c.2** cross-check: manifest-hash baked into the image at
-//!   `/etc/eigenius-runtime-env/manifest-hash` matches the env var
-//!   the substrate sets at spawn time.
-//! - **18c.3** `DockerSpawner` spawns against the substrate-built
-//!   image with `auto_remove`, network isolation, the DooD bind-mount
-//!   discipline, and `no-new-privileges:true`. No `cap_drop` per D26
-//!   §1.2 — substrate is provenance + dispatch, not adversarial
-//!   containment.
-//! - **18c.4** `wait_with_timeout` reaps the container.
-//! - **18c.5** [`crate::invocation::DispatchTrace`] carries the
-//!   substrate-built image digest and worker-reported
-//!   `numerical_metadata`.
+//! - **Multi-file build context** — Project.toml + Manifest.toml +
+//!   src/JuliaWorker.jl get materialised under `language/` together,
+//!   with the Dockerfile composer emitting one COPY per asset.
+//! - **Non-trivial install_runtime** — `Pkg.instantiate` against a
+//!   pinned Manifest pulls and precompiles CBOR.jl. Exercises the
+//!   image build's RUN-step path (alpine-vs-glibc and chmod-bit
+//!   concerns from 18c.6 don't apply — Julia runs against glibc by
+//!   default in `julia:1.12-bookworm`).
+//! - **Real interpreter cold-start** — pulls in a ~500MB base image,
+//!   hits Julia's package + JIT path. First test run takes minutes;
+//!   subsequent runs hit Docker's layer cache and substrate's image
+//!   cache.
 //!
-//! ## Manifest-hash anchor
-//!
-//! SHA-256 of the worker binary bytes. Both sides of the cross-check
-//! derive from the same input — the build pipeline writes this hash
-//! into `manifest-hash`; `spawn_worker` sets the same hash on the
-//! `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` env var. Same binary in →
-//! same hash → cross-check passes deterministically.
+//! Phase 19a will create the proper `eigenius-julia` crate; this
+//! fixture is then either retired or kept as the regression anchor
+//! between Phase 18 and Phase 19's Julia work (per the implementation
+//! plan).
 
 use crate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
 use crate::error::{BuildError, RunError, SpawnError};
@@ -56,7 +49,6 @@ use crate::image_build::{
     compose_dockerfile, BuildContext, BuildContextSpec, BuildahImageBuilder, DockerfileSpec,
     ImageBuilder, LanguageAsset,
 };
-use crate::invocation::DispatchTrace;
 use crate::language_runtime::LanguageRuntime;
 use crate::rpc::client::WorkerRpcClient;
 use crate::rpc::protocol::{HealthInfo, Request, Response};
@@ -73,101 +65,101 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-const LANGUAGE: &str = "test";
+const LANGUAGE: &str = "julia";
 const PROP_SOURCE: &str = "urn:eigenius:runtime:source";
 const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
-const PROP_TEST_BASH_STDOUT: &str = "urn:eigenius:test:bash_stdout";
-const UDS_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const WORKER_BINARY_DEST: &str = "/usr/local/bin/eigenius-test-worker";
+const PROP_TEST_JULIA_OUTPUT: &str = "urn:eigenius:test:julia_output";
+const UDS_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+const WORKER_PROJECT_DIR: &str = "/opt/eigenius/julia-worker";
 
 static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// `LanguageRuntime` impl that builds and runs the bash test worker
+/// `LanguageRuntime` impl that builds and runs the Julia worker
 /// inside a Docker container. See module docs for what it validates.
-///
-/// Construction is cheap (no I/O); the OCI image is built lazily on
-/// the first `spawn_worker` call (and cached thereafter) so repeated
-/// invocations against the same runtime instance share the build.
-pub struct TestLanguageRuntimeDocker {
+pub struct TestLanguageRuntimeJulia {
     spawner: Arc<DockerSpawner>,
-    worker_binary_path: PathBuf,
+    /// Path to `julia/runtime-worker/` — the directory containing
+    /// `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`. The
+    /// integration test resolves this via `env!("CARGO_MANIFEST_DIR")`
+    /// against a relative path to the workspace root.
+    project_dir: PathBuf,
     base_image_ref: String,
     image_tag: String,
     cached_digest: OnceLock<ImageDigest>,
-    /// Memoised hash of the worker binary bytes — used both as the
-    /// cross-check anchor and (indirectly) as part of the image tag,
-    /// so different binaries produce different images.
     cached_manifest_hash: OnceLock<String>,
-    cached_binary_bytes: OnceLock<Vec<u8>>,
-    /// Single per-process build directory under the depot. The
-    /// substrate places per-invocation tempdirs alongside it, all under
-    /// the same depot path so the DooD bind-mount discipline (D26 §9.5)
-    /// is satisfied without translation.
+    cached_assets: OnceLock<JuliaAssets>,
     depot_path: PathBuf,
 }
 
-impl TestLanguageRuntimeDocker {
-    /// Construct with an explicit worker binary path and a digest-pinned
-    /// base image reference (e.g. `"alpine@sha256:<...>"`). The depot
-    /// path is the substrate's well-known host directory under which all
-    /// per-invocation tempdirs and the build context are materialised
-    /// (D26 §9.5); it must be the same path the supplied
-    /// `DockerSpawner` was configured with.
+#[derive(Clone)]
+struct JuliaAssets {
+    project_toml: Vec<u8>,
+    manifest_toml: Vec<u8>,
+    worker_jl: Vec<u8>,
+}
+
+impl TestLanguageRuntimeJulia {
+    /// Construct with paths to the Julia project directory, the
+    /// digest-pinned Julia base image, the substrate's `DockerSpawner`,
+    /// and the depot path the spawner was configured with.
     pub fn new(
-        worker_binary: PathBuf,
+        project_dir: PathBuf,
         base_image_ref: impl Into<String>,
         spawner: Arc<DockerSpawner>,
         depot_path: PathBuf,
     ) -> Self {
         let base = base_image_ref.into();
-        // Image tag carries a short prefix of the base ref so concurrent
-        // test runs with different bases don't collide. The full hash
-        // is pinned in the manifest itself.
         let safe_prefix: String = base
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
             .take(24)
             .collect();
-        let image_tag = format!("eigenius-substrate-test-bash-{safe_prefix}:latest");
+        let image_tag = format!("eigenius-substrate-test-julia-{safe_prefix}:latest");
         Self {
             spawner,
-            worker_binary_path: worker_binary,
+            project_dir,
             base_image_ref: base,
             image_tag,
             cached_digest: OnceLock::new(),
             cached_manifest_hash: OnceLock::new(),
-            cached_binary_bytes: OnceLock::new(),
+            cached_assets: OnceLock::new(),
             depot_path,
         }
     }
 
-    fn binary_bytes(&self) -> Result<&[u8], BuildError> {
-        if let Some(b) = self.cached_binary_bytes.get() {
-            return Ok(b);
+    fn assets(&self) -> Result<&JuliaAssets, BuildError> {
+        if let Some(a) = self.cached_assets.get() {
+            return Ok(a);
         }
-        let bytes = std::fs::read(&self.worker_binary_path).map_err(|e| {
-            BuildError::BuildInputUnavailable(format!(
-                "failed to read worker binary at {}: {e}",
-                self.worker_binary_path.display()
-            ))
-        })?;
-        let _ = self.cached_binary_bytes.set(bytes);
-        Ok(self.cached_binary_bytes.get().expect("just set"))
+        let project_toml = read_or_fail(&self.project_dir.join("Project.toml"))?;
+        let manifest_toml = read_or_fail(&self.project_dir.join("Manifest.toml"))?;
+        let worker_jl = read_or_fail(&self.project_dir.join("src/JuliaWorker.jl"))?;
+        let _ = self.cached_assets.set(JuliaAssets {
+            project_toml,
+            manifest_toml,
+            worker_jl,
+        });
+        Ok(self.cached_assets.get().expect("just set"))
     }
 
     fn manifest_hash(&self) -> Result<&str, BuildError> {
         if let Some(h) = self.cached_manifest_hash.get() {
             return Ok(h);
         }
-        let bytes = self.binary_bytes()?;
-        let hash = format!("sha256:{:x}", Sha256::digest(bytes));
+        let assets = self.assets()?;
+        // Hash all three project files as a single byte stream so any
+        // edit to any of them produces a different manifest hash.
+        // Order is fixed by code (not the filesystem), which is what
+        // determinism wants.
+        let mut hasher = Sha256::new();
+        hasher.update(&assets.project_toml);
+        hasher.update(&assets.manifest_toml);
+        hasher.update(&assets.worker_jl);
+        let hash = format!("sha256:{:x}", hasher.finalize());
         let _ = self.cached_manifest_hash.set(hash);
         Ok(self.cached_manifest_hash.get().expect("just set"))
     }
 
-    /// Lazy build: invoke buildah on the first call, return the cached
-    /// digest on subsequent calls. Made deterministic by the upstream
-    /// 18c.1 pipeline — same inputs → same image id.
     fn ensure_image(&self) -> Result<ImageDigest, BuildError> {
         if let Some(d) = self.cached_digest.get() {
             return Ok(d.clone());
@@ -179,13 +171,23 @@ impl TestLanguageRuntimeDocker {
 
     fn build_image(&self) -> Result<ImageDigest, BuildError> {
         let manifest_hash = self.manifest_hash()?.to_string();
-        let binary_bytes = self.binary_bytes()?.to_vec();
+        let assets = self.assets()?.clone();
 
         let fragments = self.dockerfile_fragments_inner();
-        let asset_copies = vec![LanguageAssetCopy {
-            source: PathBuf::from("eigenius-test-worker"),
-            destination: WORKER_BINARY_DEST.to_string(),
-        }];
+        let asset_copies = vec![
+            LanguageAssetCopy {
+                source: PathBuf::from("Project.toml"),
+                destination: format!("{WORKER_PROJECT_DIR}/Project.toml"),
+            },
+            LanguageAssetCopy {
+                source: PathBuf::from("Manifest.toml"),
+                destination: format!("{WORKER_PROJECT_DIR}/Manifest.toml"),
+            },
+            LanguageAssetCopy {
+                source: PathBuf::from("src/JuliaWorker.jl"),
+                destination: format!("{WORKER_PROJECT_DIR}/src/JuliaWorker.jl"),
+            },
+        ];
         let dockerfile = compose_dockerfile(&DockerfileSpec {
             base_image_ref: &self.base_image_ref,
             fragments: &fragments,
@@ -194,7 +196,7 @@ impl TestLanguageRuntimeDocker {
             language_asset_copies: &asset_copies,
         });
 
-        let work_dir = self.depot_path.join("build-context");
+        let work_dir = self.depot_path.join("build-context-julia");
         let _ = std::fs::remove_dir_all(&work_dir);
         std::fs::create_dir_all(&work_dir).map_err(|e| {
             BuildError::EnvironmentBuildFailed(format!(
@@ -208,60 +210,59 @@ impl TestLanguageRuntimeDocker {
             manifest_hash: manifest_hash.clone(),
             mirror_iri: String::new(),
             included_pkg_iris: Vec::new(),
-            // built_at is part of the deterministic input set in the
-            // image config, so the value must be a function of inputs
-            // only — not the wall clock. The manifest hash already
-            // pins the input set; reusing it gives a stable, audit-
-            // friendly stamp.
             built_at: format!("manifest:{manifest_hash}"),
             packages: BTreeMap::new(),
             mirror: None,
-            language_assets: vec![LanguageAsset {
-                source: PathBuf::from("eigenius-test-worker"),
-                content: binary_bytes,
-                mode: Some(0o755),
-            }],
+            language_assets: vec![
+                LanguageAsset {
+                    source: PathBuf::from("Project.toml"),
+                    content: assets.project_toml,
+                    mode: None,
+                },
+                LanguageAsset {
+                    source: PathBuf::from("Manifest.toml"),
+                    content: assets.manifest_toml,
+                    mode: None,
+                },
+                LanguageAsset {
+                    source: PathBuf::from("src/JuliaWorker.jl"),
+                    content: assets.worker_jl,
+                    mode: None,
+                },
+            ],
         };
         let context = BuildContext::materialize(work_dir, &spec)?;
-        // 1. buildah builds into its own local image store. Returns
-        //    buildah's image id, which is *not* what the run-side
-        //    Docker daemon will see — they're separate stores.
         let _ = BuildahImageBuilder::new().build(&context, &self.image_tag)?;
-        // 2. Hand the image off to the local Docker daemon's store via
-        //    buildah's `docker-daemon:` transport. Production
-        //    deployments would push to a registry instead and let
-        //    DockerSpawner pull (D26 §9.2 step 5); the test fixture
-        //    short-circuits that with a local-only handoff so no
-        //    registry credentials are required.
         push_to_docker_daemon(&self.image_tag)?;
-        // 3. Re-resolve the digest from Docker's perspective. Docker
-        //    may re-encode the manifest on import (OCI ↔ Docker
-        //    manifest format), producing a different image id than
-        //    buildah's local id. The id Docker reports is the one
-        //    `DockerSpawner::spawn` will look up, so that's the
-        //    authoritative one for the substrate's `ImageDigest`.
         resolve_docker_image_id(&self.image_tag)
     }
 
     fn dockerfile_fragments_inner(&self) -> DockerfileFragments {
         DockerfileFragments {
-            // Empty install_runtime: the recommended base
-            // (`debian:bookworm-slim`) ships with bash + glibc
-            // preinstalled, which is what the worker binary needs. The
-            // alpine alternative was tried first but the cargo-built
-            // worker is dynamically linked against glibc; on alpine
-            // (musl) it fails at the dynamic-linker step. That trade-off
-            // is real for any production language runtime that ships
-            // glibc-linked binaries — choose the base image to match.
+            // Empty install_runtime — `julia:1.12-bookworm` ships
+            // with the Julia binary; nothing to install at the
+            // runtime level. Project deps go in `install_packages`
+            // because the composer's section ordering puts that
+            // section *after* the language asset COPY (`Project.toml`
+            // / `Manifest.toml`); putting it in `install_runtime`
+            // would run before the project files exist and silently
+            // become a no-op.
             install_runtime: vec![],
-            install_packages: vec![],
+            install_packages: vec![format!(
+                "RUN JULIA_PKG_PRECOMPILE_AUTO=0 julia --project={WORKER_PROJECT_DIR} \
+                     -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'"
+            )],
             install_mirror: vec![],
-            bootstrap_command: vec![WORKER_BINARY_DEST.to_string()],
+            bootstrap_command: vec![
+                "julia".to_string(),
+                format!("--project={WORKER_PROJECT_DIR}"),
+                format!("{WORKER_PROJECT_DIR}/src/JuliaWorker.jl"),
+            ],
         }
     }
 }
 
-impl LanguageRuntime for TestLanguageRuntimeDocker {
+impl LanguageRuntime for TestLanguageRuntimeJulia {
     fn language_id(&self) -> &str {
         LANGUAGE
     }
@@ -282,30 +283,25 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
     ) -> Result<WorkerHandle, SpawnError> {
         let digest = self.ensure_image().map_err(|e| SpawnError::SpawnFailed {
             backend: "docker",
-            reason: format!("test-runtime-docker build_image failed: {e}"),
+            reason: format!("test-runtime-julia build_image failed: {e}"),
         })?;
         let manifest_hash = self
             .manifest_hash()
             .map_err(|e| SpawnError::SpawnFailed {
                 backend: "docker",
-                reason: format!("test-runtime-docker manifest_hash failed: {e}"),
+                reason: format!("test-runtime-julia manifest_hash failed: {e}"),
             })?
             .to_string();
 
         let n = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
         let tempdir = self
             .depot_path
-            .join(format!("inv-{}-{n}", std::process::id()));
+            .join(format!("inv-julia-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&tempdir).map_err(|e| SpawnError::SpawnFailed {
             backend: "docker",
             reason: format!("create tempdir {} failed: {e}", tempdir.display()),
         })?;
 
-        // Image carries the manifest-hash file baked in at build time
-        // — `AssumeBaked` skips host-side write but still populates the
-        // env vars the worker reads on startup (D26 §9.3). The
-        // `prov_dir` argument is unused on this branch but required by
-        // the helper signature.
         let cross_check_env = prepare_substrate_side(
             &digest,
             &manifest_hash,
@@ -326,10 +322,14 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
 
         let spec = WorkerSpec {
             image_digest: Some(digest),
-            command: Vec::new(), // image's CMD = WORKER_BINARY_DEST
+            command: Vec::new(), // image's CMD = bootstrap_command
             tempdir_host_path: tempdir,
             depot_host_path: Some(self.depot_path.clone()),
             env,
+            // Julia cold-start + dispatch should be well under a
+            // minute even for the precompile-uncached first run; the
+            // wall-clock cap is enforced by the dispatcher in
+            // production.
             max_wall_time_ms: 0,
             max_memory_bytes: 0,
             seccomp_profile: None,
@@ -355,10 +355,10 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
 
         let mut target_cbor = Vec::new();
         ciborium::into_writer(source, &mut target_cbor)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("encode bash command as CBOR: {e}")))?;
+            .map_err(|e| RunError::WorkerRpcFailed(format!("encode julia source as CBOR: {e}")))?;
 
         let invocation_id = format!(
-            "test-docker-inv-{}",
+            "test-julia-inv-{}",
             INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
         let resp = client
@@ -386,9 +386,6 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
             }
         };
 
-        // Same connection-management contract as `TestLanguageRuntime`:
-        // explicit Evict so the worker exits cleanly (its serve loop
-        // doesn't exit on EOF since 18c.5).
         let evict_resp = client
             .call(&Request::Evict)
             .map_err(|e| RunError::WorkerRpcFailed(format!("evict call: {e}")))?;
@@ -409,7 +406,7 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
         _inputs: &[Resource],
     ) -> Result<Resource, RunError> {
         Err(RunError::MethodSignatureMismatch(
-            "TestLanguageRuntimeDocker does not implement call_method (use run_script with a bash one-liner)"
+            "TestLanguageRuntimeJulia does not implement call_method (use run_script with a Julia source string)"
                 .to_string(),
         ))
     }
@@ -436,6 +433,15 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
     }
 }
 
+fn read_or_fail(p: &Path) -> Result<Vec<u8>, BuildError> {
+    std::fs::read(p).map_err(|e| {
+        BuildError::BuildInputUnavailable(format!(
+            "could not read Julia project file {}: {e}",
+            p.display()
+        ))
+    })
+}
+
 fn read_string_property<'a>(r: &'a Resource, prop_iri: &str) -> Result<&'a str, String> {
     let iri = Iri::parse(prop_iri).map_err(|e| format!("malformed property IRI: {e}"))?;
     r.get(&iri)
@@ -449,7 +455,7 @@ fn connect_with_retry(uds_path: &Path, timeout: Duration) -> std::io::Result<Uni
         match UnixStream::connect(uds_path) {
             Ok(s) => return Ok(s),
             Err(_) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(100));
             }
             Err(e) => return Err(e),
         }
@@ -464,15 +470,15 @@ fn map_dispatch_failure(error_kind: &str, message: String) -> RunError {
     }
 }
 
-fn build_output_resource(invocation_id: &str, stdout: String) -> Resource {
+fn build_output_resource(invocation_id: &str, output: String) -> Resource {
     let iri = Iri::parse(&format!(
         "urn:eigenius:test:invocation:{invocation_id}:output"
     ))
     .expect("test invocation IRI is well-formed by construction");
     let mut r = Resource::new(iri);
     r.set(
-        Iri::parse(PROP_TEST_BASH_STDOUT).expect("static IRI is well-formed"),
-        Value::String(stdout),
+        Iri::parse(PROP_TEST_JULIA_OUTPUT).expect("static IRI is well-formed"),
+        Value::String(output),
     );
     r.set(
         Iri::parse(PROP_LANGUAGE).expect("static IRI is well-formed"),
@@ -481,38 +487,20 @@ fn build_output_resource(invocation_id: &str, stdout: String) -> Resource {
     r
 }
 
-// Suppress "unused import" warning on platforms where DispatchTrace isn't
-// referenced — the import is documentation-load-bearing and links the
-// Phase 18c.5 trace contract to this fixture. Tests cover the runtime
-// surface; the trace assembly happens upstream in the dispatcher.
-#[allow(dead_code)]
-fn _link_dispatch_trace(_: DispatchTrace) {}
-
-/// Hand the substrate-built image off to the local Docker daemon's
-/// image store. Uses the universally-compatible `docker-archive`
-/// transport (buildah → tar → `docker load`) rather than
-/// `docker-daemon:` because the latter requires the buildah build
-/// matching the Docker daemon API version. With buildah 1.23 + Docker
-/// 29 (the user's environment), the direct transport fails with a
-/// "client version too old" diagnostic. The tar handoff bypasses the
-/// API negotiation entirely.
-///
-/// Test-fixture only — production deployments push to a registry per
-/// D26 §9.2 step 5.
+/// Hand the substrate-built image off to Docker via tar archive (same
+/// pattern as `test_runtime_docker.rs`'s `push_to_docker_daemon` —
+/// keeps cross-buildah/cross-Docker-version interop irrelevant).
 fn push_to_docker_daemon(image_tag: &str) -> Result<(), BuildError> {
     // Per-call nonce so parallel test invocations in the same cargo
     // test process don't race on the same archive path.
     static ARCHIVE_NONCE: AtomicU64 = AtomicU64::new(0);
     let nonce = ARCHIVE_NONCE.fetch_add(1, Ordering::SeqCst);
     let archive_path = std::env::temp_dir().join(format!(
-        "substrate-image-{}-{}-{}.tar",
+        "substrate-image-julia-{}-{}-{}.tar",
         std::process::id(),
         sanitise_for_path(image_tag),
         nonce,
     ));
-    // Defensive cleanup — a previous failed run could have left a
-    // partial archive at the same path. `buildah push` does not
-    // overwrite atomically; pre-removing avoids partial-data ambiguity.
     let _ = std::fs::remove_file(&archive_path);
 
     let push = std::process::Command::new("buildah")
@@ -550,15 +538,6 @@ fn push_to_docker_daemon(image_tag: &str) -> Result<(), BuildError> {
     Ok(())
 }
 
-fn sanitise_for_path(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect()
-}
-
-/// Read the image id Docker assigns to `image_tag` after the push, in
-/// `sha256:<hex>` shape. Returns the parsed `ImageDigest` so it can be
-/// stored in `WorkerSpec` as the spawn-time anchor.
 fn resolve_docker_image_id(image_tag: &str) -> Result<ImageDigest, BuildError> {
     let output = std::process::Command::new("docker")
         .args(["image", "inspect", "--format", "{{.Id}}", image_tag])
@@ -582,7 +561,13 @@ fn resolve_docker_image_id(image_tag: &str) -> Result<ImageDigest, BuildError> {
     })
 }
 
-// Tests for TestLanguageRuntimeDocker live in
-// tests/docker_e2e_integration.rs because they need the
-// `CARGO_BIN_EXE_eigenius-test-worker` env var (only available to
-// integration test crates) plus a real Docker daemon and buildah.
+fn sanitise_for_path(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+// Tests live in `tests/julia_capstone_integration.rs` because they
+// need a real Docker daemon, real buildah, and the
+// `julia/runtime-worker/` directory at a known path relative to the
+// crate root.

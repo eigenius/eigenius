@@ -149,14 +149,14 @@ impl SubstrateDispatcher {
         let worker = runtime.spawn_worker(&env, None).map_err(|e| {
             FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
         })?;
-        let numerical_metadata = capture_numerical_metadata(runtime, &worker);
+        let (numerical_metadata, image_digest) = capture_health(runtime, &worker);
         let started_at = DispatchTrace::now_rfc3339();
         let output = runtime.run_script(&worker, script, &[input])?;
         let completed_at = DispatchTrace::now_rfc3339();
         Ok(build_outcome(
             &output,
             &language,
-            None,
+            image_digest,
             started_at,
             completed_at,
             numerical_metadata,
@@ -186,14 +186,14 @@ impl SubstrateDispatcher {
         let worker = runtime.spawn_worker(&env, None).map_err(|e| {
             FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
         })?;
-        let numerical_metadata = capture_numerical_metadata(runtime, &worker);
+        let (numerical_metadata, image_digest) = capture_health(runtime, &worker);
         let started_at = DispatchTrace::now_rfc3339();
         let output = runtime.call_method(&worker, signature, &[input])?;
         let completed_at = DispatchTrace::now_rfc3339();
         Ok(build_outcome(
             &output,
             &language,
-            None,
+            image_digest,
             started_at,
             completed_at,
             numerical_metadata,
@@ -201,23 +201,31 @@ impl SubstrateDispatcher {
     }
 }
 
-/// Best-effort `Health` round-trip. A failure here logs to stderr and
-/// yields empty `NumericalMetadata` rather than failing the dispatch —
-/// trace integrity is best-effort, the dispatch contract is not.
-/// Phase 18c.5 / D26 §5.5.
-fn capture_numerical_metadata(
+/// Best-effort `Health` round-trip. Returns the substrate-relevant
+/// fields from `HealthInfo`: the worker's reported `numerical_metadata`
+/// and the in-image image digest (`env_digest_in_image`). A failure
+/// here logs to stderr and yields empty fields rather than failing the
+/// dispatch — trace integrity is best-effort, the dispatch contract is
+/// not. Phase 18c.5 / D26 §5.5.
+fn capture_health(
     runtime: &dyn LanguageRuntime,
     worker: &WorkerHandle,
-) -> NumericalMetadata {
+) -> (NumericalMetadata, Option<crate::types::ImageDigest>) {
     match runtime.query_health(worker) {
-        Ok(info) => info.numerical_metadata,
+        Ok(info) => {
+            let digest = info
+                .env_digest_in_image
+                .as_deref()
+                .and_then(|s| crate::types::ImageDigest::parse(s).ok());
+            (info.numerical_metadata, digest)
+        }
         Err(e) => {
             eprintln!(
                 "eigenius-runtime-substrate: query_health failed for worker {} ({}): {e}; \
-                 dispatch will continue with empty NumericalMetadata",
+                 dispatch will continue with empty trace fields",
                 worker.id, worker.backend
             );
-            NumericalMetadata::default()
+            (NumericalMetadata::default(), None)
         }
     }
 }

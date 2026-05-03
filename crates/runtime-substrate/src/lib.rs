@@ -49,6 +49,8 @@ pub mod spawner;
 pub mod test_runtime;
 #[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
 pub mod test_runtime_docker;
+#[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
+pub mod test_runtime_julia;
 pub mod types;
 
 pub use boundary::{check_call_method, check_run_script};
@@ -84,4 +86,6 @@ pub use spawner::{LocalSpawner, WorkerSpawner};
 pub use test_runtime::TestLanguageRuntime;
 #[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
 pub use test_runtime_docker::TestLanguageRuntimeDocker;
+#[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
+pub use test_runtime_julia::TestLanguageRuntimeJulia;
 pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};
