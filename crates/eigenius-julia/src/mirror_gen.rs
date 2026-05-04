@@ -70,6 +70,12 @@ const PROP_RECOMMENDS: &str = "urn:eigenius:core:recommends";
 const PROP_DATA_TYPE: &str = "urn:eigenius:core:data_type";
 const PROP_CLASS_TYPES: &str = "urn:eigenius:core:class_types";
 const PROP_ELEMENT_TYPE: &str = "urn:eigenius:core:element_type";
+const PROP_MIN_VALUE: &str = "urn:eigenius:core:min_value";
+const PROP_MAX_VALUE: &str = "urn:eigenius:core:max_value";
+const PROP_MIN_LENGTH: &str = "urn:eigenius:core:min_length";
+const PROP_MAX_LENGTH: &str = "urn:eigenius:core:max_length";
+const PROP_PATTERN: &str = "urn:eigenius:core:pattern";
+const PROP_FORMAT: &str = "urn:eigenius:core:format";
 
 const TYPE_STRING: &str = "urn:eigenius:core:string";
 const TYPE_INTEGER: &str = "urn:eigenius:core:integer";
@@ -79,6 +85,15 @@ const TYPE_RESOURCE: &str = "urn:eigenius:core:resource";
 const TYPE_RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
 const TYPE_VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
 const TYPE_JSON: &str = "urn:eigenius:core:json";
+
+/// Property IRI we stamp on every encoded resource so the receiver can
+/// re-validate the class. Mirrors the kernel's `is_a` convention.
+const PROP_IS_A: &str = "urn:eigenius:core:is_a";
+
+/// Prefix for format IRIs in the core ontology. Format IRIs end in
+/// the format short_name (e.g. `urn:eigenius:core:formats:date` →
+/// `:date`).
+const FORMAT_IRI_PREFIX: &str = "urn:eigenius:core:formats:";
 
 /// `MirrorGenerator` for Julia. Stateless — every `generate()` call
 /// re-walks the supplied chain.
@@ -161,13 +176,29 @@ struct ClassDecl {
 
 /// One property's contribution to a struct field.
 struct PropertyDecl {
-    /// Property IRI — needed by the codec emitter (19a.3.b) to key
-    /// `decode_*` / `encode_*` lookups on the IRI-keyed CBOR map.
-    /// Unused in 19a.3.a; the `#[allow]` removes when 19a.3.b lands.
-    #[allow(dead_code)]
+    /// Property IRI — keys the `decode_*` / `encode_*` map lookups.
     iri: Iri,
     short_name: String,
     julia_type: JuliaType,
+    constraints: PropertyConstraints,
+}
+
+/// Format / range constraints declared on a property in the
+/// ontology. Drives the validating-inner-constructor emit. v1
+/// captures the constraint primitives D1 spec carries on `Property`;
+/// per-data-type semantics (e.g. `min_value` only meaningful for
+/// integer / float properties) are enforced by the ontology validator
+/// at commit time, not by the generator.
+#[derive(Default, Debug)]
+struct PropertyConstraints {
+    min_value: Option<f64>,
+    max_value: Option<f64>,
+    min_length: Option<i64>,
+    max_length: Option<i64>,
+    pattern: Option<String>,
+    /// Format short_name extracted from the format IRI's tail
+    /// (e.g. `"date"` from `urn:eigenius:core:formats:date`).
+    format: Option<String>,
 }
 
 /// The Julia type a property's `data_type` maps to. Only the cases
@@ -310,13 +341,46 @@ fn resolve_properties(
             }
         })?;
         let julia_type = resolve_property_type(request, &prop_def, &prop_iri)?;
+        let constraints = read_constraints(&prop_def);
         out.push(PropertyDecl {
             iri: prop_iri,
             short_name,
             julia_type,
+            constraints,
         });
     }
     Ok(out)
+}
+
+fn read_constraints(prop_def: &Resource) -> PropertyConstraints {
+    PropertyConstraints {
+        min_value: numeric_value(prop_def, PROP_MIN_VALUE),
+        max_value: numeric_value(prop_def, PROP_MAX_VALUE),
+        min_length: integer_value(prop_def, PROP_MIN_LENGTH),
+        max_length: integer_value(prop_def, PROP_MAX_LENGTH),
+        pattern: string_value(prop_def, PROP_PATTERN),
+        format: resource_iri_value(prop_def, PROP_FORMAT)
+            .and_then(|iri| {
+                iri.as_str()
+                    .strip_prefix(FORMAT_IRI_PREFIX)
+                    .map(str::to_string)
+            }),
+    }
+}
+
+/// Read a numeric property as f64. Tolerates `Value::Float` and
+/// `Value::Integer` (the JSON parser keeps `0` as Integer and `0.0`
+/// as Float; ontology authors write either).
+fn numeric_value(r: &Resource, prop_iri: &str) -> Option<f64> {
+    let iri = Iri::parse(prop_iri).ok()?;
+    let v = r.get(&iri)?;
+    v.as_float()
+        .or_else(|| v.as_integer().map(|n| n as f64))
+}
+
+fn integer_value(r: &Resource, prop_iri: &str) -> Option<i64> {
+    let iri = Iri::parse(prop_iri).ok()?;
+    r.get(&iri).and_then(Value::as_integer)
 }
 
 fn resolve_property_type(
@@ -458,19 +522,30 @@ fn emit_module(
     s.push('\n');
     s.push_str(&format!("module {TARGET_MODULE_NAME}\n\n"));
 
+    s.push_str("using EigeniusJuliaCommon: validate_min_value, validate_max_value, ");
+    s.push_str("validate_min_length, validate_max_length, validate_pattern, validate_format\n\n");
+
     for iri in order {
         let decl = decls.get(iri).expect("topological order references decls");
         emit_struct(&mut s, decl, &class_lookup);
+        s.push('\n');
+        emit_decoder(&mut s, decl, &class_lookup);
+        s.push('\n');
+        emit_encoder(&mut s, decl, &class_lookup);
         s.push('\n');
     }
 
     if !order.is_empty() {
         s.push_str("export ");
-        let names: Vec<&str> = order
-            .iter()
-            .filter_map(|iri| decls.get(iri).map(|d| d.short_name.as_str()))
-            .collect();
-        s.push_str(&names.join(", "));
+        let mut exports: Vec<String> = Vec::new();
+        for iri in order {
+            if let Some(d) = decls.get(iri) {
+                exports.push(d.short_name.clone());
+                exports.push(format!("decode_{}", d.short_name));
+                exports.push(format!("encode_{}", d.short_name));
+            }
+        }
+        s.push_str(&exports.join(", "));
         s.push('\n');
         s.push('\n');
     }
@@ -499,7 +574,322 @@ fn emit_struct(
             prop.julia_type.render(class_lookup)
         ));
     }
+    out.push('\n');
+    emit_inner_constructor(out, decl, class_lookup);
     out.push_str("end\n");
+}
+
+/// Inner constructor with format-constraint validation. Required
+/// fields are positional; recommended fields are keyword args
+/// defaulting to `nothing`. Each field's constraints (if any) are
+/// checked before `new(...)`.
+fn emit_inner_constructor(
+    out: &mut String,
+    decl: &ClassDecl,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
+    out.push_str(&format!("    function {}(\n", decl.short_name));
+
+    let last_required = decl.requires.len().saturating_sub(1);
+    let has_keyword = !decl.recommends.is_empty();
+
+    // Positional args: required fields. The last one ends with `;`
+    // (when keyword args follow) or `,` (when nothing follows or
+    // only recommended fields follow without `;` form).
+    for (i, prop) in decl.requires.iter().enumerate() {
+        let trailer = if i == last_required && has_keyword {
+            ";"
+        } else {
+            ","
+        };
+        out.push_str(&format!(
+            "        {}::{}{trailer}\n",
+            prop.short_name,
+            prop.julia_type.render(class_lookup)
+        ));
+    }
+    // Keyword args: recommended fields, default `nothing`.
+    if has_keyword && decl.requires.is_empty() {
+        // Edge case: only keyword args. Julia requires `;` to start
+        // the keyword section even with no positional args.
+        out.push_str("        ;\n");
+    }
+    for prop in &decl.recommends {
+        out.push_str(&format!(
+            "        {}::Union{{{}, Nothing}} = nothing,\n",
+            prop.short_name,
+            prop.julia_type.render(class_lookup)
+        ));
+    }
+    out.push_str("    )\n");
+
+    // Validation calls. Required props always; recommended props
+    // gated on `isnothing(field) || …` so a missing recommended
+    // field passes through without firing the validator.
+    for prop in &decl.requires {
+        emit_validations(out, prop, /* is_required = */ true);
+    }
+    for prop in &decl.recommends {
+        emit_validations(out, prop, /* is_required = */ false);
+    }
+
+    // Construct.
+    out.push_str("        new(");
+    let all: Vec<&str> = decl
+        .requires
+        .iter()
+        .chain(decl.recommends.iter())
+        .map(|p| p.short_name.as_str())
+        .collect();
+    out.push_str(&all.join(", "));
+    out.push_str(")\n");
+    out.push_str("    end\n");
+}
+
+fn emit_validations(out: &mut String, prop: &PropertyDecl, is_required: bool) {
+    let mut lines: Vec<String> = Vec::new();
+    let c = &prop.constraints;
+    let field = &prop.short_name;
+    if let Some(min) = c.min_value {
+        lines.push(format!(
+            "validate_min_value(:{field}, {field}, {})",
+            float_literal(min)
+        ));
+    }
+    if let Some(max) = c.max_value {
+        lines.push(format!(
+            "validate_max_value(:{field}, {field}, {})",
+            float_literal(max)
+        ));
+    }
+    if let Some(n) = c.min_length {
+        lines.push(format!("validate_min_length(:{field}, {field}, {n})"));
+    }
+    if let Some(n) = c.max_length {
+        lines.push(format!("validate_max_length(:{field}, {field}, {n})"));
+    }
+    if let Some(pat) = &c.pattern {
+        lines.push(format!(
+            "validate_pattern(:{field}, {field}, {})",
+            julia_string_literal(pat)
+        ));
+    }
+    if let Some(fmt) = &c.format {
+        lines.push(format!("validate_format(:{field}, {field}, :{fmt})"));
+    }
+
+    if lines.is_empty() {
+        return;
+    }
+
+    if is_required {
+        for line in &lines {
+            out.push_str(&format!("        {line}\n"));
+        }
+    } else {
+        // Skip validation when the recommended field was omitted.
+        out.push_str(&format!("        if !isnothing({field})\n"));
+        for line in &lines {
+            out.push_str(&format!("            {line}\n"));
+        }
+        out.push_str("        end\n");
+    }
+}
+
+/// Render an f64 as a Julia literal. `0` and `100` come out as `0.0`
+/// / `100.0` so the validator-call type matches `Real` cleanly.
+fn float_literal(v: f64) -> String {
+    if v.fract() == 0.0 && v.is_finite() {
+        format!("{v:.1}")
+    } else {
+        format!("{v}")
+    }
+}
+
+/// Escape a string for embedding in a Julia double-quoted literal.
+fn julia_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            // `$` triggers Julia string interpolation; escape it.
+            '$' => out.push_str("\\$"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn emit_decoder(
+    out: &mut String,
+    decl: &ClassDecl,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
+    let cls = &decl.short_name;
+    out.push_str(&format!(
+        "function decode_{cls}(m::AbstractDict)::{cls}\n"
+    ));
+    out.push_str(&format!("    {cls}(\n"));
+
+    let last_required = decl.requires.len().saturating_sub(1);
+    let has_keyword = !decl.recommends.is_empty();
+
+    // Required positional args.
+    for (i, prop) in decl.requires.iter().enumerate() {
+        let trailer = if i == last_required && has_keyword {
+            ";"
+        } else {
+            ","
+        };
+        out.push_str(&format!(
+            "        {}{trailer}\n",
+            decode_property_expr(prop, class_lookup, /* required = */ true)
+        ));
+    }
+    // Keyword args for recommended.
+    if has_keyword && decl.requires.is_empty() {
+        out.push_str("        ;\n");
+    }
+    for prop in &decl.recommends {
+        out.push_str(&format!(
+            "        {} = {},\n",
+            prop.short_name,
+            decode_property_expr(prop, class_lookup, /* required = */ false)
+        ));
+    }
+    out.push_str("    )\n");
+    out.push_str("end\n");
+}
+
+fn decode_property_expr(
+    prop: &PropertyDecl,
+    class_lookup: &BTreeMap<Iri, String>,
+    required: bool,
+) -> String {
+    let key = julia_string_literal(prop.iri.as_str());
+    if required {
+        decode_value_expr(&prop.julia_type, &format!("m[{key}]"), class_lookup)
+    } else {
+        // get(m, key, nothing); if nothing, pass through; else recurse.
+        let raw = format!("get(m, {key}, nothing)");
+        let inner = decode_value_expr(&prop.julia_type, "_v", class_lookup);
+        format!(
+            "(let _v = {raw}; isnothing(_v) ? nothing : ({inner}) end)"
+        )
+    }
+}
+
+/// Express the worker-side decode of `expr` (a CBOR-loaded value)
+/// into the Julia type `t`. Resource-typed fields recurse via
+/// `decode_<Class>`; primitives pass through.
+fn decode_value_expr(
+    t: &JuliaType,
+    expr: &str,
+    class_lookup: &BTreeMap<Iri, String>,
+) -> String {
+    match t {
+        JuliaType::Primitive(_) => expr.to_string(),
+        JuliaType::StructRef(iri) => {
+            let cls = class_lookup
+                .get(iri)
+                .cloned()
+                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+            format!("decode_{cls}({expr})")
+        }
+        JuliaType::Vector(inner) => match inner.as_ref() {
+            JuliaType::Primitive(_) => expr.to_string(),
+            JuliaType::StructRef(iri) => {
+                let cls = class_lookup
+                    .get(iri)
+                    .cloned()
+                    .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+                format!("[decode_{cls}(_x) for _x in {expr}]")
+            }
+            JuliaType::Vector(_) => {
+                // Nested vectors aren't reachable in v1 (no
+                // value_array of resource_array); emit a passthrough
+                // so the source still parses and add a TODO.
+                format!("# TODO: nested Vector decode unsupported in v1\n        {expr}")
+            }
+        },
+    }
+}
+
+fn emit_encoder(
+    out: &mut String,
+    decl: &ClassDecl,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
+    let cls = &decl.short_name;
+    out.push_str(&format!(
+        "function encode_{cls}(c::{cls})::Dict{{String, Any}}\n"
+    ));
+    out.push_str("    out = Dict{String, Any}(\n");
+    out.push_str(&format!(
+        "        {} => [{}],\n",
+        julia_string_literal(PROP_IS_A),
+        julia_string_literal(decl.iri.as_str())
+    ));
+    for prop in &decl.requires {
+        let key = julia_string_literal(prop.iri.as_str());
+        let value = encode_value_expr(
+            &prop.julia_type,
+            &format!("c.{}", prop.short_name),
+            class_lookup,
+        );
+        out.push_str(&format!("        {key} => {value},\n"));
+    }
+    out.push_str("    )\n");
+    for prop in &decl.recommends {
+        let key = julia_string_literal(prop.iri.as_str());
+        let field = &prop.short_name;
+        let value = encode_value_expr(
+            &prop.julia_type,
+            &format!("c.{field}"),
+            class_lookup,
+        );
+        out.push_str(&format!(
+            "    isnothing(c.{field}) || (out[{key}] = {value})\n"
+        ));
+    }
+    out.push_str("    return out\n");
+    out.push_str("end\n");
+}
+
+fn encode_value_expr(
+    t: &JuliaType,
+    expr: &str,
+    class_lookup: &BTreeMap<Iri, String>,
+) -> String {
+    match t {
+        JuliaType::Primitive(_) => expr.to_string(),
+        JuliaType::StructRef(iri) => {
+            let cls = class_lookup
+                .get(iri)
+                .cloned()
+                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+            format!("encode_{cls}({expr})")
+        }
+        JuliaType::Vector(inner) => match inner.as_ref() {
+            JuliaType::Primitive(_) => expr.to_string(),
+            JuliaType::StructRef(iri) => {
+                let cls = class_lookup
+                    .get(iri)
+                    .cloned()
+                    .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+                format!("[encode_{cls}(_x) for _x in {expr}]")
+            }
+            JuliaType::Vector(_) => {
+                format!("# TODO: nested Vector encode unsupported in v1\n        {expr}")
+            }
+        },
+    }
 }
 
 // --- Resource readers --------------------------------------------------
@@ -636,6 +1026,22 @@ mod tests {
         r
     }
 
+    /// Add `min_value` constraint to an existing property resource.
+    fn with_min_value(mut r: Resource, min: f64) -> Resource {
+        r.set(iri(PROP_MIN_VALUE), Value::Float(min));
+        r
+    }
+
+    /// Add `format` constraint (the IRI's tail becomes the
+    /// validation symbol — e.g. `date`).
+    fn with_format(mut r: Resource, format_short: &str) -> Resource {
+        r.set(
+            iri(PROP_FORMAT),
+            Value::ResourceRef(iri(&format!("{FORMAT_IRI_PREFIX}{format_short}"))),
+        );
+        r
+    }
+
     /// Build a chain mirroring the kinase ontology's structure.
     fn build_kinase_chain() -> FlatChain {
         let mut chain = FlatChain::new();
@@ -671,10 +1077,13 @@ mod tests {
         );
         chain.add(
             "urn:eigenius:demo:assay:molecular_weight",
-            property_decl(
-                "urn:eigenius:demo:assay:molecular_weight",
-                "molecular_weight",
-                TYPE_FLOAT,
+            with_min_value(
+                property_decl(
+                    "urn:eigenius:demo:assay:molecular_weight",
+                    "molecular_weight",
+                    TYPE_FLOAT,
+                ),
+                0.0,
             ),
         );
         chain.add(
@@ -733,10 +1142,13 @@ mod tests {
         );
         chain.add(
             "urn:eigenius:demo:assay:incubation_minutes",
-            property_decl(
-                "urn:eigenius:demo:assay:incubation_minutes",
-                "incubation_minutes",
-                TYPE_INTEGER,
+            with_min_value(
+                property_decl(
+                    "urn:eigenius:demo:assay:incubation_minutes",
+                    "incubation_minutes",
+                    TYPE_INTEGER,
+                ),
+                0.0,
             ),
         );
 
@@ -787,26 +1199,31 @@ mod tests {
         );
         chain.add(
             "urn:eigenius:demo:assay:ic50_nm",
-            property_decl(
-                "urn:eigenius:demo:assay:ic50_nm",
-                "ic50_nm",
-                TYPE_FLOAT,
+            with_min_value(
+                property_decl("urn:eigenius:demo:assay:ic50_nm", "ic50_nm", TYPE_FLOAT),
+                0.0,
             ),
         );
         chain.add(
             "urn:eigenius:demo:assay:replicate_count",
-            property_decl(
-                "urn:eigenius:demo:assay:replicate_count",
-                "replicate_count",
-                TYPE_INTEGER,
+            with_min_value(
+                property_decl(
+                    "urn:eigenius:demo:assay:replicate_count",
+                    "replicate_count",
+                    TYPE_INTEGER,
+                ),
+                1.0,
             ),
         );
         chain.add(
             "urn:eigenius:demo:assay:measurement_date",
-            property_decl(
-                "urn:eigenius:demo:assay:measurement_date",
-                "measurement_date",
-                TYPE_STRING,
+            with_format(
+                property_decl(
+                    "urn:eigenius:demo:assay:measurement_date",
+                    "measurement_date",
+                    TYPE_STRING,
+                ),
+                "date",
             ),
         );
         chain.add(
@@ -819,18 +1236,20 @@ mod tests {
         );
         chain.add(
             "urn:eigenius:demo:assay:ci_low_nm",
-            property_decl(
-                "urn:eigenius:demo:assay:ci_low_nm",
-                "ci_low_nm",
-                TYPE_FLOAT,
+            with_min_value(
+                property_decl("urn:eigenius:demo:assay:ci_low_nm", "ci_low_nm", TYPE_FLOAT),
+                0.0,
             ),
         );
         chain.add(
             "urn:eigenius:demo:assay:ci_high_nm",
-            property_decl(
-                "urn:eigenius:demo:assay:ci_high_nm",
-                "ci_high_nm",
-                TYPE_FLOAT,
+            with_min_value(
+                property_decl(
+                    "urn:eigenius:demo:assay:ci_high_nm",
+                    "ci_high_nm",
+                    TYPE_FLOAT,
+                ),
+                0.0,
             ),
         );
 
@@ -986,9 +1405,35 @@ mod tests {
 
 module EigeniusMirror
 
+using EigeniusJuliaCommon: validate_min_value, validate_max_value, validate_min_length, validate_max_length, validate_pattern, validate_format
+
 struct AssayProtocol
     protocol_name::String
     incubation_minutes::Int64
+
+    function AssayProtocol(
+        protocol_name::String,
+        incubation_minutes::Int64,
+    )
+        validate_min_value(:incubation_minutes, incubation_minutes, 0.0)
+        new(protocol_name, incubation_minutes)
+    end
+end
+
+function decode_AssayProtocol(m::AbstractDict)::AssayProtocol
+    AssayProtocol(
+        m[\"urn:eigenius:demo:assay:protocol_name\"],
+        m[\"urn:eigenius:demo:assay:incubation_minutes\"],
+    )
+end
+
+function encode_AssayProtocol(c::AssayProtocol)::Dict{String, Any}
+    out = Dict{String, Any}(
+        \"urn:eigenius:core:is_a\" => [\"urn:eigenius:demo:assay:AssayProtocol\"],
+        \"urn:eigenius:demo:assay:protocol_name\" => c.protocol_name,
+        \"urn:eigenius:demo:assay:incubation_minutes\" => c.incubation_minutes,
+    )
+    return out
 end
 
 struct Compound
@@ -996,11 +1441,64 @@ struct Compound
     scaffold_class::String
     molecular_weight::Float64
     logp::Union{Float64, Nothing}
+
+    function Compound(
+        compound_id::String,
+        scaffold_class::String,
+        molecular_weight::Float64;
+        logp::Union{Float64, Nothing} = nothing,
+    )
+        validate_min_value(:molecular_weight, molecular_weight, 0.0)
+        new(compound_id, scaffold_class, molecular_weight, logp)
+    end
+end
+
+function decode_Compound(m::AbstractDict)::Compound
+    Compound(
+        m[\"urn:eigenius:demo:assay:compound_id\"],
+        m[\"urn:eigenius:demo:assay:scaffold_class\"],
+        m[\"urn:eigenius:demo:assay:molecular_weight\"];
+        logp = (let _v = get(m, \"urn:eigenius:demo:assay:logp\", nothing); isnothing(_v) ? nothing : (_v) end),
+    )
+end
+
+function encode_Compound(c::Compound)::Dict{String, Any}
+    out = Dict{String, Any}(
+        \"urn:eigenius:core:is_a\" => [\"urn:eigenius:demo:assay:Compound\"],
+        \"urn:eigenius:demo:assay:compound_id\" => c.compound_id,
+        \"urn:eigenius:demo:assay:scaffold_class\" => c.scaffold_class,
+        \"urn:eigenius:demo:assay:molecular_weight\" => c.molecular_weight,
+    )
+    isnothing(c.logp) || (out[\"urn:eigenius:demo:assay:logp\"] = c.logp)
+    return out
 end
 
 struct Target
     target_name::String
     target_family::String
+
+    function Target(
+        target_name::String,
+        target_family::String,
+    )
+        new(target_name, target_family)
+    end
+end
+
+function decode_Target(m::AbstractDict)::Target
+    Target(
+        m[\"urn:eigenius:demo:assay:target_name\"],
+        m[\"urn:eigenius:demo:assay:target_family\"],
+    )
+end
+
+function encode_Target(c::Target)::Dict{String, Any}
+    out = Dict{String, Any}(
+        \"urn:eigenius:core:is_a\" => [\"urn:eigenius:demo:assay:Target\"],
+        \"urn:eigenius:demo:assay:target_name\" => c.target_name,
+        \"urn:eigenius:demo:assay:target_family\" => c.target_family,
+    )
+    return out
 end
 
 struct AssayResult
@@ -1013,9 +1511,62 @@ struct AssayResult
     passed_qc::Bool
     ci_low_nm::Union{Float64, Nothing}
     ci_high_nm::Union{Float64, Nothing}
+
+    function AssayResult(
+        compound::Compound,
+        target::Target,
+        protocol::AssayProtocol,
+        ic50_nm::Float64,
+        replicate_count::Int64,
+        measurement_date::String,
+        passed_qc::Bool;
+        ci_low_nm::Union{Float64, Nothing} = nothing,
+        ci_high_nm::Union{Float64, Nothing} = nothing,
+    )
+        validate_min_value(:ic50_nm, ic50_nm, 0.0)
+        validate_min_value(:replicate_count, replicate_count, 1.0)
+        validate_format(:measurement_date, measurement_date, :date)
+        if !isnothing(ci_low_nm)
+            validate_min_value(:ci_low_nm, ci_low_nm, 0.0)
+        end
+        if !isnothing(ci_high_nm)
+            validate_min_value(:ci_high_nm, ci_high_nm, 0.0)
+        end
+        new(compound, target, protocol, ic50_nm, replicate_count, measurement_date, passed_qc, ci_low_nm, ci_high_nm)
+    end
 end
 
-export AssayProtocol, Compound, Target, AssayResult
+function decode_AssayResult(m::AbstractDict)::AssayResult
+    AssayResult(
+        decode_Compound(m[\"urn:eigenius:demo:assay:compound\"]),
+        decode_Target(m[\"urn:eigenius:demo:assay:target\"]),
+        decode_AssayProtocol(m[\"urn:eigenius:demo:assay:protocol\"]),
+        m[\"urn:eigenius:demo:assay:ic50_nm\"],
+        m[\"urn:eigenius:demo:assay:replicate_count\"],
+        m[\"urn:eigenius:demo:assay:measurement_date\"],
+        m[\"urn:eigenius:demo:assay:passed_qc\"];
+        ci_low_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_low_nm\", nothing); isnothing(_v) ? nothing : (_v) end),
+        ci_high_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_high_nm\", nothing); isnothing(_v) ? nothing : (_v) end),
+    )
+end
+
+function encode_AssayResult(c::AssayResult)::Dict{String, Any}
+    out = Dict{String, Any}(
+        \"urn:eigenius:core:is_a\" => [\"urn:eigenius:demo:assay:AssayResult\"],
+        \"urn:eigenius:demo:assay:compound\" => encode_Compound(c.compound),
+        \"urn:eigenius:demo:assay:target\" => encode_Target(c.target),
+        \"urn:eigenius:demo:assay:protocol\" => encode_AssayProtocol(c.protocol),
+        \"urn:eigenius:demo:assay:ic50_nm\" => c.ic50_nm,
+        \"urn:eigenius:demo:assay:replicate_count\" => c.replicate_count,
+        \"urn:eigenius:demo:assay:measurement_date\" => c.measurement_date,
+        \"urn:eigenius:demo:assay:passed_qc\" => c.passed_qc,
+    )
+    isnothing(c.ci_low_nm) || (out[\"urn:eigenius:demo:assay:ci_low_nm\"] = c.ci_low_nm)
+    isnothing(c.ci_high_nm) || (out[\"urn:eigenius:demo:assay:ci_high_nm\"] = c.ci_high_nm)
+    return out
+end
+
+export AssayProtocol, decode_AssayProtocol, encode_AssayProtocol, Compound, decode_Compound, encode_Compound, Target, decode_Target, encode_Target, AssayResult, decode_AssayResult, encode_AssayResult
 
 end # module EigeniusMirror
 ";
@@ -1023,6 +1574,92 @@ end # module EigeniusMirror
             src.as_str(),
             expected,
             "generated source diverged from snapshot:\n--- actual ---\n{src}\n--- expected ---\n{expected}"
+        );
+    }
+
+    #[test]
+    fn min_value_constraint_emits_inline_validator() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("validate_min_value(:molecular_weight, molecular_weight, 0.0)"),
+            "expected min_value validator, got source:\n{src}"
+        );
+    }
+
+    #[test]
+    fn format_date_constraint_emits_inline_validator() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:AssayResult"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("validate_format(:measurement_date, measurement_date, :date)"),
+            "expected format validator, got source:\n{src}"
+        );
+    }
+
+    #[test]
+    fn recommended_field_validator_is_isnothing_gated() {
+        // ci_low_nm has min_value=0 and is recommended; the validator
+        // must be inside `if !isnothing(ci_low_nm) … end` so a
+        // missing field doesn't fire it.
+        let out = run_kinase(&["urn:eigenius:demo:assay:AssayResult"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("if !isnothing(ci_low_nm)\n            validate_min_value(:ci_low_nm"),
+            "expected isnothing-gated validator, got source:\n{src}"
+        );
+    }
+
+    #[test]
+    fn decoder_recurses_into_resource_typed_fields() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:AssayResult"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("decode_Compound(m[\"urn:eigenius:demo:assay:compound\"])"),
+            "expected nested decode_Compound call, got source:\n{src}"
+        );
+        assert!(src.contains("decode_Target(m[\"urn:eigenius:demo:assay:target\"])"));
+        assert!(src.contains("decode_AssayProtocol(m[\"urn:eigenius:demo:assay:protocol\"])"));
+    }
+
+    #[test]
+    fn encoder_recurses_into_resource_typed_fields() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:AssayResult"]);
+        let src = extract_source(&out);
+        assert!(src.contains("\"urn:eigenius:demo:assay:compound\" => encode_Compound(c.compound)"));
+        assert!(src.contains("\"urn:eigenius:demo:assay:target\" => encode_Target(c.target)"));
+        assert!(src
+            .contains("\"urn:eigenius:demo:assay:protocol\" => encode_AssayProtocol(c.protocol)"));
+    }
+
+    #[test]
+    fn encoder_stamps_is_a() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("\"urn:eigenius:core:is_a\" => [\"urn:eigenius:demo:assay:Compound\"]"),
+            "expected is_a stamp, got source:\n{src}"
+        );
+    }
+
+    #[test]
+    fn encoder_skips_recommended_when_nothing() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let src = extract_source(&out);
+        // logp is recommended → conditional encode.
+        assert!(
+            src.contains("isnothing(c.logp) || (out[\"urn:eigenius:demo:assay:logp\"] = c.logp)"),
+            "expected conditional encode for recommended field, got source:\n{src}"
+        );
+    }
+
+    #[test]
+    fn module_imports_eigenius_julia_common() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:AssayResult"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("using EigeniusJuliaCommon: validate_"),
+            "expected `using EigeniusJuliaCommon: validate_…`, got source:\n{src}"
         );
     }
 
