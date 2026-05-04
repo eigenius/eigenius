@@ -12,50 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `TestLanguageRuntimeJulia` — Phase 18d capstone fixture. Same shape
-//! as [`crate::test_runtime_docker::TestLanguageRuntimeDocker`] but
-//! the worker is a real Julia interpreter instead of bash. Validates
-//! 18c.1–18c.6 against a non-trivial language with a real install
-//! step (`Pkg.instantiate` + `Pkg.precompile`) — the witness that the
-//! substrate's e2e plumbing works for a runtime with non-trivial
-//! cold-start cost and a real package manager.
+//! `JuliaLanguageRuntime` — the production `LanguageRuntime` impl for
+//! Julia. Phase 19a.1 ships the per-invocation Docker spawner path
+//! (inherited from the 18d capstone fixture); 19a.2 introduces the
+//! `ServiceSpawner` warm-pool path; 19a.3 lights up the mirror
+//! generator and 19a.4 wires `CallRuntimeMethod` against typed mirror
+//! struct dispatch.
 //!
-//! Feature-gated behind both `test-runtime` and `docker-spawner`.
-//!
-//! ## What this validates that the bash version doesn't
-//!
-//! - **Multi-file build context** — Project.toml + Manifest.toml +
-//!   src/JuliaWorker.jl get materialised under `language/` together,
-//!   with the Dockerfile composer emitting one COPY per asset.
-//! - **Non-trivial install_runtime** — `Pkg.instantiate` against a
-//!   pinned Manifest pulls and precompiles CBOR.jl. Exercises the
-//!   image build's RUN-step path (alpine-vs-glibc and chmod-bit
-//!   concerns from 18c.6 don't apply — Julia runs against glibc by
-//!   default in `julia:1.12-bookworm`).
-//! - **Real interpreter cold-start** — pulls in a ~500MB base image,
-//!   hits Julia's package + JIT path. First test run takes minutes;
-//!   subsequent runs hit Docker's layer cache and substrate's image
-//!   cache.
-//!
-//! Phase 19a will create the proper `eigenius-julia` crate; this
-//! fixture is then either retired or kept as the regression anchor
-//! between Phase 18 and Phase 19's Julia work (per the implementation
-//! plan).
+//! This module is intentionally thin Rust over the substrate's
+//! existing image-build + spawn machinery. The Julia-specific work is
+//! the worker (`JuliaWorker.jl` in `julia/runtime-worker/`) and, in
+//! 19a.3, the generated mirror packages. From the substrate's view,
+//! this crate just composes Dockerfile fragments and routes RPC.
 
-use crate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
-use crate::error::{BuildError, RunError, SpawnError};
-use crate::image_build::dockerfile::LanguageAssetCopy;
-use crate::image_build::{
+use crate::conventions::{
+    LANGUAGE, PROP_LANGUAGE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, UDS_CONNECT_TIMEOUT,
+    WORKER_PROJECT_DIR,
+};
+use crate::dockerfile::julia_dockerfile_fragments;
+use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_runtime_substrate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
+use eigenius_runtime_substrate::error::{BuildError, RunError, SpawnError};
+use eigenius_runtime_substrate::image_build::dockerfile::LanguageAssetCopy;
+use eigenius_runtime_substrate::image_build::{
     compose_dockerfile, BuildContext, BuildContextSpec, BuildahImageBuilder, DockerfileSpec,
     ImageBuilder, LanguageAsset,
 };
-use crate::language_runtime::LanguageRuntime;
-use crate::rpc::client::WorkerRpcClient;
-use crate::rpc::protocol::{HealthInfo, Request, Response};
-use crate::spawner::{DockerSpawner, WorkerSpawner};
-use crate::types::{DockerfileFragments, ImageDigest, WorkerHandle, WorkerSpec};
-use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+use eigenius_runtime_substrate::rpc::client::WorkerRpcClient;
+use eigenius_runtime_substrate::rpc::protocol::{HealthInfo, Request, Response};
+use eigenius_runtime_substrate::spawner::{DockerSpawner, WorkerSpawner};
+use eigenius_runtime_substrate::types::{
+    DockerfileFragments, ImageDigest, WorkerHandle, WorkerSpec,
+};
 use serde_bytes::ByteBuf;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -65,23 +55,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-const LANGUAGE: &str = "julia";
-const PROP_SOURCE: &str = "urn:eigenius:runtime:source";
-const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
-const PROP_TEST_JULIA_OUTPUT: &str = "urn:eigenius:test:julia_output";
-const UDS_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
-const WORKER_PROJECT_DIR: &str = "/opt/eigenius/julia-worker";
-
 static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// `LanguageRuntime` impl that builds and runs the Julia worker
-/// inside a Docker container. See module docs for what it validates.
-pub struct TestLanguageRuntimeJulia {
+/// inside a Docker container. The substrate calls this through the
+/// language registry whenever a `RuntimeScript` /
+/// `RuntimeMethodSignature` resource declares `language = "julia"`.
+///
+/// 19a.1 path: per-invocation `DockerSpawner`, container removed on
+/// exit. 19a.2 introduces `ServiceSpawner` for warm-pool dispatch.
+pub struct JuliaLanguageRuntime {
     spawner: Arc<DockerSpawner>,
     /// Path to `julia/runtime-worker/` — the directory containing
-    /// `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`. The
-    /// integration test resolves this via `env!("CARGO_MANIFEST_DIR")`
-    /// against a relative path to the workspace root.
+    /// `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`.
+    /// Resolved by the caller (typically via `env!("CARGO_MANIFEST_DIR")`
+    /// against a workspace-relative path).
     project_dir: PathBuf,
     base_image_ref: String,
     image_tag: String,
@@ -98,10 +86,12 @@ struct JuliaAssets {
     worker_jl: Vec<u8>,
 }
 
-impl TestLanguageRuntimeJulia {
+impl JuliaLanguageRuntime {
     /// Construct with paths to the Julia project directory, the
-    /// digest-pinned Julia base image, the substrate's `DockerSpawner`,
-    /// and the depot path the spawner was configured with.
+    /// digest-pinned Julia base image (e.g. `julia:1.12-bookworm` or
+    /// `docker.io/library/julia@sha256:...`), the substrate's
+    /// `DockerSpawner`, and the depot path the spawner was configured
+    /// with.
     pub fn new(
         project_dir: PathBuf,
         base_image_ref: impl Into<String>,
@@ -114,7 +104,7 @@ impl TestLanguageRuntimeJulia {
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
             .take(24)
             .collect();
-        let image_tag = format!("eigenius-substrate-test-julia-{safe_prefix}:latest");
+        let image_tag = format!("eigenius-julia-{safe_prefix}:latest");
         Self {
             spawner,
             project_dir,
@@ -173,7 +163,7 @@ impl TestLanguageRuntimeJulia {
         let manifest_hash = self.manifest_hash()?.to_string();
         let assets = self.assets()?.clone();
 
-        let fragments = self.dockerfile_fragments_inner();
+        let fragments = julia_dockerfile_fragments();
         let asset_copies = vec![
             LanguageAssetCopy {
                 source: PathBuf::from("Project.toml"),
@@ -236,33 +226,9 @@ impl TestLanguageRuntimeJulia {
         push_to_docker_daemon(&self.image_tag)?;
         resolve_docker_image_id(&self.image_tag)
     }
-
-    fn dockerfile_fragments_inner(&self) -> DockerfileFragments {
-        DockerfileFragments {
-            // Empty install_runtime — `julia:1.12-bookworm` ships
-            // with the Julia binary; nothing to install at the
-            // runtime level. Project deps go in `install_packages`
-            // because the composer's section ordering puts that
-            // section *after* the language asset COPY (`Project.toml`
-            // / `Manifest.toml`); putting it in `install_runtime`
-            // would run before the project files exist and silently
-            // become a no-op.
-            install_runtime: vec![],
-            install_packages: vec![format!(
-                "RUN JULIA_PKG_PRECOMPILE_AUTO=0 julia --project={WORKER_PROJECT_DIR} \
-                     -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'"
-            )],
-            install_mirror: vec![],
-            bootstrap_command: vec![
-                "julia".to_string(),
-                format!("--project={WORKER_PROJECT_DIR}"),
-                format!("{WORKER_PROJECT_DIR}/src/JuliaWorker.jl"),
-            ],
-        }
-    }
 }
 
-impl LanguageRuntime for TestLanguageRuntimeJulia {
+impl LanguageRuntime for JuliaLanguageRuntime {
     fn language_id(&self) -> &str {
         LANGUAGE
     }
@@ -283,13 +249,13 @@ impl LanguageRuntime for TestLanguageRuntimeJulia {
     ) -> Result<WorkerHandle, SpawnError> {
         let digest = self.ensure_image().map_err(|e| SpawnError::SpawnFailed {
             backend: "docker",
-            reason: format!("test-runtime-julia build_image failed: {e}"),
+            reason: format!("eigenius-julia build_image failed: {e}"),
         })?;
         let manifest_hash = self
             .manifest_hash()
             .map_err(|e| SpawnError::SpawnFailed {
                 backend: "docker",
-                reason: format!("test-runtime-julia manifest_hash failed: {e}"),
+                reason: format!("eigenius-julia manifest_hash failed: {e}"),
             })?
             .to_string();
 
@@ -358,7 +324,7 @@ impl LanguageRuntime for TestLanguageRuntimeJulia {
             .map_err(|e| RunError::WorkerRpcFailed(format!("encode julia source as CBOR: {e}")))?;
 
         let invocation_id = format!(
-            "test-julia-inv-{}",
+            "julia-inv-{}",
             INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
         let resp = client
@@ -405,14 +371,18 @@ impl LanguageRuntime for TestLanguageRuntimeJulia {
         _signature: &Resource,
         _inputs: &[Resource],
     ) -> Result<Resource, RunError> {
+        // 19a.4 lights this up against typed mirror struct dispatch
+        // (worker-side method registry walking the generated mirror
+        // packages' exports). Until then, dispatch a script via
+        // `RunRuntimeScript` instead.
         Err(RunError::MethodSignatureMismatch(
-            "TestLanguageRuntimeJulia does not implement call_method (use run_script with a Julia source string)"
+            "JuliaLanguageRuntime::call_method is not yet implemented (lands in Phase 19a.4)"
                 .to_string(),
         ))
     }
 
     fn dockerfile_fragments(&self, _env: &Resource) -> DockerfileFragments {
-        self.dockerfile_fragments_inner()
+        julia_dockerfile_fragments()
     }
 
     fn query_health(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError> {
@@ -471,13 +441,11 @@ fn map_dispatch_failure(error_kind: &str, message: String) -> RunError {
 }
 
 fn build_output_resource(invocation_id: &str, output: String) -> Resource {
-    let iri = Iri::parse(&format!(
-        "urn:eigenius:test:invocation:{invocation_id}:output"
-    ))
-    .expect("test invocation IRI is well-formed by construction");
+    let iri = Iri::parse(&format!("urn:eigenius:julia:invocation:{invocation_id}:output"))
+        .expect("invocation IRI is well-formed by construction");
     let mut r = Resource::new(iri);
     r.set(
-        Iri::parse(PROP_TEST_JULIA_OUTPUT).expect("static IRI is well-formed"),
+        Iri::parse(PROP_SCRIPT_OUTPUT).expect("static IRI is well-formed"),
         Value::String(output),
     );
     r.set(
@@ -487,8 +455,8 @@ fn build_output_resource(invocation_id: &str, output: String) -> Resource {
     r
 }
 
-/// Hand the substrate-built image off to Docker via tar archive (same
-/// pattern as `test_runtime_docker.rs`'s `push_to_docker_daemon` —
+/// Hand the substrate-built image off to Docker via tar archive
+/// (matches the pattern in `runtime-substrate`'s test fixtures —
 /// keeps cross-buildah/cross-Docker-version interop irrelevant).
 fn push_to_docker_daemon(image_tag: &str) -> Result<(), BuildError> {
     // Per-call nonce so parallel test invocations in the same cargo
@@ -496,7 +464,7 @@ fn push_to_docker_daemon(image_tag: &str) -> Result<(), BuildError> {
     static ARCHIVE_NONCE: AtomicU64 = AtomicU64::new(0);
     let nonce = ARCHIVE_NONCE.fetch_add(1, Ordering::SeqCst);
     let archive_path = std::env::temp_dir().join(format!(
-        "substrate-image-julia-{}-{}-{}.tar",
+        "eigenius-julia-image-{}-{}-{}.tar",
         std::process::id(),
         sanitise_for_path(image_tag),
         nonce,
@@ -566,8 +534,3 @@ fn sanitise_for_path(s: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
 }
-
-// Tests live in `tests/julia_capstone_integration.rs` because they
-// need a real Docker daemon, real buildah, and the
-// `julia/runtime-worker/` directory at a known path relative to the
-// crate root.

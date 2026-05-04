@@ -63,3 +63,11 @@ futures-util = { version = "0.3", optional = true, default-features = false, fea
 name = "eigenius-test-worker"
 path = "src/bin/eigenius-test-worker.rs"
 required-features = ["test-runtime"]
+
+[dev-dependencies]
+# Phase 19a.1: the 18d Julia capstone integration test now exercises
+# the production `eigenius-julia` crate's `JuliaLanguageRuntime`,
+# while `src/test_runtime_julia.rs` is a thin deprecated re-export
+# during the transition. Once the test fully migrates to the new
+# name, the re-export module can drop.
+eigenius-julia = { path = "../eigenius-julia" }

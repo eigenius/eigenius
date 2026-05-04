@@ -847,6 +847,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-julia"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "serde",
+ "serde_bytes",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "eigenius-kernel"
 version = "0.1.0"
 dependencies = [
@@ -878,6 +891,7 @@ version = "0.1.0"
 dependencies = [
  "bollard",
  "ciborium",
+ "eigenius-julia",
  "eigenius-kernel",
  "futures-util",
  "humantime",

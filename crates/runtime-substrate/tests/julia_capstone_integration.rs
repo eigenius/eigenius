@@ -36,7 +36,7 @@ use eigenius_runtime_substrate::facade::SubstrateDispatcher;
 use eigenius_runtime_substrate::is_buildah_available;
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
 use eigenius_runtime_substrate::spawner::{DockerSpawner, DockerSpawnerConfig};
-use eigenius_runtime_substrate::test_runtime_julia::TestLanguageRuntimeJulia;
+use eigenius_julia::JuliaLanguageRuntime;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -169,7 +169,7 @@ fn julia_capstone_full_e2e() {
 
     let project_dir = julia_project_dir();
     let runtime =
-        TestLanguageRuntimeJulia::new(project_dir, pinned_base, spawner.clone(), depot.clone());
+        JuliaLanguageRuntime::new(project_dir, pinned_base, spawner.clone(), depot.clone());
 
     // Build is the substantive cold step — exercises buildah, multi-
     // asset materialisation (Project.toml + Manifest.toml +
@@ -204,10 +204,12 @@ fn julia_capstone_full_e2e() {
         .expect("dispatch julia hello-world");
 
     let output = eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
+    // Phase 19a.1: production crate uses `urn:eigenius:runtime:script_output`
+    // (was `urn:eigenius:test:julia_output` on the deprecated test fixture).
     let julia_output = output
-        .get(&Iri::parse("urn:eigenius:test:julia_output").unwrap())
+        .get(&Iri::parse("urn:eigenius:runtime:script_output").unwrap())
         .and_then(Value::as_str)
-        .expect("julia_output property on output");
+        .expect("script_output property on output");
     assert_eq!(julia_output, "PHASE 18D CAPSTONE");
 
     // Trace fields: language=julia, image_digest=substrate-built,
@@ -268,7 +270,7 @@ fn julia_capstone_cross_check_tampering_fires() {
 
     let project_dir = julia_project_dir();
     let runtime =
-        TestLanguageRuntimeJulia::new(project_dir, pinned_base, spawner.clone(), depot.clone());
+        JuliaLanguageRuntime::new(project_dir, pinned_base, spawner.clone(), depot.clone());
 
     // Build the image (cached if a previous test ran), then spawn
     // with deliberately mismatched cross-check env. The worker reads
@@ -285,7 +287,7 @@ fn julia_capstone_cross_check_tampering_fires() {
     // calling spawn_worker through a sneaked-in hook? Actually,
     // simpler: call query_health on a deliberately-mismatched spawn.
     //
-    // The TestLanguageRuntimeJulia constructs cross-check env from
+    // The JuliaLanguageRuntime constructs cross-check env from
     // its cached manifest_hash. To force a mismatch we'd need to
     // either (a) tamper after spawn (race), or (b) build the image
     // with one hash and spawn with a different one. Cleanest: spawn

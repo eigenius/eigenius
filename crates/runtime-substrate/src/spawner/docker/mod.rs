@@ -186,6 +186,7 @@ impl WorkerSpawner for DockerSpawner {
                 tempdir: &tempdir,
                 depot: &depot,
                 network_mode: &network_mode,
+                auto_remove: true,
             })?;
             let id = lifecycle::create_container(&self.docker, plan).await?;
             lifecycle::start_container(&self.docker, &id).await?;

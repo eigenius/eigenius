@@ -48,14 +48,20 @@ use std::path::Path;
 
 /// Inputs the pure assembler needs: the worker spec, the resolved
 /// per-invocation tempdir (always under the depot), the depot path
-/// itself (mounted read-only into the container), and the network mode
-/// to apply.
+/// itself (mounted read-only into the container), the network mode
+/// to apply, and whether the container should auto-remove on exit.
+///
+/// `auto_remove = true` is the default for the per-invocation
+/// `WorkerSpawner` (Job mode); `auto_remove = false` is what
+/// `DockerServiceSpawner` (Service mode) sets so the container
+/// persists across many dispatches until explicitly drained.
 #[derive(Debug)]
 pub struct ContainerBuildInputs<'a> {
     pub spec: &'a WorkerSpec,
     pub tempdir: &'a Path,
     pub depot: &'a Path,
     pub network_mode: &'a NetworkMode,
+    pub auto_remove: bool,
 }
 
 /// Output of [`build_create_options`]: the create-container options
@@ -150,7 +156,7 @@ fn build_host_config(inputs: &ContainerBuildInputs) -> HostConfig {
         Some(inputs.spec.max_memory_bytes as i64)
     };
     HostConfig {
-        auto_remove: Some(true),
+        auto_remove: Some(inputs.auto_remove),
         // No cap_drop. The substrate is *not* a sandbox-as-a-service
         // (D26 §1.2) — its job is provenance + dispatch for trusted
         // language toolchains, not containing untrusted code. Dropping
@@ -245,6 +251,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let err = build_create_options(&inputs).expect_err("must require digest");
         match err {
@@ -266,6 +273,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         assert_eq!(plan.body.image.as_deref(), Some(dummy_digest().as_str()));
@@ -288,6 +296,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         assert!(
@@ -304,6 +313,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         let host = plan.body.host_config.as_ref().expect("host_config");
@@ -350,6 +360,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         assert_eq!(
@@ -366,6 +377,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         assert!(plan
@@ -384,6 +396,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         let opts = plan
@@ -411,6 +424,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         let opts = plan
@@ -432,6 +446,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &NetworkMode::None,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         let labels = plan.body.labels.expect("labels");
@@ -454,6 +469,7 @@ mod tests {
             tempdir: Path::new("/var/lib/eigenius-runtime/inv-1"),
             depot: Path::new("/var/lib/eigenius-runtime"),
             network_mode: &mode,
+            auto_remove: true,
         };
         let plan = build_create_options(&inputs).expect("build");
         assert_eq!(

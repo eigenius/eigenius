@@ -126,6 +126,10 @@ Pins are content-addressed; a fresh `env create` against an unchanged Project + 
 
 A deterministic generator producing a Julia package mirroring Eigon class structure as Julia structs. Its outputs are committed back to Eigenius as `JuliaPackageMirror` resources.
 
+The "generator" is **substrate Rust code**, not a separate CLI binary. It runs as part of the substrate's image-build pipeline (D26 §9.2): when `build_environment_image` walks the chain to assemble the `JuliaEnvironment`'s image, a generator pass walks the relevant ontology classes and emits the Julia source mirror. The output gets committed as a `JuliaPackageMirror` resource (content-addressed) and baked into the env image. Earlier drafts of D27 framed the generator as `eigon-julia-gen`, an externally-runnable tool — that framing is misleading. Auditability comes from the *deterministic output spec* (D29, future), not from the generator being an out-of-process binary; anyone with the substrate source + the layer chain can re-derive byte-identical mirror source. There is no v1 use case for invoking the generator outside the image-build pipeline.
+
+The substrate POC and the mirror generator ship together as a single milestone (Phase 19a in [implementation-plan.md](implementation-plan.md)) because the worker's dispatch contract is shaped by whether mirrors exist — separating them would force two passes over the worker-side dispatch logic, and the interdependency is tight enough that addressing them in one milestone is cleaner than the original 19a/19b split.
+
 ### 3.1 What the mirror contains
 
 For each Eigon class the user might call into Julia about:

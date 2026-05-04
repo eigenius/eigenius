@@ -1228,26 +1228,256 @@ Cross-cutting codec change: replace Eigon-JSON with Eigon-CBOR on the `Component
 
 **Drives:** [D27 — Julia Institutions](d27-julia-institutions.md). Enables [`life-science-requirements.md`](life-science-requirements.md) worked examples in Phase 21 (PK ODEs, ML ensemble bounds, certified intervals, reaction-network dynamics).
 
-### Phase 19a — Julia substrate proof of concept + Service lifecycle (~3 weeks)
+### Phase 19a — Julia substrate POC + mirror generator (~6 weeks)
 
-- `eigenius-julia` crate implements `LanguageRuntime`. Default Julia env declares `lifecycle: Service` (D26 §5.3.1) — Julia's ~30s cold start is the first concrete forcing function for the Service-backed dispatcher.
-- **Service-backed dispatcher lands here**, deferred from Phase 18c. New traits and backends per [D26 §8.2](d26-runtime-substrate.md): `ServiceSpawner`, `LocalServiceSpawner` (long-lived host subprocess pool), `DockerServiceSpawner` (DooD-launched persistent service container per env). Pool layered above the trait — lease/release worker handles, idle timeout, max size, health checks. `CallRuntimeMethod` becomes wireable for the first time in this phase.
-- **Wire `dispatched_to` on `RuntimeInvocation` (deferred from Phase 18c.5).** With `CallRuntimeMethod` lighting up here, the resolved `RuntimeMethodSignature` IRI becomes available — `eigenius-julia`'s method-dispatch path returns it through `LanguageRuntime`, the substrate facade puts it on `DispatchTrace`, and the orchestrator-side handler stamps it on the committed `RuntimeInvocation`. Until 19a, Phase 18c.5 leaves the property unset on `RunRuntimeScript` invocations (it has no resolved-method semantics for raw scripts). Decide alongside this work whether to also add `urn:eigenius:runtime:spawner_backend` (string, "local" / "docker" / …) — useful for audit queries like "was this run on Docker or LocalSpawner?", trivial ontology + trace addition, but skipped in 18c.5 in the absence of a forcing query.
-- Demonstrates: a `JuliaScript` resource committed to the chain, dispatched via `RunRuntimeScript`, producing a `JuliaInvocation` provenance record served by the warm pool; a `JuliaMethodSignature` (e.g. `Symbolics.simplify`) dispatched via `CallRuntimeMethod` against the same warm pool. `image_digest` left empty initially (deployment shape (c) — Julia bundled into the orchestrator image); 19c flips to shape (a).
-- Validates the substrate shape against a real language and against the Service-backed dispatcher both; flushes out anything missing in Phase 18a / 18c.
+The first production-shape milestone for Julia. Combines what earlier drafts split as 19a (substrate POC) and 19b (mirror generator) into a single phase, because the worker's dispatch contract is shaped by whether mirrors exist — separating them forces the worker-side dispatch logic to be written twice (once for raw-dict payloads, once for typed mirror struct payloads) and the interdependency is tight enough that one combined milestone is cleaner.
 
-### Phase 19b — `eigon-julia-gen` mirror generator (~3 weeks)
+Stands up the `eigenius-julia` crate, lights up the Service-backed dispatcher (deferred from Phase 18c), implements the mirror generator as substrate Rust code (D27 §3), wires `CallRuntimeMethod` end-to-end with typed mirror struct dispatch, populates `dispatched_to` on `RuntimeInvocation` (also 18c-deferred), and ships a minimal config primitive that future tunables extend. Deployment shape (c) for the entire phase — Julia bundled in the orchestrator image; the renumbered 19b (formerly 19c) flips to shape (a) once the per-env image-build path is exercised.
 
-- Deterministic Julia mirror generator. Faithful-translation specification authored in parallel as a design doc (D29, see Design Documents §9).
-- `JuliaPackageMirror` resources committed back to the chain.
-- `CallRuntimeMethod` (Julia variant) using mirror-struct dispatch.
-- Wire format flips to CBOR with RFC 8746 typed-array tags.
+Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology classes (`Compound`, `Target`, `AssayProtocol`, `AssayResult` from `ontologies/examples/kinase/`) are the test data that grounds every sub-milestone's worked example.
 
-### Phase 19c — Per-environment images + pool tuning (~2 weeks)
+#### Phase 19a.1 — `eigenius-julia` crate skeleton + LanguageRuntime impl (~2 days)
+
+**Goal.** Promote the test-only `crates/runtime-substrate/src/test_runtime_julia.rs` into a real production crate. Capstone-equivalent functionality continues to pass.
+
+**No mirror artifacts in 19a.1.** The mirror generator lands in 19a.3 of this same phase. 19a.1 ships only the crate skeleton + `RunRuntimeScript` regression coverage; `call_method` returns `Err(NotImplemented)` until 19a.4 wires it up against generator-produced mirrors.
+
+**Files created.**
+- `crates/eigenius-julia/Cargo.toml` — new workspace member.
+- `crates/eigenius-julia/src/lib.rs` — public surface (re-exports `JuliaLanguageRuntime`).
+- `crates/eigenius-julia/src/runtime.rs` — `JuliaLanguageRuntime` struct implementing `LanguageRuntime`.
+- `crates/eigenius-julia/src/dockerfile.rs` — Dockerfile-fragment provider (Julia install, worker copy, env-var stamping).
+- `crates/eigenius-julia/src/conventions.rs` — shared constants (manifest-hash file path, env-var names) so Rust + Julia sides don't drift.
+- `crates/eigenius-julia/tests/round_trip_test.rs` — capstone-equivalent round trip.
+
+**Files modified.**
+- Workspace `Cargo.toml` — add `crates/eigenius-julia` member.
+- `crates/runtime-substrate/src/test_runtime_julia.rs` — collapse to a thin re-export of the production type, or delete entirely if `eigenius-julia` is reachable from substrate tests via dev-dep.
+- `crates/runtime-substrate/tests/julia_capstone_integration.rs` — point at the production crate.
+
+**Tasks.**
+1. Crate scaffold (`Cargo.toml`, `lib.rs`, license header).
+2. `JuliaLanguageRuntime`: `language_id() = "julia"`, `dockerfile_fragments` returns Julia-specific fragments, `build_environment_image` delegates to the 18c.1 builder with those fragments, `spawn_worker` initially uses 18c's `LocalSpawner` / `DockerSpawner` (per-invocation; the Service path lands in 19a.2), `run_script` mirrors the capstone, `call_method` returns `Err(NotImplemented)` (lights up in 19a.3), `query_health` already shipped on `JuliaWorker.jl`.
+3. Update the 18d capstone integration test to point at the production crate; confirm green.
+4. Document in the crate's `lib.rs` docstring that 19a operates without a mirror package — payloads are raw IRI-keyed dicts; 19b's mirror generator changes that.
+
+**Acceptance.**
+- `cargo build --workspace` clean.
+- `cargo test -p eigenius-julia` passes (round-trip test against `RunRuntimeScript`).
+- 18d capstone integration test passes against the production crate (regression anchor).
+
+---
+
+#### Phase 19a.2 — `ServiceSpawner` trait + Local/Docker backends (~4 days)
+
+**Goal.** Per [D26 §8.2](d26-runtime-substrate.md), introduce long-lived per-environment workers. Two dev-side backends — host subprocess and DooD-launched persistent container. `eigenius-julia` switches to using the Service path; per-invocation spawn stays available for the bash test runtime and 18d's existing tests.
+
+**Pooling deferred.** Production-target backends (Azure Container Apps, Kubernetes) handle scaling, max-replica enforcement, idle eviction, and liveness/readiness probing at the platform level (HPA / KEDA / ACA scale rules). A substrate-side pool would duplicate and potentially conflict with the platform's scaling decisions. Local subprocess and Docker backends are dev-only; their concurrent dispatch story is "one long-lived worker per env, dispatches share it" — sufficient for dev usage without a pool layer. The `ServiceSpawner` trait shape (`ensure_service` / `attach_uds` / `drain` / `backend`) generalises cleanly to future K8s and ACA spawners — those don't lease/release, they ensure-and-route.
+
+**Files created.**
+- `crates/runtime-substrate/src/spawner/service/mod.rs` — `ServiceSpawner` trait + `ServiceHandle` type.
+- `crates/runtime-substrate/src/spawner/service/local.rs` — `LocalServiceSpawner` (long-lived host subprocess, UDS RPC).
+- `crates/runtime-substrate/src/spawner/service/docker.rs` — `DockerServiceSpawner` (Bollard, persistent container per `(env_iri, image_digest)`, `auto_remove: false`).
+- `crates/runtime-substrate/tests/service_spawner_test.rs` — backend matrix (Local always, Docker gated on `--features docker-spawner` + reachable daemon).
+
+**Files modified.**
+- `crates/runtime-substrate/src/spawner/mod.rs` — expose `service` submodule.
+- `crates/runtime-substrate/src/lib.rs` — re-exports.
+- `crates/runtime-substrate/src/facade.rs` — Service-backed dispatch path; on dispatch, `ensure_service` then `attach_uds`, send the request.
+- `crates/eigenius-julia/src/runtime.rs` — `spawn_worker` uses `ServiceSpawner`; per-invocation `DockerSpawner` behaviour preserved as a fallback.
+
+**Tasks.**
+1. `ServiceSpawner` trait: `ensure_service(spec) -> Result<ServiceHandle, SpawnError>` (idempotent — same env returns same handle), `attach_uds(service) -> Result<UnixStream, SpawnError>`, `drain(service) -> Result<(), SpawnError>`, `backend() -> &'static str`. No leasing, no health-check, no max-size — those are the platform's concern (or the worker's, for concurrent dispatch on one process).
+2. `LocalServiceSpawner`: `std::process::Command` to spawn the worker; UDS bound to a per-service tempdir; `Request::Evict` on drain followed by SIGKILL on timeout. Cross-check against `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` happens in the worker as today.
+3. `DockerServiceSpawner`: Bollard, `auto_remove: false` (vs the per-invocation `DockerSpawner`'s `auto_remove: true`). Container persists across invocations; one container per `(env_iri, image_digest)`. UDS bind-mounted per 18c.3 DooD discipline. `drain` calls `docker stop` + `docker rm` (or Bollard equivalents).
+4. `eigenius-julia` rewires `spawn_worker` to call `ServiceSpawner::ensure_service` and return a connection-attaching handle. `run_script` / `call_method` become "ensure_service, attach_uds, dispatch" instead of "spawn, dispatch, terminate".
+5. The Job-style `WorkerSpawner` trait stays in place for the bash test runtime + 18d's existing tests — they're explicitly per-invocation, no migration needed.
+
+**Acceptance.**
+- Both backends pass a smoke test: `ensure_service` → `attach_uds` → dispatch a Health RPC → `drain`.
+- Cold-start vs warm-reuse timing measurable (Julia first call ≥ several seconds; subsequent calls against the same service handle sub-100ms — no pool needed because the worker stays alive).
+- Docker-backed service keeps the container alive across invocations until `drain` (verify via `docker ps`).
+- 18d capstone integration test still passes (regression — the bash + Julia per-invocation paths stay green via `WorkerSpawner`).
+
+---
+
+#### Phase 19a.3 — Mirror generator (~10 days)
+
+**Goal.** Implement the mirror generator as substrate Rust code per [D27 §3](d27-julia-institutions.md). Walks the chain's ontology layer at image-build time, emits Julia source matching the faithful-translation spec, commits the result as a `JuliaPackageMirror` resource, bakes the precompiled artifact into the env image. The deterministic-output spec (D29) authored in parallel.
+
+**Files created.**
+- `crates/eigenius-julia/src/mirror_gen.rs` — generator entry point: `generate_mirror(layer: &Layer, classes: &[Iri]) -> Result<MirrorOutput, GenError>` returning `(julia_source, content_hash, mirrored_class_iris)`.
+- `crates/eigenius-julia/src/mirror_gen/struct_emitter.rs` — emits Julia struct definitions from class declarations.
+- `crates/eigenius-julia/src/mirror_gen/codec_emitter.rs` — emits `decode_*` / `encode_*` per class for IRI-keyed CBOR round-trip.
+- `crates/eigenius-julia/src/mirror_gen/validator_emitter.rs` — emits constructor-level format-constraint validation (`min_value`, `max_value`, `pattern`, etc.) per the faithful-translation spec.
+- `crates/eigenius-julia/tests/mirror_gen_test.rs` — golden-file tests against the kinase ontology.
+- `julia/common/EigeniusJuliaCommon/Project.toml` — shared package providing helpers the generated code calls (`validate_min`, `validate_pattern`, `decode_iri_keyed_map`, etc.).
+- `julia/common/EigeniusJuliaCommon/src/EigeniusJuliaCommon.jl`.
+- `julia/env/Project.toml` — the shared env's Pkg env; declares path-deps on `EigeniusJuliaCommon` and (at build time) on the generated mirror packages.
+- `docs/design/d29-eigon-julia-mirror-spec.md` — faithful-translation specification (D29). Authored in parallel with the generator.
+
+**Files modified.**
+- `crates/eigenius-julia/src/runtime.rs` — `build_environment_image` invokes `generate_mirror` for the env's mirror class list, copies the generated source into the build context, commits the `JuliaPackageMirror` resource alongside the image digest.
+- `crates/eigenius-julia/src/dockerfile.rs` — Dockerfile fragments grow a `COPY mirror/ /julia-src/mirrors/<name>/` step plus precompile invocation.
+- `julia/runtime-worker/src/JuliaWorker.jl` — worker bootstrap loads each mirror package via `using <PackageName>` based on the env's `mirror_dependency` list (passed via env var or config).
+- The ontology / class-walking helpers in `crates/runtime-substrate/src/boundary.rs` may need refactoring for reuse by the generator (the boundary check already walks classes; the generator does similar walking).
+
+**Tasks.**
+1. Class-walking pass: from a layer + a list of class IRIs, transitively collect all reachable classes (via `requires` / `recommends` resource-typed property class_types) and topologically sort so structs can be emitted in dependency order.
+2. Per-class emit pipeline: `class → (struct decl, decode fn, encode fn, constructor with validation)`. Each piece in its own emitter module so the spec stays readable.
+3. Faithful-translation spec D29 — capture the full mapping table from D27 §3.3 plus edge cases (empty `recommends`, polymorphic `class_types`, format constraints by data type, value_arrays with element_type, nested embedded resources). Author this concurrently with the generator so the spec and the implementation co-evolve.
+4. Generator self-tests:
+   - Determinism: same `(layer_hash, class_iris)` input → byte-identical Julia source.
+   - Idempotence: regenerating against an unchanged ontology produces the same `content_hash`.
+   - Spec conformance: golden-file tests for the kinase ontology (the four classes + their properties → exact expected Julia source).
+5. `JuliaPackageMirror` resource commit: at build time, the substrate creates a `JuliaPackageMirror` resource with `library_content` = generated source, `library_content_hash`, `mirrored_classes` = the class IRIs, `source_layer` = the head layer, `generator_identifier` = the substrate version, `generator_content_hash` = the substrate binary hash.
+6. Image-build wiring: the Dockerfile composer pulls the generated mirror into the build context; `Pkg.precompile()` runs over `julia/env/` so the mirror is precompiled at build time, not at first dispatch.
+7. `EigeniusJuliaCommon` shared helpers — kept minimal (only what the generated code needs).
+
+**Acceptance.**
+- Generator produces a valid `EigeniusKinaseMirror` Julia package from `ontologies/examples/kinase/kinase-ontology.json`.
+- Generated package compiles + precompiles cleanly in the env image.
+- Round-trip test: a `Compound` resource → CBOR → `decode_compound` → `encode_compound` → CBOR → equals original.
+- Determinism: regenerating the kinase mirror twice produces byte-identical source.
+- A `JuliaPackageMirror` resource is committed with the right content hash, source layer, and mirrored class IRIs on each `build_environment_image` call.
+
+---
+
+#### Phase 19a.4 — `CallRuntimeMethod` + `JuliaWorker.jl` method dispatch + `dispatched_to` wiring (~5 days)
+
+**Goal.** Light up `CallRuntimeMethod` end-to-end against the generator-produced mirror from 19a.3. Worker dispatches by `RuntimeMethodSignature` IRI, performs Julia multiple dispatch on typed mirror struct inputs, captures `which()` for `dispatched_to`. Substrate propagates `dispatched_to` through `DispatchTrace` to the orchestrator, which stamps it on the committed `RuntimeInvocation` (closing the 18c.5-deferred property).
+
+**Files created.**
+- `crates/runtime-substrate/src/components/call_method.rs` — kernel-registered `CallRuntimeMethod` Component (substrate-level; resolves a `RuntimeMethodSignature`, leases worker, dispatches).
+- `julia/institutions/kinase-demo/EigeniusKinaseDemo/Project.toml` — small demo handler package depending on the generator-produced `EigeniusKinaseMirror`.
+- `julia/institutions/kinase-demo/EigeniusKinaseDemo/src/EigeniusKinaseDemo.jl` — sample method handlers operating on the typed mirror structs (e.g. `compute_selectivity_index(c::Compound, t1::Target, t2::Target)::Float64` reading `c.compound_id` etc.). Used as the test fixture for 19a.4 and 19a.6; not a real institution.
+- `crates/eigenius-julia/tests/call_method_test.rs` — kinase-grounded e2e.
+
+**Files modified.**
+- `julia/runtime-worker/src/JuliaWorker.jl` — `dispatch_method` evolves substantially:
+  - Maintains a *method registry*: at boot, walks loaded mirror + handler modules' exports and registers `(method_name, parameter types)` entries against `RuntimeMethodSignature` IRIs.
+  - On `dispatch_method`: decodes `target` as the `RuntimeMethodSignature` IRI; decodes `inputs` as CBOR-encoded mirror struct values via the per-class `decode_*` functions the generator emitted; looks up the handler; invokes it via Julia's multiple dispatch; captures `which(handler, typeof.(args))` for `dispatched_to`; encodes return value as CBOR via the per-class `encode_*` (or a primitive encoder).
+  - Returns `Response::DispatchOk { invocation_id, output, dispatched_to: <which-string> }` (the previously-`nothing` field is now real).
+  - Old eval-Julia-source behaviour preserved under a `target_kind = "script"` discriminator on the wire so the 18d capstone path stays green.
+- `crates/runtime-substrate/src/language_runtime.rs` — `call_method` signature stable; the impl now does real work.
+- `crates/runtime-substrate/src/invocation.rs` — `DispatchTrace.dispatched_to` field (likely already exists from 18c.5 stub).
+- `crates/runtime-substrate/src/facade.rs` — propagate `dispatched_to` from the language-runtime call up to the trace.
+- Orchestrator-side `JuliaInvocation` handler — accept `dispatched_to` from substrate, stamp on `RuntimeInvocation` resource.
+- `crates/eigenius-julia/src/runtime.rs` — `call_method` implemented (was `Err(NotImplemented)` in 19a.1).
+- `julia/env/Project.toml` — adds the `EigeniusKinaseDemo` handler package as a path-dep so it's part of the env image.
+
+**Tasks.**
+1. Settle the method-IRI scheme. Proposal: `urn:eigenius:julia:method:<package_iri>:<method_name>(<param_class_iri_1>,<param_class_iri_2>,…)`. The class IRIs are meaningful now that mirrors are typed; multi-method dispatch by class IRI works from day one.
+2. `JuliaWorker.jl` registry: a `Dict{String, Function}` keyed on the method IRI; a `register_methods(mod)` function called at boot for each loaded handler module.
+3. `dispatch_method` rewrite:
+   - Old behaviour (eval Julia source) preserved when `target_kind = "script"` — keeps the 18d capstone test green.
+   - New behaviour for `target_kind = "method"`: registry lookup + multiple-dispatch invocation on typed mirror struct args.
+   - The `Request::DispatchMethod` shape on the wire grows a `target_kind` discriminator.
+4. `CallRuntimeMethod` Component: substrate-level, kernel-registered. Input: `(method_signature_iri, inputs)`. Output: a `RuntimeInvocation` resource. Internally: resolves the signature → resolves the env → `ServiceSpawner::ensure_service` (idempotent) → `attach_uds` → dispatch → assembles the invocation.
+5. `dispatched_to` propagation: language-runtime → facade → trace → orchestrator → `RuntimeInvocation` property.
+6. Decision for the 18c.5-deferred `spawner_backend` trace property: I'd land it (one-line addition; useful for audit queries; trivial test).
+
+**Acceptance.**
+- `CallRuntimeMethod` invokes a kinase handler (`compute_selectivity_index(c::Compound, t1::Target, t2::Target)`) and returns the expected value.
+- The committed `RuntimeInvocation` has `dispatched_to` populated with the `Module.method(::Compound, ::Target, ::Target)` string Julia's `which()` returned — typed class-IRI-bearing dispatch info, useful for audit.
+- Mirror struct values round-trip across the boundary correctly (kinase resources committed in tests are usable as `CallRuntimeMethod` inputs via the generator's `decode_*` / `encode_*` helpers).
+- Test exercises both `RunRuntimeScript` and `CallRuntimeMethod` against the same warm `ServiceHandle` to confirm coexistence.
+
+---
+
+#### Phase 19a.5 — Minimal config primitive (~3 days)
+
+**Goal.** A small layered config loader (defaults → file → env → construction overrides) covering the substrate concerns 19a forces. New crate so the kernel and orchestrator can adopt it later without circular deps. Replaces ad-hoc env-var reads in the substrate. Per the [config-system memory](../../.claude/projects/-home-hm-src-eigenius/memory/project_config_system.md), the comprehensive settings story (audit, hot-reload, validation, per-namespace overrides) is a follow-on phase; this sub-milestone ships the *primitive*, not the full system.
+
+**Files created.**
+- `crates/eigenius-config/Cargo.toml` — new workspace member.
+- `crates/eigenius-config/src/lib.rs` — `Config` struct, layered `Loader`, search-path conventions.
+- `crates/eigenius-config/src/substrate.rs` — `SubstrateConfig` schema (image registry, backend selection, per-backend tunables).
+- `crates/eigenius-config/tests/loader_test.rs` — defaults / file / env / override precedence tests.
+- `crates/eigenius-config/examples/eigenius.toml` — annotated sample config.
+
+**Files modified.**
+- Workspace `Cargo.toml` — add `crates/eigenius-config`.
+- `crates/runtime-substrate/Cargo.toml` — depend on `eigenius-config`.
+- `crates/runtime-substrate/src/facade.rs` — read substrate-level config (image registry, default spawner backend) from `SubstrateConfig` instead of constants.
+- `crates/runtime-substrate/src/spawner/service/local.rs` + `docker.rs` — read backend-specific config (registry URL, daemon socket override).
+- `kernel/src/main.rs` (or wherever the substrate is constructed) — load config at startup, pass to substrate.
+
+**Tasks.**
+1. Schema:
+   ```toml
+   [image]
+   registry_url = "localhost:5000"
+   registry_credentials_env = ""  # name of env var holding the auth token
+
+   [docker]
+   daemon_socket = "unix:///var/run/docker.sock"
+
+   [local]
+   julia_binary = "julia"        # PATH lookup if relative
+   ```
+   Pool / scaling tunables are deliberately absent — production scaling is the platform's concern (HPA / KEDA / ACA scale rules), not the substrate's. Add per-backend knobs only as concrete needs arise.
+2. Loader: load from $EIGENIUS_CONFIG, then ./eigenius.toml, then ~/.config/eigenius/config.toml; layer env vars (`EIGENIUS_IMAGE_REGISTRY_URL`, `EIGENIUS_DOCKER_DAEMON_SOCKET`, …) on top; allow construction-time overrides for tests.
+3. Validation: registry URL parseable, daemon socket reachable when its backend is selected.
+4. Replace direct env reads in substrate. NB: per-spawn env vars (`EIGENIUS_RUNTIME_ENV_DIGEST`, `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH`) are *not* config — they're per-invocation parameters and stay as direct env reads inside the worker bootstrap.
+5. Document the precedence rules in the crate docstring.
+
+**Acceptance.**
+- `cargo test -p eigenius-config` passes (defaults / file / env / override precedence).
+- Substrate boots with explicit `SubstrateConfig`; ad-hoc env-var reads removed for image / backend-selection concerns.
+- Sample `eigenius.toml` loads cleanly and yields the documented defaults.
+- Validation rejects malformed config with clear errors.
+
+---
+
+#### Phase 19a.6 — End-to-end demo + integration tests (~4 days)
+
+**Goal.** Kinase-grounded e2e exercise of all 19a pieces (`ServiceSpawner` lifecycle, mirror generator, `CallRuntimeMethod` with typed-mirror dispatch, `dispatched_to`, config-loaded backend tunables). Regression coverage anchors against Phase 18.
+
+**Files created.**
+- `crates/eigenius-julia/tests/e2e_kinase.rs` — full e2e exercising `CallRuntimeMethod` against the generator-produced kinase mirror.
+- `crates/eigenius-julia/tests/service_lifecycle_test.rs` — `ensure_service` idempotence; warm-reuse timing across multiple dispatches against the same service handle; `drain` tears down cleanly.
+- `crates/eigenius-julia/tests/regression_18d_capstone.rs` — explicit 18d capstone path against the production crate.
+- `crates/eigenius-julia/tests/mirror_regeneration_test.rs` — verifies that regenerating the kinase mirror against an unchanged ontology layer produces byte-identical output (determinism anchor).
+
+**Tasks.**
+1. e2e scenario:
+   - Commit the kinase ontology layer (`ontologies/examples/kinase/kinase-ontology.json`).
+   - Commit a few `Compound` and `Target` instances from the notebook fixture.
+   - Define a `JuliaMethodSignature` resource for `compute_selectivity_index(::Compound, ::Target, ::Target) -> Float64`.
+   - Invoke `CallRuntimeMethod` against the signature; substrate `decode_*`s the resources via the generator-emitted helpers, worker dispatches on typed mirror structs.
+   - Assertions: result correct (verified against hand-computed selectivity); `RuntimeInvocation.dispatched_to` shows `Module.method(::Compound, ::Target, ::Target)`; second `CallRuntimeMethod` against the same `ServiceHandle` is warm (sub-100ms after the first cold start) — the worker stays alive across dispatches without any pool layer.
+2. Service lifecycle test:
+   - `ensure_service(spec)` → `attach_uds` → dispatch a Health RPC (sub-100ms; service is warm) → `attach_uds` again → dispatch (also warm) → `drain` → `attach_uds` returns `Err` (service is gone).
+   - Idempotence: second `ensure_service(spec)` with the same spec returns the same `ServiceHandle`.
+3. Mirror regeneration test:
+   - Build the env image; capture the kinase mirror's `library_content_hash`.
+   - Build again from the same ontology layer; assert the new hash matches.
+   - Modify a property in the kinase ontology (in a test-local layer); assert the new hash differs.
+4. Regression coverage:
+   - All Phase 18 substrate tests pass (`cargo test --workspace`).
+   - 18d capstone test passes against the production crate.
+   - The bash test runtime (Phase 18c.6) still works alongside the Julia production crate (no shared-state interference).
+5. Document the test scenarios in `crates/eigenius-julia/tests/README.md` so future contributors can extend rather than re-derive.
+
+**Acceptance.**
+- e2e kinase test passes against both `LocalServiceSpawner` and `DockerServiceSpawner`.
+- Warm-reuse timing assertion holds: first dispatch into a fresh service ≥ several seconds (Julia cold-start); subsequent dispatches against the same service handle sub-100ms.
+- Mirror determinism test passes (same ontology → same hash; modified ontology → different hash).
+- All Phase 18 tests pass.
+- `dispatched_to` shows the expected `Module.method(::Compound, ::Target, ::Target)` string in the test's assertion.
+
+### Phase 19b — Folded into 19a
+
+The original Phase 19b (`eigon-julia-gen` mirror generator) is folded into [Phase 19a.3](#phase-19a3--mirror-generator-10-days). The worker dispatch contract is shaped by whether mirrors exist; separating the substrate POC from the mirror generator would force the worker-side dispatch logic to be written twice (raw-dict payloads in 19a, typed-mirror-struct payloads in 19b) and the interdependency is tight enough to address them together. RFC 8746 typed-array tags for numerical arrays also land in 19a.3 alongside the rest of the CBOR codec work.
+
+The 19b letter is preserved (rather than renumbering 19c–19h up) to keep cross-references in the codebase + downstream design docs stable.
+
+### Phase 19c — Per-environment images (~2 weeks)
 
 - Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated. Flips Julia from deployment shape (c) (bundled in orchestrator image, established in 19a) to shape (a) (per-env image).
-- Pool tuning for Julia at production scale — the `ServiceSpawner` trait + pool already shipped in 19a; this milestone exercises and tunes idle timeout, max size, and health-check policy against realistic Julia workloads (long-running notebook sessions, AutoOnLoad bursts on commit, Symbolics simplification floods during type-checking).
 - `JuliaPackagePin` resources committed alongside the verbatim `Manifest.toml` for graph-side queryability.
+- *Production scaling concerns (HPA / KEDA / ACA scale rules) sit in their respective deployment-platform configs, not in the substrate. The platform-managed `ServiceSpawner` backends (`K8sDeploymentSpawner`, `AzureContainerAppsSpawner`) land as a separate phase when production deployment ships.*
 
 ### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~3 weeks)
 

@@ -159,6 +159,28 @@ pub async fn kill_container(docker: &Docker, container_id: &str) -> Result<(), S
     Ok(())
 }
 
+/// Remove a stopped container (Service-mode drain — `auto_remove: false`
+/// containers don't self-clean). `force = true` so the call also
+/// terminates a still-running container; `v: true` removes anonymous
+/// volumes the container created.
+pub async fn remove_container(docker: &Docker, container_id: &str) -> Result<(), SpawnError> {
+    let opts = bollard::query_parameters::RemoveContainerOptionsBuilder::new()
+        .force(true)
+        .v(true)
+        .build();
+    match docker.remove_container(container_id, Some(opts)).await {
+        Ok(_) => Ok(()),
+        // Already gone — drain is idempotent.
+        Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404, ..
+        }) => Ok(()),
+        Err(e) => Err(SpawnError::SpawnFailed {
+            backend: BACKEND,
+            reason: format!("remove_container({container_id}) failed: {e}"),
+        }),
+    }
+}
+
 /// State of a container as observed via `inspect_container`. Only the
 /// bits the substrate cares about — everything else from the inspect
 /// response is discarded.
