@@ -134,7 +134,11 @@ impl ServiceSpawner for DockerServiceSpawner {
         {
             let services = self.services.lock().expect("services mutex poisoned");
             if services.contains_key(&key) {
-                return Ok(ServiceHandle::new(BACKEND, key.clone(), Some(digest.clone())));
+                return Ok(ServiceHandle::new(
+                    BACKEND,
+                    key.clone(),
+                    Some(digest.clone()),
+                ));
             }
         }
 
@@ -286,4 +290,3 @@ fn wait_for_uds(
         }
     }
 }
-

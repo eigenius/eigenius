@@ -131,7 +131,10 @@ fn local_service_spawner_health_round_trip() {
     match resp {
         Response::Health(info) => {
             assert_eq!(info.env_digest_in_image.as_deref(), Some(TEST_DIGEST));
-            assert_eq!(info.manifest_hash_in_image.as_deref(), Some(TEST_MANIFEST_HASH));
+            assert_eq!(
+                info.manifest_hash_in_image.as_deref(),
+                Some(TEST_MANIFEST_HASH)
+            );
         }
         other => panic!("expected Health response, got {other:?}"),
     }

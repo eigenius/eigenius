@@ -29,6 +29,7 @@
 
 #![cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
 
+use eigenius_julia::JuliaLanguageRuntime;
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -36,7 +37,6 @@ use eigenius_runtime_substrate::facade::SubstrateDispatcher;
 use eigenius_runtime_substrate::is_buildah_available;
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
 use eigenius_runtime_substrate::spawner::{DockerSpawner, DockerSpawnerConfig};
-use eigenius_julia::JuliaLanguageRuntime;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

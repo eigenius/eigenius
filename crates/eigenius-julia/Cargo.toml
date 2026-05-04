@@ -18,6 +18,7 @@ eigenius-kernel = { path = "../../kernel" }
 eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }
 serde.workspace = true
 serde_bytes = "0.11"
+serde_json.workspace = true
 ciborium = "0.2"
 sha2 = "0.10"
 thiserror.workspace = true

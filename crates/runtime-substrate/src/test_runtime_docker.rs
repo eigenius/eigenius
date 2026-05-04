@@ -309,8 +309,7 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
             .map_err(|e| RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))?;
         let (numerical_metadata, image_digest) = self.capture_health(&worker);
 
-        let dispatch_result =
-            self.dispatch_and_evict(&worker, target_cbor, invocation_id.clone());
+        let dispatch_result = self.dispatch_and_evict(&worker, target_cbor, invocation_id.clone());
         let stdout = match dispatch_result {
             Ok(stdout) => stdout,
             Err(e) => {
@@ -429,10 +428,7 @@ impl TestLanguageRuntimeDocker {
         }
     }
 
-    fn query_health_internal(
-        &self,
-        worker: &WorkerHandle,
-    ) -> Result<HealthInfo, RunError> {
+    fn query_health_internal(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError> {
         let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| {
             RunError::WorkerRpcFailed(format!("connect to worker UDS for health: {e}"))
         })?;

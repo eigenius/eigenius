@@ -29,15 +29,16 @@ use crate::conventions::{
     LANGUAGE, PROP_LANGUAGE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, UDS_CONNECT_TIMEOUT,
     WORKER_PROJECT_DIR,
 };
-use crate::dockerfile::julia_dockerfile_fragments;
+use crate::dockerfile::{julia_dockerfile_fragments, JuliaImagePlan};
+use crate::eigenius_common::{self, COMMON_PACKAGE_NAME};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_runtime_substrate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
 use eigenius_runtime_substrate::error::{BuildError, RunError, SpawnError};
-use eigenius_runtime_substrate::image_build::dockerfile::LanguageAssetCopy;
+use eigenius_runtime_substrate::image_build::dockerfile::{IncludedPackage, LanguageAssetCopy};
 use eigenius_runtime_substrate::image_build::{
     compose_dockerfile, BuildContext, BuildContextSpec, BuildahImageBuilder, DockerfileSpec,
-    ImageBuilder, LanguageAsset,
+    ImageBuilder, LanguageAsset, MirrorMaterialization, PackageMaterialization,
 };
 use eigenius_runtime_substrate::invocation::{DispatchTrace, RunOutcome};
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
@@ -151,20 +152,51 @@ impl JuliaLanguageRuntime {
         Ok(self.cached_manifest_hash.get().expect("just set"))
     }
 
-    fn ensure_image(&self) -> Result<ImageDigest, BuildError> {
+    fn ensure_image(&self, mirror: Option<&Resource>) -> Result<ImageDigest, BuildError> {
+        // Cache key today is just `(project files, base image)` — the
+        // mirror parameter does not invalidate the cache because v1
+        // generates a single mirror per `JuliaLanguageRuntime` instance
+        // and the caller supplies the same value across calls. Once
+        // multiple mirrors per runtime become a thing (D27 §3.6
+        // future-work), the cache key must include the mirror's
+        // `library_content_hash`.
         if let Some(d) = self.cached_digest.get() {
             return Ok(d.clone());
         }
-        let digest = self.build_image()?;
+        let digest = self.build_image(mirror)?;
         let _ = self.cached_digest.set(digest.clone());
         Ok(digest)
     }
 
-    fn build_image(&self) -> Result<ImageDigest, BuildError> {
+    fn build_image(&self, mirror: Option<&Resource>) -> Result<ImageDigest, BuildError> {
         let manifest_hash = self.manifest_hash()?.to_string();
         let assets = self.assets()?.clone();
 
-        let fragments = julia_dockerfile_fragments();
+        // Always bake the hand-authored EigeniusJuliaCommon package —
+        // it's the import target every generated mirror uses, and it's
+        // tiny. The substrate's image cache shares layers across envs
+        // that share the same Common version, so the cost is paid once.
+        let mut packages: BTreeMap<String, PackageMaterialization> = BTreeMap::new();
+        packages.insert(
+            COMMON_PACKAGE_NAME.to_string(),
+            eigenius_common::package_materialization(),
+        );
+        let included_packages = vec![IncludedPackage {
+            name: COMMON_PACKAGE_NAME.to_string(),
+        }];
+
+        // Materialise the mirror archive when one was supplied.
+        let mirror_iri = mirror
+            .and_then(|m| m.id().map(|iri| iri.as_str().to_string()))
+            .unwrap_or_default();
+        let mirror_mat = mirror.map(materialize_mirror).transpose()?;
+
+        let plan = JuliaImagePlan {
+            include_common: true,
+            include_mirror: mirror.is_some(),
+        };
+        let fragments = julia_dockerfile_fragments(&plan);
+
         let asset_copies = vec![
             LanguageAssetCopy {
                 source: PathBuf::from("Project.toml"),
@@ -182,8 +214,8 @@ impl JuliaLanguageRuntime {
         let dockerfile = compose_dockerfile(&DockerfileSpec {
             base_image_ref: &self.base_image_ref,
             fragments: &fragments,
-            included_packages: &[],
-            has_mirror: false,
+            included_packages: &included_packages,
+            has_mirror: mirror_mat.is_some(),
             language_asset_copies: &asset_copies,
         });
 
@@ -199,11 +231,11 @@ impl JuliaLanguageRuntime {
         let spec = BuildContextSpec {
             dockerfile,
             manifest_hash: manifest_hash.clone(),
-            mirror_iri: String::new(),
+            mirror_iri,
             included_pkg_iris: Vec::new(),
             built_at: format!("manifest:{manifest_hash}"),
-            packages: BTreeMap::new(),
-            mirror: None,
+            packages,
+            mirror: mirror_mat,
             language_assets: vec![
                 LanguageAsset {
                     source: PathBuf::from("Project.toml"),
@@ -238,13 +270,20 @@ impl LanguageRuntime for JuliaLanguageRuntime {
         &self,
         _env: &Resource,
         _packages: &[Resource],
-        _mirror: Option<&Resource>,
+        mirror: Option<&Resource>,
     ) -> Result<ImageDigest, BuildError> {
-        self.ensure_image()
+        self.ensure_image(mirror)
     }
 
     fn dockerfile_fragments(&self, _env: &Resource) -> DockerfileFragments {
-        julia_dockerfile_fragments()
+        // The substrate calls this for spec-level inspection (no mirror
+        // context). Production image build goes through
+        // `build_environment_image` which builds the plan from the
+        // env's mirror; this surface is the reference fragment shape.
+        julia_dockerfile_fragments(&JuliaImagePlan {
+            include_common: true,
+            include_mirror: false,
+        })
     }
 
     fn run_script(
@@ -277,8 +316,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
             .map_err(|e| RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))?;
         let (numerical_metadata, image_digest) = self.capture_health(&worker);
 
-        let dispatch_result =
-            self.dispatch_and_evict(&worker, target_cbor, invocation_id.clone());
+        let dispatch_result = self.dispatch_and_evict(&worker, target_cbor, invocation_id.clone());
         let stdout = match dispatch_result {
             Ok(stdout) => stdout,
             Err(e) => {
@@ -318,10 +356,18 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
 impl JuliaLanguageRuntime {
     fn spawn_internal(&self) -> Result<WorkerHandle, SpawnError> {
-        let digest = self.ensure_image().map_err(|e| SpawnError::SpawnFailed {
-            backend: "docker",
-            reason: format!("eigenius-julia build_image failed: {e}"),
-        })?;
+        // Spawn-time image lookup: the cached digest from the most
+        // recent `build_environment_image` is the authoritative one.
+        // If nothing has been built yet (Service deployment without a
+        // prior build call), fall back to a mirror-less build —
+        // matching 19a.1 behaviour. 19a.4's `CallRuntimeMethod` path
+        // will always have built with the right mirror first.
+        let digest = self
+            .ensure_image(None)
+            .map_err(|e| SpawnError::SpawnFailed {
+                backend: "docker",
+                reason: format!("eigenius-julia build_image failed: {e}"),
+            })?;
         let manifest_hash = self
             .manifest_hash()
             .map_err(|e| SpawnError::SpawnFailed {
@@ -374,10 +420,7 @@ impl JuliaLanguageRuntime {
         self.spawner.spawn(spec)
     }
 
-    fn capture_health(
-        &self,
-        worker: &WorkerHandle,
-    ) -> (NumericalMetadata, Option<ImageDigest>) {
+    fn capture_health(&self, worker: &WorkerHandle) -> (NumericalMetadata, Option<ImageDigest>) {
         match self.query_health_internal(worker) {
             Ok(info) => {
                 let digest = info
@@ -482,6 +525,129 @@ fn read_or_fail(p: &Path) -> Result<Vec<u8>, BuildError> {
     })
 }
 
+/// Decode a `RuntimePackageMirror` resource's `library_content` JSON
+/// payload back into the file map the substrate's image-build pipeline
+/// materialises under `mirror/`. Inverse of
+/// [`crate::mirror_gen::mirror_to_resource`]'s embedded encoding —
+/// `{"kind": "embedded", "files": [{"path": ..., "content_b64": ...}]}`.
+///
+/// External library references are deferred (D26 §7.2 future-work);
+/// substrate-side mirrors stay in-band today.
+fn materialize_mirror(mirror: &Resource) -> Result<MirrorMaterialization, BuildError> {
+    let lib_iri = Iri::parse("urn:eigenius:runtime:library_content")
+        .expect("library_content IRI is well-formed by construction");
+    let lib_value = mirror.get(&lib_iri).ok_or_else(|| {
+        BuildError::EnvironmentBuildFailed(
+            "mirror resource missing `library_content` property".to_string(),
+        )
+    })?;
+    let lib_json = match lib_value {
+        Value::Json(v) => v,
+        other => {
+            return Err(BuildError::EnvironmentBuildFailed(format!(
+                "mirror `library_content` must be JSON, got {other:?}"
+            )));
+        }
+    };
+    let kind = lib_json
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            BuildError::EnvironmentBuildFailed(
+                "mirror `library_content` missing string `kind` field".to_string(),
+            )
+        })?;
+    if kind != "embedded" {
+        return Err(BuildError::EnvironmentBuildFailed(format!(
+            "mirror `library_content.kind = \"{kind}\"` not yet supported (only `embedded`)"
+        )));
+    }
+    let files = lib_json
+        .get("files")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            BuildError::EnvironmentBuildFailed(
+                "mirror `library_content.files` missing or not an array".to_string(),
+            )
+        })?;
+    let mut mat = MirrorMaterialization::default();
+    for entry in files {
+        let path = entry.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+            BuildError::EnvironmentBuildFailed(
+                "mirror `library_content.files[].path` missing or not a string".to_string(),
+            )
+        })?;
+        let b64 = entry
+            .get("content_b64")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                BuildError::EnvironmentBuildFailed(
+                    "mirror `library_content.files[].content_b64` missing or not a string"
+                        .to_string(),
+                )
+            })?;
+        let content = base64_decode(b64).map_err(|e| {
+            BuildError::EnvironmentBuildFailed(format!(
+                "mirror `library_content.files[].content_b64` for `{path}` is not valid base64: {e}"
+            ))
+        })?;
+        mat.files.insert(PathBuf::from(path), content);
+    }
+    Ok(mat)
+}
+
+/// Decode standard base64 (RFC 4648 §4) — pair to the encoder used by
+/// `mirror_gen::base64_encode`. The decoder is permissive on
+/// whitespace inside the payload (none expected, but a stray newline
+/// shouldn't fail loudly) and strict on illegal chars.
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    fn val(c: u8) -> Option<u8> {
+        match c {
+            b'A'..=b'Z' => Some(c - b'A'),
+            b'a'..=b'z' => Some(c - b'a' + 26),
+            b'0'..=b'9' => Some(c - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let cleaned: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if !cleaned.len().is_multiple_of(4) {
+        return Err(format!(
+            "input length {} not a multiple of 4",
+            cleaned.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(cleaned.len() / 4 * 3);
+    let mut i = 0;
+    while i < cleaned.len() {
+        let chunk = &cleaned[i..i + 4];
+        let pad = chunk.iter().filter(|&&b| b == b'=').count();
+        let v0 = val(chunk[0]).ok_or_else(|| format!("invalid byte {:?}", chunk[0] as char))?;
+        let v1 = val(chunk[1]).ok_or_else(|| format!("invalid byte {:?}", chunk[1] as char))?;
+        let v2 = if chunk[2] == b'=' {
+            0
+        } else {
+            val(chunk[2]).ok_or_else(|| format!("invalid byte {:?}", chunk[2] as char))?
+        };
+        let v3 = if chunk[3] == b'=' {
+            0
+        } else {
+            val(chunk[3]).ok_or_else(|| format!("invalid byte {:?}", chunk[3] as char))?
+        };
+        let n = ((v0 as u32) << 18) | ((v1 as u32) << 12) | ((v2 as u32) << 6) | (v3 as u32);
+        out.push(((n >> 16) & 0xff) as u8);
+        if pad < 2 {
+            out.push(((n >> 8) & 0xff) as u8);
+        }
+        if pad < 1 {
+            out.push((n & 0xff) as u8);
+        }
+        i += 4;
+    }
+    Ok(out)
+}
+
 fn read_string_property<'a>(r: &'a Resource, prop_iri: &str) -> Result<&'a str, String> {
     let iri = Iri::parse(prop_iri).map_err(|e| format!("malformed property IRI: {e}"))?;
     r.get(&iri)
@@ -511,8 +677,10 @@ fn map_dispatch_failure(error_kind: &str, message: String) -> RunError {
 }
 
 fn build_output_resource(invocation_id: &str, output: String) -> Resource {
-    let iri = Iri::parse(&format!("urn:eigenius:julia:invocation:{invocation_id}:output"))
-        .expect("invocation IRI is well-formed by construction");
+    let iri = Iri::parse(&format!(
+        "urn:eigenius:julia:invocation:{invocation_id}:output"
+    ))
+    .expect("invocation IRI is well-formed by construction");
     let mut r = Resource::new(iri);
     r.set(
         Iri::parse(PROP_SCRIPT_OUTPUT).expect("static IRI is well-formed"),
@@ -603,4 +771,146 @@ fn sanitise_for_path(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mirror_gen::{mirror_to_resource, JuliaMirrorGenerator};
+    use eigenius_runtime_substrate::chain::ChainAccessor;
+    use eigenius_runtime_substrate::mirror_generator::{
+        LibraryContent, MirrorGenerationRequest, MirrorGenerator,
+    };
+    use std::collections::HashMap;
+
+    /// Hand-build a tiny chain with one class to exercise the
+    /// generator → resource → materialiser pipeline without standing
+    /// up the full kinase fixture.
+    struct OneClassChain {
+        resources: HashMap<Iri, Resource>,
+    }
+
+    impl OneClassChain {
+        fn new() -> Self {
+            let mut resources = HashMap::new();
+
+            let class_iri = Iri::parse("urn:eigenius:test:Demo").unwrap();
+            let mut cls = Resource::new(class_iri.clone());
+            cls.set(
+                Iri::parse("urn:eigenius:core:short_name").unwrap(),
+                Value::String("Demo".into()),
+            );
+            cls.set(
+                Iri::parse("urn:eigenius:core:requires").unwrap(),
+                Value::Array(vec![Value::ResourceRef(
+                    Iri::parse("urn:eigenius:test:name").unwrap(),
+                )]),
+            );
+            resources.insert(class_iri, cls);
+
+            let prop_iri = Iri::parse("urn:eigenius:test:name").unwrap();
+            let mut prop = Resource::new(prop_iri.clone());
+            prop.set(
+                Iri::parse("urn:eigenius:core:short_name").unwrap(),
+                Value::String("name".into()),
+            );
+            prop.set(
+                Iri::parse("urn:eigenius:core:data_type").unwrap(),
+                Value::ResourceRef(Iri::parse("urn:eigenius:core:string").unwrap()),
+            );
+            resources.insert(prop_iri, prop);
+
+            Self { resources }
+        }
+    }
+
+    impl ChainAccessor for OneClassChain {
+        fn resolve(&self, _claim_layer: &Iri, target: &Iri) -> Option<Resource> {
+            self.resources.get(target).cloned()
+        }
+        fn is_ancestor_or_equal(&self, _: &Iri, _: &Iri) -> bool {
+            true
+        }
+        fn class_unchanged_between(&self, _: &Iri, _: &Iri, _: &Iri) -> bool {
+            true
+        }
+    }
+
+    /// End-to-end on the substrate side (no Docker): generator emits a
+    /// library archive, `mirror_to_resource` commits it, and
+    /// `materialize_mirror` decodes it back. Together these three steps
+    /// are the contract D26 §7 places on the chain — every byte that
+    /// goes onto the resource has to come back at image-build time, or
+    /// the worker won't get the source it expects.
+    #[test]
+    fn chain_to_mirror_to_materialization_round_trip() {
+        let g = JuliaMirrorGenerator::new();
+        let chain = OneClassChain::new();
+        let layer = Iri::parse("urn:eigenius:test:layer").unwrap();
+        let seed = vec![Iri::parse("urn:eigenius:test:Demo").unwrap()];
+
+        let out = g
+            .generate(&MirrorGenerationRequest {
+                source_layer: &layer,
+                seed_classes: &seed,
+                chain: &chain,
+            })
+            .expect("generate");
+        let resource = mirror_to_resource(&g, &out, &layer, Some("1970-01-01T00:00:00Z"));
+
+        let mat = materialize_mirror(&resource).expect("materialize");
+
+        // Files materialised back must equal the generator's output —
+        // path-by-path, byte-by-byte.
+        let LibraryContent::Embedded(files) = &out.library else {
+            panic!("expected embedded library");
+        };
+        assert_eq!(mat.files.len(), files.len());
+        for f in files {
+            let got = mat
+                .files
+                .get(&PathBuf::from(&f.path))
+                .unwrap_or_else(|| panic!("materialised mirror missing `{}`", f.path));
+            assert_eq!(
+                got, &f.content,
+                "byte-identical round-trip for `{}`",
+                f.path
+            );
+        }
+    }
+
+    #[test]
+    fn materialize_mirror_rejects_external_kind() {
+        // External library references aren't supported in v1 — a
+        // resource carrying `kind = "external"` must fail loudly so
+        // the build path doesn't silently produce an empty mirror dir.
+        let mut r = Resource::new(Iri::parse("urn:eigenius:runtime:mirror:test:1").unwrap());
+        r.set(
+            Iri::parse("urn:eigenius:runtime:library_content").unwrap(),
+            Value::Json(serde_json::json!({
+                "kind": "external",
+                "reference": "blob://store/abc",
+                "content_hash": "sha256:00",
+            })),
+        );
+        let err = materialize_mirror(&r).expect_err("external must fail");
+        match err {
+            BuildError::EnvironmentBuildFailed(msg) => {
+                assert!(msg.contains("external"), "got: {msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn materialize_mirror_rejects_missing_library_content() {
+        let r = Resource::new(Iri::parse("urn:eigenius:runtime:mirror:test:2").unwrap());
+        let err = materialize_mirror(&r).expect_err("missing library_content must fail");
+        match err {
+            BuildError::EnvironmentBuildFailed(msg) => {
+                assert!(msg.contains("library_content"), "got: {msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
 }

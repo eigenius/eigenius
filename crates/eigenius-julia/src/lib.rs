@@ -38,8 +38,9 @@
 
 pub mod conventions;
 pub mod dockerfile;
+pub mod eigenius_common;
 pub mod mirror_gen;
 pub mod runtime;
 
-pub use mirror_gen::JuliaMirrorGenerator;
+pub use mirror_gen::{mirror_to_resource, JuliaMirrorGenerator};
 pub use runtime::JuliaLanguageRuntime;

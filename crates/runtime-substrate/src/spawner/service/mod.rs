@@ -40,13 +40,13 @@
 //!   and env retirement.
 //! - `backend` identifies the spawner for telemetry.
 
-pub mod local;
 #[cfg(feature = "docker-spawner")]
 pub mod docker;
+pub mod local;
 
-pub use local::LocalServiceSpawner;
 #[cfg(feature = "docker-spawner")]
 pub use docker::DockerServiceSpawner;
+pub use local::LocalServiceSpawner;
 
 use crate::error::SpawnError;
 use crate::types::{ImageDigest, WorkerSpec};

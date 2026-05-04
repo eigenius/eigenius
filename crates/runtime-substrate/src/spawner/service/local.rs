@@ -149,11 +149,9 @@ impl ServiceSpawner for LocalServiceSpawner {
                 .uds_path
                 .clone()
         };
-        connect_with_retry(&uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| {
-            SpawnError::SpawnFailed {
-                backend: BACKEND,
-                reason: format!("attach_uds connect to {}: {e}", uds_path.display()),
-            }
+        connect_with_retry(&uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| SpawnError::SpawnFailed {
+            backend: BACKEND,
+            reason: format!("attach_uds connect to {}: {e}", uds_path.display()),
         })
     }
 
@@ -203,7 +201,10 @@ impl ServiceSpawner for LocalServiceSpawner {
     }
 }
 
-fn connect_with_retry(uds_path: &std::path::Path, timeout: Duration) -> std::io::Result<UnixStream> {
+fn connect_with_retry(
+    uds_path: &std::path::Path,
+    timeout: Duration,
+) -> std::io::Result<UnixStream> {
     let deadline = Instant::now() + timeout;
     loop {
         match UnixStream::connect(uds_path) {
@@ -215,4 +216,3 @@ fn connect_with_retry(uds_path: &std::path::Path, timeout: Duration) -> std::io:
         }
     }
 }
-

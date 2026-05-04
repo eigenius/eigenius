@@ -81,8 +81,12 @@ pub use rpc::{
     MAX_FRAME_SIZE_DEFAULT,
 };
 #[cfg(feature = "docker-spawner")]
-pub use spawner::{DockerServiceSpawner, DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy};
-pub use spawner::{LocalServiceSpawner, LocalSpawner, ServiceHandle, ServiceSpawner, WorkerSpawner};
+pub use spawner::{
+    DockerServiceSpawner, DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy,
+};
+pub use spawner::{
+    LocalServiceSpawner, LocalSpawner, ServiceHandle, ServiceSpawner, WorkerSpawner,
+};
 #[cfg(feature = "test-runtime")]
 pub use test_runtime::TestLanguageRuntime;
 #[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]

@@ -55,11 +55,28 @@ use eigenius_runtime_substrate::mirror_generator::{
     LibraryContent, LibraryFile, MirrorGenerationOutput, MirrorGenerationRequest, MirrorGenerator,
     MirrorGeneratorError,
 };
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GENERATOR_ID: &str = "eigon-julia-gen";
-const TARGET_MODULE_NAME: &str = "EigeniusMirror";
+pub(crate) const TARGET_MODULE_NAME: &str = "EigeniusMirror";
 const TARGET_FILE_PATH: &str = "src/EigeniusMirror.jl";
+const TARGET_PROJECT_TOML_PATH: &str = "Project.toml";
+
+/// Stable v4-shaped UUID for the generated `EigeniusMirror` Julia
+/// package. Julia's `Pkg` requires every package to declare a `uuid`
+/// in its `Project.toml`; the generator emits a single fixed value so
+/// the produced mirror is byte-identical across runs. Refined to a
+/// per-source-layer derived UUID once we generate multiple mirrors per
+/// runtime (D27 §3.6 future-work).
+const TARGET_PACKAGE_UUID: &str = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d";
+
+/// UUID of the hand-authored `EigeniusJuliaCommon` package the
+/// generated mirror depends on. Must match
+/// `julia/common/EigeniusJuliaCommon/Project.toml`.
+const COMMON_PACKAGE_UUID: &str = "9c8e7a4e-1f2b-4c3d-9e5f-6a7b8c9d0e1f";
+
+const TARGET_PACKAGE_VERSION: &str = "0.1.0";
 
 // Core ontology IRIs the generator reads. Pinned as constants so a
 // chain rename of the core ontology surfaces as a compile-time edit
@@ -95,6 +112,24 @@ const PROP_IS_A: &str = "urn:eigenius:core:is_a";
 /// `:date`).
 const FORMAT_IRI_PREFIX: &str = "urn:eigenius:core:formats:";
 
+// `RuntimePackageMirror` class + property IRIs from the runtime
+// substrate ontology. Pinned as constants so any rename in the
+// ontology surfaces as a compile-time edit rather than a silent drift.
+const CLASS_RUNTIME_PACKAGE_MIRROR: &str = "urn:eigenius:runtime:RuntimePackageMirror";
+const PROP_DESCRIPTION: &str = "urn:eigenius:core:description";
+const PROP_MIRROR_LANGUAGE: &str = "urn:eigenius:runtime:language";
+const PROP_MIRROR_SOURCE_LAYER: &str = "urn:eigenius:runtime:source_layer";
+const PROP_MIRROR_GEN_ID: &str = "urn:eigenius:runtime:generator_identifier";
+const PROP_MIRROR_GEN_VERSION: &str = "urn:eigenius:runtime:generator_version";
+const PROP_MIRROR_GEN_CONTENT_HASH: &str = "urn:eigenius:runtime:generator_content_hash";
+const PROP_MIRROR_LIB_CONTENT_HASH: &str = "urn:eigenius:runtime:library_content_hash";
+const PROP_MIRROR_LIB_CONTENT: &str = "urn:eigenius:runtime:library_content";
+const PROP_MIRRORED_CLASSES: &str = "urn:eigenius:runtime:mirrored_classes";
+const PROP_MIRROR_GENERATED_AT: &str = "urn:eigenius:runtime:generated_at";
+
+/// Language tag stamped on every produced mirror.
+const LANGUAGE_JULIA: &str = "julia";
+
 /// `MirrorGenerator` for Julia. Stateless — every `generate()` call
 /// re-walks the supplied chain.
 pub struct JuliaMirrorGenerator {
@@ -109,9 +144,19 @@ pub struct JuliaMirrorGenerator {
 impl JuliaMirrorGenerator {
     pub fn new() -> Self {
         let version = env!("CARGO_PKG_VERSION");
+        // The ontology's `generator_content_hash` regex pins the value
+        // to `^sha256:[a-f0-9]{64}$`. Until we wire up a real binary
+        // hash (D26 §7.2 future-work), derive the hash deterministically
+        // from `(generator_id, version)` so the integrity-chain shape
+        // is correct and the value is stable across runs.
+        let mut hasher = Sha256::new();
+        hasher.update(GENERATOR_ID.as_bytes());
+        hasher.update(b":");
+        hasher.update(version.as_bytes());
+        let content_hash = format!("sha256:{:x}", hasher.finalize());
         Self {
             version,
-            content_hash: format!("eigon-julia-gen:{version}"),
+            content_hash,
         }
     }
 }
@@ -151,17 +196,240 @@ impl MirrorGenerator for JuliaMirrorGenerator {
         //    structs are declared before it. Stable on tie (by IRI).
         let order = topological_order(&class_decls);
 
-        // 4. Emit the Julia source.
+        // 4. Emit the Julia source + the Project.toml that turns it
+        //    into an installable Julia package.
         let source = emit_module(&class_decls, &order, request);
+        let project_toml = emit_project_toml();
 
         Ok(MirrorGenerationOutput {
             mirrored_classes: order.to_vec(),
-            library: LibraryContent::Embedded(vec![LibraryFile {
-                path: TARGET_FILE_PATH.to_string(),
-                content: source.into_bytes(),
-            }]),
+            library: LibraryContent::Embedded(vec![
+                LibraryFile {
+                    path: TARGET_PROJECT_TOML_PATH.to_string(),
+                    content: project_toml.into_bytes(),
+                },
+                LibraryFile {
+                    path: TARGET_FILE_PATH.to_string(),
+                    content: source.into_bytes(),
+                },
+            ]),
         })
     }
+}
+
+/// Emit the `Project.toml` for the generated mirror package. The
+/// produced bytes are deterministic — same generator version produces
+/// the same `Project.toml` byte-for-byte.
+fn emit_project_toml() -> String {
+    format!(
+        "# Auto-generated by eigon-julia-gen — DO NOT EDIT.\n\
+         name = \"{TARGET_MODULE_NAME}\"\n\
+         uuid = \"{TARGET_PACKAGE_UUID}\"\n\
+         authors = [\"The Eigenius Authors\"]\n\
+         version = \"{TARGET_PACKAGE_VERSION}\"\n\
+         \n\
+         [deps]\n\
+         EigeniusJuliaCommon = \"{COMMON_PACKAGE_UUID}\"\n\
+         \n\
+         [compat]\n\
+         julia = \"1.10\"\n",
+    )
+}
+
+/// Construct the `RuntimePackageMirror` resource that anchors a
+/// generated mirror in the chain. Required at image-build time per
+/// D26 §5.4 / §7 — the resource IRI is what the env image's
+/// `mirror-iri` provenance file points at.
+///
+/// `generated_at` is caller-supplied so the timestamp can be
+/// deterministic in tests (`"1970-01-01T00:00:00Z"`) while production
+/// callers stamp the wall clock. The mirror itself is byte-identical
+/// without it; the property is recommended-only (audit-grade).
+pub fn mirror_to_resource(
+    generator: &dyn MirrorGenerator,
+    output: &MirrorGenerationOutput,
+    source_layer: &Iri,
+    generated_at: Option<&str>,
+) -> Resource {
+    let library_content_hash = compute_library_content_hash(&output.library);
+    let library_json = library_content_to_json(&output.library);
+    let mirror_iri = derive_mirror_iri(&library_content_hash);
+
+    let mut r = Resource::new(mirror_iri);
+    r.set(
+        Iri::parse(PROP_IS_A).expect("static IRI"),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(CLASS_RUNTIME_PACKAGE_MIRROR).expect("static IRI"),
+        )]),
+    );
+    r.set(
+        Iri::parse(PROP_SHORT_NAME).expect("static IRI"),
+        Value::String(TARGET_MODULE_NAME.to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_DESCRIPTION).expect("static IRI"),
+        Value::String(format!(
+            "Generated Julia mirror covering {} class(es) from {}.",
+            output.mirrored_classes.len(),
+            source_layer.as_str(),
+        )),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_LANGUAGE).expect("static IRI"),
+        Value::String(LANGUAGE_JULIA.to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_SOURCE_LAYER).expect("static IRI"),
+        Value::String(source_layer.as_str().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_GEN_ID).expect("static IRI"),
+        Value::String(generator.generator_identifier().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_GEN_VERSION).expect("static IRI"),
+        Value::String(generator.generator_version().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_GEN_CONTENT_HASH).expect("static IRI"),
+        Value::String(generator.generator_content_hash().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_LIB_CONTENT_HASH).expect("static IRI"),
+        Value::String(library_content_hash),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_LIB_CONTENT).expect("static IRI"),
+        Value::Json(library_json),
+    );
+    r.set(
+        Iri::parse(PROP_MIRRORED_CLASSES).expect("static IRI"),
+        Value::Array(
+            output
+                .mirrored_classes
+                .iter()
+                .cloned()
+                .map(Value::ResourceRef)
+                .collect(),
+        ),
+    );
+    if let Some(ts) = generated_at {
+        r.set(
+            Iri::parse(PROP_MIRROR_GENERATED_AT).expect("static IRI"),
+            Value::String(ts.to_string()),
+        );
+    }
+    r
+}
+
+/// SHA-256 over the library archive's bytes. For `Embedded`, the hash
+/// covers each `(path, content)` pair in path-sorted order with a
+/// length-prefix between fields so a path/content swap produces a
+/// different digest. For `External`, the hash is the caller-supplied
+/// `content_hash` (already SHA-256 of the referenced bytes).
+fn compute_library_content_hash(library: &LibraryContent) -> String {
+    match library {
+        LibraryContent::Embedded(files) => {
+            let mut sorted: Vec<&LibraryFile> = files.iter().collect();
+            sorted.sort_by(|a, b| a.path.cmp(&b.path));
+            let mut hasher = Sha256::new();
+            for f in sorted {
+                let path_bytes = f.path.as_bytes();
+                hasher.update((path_bytes.len() as u64).to_be_bytes());
+                hasher.update(path_bytes);
+                hasher.update((f.content.len() as u64).to_be_bytes());
+                hasher.update(&f.content);
+            }
+            format!("sha256:{:x}", hasher.finalize())
+        }
+        LibraryContent::External { content_hash, .. } => content_hash.clone(),
+    }
+}
+
+/// Encode a `LibraryContent` as JSON for the `library_content`
+/// property. Embedded archives become `{"kind": "embedded", "files":
+/// [{"path": ..., "content_b64": ...}, ...]}`; external references
+/// become `{"kind": "external", "reference": ..., "content_hash":
+/// ...}`. The substrate's image-build pipeline parses this back when
+/// it materialises the mirror.
+fn library_content_to_json(library: &LibraryContent) -> serde_json::Value {
+    match library {
+        LibraryContent::Embedded(files) => {
+            let mut sorted: Vec<&LibraryFile> = files.iter().collect();
+            sorted.sort_by(|a, b| a.path.cmp(&b.path));
+            let arr: Vec<serde_json::Value> = sorted
+                .into_iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "path": f.path,
+                        "content_b64": base64_encode(&f.content),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "kind": "embedded",
+                "files": arr,
+            })
+        }
+        LibraryContent::External {
+            reference,
+            content_hash,
+        } => serde_json::json!({
+            "kind": "external",
+            "reference": reference,
+            "content_hash": content_hash,
+        }),
+    }
+}
+
+/// Standard base64 (no padding stripping, no URL-safe alphabet — RFC
+/// 4648 §4). Hand-rolled so the crate keeps a tiny dep set; the
+/// alphabet is fixed and the encoder is one screen, so a dep would
+/// just trade transitive churn for nothing.
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let b = &bytes[i..i + 3];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 0x3f) as usize] as char);
+        out.push(ALPHABET[(n & 0x3f) as usize] as char);
+        i += 3;
+    }
+    let rem = bytes.len() - i;
+    if rem == 1 {
+        let n = (bytes[i] as u32) << 16;
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 0x3f) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+/// Stable IRI for the generated mirror, derived from the library
+/// content hash so byte-identical mirrors produce byte-identical
+/// IRIs. The first 16 hex chars of the hash are enough for collision
+/// safety in the practical generator-output universe; the full hash
+/// stays on `library_content_hash` for full integrity checks.
+fn derive_mirror_iri(library_content_hash: &str) -> Iri {
+    let short = library_content_hash
+        .strip_prefix("sha256:")
+        .unwrap_or(library_content_hash)
+        .chars()
+        .take(16)
+        .collect::<String>();
+    Iri::parse(&format!("urn:eigenius:runtime:mirror:julia:{short}"))
+        .expect("derived mirror IRI is well-formed")
 }
 
 /// Class declaration in the form the emitter consumes. `requires` and
@@ -359,12 +627,11 @@ fn read_constraints(prop_def: &Resource) -> PropertyConstraints {
         min_length: integer_value(prop_def, PROP_MIN_LENGTH),
         max_length: integer_value(prop_def, PROP_MAX_LENGTH),
         pattern: string_value(prop_def, PROP_PATTERN),
-        format: resource_iri_value(prop_def, PROP_FORMAT)
-            .and_then(|iri| {
-                iri.as_str()
-                    .strip_prefix(FORMAT_IRI_PREFIX)
-                    .map(str::to_string)
-            }),
+        format: resource_iri_value(prop_def, PROP_FORMAT).and_then(|iri| {
+            iri.as_str()
+                .strip_prefix(FORMAT_IRI_PREFIX)
+                .map(str::to_string)
+        }),
     }
 }
 
@@ -374,8 +641,7 @@ fn read_constraints(prop_def: &Resource) -> PropertyConstraints {
 fn numeric_value(r: &Resource, prop_iri: &str) -> Option<f64> {
     let iri = Iri::parse(prop_iri).ok()?;
     let v = r.get(&iri)?;
-    v.as_float()
-        .or_else(|| v.as_integer().map(|n| n as f64))
+    v.as_float().or_else(|| v.as_integer().map(|n| n as f64))
 }
 
 fn integer_value(r: &Resource, prop_iri: &str) -> Option<i64> {
@@ -434,13 +700,15 @@ fn resolve_property_type(
             Ok(JuliaType::Vector(Box::new(inner)))
         }
         TYPE_VALUE_ARRAY => {
-            let element_type = resource_iri_value(prop_def, PROP_ELEMENT_TYPE)
-                .ok_or_else(|| MirrorGeneratorError::UnrepresentableClass {
-                    class_iri: prop_iri.as_str().to_string(),
-                    language: "julia".to_string(),
-                    reason: format!(
-                        "data_type `{TYPE_VALUE_ARRAY}` requires `{PROP_ELEMENT_TYPE}`"
-                    ),
+            let element_type =
+                resource_iri_value(prop_def, PROP_ELEMENT_TYPE).ok_or_else(|| {
+                    MirrorGeneratorError::UnrepresentableClass {
+                        class_iri: prop_iri.as_str().to_string(),
+                        language: "julia".to_string(),
+                        reason: format!(
+                            "data_type `{TYPE_VALUE_ARRAY}` requires `{PROP_ELEMENT_TYPE}`"
+                        ),
+                    }
                 })?;
             let inner = match element_type.as_str() {
                 TYPE_STRING => JuliaType::Primitive("String"),
@@ -554,11 +822,7 @@ fn emit_module(
     s
 }
 
-fn emit_struct(
-    out: &mut String,
-    decl: &ClassDecl,
-    class_lookup: &BTreeMap<Iri, String>,
-) {
+fn emit_struct(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri, String>) {
     out.push_str(&format!("struct {}\n", decl.short_name));
     for prop in &decl.requires {
         out.push_str(&format!(
@@ -726,15 +990,9 @@ fn julia_string_literal(s: &str) -> String {
     out
 }
 
-fn emit_decoder(
-    out: &mut String,
-    decl: &ClassDecl,
-    class_lookup: &BTreeMap<Iri, String>,
-) {
+fn emit_decoder(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri, String>) {
     let cls = &decl.short_name;
-    out.push_str(&format!(
-        "function decode_{cls}(m::AbstractDict)::{cls}\n"
-    ));
+    out.push_str(&format!("function decode_{cls}(m::AbstractDict)::{cls}\n"));
     out.push_str(&format!("    {cls}(\n"));
 
     let last_required = decl.requires.len().saturating_sub(1);
@@ -779,20 +1037,14 @@ fn decode_property_expr(
         // get(m, key, nothing); if nothing, pass through; else recurse.
         let raw = format!("get(m, {key}, nothing)");
         let inner = decode_value_expr(&prop.julia_type, "_v", class_lookup);
-        format!(
-            "(let _v = {raw}; isnothing(_v) ? nothing : ({inner}) end)"
-        )
+        format!("(let _v = {raw}; isnothing(_v) ? nothing : ({inner}) end)")
     }
 }
 
 /// Express the worker-side decode of `expr` (a CBOR-loaded value)
 /// into the Julia type `t`. Resource-typed fields recurse via
 /// `decode_<Class>`; primitives pass through.
-fn decode_value_expr(
-    t: &JuliaType,
-    expr: &str,
-    class_lookup: &BTreeMap<Iri, String>,
-) -> String {
+fn decode_value_expr(t: &JuliaType, expr: &str, class_lookup: &BTreeMap<Iri, String>) -> String {
     match t {
         JuliaType::Primitive(_) => expr.to_string(),
         JuliaType::StructRef(iri) => {
@@ -821,11 +1073,7 @@ fn decode_value_expr(
     }
 }
 
-fn emit_encoder(
-    out: &mut String,
-    decl: &ClassDecl,
-    class_lookup: &BTreeMap<Iri, String>,
-) {
+fn emit_encoder(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri, String>) {
     let cls = &decl.short_name;
     out.push_str(&format!(
         "function encode_{cls}(c::{cls})::Dict{{String, Any}}\n"
@@ -849,11 +1097,7 @@ fn emit_encoder(
     for prop in &decl.recommends {
         let key = julia_string_literal(prop.iri.as_str());
         let field = &prop.short_name;
-        let value = encode_value_expr(
-            &prop.julia_type,
-            &format!("c.{field}"),
-            class_lookup,
-        );
+        let value = encode_value_expr(&prop.julia_type, &format!("c.{field}"), class_lookup);
         out.push_str(&format!(
             "    isnothing(c.{field}) || (out[{key}] = {value})\n"
         ));
@@ -862,11 +1106,7 @@ fn emit_encoder(
     out.push_str("end\n");
 }
 
-fn encode_value_expr(
-    t: &JuliaType,
-    expr: &str,
-    class_lookup: &BTreeMap<Iri, String>,
-) -> String {
+fn encode_value_expr(t: &JuliaType, expr: &str, class_lookup: &BTreeMap<Iri, String>) -> String {
     match t {
         JuliaType::Primitive(_) => expr.to_string(),
         JuliaType::StructRef(iri) => {
@@ -1678,6 +1918,198 @@ end # module EigeniusMirror
             Err(MirrorGeneratorError::UnknownClass(_)) => {}
             Err(other) => panic!("expected UnknownClass, got {other:?}"),
             Ok(_) => panic!("expected unknown-class error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn project_toml_is_emitted_alongside_module_source() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        match &out.library {
+            LibraryContent::Embedded(files) => {
+                let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+                assert!(paths.contains(&"Project.toml"), "got {paths:?}");
+                assert!(paths.contains(&"src/EigeniusMirror.jl"), "got {paths:?}");
+            }
+            other => panic!("expected Embedded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn project_toml_declares_eigenius_julia_common_dep() {
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let LibraryContent::Embedded(files) = &out.library else {
+            panic!("expected Embedded library");
+        };
+        let toml = files
+            .iter()
+            .find(|f| f.path == "Project.toml")
+            .expect("Project.toml present");
+        let body = std::str::from_utf8(&toml.content).expect("utf-8");
+        assert!(body.contains("name = \"EigeniusMirror\""), "got:\n{body}");
+        assert!(
+            body.contains("EigeniusJuliaCommon = \"9c8e7a4e-1f2b-4c3d-9e5f-6a7b8c9d0e1f\""),
+            "Project.toml must pin the hand-authored Common's UUID, got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn generator_content_hash_has_sha256_shape() {
+        // Ontology pins generator_content_hash to ^sha256:[a-f0-9]{64}$
+        // so the resource validates at chain commit.
+        let g = JuliaMirrorGenerator::new();
+        let h = g.generator_content_hash();
+        assert!(h.starts_with("sha256:"));
+        let hex = &h["sha256:".len()..];
+        assert_eq!(hex.len(), 64);
+        assert!(hex
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+    }
+
+    #[test]
+    fn mirror_to_resource_carries_required_properties() {
+        let g = JuliaMirrorGenerator::new();
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let layer = iri("urn:eigenius:test:layer:l0");
+        let r = mirror_to_resource(&g, &out, &layer, Some("1970-01-01T00:00:00Z"));
+
+        let s = |p: &str| {
+            r.get(&iri(p))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("missing string property `{p}`"))
+        };
+        assert_eq!(s(PROP_MIRROR_LANGUAGE), "julia");
+        assert_eq!(s(PROP_MIRROR_SOURCE_LAYER), "urn:eigenius:test:layer:l0");
+        assert_eq!(s(PROP_MIRROR_GEN_ID), "eigon-julia-gen");
+        assert_eq!(s(PROP_MIRROR_GEN_VERSION), env!("CARGO_PKG_VERSION"));
+        assert_eq!(s(PROP_SHORT_NAME), "EigeniusMirror");
+        let h = s(PROP_MIRROR_LIB_CONTENT_HASH);
+        assert!(h.starts_with("sha256:"));
+        // is_a points at RuntimePackageMirror.
+        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
+        assert_eq!(
+            is_a,
+            vec![iri(CLASS_RUNTIME_PACKAGE_MIRROR)],
+            "is_a must point at RuntimePackageMirror"
+        );
+        // generated_at present when provided.
+        assert_eq!(s(PROP_MIRROR_GENERATED_AT), "1970-01-01T00:00:00Z");
+        // mirrored_classes lists the class IRIs.
+        let cls = r
+            .get(&iri(PROP_MIRRORED_CLASSES))
+            .expect("mirrored_classes present")
+            .as_iri_array();
+        assert!(cls.contains(&iri("urn:eigenius:demo:assay:Compound")));
+    }
+
+    #[test]
+    fn mirror_to_resource_iri_is_derived_from_library_hash() {
+        let g = JuliaMirrorGenerator::new();
+        // Same closure → same derived IRI.
+        let out_a = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let out_b = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let layer = iri("urn:eigenius:test:layer");
+        let ra = mirror_to_resource(&g, &out_a, &layer, None);
+        let rb = mirror_to_resource(&g, &out_b, &layer, None);
+        assert_eq!(ra.id(), rb.id(), "deterministic mirror IRI");
+        // IRI starts with the substrate's mirror namespace.
+        assert!(ra
+            .id()
+            .unwrap()
+            .as_str()
+            .starts_with("urn:eigenius:runtime:mirror:julia:"));
+    }
+
+    #[test]
+    fn library_content_json_round_trips_files() {
+        // The on-resource JSON must carry every file the generator
+        // produced so the substrate's image-build pipeline can
+        // materialise the mirror by reading the resource alone.
+        let g = JuliaMirrorGenerator::new();
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let layer = iri("urn:eigenius:test:layer");
+        let r = mirror_to_resource(&g, &out, &layer, None);
+        let json = match r
+            .get(&iri(PROP_MIRROR_LIB_CONTENT))
+            .expect("library_content")
+        {
+            Value::Json(v) => v.clone(),
+            other => panic!("expected JSON value, got {other:?}"),
+        };
+        assert_eq!(json["kind"], "embedded");
+        let files = json["files"].as_array().expect("files array");
+        let paths: Vec<&str> = files
+            .iter()
+            .filter_map(|f| f.get("path").and_then(|v| v.as_str()))
+            .collect();
+        assert!(paths.contains(&"Project.toml"));
+        assert!(paths.contains(&"src/EigeniusMirror.jl"));
+        // Decoded base64 must equal the original bytes.
+        for f in files {
+            let path = f["path"].as_str().unwrap();
+            let b64 = f["content_b64"].as_str().unwrap();
+            let original = match &out.library {
+                LibraryContent::Embedded(fs) => fs
+                    .iter()
+                    .find(|x| x.path == path)
+                    .expect("path matches generator output")
+                    .content
+                    .clone(),
+                _ => panic!("expected embedded"),
+            };
+            // Decode base64 here to confirm round-trip — uses the
+            // same alphabet as base64_encode in this module.
+            let decoded = decode_b64_for_test(b64);
+            assert_eq!(decoded, original, "base64 round-trip for `{path}`");
+        }
+    }
+
+    fn decode_b64_for_test(s: &str) -> Vec<u8> {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut idx = [0u8; 256];
+        for (i, &b) in ALPHABET.iter().enumerate() {
+            idx[b as usize] = i as u8;
+        }
+        let bytes = s.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            let chunk = &bytes[i..i + 4];
+            let pad = chunk.iter().filter(|&&b| b == b'=').count();
+            let v0 = idx[chunk[0] as usize] as u32;
+            let v1 = idx[chunk[1] as usize] as u32;
+            let v2 = if chunk[2] == b'=' {
+                0
+            } else {
+                idx[chunk[2] as usize] as u32
+            };
+            let v3 = if chunk[3] == b'=' {
+                0
+            } else {
+                idx[chunk[3] as usize] as u32
+            };
+            let n = (v0 << 18) | (v1 << 12) | (v2 << 6) | v3;
+            out.push(((n >> 16) & 0xff) as u8);
+            if pad < 2 {
+                out.push(((n >> 8) & 0xff) as u8);
+            }
+            if pad < 1 {
+                out.push((n & 0xff) as u8);
+            }
+            i += 4;
+        }
+        out
+    }
+
+    #[test]
+    fn base64_encoder_round_trips_arbitrary_bytes() {
+        let cases: [&[u8]; 5] = [b"", b"f", b"fo", b"foo", b"hello world\n\xff\x00\x10"];
+        for input in &cases {
+            let encoded = base64_encode(input);
+            let decoded = decode_b64_for_test(&encoded);
+            assert_eq!(&decoded, input, "round-trip for {input:?}");
         }
     }
 }
