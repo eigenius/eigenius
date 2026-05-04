@@ -39,9 +39,10 @@ use eigenius_runtime_substrate::image_build::{
     compose_dockerfile, BuildContext, BuildContextSpec, BuildahImageBuilder, DockerfileSpec,
     ImageBuilder, LanguageAsset,
 };
+use eigenius_runtime_substrate::invocation::{DispatchTrace, RunOutcome};
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
 use eigenius_runtime_substrate::rpc::client::WorkerRpcClient;
-use eigenius_runtime_substrate::rpc::protocol::{HealthInfo, Request, Response};
+use eigenius_runtime_substrate::rpc::protocol::{HealthInfo, NumericalMetadata, Request, Response};
 use eigenius_runtime_substrate::spawner::{DockerSpawner, WorkerSpawner};
 use eigenius_runtime_substrate::types::{
     DockerfileFragments, ImageDigest, WorkerHandle, WorkerSpec,
@@ -242,11 +243,81 @@ impl LanguageRuntime for JuliaLanguageRuntime {
         self.ensure_image()
     }
 
-    fn spawn_worker(
+    fn dockerfile_fragments(&self, _env: &Resource) -> DockerfileFragments {
+        julia_dockerfile_fragments()
+    }
+
+    fn run_script(
         &self,
         _env: &Resource,
-        _image_digest: Option<&ImageDigest>,
-    ) -> Result<WorkerHandle, SpawnError> {
+        script: &Resource,
+        _inputs: &[Resource],
+    ) -> Result<RunOutcome, RunError> {
+        let source = read_string_property(script, PROP_SOURCE)
+            .map_err(|reason| {
+                RunError::MethodSignatureMismatch(format!(
+                    "RuntimeScript missing or malformed `source`: {reason}"
+                ))
+            })?
+            .to_string();
+
+        let mut target_cbor = Vec::new();
+        ciborium::into_writer(&source, &mut target_cbor)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("encode julia source as CBOR: {e}")))?;
+
+        let invocation_id = format!(
+            "julia-inv-{}",
+            INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+
+        let started_at = DispatchTrace::now_rfc3339();
+
+        let worker = self
+            .spawn_internal()
+            .map_err(|e| RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))?;
+        let (numerical_metadata, image_digest) = self.capture_health(&worker);
+
+        let dispatch_result =
+            self.dispatch_and_evict(&worker, target_cbor, invocation_id.clone());
+        let stdout = match dispatch_result {
+            Ok(stdout) => stdout,
+            Err(e) => {
+                let _ = self.try_evict(&worker);
+                return Err(e);
+            }
+        };
+
+        let completed_at = DispatchTrace::now_rfc3339();
+
+        Ok(RunOutcome {
+            output: build_output_resource(&invocation_id, stdout),
+            image_digest,
+            started_at,
+            completed_at,
+            numerical_metadata,
+            dispatched_to: None,
+        })
+    }
+
+    fn call_method(
+        &self,
+        _env: &Resource,
+        _signature: &Resource,
+        _inputs: &[Resource],
+    ) -> Result<RunOutcome, RunError> {
+        // 19a.4 lights this up against typed mirror struct dispatch
+        // (worker-side method registry walking the generated mirror
+        // packages' exports). Until then, dispatch a script via
+        // `RunRuntimeScript` instead.
+        Err(RunError::MethodSignatureMismatch(
+            "JuliaLanguageRuntime::call_method is not yet implemented (lands in Phase 19a.4)"
+                .to_string(),
+        ))
+    }
+}
+
+impl JuliaLanguageRuntime {
+    fn spawn_internal(&self) -> Result<WorkerHandle, SpawnError> {
         let digest = self.ensure_image().map_err(|e| SpawnError::SpawnFailed {
             backend: "docker",
             reason: format!("eigenius-julia build_image failed: {e}"),
@@ -303,30 +374,56 @@ impl LanguageRuntime for JuliaLanguageRuntime {
         self.spawner.spawn(spec)
     }
 
-    fn run_script(
+    fn capture_health(
         &self,
         worker: &WorkerHandle,
-        script: &Resource,
-        _inputs: &[Resource],
-    ) -> Result<Resource, RunError> {
-        let source = read_string_property(script, PROP_SOURCE).map_err(|reason| {
-            RunError::MethodSignatureMismatch(format!(
-                "RuntimeScript missing or malformed `source`: {reason}"
-            ))
-        })?;
+    ) -> (NumericalMetadata, Option<ImageDigest>) {
+        match self.query_health_internal(worker) {
+            Ok(info) => {
+                let digest = info
+                    .env_digest_in_image
+                    .as_deref()
+                    .and_then(|s| ImageDigest::parse(s).ok());
+                (info.numerical_metadata, digest)
+            }
+            Err(e) => {
+                eprintln!(
+                    "JuliaLanguageRuntime: query_health failed for worker {} ({}): {e}; \
+                     dispatch will continue with empty trace fields",
+                    worker.id, worker.backend
+                );
+                (NumericalMetadata::default(), None)
+            }
+        }
+    }
 
+    fn query_health_internal(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError> {
+        let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| {
+            RunError::WorkerRpcFailed(format!("connect to worker UDS for health: {e}"))
+        })?;
+        let mut client = WorkerRpcClient::new(stream);
+        let resp = client
+            .call(&Request::Health)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("health call: {e}")))?;
+        drop(client);
+        match resp {
+            Response::Health(info) => Ok(info),
+            other => Err(RunError::WorkerRpcFailed(format!(
+                "unexpected response to health: {other:?}"
+            ))),
+        }
+    }
+
+    fn dispatch_and_evict(
+        &self,
+        worker: &WorkerHandle,
+        target_cbor: Vec<u8>,
+        invocation_id: String,
+    ) -> Result<String, RunError> {
         let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT)
             .map_err(|e| RunError::WorkerRpcFailed(format!("connect to worker UDS: {e}")))?;
         let mut client = WorkerRpcClient::new(stream);
 
-        let mut target_cbor = Vec::new();
-        ciborium::into_writer(source, &mut target_cbor)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("encode julia source as CBOR: {e}")))?;
-
-        let invocation_id = format!(
-            "julia-inv-{}",
-            INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
         let resp = client
             .call(&Request::DispatchMethod {
                 invocation_id: invocation_id.clone(),
@@ -362,44 +459,17 @@ impl LanguageRuntime for JuliaLanguageRuntime {
         }
         drop(client);
 
-        Ok(build_output_resource(&invocation_id, stdout))
+        Ok(stdout)
     }
 
-    fn call_method(
-        &self,
-        _worker: &WorkerHandle,
-        _signature: &Resource,
-        _inputs: &[Resource],
-    ) -> Result<Resource, RunError> {
-        // 19a.4 lights this up against typed mirror struct dispatch
-        // (worker-side method registry walking the generated mirror
-        // packages' exports). Until then, dispatch a script via
-        // `RunRuntimeScript` instead.
-        Err(RunError::MethodSignatureMismatch(
-            "JuliaLanguageRuntime::call_method is not yet implemented (lands in Phase 19a.4)"
-                .to_string(),
-        ))
-    }
-
-    fn dockerfile_fragments(&self, _env: &Resource) -> DockerfileFragments {
-        julia_dockerfile_fragments()
-    }
-
-    fn query_health(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError> {
-        let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| {
-            RunError::WorkerRpcFailed(format!("connect to worker UDS for health: {e}"))
-        })?;
+    fn try_evict(&self, worker: &WorkerHandle) -> Result<(), RunError> {
+        let stream = UnixStream::connect(&worker.uds_path)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("evict-on-error connect: {e}")))?;
         let mut client = WorkerRpcClient::new(stream);
-        let resp = client
-            .call(&Request::Health)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("health call: {e}")))?;
-        drop(client);
-        match resp {
-            Response::Health(info) => Ok(info),
-            other => Err(RunError::WorkerRpcFailed(format!(
-                "unexpected response to health: {other:?}"
-            ))),
-        }
+        client
+            .call(&Request::Evict)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("evict-on-error call: {e}")))?;
+        Ok(())
     }
 }
 

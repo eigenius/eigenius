@@ -69,7 +69,7 @@ pub use image_build::{
     DockerfileSpec, ImageBuilder, IncludedPackage, LanguageAsset, MirrorMaterialization,
     PackageMaterialization,
 };
-pub use invocation::{numerical_metadata_to_json, DispatchTrace};
+pub use invocation::{numerical_metadata_to_json, DispatchTrace, RunOutcome};
 pub use language_runtime::LanguageRuntime;
 pub use mirror_generator::{
     LibraryContent, LibraryFile, MirrorGenerationOutput, MirrorGenerationRequest, MirrorGenerator,

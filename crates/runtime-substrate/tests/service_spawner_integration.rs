@@ -36,7 +36,7 @@ use eigenius_runtime_substrate::spawner::service::{LocalServiceSpawner, ServiceS
 use eigenius_runtime_substrate::types::{ImageDigest, WorkerSpec};
 use eigenius_runtime_substrate::WorkerRpcClient;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -64,7 +64,7 @@ const TEST_MANIFEST_HASH: &str = "test-manifest";
 /// Build a `WorkerSpec` shaped for `LocalServiceSpawner`. The worker's
 /// cross-check env is wired up via `prepare_substrate_side` exactly as
 /// the per-invocation tests do; only the lifecycle differs.
-fn build_spec(tempdir: &PathBuf) -> WorkerSpec {
+fn build_spec(tempdir: &Path) -> WorkerSpec {
     let uds = tempdir.join("worker.sock");
     let mut env = BTreeMap::new();
     env.insert(
@@ -91,7 +91,7 @@ fn build_spec(tempdir: &PathBuf) -> WorkerSpec {
     WorkerSpec {
         image_digest: Some(digest),
         command: vec![worker_binary().to_string_lossy().into_owned()],
-        tempdir_host_path: tempdir.clone(),
+        tempdir_host_path: tempdir.to_path_buf(),
         depot_host_path: None,
         env,
         max_wall_time_ms: 0,

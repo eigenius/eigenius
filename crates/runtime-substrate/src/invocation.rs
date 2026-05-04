@@ -99,6 +99,37 @@ pub struct DispatchTrace {
     pub numerical_metadata: NumericalMetadata,
 }
 
+/// Outcome of a [`crate::language_runtime::LanguageRuntime`] dispatch.
+/// Bundles the result resource with the trace fields the runtime is
+/// uniquely positioned to know (timestamps, image digest the worker
+/// actually ran against, numerical metadata the worker reported).
+///
+/// The runtime owns its dispatch lifecycle (spawn, attach, dispatch,
+/// cleanup) and produces this struct at the end. The substrate facade
+/// adds the language tag (which it already knows from the dispatch
+/// argument) and assembles the partial `RuntimeInvocation`.
+#[derive(Debug)]
+pub struct RunOutcome {
+    /// The output resource produced by the dispatch.
+    pub output: eigenius_kernel::ontology::resource::Resource,
+    /// Image digest the worker actually ran against. `None` under
+    /// host-subprocess backends with no built image.
+    pub image_digest: Option<ImageDigest>,
+    /// RFC3339 timestamp captured immediately before the worker-side
+    /// dispatch began.
+    pub started_at: String,
+    /// RFC3339 timestamp captured immediately after the worker-side
+    /// dispatch returned (success or failure).
+    pub completed_at: String,
+    /// Worker-reported numerical metadata (Health RPC). Empty is valid.
+    pub numerical_metadata: NumericalMetadata,
+    /// Worker-reported `dispatched_to` — the resolved method signature
+    /// for `CallRuntimeMethod`. `None` for `RunRuntimeScript` and for
+    /// runtimes that don't implement method dispatch (Phase 19a.4
+    /// lights this up for the Julia runtime).
+    pub dispatched_to: Option<String>,
+}
+
 impl DispatchTrace {
     /// Format a `SystemTime` as RFC3339 with millisecond precision and
     /// the `Z` (UTC) suffix — the standard timestamp shape across the

@@ -35,11 +35,9 @@
 //!   arrives in 18b/c.
 
 use crate::error::RunError;
-use crate::invocation::DispatchTrace;
+use crate::invocation::{DispatchTrace, RunOutcome};
 use crate::language_runtime::LanguageRuntime;
 use crate::registry::{LanguageRuntimeRegistry, RegistryError};
-use crate::rpc::NumericalMetadata;
-use crate::types::WorkerHandle;
 use eigenius_kernel::ontology::eigon_cbor::{self, CborError};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -146,21 +144,8 @@ impl SubstrateDispatcher {
         // boundary check + full chain resolution land in 18b/c.
         let script = &argument;
 
-        let worker = runtime.spawn_worker(&env, None).map_err(|e| {
-            FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
-        })?;
-        let (numerical_metadata, image_digest) = capture_health(runtime, &worker);
-        let started_at = DispatchTrace::now_rfc3339();
-        let output = runtime.run_script(&worker, script, &[input])?;
-        let completed_at = DispatchTrace::now_rfc3339();
-        Ok(build_outcome(
-            &output,
-            &language,
-            image_digest,
-            started_at,
-            completed_at,
-            numerical_metadata,
-        ))
+        let outcome = runtime.run_script(&env, script, &[input])?;
+        Ok(build_outcome(outcome, &language))
     }
 
     /// Dispatch a `CallRuntimeMethod` invocation. Same pattern as
@@ -183,61 +168,29 @@ impl SubstrateDispatcher {
         let env = synthesize_env(&language, &argument);
         let signature = &argument;
 
-        let worker = runtime.spawn_worker(&env, None).map_err(|e| {
-            FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
-        })?;
-        let (numerical_metadata, image_digest) = capture_health(runtime, &worker);
-        let started_at = DispatchTrace::now_rfc3339();
-        let output = runtime.call_method(&worker, signature, &[input])?;
-        let completed_at = DispatchTrace::now_rfc3339();
-        Ok(build_outcome(
-            &output,
-            &language,
-            image_digest,
-            started_at,
-            completed_at,
-            numerical_metadata,
-        ))
+        let outcome = runtime.call_method(&env, signature, &[input])?;
+        Ok(build_outcome(outcome, &language))
     }
 }
 
-/// Best-effort `Health` round-trip. Returns the substrate-relevant
-/// fields from `HealthInfo`: the worker's reported `numerical_metadata`
-/// and the in-image image digest (`env_digest_in_image`). A failure
-/// here logs to stderr and yields empty fields rather than failing the
-/// dispatch — trace integrity is best-effort, the dispatch contract is
-/// not. Phase 18c.5 / D26 §5.5.
-fn capture_health(
-    runtime: &dyn LanguageRuntime,
-    worker: &WorkerHandle,
-) -> (NumericalMetadata, Option<crate::types::ImageDigest>) {
-    match runtime.query_health(worker) {
-        Ok(info) => {
-            let digest = info
-                .env_digest_in_image
-                .as_deref()
-                .and_then(|s| crate::types::ImageDigest::parse(s).ok());
-            (info.numerical_metadata, digest)
-        }
-        Err(e) => {
-            eprintln!(
-                "eigenius-runtime-substrate: query_health failed for worker {} ({}): {e}; \
-                 dispatch will continue with empty trace fields",
-                worker.id, worker.backend
-            );
-            (NumericalMetadata::default(), None)
-        }
-    }
-}
-
-fn build_outcome(
-    output: &Resource,
-    language: &str,
-    image_digest: Option<crate::types::ImageDigest>,
-    started_at: String,
-    completed_at: String,
-    numerical_metadata: NumericalMetadata,
-) -> DispatchOutcome {
+/// Build a `DispatchOutcome` from the runtime's [`RunOutcome`] plus
+/// the language tag the facade resolved from the dispatch argument.
+///
+/// Path-3 trait shape: the runtime owns spawn/dispatch/cleanup and
+/// hands back the trace fields (timestamps, numerical_metadata,
+/// image_digest). The facade only contributes the language tag and
+/// the partial-invocation packaging.
+fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
+    let RunOutcome {
+        output,
+        image_digest,
+        started_at,
+        completed_at,
+        numerical_metadata,
+        // dispatched_to lands on the trace once the orchestrator-side
+        // RuntimeInvocation property is wired up — see Phase 19a.4.
+        dispatched_to: _,
+    } = outcome;
     let trace = DispatchTrace {
         language: language.to_string(),
         image_digest,
@@ -247,7 +200,7 @@ fn build_outcome(
     };
     let partial = trace.into_partial_invocation();
     DispatchOutcome {
-        output_cbor: eigon_cbor::serialize_resource(output),
+        output_cbor: eigon_cbor::serialize_resource(&output),
         partial_invocation_cbor: eigon_cbor::serialize_resource(&partial),
     }
 }

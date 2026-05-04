@@ -84,9 +84,9 @@ impl LanguageRuntimeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::{BuildError, RunError, SpawnError};
-    use crate::rpc::HealthInfo;
-    use crate::types::{DockerfileFragments, ImageDigest, WorkerHandle};
+    use crate::error::{BuildError, RunError};
+    use crate::invocation::RunOutcome;
+    use crate::types::{DockerfileFragments, ImageDigest};
     use eigenius_kernel::ontology::resource::Resource;
 
     struct StubRuntime {
@@ -105,34 +105,24 @@ mod tests {
         ) -> Result<ImageDigest, BuildError> {
             unimplemented!()
         }
-        fn spawn_worker(
-            &self,
-            _: &Resource,
-            _: Option<&ImageDigest>,
-        ) -> Result<WorkerHandle, SpawnError> {
-            unimplemented!()
-        }
         fn run_script(
             &self,
-            _: &WorkerHandle,
+            _: &Resource,
             _: &Resource,
             _: &[Resource],
-        ) -> Result<Resource, RunError> {
+        ) -> Result<RunOutcome, RunError> {
             unimplemented!()
         }
         fn call_method(
             &self,
-            _: &WorkerHandle,
+            _: &Resource,
             _: &Resource,
             _: &[Resource],
-        ) -> Result<Resource, RunError> {
+        ) -> Result<RunOutcome, RunError> {
             unimplemented!()
         }
         fn dockerfile_fragments(&self, _: &Resource) -> DockerfileFragments {
             DockerfileFragments::default()
-        }
-        fn query_health(&self, _: &WorkerHandle) -> Result<HealthInfo, RunError> {
-            Ok(HealthInfo::default())
         }
     }
 
