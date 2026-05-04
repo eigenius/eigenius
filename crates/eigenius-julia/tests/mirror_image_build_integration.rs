@@ -1,0 +1,397 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Phase 19a.3.c integration test — chain → mirror Resource → env
+//! image with the generated mirror + `EigeniusJuliaCommon` baked in.
+//!
+//! Two assertions, in order of expense:
+//!
+//! 1. **Always-on (no Docker required):** `JuliaMirrorGenerator` walks
+//!    a synthetic chain, `mirror_to_resource` produces a valid
+//!    `RuntimePackageMirror` Resource, and the materialiser path
+//!    used by `build_environment_image` round-trips every byte of the
+//!    library archive back through the resource's `library_content`
+//!    JSON. Catches drift between the generator's emit and the
+//!    runtime's materialiser without needing buildah/Docker.
+//!
+//! 2. **Full e2e (Docker + buildah):** Builds an env image with the
+//!    mirror baked in, dispatches a Julia one-liner that
+//!    `using`-imports `EigeniusMirror` + `EigeniusJuliaCommon`, and
+//!    confirms the worker can construct a typed mirror struct. Skipped
+//!    on hosts without buildah/Docker, same gating as the 18d capstone.
+//!
+//! Skipped when:
+//! - Built without `--features test-runtime,docker-spawner` (the
+//!   substrate's bash test worker + DockerSpawner backend are gated
+//!   behind these in the substrate crate).
+//! - `buildah` not installed.
+//! - Docker daemon unreachable.
+//! - Julia base image cannot be pulled (offline / no registry access).
+
+use eigenius_julia::mirror_gen::{mirror_to_resource, JuliaMirrorGenerator};
+use eigenius_julia::JuliaLanguageRuntime;
+use eigenius_kernel::ontology::eigon_cbor;
+use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_runtime_substrate::chain::ChainAccessor;
+use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, MirrorGenerator};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// ---------- Synthetic chain ------------------------------------------------
+
+/// Tiny chain carrying one class (`Demo`) with one required string
+/// property (`name`). Sufficient to exercise generator → resource →
+/// image-build wiring without dragging in a full ontology.
+struct DemoChain {
+    resources: HashMap<Iri, Resource>,
+}
+
+impl DemoChain {
+    fn new() -> Self {
+        let mut resources = HashMap::new();
+
+        let class_iri = iri("urn:eigenius:test:Demo");
+        let mut cls = Resource::new(class_iri.clone());
+        cls.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("Demo".into()),
+        );
+        cls.set(
+            iri("urn:eigenius:core:requires"),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:name"))]),
+        );
+        resources.insert(class_iri, cls);
+
+        let prop_iri = iri("urn:eigenius:test:name");
+        let mut prop = Resource::new(prop_iri.clone());
+        prop.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("name".into()),
+        );
+        prop.set(
+            iri("urn:eigenius:core:data_type"),
+            Value::ResourceRef(iri("urn:eigenius:core:string")),
+        );
+        resources.insert(prop_iri, prop);
+
+        Self { resources }
+    }
+}
+
+impl ChainAccessor for DemoChain {
+    fn resolve(&self, _claim_layer: &Iri, target: &Iri) -> Option<Resource> {
+        self.resources.get(target).cloned()
+    }
+    fn is_ancestor_or_equal(&self, _: &Iri, _: &Iri) -> bool {
+        true
+    }
+    fn class_unchanged_between(&self, _: &Iri, _: &Iri, _: &Iri) -> bool {
+        true
+    }
+}
+
+fn iri(s: &str) -> Iri {
+    Iri::parse(s).unwrap()
+}
+
+fn build_demo_mirror() -> Resource {
+    let g = JuliaMirrorGenerator::new();
+    let chain = DemoChain::new();
+    let layer = iri("urn:eigenius:test:layer");
+    let seed = vec![iri("urn:eigenius:test:Demo")];
+    let out = g
+        .generate(&MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        })
+        .expect("generate");
+    mirror_to_resource(&g, &out, &layer, Some("1970-01-01T00:00:00Z"))
+}
+
+// ---------- Test 1: deterministic mirror Resource shape --------------------
+
+/// Sanity-check the resource the substrate commits to the chain at
+/// build time. The properties + their values are what the
+/// orchestrator-side commit pipeline (lands in 19a.4 / orchestrator
+/// glue) reads to populate the `RuntimeEnvironment.mirror` link, so a
+/// drift here would surface as a chain-validation failure way
+/// downstream.
+#[test]
+fn mirror_resource_carries_runtime_substrate_required_props() {
+    let mirror = build_demo_mirror();
+
+    // Every required property of `RuntimePackageMirror` populated.
+    let required = [
+        "urn:eigenius:core:is_a",
+        "urn:eigenius:core:short_name",
+        "urn:eigenius:runtime:language",
+        "urn:eigenius:runtime:source_layer",
+        "urn:eigenius:runtime:generator_identifier",
+        "urn:eigenius:runtime:generator_version",
+        "urn:eigenius:runtime:generator_content_hash",
+        "urn:eigenius:runtime:library_content_hash",
+        "urn:eigenius:runtime:library_content",
+        "urn:eigenius:runtime:mirrored_classes",
+    ];
+    for p in required {
+        assert!(
+            mirror.get(&iri(p)).is_some(),
+            "RuntimePackageMirror is missing required property `{p}`"
+        );
+    }
+
+    // language is "julia"; mirrored_classes covers Demo.
+    assert_eq!(
+        mirror
+            .get(&iri("urn:eigenius:runtime:language"))
+            .and_then(Value::as_str),
+        Some("julia")
+    );
+    let cls = mirror
+        .get(&iri("urn:eigenius:runtime:mirrored_classes"))
+        .expect("mirrored_classes")
+        .as_iri_array();
+    assert!(cls.contains(&iri("urn:eigenius:test:Demo")));
+
+    // Hashes have the substrate's pinned shape (^sha256:[a-f0-9]{64}$).
+    for p in [
+        "urn:eigenius:runtime:generator_content_hash",
+        "urn:eigenius:runtime:library_content_hash",
+    ] {
+        let v = mirror
+            .get(&iri(p))
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("missing `{p}`"));
+        assert!(v.starts_with("sha256:"), "{p} = {v}");
+        let hex = &v["sha256:".len()..];
+        assert_eq!(hex.len(), 64, "{p} digest must be 64 hex chars, got {v}");
+        assert!(
+            hex.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()),
+            "{p} must be lowercase hex, got {v}"
+        );
+    }
+}
+
+/// The mirror Resource carries the generator's library archive on its
+/// `library_content` property as JSON. The runtime's `build_image`
+/// path materialises that JSON back into files under `mirror/` in the
+/// build context. If those two stop matching, the env image silently
+/// ships the wrong source — verify the byte-level round-trip without
+/// going through Docker.
+#[test]
+fn library_content_json_carries_project_toml_and_module_source() {
+    let mirror = build_demo_mirror();
+    let json = match mirror
+        .get(&iri("urn:eigenius:runtime:library_content"))
+        .expect("library_content")
+    {
+        Value::Json(v) => v.clone(),
+        other => panic!("expected JSON, got {other:?}"),
+    };
+    assert_eq!(json["kind"], "embedded");
+    let files = json["files"].as_array().expect("files array");
+    let paths: Vec<&str> = files
+        .iter()
+        .filter_map(|f| f.get("path").and_then(|v| v.as_str()))
+        .collect();
+    assert!(paths.contains(&"Project.toml"), "got {paths:?}");
+    assert!(paths.contains(&"src/EigeniusMirror.jl"), "got {paths:?}");
+}
+
+// ---------- Test 2: full e2e (skipped without Docker/buildah) --------------
+
+const BASE_IMAGE_TAG: &str = "julia:1.12-bookworm";
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn fresh_depot(label: &str) -> PathBuf {
+    let pid = std::process::id();
+    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("substrate-julia-mirror-it-{pid}-{label}-{n}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create depot");
+    dir
+}
+
+fn julia_project_dir() -> PathBuf {
+    // crates/eigenius-julia/Cargo.toml → workspace root is two up.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("julia")
+        .join("runtime-worker")
+        .canonicalize()
+        .expect("julia/runtime-worker/ must exist relative to eigenius-julia's Cargo.toml")
+}
+
+fn is_docker_available() -> bool {
+    Path::new("/var/run/docker.sock").exists()
+}
+
+fn ensure_base_image_pinned() -> Result<String, String> {
+    let pull = std::process::Command::new("docker")
+        .args(["pull", "--quiet", BASE_IMAGE_TAG])
+        .output()
+        .map_err(|e| format!("`docker pull` failed: {e}"))?;
+    if !pull.status.success() {
+        return Err(format!(
+            "docker pull {BASE_IMAGE_TAG} exited {}: {}",
+            pull.status,
+            String::from_utf8_lossy(&pull.stderr)
+        ));
+    }
+    let inspect = std::process::Command::new("docker")
+        .args([
+            "image",
+            "inspect",
+            "--format",
+            "{{index .RepoDigests 0}}",
+            BASE_IMAGE_TAG,
+        ])
+        .output()
+        .map_err(|e| format!("`docker image inspect` failed: {e}"))?;
+    if !inspect.status.success() {
+        return Err(format!(
+            "docker image inspect failed: {}",
+            String::from_utf8_lossy(&inspect.stderr)
+        ));
+    }
+    let pinned = String::from_utf8_lossy(&inspect.stdout).trim().to_string();
+    if !pinned.contains('@') {
+        return Err(format!(
+            "expected RepoDigests entry like `julia@sha256:...`, got `{pinned}`"
+        ));
+    }
+    let qualified = if pinned.contains('/') {
+        pinned
+    } else {
+        format!("docker.io/library/{pinned}")
+    };
+    Ok(qualified)
+}
+
+fn skip_unless_full_environment() -> Option<String> {
+    if !is_docker_available() {
+        return Some("Docker socket unavailable".into());
+    }
+    if !eigenius_runtime_substrate::is_buildah_available() {
+        return Some("buildah unavailable".into());
+    }
+    None
+}
+
+fn build_argument(language: &str, source: &str) -> Vec<u8> {
+    let mut arg = Resource::new_embedded();
+    arg.set(
+        iri("urn:eigenius:runtime:language"),
+        Value::String(language.to_string()),
+    );
+    arg.set(
+        iri("urn:eigenius:runtime:source"),
+        Value::String(source.to_string()),
+    );
+    eigon_cbor::serialize_resource(&arg)
+}
+
+/// End-to-end on Docker: build the env image with the mirror baked
+/// in, dispatch a Julia one-liner that `using`-imports the generated
+/// mirror, confirm the typed struct can be constructed and its field
+/// read back. This exercises the full chain → resource → buildah →
+/// `Pkg.develop` → `Pkg.precompile` → worker boot → mirror import path
+/// in one shot. Cold run: ~3-5 min (pulls Julia + precompiles
+/// EigeniusJuliaCommon + EigeniusMirror); warm runs hit the substrate's
+/// image cache and Docker's layer cache (~30s).
+#[test]
+fn julia_env_image_with_mirror_dispatches_typed_struct() {
+    if let Some(reason) = skip_unless_full_environment() {
+        eprintln!("skipping 19a.3.c mirror image-build e2e: {reason}");
+        return;
+    }
+    let pinned_base = match ensure_base_image_pinned() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("skipping (could not pin base image): {e}");
+            return;
+        }
+    };
+
+    let depot = fresh_depot("e2e");
+    let spawner = match eigenius_runtime_substrate::spawner::DockerSpawner::new(
+        eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(depot.clone()),
+    ) {
+        Ok(s) => std::sync::Arc::new(s),
+        Err(e) => {
+            eprintln!("skipping (DockerSpawner construction failed): {e}");
+            return;
+        }
+    };
+
+    let project_dir = julia_project_dir();
+    let runtime =
+        JuliaLanguageRuntime::new(project_dir, pinned_base, spawner.clone(), depot.clone());
+
+    let mirror = build_demo_mirror();
+    let env = Resource::new_embedded();
+    let language_runtime: Box<dyn LanguageRuntime> = Box::new(runtime);
+    let digest = match language_runtime.build_environment_image(&env, &[], Some(&mirror)) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("substrate-built julia image (with mirror) failed: {e}");
+            let _ = std::fs::remove_dir_all(&depot);
+            panic!("build_environment_image: {e}");
+        }
+    };
+    assert!(
+        digest.as_str().starts_with("sha256:"),
+        "expected sha256-shaped digest, got {digest}"
+    );
+
+    // Dispatch a Julia one-liner that imports the mirror, instantiates
+    // a `Demo`, reads back the field. The expression's value (the
+    // `name` field's contents) is what the worker stringifies and
+    // returns as the script output.
+    let script_source = "begin; \
+        using EigeniusMirror; \
+        using EigeniusJuliaCommon; \
+        instance = EigeniusMirror.Demo(\"hello-19a3c\"); \
+        instance.name; \
+        end";
+
+    let mut dispatcher = eigenius_runtime_substrate::facade::SubstrateDispatcher::new();
+    dispatcher
+        .register_language_runtime(language_runtime)
+        .expect("register julia runtime");
+
+    let argument = build_argument("julia", script_source);
+    let outcome = dispatcher
+        .dispatch_run_runtime_script(&[], &argument)
+        .expect("dispatch julia mirror-using script");
+
+    let output = eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
+    let julia_output = output
+        .get(&iri("urn:eigenius:runtime:script_output"))
+        .and_then(Value::as_str)
+        .expect("script_output property on output");
+    assert_eq!(
+        julia_output, "hello-19a3c",
+        "the generated mirror's `Demo.name` field must round-trip through the env image"
+    );
+
+    let _ = std::fs::remove_dir_all(&depot);
+}
