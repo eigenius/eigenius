@@ -35,6 +35,55 @@ pub struct ShortNameTable {
     pub enums: BTreeMap<(Iri, String), Iri>,
 }
 
+impl ShortNameTable {
+    /// Serialize for cross-process transport. Phase 18e.2: the kernel
+    /// embeds this on the `ComponentRequest` argument so the
+    /// orchestrator's `CompleteJson` handler can translate LLM
+    /// short-name output back to IRI-keyed shape before returning.
+    /// Replaces the kernel-side post-hoc translation pattern.
+    ///
+    /// `class_iri` is the root class the LLM output instantiates;
+    /// the orchestrator stamps it onto the translated resource as
+    /// `urn:eigenius:core:is_a`. Without it the output would be a
+    /// bare property bag with no class identity.
+    ///
+    /// Shape:
+    /// ```json
+    /// {
+    ///   "class_iri": "urn:eigenius:foo:Person",
+    ///   "properties": { "name": "urn:eigenius:foo:name", … },
+    ///   "enums": [
+    ///     ["urn:eigenius:foo:status", "active", "urn:eigenius:status:active"],
+    ///     …
+    ///   ]
+    /// }
+    /// ```
+    pub fn to_json(&self, class_iri: &Iri) -> serde_json::Value {
+        let properties: serde_json::Map<String, serde_json::Value> = self
+            .properties
+            .iter()
+            .map(|(name, iri)| {
+                (
+                    name.clone(),
+                    serde_json::Value::String(iri.as_str().to_string()),
+                )
+            })
+            .collect();
+        let enums: Vec<serde_json::Value> = self
+            .enums
+            .iter()
+            .map(|((prop_iri, name), value_iri)| {
+                serde_json::json!([prop_iri.as_str(), name, value_iri.as_str()])
+            })
+            .collect();
+        serde_json::json!({
+            "class_iri": class_iri.as_str(),
+            "properties": properties,
+            "enums": enums,
+        })
+    }
+}
+
 /// Errors during schema generation.
 #[derive(Debug, Clone)]
 pub enum SchemaError {

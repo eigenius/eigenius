@@ -43,6 +43,7 @@ import {
   type ValidateProgramResponse,
   type ValidationError,
 } from "../gen/eigenius_pb.ts";
+import { encodeResource } from "../wasm/cbor.ts";
 
 export type {
   HealthResponse,
@@ -55,7 +56,27 @@ export type {
   ValidationError,
 };
 
-const TEXT_ENCODER = new TextEncoder();
+const CONTENT_TYPE_CBOR = "application/eigon+cbor";
+
+/**
+ * Phase 18e: re-encode a JSON-string-shaped Eigon payload as Eigon-CBOR
+ * for transport to the kernel. The kernel server's `parse_resources`
+ * branches on `content_type` and accepts both; this client always sends
+ * CBOR. Parser handles both single-resource (object) and document
+ * (array) shapes — kernel-side `parse_document` accepts either.
+ *
+ * Caveat: this conversion uses cbor-x's default encoding, which does
+ * NOT wrap `Value::Json` payloads with `EIGENIUS_JSON_TAG`. For the
+ * RPCs flipped here (Load / ValidateProgram / RunProgram / Reflect),
+ * resources have not historically used `data_type: json` properties so
+ * the limitation is invisible. If a future caller needs to round-trip
+ * a JSON-typed property through these RPCs, extend this helper to use
+ * an Eigon-aware encoder that mirrors the kernel's
+ * `eigon_cbor::value_to_cbor` Json branch.
+ */
+function jsonStringToEigonCbor(jsonString: string): Uint8Array {
+  return encodeResource(JSON.parse(jsonString));
+}
 
 /**
  * Client for the Eigenius kernel gRPC service.
@@ -101,8 +122,8 @@ export class KernelClient {
   ): Promise<LoadResponse> {
     return await this.client.load(
       create(LoadRequestSchema, {
-        resources: TEXT_ENCODER.encode(resourcesJson),
-        contentType: "application/eigon+json",
+        resources: jsonStringToEigonCbor(resourcesJson),
+        contentType: CONTENT_TYPE_CBOR,
         autoCommit,
       }),
     );
@@ -151,8 +172,8 @@ export class KernelClient {
   ): Promise<ValidateProgramResponse> {
     return await this.client.validateProgram(
       create(ValidateProgramRequestSchema, {
-        program: TEXT_ENCODER.encode(programJson),
-        contentType: "application/eigon+json",
+        program: jsonStringToEigonCbor(programJson),
+        contentType: CONTENT_TYPE_CBOR,
       }),
     );
   }
@@ -166,9 +187,9 @@ export class KernelClient {
   ): Promise<RunProgramResponse> {
     return await this.client.runProgram(
       create(RunProgramRequestSchema, {
-        program: TEXT_ENCODER.encode(programJson),
-        input: TEXT_ENCODER.encode(inputJson),
-        contentType: "application/eigon+json",
+        program: jsonStringToEigonCbor(programJson),
+        input: jsonStringToEigonCbor(inputJson),
+        contentType: CONTENT_TYPE_CBOR,
       }),
     );
   }
@@ -179,8 +200,8 @@ export class KernelClient {
   async reflect(traceJson: string): Promise<ReflectResponse> {
     return await this.client.reflect(
       create(ReflectRequestSchema, {
-        trace: TEXT_ENCODER.encode(traceJson),
-        contentType: "application/eigon+json",
+        trace: jsonStringToEigonCbor(traceJson),
+        contentType: CONTENT_TYPE_CBOR,
       }),
     );
   }

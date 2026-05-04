@@ -37,6 +37,7 @@ pub mod observability;
 pub mod ontology;
 pub mod program;
 pub mod query;
+pub mod runtime;
 pub mod server;
 pub mod storage;
 pub mod task;

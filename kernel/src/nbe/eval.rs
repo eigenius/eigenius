@@ -1417,8 +1417,11 @@ fn dispatch_component(
     // Ontology-driven schema generation:
     // Look up the component definition, find its argument_type class,
     // scan argument properties for Class-valued references that need
-    // JSON Schema generation.
-    let schema_table = resolve_component_schemas(component_iri, &mut arg_resource, layer);
+    // JSON Schema generation. Phase 18e.2: the function also embeds
+    // the short-name table on the argument for the orchestrator's
+    // CompleteJson handler. Return value is ignored — the kernel no
+    // longer uses the table post-hoc.
+    let _ = resolve_component_schemas(component_iri, &mut arg_resource, layer);
 
     // Cache routing is determinism-gated (D21 §3.3):
     //   - Deterministic components (!is_io): content-address memo —
@@ -1457,36 +1460,11 @@ fn dispatch_component(
 
         match component.execute(&input_resource, arg_resource.as_ref(), layer) {
             Ok(result) => {
-                // For CompleteJson: convert the short-name JSON response back to a typed Resource
-                let output = if let Some((ref table, ref class_iri)) = schema_table {
-                    // Check if the output has raw JSON (short-name keys from LLM)
-                    let raw_json_iri = Iri::parse("urn:eigenius:core:raw_json").unwrap();
-                    let json_val = if let Some(crate::ontology::resource::Value::Json(j)) =
-                        result.output.get(&raw_json_iri)
-                    {
-                        j.clone()
-                    } else {
-                        // Already an Eigon resource — serialize for conversion
-                        crate::ontology::eigon_json::serialize_resource(&result.output)
-                    };
-                    match crate::program::schema::convert_json_to_resource(
-                        &json_val, table, class_iri,
-                    ) {
-                        Ok(converted) => converted,
-                        Err(e) => {
-                            tracing::warn!(
-                                { field::OPERATION } = operation::CAPABILITY_DISPATCH,
-                                { field::ERROR_KIND } = "json_to_resource_failed",
-                                { field::COMPONENT_IRI } = %component_iri,
-                                { field::ERROR_MESSAGE } = %e,
-                                "convert_json_to_resource failed; falling back to raw output"
-                            );
-                            result.output.clone()
-                        }
-                    }
-                } else {
-                    result.output.clone()
-                };
+                // Phase 18e.2: orchestrator-side `CompleteJson` handler now
+                // applies the `ShortNameTable` translation before returning,
+                // so the kernel sees a properly-IRI-keyed Eigon resource
+                // here and no post-hoc translation is needed.
+                let output = result.output.clone();
 
                 let ct = ComponentTrace {
                     component: component_iri.to_string(),
@@ -1722,6 +1700,21 @@ fn resolve_component_schemas(
                             arg.set(
                                 prop_iri.clone(),
                                 crate::ontology::resource::Value::Json(json_schema),
+                            );
+                            // Phase 18e.2: embed the short-name table on the
+                            // argument so the orchestrator-side handler can
+                            // translate LLM short-name output back to
+                            // IRI-keyed shape before returning. Replaces the
+                            // kernel-side post-hoc translation that lived
+                            // in dispatch_component until 18e.1.
+                            let table_iri =
+                                Iri::parse("urn:eigenius:program:components:short_name_table")
+                                    .expect("static IRI is well-formed");
+                            arg.set(
+                                table_iri,
+                                crate::ontology::resource::Value::Json(
+                                    table.to_json(&schema_class_iri),
+                                ),
                             );
                             return Some((table, schema_class_iri));
                         }

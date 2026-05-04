@@ -22,6 +22,17 @@ use crate::ontology::iri::{Iri, IriError};
 use crate::ontology::resource::{Resource, Value};
 use std::io::Cursor;
 
+/// CBOR tag distinguishing an Eigenius `Value::Json` payload from an
+/// embedded resource on the wire. Without this tag, a JSON object and
+/// a nested `Resource` decode to the same CBOR map, and the decoder
+/// can't tell which was meant — the JSON path tries to parse JSON keys
+/// as IRIs and fails. The tag is the only structural distinguisher.
+///
+/// `27182` is in IANA's "unassigned" range and chosen for stability of
+/// our wire format. If IANA ever reassigns this number we'll migrate;
+/// for now it's effectively private to Eigenius.
+pub const EIGENIUS_JSON_TAG: u64 = 27182;
+
 /// Errors during CBOR parsing.
 #[derive(Debug, Clone)]
 pub enum CborError {
@@ -158,7 +169,83 @@ fn value_to_cbor(value: &Value) -> ciborium::Value {
         Value::ResourceRef(iri) => ciborium::Value::Text(iri.as_str().to_string()),
         Value::Embedded(resource) => resource_to_cbor(resource),
         Value::Array(arr) => ciborium::Value::Array(arr.iter().map(value_to_cbor).collect()),
-        Value::Json(v) => json_to_cbor(v),
+        Value::Json(v) => json_value_to_cbor(v),
+    }
+}
+
+/// Encode a `Value::Json` payload. Objects and non-empty arrays get
+/// wrapped in [`EIGENIUS_JSON_TAG`] so the decoder can distinguish them
+/// from embedded resources / value arrays. Scalars and `null` flow
+/// through untagged — they normalize to wire-typed scalar `Value`
+/// variants on decode (`Json(String)` → `String`, `Json(Number)` →
+/// `Integer`/`Float`, `Json(Bool)` → `Boolean`). This is the
+/// `value_variants_round_trip_normalizations` contract pinned in
+/// `storage/rocksdb`: scalar JSON values are an in-memory convenience
+/// the wire layer collapses; object/array shapes can't collapse without
+/// breaking IRI keying or empty-array invariants and so are explicitly
+/// tagged to round-trip as `Value::Json`.
+fn json_value_to_cbor(v: &serde_json::Value) -> ciborium::Value {
+    match v {
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+            ciborium::Value::Tag(EIGENIUS_JSON_TAG, Box::new(json_to_cbor(v)))
+        }
+        _ => json_to_cbor(v),
+    }
+}
+
+/// Inverse of [`json_to_cbor`]: decode a CBOR value (already unwrapped
+/// from its [`EIGENIUS_JSON_TAG`] envelope) into a `serde_json::Value`.
+/// Used by `cbor_to_value` when it encounters a tagged JSON property.
+fn cbor_to_json(value: &ciborium::Value, property: &str) -> Result<serde_json::Value, CborError> {
+    match value {
+        ciborium::Value::Null => Ok(serde_json::Value::Null),
+        ciborium::Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+        ciborium::Value::Integer(n) => {
+            let i: i128 = (*n).into();
+            // `i64` is the JSON-safe integer range we use throughout
+            // the codec; widening to i128 above is just to compute it
+            // before narrowing. Out-of-range CBOR ints become floats so
+            // we don't lose them silently.
+            if i >= i64::MIN as i128 && i <= i64::MAX as i128 {
+                Ok(serde_json::Value::Number((i as i64).into()))
+            } else {
+                Ok(serde_json::Number::from_f64(i as f64)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null))
+            }
+        }
+        ciborium::Value::Float(f) => Ok(serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null)),
+        ciborium::Value::Text(s) => Ok(serde_json::Value::String(s.clone())),
+        ciborium::Value::Array(arr) => {
+            let mut items = Vec::with_capacity(arr.len());
+            for item in arr {
+                items.push(cbor_to_json(item, property)?);
+            }
+            Ok(serde_json::Value::Array(items))
+        }
+        ciborium::Value::Map(entries) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in entries {
+                let key = match k {
+                    ciborium::Value::Text(s) => s.clone(),
+                    other => {
+                        return Err(CborError::Decode(format!(
+                            "JSON object key for property '{property}' must be a CBOR text \
+                             string, got: {other:?}"
+                        )));
+                    }
+                };
+                obj.insert(key, cbor_to_json(v, property)?);
+            }
+            Ok(serde_json::Value::Object(obj))
+        }
+        // Bytes / Tag / unknown: fall through with a clear diagnostic.
+        // Tagging within tagged-JSON is not part of the wire format.
+        other => Err(CborError::Decode(format!(
+            "unsupported CBOR variant inside JSON value for property '{property}': {other:?}"
+        ))),
     }
 }
 
@@ -240,6 +327,9 @@ fn cbor_to_resource(value: &ciborium::Value, top_level: bool) -> Result<Resource
 
 fn cbor_to_value(value: &ciborium::Value, property: &str) -> Result<Value, CborError> {
     match value {
+        ciborium::Value::Tag(tag, inner) if *tag == EIGENIUS_JSON_TAG => {
+            Ok(Value::Json(cbor_to_json(inner, property)?))
+        }
         ciborium::Value::Text(s) => Ok(Value::String(s.clone())),
         ciborium::Value::Integer(n) => {
             let i: i128 = (*n).into();
@@ -468,5 +558,74 @@ mod tests {
 
         let cbor = serialize_resource(&r);
         assert!(parse_resource(&cbor).is_err());
+    }
+
+    #[test]
+    fn round_trip_value_json_object() {
+        let mut json_obj = serde_json::Map::new();
+        json_obj.insert(
+            "host_kernel".into(),
+            serde_json::Value::String("linux-6.6".into()),
+        );
+        json_obj.insert("fma_enabled".into(), serde_json::Value::Bool(true));
+        json_obj.insert("count".into(), serde_json::Value::Number(42.into()));
+
+        let mut r = Resource::new(iri("urn:eigenius:test:invocation"));
+        r.set(
+            iri("urn:eigenius:test:metadata"),
+            Value::Json(serde_json::Value::Object(json_obj.clone())),
+        );
+
+        let cbor = serialize_resource(&r);
+        let parsed = parse_resource(&cbor).expect("decode");
+
+        match parsed.get(&iri("urn:eigenius:test:metadata")) {
+            Some(Value::Json(serde_json::Value::Object(decoded))) => {
+                assert_eq!(decoded, &json_obj);
+            }
+            other => panic!("expected Value::Json(Object), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn value_json_decoder_distinguishes_from_embedded_resource() {
+        // Without the EIGENIUS_JSON_TAG, a JSON object with non-IRI
+        // keys ("host_kernel" instead of "urn:…") would be misdecoded
+        // as an embedded Resource and fail at IRI parsing. The tag is
+        // the only structural distinguisher; this regression guard
+        // pins it.
+        let mut json_obj = serde_json::Map::new();
+        json_obj.insert("non_iri_key".into(), serde_json::Value::String("v".into()));
+
+        let mut r = Resource::new(iri("urn:eigenius:test:invocation"));
+        r.set(
+            iri("urn:eigenius:test:metadata"),
+            Value::Json(serde_json::Value::Object(json_obj)),
+        );
+        let cbor = serialize_resource(&r);
+        // If the decoder ever stops handling the tag, this round-trip
+        // will surface as InvalidIri { key: "non_iri_key", … }.
+        parse_resource(&cbor).expect("tagged JSON must round-trip without IRI parsing");
+    }
+
+    #[test]
+    fn round_trip_value_json_nested_array() {
+        let json_val = serde_json::json!({
+            "tensor_shape": [3, 4, 5],
+            "labels": ["alpha", "beta"],
+            "nested": { "k": "v" }
+        });
+
+        let mut r = Resource::new(iri("urn:eigenius:test:invocation"));
+        r.set(
+            iri("urn:eigenius:test:metadata"),
+            Value::Json(json_val.clone()),
+        );
+        let cbor = serialize_resource(&r);
+        let parsed = parse_resource(&cbor).expect("decode");
+        match parsed.get(&iri("urn:eigenius:test:metadata")) {
+            Some(Value::Json(decoded)) => assert_eq!(decoded, &json_val),
+            other => panic!("expected Value::Json, got {other:?}"),
+        }
     }
 }

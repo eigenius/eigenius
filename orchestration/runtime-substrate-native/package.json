@@ -1,0 +1,26 @@
+{
+  "name": "eigenius-orchestrator-runtime-substrate",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "eigenius-orchestrator-runtime-substrate",
+    "//": "Targets napi-rs knows how to build for. Local `napi build --platform` only builds the host target; CI is expected to build the rest on per-OS runners. See README.",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "cargo test"
+  }
+}

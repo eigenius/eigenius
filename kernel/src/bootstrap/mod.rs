@@ -175,7 +175,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads five ontology layers: core → program → reflection → institution → notebook.
+/// Loads six ontology layers: core → program → reflection → institution → runtime → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -220,10 +220,17 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    let runtime = load_layer(
+        "runtime",
+        include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
+        Some(institution),
+        storage.clone(),
+    )?;
+
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(institution),
+        Some(runtime),
         storage.clone(),
     )?;
 
@@ -241,7 +248,7 @@ pub fn bootstrap_with_storage(
 ///
 /// - **SEED** (empty backend): run the normal in-memory bootstrap,
 ///   then commit each of the five embedded ontology layers
-///   (core → program → reflection → institution → notebook) to the
+///   (core → program → reflection → institution → runtime → notebook) to the
 ///   backend in parent→child order, record the seed manifest, and
 ///   create the `main` branch pointing at the notebook layer.
 /// - **RESUME** (backend has a `main` branch): verify the stored seed
@@ -424,7 +431,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 5] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 6] {
     [
         (
             "core",
@@ -441,6 +448,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 5] {
         (
             "institution",
             include_str!("../../../ontologies/institution/institution-ontology.json"),
+        ),
+        (
+            "runtime",
+            include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
         ),
         (
             "notebook",
@@ -463,7 +474,7 @@ fn current_manifest() -> Vec<u8> {
 fn seed_backend(
     backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
-    // Build the four ontologies in memory (reusing the existing path)
+    // Build the embedded ontologies in memory (reusing the existing path)
     // so they're validated before anything touches the DB.
     let ctx = bootstrap()?;
 
@@ -584,9 +595,11 @@ mod tests {
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
         // Head is the notebook layer
-        // (on top of institution → reflection → program → core)
+        // (on top of runtime → institution → reflection → program → core)
         assert!(!ctx.head().is_root());
-        let institution = ctx.head().parent().unwrap();
+        let runtime = ctx.head().parent().unwrap();
+        assert!(!runtime.is_root());
+        let institution = runtime.parent().unwrap();
         assert!(!institution.is_root());
         let reflection = institution.parent().unwrap();
         assert!(!reflection.is_root());
