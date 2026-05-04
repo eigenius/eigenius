@@ -23,10 +23,8 @@ Key features that we still need to wire up:
   need to be implemented. [Garbage collection across graph layers has been
   implemented](docs/design/d23-out-of-core-layer-architecture.md), but it has yet to be integrated into the application 
   life-cycle.
-- The [runtime substrate](docs/design/d26-runtime-substrate.md) for integrating third-party programming languages
-  (e.g. Julia, Lean-4, Python) still needs to be implemented and integrated
-  into the Eigenius stack. In addition, we need to provide institution-level
-  integration into appropriate languages ([Julia](docs/design/d27-julia-institutions.md) [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl) and [`JuMP`](https://jump.dev/); [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md)).
+- The [generic runtime substrate](docs/design/d26-runtime-substrate.md) exists, but language-specific worker implementations still need to be implemented. In addition, we need to provide institution-level
+  integration into appropriate languages ([Julia Institutions](docs/design/d27-julia-institutions.md) [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) and [`JuMP`](https://jump.dev/); [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md)).
 
 ## The notebook — start here
 

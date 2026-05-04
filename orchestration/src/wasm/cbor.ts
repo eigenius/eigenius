@@ -25,7 +25,41 @@
  * per ciborium's `cbor_to_resource`.
  */
 
-import { decode as cborDecode, encode as cborEncode } from "cbor-x";
+import {
+  addExtension,
+  decode as cborDecode,
+  encode as cborEncode,
+  Tag,
+} from "cbor-x";
+
+/**
+ * CBOR tag the kernel uses to mark `Value::Json` payloads on the wire
+ * so they decode back to `Value::Json` rather than `Value::Embedded(Resource)`.
+ * See `kernel/src/ontology/eigon_cbor.rs`'s `EIGENIUS_JSON_TAG` const —
+ * the values must match exactly. Without this decoder hook, cbor-x
+ * surfaces the tag as a `Tag { value, tag }` wrapper rather than the
+ * inner JS object — which then fails handler-side shape checks
+ * (e.g. `CompleteJson`'s `isShortNameTable`).
+ */
+const EIGENIUS_JSON_TAG = 27182;
+
+addExtension({
+  Class: Tag,
+  tag: EIGENIUS_JSON_TAG,
+  // Encode hook: if the JS side ever produces a `Tag` with this id
+  // (we don't, but the hook is required for `addExtension`), pass
+  // through the inner value. The kernel-side encoder is what stamps
+  // the tag on the wire.
+  encode(t: Tag, encodeFn: (v: unknown) => Uint8Array): Uint8Array {
+    return encodeFn(t.value);
+  },
+  // Decode hook: unwrap to the inner JS value. The handlers
+  // (`CompleteJson` shortNameTable, generic JSON-typed properties)
+  // expect plain objects, not `Tag` wrappers.
+  decode(value: unknown) {
+    return value;
+  },
+});
 
 // deno-lint-ignore no-explicit-any
 export type EigonResource = Record<string, any>;

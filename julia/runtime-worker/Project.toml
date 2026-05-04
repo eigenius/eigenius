@@ -1,0 +1,14 @@
+# Eigenius runtime worker — Julia environment (not a package).
+#
+# Intentionally has no `name` / `uuid` / `version` fields: this
+# directory is a Pkg *environment* (think "Julia notebook project")
+# carrying the worker's dep set, not a redistributable package. Adding
+# package metadata makes Julia look for `src/<name>.jl` as a module
+# entry point, which we don't need — `src/JuliaWorker.jl` is run
+# directly via `julia --project=. src/JuliaWorker.jl`. When 19a
+# wraps this as part of `eigenius-julia`'s production worker, it can
+# add package metadata then.
+
+[deps]
+CBOR = "7f3e1038-61bc-5414-967e-017c9d82adda"
+Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"

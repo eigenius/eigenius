@@ -41,6 +41,8 @@ import {
   createHostBridge,
   createWasmComponentHandler,
 } from "../src/wasm/hostBridge.ts";
+import { decodeResource } from "../src/wasm/cbor.ts";
+import { encode as rawCborEncode, Tag } from "cbor-x";
 
 const ECHO_IRI = "urn:test:components:CborEcho";
 const FIXTURE_URL = new URL(
@@ -157,4 +159,52 @@ Deno.test("cbor-x ↔ ciborium round-trip via WASM echo", async (t) => {
   } finally {
     wasmRegistry.clear();
   }
+});
+
+/**
+ * Regression for the Phase 18d/e bug where the kernel would tag
+ * `Value::Json` payloads with `EIGENIUS_JSON_TAG = 27182` (per
+ * `kernel/src/ontology/eigon_cbor.rs`) but cbor-x would surface the
+ * decoded value as a `Tag { value, tag }` wrapper rather than the
+ * inner JS object — breaking handler-side shape checks like
+ * `CompleteJson`'s `isShortNameTable`. The decoder hook in
+ * `wasm/cbor.ts` unwraps the tag.
+ */
+Deno.test("decodeResource unwraps EIGENIUS_JSON_TAG (27182) to the inner value", () => {
+  const inner = {
+    class_iri: "urn:test:Class",
+    properties: { foo: "urn:test:foo" },
+    enums: [],
+  };
+  // Encode using the bare cbor-x API (no extension installed for the
+  // outer call) wrapping the value in Tag(27182). The orchestrator's
+  // `decodeResource` must unwrap.
+  const taggedBytes = rawCborEncode(new Tag(inner, 27182));
+  const decoded = decodeResource(taggedBytes);
+  assertEquals(decoded, inner);
+});
+
+Deno.test("decodeResource unwraps EIGENIUS_JSON_TAG nested inside a property", () => {
+  // Wire shape the kernel produces when a Resource has a
+  // `Value::Json` property — the tagged value sits as a property
+  // value inside an outer Eigon-CBOR map.
+  const tableValue = {
+    class_iri: "urn:test:Class",
+    properties: { name: "urn:test:name" },
+    enums: [],
+  };
+  const taggedTable = new Tag(tableValue, 27182);
+  const argument = {
+    "urn:test:k": "v",
+    "urn:eigenius:program:components:short_name_table": taggedTable,
+  };
+  const argumentBytes = rawCborEncode(argument);
+  const decoded = decodeResource(argumentBytes);
+  // The tagged property must appear as a plain object after decode,
+  // not a Tag wrapper.
+  assertEquals(decoded["urn:test:k"], "v");
+  assertEquals(
+    decoded["urn:eigenius:program:components:short_name_table"],
+    tableValue,
+  );
 });

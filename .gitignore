@@ -23,6 +23,14 @@ orchestration/native/index.js
 orchestration/native/index.d.ts
 orchestration/native/package-lock.json
 
+# napi-rs native addon (orchestration/runtime-substrate-native)
+orchestration/runtime-substrate-native/target
+orchestration/runtime-substrate-native/node_modules/
+orchestration/runtime-substrate-native/*.node
+orchestration/runtime-substrate-native/index.js
+orchestration/runtime-substrate-native/index.d.ts
+orchestration/runtime-substrate-native/package-lock.json
+
 # IDE
 .vscode/
 .idea/

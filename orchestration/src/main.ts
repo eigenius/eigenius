@@ -41,6 +41,15 @@ import { startServer } from "./server/mod.ts";
 import { tryLoadWasmAddon } from "./wasm/loadAddon.ts";
 import { WasmComponentRegistry } from "./wasm/registry.ts";
 import { createHostBridge } from "./wasm/hostBridge.ts";
+import { tryLoadRuntimeSubstrateAddon } from "./runtime/loadAddon.ts";
+import {
+  createRunRuntimeScriptHandler,
+  RUN_RUNTIME_SCRIPT_IRI,
+} from "./components/run_runtime_script.ts";
+import {
+  CALL_RUNTIME_METHOD_IRI,
+  createCallRuntimeMethodHandler,
+} from "./components/call_runtime_method.ts";
 
 const KERNEL_ENDPOINT = Deno.env.get("EIGENIUS_KERNEL_ENDPOINT") ??
   "http://localhost:50051";
@@ -48,6 +57,13 @@ const ORCHESTRATOR_PORT = parseInt(
   Deno.env.get("EIGENIUS_ORCHESTRATOR_PORT") ?? "8080",
 );
 const USE_MOCK_LLM = Deno.env.get("EIGENIUS_MOCK_LLM") === "true";
+
+/** Path to the substrate's `eigenius-test-worker` binary, used by the
+ * default bash-c TestLanguageRuntime. Optional — if unset, the
+ * substrate has no language registered and `RunRuntimeScript`
+ * dispatches surface a typed `UnknownLanguage` error. Phase 19+
+ * replaces this with per-language runtime registration. */
+const TEST_WORKER_BIN = Deno.env.get("EIGENIUS_TEST_WORKER_BIN");
 
 function main() {
   // Install the structured-logging subscriber before anything else
@@ -102,6 +118,53 @@ function main() {
     log.warn(
       operation.WASM_ADDON_LOAD,
       "WASM IO components disabled (addon not loaded; RegisterWasmComponent will fail)",
+      { enabled: false },
+    );
+  }
+
+  // Native addon for the runtime substrate (RunRuntimeScript /
+  // CallRuntimeMethod). Optional — skipped if not built. Phase 18a.
+  const substrateAddon = tryLoadRuntimeSubstrateAddon();
+  if (substrateAddon) {
+    if (TEST_WORKER_BIN) {
+      try {
+        substrateAddon.registerTestLanguageRuntime(TEST_WORKER_BIN);
+        log.info(
+          operation.COMPONENT_REGISTER,
+          "registered bash-c TestLanguageRuntime",
+          { worker_binary: TEST_WORKER_BIN },
+        );
+      } catch (e) {
+        log.warn(
+          operation.COMPONENT_REGISTER,
+          "failed to register TestLanguageRuntime",
+          {
+            error_kind: "test_runtime_register_failed",
+            error_message: e instanceof Error ? e.message : String(e),
+          },
+        );
+      }
+    }
+    components.register(
+      RUN_RUNTIME_SCRIPT_IRI,
+      createRunRuntimeScriptHandler(substrateAddon),
+    );
+    components.register(
+      CALL_RUNTIME_METHOD_IRI,
+      createCallRuntimeMethodHandler(substrateAddon),
+    );
+    log.info(
+      operation.COMPONENT_REGISTER,
+      "runtime substrate components enabled",
+      {
+        languages: substrateAddon.listRegisteredLanguages(),
+      },
+    );
+  } else {
+    log.warn(
+      operation.WASM_ADDON_LOAD,
+      "runtime substrate disabled (addon not loaded; " +
+        "RunRuntimeScript / CallRuntimeMethod will fail)",
       { enabled: false },
     );
   }

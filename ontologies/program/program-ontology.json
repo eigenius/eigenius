@@ -515,7 +515,8 @@
     "urn:eigenius:core:recommends": [
       "urn:eigenius:program:components:completion:system_prompt",
       "urn:eigenius:program:components:completion:output_schema",
-      "urn:eigenius:program:components:completion:request_parameters"
+      "urn:eigenius:program:components:completion:request_parameters",
+      "urn:eigenius:program:components:short_name_table"
     ]
   },
   {
@@ -621,6 +622,14 @@
     "urn:eigenius:core:description": "LLM request parameters (model, temperature, max_tokens).",
     "urn:eigenius:core:short_name": "request_parameters",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:program:components:short_name_table",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Short-name → IRI translation table embedded by the kernel's resolve_component_schemas during CompleteJson dispatch (Phase 18e.2). Carries the class IRI, property short-name → IRI map, and enum tuples that the orchestrator-side handler applies to the LLM's structured output before returning. Set by the kernel; do not provide manually.",
+    "urn:eigenius:core:short_name": "short_name_table",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:program:components:completion:Arguments"]
   },
   {
     "@id": "urn:eigenius:program:request:model",
