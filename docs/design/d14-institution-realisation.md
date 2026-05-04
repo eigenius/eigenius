@@ -196,13 +196,13 @@ The triadic translation across an institution boundary (§5). Owned by no single
 | Property | Type | Meaning |
 |---|---|---|
 | `export_format` | IRI of an ExportFormat | The source-side $s$ — extracts a typed payload from a source-class resource. |
-| `transformation` | IRI of a Mini-TT Component | The middle $m: S \to T$, where $S = \mathrm{payload\_type}(\mathrm{export\_format})$ and $T = \mathrm{payload\_type}(\mathrm{import\_format})$. |
+| `transformation` | IRI of a Mini-TT expression (typed term) | The middle $m: S \to T$, where $S = \mathrm{payload\_type}(\mathrm{export\_format})$ and $T = \mathrm{payload\_type}(\mathrm{import\_format})$. **The transformation is a Mini-TT *term*, not an opaque Component.** The natural shape is a Lambda whose body is a typed expression — for pure transformations the body is fully transparent (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius); for institution-runtime transformations the body bottoms at a `program:Component` reference (an expression form), which the kernel evaluates by dispatching into the institution's worker. Either way the transformation slot carries an inspectable, type-checkable, composable typed term — the property that lets the kernel reason about $m$ rather than treating it as a black box. |
 | `import_format` | IRI of an ImportFormat | The target-side $t$ — constructs a target-class resource from a typed payload. |
 | `exact` | boolean | Whether the comorphism preserves model amalgamation in the sense of Diaconescu (2025, Thm. 14.15 + Prop. 14.14). Absent or `false` is the safe default; only an explicit `true` is a claim of exactness. |
 
 `source_institution` and `target_institution` are derivable from `export_format.institution_ref` and `import_format.institution_ref`; the kernel may index them but the Comorphism resource does not need to repeat them.
 
-The kernel statically type-checks a Comorphism resource at commit time: the transformation Component's signature must equal `(payload_type(export_format)) → (payload_type(import_format))`. A type-incorrect Comorphism is rejected by structural validation — comorphism well-typedness is a kernel-level invariant rather than a runtime hope.
+The kernel statically type-checks a Comorphism resource at commit time: the transformation term's type must equal `(payload_type(export_format)) → (payload_type(import_format))`. A type-incorrect Comorphism is rejected by structural validation — comorphism well-typedness is a kernel-level invariant rather than a runtime hope.
 
 ---
 
@@ -215,7 +215,7 @@ $$\rho \;=\; (s,\ m,\ t)$$
 where:
 
 - **$s$** is the *source* institution's typed extraction, declared as an ExportFormat. $s$ takes a resource of class $C_S$ (in the source institution's vocabulary) and returns a Mini-TT value of type $S$. The source institution is the only party that knows how to traverse $C_S$'s representational invariants.
-- **$m$** is a *cross-institution* transformation, declared as a kernel-registered Mini-TT Component with type $S \to T$. $m$ owns the actual mathematical content of the comorphism. It belongs to neither institution; it is the bridge.
+- **$m$** is a *cross-institution* transformation, declared as a Mini-TT term (typed expression) with type $S \to T$. $m$ owns the actual mathematical content of the comorphism. It belongs to neither institution; it is the bridge. The term is evaluable through the kernel's existing Component infrastructure — Lambda body reduction for pure transformations, Component-as-expression-form dispatch at the leaf for institution-runtime transformations — so the same evaluation path covers both.
 - **$t$** is the *target* institution's typed reification, declared as an ImportFormat. $t$ takes a Mini-TT value of type $T$ and constructs a resource of class $C_T$ (in the target institution's vocabulary). The target institution is the only party that knows how to construct well-formed $C_T$ instances.
 
 Reading the comorphism this way:

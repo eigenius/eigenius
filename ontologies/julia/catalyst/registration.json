@@ -18,6 +18,16 @@
     "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:extract_network"
   },
   {
+    "@id": "urn:eigenius:julia:catalyst:ef_to_ode_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_to_ode_input",
+    "urn:eigenius:core:description": "Export the (network + ICs + parameters + tspan) bundle used as the source payload of the Catalyst→DiffEq Comorphism.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:extract_to_ode_input"
+  },
+  {
     "@id": "urn:eigenius:julia:catalyst:ef_conservation_law",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
     "urn:eigenius:core:short_name": "ef_conservation_law",

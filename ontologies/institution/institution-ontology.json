@@ -307,10 +307,23 @@
   {
     "@id": "urn:eigenius:institution:transformation",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "IRI of the kernel-registered Mini-TT Component implementing the comorphism's typed middle m: S → T. The kernel verifies at commit time that the Component's signature equals (payload_type(export_format)) → (payload_type(import_format)).",
+    "urn:eigenius:core:description": "Reference to the Mini-TT expression (typed term) implementing the comorphism's typed middle m: S → T. **Not an opaque Component IRI — a typed term.** The natural shape is `program:Lambda` whose body is a typed expression: pure transformations (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius) bottom at composed primitive expression forms; institution-runtime transformations bottom at a `program:Component` reference (an expression form, dispatched into the institution's worker). The kernel verifies at commit time that the term's type equals (payload_type(export_format)) → (payload_type(import_format)).",
     "urn:eigenius:core:short_name": "transformation",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:program:Lambda",
+      "urn:eigenius:program:Apply",
+      "urn:eigenius:program:Component",
+      "urn:eigenius:program:Let",
+      "urn:eigenius:program:Var",
+      "urn:eigenius:program:Case",
+      "urn:eigenius:program:Pair",
+      "urn:eigenius:program:Construct",
+      "urn:eigenius:program:Project",
+      "urn:eigenius:program:Map",
+      "urn:eigenius:program:Reduce",
+      "urn:eigenius:program:Literal"
+    ],
     "urn:eigenius:core:domain": ["urn:eigenius:institution:Comorphism"]
   },
   {

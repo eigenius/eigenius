@@ -28,6 +28,27 @@
   },
 
   {
+    "@id": "urn:eigenius:julia:diffeq:if_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_problem",
+    "urn:eigenius:core:description": "Construct an OdeProblem resource from a payload. Used as the target ImportFormat of the Catalyst→DiffEq Comorphism (Catalyst's `ode_model(rn)` + map-form `ODEProblem(...)` produces an OdeProblem the institution then commits to the chain).",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:reify_problem"
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:ef_to_interval_bound_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_to_interval_bound_input",
+    "urn:eigenius:core:description": "Export the bundle (OdeSolution + interval-extension function + time domain) used as the source payload of the DiffEq→IntervalArithmetic Comorphism.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:diffeq",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:diffeq:proc:extract_to_interval_bound_input"
+  },
+
+  {
     "@id": "urn:eigenius:julia:diffeq:if_solution",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
     "urn:eigenius:core:short_name": "if_solution",

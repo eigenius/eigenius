@@ -140,6 +140,36 @@
   },
 
   {
+    "@id": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "CatalystToOdeInput",
+    "urn:eigenius:core:description": "Source-payload class for the Catalyst→DiffEq Comorphism. Bundles a ReactionNetwork with the initial-condition map (`concentrations_kv`), parameter assignment (`parameters_kv`), and time span. The transformation Component runs `complete(flatten(rn))` then `ODEProblem(rn, [species_sym => v, …], (tspan_start, tspan_end), [param_sym => v, …])` — the canonical Catalyst-16 map-form path verified in `julia/research/catalyst-ode-probe.md`. v1 does NOT call `structural_simplify`; species ordering follows `network.species_declared`.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:catalyst:network",
+      "urn:eigenius:julia:catalyst:parameters_kv",
+      "urn:eigenius:julia:catalyst:concentrations_kv",
+      "urn:eigenius:julia:catalyst:tspan_start",
+      "urn:eigenius:julia:catalyst:tspan_end"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:tspan_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tspan_start",
+    "urn:eigenius:core:description": "Start of integration interval for the produced OdeProblem.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:CatalystToOdeInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:tspan_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tspan_end",
+    "urn:eigenius:core:description": "End of integration interval for the produced OdeProblem.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:catalyst:CatalystToOdeInput"]
+  },
+
+  {
     "@id": "urn:eigenius:julia:catalyst:CatalystSteadyStateInput",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "CatalystSteadyStateInput",

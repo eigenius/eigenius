@@ -1254,36 +1254,37 @@ Cross-cutting codec change: replace Eigon-JSON with Eigon-CBOR on the `Component
 - `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes; ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
 - End-to-end demo: a notebook that loads physical-system equations, gets them simplified via `qc_symb_simplify`, runs a numerical solve via a substrate component.
 
-### Phase 19e — `JuMP` institution (~2 weeks)
-
-- `eigenius-julia-jump` per-solver registrations: HiGHS (default), GLPK, Ipopt; Gurobi if licensed. Each is a separate `Institution` resource referencing its own `JuliaEnvironment`.
-- Declarations from D27 §4.2: `OptimisationProblem`, `OptimisesTo`, `Infeasible`, `BoundedBy` resource classes; AutoOnLoad certificate-validation QueryClasses; OnDemand `qc_jump_solve`; Decidable `qc_jump_is_infeasible`.
-- Demo: a constrained design problem solved by the institution; solver certificate re-checked on commit.
-
-### Phase 19f — `IntervalArithmetic` institution + numerical hardening (~3 weeks)
+### Phase 19e — `IntervalArithmetic` institution + numerical hardening (~3 weeks)
 
 - `eigenius-julia-intervals` crate. Declarations from D27 §4.3: `BoundedBy(value, interval)`, `ProvesBoundOn(function, domain, interval)`, `ContainsRoot` resource classes; Decidable role on `qc_intv_validate_bounded_by` so user programs can write `Exp::NativeDecide` predicates that reduce operationally.
 - Strict-determinism mode: BLAS pinning, FMA off, refusal to run on non-conforming hosts.
 - Cross-host reproducibility verification tooling: re-run an invocation on a different host, surface `numerical_metadata` divergences.
+- *Reordered ahead of JuMP* — IntervalArithmetic has no solver-dependency surface, the kinase CI columns map directly onto `BoundedBy`, and the Decidable role is the most novel piece of D14 runtime mechanics; we want it exercised early.
 
-### Phase 19g — `Catalyst.jl` institution (~3 weeks)
+### Phase 19f — `JuMP` institution (~2 weeks)
 
-- `eigenius-julia-catalyst` crate. Declarations promoted from D27 §4.4 (Catalyst is now a first-class reference institution given the life-science focus on PK / signaling pathways / metabolic networks).
-- Resource classes: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `MassActionKinetics` / `JumpProcessSemantics` markers, `DeficiencyZero` / `DeficiencyOne` relations.
-- ExportFormats / ImportFormats: extract a `ReactionNetwork` into a `CatalystNetworkRepr` Mini-TT payload; reify steady-state and conservation-law results.
-- QueryClasses: `qc_cat_validate_conservation_law` (`AutoOnLoad`), `qc_cat_validate_steady_state` (`AutoOnLoad`), `qc_cat_compute_steady_states` (`OnDemand`), `qc_cat_to_ode` (`OnDemand`) producing an `OdeSystemRepr` for handoff to Phase 19h, `qc_cat_check_deficiency` (`OnDemand`, `Decidable`).
-- Comorphism into Symbolics/MTK: declared as a typed D14 Comorphism so the cross-fibre move from a reaction network to its symbolic ODE form is a tracked translation.
-- Why an institution and not just a substrate component: the fibre has structural invariants (linear conservation laws, deficiency classes, mass-action equivalence) that EigenQL FIBER queries can traverse; substrate components alone would just return numbers without the typed-relation status.
+- `eigenius-julia-jump` per-solver registrations: HiGHS (default), GLPK, Ipopt; Gurobi if licensed. Each is a separate `Institution` resource referencing its own `JuliaEnvironment`.
+- Declarations from D27 §4.2: `OptimisationProblem`, `OptimisesTo`, `Infeasible`, `OptimisationBounds` resource classes; AutoOnLoad certificate-validation QueryClasses; OnDemand `qc_jump_solve`; Decidable `qc_jump_is_infeasible`.
+- Demo: a constrained design problem solved by the institution; solver certificate re-checked on commit.
 
-### Phase 19h — `DifferentialEquations.jl` institution — ODEs only (~3 weeks)
+### Phase 19g — `DifferentialEquations.jl` institution — ODEs only (~3 weeks)
 
 - `eigenius-julia-diffeq` crate. **v1 scope: ODEs only.** SDEs, DAEs, DDEs, jump processes, and hybrid systems are deferred to follow-on milestones (19i and beyond) to be triggered by domain demand.
-- Resource classes: `OdeSystem(equations, parameters, state_variables)`, `OdeSolution(system, parameters, initial_conditions, trajectory, integrator)`, `IntegrationCertificate(solution, tolerance, error_bound)`, `BoundedError(solution, norm, bound)`, `ParameterFit(system, observations, fitted_parameters, residual)`.
-- ExportFormats / ImportFormats: extract an `OdeSystem` into the solver's representation; reify trajectory and certificate results back as typed resources.
-- QueryClasses: `qc_diffeq_validate_solution` (`AutoOnLoad` — re-integrates and confirms within tolerance), `qc_diffeq_validate_certificate` (`AutoOnLoad`), `qc_diffeq_solve(system, params, ic, [t0, t1])` (`OnDemand`), `qc_diffeq_steady_state` (`OnDemand`), `qc_diffeq_continuation` (parameter sweeps; `OnDemand`), `qc_diffeq_sensitivity` (`OnDemand`).
-- Comorphisms in: from Phase 19g (Catalyst → DiffEq) and from Phase 19d (MTK → DiffEq) — both directly supported by the Julia libraries; under D14 they're typed Comorphism resources.
-- Comorphisms out: to Phase 19f (DiffEq → IntervalArithmetic) — given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is one of the bridges Phase 21 needs for *operationally verified* PK predictions.
-- Why ODEs only in v1: bread-and-butter life-science modelling (PK compartmental models, mechanistic dose-response, steady-state cell-cycle) is ~95% deterministic ODE; SDEs / jump processes are warranted only for low-copy-number stochastic kinetics, which can land when a domain consumer asks.
+- Resource classes (per D27 §4.5 verified note): `OdeProblem` (renamed from `OdeSystem` to avoid MTK collision), `OdeSolution`, `OdeSteadyState`, plus `ReproducibleIntegration` framing for AutoOnLoad re-validation. `IntegrationCertificate` / `BoundedError` IRIs reserved for a future TaylorModels-backed institution that produces rigorous interval enclosures. `ParameterFit` moved to the JuMP / Optimization institution scope.
+- ExportFormats / ImportFormats: extract an `OdeProblem` and an `OdeSolution`; reify solution and steady-state results back as typed resources.
+- QueryClasses: `qc_diffeq_validate_solution` (`AutoOnLoad` — re-solves and checks the trajectory hash), `qc_diffeq_solve(input)` (`OnDemand`), `qc_diffeq_steady_state` (`OnDemand`).
+- Comorphism out to Phase 19e (DiffEq → IntervalArithmetic) — given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is one of the bridges Phase 21 needs for *operationally verified* PK predictions.
+- *Reordered ahead of Catalyst* — Catalyst's `qc_to_ode` Comorphism has nowhere to land if DiffEq isn't ready first; with this reordering, 19g ships using hand-written compartmental ODEs (PK two-compartment is well-defined without Catalyst), and the DiffEq institution is in place when 19h adds the Catalyst → DiffEq Comorphism.
+
+### Phase 19h — `Catalyst.jl` institution (~3 weeks)
+
+- `eigenius-julia-catalyst` crate. Declarations promoted from D27 §4.4 (Catalyst is now a first-class reference institution given the life-science focus on PK / signaling pathways / metabolic networks).
+- Resource classes: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `DeficiencyZero` / `DeficiencyOne` relations, `WeaklyReversible` / `ComplexBalanced` markers. `MassActionKinetics` / `JumpProcessSemantics` reframed as compilation-path discriminators per D27 §4.4.1 verified note.
+- ExportFormats / ImportFormats: extract a `ReactionNetwork` and a `ConservationLaw`; reify steady-state and conservation-law results.
+- QueryClasses: `qc_cat_validate_conservation_law` (`AutoOnLoad`), `qc_cat_validate_steady_state` (`AutoOnLoad`), `qc_cat_validate_deficiency_zero` / `_one` (`AutoOnLoad`), `qc_cat_compute_steady_states` (`OnDemand`), `qc_cat_extract_invariants` (`OnDemand`), `qc_cat_check_deficiency` (`OnDemand`, `Decidable`).
+- **Comorphism into DiffEq**: declared as a typed D14 Comorphism. Per the Catalyst-ODE probe (`julia/research/catalyst-ode-probe.md`): in Catalyst 16.1.1 the canonical entry point is the symbolic-keyed map form `ODEProblem(rn, [species_sym => value, ...], tspan, [param_sym => value, ...])`; positional-vector form errors with `BoundsError`, `convert(ODESystem, rn)` is broken. The Comorphism's transformation Component compiles direct to `OdeProblem` skipping the `ODESystem` intermediate.
+- Comorphism into Symbolics/MTK: deferred until the Symbolics institution gets a typed `ODESystem`-equivalent class (and the Catalyst→ODESystem path itself is settled — the probe shows the conversion to `ODESystem` is broken in 16.1.1).
+- Why an institution and not just a substrate component: the fibre has structural invariants (linear conservation laws, deficiency classes, mass-action equivalence) that EigenQL FIBER queries can traverse; substrate components alone would just return numbers without the typed-relation status.
 
 ### Phase 19 — Test plan
 

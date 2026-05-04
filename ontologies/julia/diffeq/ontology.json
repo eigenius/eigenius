@@ -212,6 +212,53 @@
   },
 
   {
+    "@id": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DiffEqToIntervalBoundInput",
+    "urn:eigenius:core:description": "Source-payload class for the DiffEq→IntervalArithmetic Comorphism. Bundles an OdeSolution with an interval-extension of the vector field (`vector_field_interval_source` is a Julia anonymous-function literal taking an Interval-typed state and parameters, returning an Interval-typed time derivative) and the time domain over which to bound. The transformation Component applies interval analysis to produce a `ProvesBoundOn` claim about the trajectory.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:diffeq:solution",
+      "urn:eigenius:julia:diffeq:vector_field_interval_source",
+      "urn:eigenius:julia:diffeq:bound_domain_start",
+      "urn:eigenius:julia:diffeq:bound_domain_end"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "solution",
+    "urn:eigenius:core:description": "Reference to an OdeSolution.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:diffeq:OdeSolution"],
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:vector_field_interval_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "vector_field_interval_source",
+    "urn:eigenius:core:description": "Julia source for the interval-extended vector field. Function shape: `(u_interval, p, t) -> du_interval`. The institution evaluates this in a scope where IntervalArithmetic operators dispatch.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 16384,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:bound_domain_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "bound_domain_start",
+    "urn:eigenius:core:description": "Start of the time interval over which to bound the trajectory.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:bound_domain_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "bound_domain_end",
+    "urn:eigenius:core:description": "End of the time interval over which to bound the trajectory.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+
+  {
     "@id": "urn:eigenius:julia:diffeq:DiffEqSolveInput",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "DiffEqSolveInput",
