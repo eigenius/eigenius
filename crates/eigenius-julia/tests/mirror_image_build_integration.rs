@@ -428,3 +428,188 @@ fn julia_env_image_with_mirror_dispatches_typed_struct() {
     let _ = runtime.drain();
     let _ = std::fs::remove_dir_all(&depot);
 }
+
+// ---------- CallRuntimeMethod e2e (Phase 19a.4) ----------------------------
+
+/// Build a `RuntimeMethodSignature` resource. v1 just needs
+/// `language` + `method_name` for the substrate's `call_method` to
+/// dispatch; the full `input_types` / `output_type` machinery is
+/// validated by the kernel boundary check (D26 §7.5) which is not
+/// part of this test.
+fn build_method_signature(method_name: &str) -> Resource {
+    let mut sig = Resource::new(iri(&format!(
+        "urn:eigenius:test:method-signature:{method_name}"
+    )));
+    sig.set(
+        iri("urn:eigenius:runtime:language"),
+        Value::String("julia".to_string()),
+    );
+    sig.set(
+        iri("urn:eigenius:runtime:method_name"),
+        Value::String(method_name.to_string()),
+    );
+    sig
+}
+
+/// Build an Eigon resource representing a `Demo` mirror struct value
+/// the worker can decode. Properties match what the generated
+/// `decode_Demo` reads — `name` (required) and the optional `_id`.
+fn build_demo_resource(name: &str, id: Option<&str>) -> Resource {
+    let mut r = match id {
+        Some(s) => Resource::new(iri(s)),
+        None => Resource::new_embedded(),
+    };
+    r.set(
+        iri("urn:eigenius:core:is_a"),
+        Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Demo"))]),
+    );
+    r.set(
+        iri("urn:eigenius:test:name"),
+        Value::String(name.to_string()),
+    );
+    r
+}
+
+/// End-to-end `CallRuntimeMethod` against the Demo mirror with a
+/// typed handler defined in the worker's `Main`. Exercises the full
+/// 19a.4 path:
+///
+/// 1. Build env image with the Demo mirror baked in.
+/// 2. Pre-load a handler `echo_demo(d::Demo) = d` via `RunRuntimeScript`
+///    (real handler packages land alongside per-institution crates;
+///    this test injects a one-liner so it doesn't need a separate
+///    `EigeniusKinaseDemo` package).
+/// 3. Dispatch `CallRuntimeMethod` with method_name = "echo_demo"
+///    and a Demo input.
+/// 4. Verify the output Resource is the round-tripped Demo.
+/// 5. Verify `dispatched_to` is populated on the partial
+///    `RuntimeInvocation` (D26 §4.2 / §5.5).
+#[test]
+fn julia_call_runtime_method_dispatches_typed_handler() {
+    if let Some(reason) = skip_unless_full_environment() {
+        eprintln!("skipping 19a.4 CallRuntimeMethod e2e: {reason}");
+        return;
+    }
+    let pinned_base = match ensure_base_image_pinned() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("skipping (could not pin base image): {e}");
+            return;
+        }
+    };
+
+    let depot = fresh_depot("call-method");
+    let spawner = match eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
+        eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(depot.clone()),
+    ) {
+        Ok(s) => std::sync::Arc::new(s),
+        Err(e) => {
+            eprintln!("skipping (DockerServiceSpawner construction failed): {e}");
+            return;
+        }
+    };
+
+    let project_dir = julia_project_dir();
+    let runtime = std::sync::Arc::new(JuliaLanguageRuntime::new(
+        project_dir,
+        pinned_base,
+        spawner.clone(),
+        depot.clone(),
+    ));
+
+    let mirror = build_demo_mirror();
+    let env = Resource::new_embedded();
+    let runtime_for_dispatch: Box<dyn LanguageRuntime> = Box::new(runtime.clone());
+    let _digest = match runtime_for_dispatch.build_environment_image(&env, &[], Some(&mirror)) {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = runtime.drain();
+            let _ = std::fs::remove_dir_all(&depot);
+            panic!("build_environment_image: {e}");
+        }
+    };
+
+    let mut dispatcher = eigenius_runtime_substrate::facade::SubstrateDispatcher::new();
+    dispatcher
+        .register_language_runtime(runtime_for_dispatch)
+        .expect("register julia runtime");
+
+    // Step 1: bring EigeniusMirror into Main and define the handler.
+    // `echo_demo(d::Demo) = d` is the simplest non-trivial typed
+    // method — it lets us verify the round-trip without any
+    // computation muddying the picture.
+    let setup_script = "begin; \
+        using EigeniusMirror; \
+        echo_demo(d::EigeniusMirror.Demo) = d; \
+        nothing; \
+        end";
+    let setup_arg = build_argument("julia", setup_script);
+    if let Err(e) = dispatcher.dispatch_run_runtime_script(&[], &setup_arg) {
+        let _ = runtime.drain();
+        let _ = std::fs::remove_dir_all(&depot);
+        panic!("setup script (handler install) failed: {e:?}");
+    }
+
+    // Step 2: dispatch CallRuntimeMethod.
+    let signature = build_method_signature("echo_demo");
+    let signature_cbor = eigon_cbor::serialize_resource(&signature);
+    let demo_input = build_demo_resource("typed-call-ok", Some("urn:eigenius:test:demo:input-1"));
+    let demo_input_cbor = eigon_cbor::serialize_resource(&demo_input);
+
+    let outcome = match dispatcher.dispatch_call_runtime_method(&demo_input_cbor, &signature_cbor) {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = runtime.drain();
+            let _ = std::fs::remove_dir_all(&depot);
+            panic!("dispatch_call_runtime_method failed: {e:?}");
+        }
+    };
+
+    // Step 3: output Resource is the round-tripped Demo.
+    let output = eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
+    let output_name = output
+        .get(&iri("urn:eigenius:test:name"))
+        .and_then(Value::as_str)
+        .expect("output's `name` property");
+    assert_eq!(output_name, "typed-call-ok");
+    let output_is_a = output
+        .get(&iri("urn:eigenius:core:is_a"))
+        .expect("output's is_a")
+        .as_iri_array();
+    assert!(
+        output_is_a.contains(&iri("urn:eigenius:test:Demo")),
+        "output must be is_a Demo, got {output_is_a:?}"
+    );
+    // Epistemic category stamp (Phase 19a.4 / D29 §8.4 substrate
+    // commit-pipeline rule): every runtime-produced resource lands
+    // with `urn:eigenius:reflection:DerivedResource` on its `is_a`,
+    // alongside its structural class. Lets the chain auditor
+    // distinguish runtime-produced from declared / observed /
+    // verified resources.
+    assert!(
+        output_is_a.contains(&iri("urn:eigenius:reflection:DerivedResource")),
+        "output must be is_a DerivedResource, got {output_is_a:?}"
+    );
+
+    // Step 4: partial RuntimeInvocation carries dispatched_to.
+    let inv = eigon_cbor::parse_resource_lenient(&outcome.partial_invocation_cbor)
+        .expect("decode partial invocation");
+    let dispatched_to = inv
+        .get(&iri("urn:eigenius:runtime:dispatched_to"))
+        .and_then(Value::as_str)
+        .expect("partial invocation must carry dispatched_to for CallRuntimeMethod");
+    // `which()` formats as `Module.fname(::ArgType) at file:line`.
+    // Loose contains-check — Julia's `which()` output format is stable
+    // but we don't pin the file/line.
+    assert!(
+        dispatched_to.contains("echo_demo"),
+        "dispatched_to must mention the handler name, got `{dispatched_to}`"
+    );
+    assert!(
+        dispatched_to.contains("Demo"),
+        "dispatched_to must mention the dispatched arg type, got `{dispatched_to}`"
+    );
+
+    let _ = runtime.drain();
+    let _ = std::fs::remove_dir_all(&depot);
+}

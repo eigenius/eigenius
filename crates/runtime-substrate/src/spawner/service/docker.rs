@@ -104,7 +104,6 @@ impl DockerServiceSpawner {
             services: Mutex::new(HashMap::new()),
         })
     }
-
 }
 
 impl ServiceSpawner for DockerServiceSpawner {

@@ -1271,6 +1271,41 @@ fn emit_module(
         s.push('\n');
     }
 
+    // Codec registries (D29 §8.5 — added in v1.1 to support
+    // worker-side typed-method dispatch). Two constants exported by
+    // every mirror module:
+    //
+    // - `_eigenius_decoders` — class IRI → `decode_<C>` function. The
+    //   worker reads `m["urn:eigenius:core:is_a"]` on each input and
+    //   dispatches to the matching decoder.
+    // - `_eigenius_encoders` — concrete struct type → `encode_<C>`
+    //   function. The worker dispatches on `typeof(result)` to
+    //   produce the output dict.
+    if !struct_order.is_empty() {
+        s.push_str("const _eigenius_decoders = Dict{String, Function}(\n");
+        for iri in struct_order {
+            if let Some(d) = decls.get(iri) {
+                s.push_str(&format!(
+                    "    {} => decode_{},\n",
+                    julia_string_literal(d.iri.as_str()),
+                    d.short_name
+                ));
+            }
+        }
+        s.push_str(")\n\n");
+
+        s.push_str("const _eigenius_encoders = Dict{DataType, Function}(\n");
+        for iri in struct_order {
+            if let Some(d) = decls.get(iri) {
+                s.push_str(&format!(
+                    "    {} => encode_{},\n",
+                    d.short_name, d.short_name
+                ));
+            }
+        }
+        s.push_str(")\n\n");
+    }
+
     if !struct_order.is_empty() {
         s.push_str("export ");
         let mut exports: Vec<String> = Vec::new();
@@ -1284,6 +1319,10 @@ fn emit_module(
                 exports.push(format!("encode_{}", d.short_name));
             }
         }
+        // Codec registries are part of the worker dispatch contract;
+        // export them so the worker's introspection finds them.
+        exports.push("_eigenius_decoders".to_string());
+        exports.push("_eigenius_encoders".to_string());
         s.push_str(&exports.join(", "));
         s.push('\n');
         s.push('\n');
@@ -2502,7 +2541,21 @@ function encode_AssayResult(c::AssayResult)::Dict{String, Any}
     return out
 end
 
-export AbstractAssayProtocol, AssayProtocol, decode_AssayProtocol, encode_AssayProtocol, AbstractCompound, Compound, decode_Compound, encode_Compound, AbstractTarget, Target, decode_Target, encode_Target, AbstractAssayResult, AssayResult, decode_AssayResult, encode_AssayResult
+const _eigenius_decoders = Dict{String, Function}(
+    \"urn:eigenius:demo:assay:AssayProtocol\" => decode_AssayProtocol,
+    \"urn:eigenius:demo:assay:Compound\" => decode_Compound,
+    \"urn:eigenius:demo:assay:Target\" => decode_Target,
+    \"urn:eigenius:demo:assay:AssayResult\" => decode_AssayResult,
+)
+
+const _eigenius_encoders = Dict{DataType, Function}(
+    AssayProtocol => encode_AssayProtocol,
+    Compound => encode_Compound,
+    Target => encode_Target,
+    AssayResult => encode_AssayResult,
+)
+
+export AbstractAssayProtocol, AssayProtocol, decode_AssayProtocol, encode_AssayProtocol, AbstractCompound, Compound, decode_Compound, encode_Compound, AbstractTarget, Target, decode_Target, encode_Target, AbstractAssayResult, AssayResult, decode_AssayResult, encode_AssayResult, _eigenius_decoders, _eigenius_encoders
 
 end # module EigeniusMirror
 ";

@@ -97,6 +97,11 @@ pub struct DispatchTrace {
     /// instance, only populates `host_kernel`); the substrate does not
     /// fail dispatch on missing health data.
     pub numerical_metadata: NumericalMetadata,
+    /// Worker-reported `dispatched_to` — the resolved method signature
+    /// (e.g. Julia's `which(...)` output) for `CallRuntimeMethod`.
+    /// `None` for `RunRuntimeScript` and for runtimes that don't
+    /// implement method dispatch (D26 §4.2).
+    pub dispatched_to: Option<String>,
 }
 
 /// Outcome of a [`crate::language_runtime::LanguageRuntime`] dispatch.
@@ -163,6 +168,9 @@ impl DispatchTrace {
             parse_iri(PROP_NUMERICAL_METADATA),
             Value::Json(numerical_metadata_to_json(&self.numerical_metadata)),
         );
+        if let Some(dt) = self.dispatched_to {
+            r.set(parse_iri(PROP_DISPATCHED_TO), Value::String(dt));
+        }
         r
     }
 }
@@ -232,6 +240,7 @@ mod tests {
                 fma_enabled: Some(true),
                 ..Default::default()
             },
+            dispatched_to: None,
         }
     }
 

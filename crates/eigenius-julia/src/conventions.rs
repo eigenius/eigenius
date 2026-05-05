@@ -34,6 +34,11 @@ pub const LANGUAGE: &str = "julia";
 /// resource — the input to `RunRuntimeScript`.
 pub const PROP_SOURCE: &str = "urn:eigenius:runtime:source";
 
+/// Property IRI carrying the method name on a `RuntimeMethodSignature`
+/// resource — the unqualified function name the Julia worker resolves
+/// in `Main` for `CallRuntimeMethod`.
+pub const PROP_METHOD_NAME: &str = "urn:eigenius:runtime:method_name";
+
 /// Property IRI for the language tag on output resources.
 pub const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
 

@@ -179,6 +179,7 @@ fn handle(req: Request) -> Response {
         Request::RegisterMirror { mirror_iri, .. } => Response::MirrorRegistered { mirror_iri },
         Request::DispatchMethod {
             invocation_id,
+            target_kind: _,
             target,
             inputs: _,
         } => dispatch_bash(invocation_id, target),

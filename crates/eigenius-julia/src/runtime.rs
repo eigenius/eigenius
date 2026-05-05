@@ -25,9 +25,12 @@
 //! 19a.3, the generated mirror packages. From the substrate's view,
 //! this crate just composes Dockerfile fragments and routes RPC.
 
-use crate::conventions::{LANGUAGE, PROP_LANGUAGE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, WORKER_PROJECT_DIR};
+use crate::conventions::{
+    LANGUAGE, PROP_LANGUAGE, PROP_METHOD_NAME, PROP_SCRIPT_OUTPUT, PROP_SOURCE, WORKER_PROJECT_DIR,
+};
 use crate::dockerfile::{julia_dockerfile_fragments, JuliaImagePlan};
 use crate::eigenius_common::{self, COMMON_PACKAGE_NAME};
+use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_runtime_substrate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
@@ -40,7 +43,10 @@ use eigenius_runtime_substrate::image_build::{
 use eigenius_runtime_substrate::invocation::{DispatchTrace, RunOutcome};
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
 use eigenius_runtime_substrate::rpc::client::WorkerRpcClient;
-use eigenius_runtime_substrate::rpc::protocol::{HealthInfo, NumericalMetadata, Request, Response};
+use eigenius_runtime_substrate::rpc::method::MethodInvocation;
+use eigenius_runtime_substrate::rpc::protocol::{
+    HealthInfo, NumericalMetadata, Request, Response, TargetKind,
+};
 use eigenius_runtime_substrate::spawner::service::{ServiceHandle, ServiceSpawner};
 use eigenius_runtime_substrate::types::{DockerfileFragments, ImageDigest, WorkerSpec};
 use serde_bytes::ByteBuf;
@@ -356,17 +362,71 @@ impl LanguageRuntime for JuliaLanguageRuntime {
     fn call_method(
         &self,
         _env: &Resource,
-        _signature: &Resource,
-        _inputs: &[Resource],
+        signature: &Resource,
+        inputs: &[Resource],
     ) -> Result<RunOutcome, RunError> {
-        // 19a.4 lights this up against typed mirror struct dispatch
-        // (worker-side method registry walking the generated mirror
-        // packages' exports). Until then, dispatch a script via
-        // `RunRuntimeScript` instead.
-        Err(RunError::MethodSignatureMismatch(
-            "JuliaLanguageRuntime::call_method is not yet implemented (lands in Phase 19a.4)"
-                .to_string(),
-        ))
+        // 1. Read method_name from the signature. The signature's
+        // own IRI flows through as `dispatched_to`'s context anchor
+        // (the worker echoes it back so the trace records what the
+        // dispatch was supposed to satisfy).
+        let method_name = read_string_property(signature, PROP_METHOD_NAME)
+            .map_err(|reason| {
+                RunError::MethodSignatureMismatch(format!(
+                    "RuntimeMethodSignature missing or malformed `method_name`: {reason}"
+                ))
+            })?
+            .to_string();
+        let signature_iri = signature
+            .id()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_default();
+
+        // 2. Encode the MethodInvocation directive (function_name +
+        // signature_iri) and each input resource for the wire.
+        let invocation = MethodInvocation {
+            function_name: method_name,
+            signature_iri,
+        };
+        let mut target_cbor = Vec::new();
+        ciborium::into_writer(&invocation, &mut target_cbor).map_err(|e| {
+            RunError::WorkerRpcFailed(format!("encode MethodInvocation as CBOR: {e}"))
+        })?;
+        let input_payloads: Vec<ByteBuf> = inputs
+            .iter()
+            .map(|r| ByteBuf::from(eigon_cbor::serialize_resource(r)))
+            .collect();
+
+        let invocation_id = format!(
+            "julia-call-{}",
+            INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+
+        let started_at = DispatchTrace::now_rfc3339();
+
+        let service = self
+            .ensure_service()
+            .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
+        let (numerical_metadata, image_digest) = self.capture_health(&service);
+        let (output_bytes, dispatched_to) =
+            self.dispatch_typed_method(&service, target_cbor, input_payloads, invocation_id)?;
+
+        let completed_at = DispatchTrace::now_rfc3339();
+
+        // 3. Decode the output as an Eigon resource. The mirror's
+        // `encode_<C>` produces the standard JSON-LD-shaped dict; the
+        // kernel's lenient parser accepts that shape directly.
+        let output = eigon_cbor::parse_resource_lenient(&output_bytes).map_err(|e| {
+            RunError::WorkerRpcFailed(format!("decode worker output as Eigon resource: {e}"))
+        })?;
+
+        Ok(RunOutcome {
+            output,
+            image_digest,
+            started_at,
+            completed_at,
+            numerical_metadata,
+            dispatched_to,
+        })
     }
 }
 
@@ -384,10 +444,7 @@ impl JuliaLanguageRuntime {
             .join(format!("service-julia-{}", std::process::id()));
         std::fs::create_dir_all(&dir).map_err(|e| SpawnError::SpawnFailed {
             backend: self.spawner.backend(),
-            reason: format!(
-                "create service tempdir {} failed: {e}",
-                dir.display()
-            ),
+            reason: format!("create service tempdir {} failed: {e}", dir.display()),
         })?;
         let _ = self.service_tempdir.set(dir);
         Ok(self.service_tempdir.get().expect("just set").as_path())
@@ -469,10 +526,7 @@ impl JuliaLanguageRuntime {
         Ok(handle)
     }
 
-    fn capture_health(
-        &self,
-        service: &ServiceHandle,
-    ) -> (NumericalMetadata, Option<ImageDigest>) {
+    fn capture_health(&self, service: &ServiceHandle) -> (NumericalMetadata, Option<ImageDigest>) {
         match self.query_health_internal(service) {
             Ok(info) => {
                 let digest = info
@@ -537,6 +591,7 @@ impl JuliaLanguageRuntime {
         let resp = client
             .call(&Request::DispatchMethod {
                 invocation_id: invocation_id.clone(),
+                target_kind: TargetKind::Script,
                 target: ByteBuf::from(target_cbor),
                 inputs: vec![],
             })
@@ -559,6 +614,51 @@ impl JuliaLanguageRuntime {
         };
         drop(client);
         Ok(stdout)
+    }
+
+    /// Dispatch a typed method call through the warm service. Returns
+    /// the raw output bytes (a CBOR-encoded mirror dict that the
+    /// caller decodes against the signature's `output_type`) and the
+    /// `dispatched_to` string captured by the worker via `which()`.
+    fn dispatch_typed_method(
+        &self,
+        service: &ServiceHandle,
+        target_cbor: Vec<u8>,
+        input_payloads: Vec<ByteBuf>,
+        invocation_id: String,
+    ) -> Result<(Vec<u8>, Option<String>), RunError> {
+        let stream = self.spawner.attach_uds(service).map_err(|e| {
+            RunError::WorkerRpcFailed(format!(
+                "attach_uds for call_method on service {}: {e}",
+                service.id()
+            ))
+        })?;
+        let mut client = WorkerRpcClient::new(stream);
+        let resp = client
+            .call(&Request::DispatchMethod {
+                invocation_id: invocation_id.clone(),
+                target_kind: TargetKind::Method,
+                target: ByteBuf::from(target_cbor),
+                inputs: input_payloads,
+            })
+            .map_err(|e| RunError::WorkerRpcFailed(format!("dispatch_method call: {e}")))?;
+        let result = match resp {
+            Response::DispatchOk {
+                output,
+                dispatched_to,
+                ..
+            } => Ok((output.into_vec(), dispatched_to)),
+            Response::DispatchFailed {
+                error_kind,
+                message,
+                ..
+            } => Err(map_dispatch_failure(&error_kind, message)),
+            other => Err(RunError::WorkerRpcFailed(format!(
+                "unexpected response to dispatch_method (method): {other:?}"
+            ))),
+        };
+        drop(client);
+        result
     }
 }
 

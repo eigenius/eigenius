@@ -45,7 +45,7 @@ use crate::error::{BuildError, RunError, SpawnError};
 use crate::invocation::{DispatchTrace, RunOutcome};
 use crate::language_runtime::LanguageRuntime;
 use crate::rpc::client::WorkerRpcClient;
-use crate::rpc::protocol::{HealthInfo, NumericalMetadata, Request, Response};
+use crate::rpc::protocol::{HealthInfo, NumericalMetadata, Request, Response, TargetKind};
 use crate::spawner::{LocalSpawner, WorkerSpawner};
 use crate::types::{DockerfileFragments, ImageDigest, WorkerHandle, WorkerSpec};
 use eigenius_kernel::ontology::iri::Iri;
@@ -240,6 +240,7 @@ impl TestLanguageRuntime {
         let resp = client
             .call(&Request::DispatchMethod {
                 invocation_id: invocation_id.clone(),
+                target_kind: TargetKind::Script,
                 target: ByteBuf::from(target_cbor),
                 inputs: vec![],
             })

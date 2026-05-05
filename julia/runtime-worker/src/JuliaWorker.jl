@@ -141,7 +141,24 @@ function handle_request(req)
     elseif verb == "register_mirror"
         return Dict("verb" => "mirror_registered", "mirror_iri" => req["mirror_iri"])
     elseif verb == "dispatch_method"
-        return dispatch_julia(req["invocation_id"], req["target"])
+        # `target_kind` chooses between the eval-source path (default,
+        # used by RunRuntimeScript) and the typed-method path
+        # (CallRuntimeMethod). Wire format pinned by D26 §8.1 +
+        # `runtime-substrate/src/rpc/protocol.rs::TargetKind`.
+        target_kind = get(req, "target_kind", "script")
+        invocation_id = req["invocation_id"]
+        if target_kind == "script"
+            return dispatch_julia(invocation_id, req["target"])
+        elseif target_kind == "method"
+            return dispatch_typed_method(
+                invocation_id,
+                req["target"],
+                get(req, "inputs", Vector{Vector{UInt8}}()),
+            )
+        else
+            return failure(invocation_id, "method_signature_mismatch",
+                "unknown target_kind: $target_kind")
+        end
     end
     return Dict(
         "verb" => "dispatch_failed",
@@ -197,6 +214,204 @@ function failure(invocation_id, error_kind, message)
         "invocation_id" => invocation_id,
         "error_kind" => error_kind,
         "message" => message,
+    )
+end
+
+# --- Typed-method dispatch (CallRuntimeMethod path) -----------------------
+#
+# Wire shape: `target` is a CBOR-encoded MethodInvocation, `inputs`
+# are CBOR-encoded mirror struct dicts. The worker:
+#   1. Discovers loaded mirror modules' `_eigenius_decoders` /
+#      `_eigenius_encoders` registries.
+#   2. Decodes each input by the leading entry of its `is_a` list.
+#   3. Looks up `function_name` in `Main` (or any `using`-imported
+#      module reachable from there).
+#   4. Calls the function with the decoded args.
+#   5. Captures `which(...)` for `dispatched_to` (D26 §4.2).
+#   6. Encodes the result via the encoder registry.
+
+const PROP_IS_A = "urn:eigenius:core:is_a"
+
+"""Walk `Base.loaded_modules` for every module defining
+`_eigenius_decoders` and merge their `class_iri → decode_fn` entries.
+Built fresh per dispatch so newly-loaded mirror modules show up
+immediately. We use `Base.loaded_modules` rather than `names(Main)`
+because `using SomeMirror` brings the mirror's *exports* into Main
+(the constants themselves, not the module-as-a-named-entity), so
+walking Main's name table loses the per-mirror grouping. Iterating
+loaded modules directly is the robust way to find every loaded mirror
+package's registry."""
+function discover_decoders()::Dict{String, Function}
+    out = Dict{String, Function}()
+    for (_pkg_id, mod) in Base.loaded_modules
+        try
+            if isdefined(mod, :_eigenius_decoders)
+                reg = getfield(mod, :_eigenius_decoders)
+                if reg isa AbstractDict
+                    for (k, v) in reg
+                        out[String(k)] = v
+                    end
+                end
+            end
+        catch
+            # Some loaded modules (Base, Core stubs, ...) reject
+            # `isdefined`/`getfield` calls outside their public surface;
+            # silently skip — they aren't mirror modules anyway.
+        end
+    end
+    return out
+end
+
+"""Mirror of `discover_decoders` for `_eigenius_encoders`. Keyed on
+concrete struct types (not class IRIs) — encoding dispatches on
+`typeof(value)`."""
+function discover_encoders()::Dict{DataType, Function}
+    out = Dict{DataType, Function}()
+    for (_pkg_id, mod) in Base.loaded_modules
+        try
+            if isdefined(mod, :_eigenius_encoders)
+                reg = getfield(mod, :_eigenius_encoders)
+                if reg isa AbstractDict
+                    for (k, v) in reg
+                        out[k] = v
+                    end
+                end
+            end
+        catch
+        end
+    end
+    return out
+end
+
+function dispatch_typed_method(
+    invocation_id::AbstractString,
+    target_bytes::Vector{UInt8},
+    input_byte_arrays,
+)
+    # 1. Decode the MethodInvocation directive from the target bytes.
+    invocation = try
+        CBOR.decode(target_bytes)
+    catch e
+        return failure(invocation_id, "method_signature_mismatch",
+            "could not decode target as CBOR MethodInvocation: $e")
+    end
+    if !(invocation isa AbstractDict)
+        return failure(invocation_id, "method_signature_mismatch",
+            "MethodInvocation must be a Dict, got $(typeof(invocation))")
+    end
+    function_name = get(invocation, "function_name", nothing)
+    if !(function_name isa AbstractString)
+        return failure(invocation_id, "method_signature_mismatch",
+            "MethodInvocation.function_name missing or not a string")
+    end
+
+    # 2. Decode each input via the mirror modules' registries.
+    decoders = discover_decoders()
+    decoded_args = []
+    for (i, bytes) in enumerate(input_byte_arrays)
+        m = try
+            CBOR.decode(Vector{UInt8}(bytes))
+        catch e
+            return failure(invocation_id, "method_signature_mismatch",
+                "could not decode input #$i as CBOR: $e")
+        end
+        if !(m isa AbstractDict)
+            return failure(invocation_id, "method_signature_mismatch",
+                "input #$i must be a Dict (a CBOR-encoded mirror resource), got $(typeof(m))")
+        end
+        is_a = get(m, PROP_IS_A, nothing)
+        if !(is_a isa AbstractVector) || isempty(is_a)
+            return failure(invocation_id, "method_signature_mismatch",
+                "input #$i missing or empty `is_a` list — needed to dispatch the decoder")
+        end
+        decoded = nothing
+        for class_iri in is_a
+            class_iri_s = String(class_iri)
+            if haskey(decoders, class_iri_s)
+                try
+                    # `invokelatest` so decoders defined in a newer
+                    # world (after a setup script's `using`/eval) are
+                    # visible from this dispatch frame's older world.
+                    decoded = Base.invokelatest(decoders[class_iri_s], m)
+                    break
+                catch e
+                    return failure(invocation_id, "runtime_error",
+                        "decoder for class $class_iri_s on input #$i failed: $e")
+                end
+            end
+        end
+        if decoded === nothing
+            return failure(invocation_id, "method_signature_mismatch",
+                "no mirror decoder registered for any class in input #$i.is_a = $(is_a)")
+        end
+        push!(decoded_args, decoded)
+    end
+
+    # 3. Look up `function_name` in Main. `using`-imported names live
+    # in Main's binding table, so this finds handlers from mirror or
+    # institution-handler modules `using`-loaded by the worker.
+    fn_symbol = Symbol(function_name)
+    if !isdefined(Main, fn_symbol)
+        return failure(invocation_id, "method_signature_mismatch",
+            "function `$function_name` not defined in Main — handler module not loaded?")
+    end
+    fn = getfield(Main, fn_symbol)
+    if !(fn isa Function)
+        return failure(invocation_id, "method_signature_mismatch",
+            "Main.$function_name is not a function (got $(typeof(fn)))")
+    end
+
+    # 4. Capture which() for `dispatched_to` BEFORE calling, in case
+    # the call panics — this gives the auditor the dispatch attempt
+    # even on failure. `which` returns a `Method` object whose `repr`
+    # is the standard "Module.f(::T1, ::T2) at file:line" form (D26
+    # §4.2).
+    arg_types = Tuple{(typeof(a) for a in decoded_args)...}
+    dispatched_to_str = try
+        string(which(fn, arg_types))
+    catch e
+        return failure(invocation_id, "method_signature_mismatch",
+            "no method matches Main.$function_name for arg types $arg_types: $e")
+    end
+
+    # 5. Invoke the handler.
+    result = try
+        Base.invokelatest(fn, decoded_args...)
+    catch e
+        return failure(invocation_id, "runtime_error",
+            "Main.$function_name dispatch failed: $e")
+    end
+
+    # 6. Encode the result. Multiple cases:
+    #    - Result is a mirror struct: dispatch via _eigenius_encoders
+    #      (keyed on typeof) to its encode_<C>.
+    #    - Result is a primitive: pass through (the caller decodes
+    #      based on RuntimeMethodSignature.output_type).
+    encoders = discover_encoders()
+    output_payload = if haskey(encoders, typeof(result))
+        try
+            Base.invokelatest(encoders[typeof(result)], result)
+        catch e
+            return failure(invocation_id, "runtime_error",
+                "encoder for $(typeof(result)) failed: $e")
+        end
+    else
+        # Primitive (or anything we don't have an encoder for) — emit
+        # as-is. The substrate decodes by the signature's output_type.
+        result
+    end
+    output_bytes = try
+        CBOR.encode(output_payload)
+    catch e
+        return failure(invocation_id, "runtime_error",
+            "could not CBOR-encode output: $e")
+    end
+
+    return Dict(
+        "verb" => "dispatch_ok",
+        "invocation_id" => invocation_id,
+        "output" => output_bytes,
+        "dispatched_to" => dispatched_to_str,
     )
 end
 
