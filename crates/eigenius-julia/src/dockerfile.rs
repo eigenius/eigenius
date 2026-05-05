@@ -99,15 +99,21 @@ fn install_packages_lines(plan: &JuliaImagePlan) -> Vec<String> {
     if plan.include_common {
         script.push_str(&format!("Pkg.develop(path=\"{common_path}\"); "));
     }
-    // Develop each institution handler package after Common so
-    // packages that depend on `EigeniusJuliaCommon` (the typical
-    // mirror-importing case) see it on the load path. Each handler
-    // package's own `[deps]` join the active project; `Pkg.instantiate`
-    // below pulls in their registry deps (e.g. `IntervalArithmetic`).
-    for name in &plan.handler_packages {
-        script.push_str(&format!(
-            "Pkg.develop(path=\"{PACKAGES_IN_IMAGE}/{name}\"); "
-        ));
+    // Handler packages typically depend on `EigeniusMirror` (the
+    // generated mirror module is the typed input boundary). The
+    // composer COPYs the mirror archive *after* `install_packages` and
+    // before `install_mirror`, so when the mirror is in play the
+    // handlers must wait for `install_mirror_lines` to develop them
+    // — otherwise `Pkg.develop(handler)` resolves to an unsatisfiable
+    // `EigeniusMirror` constraint. When there's no mirror (handlers
+    // that import nothing mirror-shaped), the handler develop calls
+    // move into this section so they get precompiled here.
+    if !plan.include_mirror {
+        for name in &plan.handler_packages {
+            script.push_str(&format!(
+                "Pkg.develop(path=\"{PACKAGES_IN_IMAGE}/{name}\"); "
+            ));
+        }
     }
     script.push_str("Pkg.instantiate(); Pkg.precompile()");
     vec![format!(
@@ -119,7 +125,18 @@ fn install_mirror_lines(plan: &JuliaImagePlan) -> Vec<String> {
     if !plan.include_mirror {
         return vec![];
     }
-    let script = format!("using Pkg; Pkg.develop(path=\"{MIRROR_IN_IMAGE}\"); Pkg.precompile()",);
+    let mut script = String::from("using Pkg; ");
+    script.push_str(&format!("Pkg.develop(path=\"{MIRROR_IN_IMAGE}\"); "));
+    // Develop handler packages after the mirror so a handler's
+    // `[deps] EigeniusMirror = "..."` resolves to the just-developed
+    // path package. `Pkg.instantiate` then pulls in any registry
+    // deps the handler declared (e.g. `IntervalArithmetic.jl`).
+    for name in &plan.handler_packages {
+        script.push_str(&format!(
+            "Pkg.develop(path=\"{PACKAGES_IN_IMAGE}/{name}\"); "
+        ));
+    }
+    script.push_str("Pkg.instantiate(); Pkg.precompile()");
     vec![format!(
         "RUN JULIA_PKG_PRECOMPILE_AUTO=0 julia --project={WORKER_PROJECT_DIR} -e '{script}'"
     )]
@@ -168,21 +185,68 @@ mod tests {
     }
 
     #[test]
-    fn handler_packages_get_pkg_develop_after_common() {
+    fn handler_packages_without_mirror_develop_in_install_packages() {
+        // No mirror in the plan → handler develop calls go in
+        // `install_packages`. Pinning this case so handlers that
+        // don't import a mirror (uncommon but valid) still get baked.
         let f = julia_dockerfile_fragments(&JuliaImagePlan {
             include_common: true,
             include_mirror: false,
-            handler_packages: vec!["EigeniusIntervals".to_string()],
+            handler_packages: vec!["StandaloneHandler".to_string()],
         });
         let line = &f.install_packages[0];
         assert!(line.contains("Pkg.develop(path=\"/opt/eigenius/packages/EigeniusJuliaCommon\")"));
-        assert!(line.contains("Pkg.develop(path=\"/opt/eigenius/packages/EigeniusIntervals\")"));
+        assert!(line.contains("Pkg.develop(path=\"/opt/eigenius/packages/StandaloneHandler\")"));
         // Common comes before handler packages so handlers that
         // import it find the load path already populated.
         let common_pos = line.find("EigeniusJuliaCommon").unwrap();
-        let intervals_pos = line.find("EigeniusIntervals").unwrap();
-        assert!(common_pos < intervals_pos);
+        let handler_pos = line.find("StandaloneHandler").unwrap();
+        assert!(common_pos < handler_pos);
         assert!(line.contains("Pkg.instantiate()"));
+        // No mirror RUN line.
+        assert!(f.install_mirror.is_empty());
+    }
+
+    #[test]
+    fn handler_packages_with_mirror_develop_after_mirror_in_install_mirror() {
+        // The composer COPYs the mirror archive *after*
+        // `install_packages` and *before* `install_mirror`. Handler
+        // packages that depend on `EigeniusMirror` (the typical case
+        // — the mirror is the typed input boundary) must therefore
+        // wait for `install_mirror` to develop them, otherwise
+        // `Pkg.develop(handler)` resolves to an unsatisfiable
+        // EigeniusMirror constraint at install_packages time.
+        let f = julia_dockerfile_fragments(&JuliaImagePlan {
+            include_common: true,
+            include_mirror: true,
+            handler_packages: vec!["EigeniusIntervals".to_string()],
+        });
+        let install_pkgs = &f.install_packages[0];
+        // Common goes in install_packages.
+        assert!(install_pkgs
+            .contains("Pkg.develop(path=\"/opt/eigenius/packages/EigeniusJuliaCommon\")"));
+        // Handler does NOT go in install_packages when a mirror is
+        // present — it would fail to resolve.
+        assert!(
+            !install_pkgs.contains("EigeniusIntervals"),
+            "handler develop must not appear in install_packages when a mirror is present"
+        );
+
+        // Both mirror.develop and handler.develop go in install_mirror,
+        // mirror first.
+        assert_eq!(f.install_mirror.len(), 1);
+        let install_mirror = &f.install_mirror[0];
+        let mirror_pos = install_mirror.find("/opt/eigenius/mirror\"").unwrap();
+        let handler_pos = install_mirror
+            .find("EigeniusIntervals\"")
+            .expect("handler develop in install_mirror");
+        assert!(
+            mirror_pos < handler_pos,
+            "mirror must develop before handler so EigeniusMirror is on the load path"
+        );
+        // Pkg.instantiate runs after both develops, picking up
+        // registry deps the handler declared.
+        assert!(install_mirror.contains("Pkg.instantiate()"));
     }
 
     #[test]

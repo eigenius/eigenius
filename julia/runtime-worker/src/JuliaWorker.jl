@@ -350,12 +350,25 @@ function dispatch_typed_method(
     # 3. Look up `function_name` in Main. `using`-imported names live
     # in Main's binding table, so this finds handlers from mirror or
     # institution-handler modules `using`-loaded by the worker.
+    #
+    # Bindings added by `using` after `dispatch_typed_method` was
+    # first compiled live in a newer world age than the function's
+    # compile-time view of `Main`. A direct `isdefined(Main, sym)`
+    # / `getfield(Main, sym)` here would miss them. `Core.eval`
+    # always evaluates at the current world, so it sees newly-loaded
+    # handler exports without an `invokelatest` rabbit hole — the
+    # canonical Julia idiom for "look up a symbol added at runtime".
     fn_symbol = Symbol(function_name)
-    if !isdefined(Main, fn_symbol)
+    fn = try
+        Core.eval(Main, fn_symbol)
+    catch e
+        if e isa UndefVarError
+            return failure(invocation_id, "method_signature_mismatch",
+                "function `$function_name` not defined in Main — handler module not loaded?")
+        end
         return failure(invocation_id, "method_signature_mismatch",
-            "function `$function_name` not defined in Main — handler module not loaded?")
+            "Core.eval(Main, :$function_name) raised: $e")
     end
-    fn = getfield(Main, fn_symbol)
     if !(fn isa Function)
         return failure(invocation_id, "method_signature_mismatch",
             "Main.$function_name is not a function (got $(typeof(fn)))")

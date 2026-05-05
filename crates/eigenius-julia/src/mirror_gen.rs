@@ -1676,12 +1676,20 @@ fn decode_value_expr(
     class_lookup: &BTreeMap<Iri, String>,
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
 ) -> String {
-    if let JuliaType::Primitive(_) = t {
-        return expr.to_string();
+    if let JuliaType::Primitive(name) = t {
+        // Coerce to the declared Julia type. CBOR's compact-float
+        // optimisation ships a Float64 source value as Float16/Float32
+        // when it fits losslessly; the mirror struct's typed `::Float64`
+        // field would reject that without coercion. Same for Int sizes
+        // and for substring/symbol-like inputs that decode as
+        // non-`String` text. Coercion is lossless for matching CBOR
+        // major types and surfaces a clear `MethodError` if the wire
+        // shape doesn't match the declared primitive.
+        return primitive_coerce_expr(name, expr);
     }
     if let JuliaType::Vector(inner) = t {
-        if matches!(inner.as_ref(), JuliaType::Primitive(_)) {
-            return expr.to_string();
+        if let JuliaType::Primitive(name) = inner.as_ref() {
+            return format!("[{} for _x in {expr}]", primitive_coerce_expr(name, "_x"));
         }
         if matches!(inner.as_ref(), JuliaType::Vector(_)) {
             return format!("# TODO: nested Vector decode unsupported in v1\n        {expr}");
@@ -1702,6 +1710,18 @@ fn decode_value_expr(
         return format!("decode_{cls}({expr})");
     }
     format!("_decode_{class_short}_{field_short}({expr})")
+}
+
+/// Wrap `expr` in a primitive-type constructor so the decoder
+/// accepts any CBOR-compatible width and converts to the struct's
+/// declared type. `Any` passes through unchanged because Julia has
+/// no `Any(x)` constructor — the field accepts whatever the wire
+/// shape produced (intentional for `data_type: json` properties).
+fn primitive_coerce_expr(name: &str, expr: &str) -> String {
+    match name {
+        "Any" => expr.to_string(),
+        other => format!("{other}({expr})"),
+    }
 }
 
 fn emit_encoder(
@@ -2415,8 +2435,8 @@ end
 
 function decode_AssayProtocol(m::AbstractDict)::AssayProtocol
     AssayProtocol(
-        m[\"urn:eigenius:demo:assay:protocol_name\"],
-        m[\"urn:eigenius:demo:assay:incubation_minutes\"];
+        String(m[\"urn:eigenius:demo:assay:protocol_name\"]),
+        Int64(m[\"urn:eigenius:demo:assay:incubation_minutes\"]);
         _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
@@ -2452,10 +2472,10 @@ end
 
 function decode_Compound(m::AbstractDict)::Compound
     Compound(
-        m[\"urn:eigenius:demo:assay:compound_id\"],
-        m[\"urn:eigenius:demo:assay:scaffold_class\"],
-        m[\"urn:eigenius:demo:assay:molecular_weight\"];
-        logp = (let _v = get(m, \"urn:eigenius:demo:assay:logp\", nothing); isnothing(_v) ? nothing : (_v) end),
+        String(m[\"urn:eigenius:demo:assay:compound_id\"]),
+        String(m[\"urn:eigenius:demo:assay:scaffold_class\"]),
+        Float64(m[\"urn:eigenius:demo:assay:molecular_weight\"]);
+        logp = (let _v = get(m, \"urn:eigenius:demo:assay:logp\", nothing); isnothing(_v) ? nothing : (Float64(_v)) end),
         _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
@@ -2488,8 +2508,8 @@ end
 
 function decode_Target(m::AbstractDict)::Target
     Target(
-        m[\"urn:eigenius:demo:assay:target_name\"],
-        m[\"urn:eigenius:demo:assay:target_family\"];
+        String(m[\"urn:eigenius:demo:assay:target_name\"]),
+        String(m[\"urn:eigenius:demo:assay:target_family\"]);
         _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
@@ -2546,12 +2566,12 @@ function decode_AssayResult(m::AbstractDict)::AssayResult
         decode_Compound(m[\"urn:eigenius:demo:assay:compound\"]),
         decode_Target(m[\"urn:eigenius:demo:assay:target\"]),
         decode_AssayProtocol(m[\"urn:eigenius:demo:assay:protocol\"]),
-        m[\"urn:eigenius:demo:assay:ic50_nm\"],
-        m[\"urn:eigenius:demo:assay:replicate_count\"],
-        m[\"urn:eigenius:demo:assay:measurement_date\"],
-        m[\"urn:eigenius:demo:assay:passed_qc\"];
-        ci_low_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_low_nm\", nothing); isnothing(_v) ? nothing : (_v) end),
-        ci_high_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_high_nm\", nothing); isnothing(_v) ? nothing : (_v) end),
+        Float64(m[\"urn:eigenius:demo:assay:ic50_nm\"]),
+        Int64(m[\"urn:eigenius:demo:assay:replicate_count\"]),
+        String(m[\"urn:eigenius:demo:assay:measurement_date\"]),
+        Bool(m[\"urn:eigenius:demo:assay:passed_qc\"]);
+        ci_low_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_low_nm\", nothing); isnothing(_v) ? nothing : (Float64(_v)) end),
+        ci_high_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_high_nm\", nothing); isnothing(_v) ? nothing : (Float64(_v)) end),
         _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
