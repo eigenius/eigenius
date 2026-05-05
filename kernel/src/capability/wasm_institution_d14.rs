@@ -191,12 +191,19 @@ impl Institution for WasmInstitution {
         procedure_iri: &Iri,
         input: &Resource,
         ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
+    ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
         let payload = eigon_cbor::serialize_resource(input);
         let out = self.call_iri_bytes("query", procedure_iri, payload, ctx)?;
-        eigon_cbor::parse_resource_lenient(&out).map_err(|e| {
+        let output = eigon_cbor::parse_resource_lenient(&out).map_err(|e| {
             InstitutionError::ComputationFailed(format!("query output parse failed: {e}"))
-        })
+        })?;
+        // WASM institutions run inside the kernel's Wasmtime host; the
+        // kernel records its own program-trace provenance for these
+        // dispatches, so no chain-committed RuntimeInvocation is
+        // produced from the institution side.
+        Ok(crate::institution::runtime::QueryOutcome::from_output(
+            output,
+        ))
     }
 }
 
@@ -411,14 +418,18 @@ mod tests {
             Value::String("question".into()),
         );
 
-        let result = inst
+        let outcome = inst
             .query(&iri("urn:eigenius:test:proc:check_q"), &input, &ctx)
             .expect("query");
-        let stage = result
+        // WASM institutions never produce chain-side provenance.
+        assert!(outcome.partial_invocation.is_none());
+        let stage = outcome
+            .output
             .get(&iri("urn:eigenius:test:d14_echo:stage"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(stage.as_deref(), Some("query"));
-        let provenance = result
+        let provenance = outcome
+            .output
             .get(&iri("urn:eigenius:test:d14_echo:provenance"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(

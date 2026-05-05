@@ -217,7 +217,7 @@ impl Institution for DockInstitution {
         procedure_iri: &Iri,
         _input: &Resource,
         _ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
+    ) -> Result<eigenius_kernel::institution::runtime::QueryOutcome, InstitutionError> {
         Err(InstitutionError::NotImplemented(format!(
             "dock institution does not implement query (`{procedure_iri}`)"
         )))
@@ -351,15 +351,15 @@ impl Institution for AssayInstitution {
         procedure_iri: &Iri,
         input: &Resource,
         _ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
-        match procedure_iri.as_str() {
+    ) -> Result<eigenius_kernel::institution::runtime::QueryOutcome, InstitutionError> {
+        let result = match procedure_iri.as_str() {
             WITHIN_TOLERANCE_PROC => {
                 let ctor = Self::within_tolerance_verdict(input);
-                Ok(Self::verdict_resource(ctor))
+                Self::verdict_resource(ctor)
             }
             CHECK_ASSAY_PREDICTION_PROC => {
                 let ctor = Self::assay_prediction_verdict(input);
-                Ok(Self::verdict_resource(ctor))
+                Self::verdict_resource(ctor)
             }
             VALIDATE_PREDICTION_PROC => {
                 // OnDemand QueryClass: input carries `candidate` →
@@ -380,12 +380,15 @@ impl Institution for AssayInstitution {
                     }
                 };
                 let ctor = Self::assay_prediction_verdict(candidate);
-                Ok(Self::verdict_resource(ctor))
+                Self::verdict_resource(ctor)
             }
-            _ => Err(InstitutionError::UnknownType(format!(
-                "assay institution does not implement procedure `{procedure_iri}`"
-            ))),
-        }
+            _ => {
+                return Err(InstitutionError::UnknownType(format!(
+                    "assay institution does not implement procedure `{procedure_iri}`"
+                )))
+            }
+        };
+        Ok(eigenius_kernel::institution::runtime::QueryOutcome::from_output(result))
     }
 }
 
@@ -582,7 +585,8 @@ fn auto_on_load_fires_on_assay_prediction() {
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
     );
     good.set(iri(IC50_PROP), Value::Float(250.0));
-    let errs = dispatch_auto_on_load_for_resource(&good, &index, &runtime, &exec_ctx);
+    let errs =
+        dispatch_auto_on_load_for_resource(&good, &index, &runtime, &exec_ctx).flatten_to_errors();
     assert!(
         errs.is_empty(),
         "Holds should produce no AutoOnLoad errors; got {errs:?}"
@@ -596,7 +600,8 @@ fn auto_on_load_fires_on_assay_prediction() {
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
     );
     bad.set(iri(IC50_PROP), Value::Float(-1.0));
-    let errs = dispatch_auto_on_load_for_resource(&bad, &index, &runtime, &exec_ctx);
+    let errs =
+        dispatch_auto_on_load_for_resource(&bad, &index, &runtime, &exec_ctx).flatten_to_errors();
     assert_eq!(errs.len(), 1, "expected one Fails error; got {errs:?}");
     assert!(
         errs[0].message.contains("returned Fails"),

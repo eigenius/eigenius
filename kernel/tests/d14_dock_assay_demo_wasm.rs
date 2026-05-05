@@ -382,7 +382,8 @@ fn wasm_auto_on_load_fires_on_assay_prediction() {
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
     );
     good.set(iri(IC50_PROP), Value::Float(250.0));
-    let errs = dispatch_auto_on_load_for_resource(&good, &index, &runtime, &exec_ctx);
+    let errs =
+        dispatch_auto_on_load_for_resource(&good, &index, &runtime, &exec_ctx).flatten_to_errors();
     assert!(
         errs.is_empty(),
         "Holds should produce no AutoOnLoad errors; got {errs:?}"
@@ -394,7 +395,8 @@ fn wasm_auto_on_load_fires_on_assay_prediction() {
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
     );
     bad.set(iri(IC50_PROP), Value::Float(-1.0));
-    let errs = dispatch_auto_on_load_for_resource(&bad, &index, &runtime, &exec_ctx);
+    let errs =
+        dispatch_auto_on_load_for_resource(&bad, &index, &runtime, &exec_ctx).flatten_to_errors();
     assert_eq!(errs.len(), 1, "expected one Fails error; got {errs:?}");
     assert!(
         errs[0].message.contains("returned Fails"),

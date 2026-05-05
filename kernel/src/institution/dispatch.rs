@@ -36,14 +36,102 @@ use crate::institution::registry::{DispatchRole, InstitutionIndex};
 use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Resource;
+use crate::ontology::resource::{Resource, Value};
 use crate::validation::{ValidationError, ValidationRule};
 
+/// One AutoOnLoad dispatch that produced a well-formed Verdict.
+/// Carries everything the commit pipeline needs to build the chain-
+/// side `RuntimeInvocation` + `Verdict` resources per
+/// [D31 §6.3](../../docs/design/d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
+///
+/// Handler crashes / malformed Verdicts do NOT produce one of these —
+/// they go into `AutoOnLoadOutcome::errors` instead, because there is
+/// no Verdict to commit as the audit anchor.
+#[derive(Debug, Clone)]
+pub struct AutoOnLoadDispatch {
+    /// The gated resource IRI (the resource whose Load triggered this
+    /// dispatch). Lifted onto the Verdict's `verdict_subject` and the
+    /// RuntimeInvocation's `inputs` list. `None` when the dispatch
+    /// fired against an embedded resource (no `@id`) — the
+    /// post-translation validation path in `nbe::eval` exercises this:
+    /// it gates a freshly-reified resource that hasn't been assigned
+    /// an IRI yet. Such dispatches still apply the
+    /// Holds/Fails/Undecidable rule but skip the chain-side
+    /// provenance commit.
+    pub subject_iri: Option<Iri>,
+    /// The `QueryClass` resource IRI that fired. Lifted onto the
+    /// Verdict's `verdict_query_class`.
+    pub query_class_iri: Iri,
+    /// IRI of the `RuntimeMethodSignature` the handler dispatched
+    /// against (= `QueryClass.query_handler`). Lifted onto the
+    /// RuntimeInvocation's `script` property.
+    pub signature_iri: Iri,
+    /// The verdict the institution returned.
+    pub verdict: VerdictReading,
+    /// Substrate-captured partial `RuntimeInvocation` (D26 §5.5).
+    /// `None` for in-process / WASM institutions whose dispatch
+    /// happens entirely inside the kernel host process — the kernel
+    /// records its own program-trace provenance for those.
+    pub partial_invocation: Option<Resource>,
+    /// The `RuntimeEnvironment` IRI the institution declared via
+    /// `requires_environment` (D31 §5). Only populated for
+    /// external-runtime institutions; lifted onto the
+    /// RuntimeInvocation's `environment` property.
+    pub environment_iri: Option<Iri>,
+}
+
+/// Aggregate outcome of an AutoOnLoad sweep. Errors arise only for
+/// dispatches that couldn't produce a Verdict at all (missing
+/// institution, handler crashed, malformed output). Every dispatch
+/// that *did* produce a Verdict — including Fails — lands in
+/// `dispatches` so the commit pipeline can build the audit-anchor
+/// chain resources before applying the Holds/Fails/Undecidable rule.
+#[derive(Debug, Clone, Default)]
+pub struct AutoOnLoadOutcome {
+    /// Handler-side failures with no chain-side provenance.
+    pub errors: Vec<ValidationError>,
+    /// Per-dispatch provenance bundles to be lifted into chain
+    /// resources by the caller.
+    pub dispatches: Vec<AutoOnLoadDispatch>,
+}
+
+impl AutoOnLoadOutcome {
+    /// Flatten the outcome into a single error list for callers that
+    /// don't need the commit-pipeline shape (post-translation
+    /// validation in `nbe::eval`, FIBER queries that just need
+    /// "did the gate accept?"). Handler errors pass through; `Fails`
+    /// dispatches become `InstitutionValidation` errors with the
+    /// QueryClass IRI in the message.
+    pub fn flatten_to_errors(self) -> Vec<ValidationError> {
+        let mut errors = self.errors;
+        for d in self.dispatches {
+            if matches!(d.verdict, VerdictReading::Fails) {
+                errors.push(ValidationError {
+                    resource_id: d.subject_iri.clone(),
+                    property: None,
+                    rule: ValidationRule::InstitutionValidation,
+                    message: format!(
+                        "AutoOnLoad QueryClass `{}` returned Fails",
+                        d.query_class_iri
+                    ),
+                });
+            }
+        }
+        errors
+    }
+}
+
 /// Run AutoOnLoad QueryClasses for every class on `resource`, against
-/// the given index + runtime. Returns one `ValidationError` per
-/// QueryClass whose Verdict was `Fails`. `Holds` and `Undecidable`
-/// produce no error. The caller composes these with structural
-/// validation errors as appropriate.
+/// the given index + runtime.
+///
+/// Returns an [`AutoOnLoadOutcome`] aggregating per-dispatch
+/// provenance (Holds, Fails, and Undecidable verdicts all produce a
+/// dispatch entry) alongside handler-side errors that prevented a
+/// Verdict from being produced at all (missing institution, handler
+/// crashed, malformed output). The caller decides how to translate
+/// these into chain-side `RuntimeInvocation` + `Verdict` commits and
+/// `Load`-failure ValidationErrors per
+/// [D31 §6.3](../../docs/design/d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
 ///
 /// Used both by the Load-path layer dispatch (one resource at a time
 /// from the new layer) and by [`Exp::InstitutionInvoke`] post-
@@ -53,8 +141,8 @@ pub fn dispatch_auto_on_load_for_resource(
     index: &InstitutionIndex,
     runtime: &InstitutionRuntime,
     ctx: &ExecutionContext,
-) -> Vec<ValidationError> {
-    let mut errors = Vec::new();
+) -> AutoOnLoadOutcome {
+    let mut outcome = AutoOnLoadOutcome::default();
     let res_id = resource.id().cloned();
 
     for class_iri_str in resource.is_a() {
@@ -82,7 +170,7 @@ pub fn dispatch_auto_on_load_for_resource(
             // caller (Load handler / post-translation invariant) sees
             // the gap clearly.
             let Some(institution) = runtime.get(&query_class.institution_ref) else {
-                errors.push(ValidationError {
+                outcome.errors.push(ValidationError {
                     resource_id: res_id.clone(),
                     property: None,
                     rule: ValidationRule::InstitutionValidation,
@@ -94,21 +182,19 @@ pub fn dispatch_auto_on_load_for_resource(
                 continue;
             };
 
+            // The institution declaration may carry a
+            // `requires_environment` IRI for external-runtime
+            // institutions; the commit pipeline uses it to populate
+            // the RuntimeInvocation's `environment` property.
+            let environment_iri = index
+                .institution(&query_class.institution_ref)
+                .and_then(|e| e.requires_environment.clone());
+
             match institution.query(&query_class.query_handler, resource, ctx) {
-                Ok(result) => match parse_verdict(&result) {
-                    VerdictReading::Holds | VerdictReading::Undecidable => {}
-                    VerdictReading::Fails => {
-                        errors.push(ValidationError {
-                            resource_id: res_id.clone(),
-                            property: None,
-                            rule: ValidationRule::InstitutionValidation,
-                            message: format!(
-                                "AutoOnLoad QueryClass `{query_class_iri}` returned Fails"
-                            ),
-                        });
-                    }
-                    VerdictReading::Malformed(reason) => {
-                        errors.push(ValidationError {
+                Ok(out) => {
+                    let verdict = parse_verdict(&out.output);
+                    if let VerdictReading::Malformed(reason) = &verdict {
+                        outcome.errors.push(ValidationError {
                             resource_id: res_id.clone(),
                             property: None,
                             rule: ValidationRule::InstitutionValidation,
@@ -116,9 +202,18 @@ pub fn dispatch_auto_on_load_for_resource(
                                 "AutoOnLoad QueryClass `{query_class_iri}` returned a non-Verdict result: {reason}"
                             ),
                         });
+                        continue;
                     }
-                },
-                Err(e) => errors.push(ValidationError {
+                    outcome.dispatches.push(AutoOnLoadDispatch {
+                        subject_iri: res_id.clone(),
+                        query_class_iri: query_class_iri.clone(),
+                        signature_iri: query_class.query_handler.clone(),
+                        verdict,
+                        partial_invocation: out.partial_invocation,
+                        environment_iri,
+                    });
+                }
+                Err(e) => outcome.errors.push(ValidationError {
                     resource_id: res_id.clone(),
                     property: None,
                     rule: ValidationRule::InstitutionValidation,
@@ -130,7 +225,7 @@ pub fn dispatch_auto_on_load_for_resource(
             }
         }
     }
-    errors
+    outcome
 }
 
 /// Run AutoOnLoad dispatch for every resource in `layer.resources()`.
@@ -142,25 +237,207 @@ pub fn dispatch_auto_on_load_for_layer(
     index: &InstitutionIndex,
     runtime: &InstitutionRuntime,
     ctx: &ExecutionContext,
-) -> Vec<ValidationError> {
-    let mut errors = Vec::new();
+) -> AutoOnLoadOutcome {
+    let mut outcome = AutoOnLoadOutcome::default();
     for (_iri, resource) in layer.iter_resources() {
-        errors.extend(dispatch_auto_on_load_for_resource(
-            &resource, index, runtime, ctx,
-        ));
+        let part = dispatch_auto_on_load_for_resource(&resource, index, runtime, ctx);
+        outcome.errors.extend(part.errors);
+        outcome.dispatches.extend(part.dispatches);
     }
-    errors
+    outcome
+}
+
+/// Build a chain-committable `Verdict` resource per [D31 §6.3].
+/// The IRI scheme `urn:eigenius:invocation:<inv-id>:verdict` ties the
+/// Verdict deterministically to its produced-by `RuntimeInvocation`
+/// — the suffix is enough discriminator because one AutoOnLoad
+/// firing produces exactly one Verdict.
+///
+/// `runtime_invocation_iri` is `Some` when the dispatch was external
+/// (a chain-committed RuntimeInvocation accompanies the Verdict);
+/// `None` for in-process / WASM dispatches whose provenance is
+/// program-trace-only. In the `None` case the IRI scheme falls back
+/// to `urn:eigenius:verdict:<query-class-short>:<subject-short>` so
+/// every Verdict still has a stable @id without inventing a fake
+/// invocation ID.
+///
+/// Returns `None` when the dispatch fired against an embedded subject
+/// — there's no `@id` to record on the Verdict's `verdict_subject`,
+/// and the post-translation validation path that produces such
+/// dispatches doesn't need a chain-side audit anchor.
+pub fn build_verdict_resource(
+    dispatch: &AutoOnLoadDispatch,
+    runtime_invocation_iri: Option<&Iri>,
+    diagnostic: Option<&str>,
+    dispatched_to: Option<&str>,
+) -> Option<Resource> {
+    use crate::ontology::well_known as wk;
+
+    let subject_iri = dispatch.subject_iri.as_ref()?;
+    let verdict_iri = match runtime_invocation_iri {
+        Some(inv) => Iri::parse(&format!("{}:verdict", inv.as_str())).expect("derived IRI"),
+        None => fallback_verdict_iri(&dispatch.query_class_iri, subject_iri),
+    };
+    let mut r = Resource::new(verdict_iri);
+    r.set(
+        Iri::parse(wk::IS_A).expect("static IRI"),
+        Value::Array(vec![
+            Value::String(wk::VERDICT.to_string()),
+            Value::String(wk::DERIVED_RESOURCE.to_string()),
+        ]),
+    );
+    r.set(
+        Iri::parse(wk::CTOR_NAME).expect("static IRI"),
+        Value::String(dispatch.verdict.ctor_name().to_string()),
+    );
+    r.set(
+        Iri::parse(VERDICT_SUBJECT_PROP).expect("static IRI"),
+        Value::ResourceRef(subject_iri.clone()),
+    );
+    r.set(
+        Iri::parse(VERDICT_QUERY_CLASS_PROP).expect("static IRI"),
+        Value::ResourceRef(dispatch.query_class_iri.clone()),
+    );
+    if let Some(inv) = runtime_invocation_iri {
+        r.set(
+            Iri::parse(RUNTIME_INVOCATION_PROP).expect("static IRI"),
+            Value::ResourceRef(inv.clone()),
+        );
+    }
+    if let Some(d) = dispatched_to {
+        r.set(
+            Iri::parse("urn:eigenius:runtime:dispatched_to").expect("static IRI"),
+            Value::String(d.to_string()),
+        );
+    }
+    if let Some(diag) = diagnostic {
+        r.set(
+            Iri::parse(VERDICT_DIAGNOSTIC_PROP).expect("static IRI"),
+            Value::String(diag.to_string()),
+        );
+    }
+    Some(r)
+}
+
+/// Build the full chain-committable `RuntimeInvocation` resource by
+/// folding the substrate's partial provenance with the IRIs the
+/// kernel knows: `script` ← signature_iri, `environment` ← env_iri,
+/// `inputs` ← gated subject IRI (single-element list per AutoOnLoad
+/// firing), `output` ← Verdict IRI.
+pub fn build_runtime_invocation_resource(
+    dispatch: &AutoOnLoadDispatch,
+    invocation_iri: &Iri,
+    verdict_iri: &Iri,
+) -> Option<Resource> {
+    use crate::ontology::well_known as wk;
+
+    let partial = dispatch.partial_invocation.as_ref()?;
+    let subject_iri = dispatch.subject_iri.as_ref()?;
+    let mut r = Resource::new(invocation_iri.clone());
+    r.set(
+        Iri::parse(wk::IS_A).expect("static IRI"),
+        Value::Array(vec![
+            Value::String("urn:eigenius:runtime:RuntimeInvocation".to_string()),
+            Value::String(wk::DERIVED_RESOURCE.to_string()),
+        ]),
+    );
+    // Carry forward every property the substrate captured (language,
+    // image_digest, started_at, completed_at, numerical_metadata,
+    // dispatched_to). Skip `is_a` because we already set our own.
+    let is_a_iri = Iri::parse(wk::IS_A).expect("static IRI");
+    for (prop_iri, val) in partial.properties() {
+        if prop_iri == &is_a_iri {
+            continue;
+        }
+        r.set(prop_iri.clone(), val.clone());
+    }
+    // Now stamp the IRIs only the kernel knows.
+    r.set(
+        Iri::parse("urn:eigenius:runtime:script").expect("static IRI"),
+        Value::ResourceRef(dispatch.signature_iri.clone()),
+    );
+    if let Some(env) = &dispatch.environment_iri {
+        r.set(
+            Iri::parse("urn:eigenius:runtime:environment").expect("static IRI"),
+            Value::ResourceRef(env.clone()),
+        );
+    }
+    r.set(
+        Iri::parse("urn:eigenius:runtime:inputs").expect("static IRI"),
+        Value::Array(vec![Value::ResourceRef(subject_iri.clone())]),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:runtime:output").expect("static IRI"),
+        Value::ResourceRef(verdict_iri.clone()),
+    );
+    Some(r)
+}
+
+/// Allocate an IRI for a fresh `RuntimeInvocation`. Uses a v4 UUID
+/// so concurrent dispatches don't collide; the `urn:eigenius:invocation:`
+/// prefix matches D31 §6.3's Verdict-IRI derivation rule.
+pub fn allocate_invocation_iri() -> Iri {
+    Iri::parse(&format!("urn:eigenius:invocation:{}", uuid::Uuid::new_v4()))
+        .expect("uuid-derived IRI parses")
+}
+
+/// Property IRI for `Verdict.verdict_subject` (D31 §6.3).
+const VERDICT_SUBJECT_PROP: &str = "urn:eigenius:institution:verdict_subject";
+/// Property IRI for `Verdict.verdict_query_class`.
+const VERDICT_QUERY_CLASS_PROP: &str = "urn:eigenius:institution:verdict_query_class";
+/// Property IRI for `Verdict.runtime_invocation`.
+const RUNTIME_INVOCATION_PROP: &str = "urn:eigenius:institution:runtime_invocation";
+/// Property IRI for `Verdict.diagnostic`.
+const VERDICT_DIAGNOSTIC_PROP: &str = "urn:eigenius:institution:diagnostic";
+
+/// Best-effort Verdict IRI when there's no companion RuntimeInvocation
+/// to derive from (in-process / WASM dispatches). Uses the QueryClass
+/// short name plus the subject short name as a stable discriminator;
+/// collisions across re-runs are acceptable since the chain is
+/// append-only and the Verdict IRI carries no causal claim by itself.
+fn fallback_verdict_iri(query_class: &Iri, subject: &Iri) -> Iri {
+    let qc_short = query_class.as_str().rsplit(':').next().unwrap_or("qc");
+    let sub_short = subject.as_str().rsplit(':').next().unwrap_or("sub");
+    Iri::parse(&format!(
+        "urn:eigenius:verdict:{qc_short}:{sub_short}:{}",
+        uuid::Uuid::new_v4()
+    ))
+    .expect("uuid-derived IRI parses")
 }
 
 /// Result of reading a Verdict off a result resource. Mirrors the
 /// `parse_verdict` helper in `nbe::eval` but produces a typed
 /// outcome rather than `DecResult` so the AutoOnLoad caller can
 /// distinguish a malformed shape from an ordinary verdict.
-enum VerdictReading {
+#[derive(Debug, Clone)]
+pub enum VerdictReading {
     Holds,
     Fails,
     Undecidable,
     Malformed(String),
+}
+
+impl VerdictReading {
+    /// Inductive ctor name (`"Holds"`, `"Fails"`, `"Undecidable"`)
+    /// matching the kernel's `parse_verdict` and the Julia mirror's
+    /// codec convention. Panics for `Malformed` — that variant
+    /// should never reach the commit pipeline.
+    pub fn ctor_name(&self) -> &'static str {
+        match self {
+            VerdictReading::Holds => "Holds",
+            VerdictReading::Fails => "Fails",
+            VerdictReading::Undecidable => "Undecidable",
+            VerdictReading::Malformed(_) => {
+                unreachable!("malformed verdict should never reach the commit pipeline")
+            }
+        }
+    }
+
+    /// `true` for verdicts that pass the AutoOnLoad gate (`Holds`,
+    /// `Undecidable`); `false` only for `Fails`.
+    pub fn admits(&self) -> bool {
+        matches!(self, VerdictReading::Holds | VerdictReading::Undecidable)
+    }
 }
 
 fn parse_verdict(result: &Resource) -> VerdictReading {
@@ -197,7 +474,7 @@ mod tests {
     use crate::context::ExecutionMode;
     use crate::institution::error::InstitutionError;
     use crate::institution::registry::InstitutionIndex;
-    use crate::institution::runtime::Institution;
+    use crate::institution::runtime::{Institution, QueryOutcome};
     use crate::layer::LayerBuilder;
     use crate::nbe::val::Val;
     use crate::ontology::resource::Value;
@@ -241,13 +518,13 @@ mod tests {
             _procedure_iri: &Iri,
             _input: &Resource,
             _ctx: &ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
+        ) -> Result<QueryOutcome, InstitutionError> {
             let mut r = Resource::new_embedded();
             r.set(
                 iri(wk::IS_A),
                 Value::Array(vec![Value::String(self.verdict_class.into())]),
             );
-            Ok(r)
+            Ok(QueryOutcome::from_output(r))
         }
     }
 
@@ -319,35 +596,48 @@ mod tests {
     #[test]
     fn auto_on_load_holds_produces_no_error() {
         let (idx, runtime, ctx) = build_dispatch_setup("urn:eigenius:institution:verdicts:holds");
-        let errs = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
+        let outcome = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
         assert!(
-            errs.is_empty(),
-            "Holds should produce no errors; got {errs:?}"
+            outcome.errors.is_empty(),
+            "Holds should produce no errors; got {:?}",
+            outcome.errors
         );
+        assert_eq!(outcome.dispatches.len(), 1);
+        assert!(matches!(
+            outcome.dispatches[0].verdict,
+            VerdictReading::Holds
+        ));
+        assert!(outcome.dispatches[0].partial_invocation.is_none());
     }
 
     #[test]
     fn auto_on_load_undecidable_produces_no_error() {
         let (idx, runtime, ctx) =
             build_dispatch_setup("urn:eigenius:institution:verdicts:undecidable");
-        let errs = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
-        assert!(
-            errs.is_empty(),
-            "Undecidable should not block Load; got {errs:?}"
-        );
+        let outcome = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
+        assert!(outcome.errors.is_empty());
+        assert_eq!(outcome.dispatches.len(), 1);
+        assert!(matches!(
+            outcome.dispatches[0].verdict,
+            VerdictReading::Undecidable
+        ));
     }
 
     #[test]
-    fn auto_on_load_fails_produces_validation_error() {
+    fn auto_on_load_fails_lands_in_dispatches_not_errors() {
         let (idx, runtime, ctx) = build_dispatch_setup("urn:eigenius:institution:verdicts:fails");
-        let errs = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
-        assert_eq!(errs.len(), 1);
-        assert_eq!(errs[0].rule, ValidationRule::InstitutionValidation);
-        assert!(
-            errs[0].message.contains("returned Fails"),
-            "unexpected message: {}",
-            errs[0].message
-        );
+        let outcome = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
+        // Fails verdicts are well-formed dispatches — they go into
+        // `dispatches` so the commit pipeline can produce a Verdict
+        // resource for the audit trail. The caller (commit_with_validation)
+        // is responsible for translating a Fails dispatch into a
+        // ValidationError pointing at the Verdict IRI.
+        assert!(outcome.errors.is_empty());
+        assert_eq!(outcome.dispatches.len(), 1);
+        assert!(matches!(
+            outcome.dispatches[0].verdict,
+            VerdictReading::Fails
+        ));
     }
 
     #[test]
@@ -359,8 +649,9 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::String("urn:eigenius:test:Other".into())]),
         );
-        let errs = dispatch_auto_on_load_for_resource(&r, &idx, &runtime, &ctx);
-        assert!(errs.is_empty(), "non-matching class should be skipped");
+        let outcome = dispatch_auto_on_load_for_resource(&r, &idx, &runtime, &ctx);
+        assert!(outcome.errors.is_empty(), "non-matching class skipped");
+        assert!(outcome.dispatches.is_empty());
     }
 
     #[test]
@@ -376,11 +667,13 @@ mod tests {
         b.add_resource(r2).unwrap();
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
-        let errs = dispatch_auto_on_load_for_layer(&layer, &idx, &runtime, &ctx);
+        let outcome = dispatch_auto_on_load_for_layer(&layer, &idx, &runtime, &ctx);
+        assert!(outcome.errors.is_empty());
         assert_eq!(
-            errs.len(),
+            outcome.dispatches.len(),
             2,
-            "expected one Fails per Subject resource; got {errs:?}"
+            "expected one Fails dispatch per Subject resource; got {:?}",
+            outcome.dispatches
         );
     }
 
@@ -415,8 +708,8 @@ mod tests {
                 _: &Iri,
                 _: &Resource,
                 _: &ExecutionContext,
-            ) -> Result<Resource, InstitutionError> {
-                Ok(Resource::new_embedded())
+            ) -> Result<QueryOutcome, InstitutionError> {
+                Ok(QueryOutcome::from_output(Resource::new_embedded()))
             }
         }
 
@@ -457,12 +750,16 @@ mod tests {
             .unwrap();
         let ctx = ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage);
 
-        let errs = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
-        assert_eq!(errs.len(), 1);
+        let outcome = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
+        assert_eq!(outcome.errors.len(), 1);
         assert!(
-            errs[0].message.contains("non-Verdict"),
+            outcome.errors[0].message.contains("non-Verdict"),
             "unexpected message: {}",
-            errs[0].message
+            outcome.errors[0].message
+        );
+        assert!(
+            outcome.dispatches.is_empty(),
+            "malformed Verdict yields no dispatch entry"
         );
     }
 }

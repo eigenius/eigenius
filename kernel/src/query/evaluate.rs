@@ -429,11 +429,15 @@ fn apply_fiber_clause(
         }
 
         // Dispatch via D14 Institution::query.
-        let response = institution
+        let outcome = institution
             .query(&qc_entry.query_handler, &query_res, ctx)
             .map_err(|e| {
                 QueryError::evaluation(format!("fiber dispatch failed (clause {clause_idx}): {e}"))
             })?;
+        // FIBER queries don't commit RuntimeInvocation provenance —
+        // they're explicit-invocation queries (D14 §6.2 OnDemand)
+        // whose audit trail rides on the EigenQL trace, not the chain.
+        let response = outcome.output;
 
         // Stamp response with a synthesized @id + attach to overlay.
         let response_iri = fp.fiber_response_iri(clause_idx, binding_idx);
@@ -596,7 +600,8 @@ pub fn eval_comorphism_coercion(
         index,
         inst_runtime,
         ctx,
-    );
+    )
+    .flatten_to_errors();
     if !post_errors.is_empty() {
         let reasons = post_errors
             .iter()
@@ -1425,7 +1430,7 @@ fn try_dispatch_decidable(
         Value::Array(args.to_vec()),
     );
 
-    let result = institution
+    let outcome = institution
         .query(&qc_entry.query_handler, &input, ctx)
         .map_err(|e| {
             QueryError::evaluation(format!(
@@ -1434,7 +1439,10 @@ fn try_dispatch_decidable(
             ))
         })?;
 
-    Ok(Some(Value::Embedded(Box::new(result))))
+    // Decidable evaluation produces no chain-side RuntimeInvocation
+    // commit — it's type-check-time reduction, not a Load. The
+    // partial provenance (if any) is dropped here on purpose.
+    Ok(Some(Value::Embedded(Box::new(outcome.output))))
 }
 
 /// Apply GROUP BY and aggregation.
@@ -1959,7 +1967,7 @@ mod tests {
             _procedure_iri: &Iri,
             input: &Resource,
             _ctx: &ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
+        ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
             // Read decide_args off the synthesized input resource.
             let args_iri = Iri::parse("urn:eigenius:institution:decide_args").unwrap();
             let ok = match input.get(&args_iri) {
@@ -1979,7 +1987,7 @@ mod tests {
                 Iri::parse(wk::CTOR_NAME).unwrap(),
                 Value::String(if ok { "Holds" } else { "Fails" }.into()),
             );
-            Ok(r)
+            Ok(crate::institution::runtime::QueryOutcome::from_output(r))
         }
     }
 

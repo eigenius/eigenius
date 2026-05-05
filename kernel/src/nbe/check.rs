@@ -3962,7 +3962,10 @@ mod tests {
             _procedure_iri: &Iri,
             input: &Resource,
             _ctx: &ExecutionContext,
-        ) -> Result<Resource, crate::institution::error::InstitutionError> {
+        ) -> Result<
+            crate::institution::runtime::QueryOutcome,
+            crate::institution::error::InstitutionError,
+        > {
             // Pull the args off the synthetic input resource where
             // try_d14_decide marshalled them.
             let args = match input.get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
@@ -3971,7 +3974,9 @@ mod tests {
                 _ => Vec::new(),
             };
             self.observed.lock().unwrap().push(args);
-            Ok(verdict_resource(self.result))
+            Ok(crate::institution::runtime::QueryOutcome::from_output(
+                verdict_resource(self.result),
+            ))
         }
     }
 

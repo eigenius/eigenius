@@ -1487,7 +1487,22 @@ impl EigeniusKernel for EigeniusService {
                         }
                     }
                 }
-                Err(crate::context::ContextError::ValidationFailed(verrs)) => {
+                Err(crate::context::ContextError::ValidationFailed {
+                    errors: verrs,
+                    provenance_layer,
+                }) => {
+                    // Per D31 §6.3: a Fails AutoOnLoad commits Verdict
+                    // + RuntimeInvocation as a separate provenance
+                    // layer even though the gated resource was
+                    // rejected. Persist that layer so the audit
+                    // anchor lives on the chain. The Load itself
+                    // still surfaces as a failure to the caller.
+                    if let Some(layer) = provenance_layer {
+                        if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
+                            errors.push(err);
+                        }
+                        self.rebuild_institution_index(&layer).await;
+                    }
                     // Per-error logging — each rule violation gets its
                     // own warn-level event so dashboards can group on
                     // `error_kind` (the rule's debug label) without

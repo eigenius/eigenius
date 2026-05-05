@@ -89,6 +89,36 @@
   },
 
   {
+    "@id": "urn:eigenius:institution:verdict_subject",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Resource the Verdict was rendered for — the gated subject for an AutoOnLoad firing, or the reified resource for a post-translation verdict (D31 §6.3).",
+    "urn:eigenius:core:short_name": "verdict_subject",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:institution:verdict_query_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "QueryClass that produced this Verdict. Lifted onto the Verdict so audit queries (`all Verdicts for QueryClass X`) are property-based without re-resolving the dispatch path.",
+    "urn:eigenius:core:short_name": "verdict_query_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:runtime_invocation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "RuntimeInvocation that produced this Verdict. Set when the dispatching institution was external-runtime (D31 §6.3); absent for in-process / WASM dispatches whose provenance is program-trace-only.",
+    "urn:eigenius:core:short_name": "runtime_invocation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:institution:diagnostic",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional language-side diagnostic message attached to a Fails Verdict (D31 §6.3) — surfaces the institution's reason-for-rejection without forcing it into the Verdict's typed shape.",
+    "urn:eigenius:core:short_name": "diagnostic",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+
+  {
     "@id": "urn:eigenius:institution:Verdict",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Verdict",

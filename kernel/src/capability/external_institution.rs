@@ -31,7 +31,7 @@
 
 use crate::context::ExecutionContext;
 use crate::institution::error::InstitutionError;
-use crate::institution::runtime::Institution;
+use crate::institution::runtime::{Institution, QueryOutcome};
 use crate::nbe::val::Val;
 use crate::ontology::eigon_cbor;
 use crate::ontology::iri::Iri;
@@ -131,7 +131,7 @@ impl Institution for ExternalInstitution {
         procedure_iri: &Iri,
         input: &Resource,
         _ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
+    ) -> Result<QueryOutcome, InstitutionError> {
         let handler = self.handlers.get(procedure_iri).ok_or_else(|| {
             InstitutionError::UnknownType(format!(
                 "external institution `{}` has no registered handler for procedure `{procedure_iri}`",
@@ -176,15 +176,34 @@ impl Institution for ExternalInstitution {
                 ))
             })?;
 
-        // TODO(19a.6): thread `runtime_invocation_partial_cbor` back
-        // through `Institution::query` so the commit pipeline can
-        // fold it into a full RuntimeInvocation and commit it
-        // transactionally with the gated resource and the Verdict
-        // (D31 §6.3). Tracked as a non-deferrable task in the 19a.6
-        // plan — IntervalArithmetic's e2e drives the trait-shape
-        // change and verifies the provenance commit.
-        let _ = resp.runtime_invocation_partial_cbor;
+        // Substrate-captured partial RuntimeInvocation (D26 §5.5 /
+        // D31 §6.2) — language, image_digest, started/completed
+        // timestamps, numerical_metadata, optional dispatched_to. The
+        // kernel commit pipeline folds this into a full
+        // `RuntimeInvocation` resource by stamping the IRIs only it
+        // knows (script ← signature_iri, environment ← env_iri,
+        // inputs ← gated resource IRI, output ← Verdict IRI) per
+        // [D31 §6.3](../../docs/design/d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
+        // Empty bytes from a non-conforming orchestrator surface as
+        // `partial_invocation: None` rather than a parse error so the
+        // gating itself still completes.
+        let partial_invocation = if resp.runtime_invocation_partial_cbor.is_empty() {
+            None
+        } else {
+            match eigon_cbor::parse_resource_lenient(&resp.runtime_invocation_partial_cbor) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    return Err(InstitutionError::ComputationFailed(format!(
+                        "external dispatch returned non-Eigon partial invocation for \
+                         `{procedure_iri}`: {e}"
+                    )));
+                }
+            }
+        };
 
-        Ok(output)
+        Ok(QueryOutcome {
+            output,
+            partial_invocation,
+        })
     }
 }

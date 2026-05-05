@@ -1354,7 +1354,8 @@ fn try_d14_institution_invoke(
         index,
         runtime,
         &exec_ctx,
-    );
+    )
+    .flatten_to_errors();
     if !post_errors.is_empty() {
         let reasons = post_errors
             .iter()
@@ -1916,7 +1917,7 @@ fn try_d14_decide(
     // → reify; institution-runtime ones land in `Institution::query`.
     // M6 wires the institution-runtime path; the Component path lands
     // alongside Component-driven AutoOnLoad in M7.
-    let result = institution
+    let outcome = institution
         .query(&query_class.query_handler, &input, &exec_ctx)
         .map_err(|e| {
             EvalError::InvalidCaseTarget(format!(
@@ -1927,8 +1928,11 @@ fn try_d14_decide(
 
     // Read off the Verdict from the result resource. The result must
     // be (or wrap) a `Verdict` inductive value with one of the three
-    // constructor names — `Holds`, `Fails`, `Undecidable`.
-    Ok(Some(parse_verdict(&result).map_err(|e| {
+    // constructor names — `Holds`, `Fails`, `Undecidable`. Decidable
+    // dispatch is type-check-time and produces no chain-side
+    // RuntimeInvocation commit, so the partial provenance (if any) is
+    // intentionally dropped here.
+    Ok(Some(parse_verdict(&outcome.output).map_err(|e| {
         EvalError::InvalidCaseTarget(format!(
             "QueryClass `{iri}` Decidable handler returned a non-Verdict result: {e}"
         ))
@@ -3605,8 +3609,10 @@ mod tests {
             _procedure_iri: &Iri,
             input: &crate::ontology::resource::Resource,
             _ctx: &crate::context::ExecutionContext,
-        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
-        {
+        ) -> Result<
+            crate::institution::runtime::QueryOutcome,
+            crate::institution::error::InstitutionError,
+        > {
             // Confirm the kernel marshalled args via the convention.
             let _ = input
                 .get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
@@ -3618,7 +3624,9 @@ mod tests {
                     crate::ontology::resource::Value::String(self.verdict_class.into()),
                 ]),
             );
-            Ok(verdict)
+            Ok(crate::institution::runtime::QueryOutcome::from_output(
+                verdict,
+            ))
         }
     }
 
