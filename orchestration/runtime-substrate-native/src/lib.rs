@@ -49,12 +49,15 @@
 
 #![deny(clippy::all)]
 
+use eigenius_julia::JuliaLanguageRuntime;
 use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
+use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
+use eigenius_runtime_substrate::spawner::DockerSpawnerConfig;
 use eigenius_runtime_substrate::test_runtime::TestLanguageRuntime;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Mirror of [`eigenius_runtime_substrate::facade::DispatchOutcome`] on
 /// the napi boundary. Phase 18c.5 split: dispatchers now return both
@@ -111,6 +114,38 @@ pub fn register_test_language_runtime(worker_binary_path: String) -> Result<()> 
         PathBuf::from(worker_binary_path),
     )))
     .map_err(into_napi_err)
+}
+
+/// Register the [`JuliaLanguageRuntime`] under language_id="julia".
+/// Idempotent within a process — calling twice surfaces an explicit
+/// `RegistryError::AlreadyRegistered`.
+///
+/// `worker_project_dir` points at `julia/runtime-worker/` (the directory
+/// containing `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`)
+/// — copied into the orchestrator image at build time. `base_image_ref`
+/// is the digest-pinned Julia base image. `depot_path` is the shared
+/// host/container path used for substrate artifacts and worker UDS
+/// sockets — must match the orchestrator's bind-mount in
+/// `docker-compose.yml` so DooD-spawned worker containers see the same
+/// path the orchestrator wrote (D26 §9.5).
+#[napi]
+pub fn register_julia_language_runtime(
+    worker_project_dir: String,
+    base_image_ref: String,
+    depot_path: String,
+) -> Result<()> {
+    let depot = PathBuf::from(&depot_path);
+    let spawner = DockerServiceSpawner::new(DockerSpawnerConfig::new(depot.clone()))
+        .map_err(|e| into_napi_err(format!("DockerServiceSpawner::new: {e}")))?;
+    let runtime = JuliaLanguageRuntime::new(
+        PathBuf::from(worker_project_dir),
+        base_image_ref,
+        Arc::new(spawner),
+        depot,
+    );
+    let mut d = dispatcher().lock().map_err(lock_err)?;
+    d.register_language_runtime(Box::new(runtime))
+        .map_err(into_napi_err)
 }
 
 /// Dispatch a `RunRuntimeScript` invocation. Async to avoid blocking

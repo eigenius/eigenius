@@ -377,6 +377,15 @@ fn synthesize_signature(
 /// Synthesize an environment Resource for v1's spawn-per-invocation
 /// model. The TestLanguageRuntime ignores it; per-language runtimes
 /// (Phase 19+) will replace this with a chain-resolved env.
+///
+/// The env carries `image_digest` when the argument has one — that
+/// is, when the dispatch came through `dispatch_external_institution`
+/// (whose synthesised signature pins the digest the kernel sent in
+/// the `DispatchExternal` request). Per-language runtimes
+/// (`JuliaLanguageRuntime` in particular) read the env's digest at
+/// dispatch time so a single runtime instance can serve multiple
+/// envs concurrently — no per-runtime cached digest, one
+/// `ServiceHandle` keyed per digest.
 fn synthesize_env(language: &str, argument: &Resource) -> Resource {
     let mut env = Resource::new_embedded();
     env.set(
@@ -389,6 +398,15 @@ fn synthesize_env(language: &str, argument: &Resource) -> Resource {
     let env_prop = Iri::parse(PROP_REQUIRES_ENVIRONMENT).expect("static IRI");
     if let Some(v) = argument.get(&env_prop) {
         env.set(env_prop, v.clone());
+    }
+    // Forward the image digest if the argument carries one. The
+    // synthesised RuntimeMethodSignature for the external-dispatch
+    // path always sets it; `RunRuntimeScript` and
+    // `CallRuntimeMethod` arguments don't, and those callers fall
+    // back to the runtime's lazy `ensure_image` path.
+    let digest_prop = Iri::parse(PROP_IMAGE_DIGEST).expect("static IRI");
+    if let Some(v) = argument.get(&digest_prop) {
+        env.set(digest_prop, v.clone());
     }
     env
 }

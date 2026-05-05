@@ -26,8 +26,9 @@
 //! this crate just composes Dockerfile fragments and routes RPC.
 
 use crate::conventions::{
-    LANGUAGE, PROP_LANGUAGE, PROP_METHOD_NAME, PROP_PACKAGE_MANIFEST, PROP_PACKAGE_NAME,
-    PROP_PACKAGE_SOURCE_TREE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, WORKER_PROJECT_DIR,
+    LANGUAGE, PROP_IMAGE_DIGEST, PROP_LANGUAGE, PROP_METHOD_NAME, PROP_PACKAGE_MANIFEST,
+    PROP_PACKAGE_NAME, PROP_PACKAGE_SOURCE_TREE, PROP_SCRIPT_OUTPUT, PROP_SOURCE,
+    WORKER_PROJECT_DIR,
 };
 use crate::dockerfile::{julia_dockerfile_fragments, JuliaImagePlan};
 use crate::eigenius_common::{self, COMMON_PACKAGE_NAME};
@@ -52,7 +53,7 @@ use eigenius_runtime_substrate::spawner::service::{ServiceHandle, ServiceSpawner
 use eigenius_runtime_substrate::types::{DockerfileFragments, ImageDigest, WorkerSpec};
 use serde_bytes::ByteBuf;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -83,16 +84,14 @@ pub struct JuliaLanguageRuntime {
     cached_manifest_hash: OnceLock<String>,
     cached_assets: OnceLock<JuliaAssets>,
     depot_path: PathBuf,
-    /// Per-service host directory carrying the worker's UDS and any
-    /// per-service tempfiles. One per `JuliaLanguageRuntime` instance
-    /// — the spawner keys its services on `image_digest`, so a single
-    /// runtime always lands on the same warm worker.
-    service_tempdir: OnceLock<PathBuf>,
-    /// The service handle returned by the most recent `ensure_service`
-    /// call. Populated lazily on first dispatch and held so [`drain`]
-    /// can find the right service to tear down at orchestrator
-    /// shutdown.
-    cached_service: Mutex<Option<ServiceHandle>>,
+    /// `image_digest` → `ServiceHandle` map populated lazily as
+    /// dispatches arrive. One service per distinct digest — the
+    /// orchestrator's external-institution path can dispatch into
+    /// multiple envs concurrently from a single runtime instance, so
+    /// the cache must be keyed by digest rather than holding one
+    /// service. `drain` walks every cached handle to tear them down
+    /// at shutdown.
+    cached_services: Mutex<HashMap<String, ServiceHandle>>,
 }
 
 #[derive(Clone)]
@@ -131,20 +130,22 @@ impl JuliaLanguageRuntime {
             cached_manifest_hash: OnceLock::new(),
             cached_assets: OnceLock::new(),
             depot_path,
-            service_tempdir: OnceLock::new(),
-            cached_service: Mutex::new(None),
+            cached_services: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Tear down the long-lived service worker. Idempotent. Used at
-    /// orchestrator shutdown and by tests for clean cleanup. After
-    /// `drain`, the next dispatch transparently re-spawns.
+    /// Tear down every long-lived service worker this runtime
+    /// instance opened. Idempotent. Used at orchestrator shutdown
+    /// and by tests for clean cleanup. After `drain`, the next
+    /// dispatch transparently re-spawns the service it needs.
     pub fn drain(&self) -> Result<(), SpawnError> {
         let mut guard = self
-            .cached_service
+            .cached_services
             .lock()
-            .expect("cached_service mutex poisoned");
-        if let Some(handle) = guard.take() {
+            .expect("cached_services mutex poisoned");
+        let handles: Vec<ServiceHandle> = guard.drain().map(|(_, h)| h).collect();
+        drop(guard);
+        for handle in handles {
             self.spawner.drain(&handle)?;
         }
         Ok(())
@@ -357,7 +358,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
     fn run_script(
         &self,
-        _env: &Resource,
+        env: &Resource,
         script: &Resource,
         _inputs: &[Resource],
     ) -> Result<RunOutcome, RunError> {
@@ -380,8 +381,11 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
         let started_at = DispatchTrace::now_rfc3339();
 
+        let digest = self
+            .resolve_image_digest(env)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("resolve_image_digest: {e}")))?;
         let service = self
-            .ensure_service()
+            .ensure_service(digest)
             .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
         let (numerical_metadata, image_digest) = self.capture_health(&service);
         let stdout = self.dispatch_script(&service, target_cbor, invocation_id.clone())?;
@@ -400,7 +404,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
     fn call_method(
         &self,
-        _env: &Resource,
+        env: &Resource,
         signature: &Resource,
         inputs: &[Resource],
     ) -> Result<RunOutcome, RunError> {
@@ -442,8 +446,11 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
         let started_at = DispatchTrace::now_rfc3339();
 
+        let digest = self
+            .resolve_image_digest(env)
+            .map_err(|e| RunError::WorkerRpcFailed(format!("resolve_image_digest: {e}")))?;
         let service = self
-            .ensure_service()
+            .ensure_service(digest)
             .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
         let (numerical_metadata, image_digest) = self.capture_health(&service);
         let (output_bytes, dispatched_to) =
@@ -474,38 +481,36 @@ impl JuliaLanguageRuntime {
     /// and reused across subsequent dispatches against the same
     /// service. The spawner bind-mounts this into the container
     /// (DooD discipline, D26 §9.5) so the worker's UDS shows up here.
-    fn service_tempdir(&self) -> Result<&Path, SpawnError> {
-        if let Some(p) = self.service_tempdir.get() {
-            return Ok(p.as_path());
-        }
+    /// Per-digest service tempdir under the depot. The UDS path
+    /// inside is unique per digest so two services running for
+    /// different envs don't collide on the same socket. Idempotent —
+    /// the directory creation is safe to repeat.
+    fn service_tempdir_for(&self, digest: &ImageDigest) -> Result<PathBuf, SpawnError> {
+        // Take the first 16 hex chars after the `sha256:` prefix as a
+        // short, filesystem-safe service tag. Keeps the resulting
+        // tempdir path well under SUN_LEN (108 bytes) when joined
+        // with the depot path + `worker.sock`.
+        let s = digest.as_str();
+        let short = s.strip_prefix("sha256:").unwrap_or(s);
+        let short = &short[..16.min(short.len())];
         let dir = self
             .depot_path
-            .join(format!("service-julia-{}", std::process::id()));
+            .join(format!("service-julia-{}-{short}", std::process::id()));
         std::fs::create_dir_all(&dir).map_err(|e| SpawnError::SpawnFailed {
             backend: self.spawner.backend(),
             reason: format!("create service tempdir {} failed: {e}", dir.display()),
         })?;
-        let _ = self.service_tempdir.set(dir);
-        Ok(self.service_tempdir.get().expect("just set").as_path())
+        Ok(dir)
     }
 
-    /// Construct a `WorkerSpec` for the env's service. Idempotent in
-    /// the sense the spawner needs — same image_digest + manifest_hash
-    /// produces a spec that maps to the same `ServiceHandle` under
-    /// `ensure_service`.
-    fn build_worker_spec(&self) -> Result<WorkerSpec, SpawnError> {
-        // The default Service-lifecycle path (RunRuntimeScript) doesn't
-        // bake any institution handler packages — it just runs the
-        // worker against the mirror (None at this layer; the mirror
-        // gets supplied via `dispatch_run_runtime_script` /
-        // `call_method`). Handler packages flow through the explicit
-        // `build_environment_image` call from the env-build path.
-        let digest = self
-            .ensure_image(&[], None)
-            .map_err(|e| SpawnError::SpawnFailed {
-                backend: self.spawner.backend(),
-                reason: format!("eigenius-julia build_image failed: {e}"),
-            })?;
+    /// Construct a `WorkerSpec` for the env's service. Caller passes
+    /// the digest the worker should run against — extracted from the
+    /// dispatch's env Resource (D31 §6.2 path) or, as a fallback, the
+    /// runtime's lazily-built image (the `build_environment_image`
+    /// path used by tests). The spawner's
+    /// `ensure_service` keys on `image_digest`, so identical inputs
+    /// resolve to the same `ServiceHandle`.
+    fn build_worker_spec(&self, digest: ImageDigest) -> Result<WorkerSpec, SpawnError> {
         let manifest_hash = self
             .manifest_hash()
             .map_err(|e| SpawnError::SpawnFailed {
@@ -514,7 +519,7 @@ impl JuliaLanguageRuntime {
             })?
             .to_string();
 
-        let tempdir = self.service_tempdir()?.to_path_buf();
+        let tempdir = self.service_tempdir_for(&digest)?;
         let cross_check_env = prepare_substrate_side(
             &digest,
             &manifest_hash,
@@ -545,29 +550,52 @@ impl JuliaLanguageRuntime {
         })
     }
 
-    /// Get-or-start the long-lived service worker. The spawner's
-    /// `ensure_service` is idempotent, so repeated calls for the same
-    /// `image_digest` return the same `ServiceHandle`. We additionally
-    /// cache the handle locally so [`drain`] can find it without
-    /// re-resolving.
-    fn ensure_service(&self) -> Result<ServiceHandle, SpawnError> {
-        // Fast path: already-cached handle.
+    /// Resolve which image to dispatch into. Reads `image_digest`
+    /// from the env Resource first — the orchestrator's external-
+    /// institution path stamps it on the synthesised env so each
+    /// dispatch can land on a different image without a per-runtime
+    /// cached digest. Falls back to `ensure_image` (lazy build via
+    /// `cached_digest`) for the legacy `RunRuntimeScript` /
+    /// `CallRuntimeMethod` callers that pre-populate the cache via
+    /// `build_environment_image`.
+    fn resolve_image_digest(&self, env: &Resource) -> Result<ImageDigest, SpawnError> {
+        let env_prop = Iri::parse(PROP_IMAGE_DIGEST).expect("static IRI");
+        if let Some(s) = env.get(&env_prop).and_then(Value::as_str) {
+            return ImageDigest::parse(s).map_err(|e| SpawnError::SpawnFailed {
+                backend: self.spawner.backend(),
+                reason: format!("env carries malformed image_digest `{s}`: {e}"),
+            });
+        }
+        self.ensure_image(&[], None)
+            .map_err(|e| SpawnError::SpawnFailed {
+                backend: self.spawner.backend(),
+                reason: format!("eigenius-julia build_image failed: {e}"),
+            })
+    }
+
+    /// Get-or-start the long-lived service worker for the given
+    /// digest. The spawner's `ensure_service` is idempotent for the
+    /// same `image_digest`; we additionally cache the handle locally
+    /// keyed by digest so [`drain`] can find every service this
+    /// runtime instance opened.
+    fn ensure_service(&self, digest: ImageDigest) -> Result<ServiceHandle, SpawnError> {
+        let key = digest.as_str().to_string();
         if let Some(h) = self
-            .cached_service
+            .cached_services
             .lock()
-            .expect("cached_service mutex poisoned")
-            .as_ref()
+            .expect("cached_services mutex poisoned")
+            .get(&key)
             .cloned()
         {
             return Ok(h);
         }
-        let spec = self.build_worker_spec()?;
+        let spec = self.build_worker_spec(digest)?;
         let handle = self.spawner.ensure_service(spec)?;
         let mut guard = self
-            .cached_service
+            .cached_services
             .lock()
-            .expect("cached_service mutex poisoned");
-        *guard = Some(handle.clone());
+            .expect("cached_services mutex poisoned");
+        guard.insert(key, handle.clone());
         Ok(handle)
     }
 

@@ -51,6 +51,20 @@ services:
       - EIGENIUS_ORCHESTRATOR_PORT=8080
       - EIGENIUS_MOCK_LLM=${EIGENIUS_MOCK_LLM:-false}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      # Docker-out-of-Docker (DooD): the orchestrator's substrate
+      # spawns Julia worker containers via the host's Docker daemon,
+      # making them siblings of the kernel + orchestrator containers
+      # rather than nested children (D26 §9.5 — "DooD discipline").
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared depot path with identical semantics on host and in the
+      # container. The substrate hands host-side bind-mount specs to
+      # the host Docker daemon when spawning workers, so the
+      # orchestrator's view of the depot path must equal the host
+      # view — otherwise the worker container's UDS bind-mount lands
+      # in the wrong place and `attach_uds` times out. See
+      # `crates/runtime-substrate/src/spawner/docker/depot.rs`.
+      - /var/lib/eigenius/substrate-depot:/var/lib/eigenius/substrate-depot
     healthcheck:
       test: ["CMD", "sh", "-c", "deno eval \"const r = await fetch('http://localhost:8080/health'); if (!r.ok) Deno.exit(1);\""]
       interval: 5s

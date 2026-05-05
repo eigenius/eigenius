@@ -49,6 +49,14 @@ pub const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
 /// anchor matching what the 18d capstone test asserts on.
 pub const PROP_SCRIPT_OUTPUT: &str = "urn:eigenius:runtime:script_output";
 
+/// Property IRI for `RuntimeEnvironment.image_digest`. The
+/// orchestrator's external-institution dispatch path stamps this on
+/// the synthesised env Resource so `JuliaLanguageRuntime::call_method`
+/// can pick the right worker image without consulting the runtime's
+/// (deliberately unset) `cached_digest`. Mirrors the substrate-side
+/// constant in `crates/runtime-substrate/src/facade.rs`.
+pub const PROP_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+
 /// Property IRI carrying the package name on a `RuntimePackage`
 /// resource — matches the `name = "..."` field in the package's
 /// `Project.toml` and is used as the directory name under

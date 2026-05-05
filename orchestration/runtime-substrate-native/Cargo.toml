@@ -17,6 +17,7 @@ napi = { version = "3", default-features = false, features = ["napi8", "tokio_rt
 napi-derive = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }
 eigenius-runtime-substrate = { path = "../../crates/runtime-substrate", features = ["test-runtime"] }
+eigenius-julia = { path = "../../crates/eigenius-julia" }
 
 [build-dependencies]
 napi-build = "2"

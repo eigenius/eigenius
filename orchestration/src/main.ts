@@ -65,6 +65,17 @@ const USE_MOCK_LLM = Deno.env.get("EIGENIUS_MOCK_LLM") === "true";
  * replaces this with per-language runtime registration. */
 const TEST_WORKER_BIN = Deno.env.get("EIGENIUS_TEST_WORKER_BIN");
 
+/** Configuration for the Julia language runtime. All three must be
+ * set for Julia to register; if any is missing the runtime stays
+ * unregistered and Julia dispatches surface a typed `UnknownLanguage`
+ * error. The defaults are tailored to the production orchestrator
+ * container layout (`/opt/eigenius/julia-runtime-worker/` for the
+ * worker source, `/var/lib/eigenius/substrate-depot/` for the shared
+ * depot). */
+const JULIA_WORKER_PROJECT_DIR = Deno.env.get("EIGENIUS_JULIA_WORKER_PROJECT_DIR");
+const JULIA_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_JULIA_BASE_IMAGE_REF");
+const JULIA_DEPOT_PATH = Deno.env.get("EIGENIUS_JULIA_DEPOT_PATH");
+
 function main() {
   // Install the structured-logging subscriber before anything else
   // emits an event. Reads `EIGENIUS_LOG_LEVEL` and
@@ -140,6 +151,35 @@ function main() {
           "failed to register TestLanguageRuntime",
           {
             error_kind: "test_runtime_register_failed",
+            error_message: e instanceof Error ? e.message : String(e),
+          },
+        );
+      }
+    }
+    if (
+      JULIA_WORKER_PROJECT_DIR && JULIA_BASE_IMAGE_REF && JULIA_DEPOT_PATH
+    ) {
+      try {
+        substrateAddon.registerJuliaLanguageRuntime(
+          JULIA_WORKER_PROJECT_DIR,
+          JULIA_BASE_IMAGE_REF,
+          JULIA_DEPOT_PATH,
+        );
+        log.info(
+          operation.COMPONENT_REGISTER,
+          "registered JuliaLanguageRuntime",
+          {
+            worker_project_dir: JULIA_WORKER_PROJECT_DIR,
+            base_image_ref: JULIA_BASE_IMAGE_REF,
+            depot_path: JULIA_DEPOT_PATH,
+          },
+        );
+      } catch (e) {
+        log.warn(
+          operation.COMPONENT_REGISTER,
+          "failed to register JuliaLanguageRuntime",
+          {
+            error_kind: "julia_runtime_register_failed",
             error_message: e instanceof Error ? e.message : String(e),
           },
         );
