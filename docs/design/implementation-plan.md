@@ -1558,12 +1558,19 @@ The work is split into five sub-milestones (a–e). Sub-milestones a–d build t
 3. Author the handler package per D31 §4.1; `validate_bounded_by` calls `IntervalArithmetic.issubset_interval`.
 4. Build env image via `eigenius env create`.
 5. Author institution declaration; `eigenius institution install`.
-6. Test the full lifecycle: commit a BoundedBy(value=2, lower=1, upper=3) → expect Verdict.Holds + commit succeeds. Commit a BoundedBy(value=5, lower=1, upper=3) → expect Verdict.Fails + commit rejected.
-7. Document the bring-up as the canonical "how to add an institution" tutorial.
+6. **Trait-shape change carried over from 19a.5.d** — thread `runtime_invocation_partial_cbor` from `DispatchExternalResponse` back through `Institution::query` so the kernel can fold the substrate-captured provenance (image digest echo, started/completed timestamps, numerical_metadata, dispatched_to) into a full `RuntimeInvocation` and commit it transactionally with the gated resource and the Verdict per [D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics). This requires:
+   - Growing the `Institution::query` return type from `Result<Resource, InstitutionError>` to a richer struct that carries optional invocation provenance (or adding a sibling `query_with_provenance` default method that other impls fall back to).
+   - Updating every existing impl: `WasmInstitution`, in-process institutions, `ExternalInstitution`, and the test stubs in `kernel/src/institution/dispatch.rs::tests`.
+   - Wiring `dispatch_auto_on_load_for_resource` to receive the provenance and surface it to the commit caller.
+   - Building the full `RuntimeInvocation` resource in the commit pipeline (kernel fills `script` ← signature_iri, `environment` ← env_iri, `inputs` ← gated resource IRI, `output` ← Verdict IRI) and adding it to the same transaction as the gated resource + Verdict.
+   The IntervalArithmetic e2e is the first verified consumer — design the trait shape against its actual needs rather than guessing now. **No "we'll do this later" deferrals**: 19a.6 is incomplete until the provenance commit lands.
+7. Test the full lifecycle: commit a BoundedBy(value=2, lower=1, upper=3) → expect Verdict.Holds + commit succeeds with both Verdict and RuntimeInvocation resources committed alongside. Commit a BoundedBy(value=5, lower=1, upper=3) → expect Verdict.Fails + commit rejected with the Verdict IRI in the error.
+8. Document the bring-up as the canonical "how to add an institution" tutorial.
 
 **Acceptance.**
 - The full e2e test passes against `DockerServiceSpawner` (with buildah).
 - Verdict resources land on the chain with the expected shape ([D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics)).
+- `RuntimeInvocation` resources land alongside, carrying the substrate-captured provenance — provenance commit, **not deferred any further**.
 - Failed commits return errors that point at the rejecting Verdict IRI.
 - Docs cover the "fresh institution from scratch" workflow.
 - **D31 acceptance criterion fulfilled**: the framework supports a real external institution end-to-end without structural gaps.

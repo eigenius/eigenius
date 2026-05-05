@@ -167,17 +167,13 @@ impl Institution for ExternalInstitution {
                 ))
             })?;
 
-        // The partial RuntimeInvocation (D31 §6.2) carries substrate-
-        // captured provenance — image digest echo, started/completed
-        // timestamps, numerical_metadata, dispatched_to. Per D31 §6.3
-        // the kernel folds that into a full RuntimeInvocation and
-        // commits it transactionally alongside the gated resource and
-        // the Verdict. Threading it back through here requires a
-        // trait-shape change: `Institution::query` currently returns
-        // a single Resource. Phase 19a.6 (IntervalArithmetic e2e) is
-        // the first consumer that actually exercises the provenance
-        // commit, so the trait redesign lands there against a verified
-        // shape rather than guessed at now.
+        // TODO(19a.6): thread `runtime_invocation_partial_cbor` back
+        // through `Institution::query` so the commit pipeline can
+        // fold it into a full RuntimeInvocation and commit it
+        // transactionally with the gated resource and the Verdict
+        // (D31 §6.3). Tracked as a non-deferrable task in the 19a.6
+        // plan — IntervalArithmetic's e2e drives the trait-shape
+        // change and verifies the provenance commit.
         let _ = resp.runtime_invocation_partial_cbor;
 
         Ok(output)
