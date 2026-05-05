@@ -1416,7 +1416,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 #### Phase 19a.4 carry-over — orchestrator-side dispatched_to commit + real handler package (~3 days)
 
-**Status: pending** (2026-05-04). The substrate work in 19a.4 is complete; this carry-over sub-milestone closes the orchestrator/glue side that gates "the work is observable from the chain".
+**Status: pending** (2026-05-04). The substrate work in 19a.4 is complete; this carry-over sub-milestone closes the orchestrator/glue side that gates "the work is observable from the chain". Lifecycle and dispatch architecture for external institutions is settled in [D31](d31-external-institution-lifecycle.md); this carry-over implements it for the simpler `RunRuntimeScript` / `CallRuntimeMethod` paths (no AutoOnLoad gating yet — that's a separate milestone after the first external institution lands).
 
 **Goal.** Make the substrate-produced trace land on a committed `RuntimeInvocation` resource with the right IRI references, and replace the e2e test's script-eval-installed handler with a real handler package.
 
@@ -1726,6 +1726,8 @@ The following design documents must be written and reviewed before the phase tha
 | D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
 | D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.4 (v1.2 draft) | Draft v1.2 |
 | D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
+| D31 | **External Institution Authoring & Dispatch Lifecycle** | The end-to-end lifecycle for institutions whose `runtime` is `external`: mirror generation CLI, institution registration, kernel-emits-request / orchestrator-services-IO dispatch routing. Generator-agnostic; per-language faithful-translation specs (D29 / D30 / D32) plug in independently. | Phase 19a.4 carry-over (v1 draft) | Draft v1 |
+| D32 | **Faithful Translation Specification — `eigon-rust-gen`** | The mapping from Eigon class structure to Rust struct / trait / impl form for WASM institution authoring. Tracked in [#41](https://github.com/eigenius/eigenius/issues/41). | TBD | Planned |
 
 **Reference documents** (analysis rather than specification):
 
