@@ -1372,6 +1372,8 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 #### Phase 19a.4 — `CallRuntimeMethod` + `JuliaWorker.jl` method dispatch + `dispatched_to` wiring (~5 days)
 
+**Status: substrate side landed (2026-05-04).** `target_kind` wire discriminator, `MethodInvocation` payload, JuliaWorker method dispatch with `Base.invokelatest`, `JuliaLanguageRuntime::call_method`, `DispatchTrace.dispatched_to` plumbing, substrate-side epistemic-category stamping (`urn:eigenius:reflection:DerivedResource`), and the codec registries (`_eigenius_decoders` / `_eigenius_encoders`) on each generated mirror are all in. Spec [D29 v1.2](d29-eigon-julia-mirror-spec.md#85-codec-registries) pins the registry shape and the world-age rule. Pinned-substrate, no `EigeniusJuliaPool` regression. **Remaining items are orchestrator-side:** see "Phase 19a.4 carry-over" sub-milestone below.
+
 **Goal.** Light up `CallRuntimeMethod` end-to-end against the generator-produced mirror from 19a.3. Worker dispatches by `RuntimeMethodSignature` IRI, performs Julia multiple dispatch on typed mirror struct inputs, captures `which()` for `dispatched_to`. Substrate propagates `dispatched_to` through `DispatchTrace` to the orchestrator, which stamps it on the committed `RuntimeInvocation` (closing the 18c.5-deferred property).
 
 **Files created.**
@@ -1409,6 +1411,29 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 - The committed `RuntimeInvocation` has `dispatched_to` populated with the `Module.method(::Compound, ::Target, ::Target)` string Julia's `which()` returned — typed class-IRI-bearing dispatch info, useful for audit.
 - Mirror struct values round-trip across the boundary correctly (kinase resources committed in tests are usable as `CallRuntimeMethod` inputs via the generator's `decode_*` / `encode_*` helpers).
 - Test exercises both `RunRuntimeScript` and `CallRuntimeMethod` against the same warm `ServiceHandle` to confirm coexistence.
+
+---
+
+#### Phase 19a.4 carry-over — orchestrator-side dispatched_to commit + real handler package (~3 days)
+
+**Status: pending** (2026-05-04). The substrate work in 19a.4 is complete; this carry-over sub-milestone closes the orchestrator/glue side that gates "the work is observable from the chain".
+
+**Goal.** Make the substrate-produced trace land on a committed `RuntimeInvocation` resource with the right IRI references, and replace the e2e test's script-eval-installed handler with a real handler package.
+
+**In scope.**
+- **Orchestrator-side TS handler for `CallRuntimeMethod`**: consumes `partial_invocation_cbor` from `SubstrateDispatcher::dispatch_call_runtime_method`, fills in the IRI-typed properties (`script` ← signature IRI, `environment` ← env IRI, `inputs` ← input resource IRIs, `output` ← committed-output IRI), and commits the assembled `RuntimeInvocation` to the chain. Same handler shape as the existing TS `RunRuntimeScript` path.
+- **Real handler package**: `julia/institutions/kinase-demo/EigeniusKinaseDemo/{Project.toml, src/EigeniusKinaseDemo.jl}` defining a typed handler depending on the kinase mirror. Replaces the 19a.4 e2e test's script-eval setup with a real `using` import. Also documents the canonical handler-package shape that institution crates (intervals, jump, …) follow.
+- **`julia/env/Project.toml`**: path-dep on the kinase-demo package so the env image bakes it in. Or, alternatively, install via `Pkg.develop` in the install_packages Dockerfile fragment alongside `EigeniusJuliaCommon`.
+- **End-to-end test refactor** of `julia_call_runtime_method_dispatches_typed_handler` to skip the script-eval setup and hit the handler package directly. Confirms the institution-crate pattern works without scope creep.
+
+**Out of scope.**
+- Kernel-registered `CallRuntimeMethod` Component (originally listed for 19a.4) — deferred to whichever milestone first needs `NativeDecide`-style chain-driven calls. The current path is dispatched directly via `SubstrateDispatcher` from an orchestrator-side TS handler, which suffices for the 19a.6 demo and the 19c–h institutions.
+- `spawner_backend` trace property — deferred until needed for an audit query.
+
+**Acceptance.**
+- A committed `RuntimeInvocation` resource carries `dispatched_to` (Julia's `which()` output) and `is_a: [..., DerivedResource]` after a `CallRuntimeMethod` round-trip.
+- The kinase handler package boots cleanly in the env image (no `using` cycles, no warnings) and is what the e2e test imports.
+- The TS `CallRuntimeMethod` handler is symmetric with the `RunRuntimeScript` handler — same commit shape, same provenance properties filled in, no special-casing.
 
 ---
 
@@ -1699,7 +1724,7 @@ The following design documents must be written and reviewed before the phase tha
 | D26 | **Runtime Substrate** | **DRAFT** — `docs/design/d26-runtime-substrate.md`. Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. `LanguageRuntime` trait, parent ontology classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`), image-vs-graph boundary, deterministic image-build pipeline with digest capture, worker pool + sandbox, mirror-anchor compositionality, `RunRuntimeScript` / `CallRuntimeMethod` substrate components. Cross-language wire format = CBOR + RFC 8746 typed-array tags. | Phase 18 | Draft |
 | D27 | **Julia Institutions** | **DRAFT** — `docs/design/d27-julia-institutions.md`. First concrete substrate instance plus reference institutions wrapping Julia libraries under D14. `JuliaScript` / `JuliaPackage` / `JuliaEnvironment` / `JuliaPackageMirror` / `JuliaInvocation` / `JuliaMethodSignature` / `JuliaPackagePin` subclasses. `eigon-julia-gen` mirror generator. Five reference institutions: `Symbolics`/`ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` (ODEs). Future Lean / Julia bridge sketch (interval-bound proof obligations). | Phase 19 | Draft |
 | D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
-| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.3.c (v1 draft) | Draft v1 |
+| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.4 (v1.2 draft) | Draft v1.2 |
 | D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
 
 **Reference documents** (analysis rather than specification):

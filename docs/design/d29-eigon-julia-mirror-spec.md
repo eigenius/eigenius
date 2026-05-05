@@ -1,6 +1,7 @@
 # Faithful Translation Specification — `eigon-julia-gen`
 
-**Status:** Draft v1.1 (Phase 19a.3.d)
+**Status:** Draft v1.2 (Phase 19a.4)
+**Changes from v1.1 → v1.2:** Per-module codec registries `_eigenius_decoders` / `_eigenius_encoders` (§8.5) — pinned so the worker-side `CallRuntimeMethod` dispatcher can discover decoders/encoders across loaded mirror modules without per-module knowledge. World-age rule for codec invocation pinned in §8.5 (`Base.invokelatest` required when codecs may have been loaded after the dispatch frame's world).
 **Changes from v1 → v1.1:** Subclass hierarchy emission (universal abstract+struct pair, single-supertype enforced); `_id` round-trip via reserved field on every struct (§7, §8.4); polymorphic `class_types` as `Union{AbstractC1, …}` with codec dispatch helpers (§4, §8.3); `core:format` IRI passthrough for non-standard formats (§9.3); pattern anchoring made explicit in the validator (§9.4); cycle detection on closure + `subclass_of` (§3.3, §11.1); `short_name` conflict detection in transitive field set (§11.1); multi-`is_a` reframed as a substrate concern, not an information loss (§8.4).
 **Scope:** The exact, byte-level contract between Eigon class structure (as resolved against an ontology layer in the chain) and the Julia source emitted by the substrate's mirror generator. Pins what the generator promises to produce so an auditor with the layer chain and the spec can re-derive byte-identical mirror source without reading the generator's Rust code.
 **Related:** [`d26-runtime-substrate.md`](d26-runtime-substrate.md) §7 (the language-agnostic `RuntimePackageMirror` model and faithful-translation framework), [`d27-julia-institutions.md`](d27-julia-institutions.md) §3 (the Julia integration's framing of the generator), [`implementation-plan.md`](implementation-plan.md) Phase 19a.3 (the generator's implementation milestone). The hand-authored shared package the generated source imports lives at [`julia/common/EigeniusJuliaCommon/`](../../julia/common/EigeniusJuliaCommon/).
@@ -389,6 +390,52 @@ This is delegation, not loss. Epistemic categorization belongs to the substrate'
 - `is_a` entries from outside the mirror's closure are ignored on decode (intended; not the mirror's domain).
 - Worker-side mutation of `_id` is preserved; worker-side mutation of `is_a` is not faithful — the encoder always emits the struct's own class.
 
+### 8.5 Codec registries
+
+Every mirror module emits two module-level constants, exported, that the substrate's worker uses for `CallRuntimeMethod` dispatch:
+
+```julia
+const _eigenius_decoders = Dict{String, Function}(
+    "<class IRI 1>" => decode_<Class1>,
+    "<class IRI 2>" => decode_<Class2>,
+    ⋮
+)
+
+const _eigenius_encoders = Dict{DataType, Function}(
+    <Class1> => encode_<Class1>,
+    <Class2> => encode_<Class2>,
+    ⋮
+)
+```
+
+Both maps cover every concrete class in the mirror's closure (per §3.1), in `struct_order` (the field-dependency topological order, §3.3). The decoder map keys on the **class IRI** because decode dispatch reads the input dict's `is_a` list. The encoder map keys on the **concrete struct type** because encode dispatch reads `typeof(value)` after the handler returns.
+
+Both constants are exported alongside the struct + codec function names so a worker walking `Base.loaded_modules` can find them by `isdefined(mod, :_eigenius_decoders)` without per-module knowledge.
+
+#### Worker-side discovery contract
+
+The dispatch worker (D26 §8.1) building its decoder/encoder tables MUST iterate `Base.loaded_modules` rather than `names(Main; imported=true)`:
+
+- `using SomeMirror` brings the mirror's *exports* (the `_eigenius_decoders` / `_eigenius_encoders` constants themselves) into the calling scope, but the mirror module is not added to `Main`'s name table by `imported=true`.
+- Iterating `Base.loaded_modules` finds every loaded mirror package's registry directly, regardless of which scope `using`-imported it.
+
+The worker's discovery walk is built **fresh per dispatch** (not cached at boot) so a mirror module loaded by a setup script lands in the registry immediately on the next `CallRuntimeMethod`. The cost is one `Dict` allocation per dispatch, which is negligible against the typed-call latency budget.
+
+#### World-age rule (`Base.invokelatest`)
+
+When a `RunRuntimeScript` precedes a `CallRuntimeMethod` and the script defines or `using`-imports a mirror module, the decoder/encoder methods land in a *newer* Julia world than the dispatch worker's accept loop. Calling them directly from the loop's older world raises a `MethodError` (`world_age` mismatch).
+
+The worker MUST therefore invoke discovered codecs through `Base.invokelatest`:
+
+```julia
+decoded = Base.invokelatest(decoders[class_iri], m)
+output_payload = Base.invokelatest(encoders[typeof(result)], result)
+```
+
+Same applies to handler invocation: the user's typed handler may be defined post-boot (e.g. by an institution's `using` of its handler package), so the worker invokes it via `Base.invokelatest` too. The performance cost is a few hundred nanoseconds per dispatch — irrelevant against typed-call latency.
+
+This rule is generator-level only by extension: the generator emits codecs that work the same way they always have; it's the **worker contract** that must call them via `invokelatest`. Pinned here because future generator versions adding new codec entry points (e.g. embedded-resource decoders) need to know that the worker integration depends on this calling convention.
+
 ---
 
 ## 9. Validating constructors
@@ -499,9 +546,9 @@ A 16-hex-char (64-bit) prefix is large enough for collision safety in the practi
 
 ## 11. v1 supported subset and planned extensions
 
-### 11.1 v1.1 supported subset
+### 11.1 v1.2 supported subset
 
-A class declaration is in the v1.1 supported subset iff **all** of the following hold:
+A class declaration is in the v1.2 supported subset iff **all** of the following hold:
 
 - All its `requires` and `recommends` properties have `data_type` in the §4 table (excluding the empty-`class_types` case for `resource` / `resource_array`).
 - `class_types` lists are non-empty when used.
@@ -511,23 +558,25 @@ A class declaration is in the v1.1 supported subset iff **all** of the following
 - The transitive field set (own + inherited via `subclass_of`) has unique property `short_name`s. Two distinct property IRIs with the same `short_name` produce a duplicate Julia struct field — rejected. The reserved `_id` slot counts in this check; properties declared with `short_name = "_id"` are rejected at resolution time.
 - All class and property `short_name` values are valid Julia identifiers (alphanumeric + underscore, leading non-digit). Properties with `short_name = "_id"` are rejected as reserved (§7.2 / §8.4).
 - Format IRIs on `core:format` are either standard (`urn:eigenius:core:formats:<name>`, rendered as `:<name>`) or any other IRI that the validator can dispatch on (rendered as `Symbol("<full IRI>")`, §9.3). The validator MUST raise on unknown formats; the generator does not statically check this.
+- The mirror module exports `_eigenius_decoders` (class IRI → `decode_<C>`) and `_eigenius_encoders` (concrete struct type → `encode_<C>`) constants per §8.5. These are required for v1.2 conformance — workers depend on them for `CallRuntimeMethod` dispatch.
 
-A class outside the v1.1 supported subset produces `MirrorGeneratorError::UnrepresentableClass` with a message naming the offending class and the rule it violated.
+A class outside the v1.2 supported subset produces `MirrorGeneratorError::UnrepresentableClass` with a message naming the offending class and the rule it violated.
 
 ### 11.2 Planned extensions
 
-These are part of the long-term D27 §3.3 contract but require generator features that have not been implemented in v1.1. Each is explicitly out-of-scope for D29 v1.1; the spec version that includes them aligns with the implementation milestone.
+These are part of the long-term D27 §3.3 contract but require generator features that have not yet been implemented. Each is explicitly out-of-scope for the current spec version; the spec version that includes them aligns with the implementation milestone.
 
 | Item | Implementation milestone | Spec version |
 |---|---|---|
-| Multi-mirror per `RuntimeEnvironment` (per-env package name + UUID) | Phase 19a.4 | D29 v1.2 |
+| Multi-mirror per `RuntimeEnvironment` (per-env package name + UUID) | Phase 19a.5+ | D29 v1.3 |
 | Multi-supertype via synthesized intersection abstract types | Future-work | D29 v2 |
 | Per-class file split | Future-work (D27 §3.6) | TBD |
 | Static lint of pattern portability (§9.5) | Future-work | TBD |
 | `core:allows_only` enum support (Julia `@enum` or singleton structs) | Future-work | TBD |
 | Embedded resources (`Value::Embedded`) decode/encode | Future-work | TBD |
 | Generator binary content hash (real SHA-256, not version-string placeholder, §10.2) | Post-19a.4 | TBD |
-| Substrate-side epistemic category stamping in `is_a` at commit time (D26 cross-link, §8.4) | Phase 19a.4 / orchestrator | D26 patch, not D29 |
+
+**Substrate-side epistemic category stamping** — landed as part of Phase 19a.4 / 19c-as-built (the substrate's facade now stamps `urn:eigenius:reflection:DerivedResource` on every runtime output's `is_a`, alongside the structural class). Pinned in this spec at §8.4 ("multi-`is_a` is delegated to the substrate, not preserved by the mirror") with the implementation in `runtime-substrate/src/facade.rs::stamp_derived_epistemic_category`.
 
 A generator implementation MAY implement any combination of planned items ahead of the milestone, provided it does so according to the relevant spec version's text (i.e. without inventing semantics that aren't pinned).
 
@@ -543,7 +592,7 @@ This document is a draft v1 of D29. Every change to the contract is a spec versi
 
 The `generator_version` property on `RuntimePackageMirror` resources implicitly anchors a spec version: the generator commits to producing output matching the spec version in force at its release, and the spec retains the prior version's text in its history (git, in this repository) for audit replay.
 
-D29 v1.1 is the spec version for `eigenius-julia 0.1.x` from Phase 19a.3.d onward. v1 was the v1 draft authored alongside 19a.3.c that pinned the subset shipped at that milestone; v1.1 closes the gap items 19a.3.d implemented (subclass hierarchy, `_id` round-trip, polymorphic `class_types`, format IRI passthrough, pattern anchoring, cycle detection, short_name uniqueness, multi-`is_a` reframing). Bumps follow as the implementation milestones in §11.2 land.
+D29 v1.2 is the spec version for `eigenius-julia 0.1.x` from Phase 19a.4 onward. v1.2 adds the codec-registry constants (§8.5) and the world-age `Base.invokelatest` rule that the worker-side `CallRuntimeMethod` dispatcher depends on. v1.1 (Phase 19a.3.d) closed the structural-translation gap items (subclass hierarchy, `_id` round-trip, polymorphic `class_types`, format IRI passthrough, pattern anchoring, cycle detection, short_name uniqueness, multi-`is_a` reframing). v1 was the original draft authored alongside 19a.3.c that pinned the subset shipped at that milestone. Bumps follow as the implementation milestones in §11.2 land.
 
 ---
 
