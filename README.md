@@ -10,6 +10,8 @@ Contemporary LLMs produce text that reads like knowledge but carries no epistemi
 
 The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
+Eigenius is grounded in [dependent type theory and institution theory](https://github.com/user-attachments/files/27193066/eigenius-cacm.pdf) to bridge and integrate different logics and scientific disciplines.
+
 > This is still a very early stage of this project. Anticipate
 > features not working or missing functionality overall. Our goal
 > is to close those quality gaps rather aggressively. Feel free
