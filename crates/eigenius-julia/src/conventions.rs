@@ -49,6 +49,28 @@ pub const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
 /// anchor matching what the 18d capstone test asserts on.
 pub const PROP_SCRIPT_OUTPUT: &str = "urn:eigenius:runtime:script_output";
 
+/// Property IRI carrying the package name on a `RuntimePackage`
+/// resource — matches the `name = "..."` field in the package's
+/// `Project.toml` and is used as the directory name under
+/// `/opt/eigenius/packages/<name>/` in the built image.
+pub const PROP_PACKAGE_NAME: &str = "urn:eigenius:runtime:package_name";
+
+/// Property IRI carrying the verbatim `Project.toml` bytes on a
+/// `RuntimePackage` resource. The substrate writes these bytes
+/// directly into the package's directory in the build context, then
+/// `Pkg.develop`s the resulting path so the package's own `[deps]`
+/// resolve into the worker project's manifest.
+pub const PROP_PACKAGE_MANIFEST: &str = "urn:eigenius:runtime:manifest";
+
+/// Property IRI for the package's source-tree archive on a
+/// `RuntimePackage` resource. Shape: a JSON array of objects each
+/// carrying `path` (string, relative to the package root) and
+/// `content_base64` (base64-encoded file bytes). Binary content
+/// rides through base64 because the ontology declares the property
+/// as `data_type: json` — the structured-archive convention is
+/// substrate-side, not chain-validated.
+pub const PROP_PACKAGE_SOURCE_TREE: &str = "urn:eigenius:runtime:source_tree";
+
 /// In-image path where the worker's `Project.toml` / `Manifest.toml` /
 /// `src/JuliaWorker.jl` are copied. Bound by the Dockerfile composer
 /// (see [`crate::dockerfile`]) and read by the worker's bootstrap.

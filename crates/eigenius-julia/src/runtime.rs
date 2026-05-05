@@ -26,7 +26,8 @@
 //! this crate just composes Dockerfile fragments and routes RPC.
 
 use crate::conventions::{
-    LANGUAGE, PROP_LANGUAGE, PROP_METHOD_NAME, PROP_SCRIPT_OUTPUT, PROP_SOURCE, WORKER_PROJECT_DIR,
+    LANGUAGE, PROP_LANGUAGE, PROP_METHOD_NAME, PROP_PACKAGE_MANIFEST, PROP_PACKAGE_NAME,
+    PROP_PACKAGE_SOURCE_TREE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, WORKER_PROJECT_DIR,
 };
 use crate::dockerfile::{julia_dockerfile_fragments, JuliaImagePlan};
 use crate::eigenius_common::{self, COMMON_PACKAGE_NAME};
@@ -182,23 +183,32 @@ impl JuliaLanguageRuntime {
         Ok(self.cached_manifest_hash.get().expect("just set"))
     }
 
-    fn ensure_image(&self, mirror: Option<&Resource>) -> Result<ImageDigest, BuildError> {
+    fn ensure_image(
+        &self,
+        packages: &[Resource],
+        mirror: Option<&Resource>,
+    ) -> Result<ImageDigest, BuildError> {
         // Cache key today is just `(project files, base image)` — the
-        // mirror parameter does not invalidate the cache because v1
-        // generates a single mirror per `JuliaLanguageRuntime` instance
-        // and the caller supplies the same value across calls. Once
-        // multiple mirrors per runtime become a thing (D27 §3.6
-        // future-work), the cache key must include the mirror's
-        // `library_content_hash`.
+        // packages and mirror parameters do not invalidate the cache
+        // because v1 generates a single mirror + handler-package set
+        // per `JuliaLanguageRuntime` instance and the caller supplies
+        // the same value across calls. Once multiple
+        // mirrors/handler-package sets per runtime become a thing
+        // (D27 §3.6 future-work), the cache key must include each
+        // input's content hash.
         if let Some(d) = self.cached_digest.get() {
             return Ok(d.clone());
         }
-        let digest = self.build_image(mirror)?;
+        let digest = self.build_image(packages, mirror)?;
         let _ = self.cached_digest.set(digest.clone());
         Ok(digest)
     }
 
-    fn build_image(&self, mirror: Option<&Resource>) -> Result<ImageDigest, BuildError> {
+    fn build_image(
+        &self,
+        handler_packages: &[Resource],
+        mirror: Option<&Resource>,
+    ) -> Result<ImageDigest, BuildError> {
         let manifest_hash = self.manifest_hash()?.to_string();
         let assets = self.assets()?.clone();
 
@@ -211,9 +221,36 @@ impl JuliaLanguageRuntime {
             COMMON_PACKAGE_NAME.to_string(),
             eigenius_common::package_materialization(),
         );
-        let included_packages = vec![IncludedPackage {
+        let mut included_packages = vec![IncludedPackage {
             name: COMMON_PACKAGE_NAME.to_string(),
         }];
+
+        // Bake institution handler packages. Each `RuntimePackage`
+        // resource carries a `package_name`, a verbatim `Project.toml`
+        // (`manifest`), and a `source_tree` JSON archive. The
+        // substrate writes these under `/opt/eigenius/packages/<name>/`
+        // and the dockerfile composer emits a matching `Pkg.develop`
+        // call so the package's `[deps]` resolve into the worker
+        // project's manifest at instantiate time.
+        let mut handler_pkg_iris: Vec<String> = Vec::new();
+        let mut handler_pkg_names: Vec<String> = Vec::new();
+        for pkg in handler_packages {
+            let mat = runtime_package_to_materialization(pkg)?;
+            if packages.contains_key(&mat.name) {
+                return Err(BuildError::EnvironmentBuildFailed(format!(
+                    "duplicate package name `{}` (clashes with EigeniusJuliaCommon or another handler package)",
+                    mat.name
+                )));
+            }
+            packages.insert(mat.name.clone(), mat.materialization);
+            included_packages.push(IncludedPackage {
+                name: mat.name.clone(),
+            });
+            handler_pkg_names.push(mat.name);
+            if let Some(iri) = pkg.id() {
+                handler_pkg_iris.push(iri.as_str().to_string());
+            }
+        }
 
         // Materialise the mirror archive when one was supplied.
         let mirror_iri = mirror
@@ -224,6 +261,7 @@ impl JuliaLanguageRuntime {
         let plan = JuliaImagePlan {
             include_common: true,
             include_mirror: mirror.is_some(),
+            handler_packages: handler_pkg_names,
         };
         let fragments = julia_dockerfile_fragments(&plan);
 
@@ -262,7 +300,7 @@ impl JuliaLanguageRuntime {
             dockerfile,
             manifest_hash: manifest_hash.clone(),
             mirror_iri,
-            included_pkg_iris: Vec::new(),
+            included_pkg_iris: handler_pkg_iris,
             built_at: format!("manifest:{manifest_hash}"),
             packages,
             mirror: mirror_mat,
@@ -299,10 +337,10 @@ impl LanguageRuntime for JuliaLanguageRuntime {
     fn build_environment_image(
         &self,
         _env: &Resource,
-        _packages: &[Resource],
+        packages: &[Resource],
         mirror: Option<&Resource>,
     ) -> Result<ImageDigest, BuildError> {
-        self.ensure_image(mirror)
+        self.ensure_image(packages, mirror)
     }
 
     fn dockerfile_fragments(&self, _env: &Resource) -> DockerfileFragments {
@@ -313,6 +351,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
         julia_dockerfile_fragments(&JuliaImagePlan {
             include_common: true,
             include_mirror: false,
+            handler_packages: Vec::new(),
         })
     }
 
@@ -455,8 +494,14 @@ impl JuliaLanguageRuntime {
     /// produces a spec that maps to the same `ServiceHandle` under
     /// `ensure_service`.
     fn build_worker_spec(&self) -> Result<WorkerSpec, SpawnError> {
+        // The default Service-lifecycle path (RunRuntimeScript) doesn't
+        // bake any institution handler packages — it just runs the
+        // worker against the mirror (None at this layer; the mirror
+        // gets supplied via `dispatch_run_runtime_script` /
+        // `call_method`). Handler packages flow through the explicit
+        // `build_environment_image` call from the env-build path.
         let digest = self
-            .ensure_image(None)
+            .ensure_image(&[], None)
             .map_err(|e| SpawnError::SpawnFailed {
                 backend: self.spawner.backend(),
                 reason: format!("eigenius-julia build_image failed: {e}"),
@@ -801,6 +846,116 @@ fn read_string_property<'a>(r: &'a Resource, prop_iri: &str) -> Result<&'a str, 
         .ok_or_else(|| format!("missing string property `{prop_iri}`"))
 }
 
+/// Parsed view of a `RuntimePackage` Resource ready to bake into the
+/// build context. Holds the package's directory name (used as both the
+/// `IncludedPackage::name` and the in-image directory under
+/// `/opt/eigenius/packages/`) plus the file map the substrate's
+/// materialiser writes verbatim.
+#[derive(Debug)]
+struct ParsedHandlerPackage {
+    name: String,
+    materialization: PackageMaterialization,
+}
+
+/// Parse a `RuntimePackage` Resource into a [`ParsedHandlerPackage`].
+/// Reads:
+///   - `runtime:package_name` → directory name in the build context.
+///   - `runtime:manifest`     → verbatim `Project.toml` bytes.
+///   - `runtime:source_tree`  → JSON archive (`[{path, content_base64}]`).
+///     Each entry's bytes get written under
+///     `packages/<name>/<path>` in the build context.
+///
+/// Surface errors as [`BuildError::EnvironmentBuildFailed`] so the
+/// caller (`build_image`) can attribute the failure to the build
+/// step rather than a generic invocation error.
+fn runtime_package_to_materialization(
+    resource: &Resource,
+) -> Result<ParsedHandlerPackage, BuildError> {
+    let name = read_string_property(resource, PROP_PACKAGE_NAME)
+        .map_err(|e| BuildError::EnvironmentBuildFailed(format!("RuntimePackage: {e}")))?
+        .to_string();
+    if name.is_empty() {
+        return Err(BuildError::EnvironmentBuildFailed(
+            "RuntimePackage: `package_name` must not be empty".into(),
+        ));
+    }
+    let manifest = read_string_property(resource, PROP_PACKAGE_MANIFEST)
+        .map_err(|e| BuildError::EnvironmentBuildFailed(format!("RuntimePackage `{name}`: {e}")))?
+        .to_string();
+
+    let source_tree_iri =
+        Iri::parse(PROP_PACKAGE_SOURCE_TREE).expect("static source_tree IRI must parse");
+    let source_tree = match resource.get(&source_tree_iri) {
+        Some(Value::Json(v)) => v,
+        Some(other) => {
+            return Err(BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: `source_tree` must be a JSON value, got {other:?}"
+            )));
+        }
+        None => {
+            return Err(BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: `source_tree` is required"
+            )));
+        }
+    };
+    let entries = source_tree.as_array().ok_or_else(|| {
+        BuildError::EnvironmentBuildFailed(format!(
+            "RuntimePackage `{name}`: `source_tree` must be a JSON array of `{{path, content_base64}}` objects"
+        ))
+    })?;
+
+    let mut files: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
+    files.insert(PathBuf::from("Project.toml"), manifest.into_bytes());
+
+    for (idx, entry) in entries.iter().enumerate() {
+        let obj = entry.as_object().ok_or_else(|| {
+            BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: `source_tree[{idx}]` must be an object"
+            ))
+        })?;
+        let path = obj.get("path").and_then(serde_json::Value::as_str).ok_or_else(|| {
+            BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: `source_tree[{idx}].path` is required and must be a string"
+            ))
+        })?;
+        let b64 = obj
+            .get("content_base64")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                BuildError::EnvironmentBuildFailed(format!(
+                    "RuntimePackage `{name}`: `source_tree[{idx}].content_base64` is required and must be a string"
+                ))
+            })?;
+        let content = base64_decode(b64).map_err(|e| {
+            BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: failed to base64-decode `source_tree[{idx}]` (path `{path}`): {e}"
+            ))
+        })?;
+        // Reject anything that escapes the package directory — `..`
+        // segments and absolute paths would break out of the
+        // materialised tree under `packages/<name>/`.
+        let p = PathBuf::from(path);
+        if p.is_absolute()
+            || p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: `source_tree[{idx}].path` `{path}` must be relative and stay inside the package directory"
+            )));
+        }
+        if files.insert(p, content).is_some() {
+            return Err(BuildError::EnvironmentBuildFailed(format!(
+                "RuntimePackage `{name}`: duplicate `source_tree[{idx}].path` `{path}`"
+            )));
+        }
+    }
+
+    Ok(ParsedHandlerPackage {
+        name,
+        materialization: PackageMaterialization { files },
+    })
+}
+
 fn map_dispatch_failure(error_kind: &str, message: String) -> RunError {
     match error_kind {
         "method_signature_mismatch" => RunError::MethodSignatureMismatch(message),
@@ -1042,6 +1197,129 @@ mod tests {
         match err {
             BuildError::EnvironmentBuildFailed(msg) => {
                 assert!(msg.contains("library_content"), "got: {msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    // ─── runtime_package_to_materialization ────────────────────────
+
+    /// Build a `RuntimePackage` Resource carrying the given files
+    /// (path → string content). The content is base64-encoded into
+    /// the JSON `source_tree` shape the parser expects.
+    fn build_package_resource(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Resource {
+        // Minimal base64 helper that mirrors the production decoder's
+        // input shape — `STANDARD` charset, '=' padding.
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        fn encode(input: &[u8]) -> String {
+            let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+            for chunk in input.chunks(3) {
+                let b0 = chunk[0];
+                let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+                let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+                out.push(ALPHABET[(b0 >> 2) as usize] as char);
+                out.push(ALPHABET[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+                if chunk.len() > 1 {
+                    out.push(ALPHABET[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+                if chunk.len() > 2 {
+                    out.push(ALPHABET[(b2 & 0x3f) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+            }
+            out
+        }
+        let mut r = Resource::new(
+            Iri::parse(&format!("urn:eigenius:test:pkg:{name}")).expect("static IRI"),
+        );
+        r.set(
+            Iri::parse(PROP_PACKAGE_NAME).unwrap(),
+            Value::String(name.to_string()),
+        );
+        r.set(
+            Iri::parse(PROP_PACKAGE_MANIFEST).unwrap(),
+            Value::String(manifest.to_string()),
+        );
+        let entries: Vec<serde_json::Value> = files
+            .iter()
+            .map(|(path, bytes)| {
+                serde_json::json!({
+                    "path": path,
+                    "content_base64": encode(bytes),
+                })
+            })
+            .collect();
+        r.set(
+            Iri::parse(PROP_PACKAGE_SOURCE_TREE).unwrap(),
+            Value::Json(serde_json::Value::Array(entries)),
+        );
+        r
+    }
+
+    #[test]
+    fn runtime_package_to_materialization_round_trips_files() {
+        let manifest = "name = \"EigeniusIntervals\"\nuuid = \"...\"\n";
+        let src = b"module EigeniusIntervals end\n";
+        let r = build_package_resource(
+            "EigeniusIntervals",
+            manifest,
+            &[("src/EigeniusIntervals.jl", src)],
+        );
+        let parsed = runtime_package_to_materialization(&r).expect("parse");
+        assert_eq!(parsed.name, "EigeniusIntervals");
+        // Project.toml comes from `manifest`, src/ files from
+        // `source_tree`; both materialised under the package directory.
+        let project_bytes = parsed
+            .materialization
+            .files
+            .get(&PathBuf::from("Project.toml"))
+            .expect("Project.toml present");
+        assert_eq!(project_bytes, manifest.as_bytes());
+        let jl_bytes = parsed
+            .materialization
+            .files
+            .get(&PathBuf::from("src/EigeniusIntervals.jl"))
+            .expect("source file present");
+        assert_eq!(jl_bytes, src);
+    }
+
+    #[test]
+    fn runtime_package_to_materialization_rejects_path_escape() {
+        // `..` segments must be rejected — they'd materialise files
+        // outside the package directory under `packages/<name>/`.
+        let r = build_package_resource(
+            "BadPkg",
+            "name = \"BadPkg\"\n",
+            &[("../escape.jl", b"oops")],
+        );
+        let err = runtime_package_to_materialization(&r).expect_err("path escape must fail");
+        match err {
+            BuildError::EnvironmentBuildFailed(msg) => {
+                assert!(msg.contains("must be relative"), "got: {msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn runtime_package_to_materialization_rejects_missing_source_tree() {
+        let mut r = Resource::new(Iri::parse("urn:eigenius:test:pkg:NoSrc").unwrap());
+        r.set(
+            Iri::parse(PROP_PACKAGE_NAME).unwrap(),
+            Value::String("NoSrc".into()),
+        );
+        r.set(
+            Iri::parse(PROP_PACKAGE_MANIFEST).unwrap(),
+            Value::String("name = \"NoSrc\"\n".into()),
+        );
+        let err =
+            runtime_package_to_materialization(&r).expect_err("missing source_tree must fail");
+        match err {
+            BuildError::EnvironmentBuildFailed(msg) => {
+                assert!(msg.contains("source_tree"), "got: {msg}");
             }
             other => panic!("unexpected error: {other:?}"),
         }

@@ -51,6 +51,13 @@ pub struct JuliaImagePlan {
     /// post-instantiate `Pkg.develop` + `Pkg.precompile` so the mirror
     /// is precompiled at image-build time, not at first dispatch.
     pub include_mirror: bool,
+    /// Names of institution handler packages baked under
+    /// `/opt/eigenius/packages/<name>/` alongside `EigeniusJuliaCommon`.
+    /// Each gets a `Pkg.develop` call so its `[deps]` (e.g.
+    /// `IntervalArithmetic.jl` for `EigeniusIntervals`) resolve
+    /// into the worker's manifest at instantiate time. Order is
+    /// preserved for deterministic dockerfile output.
+    pub handler_packages: Vec<String>,
 }
 
 /// Dockerfile fragments for a Julia env image extending an upstream
@@ -92,6 +99,16 @@ fn install_packages_lines(plan: &JuliaImagePlan) -> Vec<String> {
     if plan.include_common {
         script.push_str(&format!("Pkg.develop(path=\"{common_path}\"); "));
     }
+    // Develop each institution handler package after Common so
+    // packages that depend on `EigeniusJuliaCommon` (the typical
+    // mirror-importing case) see it on the load path. Each handler
+    // package's own `[deps]` join the active project; `Pkg.instantiate`
+    // below pulls in their registry deps (e.g. `IntervalArithmetic`).
+    for name in &plan.handler_packages {
+        script.push_str(&format!(
+            "Pkg.develop(path=\"{PACKAGES_IN_IMAGE}/{name}\"); "
+        ));
+    }
     script.push_str("Pkg.instantiate(); Pkg.precompile()");
     vec![format!(
         "RUN JULIA_PKG_PRECOMPILE_AUTO=0 julia --project={WORKER_PROJECT_DIR} -e '{script}'"
@@ -127,6 +144,7 @@ mod tests {
         let f = julia_dockerfile_fragments(&JuliaImagePlan {
             include_common: true,
             include_mirror: false,
+            handler_packages: Vec::new(),
         });
         assert!(f.install_mirror.is_empty());
         assert!(f.install_packages[0]
@@ -141,11 +159,47 @@ mod tests {
         let f = julia_dockerfile_fragments(&JuliaImagePlan {
             include_common: true,
             include_mirror: true,
+            handler_packages: Vec::new(),
         });
         assert_eq!(f.install_mirror.len(), 1);
         assert!(f.install_mirror[0].contains("Pkg.develop(path=\"/opt/eigenius/mirror\")"));
         // install_packages never references the mirror path.
         assert!(!f.install_packages[0].contains("/opt/eigenius/mirror"));
+    }
+
+    #[test]
+    fn handler_packages_get_pkg_develop_after_common() {
+        let f = julia_dockerfile_fragments(&JuliaImagePlan {
+            include_common: true,
+            include_mirror: false,
+            handler_packages: vec!["EigeniusIntervals".to_string()],
+        });
+        let line = &f.install_packages[0];
+        assert!(line.contains("Pkg.develop(path=\"/opt/eigenius/packages/EigeniusJuliaCommon\")"));
+        assert!(line.contains("Pkg.develop(path=\"/opt/eigenius/packages/EigeniusIntervals\")"));
+        // Common comes before handler packages so handlers that
+        // import it find the load path already populated.
+        let common_pos = line.find("EigeniusJuliaCommon").unwrap();
+        let intervals_pos = line.find("EigeniusIntervals").unwrap();
+        assert!(common_pos < intervals_pos);
+        assert!(line.contains("Pkg.instantiate()"));
+    }
+
+    #[test]
+    fn handler_packages_listed_in_declaration_order() {
+        let f = julia_dockerfile_fragments(&JuliaImagePlan {
+            include_common: true,
+            include_mirror: false,
+            handler_packages: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        });
+        let line = &f.install_packages[0];
+        let a = line.find("packages/A\"").unwrap();
+        let b = line.find("packages/B\"").unwrap();
+        let c = line.find("packages/C\"").unwrap();
+        assert!(
+            a < b && b < c,
+            "handler packages must keep declaration order"
+        );
     }
 
     #[test]
