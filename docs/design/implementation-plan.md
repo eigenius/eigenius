@@ -1481,7 +1481,7 @@ The work is split into five sub-milestones (a–e). Sub-milestones a–d build t
 
 **Tasks.**
 1. Wire shape exactly per D31 §6.2 — list-of-CBOR for inputs (Sigma-lowering happens in the kernel before the request).
-2. Channel mechanics: bi-directional gRPC stream is the cleanest, but starting simpler with a synchronous round-trip from kernel back to orchestrator over the same connection that initiated the commit. Kernel maintains a "pending external dispatches" map keyed on invocation_id; orchestrator reads them via a `PollExternalDispatches` RPC, services them, returns results via `CompleteExternalDispatch`.
+2. Channel mechanics: regular request/response gRPC. Kernel already holds an `orchestrator_client` ([kernel/src/server/mod.rs:1051](../../kernel/src/server/mod.rs#L1051)) for IO-WASM-component registration and dispatch — same pattern reused for `DispatchExternal`. The orchestrator's gRPC server gains a new RPC method; the kernel's institution dispatch path calls it via the existing client. No streaming, no polling.
 3. Failure path mapping per [D31 §6.4](d31-external-institution-lifecycle.md#64-failure-paths) — orchestrator unreachable → `ExternalDispatchUnavailable`; substrate failed → Verdict.Fails with diagnostic; etc.
 4. Tests: integration test with a stub external institution that always returns Verdict.Holds; verify the kernel-orchestrator round-trip works end-to-end.
 

@@ -638,5 +638,15 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeMethodSignature"],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:DispatchedTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:requires_environment",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the RuntimeEnvironment this institution dispatches into. Required for institutions whose `runtime` is `external` — the kernel resolves the env's `image_digest` and forwards it to the orchestrator on every DispatchExternal call (D31 §5 / §6.2). Declared in the runtime layer (rather than institution) because RuntimeEnvironment is defined here.",
+    "urn:eigenius:core:short_name": "requires_environment",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeEnvironment"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
   }
 ]

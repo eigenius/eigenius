@@ -442,7 +442,7 @@ The dispatch flow:
        |<──── LoadResponse ───────|                                  |                            |                          |
 ```
 
-The kernel's `Institution::query` for `runtime: external` is *not* a Rust trait impl that does work in-kernel. It's a marker that says "this institution dispatches via the orchestrator." When the kernel's commit pipeline encounters one, it pauses (mid-RPC, with the orchestrator's Load call still in-flight) and emits `DispatchExternalRequest` back to the orchestrator on a separate channel. The orchestrator's existing IO-component plumbing is the natural home — the kernel already has a kernel→orchestrator dispatch RPC for `CompleteText` etc.
+The kernel's `Institution::query` for `runtime: external` is *not* a Rust trait impl that does work in-kernel. It's a marker that says "this institution dispatches via the orchestrator." When the kernel's commit pipeline encounters one, the kernel makes an outbound gRPC call to the orchestrator's server (`orchestrator_client.dispatch_external(...)`), waits for the response, applies the gate, and continues the commit. Same pattern the kernel already uses for IO WASM components ([kernel/src/server/mod.rs:1051](../../kernel/src/server/mod.rs#L1051) — the `orchestrator_client` field — and `RegisterWasmComponent` / IO component execution use it). Regular request/response gRPC; no streaming, no polling, no two-phase commit semantics.
 
 ### 6.2 Wire shape
 

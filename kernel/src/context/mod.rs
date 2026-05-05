@@ -250,6 +250,29 @@ impl ExecutionContext {
             return Err(ContextError::ValidationFailed(errors));
         }
 
+        // D31 §5 install-time cross-check — every external Institution
+        // declaration in the new layer must resolve its env_ref, image
+        // digest, and per-QueryClass dispatch metadata against the
+        // chain. Run before head promotion so an incomplete external
+        // institution fails the Load cleanly rather than landing in
+        // the chain and surfacing only at runtime.
+        let new_index = crate::institution::registry::InstitutionIndex::from_layer(&new_layer).0;
+        let (_, ext_errors) = crate::capability::registration::validate_external_institution_chain(
+            &new_layer, &new_index,
+        );
+        if !ext_errors.is_empty() {
+            let mapped: Vec<crate::validation::ValidationError> = ext_errors
+                .into_iter()
+                .map(|e| crate::validation::ValidationError {
+                    resource_id: Iri::parse(&e.institution_iri).ok(),
+                    property: None,
+                    rule: crate::validation::ValidationRule::InstitutionValidation,
+                    message: e.message,
+                })
+                .collect();
+            return Err(ContextError::ValidationFailed(mapped));
+        }
+
         // Promote head to the new layer so AutoOnLoad QueryClasses can
         // resolve cross-references freshly loaded in the same batch.
         let prior_head = std::mem::replace(&mut self.head, Arc::clone(&new_layer));

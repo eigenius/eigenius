@@ -837,8 +837,12 @@ name = "eigenius-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "eigenius-julia",
  "eigenius-kernel",
+ "eigenius-runtime-substrate",
  "eigenius-storage-rocksdb",
+ "futures",
+ "humantime",
  "serde_json",
  "tokio",
  "tonic 0.12.3",

@@ -52,6 +52,11 @@ pub struct InstitutionEntry {
     pub iri: Iri,
     pub name: String,
     pub runtime: Option<RuntimeKind>,
+    /// IRI of the `RuntimeEnvironment` this institution dispatches
+    /// into. Carried for `runtime: external` institutions (D31 §5);
+    /// `None` for WASM and in-process kinds. Resolved from the
+    /// `requires_environment` property at index time.
+    pub requires_environment: Option<Iri>,
 }
 
 /// One declared `ExportFormat` — a typed outbound view of a source
@@ -463,10 +468,16 @@ fn parse_institution(resource: &Resource) -> Result<InstitutionEntry, String> {
     let runtime = optional_iri_property(resource, wk::RUNTIME, "Institution.runtime")?
         .map(|i| parse_runtime_kind(i.as_str()))
         .transpose()?;
+    let requires_environment = optional_iri_property(
+        resource,
+        wk::INSTITUTION_REQUIRES_ENVIRONMENT,
+        "Institution.requires_environment",
+    )?;
     Ok(InstitutionEntry {
         iri: institution_iri,
         name,
         runtime,
+        requires_environment,
     })
 }
 

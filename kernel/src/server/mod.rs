@@ -836,17 +836,45 @@ impl EigeniusService {
                 "institution-index parse error"
             );
         }
-        *self.institution_index.write().await = Arc::new(idx);
+        let idx_arc = Arc::new(idx);
+        *self.institution_index.write().await = Arc::clone(&idx_arc);
 
-        // Rebuild the runtime from chain-declared WASM institutions.
-        let (runtime, report) =
+        // Rebuild the runtime from chain-declared WASM institutions,
+        // then layer in any external-runtime institutions (D31 §5).
+        let (mut runtime, mut report) =
             crate::capability::registration::build_wasm_institution_runtime(layer);
+        if let Some(client) = self.orchestrator_client.as_ref() {
+            crate::capability::registration::register_external_institutions(
+                layer,
+                idx_arc.as_ref(),
+                &mut runtime,
+                Arc::clone(client),
+                &mut report,
+            );
+        } else {
+            // No orchestrator wired — external institutions cannot
+            // dispatch. Surface this once per rebuild rather than per
+            // institution so the operator sees it.
+            let has_external = idx_arc.institutions().any(|e| {
+                matches!(
+                    e.runtime,
+                    Some(crate::institution::registry::RuntimeKind::External)
+                )
+            });
+            if has_external {
+                tracing::warn!(
+                    { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                    "chain declares `runtime: external` institutions but the kernel was started \
+                     without --orchestrator; their dispatch will fail"
+                );
+            }
+        }
         for err in &report.errors {
             tracing::warn!(
                 { field::OPERATION } = operation::INSTITUTION_REGISTER,
                 resource_iri = %err.resource_iri,
                 { field::ERROR_MESSAGE } = %err.message,
-                "WASM institution registration error"
+                "institution registration error"
             );
         }
         for inst_iri in &report.institutions_registered {
@@ -854,7 +882,7 @@ impl EigeniusService {
                 { field::OPERATION } = operation::INSTITUTION_REGISTER,
                 { field::INSTITUTION_IRI } = %inst_iri,
                 host = "kernel",
-                "registered WASM institution"
+                "registered institution"
             );
         }
         *self.institution_runtime.write().await = Arc::new(runtime);

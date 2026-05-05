@@ -15,6 +15,9 @@
 //! Eigenius CLI — primary developer interface for the Eigenius platform.
 
 use clap::{Parser, Subcommand};
+
+// Phase 19a.5 (D31): mirror / env / institution lifecycle CLI verbs.
+mod d31;
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::layer::LayerBuilder;
 use eigenius_kernel::ontology::{eigon_json, Iri};
@@ -178,6 +181,24 @@ enum Commands {
         command: CapabilityCommands,
     },
 
+    /// Manage runtime package mirrors (D31 §3, Phase 19a.5.a)
+    Mirror {
+        #[command(subcommand)]
+        command: MirrorCommands,
+    },
+
+    /// Manage runtime environments (D31 §4.2, Phase 19a.5.b)
+    Env {
+        #[command(subcommand)]
+        command: EnvCommands,
+    },
+
+    /// Manage external institutions (D31 §5, Phase 19a.5.e)
+    Institution {
+        #[command(subcommand)]
+        command: InstitutionCommands,
+    },
+
     /// Inspect and control persisted tasks (D21). Remote mode only.
     Tasks {
         #[command(subcommand)]
@@ -315,6 +336,128 @@ enum CapabilityCommands {
 }
 
 #[derive(Subcommand)]
+enum MirrorCommands {
+    /// Generate a mirror against a layer and commit the RuntimePackageMirror to the chain.
+    Create {
+        /// IRI of the layer the mirror anchors to.
+        #[arg(long, value_name = "LAYER_IRI")]
+        layer: String,
+
+        /// Inline EigenQL query selecting class IRIs (mutually exclusive with --filter-file).
+        #[arg(long, value_name = "EIGENQL", conflicts_with = "filter_file")]
+        filter: Option<String>,
+
+        /// Path to a file containing the EigenQL filter query.
+        #[arg(long, value_name = "FILE")]
+        filter_file: Option<String>,
+
+        /// Target language: julia (other languages are planned per D31 §7).
+        #[arg(long, value_name = "LANG", default_value = "julia")]
+        language: String,
+
+        /// Output directory the source files will be written to (D31 §3.2).
+        #[arg(long, value_name = "DIR")]
+        output: String,
+    },
+
+    /// Retrieve a previously-created mirror's source files (D31 §3.5). No commit.
+    Get {
+        /// IRI of the RuntimePackageMirror to fetch.
+        #[arg(long, value_name = "MIRROR_IRI")]
+        iri: String,
+
+        /// Output directory the source files will be written to.
+        #[arg(long, value_name = "DIR")]
+        output: String,
+    },
+
+    /// List committed mirrors.
+    List {
+        /// Optional language filter.
+        #[arg(long, value_name = "LANG")]
+        language: Option<String>,
+    },
+
+    /// Inspect a mirror's metadata.
+    Inspect {
+        /// IRI of the RuntimePackageMirror.
+        #[arg(value_name = "MIRROR_IRI")]
+        iri: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum EnvCommands {
+    /// Build a runtime environment image and commit a RuntimeEnvironment resource.
+    Create {
+        /// Target language: julia (others planned per D31 §7).
+        #[arg(long, value_name = "LANG", default_value = "julia")]
+        language: String,
+
+        /// Path to the developer's handler-package directory (D31 §4.1).
+        #[arg(long, value_name = "DIR")]
+        handler_package: String,
+
+        /// IRI of a previously-committed RuntimePackageMirror to bake in.
+        #[arg(long, value_name = "MIRROR_IRI")]
+        mirror: String,
+
+        /// Extra package directories to bake in as path-deps (repeatable).
+        #[arg(long, value_name = "DIR")]
+        include_package: Vec<String>,
+
+        /// IRI to commit the RuntimeEnvironment under.
+        #[arg(long, value_name = "ENV_IRI")]
+        as_iri: String,
+
+        /// Override the language's default base image (e.g. `julia:1.12-bookworm@sha256:...`).
+        #[arg(long, value_name = "REF")]
+        base_image: Option<String>,
+
+        /// Image digest of a pre-built env image (`sha256:...`). v1 of
+        /// `env create` commits the RuntimeEnvironment resource against
+        /// this digest; the integrated image-build path lands in a
+        /// follow-up milestone (D31 §4.2 / Phase 19a.5.b proper).
+        #[arg(long, value_name = "DIGEST")]
+        image_digest: String,
+    },
+
+    /// List committed environments.
+    List {
+        /// Optional language filter.
+        #[arg(long, value_name = "LANG")]
+        language: Option<String>,
+    },
+
+    /// Inspect a runtime environment's metadata.
+    Inspect {
+        /// IRI of the RuntimeEnvironment.
+        #[arg(value_name = "ENV_IRI")]
+        iri: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum InstitutionCommands {
+    /// Install an institution by submitting its definition to the chain.
+    Install {
+        /// Path to the Eigon-JSON / ESL definition file (D31 §5.2).
+        #[arg(long, value_name = "FILE")]
+        definition: String,
+    },
+
+    /// List installed institutions.
+    List,
+
+    /// Inspect an institution's declarations.
+    Inspect {
+        /// IRI of the Institution resource.
+        #[arg(value_name = "IRI")]
+        iri: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum DbCommands {
     /// Print storage statistics
     Stats {
@@ -406,6 +549,11 @@ async fn main() {
             Commands::Capability { command } => {
                 remote_capability(endpoint, command, cli.json).await
             }
+            Commands::Mirror { command } => remote_mirror(endpoint, command, cli.json).await,
+            Commands::Env { command } => remote_env(endpoint, command, cli.json).await,
+            Commands::Institution { command } => {
+                remote_institution(endpoint, command, cli.json).await
+            }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
             Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
             Commands::Serve { .. } => {
@@ -452,6 +600,18 @@ async fn main() {
         }
         Commands::Capability { .. } => {
             eprintln!("'capability' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Mirror { .. } => {
+            eprintln!("'mirror' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Env { .. } => {
+            eprintln!("'env' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Institution { .. } => {
+            eprintln!("'institution' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Tasks { .. } => {
@@ -994,7 +1154,9 @@ fn content_type_for_file(file: &str) -> String {
 
 use eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient;
 
-async fn connect_client(endpoint: &str) -> EigeniusKernelClient<tonic::transport::Channel> {
+pub(crate) async fn connect_client(
+    endpoint: &str,
+) -> EigeniusKernelClient<tonic::transport::Channel> {
     let channel = tonic::transport::Endpoint::from_shared(endpoint.to_string())
         .unwrap_or_else(|e| {
             eprintln!("Invalid endpoint '{endpoint}': {e}");
@@ -1572,6 +1734,75 @@ async fn remote_branch_delete(endpoint: &str, name: &str, force: bool, json_outp
     }
 }
 
+async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
+    match command {
+        MirrorCommands::Create {
+            layer,
+            filter,
+            filter_file,
+            language,
+            output,
+        } => {
+            d31::mirror_create(
+                endpoint,
+                &layer,
+                filter.as_deref(),
+                filter_file.as_deref(),
+                &language,
+                &output,
+                json,
+            )
+            .await
+        }
+        MirrorCommands::Get { iri, output } => d31::mirror_get(endpoint, &iri, &output, json).await,
+        MirrorCommands::List { language } => {
+            d31::mirror_list(endpoint, language.as_deref(), json).await
+        }
+        MirrorCommands::Inspect { iri } => d31::mirror_inspect(endpoint, &iri, json).await,
+    }
+}
+
+async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
+    match command {
+        EnvCommands::Create {
+            language,
+            handler_package,
+            mirror,
+            include_package,
+            as_iri,
+            base_image,
+            image_digest,
+        } => {
+            d31::env_create(
+                endpoint,
+                &language,
+                &handler_package,
+                &mirror,
+                &include_package,
+                &as_iri,
+                base_image.as_deref(),
+                &image_digest,
+                json,
+            )
+            .await
+        }
+        EnvCommands::List { language } => d31::env_list(endpoint, language.as_deref(), json).await,
+        EnvCommands::Inspect { iri } => d31::env_inspect(endpoint, &iri, json).await,
+    }
+}
+
+async fn remote_institution(endpoint: &str, command: InstitutionCommands, json: bool) {
+    match command {
+        InstitutionCommands::Install { definition } => {
+            d31::institution_install(endpoint, &definition, json).await
+        }
+        InstitutionCommands::List => d31::institution_list(endpoint, json).await,
+        InstitutionCommands::Inspect { iri } => {
+            d31::institution_inspect(endpoint, &iri, json).await
+        }
+    }
+}
+
 async fn remote_capability(endpoint: &str, command: CapabilityCommands, json: bool) {
     match command {
         CapabilityCommands::List => remote_capability_list(endpoint, json).await,
@@ -1674,7 +1905,7 @@ async fn remote_capability_list(endpoint: &str, json: bool) {
 ///
 /// Callers access values by the short name they put in the RETURN clause
 /// — e.g. `row.get("iri")` when the query said `RETURN [] { iri: ?c }`.
-async fn run_query(
+pub(crate) async fn run_query(
     client: &mut eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient<
         tonic::transport::Channel,
     >,

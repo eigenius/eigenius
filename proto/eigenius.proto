@@ -259,6 +259,16 @@ service ComponentExecutor {
   // binary (jco) and instantiates it when Execute is called.
   rpc RegisterWasmComponent(RegisterWasmComponentRequest)
       returns (RegisterWasmComponentResponse);
+
+  // D31 §6.2 — Phase 19a.5.c. Dispatch an external-runtime institution
+  // procedure. Called by the kernel during commit-time AutoOnLoad
+  // gating (and during query / Decidable evaluation) when the matched
+  // institution declares `runtime: external`. The orchestrator routes
+  // the call into the substrate (DockerServiceSpawner + Julia worker),
+  // returns the institution-produced output (e.g. a Verdict resource)
+  // alongside the partial RuntimeInvocation provenance.
+  rpc DispatchExternal(DispatchExternalRequest)
+      returns (DispatchExternalResponse);
 }
 
 message RegisterWasmComponentRequest {
@@ -293,6 +303,57 @@ message ComponentMetrics {
   int64 prompt_tokens = 3;
   int64 completion_tokens = 4;
   int64 latency_ms = 5;
+}
+
+// --- D31 §6.2 — External Institution Dispatch (Phase 19a.5.c) ---
+
+message DispatchExternalRequest {
+  // Substrate-assigned correlation ID for the invocation. Carried
+  // through to RuntimeInvocation provenance.
+  string invocation_id = 1;
+
+  // IRI of the Institution being dispatched. For logging / audit
+  // only; the orchestrator routes by env_iri + image_digest below.
+  string institution_iri = 2;
+
+  // IRI of the RuntimeEnvironment the institution declares. The
+  // orchestrator looks up the env's image_digest from the chain (or
+  // uses the value sent in `image_digest` directly).
+  string env_iri = 3;
+
+  // Image digest the worker should run against (`sha256:...`). Set
+  // alongside env_iri so the orchestrator doesn't need an extra
+  // chain query during dispatch.
+  string image_digest = 4;
+
+  // Function name the worker resolves in `Main` after handler-package
+  // `using` import. Maps to D29 §8.5's worker dispatch convention.
+  string method_name = 5;
+
+  // IRI of the RuntimeMethodSignature this dispatch satisfies.
+  // Recorded on the RuntimeInvocation's `script` property.
+  string signature_iri = 6;
+
+  // CBOR-encoded mirror struct values, in argument order. For
+  // AutoOnLoad / Decidable QueryClass dispatches this is a single-
+  // element list (the gated subject). For OnDemand / CallRuntimeMethod
+  // surfaces this carries the Sigma-lowered components per
+  // D31 §6.5.
+  repeated bytes input_resource_cbors = 7;
+}
+
+message DispatchExternalResponse {
+  // CBOR-encoded output resource. For AutoOnLoad / Decidable this is
+  // a Verdict resource (Holds | Fails | Undecidable per D31 §6.3).
+  // For OnDemand / CallRuntimeMethod it's the QueryClass.result_class
+  // instance.
+  bytes output_resource_cbor = 1;
+
+  // CBOR-encoded partial RuntimeInvocation carrying the substrate-
+  // captured trace fields: dispatched_to (Julia's `which()`),
+  // image_digest, started_at / completed_at (RFC3339), and
+  // numerical_metadata (host kernel, FMA flag, BLAS version).
+  bytes runtime_invocation_partial_cbor = 2;
 }
 
 // --- Institution Protocol (D14) ---

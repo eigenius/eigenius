@@ -133,6 +133,20 @@ pub const DISPATCH_AUTO_ON_LOAD: &str = "urn:eigenius:institution:dispatch_roles
 /// the prior `decide` mechanism.
 pub const DISPATCH_DECIDABLE: &str = "urn:eigenius:institution:dispatch_roles:decidable";
 
+/// `requires_environment` property on an Institution — IRI of a
+/// `RuntimeEnvironment` resource the institution dispatches into.
+/// Required for institutions whose `runtime` is `external` (D31 §5).
+pub const INSTITUTION_REQUIRES_ENVIRONMENT: &str = "urn:eigenius:institution:requires_environment";
+
+/// `image_digest` property on a `RuntimeEnvironment` — the
+/// content-addressed worker image (`sha256:...`) the substrate
+/// dispatches into.
+pub const RUNTIME_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+
+/// `method_name` property on a `RuntimeMethodSignature` — the symbol
+/// the worker resolves in `Main` after handler-package `using` import.
+pub const RUNTIME_METHOD_NAME: &str = "urn:eigenius:runtime:method_name";
+
 /// is_a marker for the `Verdict` inductive type — the tri-state
 /// outcome of an institution-bound predicate query (D14 §6.1).
 pub const VERDICT: &str = "urn:eigenius:institution:Verdict";
