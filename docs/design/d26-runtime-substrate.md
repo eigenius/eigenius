@@ -419,7 +419,7 @@ Each language's faithful-translation specification is a finite document mapping 
 | `data_type: integer` / `float` / `boolean` / `string` | Language primitives |
 | Format constraints | Constructor-level validation that raises on violation |
 
-Per-language docs flesh this out for their own translation.
+Per-language docs flesh this out for their own translation. Julia: [D29](d29-eigon-julia-mirror-spec.md). Lean: D30 (planned alongside `eigon-ffi-gen`).
 
 ### 7.5 The boundary check
 

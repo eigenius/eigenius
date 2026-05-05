@@ -83,14 +83,29 @@ end
 """
     validate_pattern(field::Symbol, value::AbstractString, pattern::AbstractString)
 
-Raises `ArgumentError` if `value` does not fully match the regex
-`pattern` (ECMA 262 syntax — Julia's `Regex` is PCRE-ish; the
-substrate-side spec does the conversion). The regex is anchored
-(`^…\$` is implied by the kernel ontology semantics; the generator
-does not add anchors itself).
+Raises `ArgumentError` if `value` does not *fully* match the regex
+`pattern`. Anchoring is applied by this function — the user-supplied
+pattern is wrapped as `^(?:<pattern>)\$` before compilation, matching
+the kernel-side validator's semantics in
+`kernel/src/validation/mod.rs::check_pattern`. Pinned by D29 §9.4.
+
+Pattern syntax must use the portable subset of ECMA 262 features
+supported by both Rust's `regex` crate and Julia's PCRE-derived
+`Regex` — see D29 §9.5 for the exact subset and the PCRE-only
+features that are NOT portable.
 """
 function validate_pattern(field::Symbol, value::AbstractString, pattern::AbstractString)
-    re = Regex(pattern)
+    # Wrap in `^(?:…)$` so the user's pattern is treated as a full
+    # match. A non-capturing group around the user's pattern keeps
+    # alternation (`a|b`) anchored as a unit, not just at the leading
+    # `a` and trailing `b`.
+    anchored = "^(?:" * pattern * ")\$"
+    re = try
+        Regex(anchored)
+    catch e
+        throw(ArgumentError(
+            "$field has invalid regex pattern \\\"$pattern\\\": $e"))
+    end
     occursin(re, value) || throw(ArgumentError(
         "$field must match pattern \\\"$pattern\\\", got $(repr(value))"))
 end

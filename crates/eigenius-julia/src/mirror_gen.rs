@@ -84,6 +84,7 @@ const TARGET_PACKAGE_VERSION: &str = "0.1.0";
 const PROP_SHORT_NAME: &str = "urn:eigenius:core:short_name";
 const PROP_REQUIRES: &str = "urn:eigenius:core:requires";
 const PROP_RECOMMENDS: &str = "urn:eigenius:core:recommends";
+const PROP_SUBCLASS_OF: &str = "urn:eigenius:core:subclass_of";
 const PROP_DATA_TYPE: &str = "urn:eigenius:core:data_type";
 const PROP_CLASS_TYPES: &str = "urn:eigenius:core:class_types";
 const PROP_ELEMENT_TYPE: &str = "urn:eigenius:core:element_type";
@@ -106,6 +107,17 @@ const TYPE_JSON: &str = "urn:eigenius:core:json";
 /// Property IRI we stamp on every encoded resource so the receiver can
 /// re-validate the class. Mirrors the kernel's `is_a` convention.
 const PROP_IS_A: &str = "urn:eigenius:core:is_a";
+
+/// JSON-LD-shaped key for resource identity in the codec dict shape.
+/// Per D29 §8.4 the mirror struct exposes this as the `_id` field
+/// (a recommended-style optional slot) so a chain resource's IRI
+/// round-trips through decode/encode.
+const KEY_AT_ID: &str = "@id";
+
+/// Reserved property short_name. The mirror generator owns this slot
+/// for the `@id` round-trip; ontology authors must not declare a
+/// property with this short_name. Pinned by D29 §11.1.
+const RESERVED_FIELD_ID: &str = "_id";
 
 /// Prefix for format IRIs in the core ontology. Format IRIs end in
 /// the format short_name (e.g. `urn:eigenius:core:formats:date` →
@@ -185,24 +197,49 @@ impl MirrorGenerator for JuliaMirrorGenerator {
         request: &MirrorGenerationRequest,
     ) -> Result<MirrorGenerationOutput, MirrorGeneratorError> {
         // 1. Collect closure: walk seed_classes transitively through
-        //    resource-typed properties' class_types.
+        //    resource-typed properties' class_types and through every
+        //    class's `subclass_of` ancestors (D29 §3.1, §3.2).
         let closure = walk_closure(request)?;
 
         // 2. Resolve each class in the closure and gather its property
         //    metadata. Indexed by class IRI for stable lookup.
+        //    Multi-supertype classes are rejected at this step.
         let class_decls = resolve_class_declarations(request, &closure)?;
 
-        // 3. Topologically sort classes so a struct's referenced
-        //    structs are declared before it. Stable on tie (by IRI).
-        let order = topological_order(&class_decls);
+        // 3. Compute the transitive field layout per class (own +
+        //    inherited via subclass_of, deduplicated by property IRI
+        //    with first-declared winning, short_name conflicts
+        //    rejected). Per D29 §11.1.
+        let layouts = compute_class_layouts(&class_decls)?;
 
-        // 4. Emit the Julia source + the Project.toml that turns it
+        // 4. Build the parent → concrete-descendants map driving
+        //    codec helper emission (D29 §8.3) and union-type leaves.
+        let concrete_descendants = compute_concrete_descendants(&class_decls);
+
+        // 5. Topologically sort:
+        //    - Abstract types: parent before child via subclass_of.
+        //    - Concrete structs: a class's struct after every class
+        //      its fields reference (Julia struct field types must
+        //      resolve at parse time; `Abstract<X>` declarations are
+        //      already emitted by Phase 1, so this only constrains
+        //      struct-vs-struct referencing).
+        let abstract_order = abstract_emission_order(&class_decls)?;
+        let struct_order = topological_order(&class_decls)?;
+
+        // 6. Emit the Julia source + the Project.toml that turns it
         //    into an installable Julia package.
-        let source = emit_module(&class_decls, &order, request);
+        let source = emit_module(
+            &class_decls,
+            &layouts,
+            &abstract_order,
+            &struct_order,
+            &concrete_descendants,
+            request,
+        );
         let project_toml = emit_project_toml();
 
         Ok(MirrorGenerationOutput {
-            mirrored_classes: order.to_vec(),
+            mirrored_classes: struct_order.to_vec(),
             library: LibraryContent::Embedded(vec![
                 LibraryFile {
                     path: TARGET_PROJECT_TOML_PATH.to_string(),
@@ -434,15 +471,26 @@ fn derive_mirror_iri(library_content_hash: &str) -> Iri {
 
 /// Class declaration in the form the emitter consumes. `requires` and
 /// `recommends` are pre-resolved to property declarations so the
-/// emitter doesn't re-walk the chain.
+/// emitter doesn't re-walk the chain. Multi-supertype is rejected at
+/// resolution time (D29 §3.2 / §11.1) so `subclass_of` is at most one.
 struct ClassDecl {
     iri: Iri,
     short_name: String,
+    /// The class's directly-declared `requires` (in declaration
+    /// order). The full inherited field set is computed separately
+    /// in [`compute_class_layout`] using the abstract-class chain.
     requires: Vec<PropertyDecl>,
+    /// The class's directly-declared `recommends` (in declaration
+    /// order).
     recommends: Vec<PropertyDecl>,
+    /// Direct supertype IRI, when this class declares
+    /// `core:subclass_of`. At most one entry — multi-supertype is
+    /// rejected at resolution time.
+    subclass_of: Option<Iri>,
 }
 
 /// One property's contribution to a struct field.
+#[derive(Clone)]
 struct PropertyDecl {
     /// Property IRI — keys the `decode_*` / `encode_*` map lookups.
     iri: Iri,
@@ -457,55 +505,142 @@ struct PropertyDecl {
 /// per-data-type semantics (e.g. `min_value` only meaningful for
 /// integer / float properties) are enforced by the ontology validator
 /// at commit time, not by the generator.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct PropertyConstraints {
     min_value: Option<f64>,
     max_value: Option<f64>,
     min_length: Option<i64>,
     max_length: Option<i64>,
     pattern: Option<String>,
-    /// Format short_name extracted from the format IRI's tail
-    /// (e.g. `"date"` from `urn:eigenius:core:formats:date`).
-    format: Option<String>,
+    /// Format reference, when the property declares `core:format`.
+    /// Renders to a Julia `Symbol` literal at validation time
+    /// (D29 §9.3): standard `urn:eigenius:core:formats:<name>`
+    /// IRIs become `:<name>` (e.g. `:date`); any other IRI is passed
+    /// through as `Symbol("<full IRI>")` so the validator can raise
+    /// loudly on unknown formats rather than the generator silently
+    /// dropping the constraint.
+    format: Option<FormatRef>,
 }
 
-/// The Julia type a property's `data_type` maps to. Only the cases
-/// the v1 emitter needs; format constraints don't affect the type
-/// here (they're handled by 19a.3.b's validating constructors).
+#[derive(Debug, Clone)]
+enum FormatRef {
+    /// IRI under `urn:eigenius:core:formats:` — the tail (e.g.
+    /// `"date"`) renders as `:date`.
+    Standard(String),
+    /// Any other format IRI — renders as `Symbol("<full IRI>")`.
+    Custom(String),
+}
+
+impl FormatRef {
+    /// Render as a Julia symbol expression for use as the third
+    /// argument to `validate_format`.
+    fn as_julia_symbol_expr(&self) -> String {
+        match self {
+            FormatRef::Standard(name) => format!(":{name}"),
+            FormatRef::Custom(iri) => format!("Symbol({})", julia_string_literal(iri)),
+        }
+    }
+}
+
+/// The Julia type a property's `data_type` maps to. Format
+/// constraints don't affect the type here (they're handled by the
+/// validating constructors in §9 of D29).
 #[derive(Debug, Clone)]
 enum JuliaType {
     Primitive(&'static str),
     /// Reference to another mirror struct by class IRI.
     StructRef(Iri),
-    /// `Vector{<inner>}` — only one level of nesting supported in v1.
+    /// `Union{<C₁>, …, <Cₙ>}` — emitted when a `core:resource` (or
+    /// the inner element of a `core:resource_array`) lists more than
+    /// one class in `class_types`. IRIs are stored in IRI-sort order
+    /// so the rendered Julia source is deterministic (D29 §4).
+    UnionRef(Vec<Iri>),
+    /// `Vector{<inner>}` — one level of nesting per v1.
     Vector(Box<JuliaType>),
 }
 
 impl JuliaType {
-    /// Render to a Julia type expression. `class_lookup` resolves
-    /// class IRIs to their short names (so `Compound` not the full
-    /// IRI shows up in the source).
+    /// Render to a Julia type expression — used in field declarations
+    /// and constructor signatures. Class references render as the
+    /// `Abstract<C>` slot from the abstract+struct pair (D29 §7), so
+    /// fields uniformly accept any concrete subtype of the declared
+    /// class.
     fn render(&self, class_lookup: &BTreeMap<Iri, String>) -> String {
         match self {
             JuliaType::Primitive(s) => (*s).to_string(),
-            JuliaType::StructRef(iri) => class_lookup
-                .get(iri)
-                .cloned()
-                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str())),
+            JuliaType::StructRef(iri) => class_abstract_name(iri, class_lookup),
+            JuliaType::UnionRef(iris) => {
+                let inners: Vec<String> = iris
+                    .iter()
+                    .map(|i| class_abstract_name(i, class_lookup))
+                    .collect();
+                format!("Union{{{}}}", inners.join(", "))
+            }
             JuliaType::Vector(inner) => {
                 format!("Vector{{{}}}", inner.render(class_lookup))
             }
         }
     }
 
-    /// Class IRIs the type references — drives the closure walker.
+    /// Class IRIs the type references — drives the closure walker,
+    /// topological sort, and Union-helper leaves enumeration.
     fn struct_refs(&self) -> Vec<Iri> {
         match self {
             JuliaType::Primitive(_) => Vec::new(),
             JuliaType::StructRef(iri) => vec![iri.clone()],
+            JuliaType::UnionRef(iris) => iris.clone(),
             JuliaType::Vector(inner) => inner.struct_refs(),
         }
     }
+
+    /// Inner element when this type is a `Vector{...}` (one level).
+    /// Used by the codec to peel `Vector` and produce array-comp
+    /// expressions over the inner type's leaves.
+    fn vector_inner(&self) -> Option<&JuliaType> {
+        match self {
+            JuliaType::Vector(inner) => Some(inner.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+/// Concrete struct name for a class IRI — the name of the actual
+/// `struct C` in the emitted source, used in codec function names
+/// (`encode_C` / `decode_C`) and `isa` checks. Per D29 §7 this is the
+/// class's `short_name` verbatim.
+fn class_short_name(iri: &Iri, class_lookup: &BTreeMap<Iri, String>) -> String {
+    class_lookup
+        .get(iri)
+        .cloned()
+        .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()))
+}
+
+/// Abstract type name for a class IRI — the `Abstract<C>` slot in
+/// the abstract+struct pair, used in field-type positions (D29 §7).
+fn class_abstract_name(iri: &Iri, class_lookup: &BTreeMap<Iri, String>) -> String {
+    format!("Abstract{}", class_short_name(iri, class_lookup))
+}
+
+/// Set of concrete class IRIs a value of `t` can hold at runtime —
+/// the union of `concrete_descendants[c]` for each `c` in `t`'s
+/// struct_refs. Drives codec helper emission (D29 §8.3): one leaf →
+/// direct `decode_C` / `encode_C` call; multiple leaves → emit a
+/// per-field `_decode_<C>_<f>` / `_encode_<C>_<f>` dispatcher.
+fn type_leaves(
+    t: &JuliaType,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+) -> BTreeSet<Iri> {
+    let mut leaves = BTreeSet::new();
+    for class_iri in t.struct_refs() {
+        if let Some(d) = concrete_descendants.get(&class_iri) {
+            leaves.extend(d.iter().cloned());
+        } else {
+            // Class not in closure — defensive; closure walk should
+            // have pulled it. Treat as singleton leaf.
+            leaves.insert(class_iri);
+        }
+    }
+    leaves
 }
 
 fn walk_closure(request: &MirrorGenerationRequest) -> Result<BTreeSet<Iri>, MirrorGeneratorError> {
@@ -537,6 +672,15 @@ fn walk_closure(request: &MirrorGenerationRequest) -> Result<BTreeSet<Iri>, Mirr
                 if !visited.contains(&r) {
                     queue.push(r);
                 }
+            }
+        }
+
+        // Walk `subclass_of` ancestors transitively (D29 §3.2). Every
+        // ancestor must also be in the closure so the abstract type
+        // hierarchy is closed under emission.
+        for parent in iri_array(&class_def, PROP_SUBCLASS_OF) {
+            if !visited.contains(&parent) {
+                queue.push(parent);
             }
         }
     }
@@ -576,6 +720,7 @@ fn resolve_class_declarations(
 
         let requires = resolve_properties(request, &class_def, PROP_REQUIRES)?;
         let recommends = resolve_properties(request, &class_def, PROP_RECOMMENDS)?;
+        let subclass_of = resolve_subclass_of(&class_def, class_iri)?;
 
         decls.insert(
             class_iri.clone(),
@@ -584,10 +729,248 @@ fn resolve_class_declarations(
                 short_name,
                 requires,
                 recommends,
+                subclass_of,
             },
         );
     }
     Ok(decls)
+}
+
+/// Read `core:subclass_of` from a class declaration.
+///
+/// D29 §3.2: at most one supertype is permitted in v1.1 — Julia has
+/// single-inheritance abstract types and multi-inheritance has no
+/// faithful Julia mapping. Multiple entries → `UnrepresentableClass`.
+fn resolve_subclass_of(
+    class_def: &Resource,
+    class_iri: &Iri,
+) -> Result<Option<Iri>, MirrorGeneratorError> {
+    let parents = iri_array(class_def, PROP_SUBCLASS_OF);
+    match parents.len() {
+        0 => Ok(None),
+        1 => {
+            let parent = parents.into_iter().next().expect("len 1");
+            if &parent == class_iri {
+                return Err(MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: class_iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: "class declares itself as its own supertype".to_string(),
+                });
+            }
+            Ok(Some(parent))
+        }
+        _ => Err(MirrorGeneratorError::UnrepresentableClass {
+            class_iri: class_iri.as_str().to_string(),
+            language: "julia".to_string(),
+            reason: format!(
+                "class declares {} supertypes via `subclass_of`; Julia's single-inheritance \
+                 abstract types support at most one (D29 §3.2 / §11.1)",
+                parents.len()
+            ),
+        }),
+    }
+}
+
+/// A class's effective field set after walking its `subclass_of`
+/// chain. Properties from ancestors come first (root-to-leaf), then
+/// the class's own properties; deduplicated by property IRI with
+/// first-declared winning. Pinned by D29 §3.2 / §7.
+#[derive(Clone)]
+struct ClassLayout {
+    requires: Vec<PropertyDecl>,
+    recommends: Vec<PropertyDecl>,
+}
+
+/// Compute the transitive field layout for every class in `decls` by
+/// walking each class's `subclass_of` chain root-to-leaf and unioning
+/// `requires`/`recommends` with first-declared dedup on property IRI.
+/// Detects:
+/// - `subclass_of` cycles → `UnrepresentableClass`.
+/// - `short_name` conflicts within a class's transitive field set
+///   (D29 §11.1) → `UnrepresentableClass`.
+fn compute_class_layouts(
+    decls: &BTreeMap<Iri, ClassDecl>,
+) -> Result<BTreeMap<Iri, ClassLayout>, MirrorGeneratorError> {
+    enum Mark {
+        InProgress,
+        Done,
+    }
+    let mut layouts: BTreeMap<Iri, ClassLayout> = BTreeMap::new();
+    let mut marks: BTreeMap<Iri, Mark> = BTreeMap::new();
+
+    fn compute(
+        iri: &Iri,
+        decls: &BTreeMap<Iri, ClassDecl>,
+        layouts: &mut BTreeMap<Iri, ClassLayout>,
+        marks: &mut BTreeMap<Iri, Mark>,
+    ) -> Result<ClassLayout, MirrorGeneratorError> {
+        if let Some(l) = layouts.get(iri) {
+            return Ok(l.clone());
+        }
+        match marks.get(iri) {
+            Some(Mark::Done) => return Ok(layouts.get(iri).expect("done implies layout").clone()),
+            Some(Mark::InProgress) => {
+                return Err(MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: "class participates in a `subclass_of` cycle (D29 §3.2 / §11.1)"
+                        .to_string(),
+                });
+            }
+            None => {}
+        }
+        marks.insert(iri.clone(), Mark::InProgress);
+
+        let decl = decls.get(iri).expect("layout target must be in decls");
+        let mut requires: Vec<PropertyDecl> = Vec::new();
+        let mut recommends: Vec<PropertyDecl> = Vec::new();
+        let mut seen_iris: BTreeSet<Iri> = BTreeSet::new();
+
+        // Inherit from parent first (root-to-leaf order).
+        if let Some(parent) = &decl.subclass_of {
+            let parent_layout = compute(parent, decls, layouts, marks)?;
+            for p in &parent_layout.requires {
+                if seen_iris.insert(p.iri.clone()) {
+                    requires.push(p.clone());
+                }
+            }
+            for p in &parent_layout.recommends {
+                if seen_iris.insert(p.iri.clone()) {
+                    recommends.push(p.clone());
+                }
+            }
+        }
+        // Own declarations come last; dedup against ancestors.
+        for p in &decl.requires {
+            if seen_iris.insert(p.iri.clone()) {
+                requires.push(p.clone());
+            }
+        }
+        for p in &decl.recommends {
+            if seen_iris.insert(p.iri.clone()) {
+                recommends.push(p.clone());
+            }
+        }
+
+        // D29 §11.1: short_name uniqueness across the transitive
+        // field set. Two distinct property IRIs with the same
+        // short_name produce invalid Julia (duplicate struct field
+        // name) — reject loudly so the chain author can fix the
+        // ontology.
+        let mut name_to_iri: BTreeMap<String, Iri> = BTreeMap::new();
+        for p in requires.iter().chain(recommends.iter()) {
+            if let Some(prev) = name_to_iri.get(&p.short_name) {
+                return Err(MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: format!(
+                        "two distinct properties resolve to the same short_name `{}` on \
+                         this class's transitive field set: `{}` and `{}` (D29 §11.1)",
+                        p.short_name,
+                        prev.as_str(),
+                        p.iri.as_str(),
+                    ),
+                });
+            }
+            name_to_iri.insert(p.short_name.clone(), p.iri.clone());
+        }
+
+        marks.insert(iri.clone(), Mark::Done);
+        let layout = ClassLayout {
+            requires,
+            recommends,
+        };
+        layouts.insert(iri.clone(), layout.clone());
+        Ok(layout)
+    }
+
+    for iri in decls.keys() {
+        compute(iri, decls, &mut layouts, &mut marks)?;
+    }
+    Ok(layouts)
+}
+
+/// Build a map from each class IRI in the closure to its inclusive
+/// concrete-descendants set (the class itself plus all classes whose
+/// `subclass_of` chain reaches it transitively). Used by codec
+/// emission to enumerate the leaves of an `Abstract<C>`-typed field.
+/// IRIs in the result set are sorted by `BTreeSet` ordering.
+fn compute_concrete_descendants(decls: &BTreeMap<Iri, ClassDecl>) -> BTreeMap<Iri, BTreeSet<Iri>> {
+    // Inverse relation: parent IRI → list of direct child IRIs.
+    let mut children: BTreeMap<Iri, Vec<Iri>> = BTreeMap::new();
+    for decl in decls.values() {
+        if let Some(parent) = &decl.subclass_of {
+            children
+                .entry(parent.clone())
+                .or_default()
+                .push(decl.iri.clone());
+        }
+    }
+    // For each class, BFS down the inverse-edge graph.
+    let mut out: BTreeMap<Iri, BTreeSet<Iri>> = BTreeMap::new();
+    for iri in decls.keys() {
+        let mut set: BTreeSet<Iri> = BTreeSet::new();
+        let mut stack: Vec<Iri> = vec![iri.clone()];
+        while let Some(c) = stack.pop() {
+            if !set.insert(c.clone()) {
+                continue;
+            }
+            if let Some(kids) = children.get(&c) {
+                stack.extend(kids.iter().cloned());
+            }
+        }
+        out.insert(iri.clone(), set);
+    }
+    out
+}
+
+/// Topologically order classes by `subclass_of` for abstract-type
+/// emission: parent's abstract type is declared before the child's.
+/// Tie-breaking by IRI sort (BTreeMap iteration). Cycles → already
+/// rejected by [`compute_class_layouts`]; this pass returns an
+/// equivalent error if seen, defending the contract locally.
+fn abstract_emission_order(
+    decls: &BTreeMap<Iri, ClassDecl>,
+) -> Result<Vec<Iri>, MirrorGeneratorError> {
+    enum Mark {
+        InProgress,
+        Done,
+    }
+    let mut marks: BTreeMap<Iri, Mark> = BTreeMap::new();
+    let mut order: Vec<Iri> = Vec::new();
+
+    fn visit(
+        iri: &Iri,
+        decls: &BTreeMap<Iri, ClassDecl>,
+        marks: &mut BTreeMap<Iri, Mark>,
+        order: &mut Vec<Iri>,
+    ) -> Result<(), MirrorGeneratorError> {
+        match marks.get(iri) {
+            Some(Mark::Done) => return Ok(()),
+            Some(Mark::InProgress) => {
+                return Err(MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: "subclass_of cycle while ordering abstract emission".to_string(),
+                });
+            }
+            None => {}
+        }
+        marks.insert(iri.clone(), Mark::InProgress);
+        if let Some(decl) = decls.get(iri) {
+            if let Some(parent) = &decl.subclass_of {
+                visit(parent, decls, marks, order)?;
+            }
+        }
+        marks.insert(iri.clone(), Mark::Done);
+        order.push(iri.clone());
+        Ok(())
+    }
+
+    for iri in decls.keys() {
+        visit(iri, decls, &mut marks, &mut order)?;
+    }
+    Ok(order)
 }
 
 fn resolve_properties(
@@ -608,6 +991,16 @@ fn resolve_properties(
                 reason: format!("property missing required `{}` property", PROP_SHORT_NAME),
             }
         })?;
+        if short_name == RESERVED_FIELD_ID {
+            return Err(MirrorGeneratorError::UnrepresentableClass {
+                class_iri: prop_iri.as_str().to_string(),
+                language: "julia".to_string(),
+                reason: format!(
+                    "property short_name `{RESERVED_FIELD_ID}` is reserved by the mirror \
+                     generator for the @id round-trip slot (D29 §11.1)"
+                ),
+            });
+        }
         let julia_type = resolve_property_type(request, &prop_def, &prop_iri)?;
         let constraints = read_constraints(&prop_def);
         out.push(PropertyDecl {
@@ -627,10 +1020,11 @@ fn read_constraints(prop_def: &Resource) -> PropertyConstraints {
         min_length: integer_value(prop_def, PROP_MIN_LENGTH),
         max_length: integer_value(prop_def, PROP_MAX_LENGTH),
         pattern: string_value(prop_def, PROP_PATTERN),
-        format: resource_iri_value(prop_def, PROP_FORMAT).and_then(|iri| {
-            iri.as_str()
-                .strip_prefix(FORMAT_IRI_PREFIX)
-                .map(str::to_string)
+        format: resource_iri_value(prop_def, PROP_FORMAT).map(|iri| {
+            match iri.as_str().strip_prefix(FORMAT_IRI_PREFIX) {
+                Some(name) => FormatRef::Standard(name.to_string()),
+                None => FormatRef::Custom(iri.as_str().to_string()),
+            }
         }),
     }
 }
@@ -647,6 +1041,37 @@ fn numeric_value(r: &Resource, prop_iri: &str) -> Option<f64> {
 fn integer_value(r: &Resource, prop_iri: &str) -> Option<i64> {
     let iri = Iri::parse(prop_iri).ok()?;
     r.get(&iri).and_then(Value::as_integer)
+}
+
+/// Resolve a `class_types` array to a single `JuliaType`: a `StructRef`
+/// when it lists exactly one class, a `UnionRef` (with IRIs sorted) when
+/// it lists two or more, an error when it's empty. Used for both
+/// `core:resource` (scalar) and `core:resource_array` (inner of the
+/// `Vector{...}` wrapper).
+fn struct_or_union_ref(
+    prop_def: &Resource,
+    prop_iri: &Iri,
+    declared_data_type: &str,
+) -> Result<JuliaType, MirrorGeneratorError> {
+    let mut class_types = iri_array(prop_def, PROP_CLASS_TYPES);
+    match class_types.len() {
+        0 => Err(MirrorGeneratorError::UnrepresentableClass {
+            class_iri: prop_iri.as_str().to_string(),
+            language: "julia".to_string(),
+            reason: format!(
+                "data_type `{declared_data_type}` requires at least one `class_types` entry"
+            ),
+        }),
+        1 => Ok(JuliaType::StructRef(class_types.remove(0))),
+        _ => {
+            // D29 §4: Union variants are emitted in IRI-sort order so
+            // the rendered Julia source is deterministic regardless of
+            // the chain's class_types declaration order.
+            class_types.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            class_types.dedup();
+            Ok(JuliaType::UnionRef(class_types))
+        }
+    }
 }
 
 fn resolve_property_type(
@@ -667,36 +1092,9 @@ fn resolve_property_type(
         TYPE_FLOAT => Ok(JuliaType::Primitive("Float64")),
         TYPE_BOOLEAN => Ok(JuliaType::Primitive("Bool")),
         TYPE_JSON => Ok(JuliaType::Primitive("Any")),
-        TYPE_RESOURCE => {
-            let class_types = iri_array(prop_def, PROP_CLASS_TYPES);
-            // v1: pick the first; multi-class_types becomes a Union
-            // type once we settle the runtime semantics. D27 §3.3
-            // doesn't fully specify; flagged for 19a.3.b.
-            class_types
-                .into_iter()
-                .next()
-                .map(JuliaType::StructRef)
-                .ok_or_else(|| MirrorGeneratorError::UnrepresentableClass {
-                    class_iri: prop_iri.as_str().to_string(),
-                    language: "julia".to_string(),
-                    reason: format!(
-                        "data_type `{TYPE_RESOURCE}` requires at least one `class_types` entry"
-                    ),
-                })
-        }
+        TYPE_RESOURCE => Ok(struct_or_union_ref(prop_def, prop_iri, TYPE_RESOURCE)?),
         TYPE_RESOURCE_ARRAY => {
-            let class_types = iri_array(prop_def, PROP_CLASS_TYPES);
-            let inner = class_types
-                .into_iter()
-                .next()
-                .map(JuliaType::StructRef)
-                .ok_or_else(|| MirrorGeneratorError::UnrepresentableClass {
-                    class_iri: prop_iri.as_str().to_string(),
-                    language: "julia".to_string(),
-                    reason: format!(
-                        "data_type `{TYPE_RESOURCE_ARRAY}` requires at least one `class_types` entry"
-                    ),
-                })?;
+            let inner = struct_or_union_ref(prop_def, prop_iri, TYPE_RESOURCE_ARRAY)?;
             Ok(JuliaType::Vector(Box::new(inner)))
         }
         TYPE_VALUE_ARRAY => {
@@ -737,41 +1135,74 @@ fn resolve_property_type(
 /// Topologically sort classes so a struct that references another is
 /// declared after the referenced struct. Stable on tie (BTreeMap
 /// iteration order = IRI sort).
-fn topological_order(decls: &BTreeMap<Iri, ClassDecl>) -> Vec<Iri> {
-    let mut visited: BTreeSet<Iri> = BTreeSet::new();
+/// Topologically sort classes so a struct that references another is
+/// declared after the referenced struct. Stable on tie (BTreeMap
+/// iteration order = IRI sort).
+///
+/// Cycles in the class graph (D29 §3.3) are rejected with
+/// `UnrepresentableClass`: Julia's `struct` declaration form requires
+/// forward references to be resolved at parse time, and the
+/// mutable-struct + forward-declaration workaround is deferred to a
+/// future spec version. v1 callers must factor cycles out of the seed
+/// (typically by extracting an interface class).
+fn topological_order(decls: &BTreeMap<Iri, ClassDecl>) -> Result<Vec<Iri>, MirrorGeneratorError> {
+    enum Mark {
+        InProgress,
+        Done,
+    }
+    let mut marks: BTreeMap<Iri, Mark> = BTreeMap::new();
     let mut order: Vec<Iri> = Vec::new();
 
     fn visit(
         iri: &Iri,
         decls: &BTreeMap<Iri, ClassDecl>,
-        visited: &mut BTreeSet<Iri>,
+        marks: &mut BTreeMap<Iri, Mark>,
         order: &mut Vec<Iri>,
-    ) {
-        if visited.contains(iri) {
-            return;
+    ) -> Result<(), MirrorGeneratorError> {
+        match marks.get(iri) {
+            Some(Mark::Done) => return Ok(()),
+            Some(Mark::InProgress) => {
+                // Re-entered the same class while it's still being
+                // resolved → cycle. Report the offending class IRI;
+                // the caller adds context to the error chain.
+                return Err(MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: "class participates in a cycle of resource-typed property references; \
+                         Julia struct definitions cannot forward-reference and v1 of D29 does not \
+                         emit mutable structs (see D29 §3.3)"
+                        .to_string(),
+                });
+            }
+            None => {}
         }
-        visited.insert(iri.clone());
+        marks.insert(iri.clone(), Mark::InProgress);
         if let Some(decl) = decls.get(iri) {
             for prop in decl.requires.iter().chain(decl.recommends.iter()) {
                 for ref_iri in prop.julia_type.struct_refs() {
-                    visit(&ref_iri, decls, visited, order);
+                    visit(&ref_iri, decls, marks, order)?;
                 }
             }
         }
+        marks.insert(iri.clone(), Mark::Done);
         order.push(iri.clone());
+        Ok(())
     }
 
     // BTreeMap iteration is sorted by key — gives a stable starting
     // order, so the topological sort is deterministic.
     for iri in decls.keys() {
-        visit(iri, decls, &mut visited, &mut order);
+        visit(iri, decls, &mut marks, &mut order)?;
     }
-    order
+    Ok(order)
 }
 
 fn emit_module(
     decls: &BTreeMap<Iri, ClassDecl>,
-    order: &[Iri],
+    layouts: &BTreeMap<Iri, ClassLayout>,
+    abstract_order: &[Iri],
+    struct_order: &[Iri],
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
     request: &MirrorGenerationRequest,
 ) -> String {
     let class_lookup: BTreeMap<Iri, String> = decls
@@ -784,7 +1215,7 @@ fn emit_module(
     s.push_str("# Regenerate via the substrate's image-build pipeline.\n");
     s.push_str(&format!("# source_layer: {}\n", request.source_layer));
     s.push_str("# mirrored_classes:\n");
-    for iri in order {
+    for iri in struct_order {
         s.push_str(&format!("#   - {iri}\n"));
     }
     s.push('\n');
@@ -793,21 +1224,61 @@ fn emit_module(
     s.push_str("using EigeniusJuliaCommon: validate_min_value, validate_max_value, ");
     s.push_str("validate_min_length, validate_max_length, validate_pattern, validate_format\n\n");
 
-    for iri in order {
-        let decl = decls.get(iri).expect("topological order references decls");
-        emit_struct(&mut s, decl, &class_lookup);
-        s.push('\n');
-        emit_decoder(&mut s, decl, &class_lookup);
-        s.push('\n');
-        emit_encoder(&mut s, decl, &class_lookup);
+    // Phase 1: emit abstract type declarations in subclass_of-topo
+    // order. Every class C produces `abstract type AbstractC end`
+    // (with `<: AbstractParent` when C declares subclass_of). The
+    // hierarchy is closed before any concrete struct is emitted, so
+    // struct field types referencing AbstractX are always in scope.
+    for iri in abstract_order {
+        let decl = decls.get(iri).expect("abstract order references decls");
+        let parent_clause = match &decl.subclass_of {
+            Some(parent) => format!(" <: {}", class_abstract_name(parent, &class_lookup)),
+            None => String::new(),
+        };
+        s.push_str(&format!(
+            "abstract type {}{parent_clause} end\n",
+            class_abstract_name(&decl.iri, &class_lookup)
+        ));
+    }
+    if !abstract_order.is_empty() {
         s.push('\n');
     }
 
-    if !order.is_empty() {
+    // Phase 2: emit concrete struct + helpers + codecs per class in
+    // field-dependency topo order.
+    for iri in struct_order {
+        let decl = decls.get(iri).expect("struct order references decls");
+        let layout = layouts.get(iri).expect("layout for every class");
+        emit_struct(&mut s, decl, layout, &class_lookup);
+        s.push('\n');
+        // D29 §8.3: emit per-field codec helpers for any property
+        // whose type has more than one concrete leaf in the closure.
+        let any_helper_needed = layout
+            .requires
+            .iter()
+            .chain(layout.recommends.iter())
+            .any(|p| {
+                let t = property_codec_type(p);
+                type_leaves(t, concrete_descendants).len() > 1
+            });
+        if any_helper_needed {
+            emit_union_helpers(&mut s, decl, layout, concrete_descendants, &class_lookup);
+            s.push('\n');
+        }
+        emit_decoder(&mut s, decl, layout, concrete_descendants, &class_lookup);
+        s.push('\n');
+        emit_encoder(&mut s, decl, layout, concrete_descendants, &class_lookup);
+        s.push('\n');
+    }
+
+    if !struct_order.is_empty() {
         s.push_str("export ");
         let mut exports: Vec<String> = Vec::new();
-        for iri in order {
+        for iri in struct_order {
             if let Some(d) = decls.get(iri) {
+                // Both the abstract and the concrete struct are
+                // exported so user code can dispatch on either.
+                exports.push(class_abstract_name(&d.iri, &class_lookup));
                 exports.push(d.short_name.clone());
                 exports.push(format!("decode_{}", d.short_name));
                 exports.push(format!("encode_{}", d.short_name));
@@ -822,45 +1293,71 @@ fn emit_module(
     s
 }
 
-fn emit_struct(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri, String>) {
-    out.push_str(&format!("struct {}\n", decl.short_name));
-    for prop in &decl.requires {
+/// Return the inner type used for codec leaf-counting on a property.
+/// `Vector{<inner>}` reduces to `<inner>` for the helper-or-direct
+/// decision (the array comprehension is independent of element-codec
+/// shape).
+fn property_codec_type(p: &PropertyDecl) -> &JuliaType {
+    p.julia_type.vector_inner().unwrap_or(&p.julia_type)
+}
+
+fn emit_struct(
+    out: &mut String,
+    decl: &ClassDecl,
+    layout: &ClassLayout,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
+    let parent_clause = format!(" <: {}", class_abstract_name(&decl.iri, class_lookup));
+    out.push_str(&format!("struct {}{}\n", decl.short_name, parent_clause));
+    for prop in &layout.requires {
         out.push_str(&format!(
             "    {}::{}\n",
             prop.short_name,
             prop.julia_type.render(class_lookup)
         ));
     }
-    for prop in &decl.recommends {
+    for prop in &layout.recommends {
         out.push_str(&format!(
             "    {}::Union{{{}, Nothing}}\n",
             prop.short_name,
             prop.julia_type.render(class_lookup)
         ));
     }
+    // D29 §8.4: `_id` is the mirror-managed @id round-trip slot.
+    // Emitted on every struct, last in declaration order so the
+    // user-facing required+recommended fields stay grouped at the top.
+    out.push_str(&format!(
+        "    {RESERVED_FIELD_ID}::Union{{String, Nothing}}\n"
+    ));
     out.push('\n');
-    emit_inner_constructor(out, decl, class_lookup);
+    emit_inner_constructor(out, decl, layout, class_lookup);
     out.push_str("end\n");
 }
 
 /// Inner constructor with format-constraint validation. Required
-/// fields are positional; recommended fields are keyword args
-/// defaulting to `nothing`. Each field's constraints (if any) are
-/// checked before `new(...)`.
+/// fields are positional; recommended fields and `_id` are keyword
+/// args defaulting to `nothing`. Each field's constraints (if any)
+/// are checked before `new(...)`. Per D29 §8.4 `_id` is always the
+/// last keyword arg — it's mirror-managed metadata and stays out of
+/// the way of the user-facing recommended properties.
 fn emit_inner_constructor(
     out: &mut String,
     decl: &ClassDecl,
+    layout: &ClassLayout,
     class_lookup: &BTreeMap<Iri, String>,
 ) {
     out.push_str(&format!("    function {}(\n", decl.short_name));
 
-    let last_required = decl.requires.len().saturating_sub(1);
-    let has_keyword = !decl.recommends.is_empty();
+    let last_required = layout.requires.len().saturating_sub(1);
+    // `_id` is always a keyword arg, so the constructor *always* has
+    // at least one keyword section — the `;` separator after the last
+    // required arg is unconditional.
+    let has_keyword = true;
 
     // Positional args: required fields. The last one ends with `;`
-    // (when keyword args follow) or `,` (when nothing follows or
-    // only recommended fields follow without `;` form).
-    for (i, prop) in decl.requires.iter().enumerate() {
+    // because the keyword section (carrying at minimum `_id`) always
+    // follows.
+    for (i, prop) in layout.requires.iter().enumerate() {
         let trailer = if i == last_required && has_keyword {
             ";"
         } else {
@@ -872,39 +1369,46 @@ fn emit_inner_constructor(
             prop.julia_type.render(class_lookup)
         ));
     }
-    // Keyword args: recommended fields, default `nothing`.
-    if has_keyword && decl.requires.is_empty() {
-        // Edge case: only keyword args. Julia requires `;` to start
-        // the keyword section even with no positional args.
+    // Edge case: zero required fields. Julia needs `;` to open the
+    // keyword section even with no positional args.
+    if layout.requires.is_empty() {
         out.push_str("        ;\n");
     }
-    for prop in &decl.recommends {
+    for prop in &layout.recommends {
         out.push_str(&format!(
             "        {}::Union{{{}, Nothing}} = nothing,\n",
             prop.short_name,
             prop.julia_type.render(class_lookup)
         ));
     }
+    // `_id` last among kwargs (D29 §8.4).
+    out.push_str(&format!(
+        "        {RESERVED_FIELD_ID}::Union{{String, Nothing}} = nothing,\n"
+    ));
     out.push_str("    )\n");
 
     // Validation calls. Required props always; recommended props
     // gated on `isnothing(field) || …` so a missing recommended
-    // field passes through without firing the validator.
-    for prop in &decl.requires {
+    // field passes through without firing the validator. `_id` has
+    // no validators in v1 (the kernel handles IRI well-formedness
+    // upstream when one is present at all).
+    for prop in &layout.requires {
         emit_validations(out, prop, /* is_required = */ true);
     }
-    for prop in &decl.recommends {
+    for prop in &layout.recommends {
         emit_validations(out, prop, /* is_required = */ false);
     }
 
-    // Construct.
+    // Construct. Field order: required, recommended, _id (matches
+    // struct declaration order).
     out.push_str("        new(");
-    let all: Vec<&str> = decl
+    let mut all: Vec<&str> = layout
         .requires
         .iter()
-        .chain(decl.recommends.iter())
+        .chain(layout.recommends.iter())
         .map(|p| p.short_name.as_str())
         .collect();
+    all.push(RESERVED_FIELD_ID);
     out.push_str(&all.join(", "));
     out.push_str(")\n");
     out.push_str("    end\n");
@@ -939,7 +1443,10 @@ fn emit_validations(out: &mut String, prop: &PropertyDecl, is_required: bool) {
         ));
     }
     if let Some(fmt) = &c.format {
-        lines.push(format!("validate_format(:{field}, {field}, :{fmt})"));
+        lines.push(format!(
+            "validate_format(:{field}, {field}, {})",
+            fmt.as_julia_symbol_expr()
+        ));
     }
 
     if lines.is_empty() {
@@ -990,16 +1497,23 @@ fn julia_string_literal(s: &str) -> String {
     out
 }
 
-fn emit_decoder(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri, String>) {
+fn emit_decoder(
+    out: &mut String,
+    decl: &ClassDecl,
+    layout: &ClassLayout,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
     let cls = &decl.short_name;
     out.push_str(&format!("function decode_{cls}(m::AbstractDict)::{cls}\n"));
     out.push_str(&format!("    {cls}(\n"));
 
-    let last_required = decl.requires.len().saturating_sub(1);
-    let has_keyword = !decl.recommends.is_empty();
+    let last_required = layout.requires.len().saturating_sub(1);
+    // `_id` is always a kwarg, so kwarg section is always present.
+    let has_keyword = true;
 
     // Required positional args.
-    for (i, prop) in decl.requires.iter().enumerate() {
+    for (i, prop) in layout.requires.iter().enumerate() {
         let trailer = if i == last_required && has_keyword {
             ";"
         } else {
@@ -1007,73 +1521,125 @@ fn emit_decoder(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri,
         };
         out.push_str(&format!(
             "        {}{trailer}\n",
-            decode_property_expr(prop, class_lookup, /* required = */ true)
+            decode_property_expr(
+                prop,
+                cls,
+                class_lookup,
+                concrete_descendants,
+                /* required = */ true
+            )
         ));
     }
-    // Keyword args for recommended.
-    if has_keyword && decl.requires.is_empty() {
+    // Keyword args. Empty required → leading `;` opens the kwarg
+    // section before `_id` and any recommended.
+    if layout.requires.is_empty() {
         out.push_str("        ;\n");
     }
-    for prop in &decl.recommends {
+    for prop in &layout.recommends {
         out.push_str(&format!(
             "        {} = {},\n",
             prop.short_name,
-            decode_property_expr(prop, class_lookup, /* required = */ false)
+            decode_property_expr(
+                prop,
+                cls,
+                class_lookup,
+                concrete_descendants,
+                /* required = */ false
+            )
         ));
     }
+    // `_id` last (D29 §8.4): read m["@id"] when present, nothing
+    // otherwise. No type recursion — IRIs are bare strings.
+    out.push_str(&format!(
+        "        {RESERVED_FIELD_ID} = (let _v = get(m, {}, nothing); isnothing(_v) ? nothing : _v end),\n",
+        julia_string_literal(KEY_AT_ID)
+    ));
     out.push_str("    )\n");
     out.push_str("end\n");
 }
 
 fn decode_property_expr(
     prop: &PropertyDecl,
+    class_short: &str,
     class_lookup: &BTreeMap<Iri, String>,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
     required: bool,
 ) -> String {
     let key = julia_string_literal(prop.iri.as_str());
     if required {
-        decode_value_expr(&prop.julia_type, &format!("m[{key}]"), class_lookup)
+        decode_value_expr(
+            &prop.julia_type,
+            &format!("m[{key}]"),
+            class_short,
+            &prop.short_name,
+            class_lookup,
+            concrete_descendants,
+        )
     } else {
         // get(m, key, nothing); if nothing, pass through; else recurse.
         let raw = format!("get(m, {key}, nothing)");
-        let inner = decode_value_expr(&prop.julia_type, "_v", class_lookup);
+        let inner = decode_value_expr(
+            &prop.julia_type,
+            "_v",
+            class_short,
+            &prop.short_name,
+            class_lookup,
+            concrete_descendants,
+        );
         format!("(let _v = {raw}; isnothing(_v) ? nothing : ({inner}) end)")
     }
 }
 
 /// Express the worker-side decode of `expr` (a CBOR-loaded value)
-/// into the Julia type `t`. Resource-typed fields recurse via
-/// `decode_<Class>`; primitives pass through.
-fn decode_value_expr(t: &JuliaType, expr: &str, class_lookup: &BTreeMap<Iri, String>) -> String {
-    match t {
-        JuliaType::Primitive(_) => expr.to_string(),
-        JuliaType::StructRef(iri) => {
-            let cls = class_lookup
-                .get(iri)
-                .cloned()
-                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
-            format!("decode_{cls}({expr})")
-        }
-        JuliaType::Vector(inner) => match inner.as_ref() {
-            JuliaType::Primitive(_) => expr.to_string(),
-            JuliaType::StructRef(iri) => {
-                let cls = class_lookup
-                    .get(iri)
-                    .cloned()
-                    .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
-                format!("[decode_{cls}(_x) for _x in {expr}]")
-            }
-            JuliaType::Vector(_) => {
-                // Nested vectors aren't reachable in v1 (no
-                // value_array of resource_array); emit a passthrough
-                // so the source still parses and add a TODO.
-                format!("# TODO: nested Vector decode unsupported in v1\n        {expr}")
-            }
-        },
+/// into the Julia type `t`. Decision tree (D29 §8.3):
+/// - Primitive → pass `expr` through verbatim.
+/// - Single concrete leaf → direct `decode_<C>(expr)` call.
+/// - Multiple concrete leaves → call the per-field
+///   `_decode_<class>_<field>` helper emitted by [`emit_union_helpers`].
+/// - Vector wrapper → array comprehension over the inner type.
+fn decode_value_expr(
+    t: &JuliaType,
+    expr: &str,
+    class_short: &str,
+    field_short: &str,
+    class_lookup: &BTreeMap<Iri, String>,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+) -> String {
+    if let JuliaType::Primitive(_) = t {
+        return expr.to_string();
     }
+    if let JuliaType::Vector(inner) = t {
+        if matches!(inner.as_ref(), JuliaType::Primitive(_)) {
+            return expr.to_string();
+        }
+        if matches!(inner.as_ref(), JuliaType::Vector(_)) {
+            return format!("# TODO: nested Vector decode unsupported in v1\n        {expr}");
+        }
+        let leaves = type_leaves(inner.as_ref(), concrete_descendants);
+        if leaves.len() == 1 {
+            let only = leaves.iter().next().expect("len 1");
+            let cls = class_short_name(only, class_lookup);
+            return format!("[decode_{cls}(_x) for _x in {expr}]");
+        }
+        return format!("[_decode_{class_short}_{field_short}(_x) for _x in {expr}]");
+    }
+    // Scalar struct ref / union ref.
+    let leaves = type_leaves(t, concrete_descendants);
+    if leaves.len() == 1 {
+        let only = leaves.iter().next().expect("len 1");
+        let cls = class_short_name(only, class_lookup);
+        return format!("decode_{cls}({expr})");
+    }
+    format!("_decode_{class_short}_{field_short}({expr})")
 }
 
-fn emit_encoder(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri, String>) {
+fn emit_encoder(
+    out: &mut String,
+    decl: &ClassDecl,
+    layout: &ClassLayout,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
     let cls = &decl.short_name;
     out.push_str(&format!(
         "function encode_{cls}(c::{cls})::Dict{{String, Any}}\n"
@@ -1084,52 +1650,157 @@ fn emit_encoder(out: &mut String, decl: &ClassDecl, class_lookup: &BTreeMap<Iri,
         julia_string_literal(PROP_IS_A),
         julia_string_literal(decl.iri.as_str())
     ));
-    for prop in &decl.requires {
+    for prop in &layout.requires {
         let key = julia_string_literal(prop.iri.as_str());
         let value = encode_value_expr(
             &prop.julia_type,
             &format!("c.{}", prop.short_name),
+            cls,
+            &prop.short_name,
             class_lookup,
+            concrete_descendants,
         );
         out.push_str(&format!("        {key} => {value},\n"));
     }
     out.push_str("    )\n");
-    for prop in &decl.recommends {
+    for prop in &layout.recommends {
         let key = julia_string_literal(prop.iri.as_str());
         let field = &prop.short_name;
-        let value = encode_value_expr(&prop.julia_type, &format!("c.{field}"), class_lookup);
+        let value = encode_value_expr(
+            &prop.julia_type,
+            &format!("c.{field}"),
+            cls,
+            field,
+            class_lookup,
+            concrete_descendants,
+        );
         out.push_str(&format!(
             "    isnothing(c.{field}) || (out[{key}] = {value})\n"
         ));
     }
+    // `_id` last: stamp the @id key when the struct carries one
+    // (D29 §8.4).
+    out.push_str(&format!(
+        "    isnothing(c.{RESERVED_FIELD_ID}) || (out[{}] = c.{RESERVED_FIELD_ID})\n",
+        julia_string_literal(KEY_AT_ID)
+    ));
     out.push_str("    return out\n");
     out.push_str("end\n");
 }
 
-fn encode_value_expr(t: &JuliaType, expr: &str, class_lookup: &BTreeMap<Iri, String>) -> String {
-    match t {
-        JuliaType::Primitive(_) => expr.to_string(),
-        JuliaType::StructRef(iri) => {
-            let cls = class_lookup
-                .get(iri)
-                .cloned()
-                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
-            format!("encode_{cls}({expr})")
-        }
-        JuliaType::Vector(inner) => match inner.as_ref() {
-            JuliaType::Primitive(_) => expr.to_string(),
-            JuliaType::StructRef(iri) => {
-                let cls = class_lookup
-                    .get(iri)
-                    .cloned()
-                    .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
-                format!("[encode_{cls}(_x) for _x in {expr}]")
-            }
-            JuliaType::Vector(_) => {
-                format!("# TODO: nested Vector encode unsupported in v1\n        {expr}")
-            }
-        },
+fn encode_value_expr(
+    t: &JuliaType,
+    expr: &str,
+    class_short: &str,
+    field_short: &str,
+    class_lookup: &BTreeMap<Iri, String>,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+) -> String {
+    if let JuliaType::Primitive(_) = t {
+        return expr.to_string();
     }
+    if let JuliaType::Vector(inner) = t {
+        if matches!(inner.as_ref(), JuliaType::Primitive(_)) {
+            return expr.to_string();
+        }
+        if matches!(inner.as_ref(), JuliaType::Vector(_)) {
+            return format!("# TODO: nested Vector encode unsupported in v1\n        {expr}");
+        }
+        let leaves = type_leaves(inner.as_ref(), concrete_descendants);
+        if leaves.len() == 1 {
+            let only = leaves.iter().next().expect("len 1");
+            let cls = class_short_name(only, class_lookup);
+            return format!("[encode_{cls}(_x) for _x in {expr}]");
+        }
+        return format!("[_encode_{class_short}_{field_short}(_x) for _x in {expr}]");
+    }
+    let leaves = type_leaves(t, concrete_descendants);
+    if leaves.len() == 1 {
+        let only = leaves.iter().next().expect("len 1");
+        let cls = class_short_name(only, class_lookup);
+        return format!("encode_{cls}({expr})");
+    }
+    format!("_encode_{class_short}_{field_short}({expr})")
+}
+
+/// Emit `_encode_<C>_<field>` and `_decode_<C>_<field>` helpers for
+/// every property on `decl` whose effective concrete-leaf set has
+/// more than one element — i.e. either a `Union` of struct refs OR a
+/// single `class_types: [C]` where C has descendants in the closure.
+/// The helpers dispatch by `typeof` (encode) and by the input dict's
+/// `is_a` list (decode), per D29 §8.3.
+fn emit_union_helpers(
+    out: &mut String,
+    decl: &ClassDecl,
+    layout: &ClassLayout,
+    concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+    class_lookup: &BTreeMap<Iri, String>,
+) {
+    for prop in layout.requires.iter().chain(layout.recommends.iter()) {
+        let codec_type = property_codec_type(prop);
+        let leaves: Vec<Iri> = type_leaves(codec_type, concrete_descendants)
+            .into_iter()
+            .collect();
+        if leaves.len() <= 1 {
+            continue;
+        }
+        emit_one_union_helper_pair(
+            out,
+            &decl.short_name,
+            &prop.short_name,
+            &leaves,
+            class_lookup,
+        );
+    }
+}
+
+fn emit_one_union_helper_pair(
+    out: &mut String,
+    class_short: &str,
+    field_short: &str,
+    iris: &[Iri],
+    class_lookup: &BTreeMap<Iri, String>,
+) {
+    // Encoder: dispatch by typeof.
+    out.push_str(&format!(
+        "function _encode_{class_short}_{field_short}(v)\n"
+    ));
+    for (i, iri) in iris.iter().enumerate() {
+        let cls = class_short_name(iri, class_lookup);
+        let kw = if i == 0 { "if" } else { "elseif" };
+        out.push_str(&format!("    {kw} v isa {cls}\n"));
+        out.push_str(&format!("        return encode_{cls}(v)\n"));
+    }
+    out.push_str("    else\n");
+    out.push_str(&format!(
+        "        throw(ArgumentError(\"unexpected type $(typeof(v)) for field {field_short} of {class_short}\"))\n"
+    ));
+    out.push_str("    end\n");
+    out.push_str("end\n\n");
+
+    // Decoder: dispatch by is_a list.
+    out.push_str(&format!(
+        "function _decode_{class_short}_{field_short}(m::AbstractDict)\n"
+    ));
+    out.push_str(&format!(
+        "    is_a = get(m, {}, String[])\n",
+        julia_string_literal(PROP_IS_A)
+    ));
+    for (i, iri) in iris.iter().enumerate() {
+        let cls = class_short_name(iri, class_lookup);
+        let kw = if i == 0 { "if" } else { "elseif" };
+        out.push_str(&format!(
+            "    {kw} {} in is_a\n",
+            julia_string_literal(iri.as_str())
+        ));
+        out.push_str(&format!("        return decode_{cls}(m)\n"));
+    }
+    out.push_str("    else\n");
+    out.push_str(&format!(
+        "        throw(ArgumentError(\"no matching decoder for is_a $(is_a) on field {field_short} of {class_short}\"))\n"
+    ));
+    out.push_str("    end\n");
+    out.push_str("end\n");
 }
 
 // --- Resource readers --------------------------------------------------
@@ -1577,15 +2248,19 @@ mod tests {
     }
 
     #[test]
-    fn struct_for_assay_result_uses_struct_refs_not_iris() {
+    fn struct_for_assay_result_uses_abstract_class_refs() {
+        // D29 §4 / §7: a property's `class_types: [C]` renders the
+        // field type as `AbstractC` (not `C`) so any concrete subtype
+        // of C is assignable. Even leaves with no subclasses go
+        // through the abstract slot — uniform shape.
         let out = run_kinase(&["urn:eigenius:demo:assay:AssayResult"]);
         let src = extract_source(&out);
         assert!(
-            src.contains("compound::Compound"),
-            "expected `compound::Compound`, got source:\n{src}"
+            src.contains("compound::AbstractCompound"),
+            "expected `compound::AbstractCompound`, got source:\n{src}"
         );
-        assert!(src.contains("target::Target"));
-        assert!(src.contains("protocol::AssayProtocol"));
+        assert!(src.contains("target::AbstractTarget"));
+        assert!(src.contains("protocol::AbstractAssayProtocol"));
         assert!(src.contains("ic50_nm::Float64"));
         assert!(src.contains("replicate_count::Int64"));
         assert!(src.contains("passed_qc::Bool"));
@@ -1647,23 +2322,31 @@ module EigeniusMirror
 
 using EigeniusJuliaCommon: validate_min_value, validate_max_value, validate_min_length, validate_max_length, validate_pattern, validate_format
 
-struct AssayProtocol
+abstract type AbstractAssayProtocol end
+abstract type AbstractAssayResult end
+abstract type AbstractCompound end
+abstract type AbstractTarget end
+
+struct AssayProtocol <: AbstractAssayProtocol
     protocol_name::String
     incubation_minutes::Int64
+    _id::Union{String, Nothing}
 
     function AssayProtocol(
         protocol_name::String,
-        incubation_minutes::Int64,
+        incubation_minutes::Int64;
+        _id::Union{String, Nothing} = nothing,
     )
         validate_min_value(:incubation_minutes, incubation_minutes, 0.0)
-        new(protocol_name, incubation_minutes)
+        new(protocol_name, incubation_minutes, _id)
     end
 end
 
 function decode_AssayProtocol(m::AbstractDict)::AssayProtocol
     AssayProtocol(
         m[\"urn:eigenius:demo:assay:protocol_name\"],
-        m[\"urn:eigenius:demo:assay:incubation_minutes\"],
+        m[\"urn:eigenius:demo:assay:incubation_minutes\"];
+        _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
 
@@ -1673,23 +2356,26 @@ function encode_AssayProtocol(c::AssayProtocol)::Dict{String, Any}
         \"urn:eigenius:demo:assay:protocol_name\" => c.protocol_name,
         \"urn:eigenius:demo:assay:incubation_minutes\" => c.incubation_minutes,
     )
+    isnothing(c._id) || (out[\"@id\"] = c._id)
     return out
 end
 
-struct Compound
+struct Compound <: AbstractCompound
     compound_id::String
     scaffold_class::String
     molecular_weight::Float64
     logp::Union{Float64, Nothing}
+    _id::Union{String, Nothing}
 
     function Compound(
         compound_id::String,
         scaffold_class::String,
         molecular_weight::Float64;
         logp::Union{Float64, Nothing} = nothing,
+        _id::Union{String, Nothing} = nothing,
     )
         validate_min_value(:molecular_weight, molecular_weight, 0.0)
-        new(compound_id, scaffold_class, molecular_weight, logp)
+        new(compound_id, scaffold_class, molecular_weight, logp, _id)
     end
 end
 
@@ -1699,6 +2385,7 @@ function decode_Compound(m::AbstractDict)::Compound
         m[\"urn:eigenius:demo:assay:scaffold_class\"],
         m[\"urn:eigenius:demo:assay:molecular_weight\"];
         logp = (let _v = get(m, \"urn:eigenius:demo:assay:logp\", nothing); isnothing(_v) ? nothing : (_v) end),
+        _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
 
@@ -1710,25 +2397,29 @@ function encode_Compound(c::Compound)::Dict{String, Any}
         \"urn:eigenius:demo:assay:molecular_weight\" => c.molecular_weight,
     )
     isnothing(c.logp) || (out[\"urn:eigenius:demo:assay:logp\"] = c.logp)
+    isnothing(c._id) || (out[\"@id\"] = c._id)
     return out
 end
 
-struct Target
+struct Target <: AbstractTarget
     target_name::String
     target_family::String
+    _id::Union{String, Nothing}
 
     function Target(
         target_name::String,
-        target_family::String,
+        target_family::String;
+        _id::Union{String, Nothing} = nothing,
     )
-        new(target_name, target_family)
+        new(target_name, target_family, _id)
     end
 end
 
 function decode_Target(m::AbstractDict)::Target
     Target(
         m[\"urn:eigenius:demo:assay:target_name\"],
-        m[\"urn:eigenius:demo:assay:target_family\"],
+        m[\"urn:eigenius:demo:assay:target_family\"];
+        _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
 
@@ -1738,30 +2429,33 @@ function encode_Target(c::Target)::Dict{String, Any}
         \"urn:eigenius:demo:assay:target_name\" => c.target_name,
         \"urn:eigenius:demo:assay:target_family\" => c.target_family,
     )
+    isnothing(c._id) || (out[\"@id\"] = c._id)
     return out
 end
 
-struct AssayResult
-    compound::Compound
-    target::Target
-    protocol::AssayProtocol
+struct AssayResult <: AbstractAssayResult
+    compound::AbstractCompound
+    target::AbstractTarget
+    protocol::AbstractAssayProtocol
     ic50_nm::Float64
     replicate_count::Int64
     measurement_date::String
     passed_qc::Bool
     ci_low_nm::Union{Float64, Nothing}
     ci_high_nm::Union{Float64, Nothing}
+    _id::Union{String, Nothing}
 
     function AssayResult(
-        compound::Compound,
-        target::Target,
-        protocol::AssayProtocol,
+        compound::AbstractCompound,
+        target::AbstractTarget,
+        protocol::AbstractAssayProtocol,
         ic50_nm::Float64,
         replicate_count::Int64,
         measurement_date::String,
         passed_qc::Bool;
         ci_low_nm::Union{Float64, Nothing} = nothing,
         ci_high_nm::Union{Float64, Nothing} = nothing,
+        _id::Union{String, Nothing} = nothing,
     )
         validate_min_value(:ic50_nm, ic50_nm, 0.0)
         validate_min_value(:replicate_count, replicate_count, 1.0)
@@ -1772,7 +2466,7 @@ struct AssayResult
         if !isnothing(ci_high_nm)
             validate_min_value(:ci_high_nm, ci_high_nm, 0.0)
         end
-        new(compound, target, protocol, ic50_nm, replicate_count, measurement_date, passed_qc, ci_low_nm, ci_high_nm)
+        new(compound, target, protocol, ic50_nm, replicate_count, measurement_date, passed_qc, ci_low_nm, ci_high_nm, _id)
     end
 end
 
@@ -1787,6 +2481,7 @@ function decode_AssayResult(m::AbstractDict)::AssayResult
         m[\"urn:eigenius:demo:assay:passed_qc\"];
         ci_low_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_low_nm\", nothing); isnothing(_v) ? nothing : (_v) end),
         ci_high_nm = (let _v = get(m, \"urn:eigenius:demo:assay:ci_high_nm\", nothing); isnothing(_v) ? nothing : (_v) end),
+        _id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end),
     )
 end
 
@@ -1803,10 +2498,11 @@ function encode_AssayResult(c::AssayResult)::Dict{String, Any}
     )
     isnothing(c.ci_low_nm) || (out[\"urn:eigenius:demo:assay:ci_low_nm\"] = c.ci_low_nm)
     isnothing(c.ci_high_nm) || (out[\"urn:eigenius:demo:assay:ci_high_nm\"] = c.ci_high_nm)
+    isnothing(c._id) || (out[\"@id\"] = c._id)
     return out
 end
 
-export AssayProtocol, decode_AssayProtocol, encode_AssayProtocol, Compound, decode_Compound, encode_Compound, Target, decode_Target, encode_Target, AssayResult, decode_AssayResult, encode_AssayResult
+export AbstractAssayProtocol, AssayProtocol, decode_AssayProtocol, encode_AssayProtocol, AbstractCompound, Compound, decode_Compound, encode_Compound, AbstractTarget, Target, decode_Target, encode_Target, AbstractAssayResult, AssayResult, decode_AssayResult, encode_AssayResult
 
 end # module EigeniusMirror
 ";
@@ -2111,5 +2807,450 @@ end # module EigeniusMirror
             let decoded = decode_b64_for_test(&encoded);
             assert_eq!(&decoded, input, "round-trip for {input:?}");
         }
+    }
+
+    // ---- D29 v1.1 conformance tests ----------------------------------------
+
+    fn property_resource_multi(iri_str: &str, short: &str, class_iris: &[&str]) -> Resource {
+        let mut r = property_decl(iri_str, short, TYPE_RESOURCE);
+        r.set(
+            iri(PROP_CLASS_TYPES),
+            Value::Array(
+                class_iris
+                    .iter()
+                    .map(|s| Value::ResourceRef(iri(s)))
+                    .collect(),
+            ),
+        );
+        r
+    }
+
+    fn class_with_subclass_of(
+        short: &str,
+        parents: &[&str],
+        requires: &[&str],
+        recommends: &[&str],
+    ) -> Resource {
+        let mut r = class_decl(short, requires, recommends);
+        if !parents.is_empty() {
+            r.set(
+                iri(PROP_SUBCLASS_OF),
+                Value::Array(parents.iter().map(|p| Value::ResourceRef(iri(p))).collect()),
+            );
+        }
+        r
+    }
+
+    /// Build a tiny chain with `Animal` as a parent and `Dog`, `Cat`
+    /// as concrete subclasses. Animal has property `name`; Dog adds
+    /// `breed`; Cat adds `indoor`. Used to exercise the abstract+
+    /// struct hierarchy emission and Union dispatch.
+    fn build_animal_chain() -> FlatChain {
+        let mut chain = FlatChain::new();
+        chain.add(
+            "urn:eigenius:demo:assay:Animal",
+            class_with_subclass_of("Animal", &[], &["urn:eigenius:demo:assay:name"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:name",
+            property_decl("urn:eigenius:demo:assay:name", "name", TYPE_STRING),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:Dog",
+            class_with_subclass_of(
+                "Dog",
+                &["urn:eigenius:demo:assay:Animal"],
+                &["urn:eigenius:demo:assay:breed"],
+                &[],
+            ),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:breed",
+            property_decl("urn:eigenius:demo:assay:breed", "breed", TYPE_STRING),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:Cat",
+            class_with_subclass_of(
+                "Cat",
+                &["urn:eigenius:demo:assay:Animal"],
+                &["urn:eigenius:demo:assay:indoor"],
+                &[],
+            ),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:indoor",
+            property_decl("urn:eigenius:demo:assay:indoor", "indoor", TYPE_BOOLEAN),
+        );
+        chain
+    }
+
+    fn run_with_chain(chain: &FlatChain, seed: &[&str]) -> MirrorGenerationOutput {
+        let layer = iri("urn:eigenius:test:layer");
+        let seed_iris: Vec<Iri> = seed.iter().map(|s| iri(s)).collect();
+        let request = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed_iris,
+            chain,
+        };
+        JuliaMirrorGenerator::new()
+            .generate(&request)
+            .expect("generate")
+    }
+
+    #[test]
+    fn subclass_emission_walks_subclass_of_into_closure() {
+        // D29 §3.1: subclass_of ancestors are pulled into the closure
+        // automatically. Seeding only on Dog should still pull in Animal.
+        let chain = build_animal_chain();
+        let out = run_with_chain(&chain, &["urn:eigenius:demo:assay:Dog"]);
+        let mirrored: Vec<&str> = out.mirrored_classes.iter().map(|i| i.as_str()).collect();
+        assert!(mirrored.contains(&"urn:eigenius:demo:assay:Animal"));
+        assert!(mirrored.contains(&"urn:eigenius:demo:assay:Dog"));
+    }
+
+    #[test]
+    fn subclass_struct_extends_abstract_parent() {
+        // D29 §7: `struct Sub <: AbstractParent` for direct supertype.
+        let chain = build_animal_chain();
+        let out = run_with_chain(&chain, &["urn:eigenius:demo:assay:Dog"]);
+        let src = extract_source(&out);
+        assert!(src.contains("abstract type AbstractAnimal end"));
+        assert!(src.contains("abstract type AbstractDog <: AbstractAnimal end"));
+        assert!(src.contains("struct Animal <: AbstractAnimal"));
+        assert!(src.contains("struct Dog <: AbstractDog"));
+    }
+
+    #[test]
+    fn subclass_struct_inherits_parent_fields_first() {
+        // D29 §3.2 / §11.1: Dog's struct carries Animal's `name` first
+        // (root-to-leaf order), then Dog's own `breed`. _id is last.
+        let chain = build_animal_chain();
+        let out = run_with_chain(&chain, &["urn:eigenius:demo:assay:Dog"]);
+        let src = extract_source(&out);
+        let dog_idx = src.find("struct Dog").expect("Dog struct present");
+        let dog_block = &src[dog_idx..src[dog_idx..].find("end\n").unwrap() + dog_idx + 4];
+        let name_idx = dog_block.find("name::String").expect("Dog has name");
+        let breed_idx = dog_block.find("breed::String").expect("Dog has breed");
+        assert!(
+            name_idx < breed_idx,
+            "ancestor's `name` field must precede own `breed` field, got:\n{dog_block}"
+        );
+    }
+
+    #[test]
+    fn polymorphic_union_emits_union_type_and_helpers() {
+        // D29 §4 + §8.3: a property with `class_types: [C1, C2]`
+        // produces a `Union{AbstractC1, AbstractC2}` field type AND
+        // per-field encode/decode dispatch helpers.
+        let mut chain = FlatChain::new();
+        // Two leaf classes.
+        chain.add(
+            "urn:eigenius:demo:assay:Foo",
+            class_decl("Foo", &["urn:eigenius:demo:assay:foo_name"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:foo_name",
+            property_decl("urn:eigenius:demo:assay:foo_name", "foo_name", TYPE_STRING),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:Bar",
+            class_decl("Bar", &["urn:eigenius:demo:assay:bar_name"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:bar_name",
+            property_decl("urn:eigenius:demo:assay:bar_name", "bar_name", TYPE_STRING),
+        );
+        // Owner has a polymorphic field referencing both.
+        chain.add(
+            "urn:eigenius:demo:assay:Owner",
+            class_decl("Owner", &["urn:eigenius:demo:assay:thing"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:thing",
+            property_resource_multi(
+                "urn:eigenius:demo:assay:thing",
+                "thing",
+                &["urn:eigenius:demo:assay:Foo", "urn:eigenius:demo:assay:Bar"],
+            ),
+        );
+
+        let out = run_with_chain(&chain, &["urn:eigenius:demo:assay:Owner"]);
+        let src = extract_source(&out);
+        // IRI sort: Bar < Foo, so Union renders Bar first.
+        assert!(
+            src.contains("thing::Union{AbstractBar, AbstractFoo}"),
+            "expected Union field type in IRI sort order, got source:\n{src}"
+        );
+        // Helpers emitted for the polymorphic field.
+        assert!(src.contains("function _encode_Owner_thing(v)"));
+        assert!(src.contains("function _decode_Owner_thing(m::AbstractDict)"));
+        // Encoder dispatches via typeof; decoder via is_a list.
+        assert!(src.contains("if v isa Bar"));
+        assert!(src.contains("\"urn:eigenius:demo:assay:Bar\" in is_a"));
+    }
+
+    #[test]
+    fn id_field_round_trips_through_decode_and_encode() {
+        // D29 §8.4: every struct exposes `_id` as a Union{String,
+        // Nothing} kwarg; decode reads m["@id"], encode stamps
+        // out["@id"] when present.
+        let out = run_kinase(&["urn:eigenius:demo:assay:Compound"]);
+        let src = extract_source(&out);
+        // Struct field present.
+        assert!(src.contains("_id::Union{String, Nothing}"));
+        // Constructor kwarg, last in the list.
+        assert!(src.contains("_id::Union{String, Nothing} = nothing"));
+        // Decoder reads m["@id"].
+        assert!(
+            src.contains(
+                "_id = (let _v = get(m, \"@id\", nothing); isnothing(_v) ? nothing : _v end)"
+            ),
+            "expected decoder to read m[\"@id\"], got source:\n{src}"
+        );
+        // Encoder stamps out["@id"].
+        assert!(
+            src.contains("isnothing(c._id) || (out[\"@id\"] = c._id)"),
+            "expected encoder to stamp out[\"@id\"], got source:\n{src}"
+        );
+    }
+
+    #[test]
+    fn reserved_id_short_name_is_rejected() {
+        // D29 §11.1: property short_name `_id` is reserved.
+        let mut chain = FlatChain::new();
+        chain.add(
+            "urn:eigenius:demo:assay:Bad",
+            class_decl("Bad", &["urn:eigenius:demo:assay:reserved"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:reserved",
+            property_decl("urn:eigenius:demo:assay:reserved", "_id", TYPE_STRING),
+        );
+        let layer = iri("urn:eigenius:test:layer");
+        let seed = vec![iri("urn:eigenius:demo:assay:Bad")];
+        let request = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let result = JuliaMirrorGenerator::new().generate(&request);
+        match result {
+            Err(MirrorGeneratorError::UnrepresentableClass { reason, .. }) => {
+                assert!(
+                    reason.contains("_id"),
+                    "expected `_id` reserved-name error, got reason: {reason}"
+                );
+            }
+            Err(other) => panic!("expected UnrepresentableClass for reserved `_id`, got {other:?}"),
+            Ok(_) => panic!("expected UnrepresentableClass for reserved `_id`, got Ok"),
+        }
+    }
+
+    #[test]
+    fn multi_supertype_is_rejected() {
+        // D29 §3.2 / §11.1: Julia abstract types are single-inheritance.
+        // A class with two `subclass_of` entries cannot be faithfully
+        // mirrored.
+        let mut chain = FlatChain::new();
+        chain.add(
+            "urn:eigenius:demo:assay:A",
+            class_decl("A", &["urn:eigenius:demo:assay:p_a"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:p_a",
+            property_decl("urn:eigenius:demo:assay:p_a", "p_a", TYPE_STRING),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:B",
+            class_decl("B", &["urn:eigenius:demo:assay:p_b"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:p_b",
+            property_decl("urn:eigenius:demo:assay:p_b", "p_b", TYPE_STRING),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:Multi",
+            class_with_subclass_of(
+                "Multi",
+                &["urn:eigenius:demo:assay:A", "urn:eigenius:demo:assay:B"],
+                &[],
+                &[],
+            ),
+        );
+        let layer = iri("urn:eigenius:test:layer");
+        let seed = vec![iri("urn:eigenius:demo:assay:Multi")];
+        let request = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let result = JuliaMirrorGenerator::new().generate(&request);
+        match result {
+            Err(MirrorGeneratorError::UnrepresentableClass { reason, .. }) => {
+                assert!(
+                    reason.contains("supertype"),
+                    "expected multi-supertype error, got: {reason}"
+                );
+            }
+            Err(other) => {
+                panic!("expected UnrepresentableClass for multi-supertype, got {other:?}")
+            }
+            Ok(_) => panic!("expected UnrepresentableClass for multi-supertype, got Ok"),
+        }
+    }
+
+    #[test]
+    fn cycle_in_property_refs_is_rejected() {
+        // D29 §3.3: cyclic class graphs aren't representable as Julia
+        // structs (no forward references). Reject loudly.
+        let mut chain = FlatChain::new();
+        chain.add(
+            "urn:eigenius:demo:assay:Loop1",
+            class_decl("Loop1", &["urn:eigenius:demo:assay:to2"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:to2",
+            property_resource(
+                "urn:eigenius:demo:assay:to2",
+                "to2",
+                "urn:eigenius:demo:assay:Loop2",
+            ),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:Loop2",
+            class_decl("Loop2", &["urn:eigenius:demo:assay:to1"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:to1",
+            property_resource(
+                "urn:eigenius:demo:assay:to1",
+                "to1",
+                "urn:eigenius:demo:assay:Loop1",
+            ),
+        );
+        let layer = iri("urn:eigenius:test:layer");
+        let seed = vec![iri("urn:eigenius:demo:assay:Loop1")];
+        let request = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let result = JuliaMirrorGenerator::new().generate(&request);
+        match result {
+            Err(MirrorGeneratorError::UnrepresentableClass { reason, .. }) => {
+                assert!(
+                    reason.contains("cycle"),
+                    "expected cycle-detection error, got: {reason}"
+                );
+            }
+            Err(other) => panic!("expected UnrepresentableClass for cycle, got {other:?}"),
+            Ok(_) => panic!("expected UnrepresentableClass for cycle, got Ok"),
+        }
+    }
+
+    #[test]
+    fn cycle_in_subclass_of_is_rejected() {
+        // D29 §11.1: subclass_of cycles produce `UnrepresentableClass`.
+        let mut chain = FlatChain::new();
+        chain.add(
+            "urn:eigenius:demo:assay:CycleA",
+            class_with_subclass_of("CycleA", &["urn:eigenius:demo:assay:CycleB"], &[], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:CycleB",
+            class_with_subclass_of("CycleB", &["urn:eigenius:demo:assay:CycleA"], &[], &[]),
+        );
+        let layer = iri("urn:eigenius:test:layer");
+        let seed = vec![iri("urn:eigenius:demo:assay:CycleA")];
+        let request = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let result = JuliaMirrorGenerator::new().generate(&request);
+        match result {
+            Err(MirrorGeneratorError::UnrepresentableClass { reason, .. }) => {
+                assert!(
+                    reason.contains("cycle") || reason.contains("subclass_of"),
+                    "expected subclass_of cycle error, got: {reason}"
+                );
+            }
+            Err(other) => {
+                panic!("expected UnrepresentableClass for subclass_of cycle, got {other:?}")
+            }
+            Ok(_) => panic!("expected UnrepresentableClass for subclass_of cycle, got Ok"),
+        }
+    }
+
+    #[test]
+    fn short_name_conflict_in_inherited_field_set_is_rejected() {
+        // D29 §11.1: two distinct property IRIs with the same
+        // short_name in a class's transitive field set is invalid.
+        let mut chain = FlatChain::new();
+        chain.add(
+            "urn:eigenius:demo:assay:Parent",
+            class_decl("Parent", &["urn:eigenius:demo:assay:weight_kg"], &[]),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:weight_kg",
+            property_decl("urn:eigenius:demo:assay:weight_kg", "weight", TYPE_FLOAT),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:Child",
+            class_with_subclass_of(
+                "Child",
+                &["urn:eigenius:demo:assay:Parent"],
+                &["urn:eigenius:demo:assay:weight_lbs"],
+                &[],
+            ),
+        );
+        chain.add(
+            "urn:eigenius:demo:assay:weight_lbs",
+            property_decl("urn:eigenius:demo:assay:weight_lbs", "weight", TYPE_FLOAT),
+        );
+        let layer = iri("urn:eigenius:test:layer");
+        let seed = vec![iri("urn:eigenius:demo:assay:Child")];
+        let request = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let result = JuliaMirrorGenerator::new().generate(&request);
+        match result {
+            Err(MirrorGeneratorError::UnrepresentableClass { reason, .. }) => {
+                assert!(
+                    reason.contains("short_name"),
+                    "expected short_name conflict error, got: {reason}"
+                );
+            }
+            Err(other) => {
+                panic!("expected UnrepresentableClass for short_name conflict, got {other:?}")
+            }
+            Ok(_) => panic!("expected UnrepresentableClass for short_name conflict, got Ok"),
+        }
+    }
+
+    #[test]
+    fn custom_format_iri_passes_through_to_validator() {
+        // D29 §9.3: format IRIs outside `urn:eigenius:core:formats:`
+        // pass through as `Symbol("<full IRI>")` rather than being
+        // silently dropped.
+        let mut chain = FlatChain::new();
+        let mut prop = property_decl("urn:eigenius:demo:assay:p", "p", TYPE_STRING);
+        prop.set(
+            iri(PROP_FORMAT),
+            Value::ResourceRef(iri("urn:my:custom:format:foo")),
+        );
+        chain.add("urn:eigenius:demo:assay:p", prop);
+        chain.add(
+            "urn:eigenius:demo:assay:Bag",
+            class_decl("Bag", &["urn:eigenius:demo:assay:p"], &[]),
+        );
+        let out = run_with_chain(&chain, &["urn:eigenius:demo:assay:Bag"]);
+        let src = extract_source(&out);
+        assert!(
+            src.contains("validate_format(:p, p, Symbol(\"urn:my:custom:format:foo\"))"),
+            "expected full-IRI format passthrough, got source:\n{src}"
+        );
     }
 }

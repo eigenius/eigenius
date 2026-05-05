@@ -1303,7 +1303,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 #### Phase 19a.3 — Mirror generator (~10 days)
 
-**Goal.** Implement the mirror generator as substrate Rust code per [D27 §3](d27-julia-institutions.md). Walks the chain's ontology layer at image-build time, emits Julia source matching the faithful-translation spec, commits the result as a `JuliaPackageMirror` resource, bakes the precompiled artifact into the env image. The deterministic-output spec (D29) authored in parallel.
+**Goal.** Implement the mirror generator as substrate Rust code per [D27 §3](d27-julia-institutions.md). Walks the chain's ontology layer at image-build time, emits Julia source matching the [D29 faithful-translation specification](d29-eigon-julia-mirror-spec.md), commits the result as a `RuntimePackageMirror` resource, bakes the precompiled artifact into the env image. D29 v1 lands in 19a.3.c alongside the chain-commit work; the implementation is reconciled to it in 19a.3.d (subclass hierarchy + remaining gap items called out in [D29 §11.2](d29-eigon-julia-mirror-spec.md#112-planned-extensions)).
 
 **Files created.**
 - `crates/eigenius-julia/src/mirror_gen.rs` — generator entry point: `generate_mirror(layer: &Layer, classes: &[Iri]) -> Result<MirrorOutput, GenError>` returning `(julia_source, content_hash, mirrored_class_iris)`.
@@ -1314,7 +1314,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 - `julia/common/EigeniusJuliaCommon/Project.toml` — shared package providing helpers the generated code calls (`validate_min`, `validate_pattern`, `decode_iri_keyed_map`, etc.).
 - `julia/common/EigeniusJuliaCommon/src/EigeniusJuliaCommon.jl`.
 - `julia/env/Project.toml` — the shared env's Pkg env; declares path-deps on `EigeniusJuliaCommon` and (at build time) on the generated mirror packages.
-- `docs/design/d29-eigon-julia-mirror-spec.md` — faithful-translation specification (D29). Authored in parallel with the generator.
+- [`docs/design/d29-eigon-julia-mirror-spec.md`](d29-eigon-julia-mirror-spec.md) — faithful-translation specification (D29). v1 draft committed in 19a.3.c.
 
 **Files modified.**
 - `crates/eigenius-julia/src/runtime.rs` — `build_environment_image` invokes `generate_mirror` for the env's mirror class list, copies the generated source into the build context, commits the `JuliaPackageMirror` resource alongside the image digest.
@@ -1340,6 +1340,33 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 - Round-trip test: a `Compound` resource → CBOR → `decode_compound` → `encode_compound` → CBOR → equals original.
 - Determinism: regenerating the kinase mirror twice produces byte-identical source.
 - A `JuliaPackageMirror` resource is committed with the right content hash, source layer, and mirrored class IRIs on each `build_environment_image` call.
+
+**Sub-milestones.** 19a.3 ships in four chunks: 19a.3.a (class-walking + struct emitter), 19a.3.b (codec emitters + validating constructors + `EigeniusJuliaCommon`), 19a.3.c (`RuntimePackageMirror` chain commit + image-build wiring + [D29 v1 draft](d29-eigon-julia-mirror-spec.md)), 19a.3.d (reconcile generator output to D29 — see below).
+
+---
+
+#### Phase 19a.3.d — D29 conformance pass (~3 days)
+
+**Goal.** Reconcile the v1 generator's actual output to [D29 v1](d29-eigon-julia-mirror-spec.md). 19a.3.a–c shipped the generator and the spec in parallel; 19a.3.d closes the gap items the spec calls out as bugs against the v1 implementation, plus implements the spec's required-but-not-yet-emitted features.
+
+**In scope.**
+- **Pattern anchoring** ([D29 §9.4](d29-eigon-julia-mirror-spec.md#94-validator-semantics-delegated-to-eigeniusjuliacommon)): `validate_pattern` wraps the user's pattern in `^(?:…)$` so Julia-side validation matches the kernel-side semantics in `kernel/src/validation/mod.rs:check_pattern`.
+- **Polymorphic `class_types` as `Union`** ([D29 §4](d29-eigon-julia-mirror-spec.md#4-faithful-type-translation)): a property with multiple `class_types` produces a `Union{T₁, …, Tₙ}` field type (sorted by IRI), with helper-driven encode dispatch on `typeof` and decode dispatch on the input dict's `is_a` list ([D29 §8.3](d29-eigon-julia-mirror-spec.md#83-polymorphic-union-field-codecs)). Extends the kinase fixture with a polymorphic case.
+- **Format IRI passthrough** ([D29 §9.3](d29-eigon-julia-mirror-spec.md#93-format-symbol-rendering)): non-`urn:eigenius:core:formats:` format IRIs are passed to `validate_format` as-is rather than silently dropped; `validate_format` raises on unknown formats.
+- **Cycle detection** ([D29 §3.3](d29-eigon-julia-mirror-spec.md#33-topological-order)): closure containing class cycles raises `MirrorGeneratorError::UnrepresentableClass`. Currently the topological sort silently produces invalid Julia.
+- **Subclass hierarchy emission** ([D29 §3.2](d29-eigon-julia-mirror-spec.md#32-subclass-closure-planned-112) / §11.2): `subclass_of` walked into the closure; abstract types emitted (`abstract type SuperType end`) before concrete structs; `struct Sub <: SuperType`. Bumps the spec to v1.1.
+- **Generator self-tests** for each of the above + a snapshot test that the kinase-fixture output matches the post-fix shape.
+
+**Out of scope** (pinned for later milestones in [D29 §11.2](d29-eigon-julia-mirror-spec.md#112-planned-extensions)).
+- Multi-mirror per `RuntimeEnvironment` (lands in 19a.4 alongside `CallRuntimeMethod`).
+- Per-class file split.
+- `core:allows_only` enum support, embedded resources.
+- Real generator binary content hash (replaces the `sha256("eigon-julia-gen:<version>")` v1 placeholder).
+
+**Acceptance.**
+- D29 v1.1 published; generator output conforms by every spec rule it cites.
+- Existing kinase snapshot test updated; new snapshot covers a polymorphic field and a subclass relationship.
+- Pattern-anchoring regression: `pattern: "abc"` rejects `"xxxabcxxx"` on both kernel and Julia validators.
 
 ---
 
@@ -1529,7 +1556,7 @@ The 19b letter is preserved (rather than renumbering 19c–19h up) to keep cross
 - [D27 — Julia Institutions](d27-julia-institutions.md) — full specification
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate this layers on
 - D14 — institution protocol (each Julia institution is a D14 institution)
-- D29 (to be written) — Faithful translation specification for `eigon-julia-gen`
+- [D29](d29-eigon-julia-mirror-spec.md) — Faithful translation specification for `eigon-julia-gen`
 
 ---
 
@@ -1672,7 +1699,7 @@ The following design documents must be written and reviewed before the phase tha
 | D26 | **Runtime Substrate** | **DRAFT** — `docs/design/d26-runtime-substrate.md`. Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. `LanguageRuntime` trait, parent ontology classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`), image-vs-graph boundary, deterministic image-build pipeline with digest capture, worker pool + sandbox, mirror-anchor compositionality, `RunRuntimeScript` / `CallRuntimeMethod` substrate components. Cross-language wire format = CBOR + RFC 8746 typed-array tags. | Phase 18 | Draft |
 | D27 | **Julia Institutions** | **DRAFT** — `docs/design/d27-julia-institutions.md`. First concrete substrate instance plus reference institutions wrapping Julia libraries under D14. `JuliaScript` / `JuliaPackage` / `JuliaEnvironment` / `JuliaPackageMirror` / `JuliaInvocation` / `JuliaMethodSignature` / `JuliaPackagePin` subclasses. `eigon-julia-gen` mirror generator. Five reference institutions: `Symbolics`/`ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` (ODEs). Future Lean / Julia bridge sketch (interval-bound proof obligations). | Phase 19 | Draft |
 | D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
-| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19b | 8–12 pages |
+| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.3.c (v1 draft) | Draft v1 |
 | D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
 
 **Reference documents** (analysis rather than specification):
