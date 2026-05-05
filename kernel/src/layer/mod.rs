@@ -72,7 +72,8 @@ pub fn build_chain(
 }
 
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Resource;
+use crate::ontology::resource::{Resource, Value};
+use crate::ontology::well_known as wk;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -469,7 +470,21 @@ impl LayerBuilder {
     /// evicts a freshly-built resource before commit, the resource is lost;
     /// commit promptly. The bounded cache (14c) will need coordination with
     /// this lifecycle.
-    pub fn build(self, storage: LayerStorage) -> Layer {
+    pub fn build(mut self, storage: LayerStorage) -> Layer {
+        // Canonicalise property values BEFORE computing the layer id /
+        // populating caches: every Eigon-JSON-parsed `Value::String`
+        // that names a `data_type: resource` (or `resource_array`)
+        // property gets upgraded to `Value::ResourceRef` so the
+        // committed shape is uniform regardless of which codec
+        // produced the resource. Downstream readers (validator,
+        // triple index, query evaluator) can then assume one shape
+        // per data_type. Bootstrap is unaffected: the lookup
+        // consults `self.resources` first, so properties defined in
+        // the layer being built (the core ontology's own property
+        // declarations, for instance) are visible to their own
+        // canonicalisation pass.
+        canonicalise_resource_refs(&mut self.resources, &self.parents);
+
         let id = self.compute_layer_id();
         let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
         for (iri, resource) in self.resources {
@@ -555,6 +570,128 @@ impl LayerBuilder {
         id.copy_from_slice(&hash);
         LayerId(id)
     }
+}
+
+// ─── Canonical resource-reference shape ────────────────────────────────
+//
+// The Eigon-JSON parser is intentionally schema-agnostic: every
+// `"prop": "urn:..."` entry parses as `Value::String` because at parse
+// time the parser doesn't know the property's `data_type`. The
+// Eigon-CBOR codec and substrate-side resource builders use
+// `Value::ResourceRef` for the same role. The chain itself should
+// carry one canonical shape so downstream readers (validator,
+// triple index, query evaluator) don't need a tolerant
+// `String|ResourceRef` accept set everywhere.
+//
+// `canonicalise_resource_refs` runs once per `LayerBuilder::build`,
+// before the layer id is computed and the resources are pushed into
+// the cache. For every property whose declared `data_type` is
+// `resource` or `resource_array`, it rewrites `Value::String` IRIs
+// to `Value::ResourceRef`. Property definitions are looked up first
+// in the layer being built (so a layer that introduces both a
+// property and an instance of it canonicalises consistently — the
+// core ontology's `is_a` is the canonical example) and then in the
+// parent chain. Properties without a known `data_type` (custom
+// extensions, malformed declarations) are left untouched; the
+// validator surfaces the malformed shape via its standard rules.
+
+const PROP_DATA_TYPE: &str = "urn:eigenius:core:data_type";
+
+fn canonicalise_resource_refs(resources: &mut BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) {
+    let data_type_iri =
+        Iri::parse(PROP_DATA_TYPE).expect("static IRI urn:eigenius:core:data_type must parse");
+    let resource_dt = wk::RESOURCE.to_string();
+    let resource_array_dt = wk::RESOURCE_ARRAY.to_string();
+
+    // Snapshot the `(prop_iri, data_type_iri)` pairs we'll need.
+    // Computing them up front lets us rewrite `resources` without
+    // borrowing it twice (once to look up, once to mutate).
+    let mut prop_data_types: BTreeMap<Iri, String> = BTreeMap::new();
+    let mut all_prop_iris: BTreeSet<Iri> = BTreeSet::new();
+    for resource in resources.values() {
+        for prop_iri in resource.property_iris() {
+            all_prop_iris.insert(prop_iri.clone());
+        }
+    }
+    for prop_iri in &all_prop_iris {
+        if let Some(dt) = lookup_property_data_type(prop_iri, &data_type_iri, resources, parents) {
+            prop_data_types.insert(prop_iri.clone(), dt);
+        }
+    }
+
+    for resource in resources.values_mut() {
+        let prop_iris: Vec<Iri> = resource.property_iris().cloned().collect();
+        for prop_iri in prop_iris {
+            let Some(dt) = prop_data_types.get(&prop_iri) else {
+                continue;
+            };
+            if dt == &resource_dt {
+                if let Some(value) = resource.get(&prop_iri).cloned() {
+                    if let Some(canon) = canonicalise_single_value(value) {
+                        resource.set(prop_iri, canon);
+                    }
+                }
+            } else if dt == &resource_array_dt {
+                if let Some(Value::Array(items)) = resource.get(&prop_iri).cloned() {
+                    let canon = items
+                        .into_iter()
+                        .map(|v| canonicalise_single_value(v.clone()).unwrap_or(v))
+                        .collect();
+                    resource.set(prop_iri, Value::Array(canon));
+                }
+            }
+        }
+    }
+}
+
+/// Upgrade a single `Value::String` IRI to `Value::ResourceRef`.
+/// Returns `None` when the value is already canonical (or isn't a
+/// string at all) so callers can skip the `set` round-trip.
+fn canonicalise_single_value(value: Value) -> Option<Value> {
+    match value {
+        Value::String(s) => Iri::parse(&s).ok().map(Value::ResourceRef),
+        // ResourceRef and Embedded are already canonical for resource
+        // references; other shapes are left for the validator to
+        // flag as type mismatches.
+        _ => None,
+    }
+}
+
+/// Resolve a property IRI to its declared `data_type`, looking up
+/// (in order):
+/// 1. The layer being built (so a layer that introduces both a
+///    property and a resource using it canonicalises consistently).
+/// 2. The parent chain, via `Layer::resolve` (which walks ancestors).
+///
+/// Returns the data_type IRI as a `String` so callers can match
+/// against `wk::RESOURCE` / `wk::RESOURCE_ARRAY` without an extra
+/// `Iri::parse` per resource property.
+fn lookup_property_data_type(
+    prop_iri: &Iri,
+    data_type_iri: &Iri,
+    working: &BTreeMap<Iri, Resource>,
+    parents: &[Arc<Layer>],
+) -> Option<String> {
+    let extract = |r: &Resource| -> Option<String> {
+        match r.get(data_type_iri)? {
+            Value::String(s) => Some(s.clone()),
+            Value::ResourceRef(i) => Some(i.as_str().to_string()),
+            _ => None,
+        }
+    };
+    if let Some(r) = working.get(prop_iri) {
+        if let Some(dt) = extract(r) {
+            return Some(dt);
+        }
+    }
+    for parent in parents {
+        if let Some(r) = parent.resolve(prop_iri) {
+            if let Some(dt) = extract(r.as_ref()) {
+                return Some(dt);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

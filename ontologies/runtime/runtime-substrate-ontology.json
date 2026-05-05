@@ -605,10 +605,10 @@
   {
     "@id": "urn:eigenius:runtime:output_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Eigon class IRI of the method's return type.",
+    "urn:eigenius:core:description": "Eigon class IRI of the method's return type. Accepts both Class and InductiveType references — institution-runtime methods like the IntervalArithmetic validator return a `Verdict` (an InductiveType), not a class instance.",
     "urn:eigenius:core:short_name": "output_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
   },
   {

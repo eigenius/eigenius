@@ -1,0 +1,39 @@
+[
+  {
+    "@id": "urn:eigenius:intervals:BoundedBy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "BoundedBy",
+    "urn:eigenius:core:description": "A scalar `value` claimed to lie within the closed interval [`lower`, `upper`]. The IntervalArithmetic institution's AutoOnLoad QueryClass dispatches a Julia handler (`validate_bounded_by`) that uses `IntervalArithmetic.jl` to verify the inclusion rigorously: `Holds` when the inclusion is proved, `Fails` when refuted, `Undecidable` when the proof is inconclusive. See D27 §4.0.2.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:intervals:value",
+      "urn:eigenius:intervals:lower",
+      "urn:eigenius:intervals:upper"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:intervals:value",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "value",
+    "urn:eigenius:core:description": "The scalar value being checked for interval membership.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundedBy"]
+  },
+  {
+    "@id": "urn:eigenius:intervals:lower",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lower",
+    "urn:eigenius:core:description": "Inclusive lower bound of the interval the value is claimed to lie within.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundedBy"]
+  },
+  {
+    "@id": "urn:eigenius:intervals:upper",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "upper",
+    "urn:eigenius:core:description": "Inclusive upper bound of the interval the value is claimed to lie within.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundedBy"]
+  }
+]

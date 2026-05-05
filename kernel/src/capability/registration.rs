@@ -219,11 +219,16 @@ pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, Reg
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
-        let runtime_kind = match resource.get(&runtime_prop) {
-            Some(Value::String(s)) if s == wk::RUNTIME_WASM => s,
-            _ => continue, // not WASM-runtime — caller's responsibility
-        };
-        let _ = runtime_kind;
+        // `runtime` is `data_type: resource`; canonicalises to
+        // `ResourceRef`. `as_iri` accepts both that and the
+        // pre-canonical `String` shape.
+        let is_wasm = resource
+            .get(&runtime_prop)
+            .and_then(|v| v.as_iri())
+            .is_some_and(|i| i.as_str() == wk::RUNTIME_WASM);
+        if !is_wasm {
+            continue; // not WASM-runtime — caller's responsibility
+        }
 
         match load_wasm_institution(&resource, &iri, layer) {
             Ok(wasm_inst) => {
@@ -304,25 +309,21 @@ pub fn validate_external_institution_chain(
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
-        match resource.get(&runtime_prop) {
-            Some(Value::String(s)) if s == wk::RUNTIME_EXTERNAL => {}
+        // `runtime` is `data_type: resource` post-canonicalisation,
+        // so the value is a `ResourceRef`. `Value::as_iri` accepts
+        // both ResourceRef and (legacy/parse-time) String, so this
+        // also handles intermediates that haven't been through
+        // `canonicalise_resource_refs` yet.
+        match resource.get(&runtime_prop).and_then(|v| v.as_iri()) {
+            Some(i) if i.as_str() == wk::RUNTIME_EXTERNAL => {}
             _ => continue,
         }
 
         let inst_iri_str = iri.as_str().to_string();
 
-        let env_iri = match resource.get(&env_ref_prop) {
-            Some(Value::String(s)) => match Iri::parse(s) {
-                Ok(i) => i,
-                Err(e) => {
-                    errors.push(ExternalInstitutionCheckError {
-                        institution_iri: inst_iri_str,
-                        message: format!("invalid `requires_environment` IRI `{s}`: {e}"),
-                    });
-                    continue;
-                }
-            },
-            _ => {
+        let env_iri = match resource.get(&env_ref_prop).and_then(|v| v.as_iri()) {
+            Some(i) => i,
+            None => {
                 errors.push(ExternalInstitutionCheckError {
                     institution_iri: inst_iri_str,
                     message:

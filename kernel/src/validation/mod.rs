@@ -275,13 +275,15 @@ impl<'a> Validator<'a> {
         required: &mut BTreeSet<Iri>,
         recommended: &mut BTreeSet<Iri>,
     ) {
-        // Get when_property
-        let when_prop = match condition.get(&iri(wk::WHEN_PROPERTY)) {
-            Some(Value::String(s)) => match Iri::parse(s) {
-                Ok(i) => i,
-                Err(_) => return,
-            },
-            _ => return,
+        // Get when_property — `data_type: resource`, so the canonical
+        // shape is `ResourceRef`; `as_iri` also tolerates the
+        // pre-canonical `String` shape.
+        let when_prop = match condition
+            .get(&iri(wk::WHEN_PROPERTY))
+            .and_then(|v| v.as_iri())
+        {
+            Some(i) => i,
+            None => return,
         };
 
         // Get has_value
@@ -290,22 +292,16 @@ impl<'a> Validator<'a> {
             None => return,
         };
 
-        // Check if the resource's property value matches any has_value
+        // Check if the resource's property value matches any has_value.
+        // The value being matched is itself an IRI in either shape.
         let resource_value = match resource.get(&when_prop) {
             Some(v) => v,
             None => return,
         };
-
-        let matches = match resource_value {
-            Value::String(s) => {
-                if let Ok(val_iri) = Iri::parse(s) {
-                    has_values.contains(&val_iri)
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        };
+        let matches = resource_value
+            .as_iri()
+            .map(|val_iri| has_values.contains(&val_iri))
+            .unwrap_or(false);
 
         if matches {
             // Apply then_requires
@@ -342,12 +338,22 @@ impl<'a> Validator<'a> {
             wk::FLOAT => matches!(value, Value::Float(_) | Value::Integer(_)),
             wk::BOOLEAN => matches!(value, Value::Boolean(_)),
             wk::RESOURCE => {
-                matches!(value, Value::String(_) | Value::Embedded(_))
+                // Post-canonicalisation (see `LayerBuilder::build` ->
+                // `canonicalise_resource_refs`), every resource-typed
+                // value on a committed layer is either `ResourceRef`
+                // (an IRI) or `Embedded` (an inlined Resource).
+                // `Value::String` for a `data_type: resource`
+                // property is a malformed declaration the
+                // canonicaliser couldn't normalise (typically because
+                // the property def is missing or its data_type isn't
+                // resolvable) — flag it as a type mismatch rather
+                // than silently accepting a non-canonical shape.
+                matches!(value, Value::ResourceRef(_) | Value::Embedded(_))
             }
             wk::RESOURCE_ARRAY => match value {
                 Value::Array(arr) => arr
                     .iter()
-                    .all(|v| matches!(v, Value::String(_) | Value::Embedded(_))),
+                    .all(|v| matches!(v, Value::ResourceRef(_) | Value::Embedded(_))),
                 _ => false,
             },
             wk::VALUE_ARRAY => matches!(value, Value::Array(_)),
@@ -569,31 +575,18 @@ impl<'a> Validator<'a> {
 
         let mut errors = Vec::new();
         let values_to_check = match value {
-            Value::String(_) | Value::Embedded(_) => vec![value],
+            Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_) => vec![value],
             Value::Array(arr) => arr.iter().collect(),
             _ => return vec![],
         };
 
         for v in values_to_check {
-            match v {
-                Value::String(ref_str) => {
-                    if let Ok(ref_iri) = Iri::parse(ref_str) {
-                        if let Some(referenced) = self.layer.resolve(&ref_iri) {
-                            if !self.is_instance_of_any(&referenced, &allowed_refs) {
-                                errors.push(ValidationError {
-                                    resource_id: res_id.clone(),
-                                    property: Some(prop_iri.clone()),
-                                    rule: ValidationRule::ClassTypeMismatch,
-                                    message: format!(
-                                        "referenced resource '{ref_iri}' is not an instance of any allowed class"
-                                    ),
-                                });
-                            }
-                        }
-                        // If we can't resolve, skip — might be external
-                    }
-                }
-                Value::Embedded(embedded) if !self.is_instance_of_any(embedded, &allowed_refs) => {
+            // Embedded resources are checked directly against the
+            // allowed-class set; IRI references (in either canonical
+            // `ResourceRef` or pre-canonical `String` shape) are
+            // resolved through the chain first.
+            if let Value::Embedded(embedded) = v {
+                if !self.is_instance_of_any(embedded, &allowed_refs) {
                     errors.push(ValidationError {
                         resource_id: res_id.clone(),
                         property: Some(prop_iri.clone()),
@@ -602,7 +595,22 @@ impl<'a> Validator<'a> {
                             .to_string(),
                     });
                 }
-                _ => {}
+                continue;
+            }
+            if let Some(ref_iri) = v.as_iri() {
+                if let Some(referenced) = self.layer.resolve(&ref_iri) {
+                    if !self.is_instance_of_any(&referenced, &allowed_refs) {
+                        errors.push(ValidationError {
+                            resource_id: res_id.clone(),
+                            property: Some(prop_iri.clone()),
+                            rule: ValidationRule::ClassTypeMismatch,
+                            message: format!(
+                                "referenced resource '{ref_iri}' is not an instance of any allowed class"
+                            ),
+                        });
+                    }
+                }
+                // If we can't resolve, skip — might be external.
             }
         }
 
@@ -629,14 +637,18 @@ impl<'a> Validator<'a> {
         let allowed_set: BTreeSet<Iri> = allowed.into_iter().collect();
         let mut errors = Vec::new();
 
-        let refs_to_check: Vec<&str> = match value {
-            Value::String(s) => vec![s.as_str()],
-            Value::Array(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
-            _ => return vec![],
+        // Collect candidate IRIs to test against the allows_only set.
+        // Single-value properties hold one IRI directly; resource_array
+        // properties hold a `Value::Array` of IRI elements. `as_iri`
+        // accepts both canonical `ResourceRef` and pre-canonical
+        // `String` shapes.
+        let refs_to_check: Vec<Iri> = match value {
+            Value::Array(arr) => arr.iter().filter_map(|v| v.as_iri()).collect(),
+            single => single.as_iri().map(|i| vec![i]).unwrap_or_default(),
         };
 
-        for ref_str in refs_to_check {
-            if let Ok(ref_iri) = Iri::parse(ref_str) {
+        for ref_iri in refs_to_check {
+            {
                 if !allowed_set.contains(&ref_iri) {
                     errors.push(ValidationError {
                         resource_id: res_id.clone(),
@@ -729,10 +741,15 @@ impl<'a> Validator<'a> {
 
     /// Extract the data_type IRI string from a property definition.
     fn get_data_type_str(&self, prop_def: &Resource) -> Option<String> {
-        match prop_def.get(&iri(wk::DATA_TYPE_PROP)) {
-            Some(Value::String(s)) => Some(s.clone()),
-            _ => None,
-        }
+        // `data_type` is a `data_type: resource` property, so after
+        // `LayerBuilder::canonicalise_resource_refs` runs the value is
+        // a `Value::ResourceRef`. Accept the (legacy) `Value::String`
+        // shape too for resources read off the wire before
+        // canonicalisation (RPC payloads, FIBER intermediates).
+        prop_def
+            .get(&iri(wk::DATA_TYPE_PROP))
+            .and_then(|v| v.as_iri())
+            .map(|i| i.as_str().to_string())
     }
 
     /// Rule 14: Class-definition reference integrity (eigenius#26).
@@ -998,22 +1015,16 @@ impl<'a> Validator<'a> {
                 continue;
             }
 
-            // Collect IRI references from the value
-            let ref_iris = match value {
-                Value::String(s) => vec![s.clone()],
-                Value::Array(arr) => arr
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect(),
-                _ => continue,
+            // Collect IRI references from the value, accepting both
+            // canonical `ResourceRef` and pre-canonical `String`
+            // shapes via `Value::as_iri` / `as_iri_array`.
+            let ref_iris: Vec<Iri> = match value {
+                Value::Array(_) => value.as_iri_array(),
+                single => single.as_iri().map(|i| vec![i]).unwrap_or_default(),
             };
 
-            for ref_str in &ref_iris {
-                let ref_iri = match Iri::parse(ref_str) {
-                    Ok(i) => i,
-                    Err(_) => continue,
-                };
-                if let Some(referenced) = self.layer.resolve(&ref_iri) {
+            for ref_iri in &ref_iris {
+                if let Some(referenced) = self.layer.resolve(ref_iri) {
                     if let Some(Value::Integer(ref_level)) =
                         referenced.get(&iri(wk::UNIVERSE_LEVEL))
                     {
@@ -1253,9 +1264,12 @@ mod tests {
 
         let validator = Validator::new(&layer);
         let errors = validator.validate();
-        assert!(errors
-            .iter()
-            .any(|e| e.rule == ValidationRule::TypeMismatch));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == ValidationRule::TypeMismatch),
+            "expected TypeMismatch error; got: {errors:?}"
+        );
     }
 
     #[test]

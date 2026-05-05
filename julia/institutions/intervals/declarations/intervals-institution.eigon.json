@@ -1,0 +1,37 @@
+[
+  {
+    "@id": "urn:eigenius:institutions:intervals",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:core:short_name": "IntervalArithmetic",
+    "urn:eigenius:core:description": "Verifies scalar interval-membership claims (`BoundedBy`) by dispatching `IntervalArithmetic.jl` through a Julia worker. The minimal D31 institution: one resource class, one AutoOnLoad QueryClass, no outgoing Comorphisms (defer §6.6 until a second institution exists). See D27 §4.0.2.",
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:institutions:intervals",
+    "urn:eigenius:institution:institution_name": "IntervalArithmetic",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:institution:requires_environment": "urn:eigenius:intervals:env:v1"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:signatures:validate_bounded_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_bounded_by",
+    "urn:eigenius:core:description": "Julia entry point that takes a `BoundedBy` mirror struct and returns a `Verdict`. The handler runs `value in interval(lower, upper)` rigorously via `IntervalArithmetic.jl`: rounding-respecting interval inclusion, so a `Holds` answer is a proof of containment, not a heuristic.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_bounded_by",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:intervals:BoundedBy"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:query_classes:bounded_by_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "bounded_by_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `BoundedBy` resource. Verdict shape is the canonical D14 tri-state (`Holds`, `Fails`, `Undecidable`); a `Fails` verdict rejects the gated commit per D31 §6.3 and lands a Verdict + RuntimeInvocation as the audit anchor explaining the rejection.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:intervals:BoundedBy",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:intervals:signatures:validate_bounded_by",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals"
+  }
+]

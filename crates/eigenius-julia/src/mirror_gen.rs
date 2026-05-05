@@ -667,25 +667,46 @@ fn walk_closure(request: &MirrorGenerationRequest) -> Result<BTreeSet<Iri>, Mirr
                 Some(r) => r,
                 None => continue,
             };
-            let referenced = property_class_references(&prop_def);
-            for r in referenced {
-                if !visited.contains(&r) {
-                    queue.push(r);
+            for r in property_class_references(&prop_def) {
+                if is_core_meta_iri(&r) || visited.contains(&r) {
+                    continue;
                 }
+                queue.push(r);
             }
         }
 
         // Walk `subclass_of` ancestors transitively (D29 §3.2). Every
         // ancestor must also be in the closure so the abstract type
-        // hierarchy is closed under emission.
+        // hierarchy is closed under emission. Core-namespace meta
+        // classes (`Class`, `Property`, `DataType`, …) are skipped
+        // for the same reason they're skipped above: they're the
+        // type system itself, not user data, and `EigeniusJuliaCommon`
+        // already supplies whatever the mirror needs.
         for parent in iri_array(&class_def, PROP_SUBCLASS_OF) {
-            if !visited.contains(&parent) {
-                queue.push(parent);
+            if is_core_meta_iri(&parent) || visited.contains(&parent) {
+                continue;
             }
+            queue.push(parent);
         }
     }
 
     Ok(visited)
+}
+
+/// True when `iri` lives under the `urn:eigenius:core:` namespace —
+/// i.e. it's a core-ontology meta-class or meta-property (`Class`,
+/// `Property`, `is_a`, `ConditionalRequirement`, …) rather than a
+/// user-data class. The mirror generator emits Julia struct types for
+/// user-data classes; meta classes never get a struct type because
+/// the kernel's type-system shape is implicitly known to the
+/// hand-authored `EigeniusJuliaCommon` package the generated mirror
+/// imports. Skipping these in the closure walk avoids both redundant
+/// code emission and the recursion that pulls
+/// `ConditionalRequirement.has_value` (a `value_array` with no
+/// `class_types`, which is correct for its meta role but incompatible
+/// with the generator's expectation of mirrored properties).
+fn is_core_meta_iri(iri: &Iri) -> bool {
+    iri.as_str().starts_with("urn:eigenius:core:")
 }
 
 fn property_class_references(prop_def: &Resource) -> Vec<Iri> {
@@ -980,6 +1001,17 @@ fn resolve_properties(
 ) -> Result<Vec<PropertyDecl>, MirrorGeneratorError> {
     let mut out = Vec::new();
     for prop_iri in iri_array(class_def, arity_prop) {
+        // Skip core-namespace properties — `is_a`, `short_name`,
+        // `description`, `requires`, … are meta-shape properties the
+        // codec emitter already handles (the encoder stamps `is_a`
+        // automatically; `@id` rides through the reserved `_id`
+        // slot). Surfacing them as data fields would both produce
+        // redundant struct fields and recurse into core meta-classes
+        // (`is_a.class_types = [core:Class]`) that the closure
+        // walker correctly excludes from the decl set.
+        if is_core_meta_iri(&prop_iri) {
+            continue;
+        }
         let prop_def = request
             .chain
             .resolve(request.source_layer, &prop_iri)

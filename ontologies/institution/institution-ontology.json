@@ -281,10 +281,10 @@
   {
     "@id": "urn:eigenius:institution:result_class",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The class of result resources this QueryClass produces. Must be Verdict when dispatch_role contains AutoOnLoad or Decidable.",
+    "urn:eigenius:core:description": "The class of result resources this QueryClass produces. Must be Verdict when dispatch_role contains AutoOnLoad or Decidable; Verdict is an InductiveType, so this property accepts both Class and InductiveType references.",
     "urn:eigenius:core:short_name": "result_class",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
   },
   {

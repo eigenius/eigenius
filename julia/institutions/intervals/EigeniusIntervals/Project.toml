@@ -1,0 +1,22 @@
+name = "EigeniusIntervals"
+uuid = "c5e9b1f0-3d7a-4c2e-9b8f-1a2b3c4d5e6f"
+authors = ["The Eigenius Authors"]
+version = "0.1.0"
+
+[deps]
+# IntervalArithmetic.jl — registry-pinned. The handler uses
+# `issubset_interval` / `isdisjoint_interval` from 0.22+.
+IntervalArithmetic = "d1acc4aa-44c8-5952-acd4-ba5d80a2a253"
+
+# Generated mirror module. The UUID is the substrate's stable
+# `EigeniusMirror` package identifier (see
+# `crates/eigenius-julia/src/mirror_gen.rs::TARGET_PACKAGE_UUID`); the
+# concrete source is injected at env-build time via
+# `eigenius env create --include-package` so the handler resolves
+# `EigeniusMirror.BoundedBy` against the mirror generated for *this*
+# env.
+EigeniusMirror = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+
+[compat]
+julia = "1.10"
+IntervalArithmetic = "0.22"
