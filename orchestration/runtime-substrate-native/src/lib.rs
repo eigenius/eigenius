@@ -165,6 +165,50 @@ pub async fn dispatch_call_runtime_method(
     .map(JsDispatchOutcome::from)
 }
 
+/// Dispatch an external-institution invocation (D31 §6.2 / Phase
+/// 19a.5.c). Same `JsDispatchOutcome` shape as the script / method
+/// dispatchers above, but the kernel's gRPC handler sends structured
+/// metadata fields rather than a single argument Resource — so this
+/// entry point takes them as direct parameters and packs them into
+/// the substrate's synthesised signature inside
+/// `SubstrateDispatcher::dispatch_external_institution`.
+///
+/// `input_cbors` carries the multi-input list (D31 §6.5). For an
+/// AutoOnLoad / Decidable QueryClass dispatch it is a single-element
+/// list; for OnDemand / `CallRuntimeMethod` surfaces it can be longer.
+#[napi]
+#[allow(clippy::too_many_arguments)]
+pub async fn dispatch_external_institution(
+    language: String,
+    env_iri: String,
+    image_digest: String,
+    method_name: String,
+    signature_iri: String,
+    input_cbors: Vec<Buffer>,
+) -> Result<JsDispatchOutcome> {
+    let inputs: Vec<Vec<u8>> = input_cbors.into_iter().map(|b| b.to_vec()).collect();
+    tokio::task::spawn_blocking(move || -> Result<DispatchOutcome> {
+        let d = dispatcher().lock().map_err(lock_err)?;
+        d.dispatch_external_institution(
+            &language,
+            &env_iri,
+            &image_digest,
+            &method_name,
+            &signature_iri,
+            &inputs,
+        )
+        .map_err(into_napi_err)
+    })
+    .await
+    .map_err(|e| {
+        Error::new(
+            Status::GenericFailure,
+            format!("dispatch_external_institution join failed: {e}"),
+        )
+    })?
+    .map(JsDispatchOutcome::from)
+}
+
 /// List the language IDs of currently-registered runtimes. Useful for
 /// the orchestrator's startup banner and `/health` reporting.
 #[napi]

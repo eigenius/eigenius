@@ -61,6 +61,12 @@ pub struct ExternalInstitution {
     institution_iri: Iri,
     env_iri: Iri,
     image_digest: String,
+    /// Language identifier (`"julia"`, `"python"`, …) read from the
+    /// `RuntimeEnvironment.language` property at registration time.
+    /// Forwarded on the wire so the orchestrator's substrate
+    /// dispatcher routes to the matching `LanguageRuntime` without
+    /// having to re-resolve the chain.
+    language: String,
     /// Maps a `QueryClass.query_handler` IRI to the worker dispatch
     /// metadata. Populated at registration time when the index is
     /// rebuilt.
@@ -73,6 +79,7 @@ impl ExternalInstitution {
         institution_iri: Iri,
         env_iri: Iri,
         image_digest: String,
+        language: String,
         handlers: BTreeMap<Iri, ExternalQueryHandler>,
         client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
     ) -> Self {
@@ -80,6 +87,7 @@ impl ExternalInstitution {
             institution_iri,
             env_iri,
             image_digest,
+            language,
             handlers,
             client,
         }
@@ -140,6 +148,7 @@ impl Institution for ExternalInstitution {
             method_name: handler.method_name.clone(),
             signature_iri: handler.signature_iri.as_str().to_string(),
             input_resource_cbors: vec![eigon_cbor::serialize_resource(input)],
+            language: self.language.clone(),
         };
 
         // Bridge sync trait method to the async gRPC client. Same

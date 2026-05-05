@@ -45,6 +45,8 @@ use thiserror::Error;
 
 const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
 const PROP_REQUIRES_ENVIRONMENT: &str = "urn:eigenius:runtime:requires_environment";
+const PROP_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+const PROP_METHOD_NAME: &str = "urn:eigenius:runtime:method_name";
 
 /// Failure modes for [`SubstrateDispatcher::dispatch_run_runtime_script`]
 /// and `dispatch_call_runtime_method`. Wraps lower-level errors with
@@ -171,6 +173,48 @@ impl SubstrateDispatcher {
         let outcome = runtime.call_method(&env, signature, &[input])?;
         Ok(build_outcome(outcome, &language))
     }
+
+    /// Dispatch an external-institution invocation (D31 §6.2 /
+    /// Phase 19a.5.c). Same dispatch shape as
+    /// [`Self::dispatch_call_runtime_method`] but reached through the
+    /// kernel's `DispatchExternal` gRPC path: the kernel sends the
+    /// dispatch metadata as structured proto fields rather than as
+    /// properties on a chain-resolved `RuntimeMethodSignature`. We
+    /// synthesize the env + signature resources here so the
+    /// `LanguageRuntime::call_method` boundary stays uniform — the
+    /// runtime never has to know which surface the call came from.
+    ///
+    /// `input_cbors` is the multi-input list per D31 §6.5; for an
+    /// AutoOnLoad / Decidable QueryClass dispatch this is exactly one
+    /// element (the gated subject). Each element is parsed
+    /// independently via [`eigon_cbor::parse_resource_lenient`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_external_institution(
+        &self,
+        language: &str,
+        env_iri: &str,
+        image_digest: &str,
+        method_name: &str,
+        signature_iri: &str,
+        input_cbors: &[Vec<u8>],
+    ) -> Result<DispatchOutcome, FacadeError> {
+        let runtime = self
+            .registry
+            .get(language)
+            .ok_or_else(|| FacadeError::UnknownLanguage(language.to_string()))?;
+
+        let mut inputs = Vec::with_capacity(input_cbors.len());
+        for bytes in input_cbors {
+            inputs.push(parse_resource(bytes)?);
+        }
+
+        let signature =
+            synthesize_signature(language, env_iri, image_digest, method_name, signature_iri);
+        let env = synthesize_env(language, &signature);
+
+        let outcome = runtime.call_method(&env, &signature, &inputs)?;
+        Ok(build_outcome(outcome, language))
+    }
 }
 
 /// Build a `DispatchOutcome` from the runtime's [`RunOutcome`] plus
@@ -284,6 +328,50 @@ fn leak_property_name(prop_iri: &str) -> &'static str {
         PROP_REQUIRES_ENVIRONMENT => PROP_REQUIRES_ENVIRONMENT,
         _ => "<unknown>",
     }
+}
+
+/// Synthesize a `RuntimeMethodSignature` resource for the
+/// `dispatch_external_institution` path. The kernel sends D31 §6.2's
+/// structured fields (env_iri, image_digest, method_name,
+/// signature_iri, language) — we wrap them in a Resource so the
+/// existing `LanguageRuntime::call_method` boundary keeps its single
+/// shape. The synthesised signature carries `@id = signature_iri` so
+/// per-language runtimes that record the resolved signature IRI keep
+/// matching against the kernel's chain-side resource.
+fn synthesize_signature(
+    language: &str,
+    env_iri: &str,
+    image_digest: &str,
+    method_name: &str,
+    signature_iri: &str,
+) -> Resource {
+    let mut sig = match Iri::parse(signature_iri) {
+        Ok(iri) => Resource::new(iri),
+        // Defensive fallback: a malformed signature IRI from the wire
+        // is a kernel-side bug, but we still need a usable Resource so
+        // the caller surfaces an UnknownLanguage / RunError rather
+        // than panicking on IRI parse.
+        Err(_) => Resource::new_embedded(),
+    };
+    sig.set(
+        Iri::parse(PROP_LANGUAGE).expect("static IRI"),
+        Value::String(language.to_string()),
+    );
+    sig.set(
+        Iri::parse(PROP_METHOD_NAME).expect("static IRI"),
+        Value::String(method_name.to_string()),
+    );
+    sig.set(
+        Iri::parse(PROP_IMAGE_DIGEST).expect("static IRI"),
+        Value::String(image_digest.to_string()),
+    );
+    if let Ok(env) = Iri::parse(env_iri) {
+        sig.set(
+            Iri::parse(PROP_REQUIRES_ENVIRONMENT).expect("static IRI"),
+            Value::ResourceRef(env),
+        );
+    }
+    sig
 }
 
 /// Synthesize an environment Resource for v1's spawn-per-invocation

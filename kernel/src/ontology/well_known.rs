@@ -147,6 +147,11 @@ pub const RUNTIME_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
 /// the worker resolves in `Main` after handler-package `using` import.
 pub const RUNTIME_METHOD_NAME: &str = "urn:eigenius:runtime:method_name";
 
+/// `language` property on a `RuntimeEnvironment` — the language
+/// identifier (`"julia"`, `"python"`, …) the substrate dispatches
+/// against its `LanguageRuntime` registry.
+pub const RUNTIME_LANGUAGE: &str = "urn:eigenius:runtime:language";
+
 /// is_a marker for the `Verdict` inductive type — the tri-state
 /// outcome of an institution-bound predicate query (D14 §6.1).
 pub const VERDICT: &str = "urn:eigenius:institution:Verdict";

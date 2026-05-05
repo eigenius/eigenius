@@ -178,8 +178,17 @@ function main() {
     },
   );
 
-  // Start the orchestrator server (gRPC + NotebookService + health)
-  startServer(components, client, ORCHESTRATOR_PORT, wasm);
+  // Start the orchestrator server (gRPC + NotebookService + health).
+  // Pass the substrate addon explicitly so the `DispatchExternal` RPC
+  // (D31 §6.2) can route into the same handle that powers
+  // `RunRuntimeScript` / `CallRuntimeMethod`.
+  startServer(
+    components,
+    client,
+    ORCHESTRATOR_PORT,
+    wasm,
+    substrateAddon ?? undefined,
+  );
 }
 
 main();

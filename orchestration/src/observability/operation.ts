@@ -36,6 +36,8 @@ export const SERVER_SHUTDOWN = "orchestrator.server.shutdown";
 export const COMPONENT_REGISTER = "orchestrator.component.register";
 /** A component-dispatch RPC arrived from the kernel. */
 export const COMPONENT_DISPATCH = "orchestrator.component.dispatch";
+/** A `DispatchExternal` RPC arrived from the kernel (D31 §6.2 / 19a.5.c). */
+export const EXTERNAL_DISPATCH = "orchestrator.component.external_dispatch";
 
 // --- LLM ---
 

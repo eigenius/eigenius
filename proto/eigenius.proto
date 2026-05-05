@@ -340,6 +340,13 @@ message DispatchExternalRequest {
   // surfaces this carries the Sigma-lowered components per
   // D31 §6.5.
   repeated bytes input_resource_cbors = 7;
+
+  // Language identifier (`"julia"`, `"python"`, …). The orchestrator's
+  // SubstrateDispatcher routes by this string against its registered
+  // `LanguageRuntime` registry. Resolved at kernel registration time
+  // from the RuntimeEnvironment's `language` property and forwarded
+  // here so the orchestrator stays stateless wrt the chain.
+  string language = 8;
 }
 
 message DispatchExternalResponse {

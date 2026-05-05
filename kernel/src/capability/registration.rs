@@ -260,6 +260,7 @@ pub struct ExternalInstitutionPlan {
     pub institution_iri: Iri,
     pub env_iri: Iri,
     pub image_digest: String,
+    pub language: String,
     pub handlers: BTreeMap<Iri, ExternalQueryHandler>,
 }
 
@@ -297,6 +298,7 @@ pub fn validate_external_institution_chain(
     let env_ref_prop = Iri::parse(wk::INSTITUTION_REQUIRES_ENVIRONMENT).expect("well-known IRI");
     let image_digest_prop = Iri::parse(wk::RUNTIME_IMAGE_DIGEST).expect("well-known IRI");
     let method_name_prop = Iri::parse(wk::RUNTIME_METHOD_NAME).expect("well-known IRI");
+    let language_prop = Iri::parse(wk::RUNTIME_LANGUAGE).expect("well-known IRI");
 
     for (iri, resource) in layer.iter_all_resources() {
         if !resource.is_instance_of(&institution_class_iri) {
@@ -360,6 +362,20 @@ pub fn validate_external_institution_chain(
             }
         };
 
+        let language = match env_resource.get(&language_prop) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                errors.push(ExternalInstitutionCheckError {
+                    institution_iri: inst_iri_str,
+                    message: format!(
+                        "RuntimeEnvironment `{env_iri}` carries no `language` — orchestrator \
+                         cannot route to a LanguageRuntime without one"
+                    ),
+                });
+                continue;
+            }
+        };
+
         let mut handlers: BTreeMap<Iri, ExternalQueryHandler> = BTreeMap::new();
         let mut handler_errors: Vec<String> = Vec::new();
         for qc in index.query_classes() {
@@ -411,6 +427,7 @@ pub fn validate_external_institution_chain(
             institution_iri: iri.clone(),
             env_iri,
             image_digest,
+            language,
             handlers,
         });
     }
@@ -448,6 +465,7 @@ pub fn register_external_institutions(
             plan.institution_iri.clone(),
             plan.env_iri,
             plan.image_digest,
+            plan.language,
             plan.handlers,
             client.clone(),
         );
