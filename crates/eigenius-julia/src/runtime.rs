@@ -25,10 +25,7 @@
 //! 19a.3, the generated mirror packages. From the substrate's view,
 //! this crate just composes Dockerfile fragments and routes RPC.
 
-use crate::conventions::{
-    LANGUAGE, PROP_LANGUAGE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, UDS_CONNECT_TIMEOUT,
-    WORKER_PROJECT_DIR,
-};
+use crate::conventions::{LANGUAGE, PROP_LANGUAGE, PROP_SCRIPT_OUTPUT, PROP_SOURCE, WORKER_PROJECT_DIR};
 use crate::dockerfile::{julia_dockerfile_fragments, JuliaImagePlan};
 use crate::eigenius_common::{self, COMMON_PACKAGE_NAME};
 use eigenius_kernel::ontology::iri::Iri;
@@ -44,30 +41,30 @@ use eigenius_runtime_substrate::invocation::{DispatchTrace, RunOutcome};
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
 use eigenius_runtime_substrate::rpc::client::WorkerRpcClient;
 use eigenius_runtime_substrate::rpc::protocol::{HealthInfo, NumericalMetadata, Request, Response};
-use eigenius_runtime_substrate::spawner::{DockerSpawner, WorkerSpawner};
-use eigenius_runtime_substrate::types::{
-    DockerfileFragments, ImageDigest, WorkerHandle, WorkerSpec,
-};
+use eigenius_runtime_substrate::spawner::service::{ServiceHandle, ServiceSpawner};
+use eigenius_runtime_substrate::types::{DockerfileFragments, ImageDigest, WorkerSpec};
 use serde_bytes::ByteBuf;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, OnceLock};
 
 static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// `LanguageRuntime` impl that builds and runs the Julia worker
-/// inside a Docker container. The substrate calls this through the
-/// language registry whenever a `RuntimeScript` /
+/// `LanguageRuntime` impl that runs the Julia worker as a long-lived
+/// **service** (D26 §8.1 Service lifecycle). The substrate calls this
+/// through the language registry whenever a `RuntimeScript` /
 /// `RuntimeMethodSignature` resource declares `language = "julia"`.
 ///
-/// 19a.1 path: per-invocation `DockerSpawner`, container removed on
-/// exit. 19a.2 introduces `ServiceSpawner` for warm-pool dispatch.
+/// Phase 19a.3.e wires this against [`ServiceSpawner`] so a single
+/// long-lived worker per env amortises Julia's cold-start across many
+/// dispatches. The previous per-invocation `DockerSpawner` path
+/// (19a.1) shipped before the warm-pool design and is no longer used —
+/// `CallRuntimeMethod` (19a.4) needs sub-second latency that
+/// per-invocation spawns can't deliver for Julia.
 pub struct JuliaLanguageRuntime {
-    spawner: Arc<DockerSpawner>,
+    spawner: Arc<dyn ServiceSpawner>,
     /// Path to `julia/runtime-worker/` — the directory containing
     /// `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`.
     /// Resolved by the caller (typically via `env!("CARGO_MANIFEST_DIR")`
@@ -79,6 +76,16 @@ pub struct JuliaLanguageRuntime {
     cached_manifest_hash: OnceLock<String>,
     cached_assets: OnceLock<JuliaAssets>,
     depot_path: PathBuf,
+    /// Per-service host directory carrying the worker's UDS and any
+    /// per-service tempfiles. One per `JuliaLanguageRuntime` instance
+    /// — the spawner keys its services on `image_digest`, so a single
+    /// runtime always lands on the same warm worker.
+    service_tempdir: OnceLock<PathBuf>,
+    /// The service handle returned by the most recent `ensure_service`
+    /// call. Populated lazily on first dispatch and held so [`drain`]
+    /// can find the right service to tear down at orchestrator
+    /// shutdown.
+    cached_service: Mutex<Option<ServiceHandle>>,
 }
 
 #[derive(Clone)]
@@ -91,13 +98,14 @@ struct JuliaAssets {
 impl JuliaLanguageRuntime {
     /// Construct with paths to the Julia project directory, the
     /// digest-pinned Julia base image (e.g. `julia:1.12-bookworm` or
-    /// `docker.io/library/julia@sha256:...`), the substrate's
-    /// `DockerSpawner`, and the depot path the spawner was configured
-    /// with.
+    /// `docker.io/library/julia@sha256:...`), a `ServiceSpawner`
+    /// (typically `DockerServiceSpawner` for local development or a
+    /// future Container Apps / Kubernetes backend), and the depot
+    /// path the spawner was configured with.
     pub fn new(
         project_dir: PathBuf,
         base_image_ref: impl Into<String>,
-        spawner: Arc<DockerSpawner>,
+        spawner: Arc<dyn ServiceSpawner>,
         depot_path: PathBuf,
     ) -> Self {
         let base = base_image_ref.into();
@@ -116,7 +124,23 @@ impl JuliaLanguageRuntime {
             cached_manifest_hash: OnceLock::new(),
             cached_assets: OnceLock::new(),
             depot_path,
+            service_tempdir: OnceLock::new(),
+            cached_service: Mutex::new(None),
         }
+    }
+
+    /// Tear down the long-lived service worker. Idempotent. Used at
+    /// orchestrator shutdown and by tests for clean cleanup. After
+    /// `drain`, the next dispatch transparently re-spawns.
+    pub fn drain(&self) -> Result<(), SpawnError> {
+        let mut guard = self
+            .cached_service
+            .lock()
+            .expect("cached_service mutex poisoned");
+        if let Some(handle) = guard.take() {
+            self.spawner.drain(&handle)?;
+        }
+        Ok(())
     }
 
     fn assets(&self) -> Result<&JuliaAssets, BuildError> {
@@ -311,19 +335,11 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
         let started_at = DispatchTrace::now_rfc3339();
 
-        let worker = self
-            .spawn_internal()
-            .map_err(|e| RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))?;
-        let (numerical_metadata, image_digest) = self.capture_health(&worker);
-
-        let dispatch_result = self.dispatch_and_evict(&worker, target_cbor, invocation_id.clone());
-        let stdout = match dispatch_result {
-            Ok(stdout) => stdout,
-            Err(e) => {
-                let _ = self.try_evict(&worker);
-                return Err(e);
-            }
-        };
+        let service = self
+            .ensure_service()
+            .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
+        let (numerical_metadata, image_digest) = self.capture_health(&service);
+        let stdout = self.dispatch_script(&service, target_cbor, invocation_id.clone())?;
 
         let completed_at = DispatchTrace::now_rfc3339();
 
@@ -355,36 +371,48 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 }
 
 impl JuliaLanguageRuntime {
-    fn spawn_internal(&self) -> Result<WorkerHandle, SpawnError> {
-        // Spawn-time image lookup: the cached digest from the most
-        // recent `build_environment_image` is the authoritative one.
-        // If nothing has been built yet (Service deployment without a
-        // prior build call), fall back to a mirror-less build —
-        // matching 19a.1 behaviour. 19a.4's `CallRuntimeMethod` path
-        // will always have built with the right mirror first.
+    /// Per-service host directory. Created lazily on first dispatch
+    /// and reused across subsequent dispatches against the same
+    /// service. The spawner bind-mounts this into the container
+    /// (DooD discipline, D26 §9.5) so the worker's UDS shows up here.
+    fn service_tempdir(&self) -> Result<&Path, SpawnError> {
+        if let Some(p) = self.service_tempdir.get() {
+            return Ok(p.as_path());
+        }
+        let dir = self
+            .depot_path
+            .join(format!("service-julia-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).map_err(|e| SpawnError::SpawnFailed {
+            backend: self.spawner.backend(),
+            reason: format!(
+                "create service tempdir {} failed: {e}",
+                dir.display()
+            ),
+        })?;
+        let _ = self.service_tempdir.set(dir);
+        Ok(self.service_tempdir.get().expect("just set").as_path())
+    }
+
+    /// Construct a `WorkerSpec` for the env's service. Idempotent in
+    /// the sense the spawner needs — same image_digest + manifest_hash
+    /// produces a spec that maps to the same `ServiceHandle` under
+    /// `ensure_service`.
+    fn build_worker_spec(&self) -> Result<WorkerSpec, SpawnError> {
         let digest = self
             .ensure_image(None)
             .map_err(|e| SpawnError::SpawnFailed {
-                backend: "docker",
+                backend: self.spawner.backend(),
                 reason: format!("eigenius-julia build_image failed: {e}"),
             })?;
         let manifest_hash = self
             .manifest_hash()
             .map_err(|e| SpawnError::SpawnFailed {
-                backend: "docker",
+                backend: self.spawner.backend(),
                 reason: format!("eigenius-julia manifest_hash failed: {e}"),
             })?
             .to_string();
 
-        let n = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tempdir = self
-            .depot_path
-            .join(format!("inv-julia-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&tempdir).map_err(|e| SpawnError::SpawnFailed {
-            backend: "docker",
-            reason: format!("create tempdir {} failed: {e}", tempdir.display()),
-        })?;
-
+        let tempdir = self.service_tempdir()?.to_path_buf();
         let cross_check_env = prepare_substrate_side(
             &digest,
             &manifest_hash,
@@ -392,7 +420,7 @@ impl JuliaLanguageRuntime {
             ProvenanceDirAction::AssumeBaked,
         )
         .map_err(|e| SpawnError::SpawnFailed {
-            backend: "docker",
+            backend: self.spawner.backend(),
             reason: format!("cross-check setup failed: {e}"),
         })?;
 
@@ -403,25 +431,49 @@ impl JuliaLanguageRuntime {
         );
         env.extend(cross_check_env);
 
-        let spec = WorkerSpec {
+        Ok(WorkerSpec {
             image_digest: Some(digest),
             command: Vec::new(), // image's CMD = bootstrap_command
             tempdir_host_path: tempdir,
             depot_host_path: Some(self.depot_path.clone()),
             env,
-            // Julia cold-start + dispatch should be well under a
-            // minute even for the precompile-uncached first run; the
-            // wall-clock cap is enforced by the dispatcher in
-            // production.
             max_wall_time_ms: 0,
             max_memory_bytes: 0,
             seccomp_profile: None,
-        };
-        self.spawner.spawn(spec)
+        })
     }
 
-    fn capture_health(&self, worker: &WorkerHandle) -> (NumericalMetadata, Option<ImageDigest>) {
-        match self.query_health_internal(worker) {
+    /// Get-or-start the long-lived service worker. The spawner's
+    /// `ensure_service` is idempotent, so repeated calls for the same
+    /// `image_digest` return the same `ServiceHandle`. We additionally
+    /// cache the handle locally so [`drain`] can find it without
+    /// re-resolving.
+    fn ensure_service(&self) -> Result<ServiceHandle, SpawnError> {
+        // Fast path: already-cached handle.
+        if let Some(h) = self
+            .cached_service
+            .lock()
+            .expect("cached_service mutex poisoned")
+            .as_ref()
+            .cloned()
+        {
+            return Ok(h);
+        }
+        let spec = self.build_worker_spec()?;
+        let handle = self.spawner.ensure_service(spec)?;
+        let mut guard = self
+            .cached_service
+            .lock()
+            .expect("cached_service mutex poisoned");
+        *guard = Some(handle.clone());
+        Ok(handle)
+    }
+
+    fn capture_health(
+        &self,
+        service: &ServiceHandle,
+    ) -> (NumericalMetadata, Option<ImageDigest>) {
+        match self.query_health_internal(service) {
             Ok(info) => {
                 let digest = info
                     .env_digest_in_image
@@ -431,18 +483,27 @@ impl JuliaLanguageRuntime {
             }
             Err(e) => {
                 eprintln!(
-                    "JuliaLanguageRuntime: query_health failed for worker {} ({}): {e}; \
+                    "JuliaLanguageRuntime: query_health failed for service {} ({}): {e}; \
                      dispatch will continue with empty trace fields",
-                    worker.id, worker.backend
+                    service.id(),
+                    service.backend()
                 );
-                (NumericalMetadata::default(), None)
+                // Fall back to the digest the spawner remembered when
+                // it created the service — better than nothing.
+                (
+                    NumericalMetadata::default(),
+                    service.image_digest().cloned(),
+                )
             }
         }
     }
 
-    fn query_health_internal(&self, worker: &WorkerHandle) -> Result<HealthInfo, RunError> {
-        let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT).map_err(|e| {
-            RunError::WorkerRpcFailed(format!("connect to worker UDS for health: {e}"))
+    fn query_health_internal(&self, service: &ServiceHandle) -> Result<HealthInfo, RunError> {
+        let stream = self.spawner.attach_uds(service).map_err(|e| {
+            RunError::WorkerRpcFailed(format!(
+                "attach_uds for health on service {}: {e}",
+                service.id()
+            ))
         })?;
         let mut client = WorkerRpcClient::new(stream);
         let resp = client
@@ -457,16 +518,22 @@ impl JuliaLanguageRuntime {
         }
     }
 
-    fn dispatch_and_evict(
+    /// Dispatch a script through the warm service. No `Evict` after —
+    /// the worker stays alive for the next dispatch (D26 §8.1
+    /// Service-mode lifecycle).
+    fn dispatch_script(
         &self,
-        worker: &WorkerHandle,
+        service: &ServiceHandle,
         target_cbor: Vec<u8>,
         invocation_id: String,
     ) -> Result<String, RunError> {
-        let stream = connect_with_retry(&worker.uds_path, UDS_CONNECT_TIMEOUT)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("connect to worker UDS: {e}")))?;
+        let stream = self.spawner.attach_uds(service).map_err(|e| {
+            RunError::WorkerRpcFailed(format!(
+                "attach_uds for dispatch on service {}: {e}",
+                service.id()
+            ))
+        })?;
         let mut client = WorkerRpcClient::new(stream);
-
         let resp = client
             .call(&Request::DispatchMethod {
                 invocation_id: invocation_id.clone(),
@@ -474,7 +541,6 @@ impl JuliaLanguageRuntime {
                 inputs: vec![],
             })
             .map_err(|e| RunError::WorkerRpcFailed(format!("dispatch_method call: {e}")))?;
-
         let stdout = match resp {
             Response::DispatchOk { output, .. } => ciborium::from_reader::<String, _>(&output[..])
                 .map_err(|e| {
@@ -491,28 +557,8 @@ impl JuliaLanguageRuntime {
                 )));
             }
         };
-
-        let evict_resp = client
-            .call(&Request::Evict)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("evict call: {e}")))?;
-        if !matches!(evict_resp, Response::Evicted) {
-            return Err(RunError::WorkerRpcFailed(format!(
-                "unexpected response to evict: {evict_resp:?}"
-            )));
-        }
         drop(client);
-
         Ok(stdout)
-    }
-
-    fn try_evict(&self, worker: &WorkerHandle) -> Result<(), RunError> {
-        let stream = UnixStream::connect(&worker.uds_path)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("evict-on-error connect: {e}")))?;
-        let mut client = WorkerRpcClient::new(stream);
-        client
-            .call(&Request::Evict)
-            .map_err(|e| RunError::WorkerRpcFailed(format!("evict-on-error call: {e}")))?;
-        Ok(())
     }
 }
 
@@ -653,19 +699,6 @@ fn read_string_property<'a>(r: &'a Resource, prop_iri: &str) -> Result<&'a str, 
     r.get(&iri)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("missing string property `{prop_iri}`"))
-}
-
-fn connect_with_retry(uds_path: &Path, timeout: Duration) -> std::io::Result<UnixStream> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match UnixStream::connect(uds_path) {
-            Ok(s) => return Ok(s),
-            Err(_) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => return Err(e),
-        }
-    }
 }
 
 fn map_dispatch_failure(error_kind: &str, message: String) -> RunError {

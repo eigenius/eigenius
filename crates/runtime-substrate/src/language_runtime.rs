@@ -132,3 +132,47 @@ pub trait LanguageRuntime: Send + Sync {
         inputs: &[Resource],
     ) -> Result<RunOutcome, RunError>;
 }
+
+/// Blanket impl so `Arc<R>` is itself a `LanguageRuntime` whenever
+/// `R` is. Lets a test or orchestrator hold one runtime instance
+/// shared between the dispatcher (which takes ownership of a
+/// `Box<dyn LanguageRuntime>`) and the caller (which keeps its own
+/// reference for backend-specific lifecycle operations like
+/// `JuliaLanguageRuntime::drain`). Trait methods delegate to the
+/// inner `R` via `Arc::deref` — `&self` only.
+impl<R: LanguageRuntime + ?Sized> LanguageRuntime for std::sync::Arc<R> {
+    fn language_id(&self) -> &str {
+        (**self).language_id()
+    }
+
+    fn build_environment_image(
+        &self,
+        env: &Resource,
+        packages: &[Resource],
+        mirror: Option<&Resource>,
+    ) -> Result<ImageDigest, BuildError> {
+        (**self).build_environment_image(env, packages, mirror)
+    }
+
+    fn dockerfile_fragments(&self, env: &Resource) -> DockerfileFragments {
+        (**self).dockerfile_fragments(env)
+    }
+
+    fn run_script(
+        &self,
+        env: &Resource,
+        script: &Resource,
+        inputs: &[Resource],
+    ) -> Result<RunOutcome, RunError> {
+        (**self).run_script(env, script, inputs)
+    }
+
+    fn call_method(
+        &self,
+        env: &Resource,
+        signature: &Resource,
+        inputs: &[Resource],
+    ) -> Result<RunOutcome, RunError> {
+        (**self).call_method(env, signature, inputs)
+    }
+}

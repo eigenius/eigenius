@@ -36,7 +36,8 @@ use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_runtime_substrate::facade::SubstrateDispatcher;
 use eigenius_runtime_substrate::is_buildah_available;
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
-use eigenius_runtime_substrate::spawner::{DockerSpawner, DockerSpawnerConfig};
+use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
+use eigenius_runtime_substrate::spawner::DockerSpawnerConfig;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -159,28 +160,33 @@ fn julia_capstone_full_e2e() {
     };
 
     let depot = fresh_depot("e2e");
-    let spawner = match DockerSpawner::new(DockerSpawnerConfig::new(depot.clone())) {
+    let spawner = match DockerServiceSpawner::new(DockerSpawnerConfig::new(depot.clone())) {
         Ok(s) => Arc::new(s),
         Err(e) => {
-            eprintln!("skipping (DockerSpawner construction failed): {e}");
+            eprintln!("skipping (DockerServiceSpawner construction failed): {e}");
             return;
         }
     };
 
     let project_dir = julia_project_dir();
-    let runtime =
-        JuliaLanguageRuntime::new(project_dir, pinned_base, spawner.clone(), depot.clone());
+    let runtime = Arc::new(JuliaLanguageRuntime::new(
+        project_dir,
+        pinned_base,
+        spawner.clone(),
+        depot.clone(),
+    ));
 
     // Build is the substantive cold step — exercises buildah, multi-
     // asset materialisation (Project.toml + Manifest.toml +
     // src/JuliaWorker.jl), and `Pkg.instantiate` + `Pkg.precompile`
     // inside `julia:1.12-bookworm`.
-    let language_runtime: Box<dyn LanguageRuntime> = Box::new(runtime);
+    let language_runtime: Box<dyn LanguageRuntime> = Box::new(runtime.clone());
     let env = Resource::new_embedded();
     let digest = match language_runtime.build_environment_image(&env, &[], None) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("substrate-built julia image failed: {e}");
+            let _ = runtime.drain();
             let _ = std::fs::remove_dir_all(&depot);
             panic!("build_environment_image: {e}");
         }
@@ -211,6 +217,10 @@ fn julia_capstone_full_e2e() {
         .and_then(Value::as_str)
         .expect("script_output property on output");
     assert_eq!(julia_output, "PHASE 18D CAPSTONE");
+
+    // Drain at end so the docker container doesn't linger.
+    let cleanup_runtime = runtime.clone();
+    let _ = cleanup_runtime.drain();
 
     // Trace fields: language=julia, image_digest=substrate-built,
     // worker reports host_kernel="julia-test-runtime" (so we know
@@ -260,17 +270,21 @@ fn julia_capstone_cross_check_tampering_fires() {
     };
 
     let depot = fresh_depot("xcheck");
-    let spawner = match DockerSpawner::new(DockerSpawnerConfig::new(depot.clone())) {
+    let spawner = match DockerServiceSpawner::new(DockerSpawnerConfig::new(depot.clone())) {
         Ok(s) => Arc::new(s),
         Err(e) => {
-            eprintln!("skipping (DockerSpawner construction failed): {e}");
+            eprintln!("skipping (DockerServiceSpawner construction failed): {e}");
             return;
         }
     };
 
     let project_dir = julia_project_dir();
-    let runtime =
-        JuliaLanguageRuntime::new(project_dir, pinned_base, spawner.clone(), depot.clone());
+    let runtime = Arc::new(JuliaLanguageRuntime::new(
+        project_dir,
+        pinned_base,
+        spawner.clone(),
+        depot.clone(),
+    ));
 
     // Build the image (cached if a previous test ran), then spawn
     // with deliberately mismatched cross-check env. The worker reads

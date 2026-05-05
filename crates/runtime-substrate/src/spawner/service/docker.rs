@@ -105,17 +105,6 @@ impl DockerServiceSpawner {
         })
     }
 
-    /// Synthesize a unique tempdir under the configured depot for a
-    /// service. Service-mode reuses one tempdir across many dispatches
-    /// (rather than per-invocation tempdirs as in Job mode).
-    fn service_tempdir(&self, key: &str) -> PathBuf {
-        // Sanitise the digest's `sha256:` prefix for path safety.
-        let safe: String = key
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
-        self.config.depot_path.join(format!("svc-{}", safe))
-    }
 }
 
 impl ServiceSpawner for DockerServiceSpawner {
@@ -142,19 +131,40 @@ impl ServiceSpawner for DockerServiceSpawner {
             }
         }
 
-        // Slow path: spawn a fresh container.
-        let tempdir = self.service_tempdir(&key);
-        let _ = std::fs::remove_dir_all(&tempdir);
+        // Slow path: spawn a fresh container. The caller's
+        // `WorkerSpec::tempdir_host_path` is the service tempdir —
+        // the spawner does not invent its own. This keeps two
+        // invariants in agreement: (1) the bind-mount maps the
+        // caller's tempdir into the container at the same host path
+        // (DooD discipline, D26 §9.5), and (2) `EIGENIUS_TEST_WORKER_UDS`
+        // (set by the caller in `spec.env`) points inside that tempdir.
+        // If they disagreed, the worker would bind the UDS where the
+        // bind-mount can't reach it and `attach_uds` would time out.
+        let tempdir = spec.tempdir_host_path.clone();
+        if tempdir.as_os_str().is_empty() {
+            return Err(SpawnError::SpawnFailed {
+                backend: BACKEND,
+                reason: "WorkerSpec.tempdir_host_path must be set for DockerServiceSpawner — \
+                         the caller is responsible for choosing the per-service tempdir so it \
+                         stays short enough for SUN_LEN (108 bytes on Linux)"
+                    .to_string(),
+            });
+        }
         std::fs::create_dir_all(&tempdir).map_err(|e| SpawnError::SpawnFailed {
             backend: BACKEND,
             reason: format!("create service tempdir {}: {e}", tempdir.display()),
         })?;
         depot::verify_tempdir_under_depot(&tempdir, &self.config.depot_path)?;
         let uds_path = tempdir.join("worker.sock");
+        // Stale UDS files from a previous service in the same tempdir
+        // would block the worker's `bind` — clean up best-effort.
+        let _ = std::fs::remove_file(&uds_path);
 
         let mut svc_spec = spec.clone();
-        svc_spec.tempdir_host_path = tempdir.clone();
-        // Worker reads UDS path from this env var.
+        // Worker reads UDS path from this env var. Caller likely
+        // already set it via `prepare_substrate_side` + their own
+        // tempdir+`/worker.sock`; if not, fill in from this spawner's
+        // view of the same path.
         svc_spec
             .env
             .entry("EIGENIUS_TEST_WORKER_UDS".into())

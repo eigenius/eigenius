@@ -332,27 +332,32 @@ fn julia_env_image_with_mirror_dispatches_typed_struct() {
     };
 
     let depot = fresh_depot("e2e");
-    let spawner = match eigenius_runtime_substrate::spawner::DockerSpawner::new(
+    let spawner = match eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
         eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(depot.clone()),
     ) {
         Ok(s) => std::sync::Arc::new(s),
         Err(e) => {
-            eprintln!("skipping (DockerSpawner construction failed): {e}");
+            eprintln!("skipping (DockerServiceSpawner construction failed): {e}");
             return;
         }
     };
 
     let project_dir = julia_project_dir();
-    let runtime =
-        JuliaLanguageRuntime::new(project_dir, pinned_base, spawner.clone(), depot.clone());
+    let runtime = std::sync::Arc::new(JuliaLanguageRuntime::new(
+        project_dir,
+        pinned_base,
+        spawner.clone(),
+        depot.clone(),
+    ));
 
     let mirror = build_demo_mirror();
     let env = Resource::new_embedded();
-    let language_runtime: Box<dyn LanguageRuntime> = Box::new(runtime);
-    let digest = match language_runtime.build_environment_image(&env, &[], Some(&mirror)) {
+    let runtime_for_dispatch: Box<dyn LanguageRuntime> = Box::new(runtime.clone());
+    let digest = match runtime_for_dispatch.build_environment_image(&env, &[], Some(&mirror)) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("substrate-built julia image (with mirror) failed: {e}");
+            let _ = runtime.drain();
             let _ = std::fs::remove_dir_all(&depot);
             panic!("build_environment_image: {e}");
         }
@@ -362,36 +367,64 @@ fn julia_env_image_with_mirror_dispatches_typed_struct() {
         "expected sha256-shaped digest, got {digest}"
     );
 
-    // Dispatch a Julia one-liner that imports the mirror, instantiates
-    // a `Demo`, reads back the field. The expression's value (the
-    // `name` field's contents) is what the worker stringifies and
-    // returns as the script output.
-    let script_source = "begin; \
+    let mut dispatcher = eigenius_runtime_substrate::facade::SubstrateDispatcher::new();
+    dispatcher
+        .register_language_runtime(runtime_for_dispatch)
+        .expect("register julia runtime");
+
+    // Dispatch twice. With the warm-pool path, the second dispatch
+    // hits the same already-running container — no rebuild, no
+    // cold-start, no Pkg.precompile. We don't have a direct hook for
+    // "did the worker get re-spawned?" but the timing differential
+    // shows it: the second call must complete in well under a second
+    // (warm RPC), while the first carries Julia's first-call JIT.
+    fn dispatch_once(
+        dispatcher: &mut eigenius_runtime_substrate::facade::SubstrateDispatcher,
+        source: &str,
+    ) -> String {
+        let argument = build_argument("julia", source);
+        let outcome = dispatcher
+            .dispatch_run_runtime_script(&[], &argument)
+            .expect("dispatch julia mirror-using script");
+        let output =
+            eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
+        output
+            .get(&iri("urn:eigenius:runtime:script_output"))
+            .and_then(Value::as_str)
+            .expect("script_output property on output")
+            .to_string()
+    }
+
+    let script_a = "begin; \
         using EigeniusMirror; \
         using EigeniusJuliaCommon; \
-        instance = EigeniusMirror.Demo(\"hello-19a3c\"); \
+        instance = EigeniusMirror.Demo(\"hello-19a3e\"); \
+        instance.name; \
+        end";
+    let script_b = "begin; \
+        using EigeniusMirror; \
+        instance = EigeniusMirror.Demo(\"warm-reuse-ok\"); \
         instance.name; \
         end";
 
-    let mut dispatcher = eigenius_runtime_substrate::facade::SubstrateDispatcher::new();
-    dispatcher
-        .register_language_runtime(language_runtime)
-        .expect("register julia runtime");
+    assert_eq!(dispatch_once(&mut dispatcher, script_a), "hello-19a3e");
 
-    let argument = build_argument("julia", script_source);
-    let outcome = dispatcher
-        .dispatch_run_runtime_script(&[], &argument)
-        .expect("dispatch julia mirror-using script");
-
-    let output = eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
-    let julia_output = output
-        .get(&iri("urn:eigenius:runtime:script_output"))
-        .and_then(Value::as_str)
-        .expect("script_output property on output");
-    assert_eq!(
-        julia_output, "hello-19a3c",
-        "the generated mirror's `Demo.name` field must round-trip through the env image"
+    // The second dispatch must complete in **well** under the cold-
+    // start envelope. Julia first-call JIT dominates the first
+    // dispatch (often 5-15s); on a warm worker, a typed-struct
+    // round-trip is sub-second. Use a generous bound to avoid CI
+    // flakiness while still proving the worker wasn't re-spawned.
+    let warm_start = std::time::Instant::now();
+    let warm_output = dispatch_once(&mut dispatcher, script_b);
+    let warm_elapsed = warm_start.elapsed();
+    assert_eq!(warm_output, "warm-reuse-ok");
+    assert!(
+        warm_elapsed < std::time::Duration::from_secs(5),
+        "warm dispatch must complete in <5s (got {warm_elapsed:?}); \
+         a cold restart would take 10s+ for Julia's first-call JIT — \
+         this confirms the ServiceSpawner warm-pool path"
     );
 
+    let _ = runtime.drain();
     let _ = std::fs::remove_dir_all(&depot);
 }
