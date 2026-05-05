@@ -1372,14 +1372,16 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 #### Phase 19a.4 — `CallRuntimeMethod` + `JuliaWorker.jl` method dispatch + `dispatched_to` wiring (~5 days)
 
-**Status: substrate side landed (2026-05-04).** `target_kind` wire discriminator, `MethodInvocation` payload, JuliaWorker method dispatch with `Base.invokelatest`, `JuliaLanguageRuntime::call_method`, `DispatchTrace.dispatched_to` plumbing, substrate-side epistemic-category stamping (`urn:eigenius:reflection:DerivedResource`), and the codec registries (`_eigenius_decoders` / `_eigenius_encoders`) on each generated mirror are all in. Spec [D29 v1.2](d29-eigon-julia-mirror-spec.md#85-codec-registries) pins the registry shape and the world-age rule. Pinned-substrate, no `EigeniusJuliaPool` regression. **Remaining items are orchestrator-side:** see "Phase 19a.4 carry-over" sub-milestone below.
+**Status: substrate side landed (2026-05-04).** `target_kind` wire discriminator, `MethodInvocation` payload, JuliaWorker method dispatch with `Base.invokelatest`, `JuliaLanguageRuntime::call_method`, `DispatchTrace.dispatched_to` plumbing, substrate-side epistemic-category stamping (`urn:eigenius:reflection:DerivedResource`), and the codec registries (`_eigenius_decoders` / `_eigenius_encoders`) on each generated mirror are all in. Spec [D29 v1.2](d29-eigon-julia-mirror-spec.md#85-codec-registries) pins the registry shape and the world-age rule.
+
+**Orchestrator-side glue and chain commit pipeline** are subsumed by Phase 19a.5 (D31 infrastructure) — they were originally framed as a "carry-over" sub-milestone but D31 settled the broader institution lifecycle, of which the orchestrator commit pipeline is one component. See [Phase 19a.5](#phase-19a5--d31-infrastructure-external-institution-lifecycle-3-weeks) below.
 
 **Goal.** Light up `CallRuntimeMethod` end-to-end against the generator-produced mirror from 19a.3. Worker dispatches by `RuntimeMethodSignature` IRI, performs Julia multiple dispatch on typed mirror struct inputs, captures `which()` for `dispatched_to`. Substrate propagates `dispatched_to` through `DispatchTrace` to the orchestrator, which stamps it on the committed `RuntimeInvocation` (closing the 18c.5-deferred property).
 
 **Files created.**
 - `crates/runtime-substrate/src/components/call_method.rs` — kernel-registered `CallRuntimeMethod` Component (substrate-level; resolves a `RuntimeMethodSignature`, leases worker, dispatches).
 - `julia/institutions/kinase-demo/EigeniusKinaseDemo/Project.toml` — small demo handler package depending on the generator-produced `EigeniusKinaseMirror`.
-- `julia/institutions/kinase-demo/EigeniusKinaseDemo/src/EigeniusKinaseDemo.jl` — sample method handlers operating on the typed mirror structs (e.g. `compute_selectivity_index(c::Compound, t1::Target, t2::Target)::Float64` reading `c.compound_id` etc.). Used as the test fixture for 19a.4 and 19a.6; not a real institution.
+- `julia/institutions/kinase-demo/EigeniusKinaseDemo/src/EigeniusKinaseDemo.jl` — sample method handlers operating on the typed mirror structs (e.g. `compute_selectivity_index(c::Compound, t1::Target, t2::Target)::Float64` reading `c.compound_id` etc.). Used as the test fixture for 19a.4 and the 19a.8 e2e demo; not a real institution. (The first real institution lands in 19a.6 — IntervalArithmetic.)
 - `crates/eigenius-julia/tests/call_method_test.rs` — kinase-grounded e2e.
 
 **Files modified.**
@@ -1414,30 +1416,163 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.4 carry-over — orchestrator-side dispatched_to commit + real handler package (~3 days)
+#### Phase 19a.5 — D31 infrastructure (external institution lifecycle, ~3 weeks)
 
-**Status: pending** (2026-05-04). The substrate work in 19a.4 is complete; this carry-over sub-milestone closes the orchestrator/glue side that gates "the work is observable from the chain". Lifecycle and dispatch architecture for external institutions is settled in [D31](d31-external-institution-lifecycle.md); this carry-over implements it for the simpler `RunRuntimeScript` / `CallRuntimeMethod` paths (no AutoOnLoad gating yet — that's a separate milestone after the first external institution lands).
+**Goal.** Land the framework that [D31](d31-external-institution-lifecycle.md) specifies: mirror generation CLI, env image build, institution registration, kernel-emits-request / orchestrator-services-IO dispatch, Verdict commit pipeline. Generator-agnostic; the surfaces light up against Julia first because that's the only generator shipped, but they accept any future language without protocol churn.
 
-**Goal.** Make the substrate-produced trace land on a committed `RuntimeInvocation` resource with the right IRI references, and replace the e2e test's script-eval-installed handler with a real handler package.
+The work is split into five sub-milestones (a–e). Sub-milestones a–d build the framework; sub-milestone e is the **acceptance test for the framework** — the first real external institution (IntervalArithmetic) ships in 19a.6 and exercises every piece of 19a.5 end-to-end.
 
-**In scope.**
-- **Orchestrator-side TS handler for `CallRuntimeMethod`**: consumes `partial_invocation_cbor` from `SubstrateDispatcher::dispatch_call_runtime_method`, fills in the IRI-typed properties (`script` ← signature IRI, `environment` ← env IRI, `inputs` ← input resource IRIs, `output` ← committed-output IRI), and commits the assembled `RuntimeInvocation` to the chain. Same handler shape as the existing TS `RunRuntimeScript` path.
-- **Real handler package**: `julia/institutions/kinase-demo/EigeniusKinaseDemo/{Project.toml, src/EigeniusKinaseDemo.jl}` defining a typed handler depending on the kinase mirror. Replaces the 19a.4 e2e test's script-eval setup with a real `using` import. Also documents the canonical handler-package shape that institution crates (intervals, jump, …) follow.
-- **`julia/env/Project.toml`**: path-dep on the kinase-demo package so the env image bakes it in. Or, alternatively, install via `Pkg.develop` in the install_packages Dockerfile fragment alongside `EigeniusJuliaCommon`.
-- **End-to-end test refactor** of `julia_call_runtime_method_dispatches_typed_handler` to skip the script-eval setup and hit the handler package directly. Confirms the institution-crate pattern works without scope creep.
+##### 19a.5.a — Mirror CLI (~3 days)
 
-**Out of scope.**
-- Kernel-registered `CallRuntimeMethod` Component (originally listed for 19a.4) — deferred to whichever milestone first needs `NativeDecide`-style chain-driven calls. The current path is dispatched directly via `SubstrateDispatcher` from an orchestrator-side TS handler, which suffices for the 19a.6 demo and the 19c–h institutions.
-- `spawner_backend` trace property — deferred until needed for an audit query.
+**Files created.**
+- `cli/src/commands/mirror.rs` — `mirror create`, `mirror get`, `mirror list`, `mirror inspect` subcommand handlers.
+
+**Files modified.**
+- `cli/src/main.rs` — register the new `mirror` subcommand group.
+
+**Tasks.**
+1. `mirror create`: resolve `--filter` / `--filter-file` query against `--layer`, materialize seed class IRIs, dispatch to language-specific generator (`JuliaMirrorGenerator` from `eigenius-julia`), commit `RuntimePackageMirror` to chain via `LoadRequest`, write source files to `--output`. Idempotence: same inputs produce same `library_content_hash` → kernel deduplicates the commit.
+2. `mirror get`: read `RuntimePackageMirror.library_content` from the chain by IRI, base64-decode the embedded files, write to `--output`. Read-only; no commit.
+3. `mirror list`: EigenQL query for all `RuntimePackageMirror` resources, optional `--language` / `--layer` filters.
+4. `mirror inspect <iri>`: fetch the resource, print its metadata (generator id/version, source layer, mirrored class IRIs, library_content_hash).
+5. Tests: a fake-chain integration test exercising `create` + `get` round-trip, and a CLI smoke test against the kinase mirror.
 
 **Acceptance.**
-- A committed `RuntimeInvocation` resource carries `dispatched_to` (Julia's `which()` output) and `is_a: [..., DerivedResource]` after a `CallRuntimeMethod` round-trip.
-- The kinase handler package boots cleanly in the env image (no `using` cycles, no warnings) and is what the e2e test imports.
-- The TS `CallRuntimeMethod` handler is symmetric with the `RunRuntimeScript` handler — same commit shape, same provenance properties filled in, no special-casing.
+- `eigenius mirror create --layer <l> --filter-file ./classes.eigenql --language julia --output ./out` produces files matching what the existing `JuliaMirrorGenerator` integration test expects, plus a chain commit.
+- `eigenius mirror get --iri <mirror-iri> --output ./out` produces byte-identical files to what `create` wrote.
+- Re-running `mirror create` with the same inputs produces no new commit (idempotence).
 
 ---
 
-#### Phase 19a.5 — Minimal config primitive (~3 days)
+##### 19a.5.b — `env create` for Julia (~3 days)
+
+**Files created.**
+- `cli/src/commands/env.rs` — `env create`, `env list`, `env inspect` subcommand handlers.
+- `crates/eigenius-julia/src/env_builder.rs` — high-level builder that takes `--handler-package` + `--mirror` and produces an env image + RuntimeEnvironment commit. Wraps the existing `JuliaLanguageRuntime::build_environment_image` machinery.
+
+**Files modified.**
+- `crates/eigenius-julia/src/runtime.rs` — extend `build_environment_image` to accept an optional handler-package path that gets baked in alongside `EigeniusJuliaCommon` and the mirror.
+- `crates/eigenius-julia/src/dockerfile.rs` — extend `JuliaImagePlan` with handler-package fields; install_packages fragment runs `Pkg.develop` for the handler package.
+
+**Tasks.**
+1. CLI surface per [D31 §4.2](d31-external-institution-lifecycle.md#42-phase-3--build-the-env-image-with-eigenius-env-create): `--lang`, `--handler-package`, `--mirror`, `--include-package` (repeatable), `--as-iri`, `--base-image`, `--push-to`.
+2. Validation: handler-package's `Project.toml` must declare deps on `EigeniusMirror` + `EigeniusJuliaCommon`; mirror IRI must resolve to a chain-committed `RuntimePackageMirror`.
+3. Image build: extend the existing `eigenius-julia` build pipeline to bake the handler-package source into the image alongside the mirror, set the worker's `Project.toml` deps to include it, run `Pkg.develop` + `Pkg.precompile` in install_packages so the handler module is precompiled at image-build time.
+4. Commit `RuntimeEnvironment` resource with `image_digest`, `language`, references to mirror + handler-package metadata.
+5. Tests: end-to-end test that builds an env image with a fake handler package, verifies the worker can `using` the handler module after spawn.
+
+**Acceptance.**
+- `eigenius env create --lang julia --handler-package ./TestHandler --mirror <iri> --as-iri <env-iri>` produces an image_digest + committed RuntimeEnvironment.
+- The built image's worker boots, finds the handler module in `Base.loaded_modules`, finds its handler functions in `Main` after `using`.
+- Re-running `env create` with the same inputs produces the same digest (deterministic image build).
+
+---
+
+##### 19a.5.c — `DispatchExternal` RPC + orchestrator handler (~5 days)
+
+**Files created.**
+- `proto/external_dispatch.proto` (or extend existing kernel proto) — `DispatchExternalRequest`, `DispatchExternalResponse`, `DispatchExternalError` messages per [D31 §6.2](d31-external-institution-lifecycle.md#62-wire-shape).
+- `kernel/src/server/external_dispatch.rs` — kernel-side RPC stub: emits a `DispatchExternalRequest` over a back-channel during commit pipeline processing, blocks on the orchestrator's response.
+- `orchestration/runtime-substrate-native/src/dispatch_external.rs` — napi addon method `addon.dispatchExternal(institution_iri, env_iri, image_digest, method_name, signature_iri, input_cbors)` → `{ output_cbor, runtime_invocation_partial_cbor }`.
+- `orchestration/src/components/dispatch_external.ts` — TS handler that receives the kernel's request, routes to the addon method, returns the response.
+
+**Files modified.**
+- Kernel commit pipeline (`kernel/src/server/mod.rs` — `Load` RPC handler) — when the new layer's institutions include `runtime: external` and the commit triggers AutoOnLoad, route the dispatch through `external_dispatch.rs` rather than via the in-process `Institution::query`.
+
+**Tasks.**
+1. Wire shape exactly per D31 §6.2 — list-of-CBOR for inputs (Sigma-lowering happens in the kernel before the request).
+2. Channel mechanics: bi-directional gRPC stream is the cleanest, but starting simpler with a synchronous round-trip from kernel back to orchestrator over the same connection that initiated the commit. Kernel maintains a "pending external dispatches" map keyed on invocation_id; orchestrator reads them via a `PollExternalDispatches` RPC, services them, returns results via `CompleteExternalDispatch`.
+3. Failure path mapping per [D31 §6.4](d31-external-institution-lifecycle.md#64-failure-paths) — orchestrator unreachable → `ExternalDispatchUnavailable`; substrate failed → Verdict.Fails with diagnostic; etc.
+4. Tests: integration test with a stub external institution that always returns Verdict.Holds; verify the kernel-orchestrator round-trip works end-to-end.
+
+**Acceptance.**
+- A test institution with a stub Julia handler + AutoOnLoad QueryClass fires correctly on commit; Verdict round-trips via DispatchExternal.
+- All four failure modes from §6.4 produce the expected error shape.
+
+---
+
+##### 19a.5.d — Verdict commit pipeline (~3 days)
+
+**Files modified.**
+- `kernel/src/institution/dispatch.rs` — extend `dispatch_auto_on_load_for_resource` to handle `runtime: external` institutions: emit `DispatchExternalRequest` (via 19a.5.c's mechanism), parse the returned Verdict resource, apply the gate.
+- `kernel/src/server/mod.rs` — commit pipeline integration: AutoOnLoad runs as part of the commit transaction; Verdict + RuntimeInvocation commit transactionally with the gated resource per [D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
+
+**Tasks.**
+1. Extend `dispatch_auto_on_load_for_resource` to branch on `Institution.runtime`. WASM/InProcess use the existing `InstitutionRuntime::query`. External emits via 19a.5.c.
+2. Verdict commit: when an external dispatch returns successfully, build the Verdict resource (IRI, ctor_name, verdict_subject, verdict_query_class, runtime_invocation, dispatched_to, optional diagnostic) and add to the same kernel commit transaction as the gated resource.
+3. RuntimeInvocation commit: build from the orchestrator's `runtime_invocation_partial_cbor` (carrying dispatched_to, image_digest, started_at/completed_at, numerical_metadata) plus kernel-known fields (script ← signature IRI, environment ← env IRI, inputs ← gated resource IRI, output ← Verdict IRI). Commit transactionally.
+4. Failure-mode handling: Verdict.Fails commits Verdict but rejects gated resource; orchestrator-unreachable aborts the entire transaction; etc.
+5. Tests: a stub external institution fixture that returns Holds/Fails/Undecidable on demand; verify the gate behavior + Verdict commit semantics for all three.
+
+**Acceptance.**
+- Verdict.Holds → both gated resource and Verdict committed.
+- Verdict.Fails → Verdict committed; gated resource rejected; the `Load` request errors out with a typed error pointing at the Verdict IRI.
+- Verdict.Undecidable → both committed (audit-only).
+- All three commits land in one kernel transaction; no partial-state windows.
+
+---
+
+##### 19a.5.e — `institution install` external mode (~2 days)
+
+**Files created.**
+- `cli/src/commands/institution.rs` — `institution install`, `institution list`, `institution inspect` subcommand handlers.
+
+**Files modified.**
+- `cli/src/main.rs` — register the `institution` subcommand group; `capability install` becomes a deprecation alias dispatching to `component install` / `institution install` (per [issue #42](https://github.com/eigenius/eigenius/issues/42)).
+
+**Tasks.**
+1. `institution install --definition <file>` per [D31 §5.1](d31-external-institution-lifecycle.md#51-cli-surface). Sends LoadRequest with auto_commit; kernel cross-checks env_iri + mirror IRI references at commit time.
+2. Cross-checks: `Institution.runtime_environment` must resolve to a `RuntimeEnvironment`; `Institution.mirror` must resolve to a `RuntimePackageMirror`; QueryClass.query_handler procedure IRIs must be unique within the institution.
+3. Definition file shape per [D31 §5.2](d31-external-institution-lifecycle.md#52-definition-file-structure) — Eigon-JSON with Institution + QueryClass + ExportFormat + ImportFormat + Comorphism declarations, no inline binary, references to chain-pinned env/mirror.
+4. `institution list` / `inspect` for visibility into installed institutions.
+5. Tests: install a stub external institution (no real worker yet); verify the chain commits correctly and that subsequent commits trigger AutoOnLoad dispatch via 19a.5.d.
+
+**Acceptance.**
+- A definition file with all the institution-shape resources commits cleanly.
+- Cross-checks reject definitions referencing non-existent env or mirror IRIs.
+- `eigenius institution list` shows installed institutions with their runtime kind.
+
+---
+
+#### Phase 19a.6 — IntervalArithmetic institution (~1 week, integration test for D31)
+
+**Goal.** Bring up the first real external institution against 19a.5's framework. **Acts as the integration test for D31 end-to-end** — 19a.5 isn't done until IntervalArithmetic's `BoundedBy` AutoOnLoad gate fires correctly on commit, with a Verdict landing on the chain. Surfaces any 19a.5 gaps that need fixing before more institutions land.
+
+**Why IntervalArithmetic first.** Smallest non-trivial institution in the Phase 19 plan:
+- One resource class (`BoundedBy`).
+- One QueryClass (`AutoOnLoad` validator).
+- No outgoing Comorphisms (defer §6.6 until a second institution exists).
+- Verified API surface ([D27 §4.0.2](d27-julia-institutions.md): `inf`/`sup` accessors, `interval` constructor, `issubset_interval`).
+- No parameter macros, no MTK, no JuMP — cleanest of the five Julia institutions.
+
+**Files created.**
+- `crates/eigenius-julia-intervals/Cargo.toml` — new workspace member, the institution's Rust crate.
+- `crates/eigenius-julia-intervals/src/lib.rs` — institution declarations (Institution + BoundedBy class + QueryClass + ExportFormat + ImportFormat resources as Eigon-JSON / ESL).
+- `julia/institutions/intervals/EigeniusIntervals/Project.toml` — handler package per [D31 §4.1](d31-external-institution-lifecycle.md#41-phase-2--author-the-handler-package).
+- `julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl` — `validate_bounded_by(b::BoundedBy)` handler returning Verdict.
+- `crates/eigenius-julia-intervals/tests/end_to_end.rs` — full e2e: commit BoundedBy ontology → mirror create → env create → institution install → commit a BoundedBy instance → verify AutoOnLoad fires + Verdict committed.
+
+**Tasks.**
+1. Author the institution's resource ontology (BoundedBy class, BoundedBy properties: value/lower/upper, ExportFormat/ImportFormat for the typed payload).
+2. Generate the mirror against the BoundedBy class via `eigenius mirror create`.
+3. Author the handler package per D31 §4.1; `validate_bounded_by` calls `IntervalArithmetic.issubset_interval`.
+4. Build env image via `eigenius env create`.
+5. Author institution declaration; `eigenius institution install`.
+6. Test the full lifecycle: commit a BoundedBy(value=2, lower=1, upper=3) → expect Verdict.Holds + commit succeeds. Commit a BoundedBy(value=5, lower=1, upper=3) → expect Verdict.Fails + commit rejected.
+7. Document the bring-up as the canonical "how to add an institution" tutorial.
+
+**Acceptance.**
+- The full e2e test passes against `DockerServiceSpawner` (with buildah).
+- Verdict resources land on the chain with the expected shape ([D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics)).
+- Failed commits return errors that point at the rejecting Verdict IRI.
+- Docs cover the "fresh institution from scratch" workflow.
+- **D31 acceptance criterion fulfilled**: the framework supports a real external institution end-to-end without structural gaps.
+
+If 19a.6 surfaces structural issues with 19a.5, fix them in 19a.5 (don't paper over in IntervalArithmetic). The framework's correctness is what 19a.6 validates.
+
+---
+
+#### Phase 19a.7 — Minimal config primitive (~3 days)
 
 **Goal.** A small layered config loader (defaults → file → env → construction overrides) covering the substrate concerns 19a forces. New crate so the kernel and orchestrator can adopt it later without circular deps. Replaces ad-hoc env-var reads in the substrate. Per the [config-system memory](../../.claude/projects/-home-hm-src-eigenius/memory/project_config_system.md), the comprehensive settings story (audit, hot-reload, validation, per-namespace overrides) is a follow-on phase; this sub-milestone ships the *primitive*, not the full system.
 
@@ -1482,7 +1617,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.6 — End-to-end demo + integration tests (~4 days)
+#### Phase 19a.8 — End-to-end demo + integration tests (~4 days)
 
 **Goal.** Kinase-grounded e2e exercise of all 19a pieces (`ServiceSpawner` lifecycle, mirror generator, `CallRuntimeMethod` with typed-mirror dispatch, `dispatched_to`, config-loaded backend tunables). Regression coverage anchors against Phase 18.
 
@@ -1726,7 +1861,7 @@ The following design documents must be written and reviewed before the phase tha
 | D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
 | D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.4 (v1.2 draft) | Draft v1.2 |
 | D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
-| D31 | **External Institution Authoring & Dispatch Lifecycle** | The end-to-end lifecycle for institutions whose `runtime` is `external`: mirror generation CLI, institution registration, kernel-emits-request / orchestrator-services-IO dispatch routing. Generator-agnostic; per-language faithful-translation specs (D29 / D30 / D32) plug in independently. | Phase 19a.4 carry-over (v1.1 draft) | Draft v1.1 |
+| D31 | **External Institution Authoring & Dispatch Lifecycle** | The end-to-end lifecycle for institutions whose `runtime` is `external`: mirror generation CLI, institution registration, kernel-emits-request / orchestrator-services-IO dispatch routing. Generator-agnostic; per-language faithful-translation specs (D29 / D30 / D32) plug in independently. Implementation milestone: Phase 19a.5 (framework) + Phase 19a.6 (IntervalArithmetic, the framework's integration test). | Phase 19a.5 (v1.1 draft) | Draft v1.1 |
 | D32 | **Faithful Translation Specification — `eigon-rust-gen`** | The mapping from Eigon class structure to Rust struct / trait / impl form for WASM institution authoring. Tracked in [#41](https://github.com/eigenius/eigenius/issues/41). | TBD | Planned |
 
 **Reference documents** (analysis rather than specification):
