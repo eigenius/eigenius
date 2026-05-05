@@ -343,6 +343,368 @@ pub async fn mirror_inspect(endpoint: &str, iri: &str, json: bool) {
 
 // --- Env commands ---------------------------------------------------------
 
+/// Implements `eigenius env build`. Reads the handler package from
+/// `--package-path` (or cwd), fetches the mirror Resource from the
+/// chain by IRI, and drives the substrate's
+/// `JuliaLanguageRuntime::build_environment_image` to produce an OCI
+/// image with handler + mirror + `EigeniusJuliaCommon` baked in.
+/// Prints the resulting `sha256:` digest. Pass that digest to
+/// `eigenius env create --image-digest <digest>` to commit the
+/// `RuntimeEnvironment` resource referencing it.
+///
+/// Filesystem contract:
+///   `<package-path>/Project.toml` — handler package manifest.
+///   `<package-path>/src/**`        — handler source tree (recursive,
+///                                    flattened into a JSON archive
+///                                    the substrate's image-build
+///                                    pipeline materialises under
+///                                    `/opt/eigenius/packages/<name>/`).
+///
+/// Network contract: connects to the kernel's gRPC endpoint to fetch
+/// the mirror Resource by IRI; the actual buildah invocation runs
+/// locally against the host's Docker daemon.
+#[allow(clippy::too_many_arguments)]
+pub async fn env_build(
+    endpoint: &str,
+    language: &str,
+    package_path: Option<&str>,
+    mirror_iri: &str,
+    base_image: &str,
+    worker_source_dir: Option<&str>,
+    depot: Option<&str>,
+    json: bool,
+) {
+    if language != "julia" {
+        eprintln!("language `{language}` is not yet supported by env build (only `julia` for v1)");
+        std::process::exit(1);
+    }
+
+    // 1. Resolve package directory (cwd by default).
+    let pkg_dir = match package_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => match std::env::current_dir() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("could not read current working directory: {e}");
+                std::process::exit(1);
+            }
+        },
+    };
+    let project_toml_path = pkg_dir.join("Project.toml");
+    let src_dir = pkg_dir.join("src");
+    if !project_toml_path.is_file() {
+        eprintln!(
+            "handler package missing `Project.toml` at {}; run from the package directory \
+             or pass --package-path",
+            project_toml_path.display()
+        );
+        std::process::exit(1);
+    }
+    if !src_dir.is_dir() {
+        eprintln!(
+            "handler package missing `src/` directory at {}",
+            src_dir.display()
+        );
+        std::process::exit(1);
+    }
+
+    // 2. Read Project.toml + extract package name.
+    let project_toml = match std::fs::read_to_string(&project_toml_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("failed to read {}: {e}", project_toml_path.display());
+            std::process::exit(1);
+        }
+    };
+    let pkg_name = match parse_project_toml_name(&project_toml) {
+        Some(n) => n,
+        None => {
+            eprintln!(
+                "could not find a `name = \"...\"` line in {}",
+                project_toml_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
+
+    // 3. Walk src/ recursively, collect (relative-path, bytes).
+    let source_files = match collect_handler_sources(&src_dir) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "failed to read handler sources under {}: {e}",
+                src_dir.display()
+            );
+            std::process::exit(1);
+        }
+    };
+    if source_files.is_empty() {
+        eprintln!(
+            "handler package's src/ directory contains no files at {}",
+            src_dir.display()
+        );
+        std::process::exit(1);
+    }
+
+    // 4. Fetch the mirror Resource from the chain.
+    let mut client = crate::connect_client(endpoint).await;
+    let mirror_resource = match fetch_resource(&mut client, mirror_iri).await {
+        Some(r) => r,
+        None => {
+            eprintln!("--mirror IRI `{mirror_iri}` did not resolve to a chain-committed resource");
+            std::process::exit(1);
+        }
+    };
+    drop(client);
+
+    // 5. Resolve the Julia worker source dir.
+    let worker_dir = match resolve_worker_source_dir(worker_source_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+
+    // 6. Resolve depot path.
+    let depot_path = match depot {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let dir = std::env::temp_dir().join(format!(
+                "eigenius-env-build-{}-{}",
+                std::process::id(),
+                pkg_name
+            ));
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("failed to create depot dir {}: {e}", dir.display());
+                std::process::exit(1);
+            }
+            dir
+        }
+    };
+
+    // 7. Build the in-memory RuntimePackage Resource.
+    let handler_pkg = build_handler_package_resource(&pkg_name, &project_toml, &source_files);
+
+    // 8. Construct the substrate runtime + spawner.
+    let spawner = match eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
+        eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(depot_path.clone()),
+    ) {
+        Ok(s) => std::sync::Arc::new(s),
+        Err(e) => {
+            eprintln!(
+                "failed to construct DockerServiceSpawner: {e}\n\
+                 Is the Docker daemon running and reachable?"
+            );
+            std::process::exit(1);
+        }
+    };
+    let runtime = eigenius_julia::JuliaLanguageRuntime::new(
+        worker_dir.clone(),
+        base_image.to_string(),
+        spawner,
+        depot_path.clone(),
+    );
+
+    // 9. Call the substrate engine.
+    use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+    let env_resource = eigenius_kernel::ontology::resource::Resource::new_embedded();
+    let digest = match runtime.build_environment_image(
+        &env_resource,
+        &[handler_pkg],
+        Some(&mirror_resource),
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("env build failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // 10. Print the digest. JSON mode emits a single line so callers
+    // can pipe through `jq`; human mode formats for readability.
+    if json {
+        println!(
+            "{{\"image_digest\":\"{}\",\"package_name\":\"{}\",\"mirror_iri\":\"{}\"}}",
+            digest.as_str(),
+            pkg_name,
+            mirror_iri
+        );
+    } else {
+        println!("Image built.");
+        println!("  Package: {pkg_name}");
+        println!("  Mirror : {mirror_iri}");
+        println!("  Digest : {}", digest.as_str());
+        println!();
+        println!("Commit the env Resource referencing this digest with:");
+        println!(
+            "  eigenius env create --language {language} --handler-package {} --mirror {mirror_iri} \\",
+            pkg_dir.display()
+        );
+        println!(
+            "      --as-iri <ENV_IRI> --image-digest {}",
+            digest.as_str()
+        );
+    }
+}
+
+/// Extract `name = "..."` from a `Project.toml` body. Tolerant
+/// shape — splits on whitespace and `=`, returns the first quoted
+/// `name = "..."` it finds. Sufficient for v1's MVP; a full TOML
+/// parser is overkill for the single field we need.
+fn parse_project_toml_name(toml: &str) -> Option<String> {
+    for line in toml.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("name") {
+            let after = rest.trim_start();
+            let after = after.strip_prefix('=')?.trim_start();
+            let stripped = after.strip_prefix('"')?;
+            let end = stripped.find('"')?;
+            return Some(stripped[..end].to_string());
+        }
+    }
+    None
+}
+
+/// Recursively collect every regular file under `dir`, returning a
+/// list of (path-relative-to-`dir`-parent, bytes). The relative path
+/// stays under `src/` because the substrate's package materialiser
+/// writes files under `packages/<name>/<path>` and the handler package
+/// contract is `packages/<name>/src/<...>`.
+fn collect_handler_sources(src_dir: &std::path::Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+    let mut out = Vec::new();
+    walk_dir(src_dir, std::path::Path::new("src"), &mut out)?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn walk_dir(
+    dir: &std::path::Path,
+    relative_root: &std::path::Path,
+    out: &mut Vec<(String, Vec<u8>)>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        let file_name = entry.file_name();
+        let rel = relative_root.join(&file_name);
+        if file_type.is_dir() {
+            walk_dir(&path, &rel, out)?;
+        } else if file_type.is_file() {
+            let bytes = std::fs::read(&path)?;
+            // Always use forward slashes — these end up in the
+            // image's filesystem.
+            let rel_str = rel
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            out.push((rel_str, bytes));
+        }
+        // Symlinks / other types: skip silently.
+    }
+    Ok(())
+}
+
+/// Build a `RuntimePackage` Resource carrying the handler's
+/// `package_name`, verbatim `Project.toml`, and a JSON `source_tree`
+/// archive in the shape `runtime_package_to_materialization`
+/// expects (see `crates/eigenius-julia/src/runtime.rs`).
+fn build_handler_package_resource(
+    pkg_name: &str,
+    project_toml: &str,
+    source_files: &[(String, Vec<u8>)],
+) -> Resource {
+    let pkg_iri = Iri::parse(&format!("urn:eigenius:cli:env-build:package:{pkg_name}"))
+        .expect("static IRI shape");
+    let mut r = Resource::new(pkg_iri);
+    r.set(
+        Iri::parse("urn:eigenius:runtime:package_name").unwrap(),
+        Value::String(pkg_name.to_string()),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:runtime:manifest").unwrap(),
+        Value::String(project_toml.to_string()),
+    );
+    let entries: Vec<serde_json::Value> = source_files
+        .iter()
+        .map(|(path, bytes)| {
+            serde_json::json!({
+                "path": path,
+                "content_base64": base64_encode(bytes),
+            })
+        })
+        .collect();
+    r.set(
+        Iri::parse("urn:eigenius:runtime:source_tree").unwrap(),
+        Value::Json(serde_json::Value::Array(entries)),
+    );
+    r
+}
+
+/// Standard base64 encoder. Mirrors the substrate-side decoder's
+/// expected alphabet (`A-Za-z0-9+/`, `=` padding) — keeping a tiny
+/// hand-written impl avoids pulling in a dep just for this.
+fn base64_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+        out.push(ALPHABET[(b0 >> 2) as usize] as char);
+        out.push(ALPHABET[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(b2 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+/// Resolve the Julia worker source directory in priority order:
+///   1. Explicit `--worker-source-dir` flag.
+///   2. `$EIGENIUS_HOME/julia/runtime-worker` if `EIGENIUS_HOME` is set.
+///   3. Workspace-relative `julia/runtime-worker/` based on the CLI's
+///      `CARGO_MANIFEST_DIR` — works in dev when running from the
+///      repo, errors otherwise. Production deployments should set
+///      `EIGENIUS_HOME`.
+fn resolve_worker_source_dir(flag: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let candidate = if let Some(p) = flag {
+        std::path::PathBuf::from(p)
+    } else if let Ok(home) = std::env::var("EIGENIUS_HOME") {
+        std::path::PathBuf::from(home)
+            .join("julia")
+            .join("runtime-worker")
+    } else {
+        // CLI's manifest dir is `<repo>/cli`. The worker source lives
+        // at `<repo>/julia/runtime-worker`.
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("julia")
+            .join("runtime-worker")
+    };
+    let canonical = candidate.canonicalize().map_err(|e| {
+        format!(
+            "could not resolve worker source dir {}: {e}\n\
+             Set --worker-source-dir or $EIGENIUS_HOME/julia/runtime-worker.",
+            candidate.display()
+        )
+    })?;
+    if !canonical.join("src").join("JuliaWorker.jl").is_file() {
+        return Err(format!(
+            "worker source dir {} does not contain src/JuliaWorker.jl",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
 /// Implements `eigenius env create`. v1 takes a pre-built image digest
 /// (`--image-digest`) and commits the `RuntimeEnvironment` resource to
 /// the chain. The full image-build pipeline (handler-package + mirror

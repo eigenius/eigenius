@@ -388,6 +388,50 @@ enum MirrorCommands {
 
 #[derive(Subcommand)]
 enum EnvCommands {
+    /// Build an env image from the handler package in the working
+    /// directory. Reads `./Project.toml` + `./src/` (or
+    /// `--package-path` if set), fetches the named mirror from the
+    /// chain, and runs the substrate's `build_environment_image` with
+    /// the handler package + mirror baked in. Prints the resulting
+    /// `sha256:` image digest. Pass that digest to `env create` to
+    /// commit the `RuntimeEnvironment` resource.
+    Build {
+        /// Target language: `julia` for v1.
+        #[arg(long, value_name = "LANG", default_value = "julia")]
+        language: String,
+
+        /// Handler package directory (defaults to current working directory).
+        /// The directory must contain `Project.toml` and `src/`.
+        #[arg(long, value_name = "DIR")]
+        package_path: Option<String>,
+
+        /// IRI of a previously-committed `RuntimePackageMirror` to bake in.
+        #[arg(long, value_name = "MIRROR_IRI")]
+        mirror: String,
+
+        /// Override the language's default base image. Pin by digest in
+        /// production (e.g. `julia@sha256:...`) so builds stay
+        /// reproducible.
+        #[arg(long, value_name = "REF", default_value = "julia:1.12-bookworm")]
+        base_image: String,
+
+        /// Path to the Julia worker's project directory (must contain
+        /// `Project.toml`, `Manifest.toml`, `src/JuliaWorker.jl`).
+        /// Defaults to `julia/runtime-worker/` resolved against
+        /// `$EIGENIUS_HOME` (or, in dev, the workspace root the CLI
+        /// was built under). The worker source is what the substrate
+        /// stages as the env image's PID 1; production deployments
+        /// should pin a specific worker version.
+        #[arg(long, value_name = "DIR")]
+        worker_source_dir: Option<String>,
+
+        /// Build context / depot path. Builds materialise the
+        /// Dockerfile + COPYs under this directory; `buildah` reads
+        /// from here. Defaults to a fresh temp directory.
+        #[arg(long, value_name = "DIR")]
+        depot: Option<String>,
+    },
+
     /// Build a runtime environment image and commit a RuntimeEnvironment resource.
     Create {
         /// Target language: julia (others planned per D31 §7).
@@ -1764,6 +1808,26 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
 
 async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
     match command {
+        EnvCommands::Build {
+            language,
+            package_path,
+            mirror,
+            base_image,
+            worker_source_dir,
+            depot,
+        } => {
+            d31::env_build(
+                endpoint,
+                &language,
+                package_path.as_deref(),
+                &mirror,
+                &base_image,
+                worker_source_dir.as_deref(),
+                depot.as_deref(),
+                json,
+            )
+            .await
+        }
         EnvCommands::Create {
             language,
             handler_package,
