@@ -115,11 +115,18 @@ impl JuliaLanguageRuntime {
         depot_path: PathBuf,
     ) -> Self {
         let base = base_image_ref.into();
+        // Derive a buildah-friendly tag suffix from the base image
+        // reference. Docker tag syntax forbids a `-` immediately
+        // before the `:tag` separator, so we trim trailing separators
+        // after truncation. `take(24)` keeps the suffix short enough
+        // for buildah's name length limits.
         let safe_prefix: String = base
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
             .take(24)
-            .collect();
+            .collect::<String>()
+            .trim_end_matches(['-', '_'])
+            .to_string();
         let image_tag = format!("eigenius-julia-{safe_prefix}:latest");
         Self {
             spawner,

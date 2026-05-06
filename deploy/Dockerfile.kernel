@@ -17,6 +17,9 @@ COPY storage/ storage/
 COPY cli/ cli/
 COPY proto/ proto/
 COPY ontologies/ ontologies/
+# eigenius-julia (transitive dep of the CLI's `env build` command) does
+# `include_str!`s of julia/common/EigeniusJuliaCommon/ at compile time.
+COPY julia/ julia/
 
 # Build the CLI binary (includes serve command)
 RUN cargo build --release -p eigenius-cli

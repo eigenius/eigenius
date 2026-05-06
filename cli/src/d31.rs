@@ -486,47 +486,73 @@ pub async fn env_build(
     // 7. Build the in-memory RuntimePackage Resource.
     let handler_pkg = build_handler_package_resource(&pkg_name, &project_toml, &source_files);
 
-    // 8. Construct the substrate runtime + spawner.
-    let spawner = match eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
-        eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(depot_path.clone()),
-    ) {
-        Ok(s) => std::sync::Arc::new(s),
-        Err(e) => {
-            eprintln!(
+    // 8. Construct the substrate runtime + spawner, then drive
+    // `build_environment_image`. `DockerServiceSpawner::new` owns its
+    // own multi-thread Tokio runtime and `block_on`s into Bollard;
+    // doing that from inside this `async` CLI context would panic with
+    // "Cannot start a runtime from within a runtime", so the whole
+    // sync subtree runs on a blocking thread.
+    let depot_for_blocking = depot_path.clone();
+    let worker_dir_for_blocking = worker_dir.clone();
+    let base_image_for_blocking = base_image.to_string();
+    let digest = match tokio::task::spawn_blocking(move || {
+        let spawner = eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
+            eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(
+                depot_for_blocking.clone(),
+            ),
+        )
+        .map_err(|e| {
+            format!(
                 "failed to construct DockerServiceSpawner: {e}\n\
-                 Is the Docker daemon running and reachable?"
-            );
+                     Is the Docker daemon running and reachable?"
+            )
+        })?;
+        let runtime = eigenius_julia::JuliaLanguageRuntime::new(
+            worker_dir_for_blocking,
+            base_image_for_blocking,
+            std::sync::Arc::new(spawner),
+            depot_for_blocking,
+        );
+        use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+        let env_resource = eigenius_kernel::ontology::resource::Resource::new_embedded();
+        runtime
+            .build_environment_image(&env_resource, &[handler_pkg], Some(&mirror_resource))
+            .map_err(|e| format!("env build failed: {e}"))
+    })
+    .await
+    {
+        Ok(Ok(d)) => d,
+        Ok(Err(msg)) => {
+            eprintln!("{msg}");
             std::process::exit(1);
         }
-    };
-    let runtime = eigenius_julia::JuliaLanguageRuntime::new(
-        worker_dir.clone(),
-        base_image.to_string(),
-        spawner,
-        depot_path.clone(),
-    );
-
-    // 9. Call the substrate engine.
-    use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
-    let env_resource = eigenius_kernel::ontology::resource::Resource::new_embedded();
-    let digest = match runtime.build_environment_image(
-        &env_resource,
-        &[handler_pkg],
-        Some(&mirror_resource),
-    ) {
-        Ok(d) => d,
         Err(e) => {
-            eprintln!("env build failed: {e}");
+            eprintln!("env build worker join failed: {e}");
             std::process::exit(1);
         }
     };
 
-    // 10. Print the digest. JSON mode emits a single line so callers
-    // can pipe through `jq`; human mode formats for readability.
+    // 10. Capture the runtime version from the built image. This is
+    // the patch-level pin (`1.12.1`, not `1.12-bookworm`) the chain
+    // ontology requires on `RuntimeEnvironment.runtime_version` —
+    // anchored to whatever the base image actually shipped, so a
+    // re-instantiation on a different host gets the same Julia.
+    let runtime_version = match query_runtime_version(language, digest.as_str()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("env build: failed to capture {language} runtime version from image: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // 11. Print the digest + runtime version. JSON mode emits a single
+    // line so callers can pipe through `jq`; human mode formats for
+    // readability.
     if json {
         println!(
-            "{{\"image_digest\":\"{}\",\"package_name\":\"{}\",\"mirror_iri\":\"{}\"}}",
+            "{{\"image_digest\":\"{}\",\"runtime_version\":\"{}\",\"package_name\":\"{}\",\"mirror_iri\":\"{}\"}}",
             digest.as_str(),
+            runtime_version,
             pkg_name,
             mirror_iri
         );
@@ -535,6 +561,7 @@ pub async fn env_build(
         println!("  Package: {pkg_name}");
         println!("  Mirror : {mirror_iri}");
         println!("  Digest : {}", digest.as_str());
+        println!("  Runtime version: {runtime_version}");
         println!();
         println!("Commit the env Resource referencing this digest with:");
         println!(
@@ -542,10 +569,88 @@ pub async fn env_build(
             pkg_dir.display()
         );
         println!(
-            "      --as-iri <ENV_IRI> --image-digest {}",
+            "      --as-iri <ENV_IRI> --image-digest {} --runtime-version {runtime_version}",
             digest.as_str()
         );
     }
+}
+
+/// Per-language version-extraction recipe used by [`query_runtime_version`].
+struct VersionProbe {
+    /// Binary name to invoke as the container's entrypoint.
+    cmd: &'static str,
+    /// Arguments to pass to `cmd`.
+    args: &'static [&'static str],
+    /// Parser that pulls a version string out of the command's stdout.
+    parse: fn(&str) -> Option<String>,
+}
+
+fn version_probe_for(language: &str) -> Result<VersionProbe, String> {
+    match language {
+        "julia" => Ok(VersionProbe {
+            cmd: "julia",
+            args: &["--version"],
+            parse: parse_julia_version,
+        }),
+        other => Err(format!(
+            "no version-extraction command registered for language `{other}`"
+        )),
+    }
+}
+
+/// Run the language's version command inside the freshly-built image
+/// and parse the output. The base image already has the runtime
+/// installed (by definition — the substrate's Dockerfile composer's
+/// `install_runtime` is empty for languages whose base image ships
+/// the runtime, and Julia's does), so a one-shot `docker run --rm`
+/// is sufficient.
+fn query_runtime_version(language: &str, image_digest: &str) -> Result<String, String> {
+    let probe = version_probe_for(language)?;
+
+    let output = std::process::Command::new("docker")
+        .args(["run", "--rm", "--entrypoint", probe.cmd, image_digest])
+        .args(probe.args)
+        .output()
+        .map_err(|e| {
+            format!(
+                "`docker run --rm <image> {}` failed to start: {e}",
+                probe.cmd
+            )
+        })?;
+    if !output.status.success() {
+        return Err(format!(
+            "`docker run --rm <image> {}` exited {}: {}",
+            probe.cmd,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    (probe.parse)(&stdout).ok_or_else(|| {
+        format!(
+            "could not parse {language} version from `{}` output: {}",
+            probe.cmd,
+            stdout.trim()
+        )
+    })
+}
+
+/// Parse `julia version 1.12.1\n` (the canonical `julia --version`
+/// output shape) and return `1.12.1`.
+fn parse_julia_version(stdout: &str) -> Option<String> {
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        // `julia version X.Y.Z[-pre]` — anchor on the prefix so any
+        // future addition (e.g. a leading banner line) doesn't drift
+        // us into the wrong line.
+        if let Some(rest) = trimmed.strip_prefix("julia version ") {
+            let v = rest.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Extract `name = "..."` from a `Project.toml` body. Tolerant
@@ -733,6 +838,7 @@ pub async fn env_create(
     as_iri: &str,
     _base_image: Option<&str>,
     image_digest: &str,
+    runtime_version: &str,
     json: bool,
 ) {
     if language != "julia" {
@@ -797,6 +903,35 @@ pub async fn env_create(
             std::process::exit(1);
         }
     };
+
+    // Derive a `short_name` from the env IRI's last segment — same
+    // convention every other CLI verb uses for synthesised resources.
+    let short_name = env_iri
+        .as_str()
+        .rsplit(':')
+        .find(|s| !s.is_empty())
+        .unwrap_or("env")
+        .to_string();
+
+    // The handler's `Project.toml` is the v1 stand-in for the env's
+    // lockfile. The full pin set lives in the worker image's
+    // `Manifest.toml` after `Pkg.instantiate`, but committing those
+    // bytes requires post-build extraction (deferred to D26 §5.6's
+    // pinned_packages projection). The handler manifest is the
+    // best-available-on-the-host approximation for now and satisfies
+    // the chain's required-property check.
+    let lockfile_str = match std::fs::read_to_string(&project_toml_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "Cannot re-read handler-package Project.toml at {}: {e}",
+                project_toml_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
+    let _ = project_toml_str; // already validated above; lockfile_str shadows the read
+
     let mut env = Resource::new(env_iri.clone());
     env.set(
         Iri::parse("urn:eigenius:core:is_a").expect("static IRI"),
@@ -805,8 +940,26 @@ pub async fn env_create(
         )]),
     );
     env.set(
+        Iri::parse("urn:eigenius:core:short_name").expect("static IRI"),
+        Value::String(short_name),
+    );
+    env.set(
         Iri::parse("urn:eigenius:runtime:language").expect("static IRI"),
         Value::String(language.to_string()),
+    );
+    env.set(
+        Iri::parse("urn:eigenius:runtime:runtime_version").expect("static IRI"),
+        Value::String(runtime_version.to_string()),
+    );
+    env.set(
+        Iri::parse("urn:eigenius:runtime:lockfile").expect("static IRI"),
+        Value::String(lockfile_str),
+    );
+    env.set(
+        Iri::parse("urn:eigenius:runtime:lifecycle").expect("static IRI"),
+        Value::ResourceRef(
+            Iri::parse("urn:eigenius:runtime:lifecycle:Service").expect("static IRI"),
+        ),
     );
     env.set(
         Iri::parse("urn:eigenius:runtime:image_digest").expect("static IRI"),
@@ -1072,32 +1225,9 @@ impl ChainAccessor for RemoteChainAccessor {
         {
             return cached;
         }
-        // Fetch via kernel query. Generic "give me the resource at this
-        // IRI" — uses an EigenQL query that pattern-matches on the IRI.
-        // The runtime client lock and async-bridge here are clunky;
-        // acceptable for a CLI command that issues O(closure-size)
-        // queries.
-        let query = format!(
-            r#"
-            MATCH ?_class(?r) {{
-                "urn:eigenius:core:is_a": ?_is_a
-            }}
-            WHERE ?r = "{}"
-            RETURN [] {{ iri: ?r }}
-        "#,
-            target.as_str()
-        );
-        let rows = futures::executor::block_on(async {
-            let mut c = self.client.lock().expect("client mutex poisoned").clone();
-            crate::run_query(&mut c, &query).await
-        });
-        let _ = rows; // smoke-test the query path; actual resource fetch via document below
-
-        // The query above returns just IRIs. To get the full resource,
-        // we use the same query path but with a richer pattern that
-        // brings back all properties. Simpler: a `Reflect` RPC would be
-        // ideal, but for v1 we issue a query that selects the resource
-        // and walks the resulting document for all of its properties.
+        // Fetch via the kernel's Inspect RPC. The async-bridge here is
+        // clunky but acceptable for a CLI command that issues
+        // O(closure-size) lookups during mirror generation.
         let resource = futures::executor::block_on(async {
             let mut c = self.client.lock().expect("client mutex poisoned").clone();
             fetch_resource(&mut c, &target_str).await
@@ -1130,37 +1260,22 @@ impl ChainAccessor for RemoteChainAccessor {
 /// result document. Walks the document, finds the matching resource by
 /// IRI, returns it. Returns `None` if not found.
 async fn fetch_resource(client: &mut EigeniusKernelClient<Channel>, iri: &str) -> Option<Resource> {
-    // This query pattern uses the existing kernel query path; it
-    // returns the matched resource alongside its properties. We then
-    // pull the resource out of the response document by matching its
-    // IRI.
-    let query = format!(
-        r#"
-        MATCH ?_cls(?r) {{
-            "urn:eigenius:core:is_a": ?_is_a
-        }}
-        WHERE ?r = "{}"
-        RETURN [] {{ iri: ?r }}
-    "#,
-        iri
-    );
-    let resp = match client
-        .query(proto::QueryRequest {
+    // Use the kernel's Inspect RPC — the canonical "give me this
+    // resource by IRI" surface. It walks the parent-layer chain on
+    // the kernel side and returns the resource as Eigon-CBOR.
+    let resp = client
+        .inspect(proto::InspectRequest {
+            iri: iri.to_string(),
             at_layer: String::new(),
-            eigenql: query,
             branch: String::new(),
         })
         .await
-    {
-        Ok(r) => r.into_inner(),
-        Err(_) => return None,
-    };
-    if !resp.success {
+        .ok()?
+        .into_inner();
+    if !resp.found {
         return None;
     }
-    let doc = eigon_cbor::parse_document(&resp.document).ok()?;
-    doc.into_iter()
-        .find(|r| r.id().map(|i| i.as_str() == iri).unwrap_or(false))
+    eigon_cbor::parse_resource_lenient(&resp.resource).ok()
 }
 
 /// Submit a single Resource via Load with auto_commit. Helper for
@@ -1245,4 +1360,31 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
         i += 4;
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_julia_version_extracts_patch_level() {
+        assert_eq!(
+            parse_julia_version("julia version 1.12.1\n"),
+            Some("1.12.1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_julia_version_handles_pre_release_suffix() {
+        assert_eq!(
+            parse_julia_version("julia version 1.12.0-rc1\n"),
+            Some("1.12.0-rc1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_julia_version_returns_none_on_unrecognised_shape() {
+        assert!(parse_julia_version("Julia 1.12.1\n").is_none());
+        assert!(parse_julia_version("").is_none());
+    }
 }

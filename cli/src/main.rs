@@ -464,6 +464,14 @@ enum EnvCommands {
         /// follow-up milestone (D31 §4.2 / Phase 19a.5.b proper).
         #[arg(long, value_name = "DIGEST")]
         image_digest: String,
+
+        /// Exact runtime version pinned in the image (e.g. `1.12.1`
+        /// for Julia, `3.12.2` for Python). `eigenius env build`
+        /// captures this from the built image and prints it; pass that
+        /// value through. Required by the chain ontology on
+        /// `RuntimeEnvironment.runtime_version`.
+        #[arg(long, value_name = "VERSION")]
+        runtime_version: String,
     },
 
     /// List committed environments.
@@ -1836,6 +1844,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             as_iri,
             base_image,
             image_digest,
+            runtime_version,
         } => {
             d31::env_create(
                 endpoint,
@@ -1846,6 +1855,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
                 &as_iri,
                 base_image.as_deref(),
                 &image_digest,
+                &runtime_version,
                 json,
             )
             .await

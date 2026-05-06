@@ -447,10 +447,68 @@ function serve(stream)::ServeOutcome
     end
 end
 
+"""
+Walk the in-image package tree (`/opt/eigenius/packages/*/Project.toml`
+and `/opt/eigenius/mirror/Project.toml`) and `using` each baked package
+into `Main`. This is the bridge between Pkg.develop'd packages (visible
+to the project) and `Main` bindings (visible to `Core.eval(Main, ...)`
+during dispatch). Without this, mirror modules' `_eigenius_decoders`
+registry stays empty and the dispatcher rejects every input as
+"no mirror decoder registered for class X".
+
+Each `using` evaluates against `Main` at the worker's current world;
+`Core.eval(Main, fn_symbol)` in `dispatch_typed_method` later picks up
+the new bindings naturally.
+"""
+function load_baked_packages()
+    package_roots = [
+        "/opt/eigenius/packages",
+        "/opt/eigenius/mirror",
+    ]
+    for root in package_roots
+        isdir(root) || continue
+        # `/opt/eigenius/mirror/` is a single package; `/opt/eigenius/packages/`
+        # contains one subdirectory per package.
+        candidates = if isfile(joinpath(root, "Project.toml"))
+            [root]
+        else
+            [joinpath(root, name) for name in readdir(root)
+             if isfile(joinpath(root, name, "Project.toml"))]
+        end
+        for pkg_dir in candidates
+            project_toml = joinpath(pkg_dir, "Project.toml")
+            name = parse_package_name(project_toml)
+            name === nothing && continue
+            try
+                Core.eval(Main, Meta.parse("using $name"))
+            catch e
+                println(stderr,
+                    "JuliaWorker: failed to `using $name` from $pkg_dir: $e; ",
+                    "dispatches that depend on its bindings will fail")
+            end
+        end
+    end
+end
+
+"""Parse `name = "..."` from a Julia Project.toml. Tolerant single-line
+form; sufficient for the well-formed Project.tomls produced by the
+substrate's mirror generator and `eigenius env build`."""
+function parse_package_name(project_toml_path::AbstractString)::Union{Nothing, String}
+    isfile(project_toml_path) || return nothing
+    for line in eachline(project_toml_path)
+        m = match(r"^\s*name\s*=\s*\"([^\"]+)\"", line)
+        m === nothing && continue
+        return m.captures[1]
+    end
+    return nothing
+end
+
 function main()
     verify_cross_check()
     ENV_DIGEST[] = ENV["EIGENIUS_RUNTIME_ENV_DIGEST"]
     ENV_HASH[] = ENV["EIGENIUS_RUNTIME_ENV_MANIFEST_HASH"]
+
+    load_baked_packages()
 
     uds_path = get(ENV, "EIGENIUS_TEST_WORKER_UDS", nothing)
     if uds_path === nothing

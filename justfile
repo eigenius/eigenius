@@ -59,6 +59,10 @@ down:
 demo:
     ./demo/run.sh
 
+# Run the IntervalArithmetic institution end-to-end demo (D31)
+demo-intervals:
+    ./demo/intervals/run.sh
+
 # Start orchestrator locally (mock LLM)
 orchestrator-mock:
     cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env --allow-sys=hostname src/main.ts
