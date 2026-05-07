@@ -177,6 +177,48 @@ fn local_service_spawner_warm_reuse_across_attach() {
 }
 
 #[test]
+fn local_service_spawner_ensure_service_is_idempotent() {
+    // Trait contract: repeated `ensure_service` calls for the same
+    // `(image_digest, command)` identity must return the same handle
+    // and reuse the same backing process. Without this the dispatcher's
+    // warm-pool semantics break — a per-dispatch ensure call would
+    // spawn a fresh worker every time and pay the cold-start cost
+    // forever.
+    let depot = fresh_tempdir("idempotent");
+    let spawner = LocalServiceSpawner::new(depot.clone());
+    let service_dir = depot.join("svc");
+
+    let spec = build_spec(&service_dir);
+    let h1 = spawner.ensure_service(spec.clone()).expect("ensure 1");
+    let h2 = spawner.ensure_service(spec.clone()).expect("ensure 2");
+
+    assert_eq!(
+        h1.id(),
+        h2.id(),
+        "second ensure_service for the same spec must return the same ServiceHandle id"
+    );
+
+    // Verify the worker really is the same process by exchanging two
+    // Health roundtrips and checking they report identical in-image
+    // metadata. A spawn-per-call implementation would have spawned a
+    // second worker; the two would still report the same env digest
+    // (it's a constant) but the test asserts the *handle* equality
+    // above — Health is the secondary "really one process" check.
+    let r1 = rpc(&spawner, &h1, &Request::Health);
+    let r2 = rpc(&spawner, &h2, &Request::Health);
+    match (r1, r2) {
+        (Response::Health(a), Response::Health(b)) => {
+            assert_eq!(a.env_digest_in_image, b.env_digest_in_image);
+            assert_eq!(a.manifest_hash_in_image, b.manifest_hash_in_image);
+        }
+        other => panic!("expected two Health responses, got {other:?}"),
+    }
+
+    spawner.drain(&h1).expect("drain");
+    let _ = std::fs::remove_dir_all(&depot);
+}
+
+#[test]
 fn local_service_spawner_drain_makes_attach_fail() {
     let depot = fresh_tempdir("drain");
     let spawner = LocalServiceSpawner::new(depot.clone());

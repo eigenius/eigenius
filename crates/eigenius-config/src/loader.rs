@@ -28,6 +28,15 @@
 use crate::config::Config;
 use std::path::{Path, PathBuf};
 
+/// Function shape a loader caller plugs in to read environment
+/// variables. Defaulted to `std::env::var` in production; tests pin a
+/// synthetic environment so they don't have to mutate the process's
+/// real env vars.
+type EnvProvider = dyn Fn(&str) -> Option<String> + Send + Sync;
+
+/// Last-precedence override hook applied to the resolved config.
+type OverrideFn = dyn FnOnce(&mut Config) + Send;
+
 /// Errors the loader can surface. Carry enough context (path, parser
 /// message) to fix the underlying file without a debugger.
 #[derive(thiserror::Error, Debug)]
@@ -59,7 +68,7 @@ pub struct Loader {
     /// Environment provider — defaulted to `std::env::var` but
     /// swappable in tests so precedence can be exercised without
     /// mutating the process's actual environment.
-    env_provider: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    env_provider: Option<Box<EnvProvider>>,
 
     /// Disable the search-path lookup. When `true`, no file is
     /// considered unless [`Loader::explicit_file`] was set.
@@ -69,7 +78,7 @@ pub struct Loader {
     /// Stored as a closure rather than a partial config so callers
     /// can mutate any nested field without an explicit "unset"
     /// sentinel in the schema.
-    override_fn: Option<Box<dyn FnOnce(&mut Config) + Send>>,
+    override_fn: Option<Box<OverrideFn>>,
 }
 
 impl Loader {
@@ -160,7 +169,7 @@ impl Loader {
 ///   1. `$EIGENIUS_CONFIG` — explicit, never inferred.
 ///   2. `./eigenius.toml` — project-local checkout.
 ///   3. `~/.config/eigenius/config.toml` — XDG default.
-fn search_paths(env: &(dyn Fn(&str) -> Option<String> + Send + Sync)) -> Vec<PathBuf> {
+fn search_paths(env: &EnvProvider) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(p) = env("EIGENIUS_CONFIG") {
         out.push(PathBuf::from(p));
@@ -205,7 +214,7 @@ fn merge_file(cfg: Config, path: &Path, required: bool) -> Result<Config, Loader
 /// flat translation of the TOML structure: each nested key becomes
 /// `EIGENIUS_<SECTION>_<FIELD>`, screaming snake case. Unset vars
 /// leave the file/default value alone.
-fn apply_env(cfg: &mut Config, env: &(dyn Fn(&str) -> Option<String> + Send + Sync)) {
+fn apply_env(cfg: &mut Config, env: &EnvProvider) {
     if let Some(v) = env("EIGENIUS_IMAGE_REGISTRY_URL") {
         cfg.substrate.image.registry_url = if v.is_empty() { None } else { Some(v) };
     }
@@ -220,6 +229,6 @@ fn apply_env(cfg: &mut Config, env: &(dyn Fn(&str) -> Option<String> + Send + Sy
     }
 }
 
-fn default_env_provider() -> Box<dyn Fn(&str) -> Option<String> + Send + Sync> {
+fn default_env_provider() -> Box<EnvProvider> {
     Box::new(|name: &str| std::env::var(name).ok())
 }

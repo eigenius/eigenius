@@ -61,6 +61,20 @@ pub struct LocalServiceSpawner {
     depot_path: PathBuf,
     /// Live services keyed by `ServiceHandle.id()`.
     services: Mutex<HashMap<String, ServiceState>>,
+    /// Idempotence index: `(image_digest, command)` → service id. Honours the
+    /// trait contract that repeated `ensure_service` calls for the same
+    /// effective worker identity return the same `ServiceHandle`. The
+    /// command is part of the key because Local has no image — two
+    /// invocations with different binaries are different services even
+    /// if they share an image_digest stub.
+    by_identity: Mutex<HashMap<ServiceIdentity, String>>,
+}
+
+/// Cache key for [`LocalServiceSpawner`]'s idempotence map.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ServiceIdentity {
+    image_digest: Option<String>,
+    command: Vec<String>,
 }
 
 struct ServiceState {
@@ -70,6 +84,13 @@ struct ServiceState {
     uds_path: PathBuf,
     /// Tempdir the worker is running in.
     tempdir: PathBuf,
+    /// Cached handle returned by `ensure_service`; reused on
+    /// idempotent re-calls so callers compare equal.
+    handle: ServiceHandle,
+    /// Identity that keyed this service in `by_identity` — used at
+    /// `drain` time to evict the cache entry alongside the
+    /// `services` map.
+    identity: ServiceIdentity,
 }
 
 impl LocalServiceSpawner {
@@ -80,6 +101,7 @@ impl LocalServiceSpawner {
         Self {
             depot_path,
             services: Mutex::new(HashMap::new()),
+            by_identity: Mutex::new(HashMap::new()),
         }
     }
 
@@ -91,8 +113,6 @@ impl LocalServiceSpawner {
 
 impl ServiceSpawner for LocalServiceSpawner {
     fn ensure_service(&self, spec: WorkerSpec) -> Result<ServiceHandle, SpawnError> {
-        let id = self.next_service_id();
-
         if spec.command.is_empty() {
             return Err(SpawnError::SpawnFailed {
                 backend: BACKEND,
@@ -102,6 +122,24 @@ impl ServiceSpawner for LocalServiceSpawner {
             });
         }
 
+        let identity = ServiceIdentity {
+            image_digest: spec.image_digest.as_ref().map(|d| d.as_str().to_string()),
+            command: spec.command.clone(),
+        };
+
+        // Fast path: existing service for this identity? Return the
+        // cached handle so callers compare equal across calls.
+        {
+            let by_identity = self.by_identity.lock().expect("by_identity mutex poisoned");
+            if let Some(existing_id) = by_identity.get(&identity) {
+                let services = self.services.lock().expect("services mutex poisoned");
+                if let Some(state) = services.get(existing_id) {
+                    return Ok(state.handle.clone());
+                }
+            }
+        }
+
+        let id = self.next_service_id();
         let tempdir = spec.tempdir_host_path.clone();
         std::fs::create_dir_all(&tempdir).map_err(|e| SpawnError::SpawnFailed {
             backend: BACKEND,
@@ -124,15 +162,21 @@ impl ServiceSpawner for LocalServiceSpawner {
             reason: format!("spawn {}: {e}", spec.command[0]),
         })?;
 
+        let handle = ServiceHandle::new(BACKEND, id.clone(), spec.image_digest.clone());
         let state = ServiceState {
             child,
             uds_path,
             tempdir,
+            handle: handle.clone(),
+            identity: identity.clone(),
         };
-        let handle = ServiceHandle::new(BACKEND, id.clone(), spec.image_digest.clone());
 
         let mut services = self.services.lock().expect("services mutex poisoned");
-        services.insert(id, state);
+        services.insert(id.clone(), state);
+        self.by_identity
+            .lock()
+            .expect("by_identity mutex poisoned")
+            .insert(identity, id);
 
         Ok(handle)
     }
@@ -163,6 +207,10 @@ impl ServiceSpawner for LocalServiceSpawner {
                 backend: BACKEND,
                 reason: format!("unknown service id `{}` for drain", service.id()),
             })?;
+        self.by_identity
+            .lock()
+            .expect("by_identity mutex poisoned")
+            .remove(&state.identity);
 
         // Best-effort graceful shutdown: send Evict via RPC, then
         // wait briefly for the child to exit cleanly. Fall back to
