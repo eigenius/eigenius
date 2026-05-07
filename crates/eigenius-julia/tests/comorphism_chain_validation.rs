@@ -84,6 +84,23 @@ fn symbolics_to_intervals_comorphism_validates_cleanly() {
         "urn:eigenius:symbolics:signatures:check_equivalence",
         "urn:eigenius:symbolics:query_classes:qc_symb_simplify",
         "urn:eigenius:symbolics:query_classes:qc_symb_check_equivalence",
+        // Phase 19d.4 — SatisfiesEquation chain claim + supporting
+        // SymbolicEquation / VariableBinding shapes.
+        "urn:eigenius:symbolics:SymbolicEquation",
+        "urn:eigenius:symbolics:VariableBinding",
+        "urn:eigenius:symbolics:SatisfiesEquation",
+        "urn:eigenius:symbolics:signatures:validate_satisfies_equation",
+        "urn:eigenius:symbolics:query_classes:satisfies_equation_validity",
+        // Phase 19d.5 — Substitutes chain claim.
+        "urn:eigenius:symbolics:Substitutes",
+        "urn:eigenius:symbolics:signatures:validate_substitutes",
+        "urn:eigenius:symbolics:query_classes:substitutes_validity",
+        // Phase 19d.6 — SymbolicallyReducesTo + ReductionStrategy
+        // (strategy-parametric reduction claim).
+        "urn:eigenius:symbolics:ReductionStrategy",
+        "urn:eigenius:symbolics:SymbolicallyReducesTo",
+        "urn:eigenius:symbolics:signatures:validate_symbolically_reduces_to",
+        "urn:eigenius:symbolics:query_classes:symbolically_reduces_to_validity",
     ] {
         assert!(
             ctx.head().resolve(&iri(required)).is_some(),

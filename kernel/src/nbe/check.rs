@@ -3910,13 +3910,18 @@ mod tests {
     use crate::ontology::resource::Value as RVal;
     use crate::ontology::well_known as wk;
 
-    /// In-test institution whose `query` returns a pre-canned Verdict
-    /// resource for each `Constraint::Institution` invocation and
-    /// records the args it observed off the synthetic input
-    /// resource's `decide_args` property (D14 §9.2).
+    /// In-test institution whose `query` returns a pre-canned
+    /// Verdict resource for each `Constraint::Institution`
+    /// invocation and records the input resource it observed.
+    /// Phase 19d.7 dropped the legacy `decide_args` array — args
+    /// now ride on typed required properties of the input class —
+    /// so `last_args` walks `input.properties()` in BTreeMap order
+    /// (alphabetical by IRI), skipping `core:is_a`. Test fixtures
+    /// name arg properties `arg_0` / `arg_1` / … so the alphabetical
+    /// walk yields them in positional order.
     struct FakeInstitution {
         iri: Iri,
-        observed: std::sync::Mutex<Vec<Vec<RVal>>>,
+        last_input: std::sync::Mutex<Option<Resource>>,
         result: DecResult,
     }
 
@@ -3924,13 +3929,30 @@ mod tests {
         fn new(iri: &str, result: DecResult) -> Arc<Self> {
             Arc::new(Self {
                 iri: Iri::parse(iri).unwrap(),
-                observed: std::sync::Mutex::new(Vec::new()),
+                last_input: std::sync::Mutex::new(None),
                 result,
             })
         }
 
+        fn last_input(&self) -> Option<Resource> {
+            self.last_input.lock().unwrap().clone()
+        }
+
+        /// Extract the args from the last input resource by walking
+        /// its typed properties (skipping `core:is_a`). Properties
+        /// fixture-named `arg_0` / `arg_1` / … come back in
+        /// positional order via BTreeMap's alphabetical key sort.
         fn last_args(&self) -> Option<Vec<RVal>> {
-            self.observed.lock().unwrap().last().cloned()
+            let input = self.last_input()?;
+            let is_a = Iri::parse(wk::IS_A).unwrap();
+            Some(
+                input
+                    .properties()
+                    .iter()
+                    .filter(|(k, _)| **k != is_a)
+                    .map(|(_, v)| v.clone())
+                    .collect(),
+            )
         }
     }
 
@@ -3966,14 +3988,7 @@ mod tests {
             crate::institution::runtime::QueryOutcome,
             crate::institution::error::InstitutionError,
         > {
-            // Pull the args off the synthetic input resource where
-            // try_d14_decide marshalled them.
-            let args = match input.get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
-            {
-                Some(RVal::Array(items)) => items.clone(),
-                _ => Vec::new(),
-            };
-            self.observed.lock().unwrap().push(args);
+            *self.last_input.lock().unwrap() = Some(input.clone());
             Ok(crate::institution::runtime::QueryOutcome::from_output(
                 verdict_resource(self.result),
             ))
@@ -3995,19 +4010,59 @@ mod tests {
         r
     }
 
-    /// Build an `InstitutionIndex` and `InstitutionRuntime` declaring a
-    /// Decidable `QueryClass` for `constraint_iri`, served by `fake`.
-    /// The index walks a synthetic test layer carrying the QueryClass
-    /// declaration; the runtime registers the fake under the same
-    /// institution IRI.
+    /// IRI of the Nth user-required arg property emitted by
+    /// `build_decide_index`. Properties are named `arg_0`, `arg_1`,
+    /// … so they sort alphabetically into positional order in the
+    /// input's BTreeMap.
+    fn arg_prop_iri(input_class_iri: &str, n: usize) -> String {
+        format!("{input_class_iri}:arg_{n}")
+    }
+
+    /// Build an `InstitutionIndex` and `InstitutionRuntime` declaring
+    /// a Decidable `QueryClass` for `constraint_iri`, served by
+    /// `fake`. Also declares a typed input class with `arg_count`
+    /// required properties (`arg_0` … `arg_{arg_count-1}`) — Phase
+    /// 19d.7 dropped the legacy `decide_args` array, so the input
+    /// class must declare typed slots for the kernel to populate.
+    /// Returns the layer along with the index/runtime so callers
+    /// can thread it into `EvalCtx::Check.layer` for typed
+    /// marshaling.
     fn build_decide_index(
         fake: Arc<FakeInstitution>,
-    ) -> (Arc<InstitutionIndex>, Arc<InstitutionRuntime>) {
+        arg_count: usize,
+    ) -> (
+        Arc<crate::layer::Layer>,
+        Arc<InstitutionIndex>,
+        Arc<InstitutionRuntime>,
+    ) {
         let constraint_iri = fake.iri.as_str();
         let inst_iri = constraint_iri; // for tests, institution IRI = constraint IRI
-        let input_class = "urn:eigenius:test:Subject";
+        let input_class_iri = format!("{constraint_iri}:Input");
 
         let mut b = LayerBuilder::new("test", None);
+
+        // Each arg slot is its own Property resource; the input
+        // class lists them in order via `requires`.
+        let mut requires = Vec::with_capacity(arg_count);
+        for n in 0..arg_count {
+            let prop_iri = arg_prop_iri(&input_class_iri, n);
+            let mut p = Resource::new(Iri::parse(&prop_iri).unwrap());
+            p.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                RVal::Array(vec![RVal::String(wk::PROPERTY.into())]),
+            );
+            b.add_resource(p).unwrap();
+            requires.push(RVal::String(prop_iri));
+        }
+
+        let mut input_class = Resource::new(Iri::parse(&input_class_iri).unwrap());
+        input_class.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk::CLASS.into())]),
+        );
+        input_class.set(Iri::parse(wk::REQUIRES).unwrap(), RVal::Array(requires));
+        b.add_resource(input_class).unwrap();
+
         let mut qc = Resource::new(Iri::parse(constraint_iri).unwrap());
         qc.set(
             Iri::parse(wk::IS_A).unwrap(),
@@ -4015,7 +4070,7 @@ mod tests {
         );
         qc.set(
             Iri::parse(wk::QUERY_CLASS).unwrap(),
-            RVal::String(input_class.into()),
+            RVal::String(input_class_iri.clone()),
         );
         qc.set(
             Iri::parse(wk::RESULT_CLASS).unwrap(),
@@ -4040,16 +4095,18 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         let mut rt = InstitutionRuntime::new();
         rt.register(Box::new(fake)).unwrap();
-        (Arc::new(idx), Arc::new(rt))
+        (layer, Arc::new(idx), Arc::new(rt))
     }
 
     /// Build an `EvalCtx::Check` populated with the D14 index +
-    /// runtime built from `fake`.
-    fn check_ctx_for(fake: Arc<FakeInstitution>) -> EvalCtx {
-        let (idx, rt) = build_decide_index(fake);
+    /// runtime built from `fake`. Threads the synthetic test layer
+    /// so `try_d14_decide` can resolve the input class for typed-
+    /// property marshaling (Phase 19d.7).
+    fn check_ctx_for(fake: Arc<FakeInstitution>, arg_count: usize) -> EvalCtx {
+        let (layer, idx, rt) = build_decide_index(fake, arg_count);
         let _ = ExecutionMode::ReadOnly; // silence unused-import warning on small surface
         EvalCtx::Check {
-            layer: None,
+            layer: Some(layer),
             institution_index: Some(idx),
             institution_runtime: Some(rt),
         }
@@ -4085,7 +4142,7 @@ mod tests {
     fn decide_holds_reduces_to_refl() {
         // Institution returns Holds → eval reduces NativeDecide to Refl.
         let fake = FakeInstitution::new("urn:eigenius:test:yes", DecResult::Holds);
-        let ctx = check_ctx_for(fake.clone());
+        let ctx = check_ctx_for(fake.clone(), 1);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:yes").unwrap(),
             args: vec![wrap_int(42)],
@@ -4094,8 +4151,8 @@ mod tests {
         let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
         assert!(matches!(v, Val::Refl(_)), "expected Refl, got {v:?}");
 
-        // The fake observed the arg via the `decide_args` array on the
-        // synthetic input resource that try_d14_decide marshals.
+        // The fake observed the arg on the typed `arg_0` property of
+        // the synthetic input resource that try_d14_decide marshals.
         let observed = fake.last_args().expect("institution was called");
         assert_eq!(observed.len(), 1);
     }
@@ -4103,7 +4160,7 @@ mod tests {
     #[test]
     fn decide_fails_produces_failing_neutral() {
         let fake = FakeInstitution::new("urn:eigenius:test:no", DecResult::Fails);
-        let ctx = check_ctx_for(fake);
+        let ctx = check_ctx_for(fake, 0);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:no").unwrap(),
             args: vec![],
@@ -4121,7 +4178,7 @@ mod tests {
     #[test]
     fn decide_undecidable_produces_passthrough_neutral() {
         let fake = FakeInstitution::new("urn:eigenius:test:dunno", DecResult::Undecidable);
-        let ctx = check_ctx_for(fake);
+        let ctx = check_ctx_for(fake, 0);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:dunno").unwrap(),
             args: vec![],
@@ -4143,7 +4200,7 @@ mod tests {
         // returns None → legacy fallback returns Undecidable (empty
         // legacy registry).
         let fake = FakeInstitution::new("urn:eigenius:test:other", DecResult::Holds);
-        let ctx = check_ctx_for(fake);
+        let ctx = check_ctx_for(fake, 0);
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:unknown_iri").unwrap(),
             args: vec![],
@@ -4159,9 +4216,10 @@ mod tests {
     fn decide_list_arg_roundtrip() {
         // Life-science ensemble-style predicate: the arg is a list of
         // values. Verify the Val::List marshals through to an
-        // RVal::Array on the synthetic input's `decide_args`.
+        // RVal::Array on the synthetic input's typed `arg_0`
+        // property.
         let fake = FakeInstitution::new("urn:eigenius:test:ensemble", DecResult::Holds);
-        let ctx = check_ctx_for(fake.clone());
+        let ctx = check_ctx_for(fake.clone(), 1);
 
         let list_val = Val::List(vec![
             crate::nbe::eval::eval(&wrap_int(1), &Rho::Nil).unwrap(),
@@ -4193,7 +4251,7 @@ mod tests {
         // `is_a` carries the ctor name.
         let nat = nat_decl();
         let fake = FakeInstitution::new("urn:eigenius:test:pose", DecResult::Holds);
-        let ctx = check_ctx_for(fake.clone());
+        let ctx = check_ctx_for(fake.clone(), 1);
 
         let succ_zero_exp = Exp::InductiveCtor(
             nat.clone(),
@@ -4220,6 +4278,156 @@ mod tests {
     }
 
     #[test]
+    fn decide_typed_input_marshals_typed_props() {
+        // Phase 19d.7: when the QueryClass's input class has typed
+        // required properties, positional ESL args populate those
+        // typed fields in declaration order. This is what makes
+        // mirror-decoded handlers like `check_equivalence(check::
+        // EquivalenceCheck)` work end-to-end — the worker's
+        // `decode_EquivalenceCheck` reads the typed fields, and
+        // those properties had to come from somewhere.
+        let fake = FakeInstitution::new("urn:eigenius:test:typed", DecResult::Holds);
+        let ctx = check_ctx_for(fake.clone(), 2);
+
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:typed").unwrap(),
+            args: vec![wrap_int(11), wrap_int(22)],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(99)));
+        let _ = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+
+        // The typed `arg_0` / `arg_1` properties of the input class
+        // must be populated with the positional args.
+        let input = fake.last_input().expect("institution was called");
+        let arg_0 =
+            input.get(&Iri::parse(&arg_prop_iri("urn:eigenius:test:typed:Input", 0)).unwrap());
+        let arg_1 =
+            input.get(&Iri::parse(&arg_prop_iri("urn:eigenius:test:typed:Input", 1)).unwrap());
+        assert!(arg_0.is_some(), "typed arg_0 must be populated");
+        assert!(arg_1.is_some(), "typed arg_1 must be populated");
+
+        // `last_args` walks the typed properties in BTreeMap order;
+        // returns the two arg values, no `decide_args` array.
+        let observed = fake.last_args().expect("called");
+        assert_eq!(observed.len(), 2, "two typed args expected");
+    }
+
+    #[test]
+    fn decide_typed_input_excludes_kernel_managed_requires() {
+        // `is_a` is auto-stamped by the kernel, `short_name` is
+        // chain-bookkeeping irrelevant to a transient Decidable
+        // input. Both must be excluded from the typed-required set
+        // — same exclusion the FIBER type-checker applies (Phase
+        // 19d.2). Build a custom layer where `requires` interleaves
+        // kernel-managed entries with semantic ones, and confirm
+        // the user still supplies just the semantic args.
+        let fake = FakeInstitution::new("urn:eigenius:test:typed_km", DecResult::Holds);
+        let constraint_iri = "urn:eigenius:test:typed_km";
+        let input_class_iri = format!("{constraint_iri}:Input");
+
+        let mut b = LayerBuilder::new("test", None);
+        let arg_0 = arg_prop_iri(&input_class_iri, 0);
+        let arg_1 = arg_prop_iri(&input_class_iri, 1);
+        for prop in [&arg_0, &arg_1] {
+            let mut p = Resource::new(Iri::parse(prop).unwrap());
+            p.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                RVal::Array(vec![RVal::String(wk::PROPERTY.into())]),
+            );
+            b.add_resource(p).unwrap();
+        }
+        let mut input_class = Resource::new(Iri::parse(&input_class_iri).unwrap());
+        input_class.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk::CLASS.into())]),
+        );
+        input_class.set(
+            Iri::parse(wk::REQUIRES).unwrap(),
+            RVal::Array(vec![
+                RVal::String(wk::IS_A.into()),
+                RVal::String(wk::SHORT_NAME.into()),
+                RVal::String(arg_0.clone()),
+                RVal::String(arg_1.clone()),
+            ]),
+        );
+        b.add_resource(input_class).unwrap();
+
+        let mut qc = Resource::new(Iri::parse(constraint_iri).unwrap());
+        qc.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk::QUERY_CLASS_CLASS.into())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
+            RVal::String(input_class_iri.clone()),
+        );
+        qc.set(
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            RVal::String(wk::VERDICT.into()),
+        );
+        qc.set(
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
+            RVal::Array(vec![RVal::String(wk::DISPATCH_DECIDABLE.into())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
+            RVal::String(format!("{constraint_iri}:handler")),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            RVal::String(constraint_iri.into()),
+        );
+        b.add_resource(qc).unwrap();
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut rt = InstitutionRuntime::new();
+        rt.register(Box::new(fake.clone())).unwrap();
+
+        let ctx = EvalCtx::Check {
+            layer: Some(layer),
+            institution_index: Some(Arc::new(idx)),
+            institution_runtime: Some(Arc::new(rt)),
+        };
+
+        // Two args, two semantically-required properties — succeeds.
+        let constraint = Constraint::Institution {
+            iri: Iri::parse(constraint_iri).unwrap(),
+            args: vec![wrap_int(1), wrap_int(2)],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        let _ = eval_ctx(&exp, &Rho::Nil, &ctx).expect("eval");
+
+        let input = fake.last_input().expect("institution was called");
+        assert!(input.get(&Iri::parse(&arg_0).unwrap()).is_some());
+        assert!(input.get(&Iri::parse(&arg_1).unwrap()).is_some());
+    }
+
+    #[test]
+    fn decide_typed_input_arity_mismatch_errors() {
+        // The kernel hard-errors when positional arg count doesn't
+        // match the typed required count — silently dropping or
+        // padding args would surface much later as a confusing
+        // decoder error in the institution's worker.
+        let fake = FakeInstitution::new("urn:eigenius:test:typed_arity", DecResult::Holds);
+        let ctx = check_ctx_for(fake, 2);
+
+        // Typed required = 2 (arg_0, arg_1); user supplies 1 positional.
+        let constraint = Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:typed_arity").unwrap(),
+            args: vec![wrap_int(42)],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(0)));
+        let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("typed required") && msg.contains("positional"),
+            "expected an arity error, got {msg}"
+        );
+    }
+
+    #[test]
     fn decide_fires_at_check_time_when_registry_on_ctx() {
         // Integration: check-time dispatch via CheckCtx. A NativeDecide
         // whose constraint holds reduces to Refl; from CheckCtx's
@@ -4227,9 +4435,9 @@ mod tests {
         // observed it), confirming the index + runtime were threaded
         // through the check eval_ctx.
         let fake = FakeInstitution::new("urn:eigenius:test:check_time", DecResult::Holds);
-        let (idx, rt) = build_decide_index(fake.clone());
+        let (layer, idx, rt) = build_decide_index(fake.clone(), 1);
 
-        let c = CheckCtx::new(Rho::Nil, Vec::new()).with_institutions_d14(idx, rt);
+        let c = CheckCtx::with_layer(Rho::Nil, Vec::new(), layer).with_institutions_d14(idx, rt);
 
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:check_time").unwrap(),
@@ -4240,7 +4448,7 @@ mod tests {
         let v = c.eval(&exp, &Rho::Nil).expect("CheckCtx eval");
         assert!(matches!(v, Val::Refl(_)));
         assert!(
-            fake.last_args().is_some(),
+            fake.last_input().is_some(),
             "institution should have been consulted at check time"
         );
     }

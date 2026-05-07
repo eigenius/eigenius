@@ -1523,17 +1523,18 @@ fn try_dispatch_decidable(
     })?;
 
     // Marshal positional args onto a synthetic input resource of the
-    // QueryClass's input class (D14 §9.2, mirrored by the kernel-side
-    // `try_d14_decide`).
-    let mut input = Resource::new_embedded();
-    input.set(
-        Iri::parse(wk::IS_A).expect("well-known IRI"),
-        Value::Array(vec![Value::String(qc_entry.query_class.as_str().into())]),
-    );
-    input.set(
-        Iri::parse("urn:eigenius:institution:decide_args").expect("well-known IRI"),
-        Value::Array(args.to_vec()),
-    );
+    // QueryClass's input class via the shared
+    // `institution::marshal::marshal_decidable_input` helper. Same
+    // logic as the kernel-side `nbe::eval::try_d14_decide` (D14 §9.2)
+    // — typed required properties populated in `requires` order,
+    // IRI-shaped args targeting `core:resource` properties
+    // dereferenced to embedded resources.
+    let input = crate::institution::marshal::marshal_decidable_input(
+        &qc_entry.query_class,
+        args,
+        ctx.head(),
+    )
+    .map_err(|e| QueryError::evaluation(format!("Decidable QueryClass `{iri}`: {e}")))?;
 
     let outcome = institution
         .query(&qc_entry.query_handler, &input, ctx)
@@ -2042,9 +2043,13 @@ mod tests {
     const Q_HANDLER_IRI: &str = "urn:eigenius:test:proc:q_positive";
 
     /// Test institution implementing one Decidable QueryClass.
-    /// `q_positive` returns Holds for the first positive Integer in
-    /// `decide_args`, Fails otherwise.
+    /// `q_positive` returns Holds for a positive Integer on the
+    /// input class's typed `arg_0` property, Fails otherwise. Phase
+    /// 19d.7 dropped the `decide_args` array — args ride on typed
+    /// required properties.
     struct QueryCapInst;
+
+    const Q_ARG_0_PROP: &str = "urn:eigenius:test:QPositiveInput:arg_0";
 
     impl Institution for QueryCapInst {
         fn institution_iri(&self) -> &Iri {
@@ -2073,13 +2078,11 @@ mod tests {
             input: &Resource,
             _ctx: &ExecutionContext,
         ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
-            // Read decide_args off the synthesized input resource.
-            let args_iri = Iri::parse("urn:eigenius:institution:decide_args").unwrap();
-            let ok = match input.get(&args_iri) {
-                Some(Value::Array(items)) => items
-                    .first()
-                    .and_then(|v| v.as_integer())
-                    .is_some_and(|n| n > 0),
+            // Read the typed `arg_0` property the kernel populates
+            // from the first positional ESL arg.
+            let arg_0_iri = Iri::parse(Q_ARG_0_PROP).unwrap();
+            let ok = match input.get(&arg_0_iri) {
+                Some(v) => v.as_integer().is_some_and(|n| n > 0),
                 _ => false,
             };
             // Build a Verdict response carrying ctor_name.
@@ -2096,10 +2099,29 @@ mod tests {
         }
     }
 
-    /// Build an InstitutionIndex carrying a single Decidable QueryClass
-    /// (q_positive) declared by the test institution.
-    fn q_index() -> Arc<InstitutionIndex> {
-        let mut b = LayerBuilder::new("q_test", None);
+    /// Build a layer carrying the core ontology + the q_test fixtures
+    /// (Institution, QueryClass, typed input class) and an
+    /// `InstitutionIndex` over it. Phase 19d.7 typed-marshaling needs
+    /// the input class to resolve on the layer the dispatch sees, so
+    /// the test layer must include both the q_test resources and the
+    /// core ontology — the previous split-layer setup (q_test parent
+    /// = None, separately-built core layer for the ExecutionContext)
+    /// no longer works.
+    fn q_index() -> (
+        Arc<crate::layer::Layer>,
+        crate::layer::LayerStorage,
+        Arc<InstitutionIndex>,
+    ) {
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_b = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_b.add_resource(r).unwrap();
+        }
+        let core_layer = Arc::new(core_b.build(storage.clone()));
+
+        let mut b = LayerBuilder::new("q_test", Some(Arc::clone(&core_layer)));
 
         let mut inst = Resource::new(Iri::parse(Q_INST_IRI).unwrap());
         inst.set(
@@ -2117,6 +2139,26 @@ mod tests {
             Value::String("QueryCapInst".to_string()),
         );
         b.add_resource(inst).unwrap();
+
+        // Declare arg_0 property + the typed input class with
+        // requires=[arg_0]. Phase 19d.7 typed-marshaling needs the
+        // input class to resolve on the layer.
+        let mut arg_prop = Resource::new(Iri::parse(Q_ARG_0_PROP).unwrap());
+        arg_prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::PROPERTY.into())]),
+        );
+        b.add_resource(arg_prop).unwrap();
+        let mut input_class = Resource::new(Iri::parse(Q_INPUT_CLASS_IRI).unwrap());
+        input_class.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::CLASS.into())]),
+        );
+        input_class.set(
+            Iri::parse(wk::REQUIRES).unwrap(),
+            Value::Array(vec![Value::String(Q_ARG_0_PROP.into())]),
+        );
+        b.add_resource(input_class).unwrap();
 
         let mut qc = Resource::new(Iri::parse(Q_POSITIVE_IRI).unwrap());
         qc.set(
@@ -2145,10 +2187,10 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let layer = b.build(crate::layer::LayerStorage::in_memory());
+        let layer = Arc::new(b.build(storage.clone()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "fixture index errors: {errors:?}");
-        Arc::new(idx)
+        (layer, storage, Arc::new(idx))
     }
 
     fn q_runtime() -> Arc<InstitutionRuntime> {
@@ -2182,17 +2224,8 @@ mod tests {
         // Under D14, a Decidable QueryClass call returns a Verdict
         // resource (not a Boolean). The postfix predicate (D2 §3.8)
         // is what projects to Boolean — a separate parser concern.
-        let index = q_index();
+        let (layer, storage, index) = q_index();
         let inst_runtime = q_runtime();
-
-        let storage = crate::layer::LayerStorage::in_memory();
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let core_resources = eigon_json::parse_document(core_json).unwrap();
-        let mut builder = LayerBuilder::new("core", None);
-        for r in core_resources {
-            builder.add_resource(r).unwrap();
-        }
-        let layer = Arc::new(builder.build(storage.clone()));
         let exec_ctx = q_exec_ctx(Arc::clone(&layer), storage);
 
         let runtime = FiberRuntime {
@@ -2243,17 +2276,8 @@ mod tests {
         // An IRI that doesn't resolve to a Decidable QueryClass falls
         // through to `functions::call_function`, which errors with
         // "no such function."
-        let index = q_index();
+        let (layer, storage, index) = q_index();
         let inst_runtime = q_runtime();
-
-        let storage = crate::layer::LayerStorage::in_memory();
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let core_resources = eigon_json::parse_document(core_json).unwrap();
-        let mut builder = LayerBuilder::new("core", None);
-        for r in core_resources {
-            builder.add_resource(r).unwrap();
-        }
-        let layer = Arc::new(builder.build(storage.clone()));
         let exec_ctx = q_exec_ctx(Arc::clone(&layer), storage);
 
         let runtime = FiberRuntime {
@@ -2272,6 +2296,202 @@ mod tests {
         let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("unknown") || msg.contains("function"));
+    }
+
+    /// Phase 19d.7 follow-on: when an EigenQL Decidable predicate
+    /// receives an IRI-shaped arg targeting a typed `core:resource`
+    /// property, the kernel dereferences the IRI to the embedded
+    /// chain resource before serialising for the institution. This
+    /// is the same plumbing fix that landed for FIBER param values
+    /// in `embed_typed_resource_param` — both surfaces now share
+    /// `institution::marshal::embed_typed_resource_arg`.
+    #[test]
+    fn decide_dereferences_iri_args_for_typed_resource_props() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static OBSERVED_EMBEDDED: AtomicBool = AtomicBool::new(false);
+
+        const DEREF_INST_IRI: &str = "urn:eigenius:test:deref_inst";
+        const DEREF_QC_IRI: &str = "urn:eigenius:test:deref_qc";
+        const DEREF_INPUT_CLASS_IRI: &str = "urn:eigenius:test:DerefInput";
+        const DEREF_TARGET_PROP_IRI: &str = "urn:eigenius:test:DerefInput:target";
+        const DEREF_TARGET_INSTANCE_IRI: &str = "urn:eigenius:test:deref_target";
+
+        struct DerefInst;
+        impl Institution for DerefInst {
+            fn institution_iri(&self) -> &Iri {
+                static INST: std::sync::OnceLock<Iri> = std::sync::OnceLock::new();
+                INST.get_or_init(|| Iri::parse(DEREF_INST_IRI).unwrap())
+            }
+            fn extract_typed(
+                &self,
+                _: &Iri,
+                _: &Resource,
+                _: &ExecutionContext,
+            ) -> Result<Val, InstitutionError> {
+                unreachable!()
+            }
+            fn reify(
+                &self,
+                _: &Iri,
+                _: &Val,
+                _: &ExecutionContext,
+            ) -> Result<Resource, InstitutionError> {
+                unreachable!()
+            }
+            fn query(
+                &self,
+                _: &Iri,
+                input: &Resource,
+                _: &ExecutionContext,
+            ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
+                // The target property must be Embedded (the kernel
+                // dereferenced the IRI), NOT String — that's the
+                // entire point.
+                let target = input.get(&Iri::parse(DEREF_TARGET_PROP_IRI).unwrap());
+                if matches!(target, Some(Value::Embedded(_))) {
+                    OBSERVED_EMBEDDED.store(true, Ordering::SeqCst);
+                }
+                let mut r = Resource::new_embedded();
+                r.set(
+                    Iri::parse(wk::IS_A).unwrap(),
+                    Value::Array(vec![Value::String(wk::VERDICT.into())]),
+                );
+                r.set(
+                    Iri::parse(wk::CTOR_NAME).unwrap(),
+                    Value::String("Holds".into()),
+                );
+                Ok(crate::institution::runtime::QueryOutcome::from_output(r))
+            }
+        }
+
+        // Layer carries:
+        //   - a target instance the IRI arg references
+        //   - the typed `target: core:resource` property
+        //   - the input class with `requires: [target]`
+        //   - the Decidable QueryClass + Institution
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_b = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_b.add_resource(r).unwrap();
+        }
+        let core_layer = Arc::new(core_b.build(storage.clone()));
+
+        let mut b = LayerBuilder::new("deref_test", Some(Arc::clone(&core_layer)));
+
+        // Target instance (some chain-committed resource).
+        let mut target = Resource::new(Iri::parse(DEREF_TARGET_INSTANCE_IRI).unwrap());
+        target.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            Value::String("the_target".into()),
+        );
+        b.add_resource(target).unwrap();
+
+        // Property declaration with `data_type: core:resource`.
+        let mut prop = Resource::new(Iri::parse(DEREF_TARGET_PROP_IRI).unwrap());
+        prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::PROPERTY.into())]),
+        );
+        prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::String(wk::RESOURCE.into()),
+        );
+        b.add_resource(prop).unwrap();
+
+        // Input class.
+        let mut input_class = Resource::new(Iri::parse(DEREF_INPUT_CLASS_IRI).unwrap());
+        input_class.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::CLASS.into())]),
+        );
+        input_class.set(
+            Iri::parse(wk::REQUIRES).unwrap(),
+            Value::Array(vec![Value::String(DEREF_TARGET_PROP_IRI.into())]),
+        );
+        b.add_resource(input_class).unwrap();
+
+        // Institution.
+        let mut inst = Resource::new(Iri::parse(DEREF_INST_IRI).unwrap());
+        inst.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:institution:Institution".into(),
+            )]),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_iri").unwrap(),
+            Value::String(DEREF_INST_IRI.into()),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_name").unwrap(),
+            Value::String("DerefInst".into()),
+        );
+        b.add_resource(inst).unwrap();
+
+        // QueryClass.
+        let mut qc = Resource::new(Iri::parse(DEREF_QC_IRI).unwrap());
+        qc.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::String(wk::QUERY_CLASS_CLASS.into())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
+            Value::String(DEREF_INPUT_CLASS_IRI.into()),
+        );
+        qc.set(
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            Value::String(wk::VERDICT.into()),
+        );
+        qc.set(
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
+            Value::Array(vec![Value::String(wk::DISPATCH_DECIDABLE.into())]),
+        );
+        qc.set(
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
+            Value::String("urn:eigenius:test:deref:handler".into()),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            Value::String(DEREF_INST_IRI.into()),
+        );
+        b.add_resource(qc).unwrap();
+
+        let layer = Arc::new(b.build(storage.clone()));
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut rt = InstitutionRuntime::new();
+        rt.register(Box::new(DerefInst)).unwrap();
+
+        let exec_ctx = q_exec_ctx(Arc::clone(&layer), storage);
+        let inst_runtime = Arc::new(rt);
+        let runtime = FiberRuntime {
+            index: Some(&idx),
+            runtime: Some(&inst_runtime),
+            components: None,
+            overlay: None,
+            ctx: Some(&exec_ctx),
+        };
+
+        // Pass the IRI as a String literal — same shape MATCH
+        // bindings produce when binding `?var` to a chain resource
+        // subject. The kernel must dereference it before the
+        // institution sees the input.
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: DEREF_QC_IRI.to_string(),
+            args: vec![Expression::Literal(Literal::String(
+                DEREF_TARGET_INSTANCE_IRI.into(),
+            ))],
+        };
+        let _ = eval_expression(&expr, &binding, &layer, runtime).expect("eval");
+        assert!(
+            OBSERVED_EMBEDDED.load(Ordering::SeqCst),
+            "institution must have observed the typed property as Embedded — \
+             the kernel's IRI-dereference pass should have unwrapped the IRI"
+        );
     }
 
     // ─── D2 v2 §3.7 / §3.8 — postfix Verdict predicate ─────────────────

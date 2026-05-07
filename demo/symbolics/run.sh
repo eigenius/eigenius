@@ -98,7 +98,7 @@ trap 'rm -rf "$MIRROR_OUTPUT_DIR"' EXIT
 
 $EIGENIUS --endpoint "$ENDPOINT" mirror create \
     --layer "$LAYER_IRI" \
-    --filter 'MATCH "urn:eigenius:core:Class"(?iri) { "urn:eigenius:core:short_name": ?name } WHERE ?name IN ["SimplifiesTo", "SimplifyRequest", "EquivalenceCheck"] RETURN [] { iri: ?iri }' \
+    --filter 'MATCH "urn:eigenius:core:Class"(?iri) { "urn:eigenius:core:short_name": ?name } WHERE ?name IN ["SimplifiesTo", "SimplifyRequest", "EquivalenceCheck", "Substitutes", "SatisfiesEquation", "SymbolicallyReducesTo"] RETURN [] { iri: ?iri }' \
     --language julia \
     --output "$MIRROR_OUTPUT_DIR" \
     --json | tee /tmp/eigenius-symbolics-mirror.json
@@ -246,6 +246,258 @@ $EIGENIUS --endpoint "$ENDPOINT" query \
        expr: "urn:eigenius:demo:symbolics:expr:x_plus_0_times_1"
      } AS ?simplified
      RETURN [] { result: ?simplified, term: ?simplified.term }'
+echo
+
+# Step 11: Commit a Substitutes claim (Phase 19d.5). We claim that
+# substituting `x` with `0` in `x + 1` yields `1`. AutoOnLoad fires
+# `validate_substitutes`, which re-runs `Symbolics.substitute(target,
+# x => 0)` and compares against the claimed result.
+echo "--- Step 11: Commit Substitutes claim (x↦0 in x+1 == 1; expect Holds) ---"
+SUBSTITUTES_FILE="$(mktemp -t eigenius-symbolics-substitutes-XXXXXX.json)"
+trap 'rm -rf "$MIRROR_OUTPUT_DIR" "$INSTANCE_FILE" "$INPUT_EXPR_FILE" "$SUBSTITUTES_FILE"' EXIT
+cat >"$SUBSTITUTES_FILE" <<'EOF'
+[
+  {
+    "@id": "urn:eigenius:demo:symbolics:claim:sub_x_with_0_in_x_plus_1",
+    "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:Substitutes"],
+    "urn:eigenius:core:short_name": "sub_x_with_0_in_x_plus_1",
+    "urn:eigenius:symbolics:target": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+      "urn:eigenius:core:short_name": "x_plus_1",
+      "urn:eigenius:symbolics:term": {
+        "ctor": "App",
+        "args": [
+          {
+            "ctor": "App",
+            "args": [
+              {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+              {"ctor": "Var", "args": ["x"]}
+            ]
+          },
+          {"ctor": "LitFloat", "args": [1.0]}
+        ]
+      }
+    },
+    "urn:eigenius:symbolics:variable": "x",
+    "urn:eigenius:symbolics:replacement": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+      "urn:eigenius:core:short_name": "lit_zero",
+      "urn:eigenius:symbolics:term": {
+        "ctor": "LitFloat",
+        "args": [0.0]
+      }
+    },
+    "urn:eigenius:symbolics:result": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+      "urn:eigenius:core:short_name": "lit_one",
+      "urn:eigenius:symbolics:term": {
+        "ctor": "LitFloat",
+        "args": [1.0]
+      }
+    }
+  }
+]
+EOF
+$EIGENIUS --endpoint "$ENDPOINT" load "$SUBSTITUTES_FILE"
+echo
+
+# Step 12: Commit a SatisfiesEquation claim (Phase 19d.4). We claim
+# that the equation `x + 0 = x` holds unconditionally (empty bindings
+# = pure algebraic equivalence between the two sides). AutoOnLoad
+# fires `validate_satisfies_equation`, which simplifies the residue
+# `lhs - rhs` and asserts it's zero.
+echo "--- Step 12: Commit SatisfiesEquation claim (x+0 = x; expect Holds) ---"
+SATISFIES_FILE="$(mktemp -t eigenius-symbolics-satisfies-XXXXXX.json)"
+trap 'rm -rf "$MIRROR_OUTPUT_DIR" "$INSTANCE_FILE" "$INPUT_EXPR_FILE" "$SUBSTITUTES_FILE" "$SATISFIES_FILE"' EXIT
+cat >"$SATISFIES_FILE" <<'EOF'
+[
+  {
+    "@id": "urn:eigenius:demo:symbolics:claim:x_plus_0_eq_x",
+    "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SatisfiesEquation"],
+    "urn:eigenius:core:short_name": "x_plus_0_eq_x",
+    "urn:eigenius:symbolics:equation": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicEquation"],
+      "urn:eigenius:core:short_name": "x_plus_0_equation",
+      "urn:eigenius:symbolics:lhs": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+        "urn:eigenius:core:short_name": "lhs_x_plus_0",
+        "urn:eigenius:symbolics:term": {
+          "ctor": "App",
+          "args": [
+            {
+              "ctor": "App",
+              "args": [
+                {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+                {"ctor": "Var", "args": ["x"]}
+              ]
+            },
+            {"ctor": "LitFloat", "args": [0.0]}
+          ]
+        }
+      },
+      "urn:eigenius:symbolics:rhs": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+        "urn:eigenius:core:short_name": "rhs_x",
+        "urn:eigenius:symbolics:term": {
+          "ctor": "Var",
+          "args": ["x"]
+        }
+      }
+    },
+    "urn:eigenius:symbolics:bindings": []
+  }
+]
+EOF
+$EIGENIUS --endpoint "$ENDPOINT" load "$SATISFIES_FILE"
+echo
+
+# Step 13: Commit a SymbolicallyReducesTo claim (Phase 19d.6) under
+# the `Expand` strategy. Source: `2 * (x + 1)`; claimed result:
+# `2*x + 2`. AutoOnLoad fires `validate_symbolically_reduces_to`,
+# which dispatches on the strategy ctor (`Expand` →
+# `Symbolics.expand`) and compares the resulting form against the
+# claim.
+echo "--- Step 13: Commit SymbolicallyReducesTo claim (Expand 2*(x+1) == 2*x+2; expect Holds) ---"
+REDUCES_FILE="$(mktemp -t eigenius-symbolics-reduces-XXXXXX.json)"
+trap 'rm -rf "$MIRROR_OUTPUT_DIR" "$INSTANCE_FILE" "$INPUT_EXPR_FILE" "$SUBSTITUTES_FILE" "$SATISFIES_FILE" "$REDUCES_FILE"' EXIT
+cat >"$REDUCES_FILE" <<'EOF'
+[
+  {
+    "@id": "urn:eigenius:demo:symbolics:claim:expand_2_times_x_plus_1",
+    "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicallyReducesTo"],
+    "urn:eigenius:core:short_name": "expand_2_times_x_plus_1",
+    "urn:eigenius:symbolics:expr": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+      "urn:eigenius:core:short_name": "two_times_x_plus_one",
+      "urn:eigenius:symbolics:term": {
+        "ctor": "App",
+        "args": [
+          {
+            "ctor": "App",
+            "args": [
+              {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
+              {"ctor": "LitFloat", "args": [2.0]}
+            ]
+          },
+          {
+            "ctor": "App",
+            "args": [
+              {
+                "ctor": "App",
+                "args": [
+                  {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+                  {"ctor": "Var", "args": ["x"]}
+                ]
+              },
+              {"ctor": "LitFloat", "args": [1.0]}
+            ]
+          }
+        ]
+      }
+    },
+    "urn:eigenius:symbolics:strategy": {
+      "ctor": "Expand",
+      "args": []
+    },
+    "urn:eigenius:symbolics:result": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+      "urn:eigenius:core:short_name": "two_x_plus_two",
+      "urn:eigenius:symbolics:term": {
+        "ctor": "App",
+        "args": [
+          {
+            "ctor": "App",
+            "args": [
+              {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+              {
+                "ctor": "App",
+                "args": [
+                  {
+                    "ctor": "App",
+                    "args": [
+                      {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
+                      {"ctor": "LitFloat", "args": [2.0]}
+                    ]
+                  },
+                  {"ctor": "Var", "args": ["x"]}
+                ]
+              }
+            ]
+          },
+          {"ctor": "LitFloat", "args": [2.0]}
+        ]
+      }
+    }
+  }
+]
+EOF
+$EIGENIUS --endpoint "$ENDPOINT" load "$REDUCES_FILE"
+echo
+
+# Step 14: Re-query Verdicts to surface the four new ones (Substitutes,
+# SatisfiesEquation, SymbolicallyReducesTo, plus the original
+# SimplifiesTo from Step 7).
+echo "--- Step 14: Query all Verdicts (after AutoOnLoad-gated commits) ---"
+$EIGENIUS --endpoint "$ENDPOINT" query \
+    'MATCH "urn:eigenius:institution:Verdict"(?v) { "urn:eigenius:core:ctor_name": ?ctor } RETURN [] { verdict: ?v, ctor: ?ctor }'
+echo
+
+# Step 15: Decidable EigenQL invocation — `qc_symb_check_equivalence`.
+# Pre-commit two SymbolicExpressions (`x + 0` and `x`); pass them
+# positionally to the Decidable predicate. The kernel's typed-property
+# marshaling populates `EquivalenceCheck.lhs` / `EquivalenceCheck.rhs`
+# from the IRI-string args (Phase 19d.7), the worker decodes the
+# typed input and runs Symbolics' simplifier on both sides. The
+# returned Verdict shows in the row.
+echo "--- Step 15: Pre-commit lhs/rhs SymbolicExpressions for Decidable check ---"
+LHS_RHS_FILE="$(mktemp -t eigenius-symbolics-lhs-rhs-XXXXXX.json)"
+trap 'rm -rf "$MIRROR_OUTPUT_DIR" "$INSTANCE_FILE" "$INPUT_EXPR_FILE" "$SUBSTITUTES_FILE" "$SATISFIES_FILE" "$REDUCES_FILE" "$LHS_RHS_FILE"' EXIT
+cat >"$LHS_RHS_FILE" <<'EOF'
+[
+  {
+    "@id": "urn:eigenius:demo:symbolics:expr:lhs_x_plus_0",
+    "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:short_name": "lhs_x_plus_0",
+    "urn:eigenius:symbolics:term": {
+      "ctor": "App",
+      "args": [
+        {
+          "ctor": "App",
+          "args": [
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+            {"ctor": "Var", "args": ["x"]}
+          ]
+        },
+        {"ctor": "LitFloat", "args": [0.0]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:demo:symbolics:expr:rhs_x",
+    "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:short_name": "rhs_x",
+    "urn:eigenius:symbolics:term": {
+      "ctor": "Var",
+      "args": ["x"]
+    }
+  }
+]
+EOF
+$EIGENIUS --endpoint "$ENDPOINT" load "$LHS_RHS_FILE"
+echo
+
+echo "--- Step 16: Decidable EigenQL invocation — qc_symb_check_equivalence ---"
+# `cap:qc_symb_check_equivalence(?lhs_iri, ?rhs_iri)` is a Decidable
+# predicate call returning a Verdict resource. Postfix `:Holds`
+# projects to Boolean for use in WHERE / RETURN expressions.
+$EIGENIUS --endpoint "$ENDPOINT" query \
+    'USING INSTITUTION "urn:eigenius:institutions:symbolics" AS cap
+     RETURN [] {
+       verdict: cap:qc_symb_check_equivalence(
+         "urn:eigenius:demo:symbolics:expr:lhs_x_plus_0",
+         "urn:eigenius:demo:symbolics:expr:rhs_x"
+       )
+     }'
 echo
 
 echo "=== Demo complete ==="

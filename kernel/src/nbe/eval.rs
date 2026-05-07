@@ -1879,25 +1879,30 @@ fn try_d14_decide(
         )));
     };
 
-    // Marshal args into a synthetic input resource of the declared
-    // input class. Args ride on a single `decide_args` array property
-    // — the institution handler pulls them positionally.
+    // Marshal args into a synthetic input resource via the shared
+    // `institution::marshal::marshal_decidable_input` helper. Same
+    // logic as the EigenQL-side `query::evaluate::try_dispatch_decidable`
+    // — input class typed required properties get populated in
+    // `requires` declaration order, IRI-shaped values targeting
+    // `core:resource` properties dereference to embedded resources.
     let arg_values: Result<Vec<_>, EvalError> = args
         .iter()
         .map(|a| eval_ctx(a, rho, ctx).map(|v| val_to_resource_value(&v)))
         .collect();
     let arg_values = arg_values?;
-    let mut input = crate::ontology::resource::Resource::new_embedded();
-    input.set(
-        Iri::parse(crate::ontology::well_known::IS_A).expect("well-known IRI"),
-        crate::ontology::resource::Value::Array(vec![crate::ontology::resource::Value::String(
-            query_class.query_class.as_str().into(),
-        )]),
-    );
-    input.set(
-        Iri::parse("urn:eigenius:institution:decide_args").expect("well-known IRI"),
-        crate::ontology::resource::Value::Array(arg_values),
-    );
+    let layer = ctx.layer().ok_or_else(|| {
+        EvalError::InvalidCaseTarget(format!(
+            "QueryClass `{iri}` Decidable call: no layer attached to EvalCtx — cannot \
+             resolve input class `{}` for typed-property marshaling",
+            query_class.query_class
+        ))
+    })?;
+    let input = crate::institution::marshal::marshal_decidable_input(
+        &query_class.query_class,
+        &arg_values,
+        layer,
+    )
+    .map_err(|e| EvalError::InvalidCaseTarget(format!("QueryClass `{iri}` Decidable call: {e}")))?;
 
     let head = ctx.layer().cloned().unwrap_or_else(|| {
         Arc::new(
@@ -3613,10 +3618,14 @@ mod tests {
             crate::institution::runtime::QueryOutcome,
             crate::institution::error::InstitutionError,
         > {
-            // Confirm the kernel marshalled args via the convention.
+            // Confirm the kernel stamped `is_a` to the input class IRI
+            // (Phase 19d.7: positional args ride on typed required
+            // properties, not on a `decide_args` array; the
+            // structural marker we can rely on regardless of arity is
+            // the auto-stamped is_a).
             let _ = input
-                .get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
-                .expect("kernel must marshal decide_args onto the input resource");
+                .get(&Iri::parse(crate::ontology::well_known::IS_A).unwrap())
+                .expect("kernel must stamp is_a onto the synthetic input resource");
             let mut verdict = crate::ontology::resource::Resource::new_embedded();
             verdict.set(
                 Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
@@ -3630,41 +3639,69 @@ mod tests {
         }
     }
 
-    fn build_d14_decide_ctx(verdict_class: &'static str) -> EvalCtx {
+    fn build_d14_decide_ctx(verdict_class: &'static str, arg_count: usize) -> EvalCtx {
+        use crate::ontology::well_known as wk;
         let mut b = crate::layer::LayerBuilder::new("test", None);
 
         let inst_iri = "urn:eigenius:test:d14_decide:inst";
         let constraint_iri = "urn:eigenius:test:d14_decide:has_property";
         let input_class = "urn:eigenius:test:d14_decide:Subject";
 
+        // Phase 19d.7: the input class must declare typed required
+        // properties for the kernel's typed-property marshaling to
+        // populate. Each arg slot is its own Property resource named
+        // `arg_N`, listed in `requires` in declaration order.
+        let mut requires = Vec::with_capacity(arg_count);
+        for n in 0..arg_count {
+            let prop_iri = format!("{input_class}:arg_{n}");
+            let mut p = crate::ontology::resource::Resource::new(Iri::parse(&prop_iri).unwrap());
+            p.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                crate::ontology::resource::Value::Array(vec![
+                    crate::ontology::resource::Value::String(wk::PROPERTY.into()),
+                ]),
+            );
+            b.add_resource(p).unwrap();
+            requires.push(crate::ontology::resource::Value::String(prop_iri));
+        }
+        let mut input_class_res =
+            crate::ontology::resource::Resource::new(Iri::parse(input_class).unwrap());
+        input_class_res.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(wk::CLASS.into()),
+            ]),
+        );
+        input_class_res.set(
+            Iri::parse(wk::REQUIRES).unwrap(),
+            crate::ontology::resource::Value::Array(requires),
+        );
+        b.add_resource(input_class_res).unwrap();
+
         // QueryClass declaring Decidable role for `constraint_iri`.
         let mut qc = crate::ontology::resource::Resource::new(Iri::parse(constraint_iri).unwrap());
         qc.set(
-            Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+            Iri::parse(wk::IS_A).unwrap(),
             crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    crate::ontology::well_known::QUERY_CLASS_CLASS.into(),
-                ),
+                crate::ontology::resource::Value::String(wk::QUERY_CLASS_CLASS.into()),
             ]),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::QUERY_CLASS).unwrap(),
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
             crate::ontology::resource::Value::String(input_class.into()),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::RESULT_CLASS).unwrap(),
-            crate::ontology::resource::Value::String(crate::ontology::well_known::VERDICT.into()),
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            crate::ontology::resource::Value::String(wk::VERDICT.into()),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::DISPATCH_ROLE).unwrap(),
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
             crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    crate::ontology::well_known::DISPATCH_DECIDABLE.into(),
-                ),
+                crate::ontology::resource::Value::String(wk::DISPATCH_DECIDABLE.into()),
             ]),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::QUERY_HANDLER).unwrap(),
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
             crate::ontology::resource::Value::String(
                 "urn:eigenius:test:d14_decide:proc:check".into(),
             ),
@@ -3700,7 +3737,7 @@ mod tests {
 
     #[test]
     fn native_decide_d14_holds_reduces_to_refl() {
-        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:holds");
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:holds", 1);
         let constraint = crate::nbe::term::Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
             args: vec![Exp::Unit],
@@ -3715,7 +3752,7 @@ mod tests {
 
     #[test]
     fn native_decide_d14_fails_produces_failing_neutral() {
-        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:fails");
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:fails", 0);
         let constraint = crate::nbe::term::Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
             args: vec![],
@@ -3730,7 +3767,7 @@ mod tests {
 
     #[test]
     fn native_decide_d14_undecidable_produces_passthrough_neutral() {
-        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:undecidable");
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:undecidable", 0);
         let constraint = crate::nbe::term::Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
             args: vec![],

@@ -319,4 +319,155 @@ end
 
 end # @static if isdefined(EigeniusMirror, :EquivalenceCheck)
 
+# ─── AutoOnLoad: validate_satisfies_equation (SatisfiesEquation) ────────
+
+@static if isdefined(EigeniusMirror, :SatisfiesEquation)
+
+export validate_satisfies_equation
+
+"""
+    validate_satisfies_equation(s::SatisfiesEquation) -> Verdict
+
+Verify a `SatisfiesEquation` claim. Builds a Symbolics substitution
+dict from `s.bindings`, applies it to both `lhs` and `rhs` of
+`s.equation`, simplifies the residue `lhs_subbed - rhs_subbed`, and
+returns:
+
+- `Holds` when the residue simplifies to zero (or `isequal` to a
+  zero literal) — algebraic equivalence under substitution.
+- `Undecidable` otherwise — `Symbolics.simplify` is heuristic
+  (D27 §4.1.1), so a non-zero representation does not refute the
+  claim. `Fails` is reserved for a future strict-decision path.
+
+The substitution map is keyed on `Symbolics.Num` variables produced
+by `_get_or_make_var`, the same cache `formula_to_num` populates —
+so a binding for variable name `\"x\"` matches every
+`FormulaTerm_Var(\"x\")` somewhere in the equation, regardless of
+where it appears.
+"""
+function validate_satisfies_equation(s::EigeniusMirror.SatisfiesEquation)
+    # Build the substitution map. Keys are `Symbolics.Num` variable
+    # tokens; values are the bound expressions translated to `Num`.
+    sub_map = Dict{Any, Any}()
+    for binding in s.bindings
+        var_num = _get_or_make_var(binding.variable)
+        sub_map[var_num] = formula_to_num(binding.expression.term)
+    end
+
+    lhs_num = formula_to_num(s.equation.lhs.term)
+    rhs_num = formula_to_num(s.equation.rhs.term)
+
+    # `Symbolics.substitute` accepts an empty dict (returns the term
+    # unchanged) — empty `bindings` reduces to a pure equivalence
+    # check on the equation's two sides.
+    lhs_subbed = isempty(sub_map) ? lhs_num : Symbolics.substitute(lhs_num, sub_map)
+    rhs_subbed = isempty(sub_map) ? rhs_num : Symbolics.substitute(rhs_num, sub_map)
+
+    residue = Symbolics.simplify(lhs_subbed - rhs_subbed)
+
+    # Coerce residue to a value we can ask `iszero` of. After
+    # simplification, a numerically-zero residue is either the literal
+    # `0`, a zero-`Num`, or a `BasicSymbolic` whose `isequal` matches a
+    # zero. `iszero` handles the numeric and Num cases; we add an
+    # `isequal(residue, 0)` fallback for the symbolic-zero case the
+    # rewriter produces when it cancels typed terms.
+    if iszero(residue) || isequal(residue, 0) || isequal(residue, Symbolics.Num(0))
+        return _verdict("Holds")
+    else
+        return _verdict("Undecidable")
+    end
+end
+
+end # @static if isdefined(EigeniusMirror, :SatisfiesEquation)
+
+# ─── AutoOnLoad: validate_substitutes (Substitutes) ─────────────────────
+
+@static if isdefined(EigeniusMirror, :Substitutes)
+
+export validate_substitutes
+
+"""
+    validate_substitutes(s::Substitutes) -> Verdict
+
+Verify a `Substitutes` claim. Runs
+`Symbolics.substitute(target, var => replacement)`, simplifies both
+the actual and claimed result, and returns:
+
+- `Holds` when the simplified actual and claimed are structurally
+  equal (`isequal`).
+- `Undecidable` otherwise — `Symbolics.simplify` is heuristic
+  (D27 §4.1.1), so disagreement of representations does not refute
+  the claim.
+
+Symmetric simplification is intentional: `substitute` may leave
+the result in an unsimplified form (e.g. `0 * x` rather than `0`),
+and the claimed result may have been authored in a non-canonical
+form. Simplifying both sides before `isequal` recovers Holds in
+those cases without pretending to refute non-trivial mismatches.
+"""
+function validate_substitutes(s::EigeniusMirror.Substitutes)
+    target_num = formula_to_num(s.target.term)
+    replacement_num = formula_to_num(s.replacement.term)
+    var_num = _get_or_make_var(s.variable)
+
+    actual = Symbolics.simplify(Symbolics.substitute(target_num, var_num => replacement_num))
+    claimed = Symbolics.simplify(formula_to_num(s.result.term))
+
+    if isequal(actual, claimed)
+        return _verdict("Holds")
+    else
+        return _verdict("Undecidable")
+    end
+end
+
+end # @static if isdefined(EigeniusMirror, :Substitutes)
+
+# ─── AutoOnLoad: validate_symbolically_reduces_to ───────────────────────
+
+@static if isdefined(EigeniusMirror, :SymbolicallyReducesTo)
+
+export validate_symbolically_reduces_to
+
+"""
+    apply_strategy(strategy, expr)
+
+Per-strategy dispatch from a `ReductionStrategy_*` mirror struct to
+the underlying Symbolics rewriter operation. New strategies land as
+additional methods here paired with a new `InductiveCtor` on the
+chain-side `ReductionStrategy` inductive — the closed-set discipline
+of inductives means a chain-committed claim with a missing strategy
+is a chain-validation failure (Rule 16 catches it), not a
+`MethodError` here.
+"""
+apply_strategy(::EigeniusMirror.ReductionStrategy_Simplify, expr) =
+    Symbolics.simplify(expr)
+apply_strategy(::EigeniusMirror.ReductionStrategy_Expand, expr) =
+    Symbolics.expand(expr)
+
+"""
+    validate_symbolically_reduces_to(s::SymbolicallyReducesTo) -> Verdict
+
+Verify a `SymbolicallyReducesTo` claim. Dispatches on `s.strategy`
+to the matching Symbolics operation, applies it to the source, and
+compares structurally against the claimed result. Symmetric
+`simplify` on both sides absorbs non-canonical authoring (the
+`Expand` policy still folds under `simplify` for now; a strict-
+Fails policy on polynomial mismatch lands when the polynomial-
+canonicalisation surface is wired).
+"""
+function validate_symbolically_reduces_to(s::EigeniusMirror.SymbolicallyReducesTo)
+    source_num = formula_to_num(s.expr.term)
+    claimed_num = formula_to_num(s.result.term)
+
+    actual = apply_strategy(s.strategy, source_num)
+
+    if isequal(Symbolics.simplify(actual), Symbolics.simplify(claimed_num))
+        return _verdict("Holds")
+    else
+        return _verdict("Undecidable")
+    end
+end
+
+end # @static if isdefined(EigeniusMirror, :SymbolicallyReducesTo)
+
 end # module

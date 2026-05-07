@@ -239,31 +239,25 @@ impl AssayInstitution {
 
     fn within_tolerance_verdict(input: &Resource) -> &'static str {
         // Decidable QueryClass dispatch (D14 §9.2): the kernel
-        // synthesises an input resource carrying a positional
-        // `decide_args` array. Unpack predicted/target/tolerance from
-        // that array. As a fall-back, also accept the named-property
-        // shape (used when the same handler is reachable via FIBER
-        // with explicit parameters).
-        let decide_args_iri = iri("urn:eigenius:institution:decide_args");
-        let from_args = match input.get(&decide_args_iri) {
-            Some(Value::Array(items)) if items.len() == 3 => {
-                let arg_float = |idx: usize| match &items[idx] {
-                    Value::Float(f) => Some(*f),
-                    Value::Integer(n) => Some(*n as f64),
-                    Value::Embedded(r) => first_float_property(r),
-                    _ => None,
-                };
-                Some((arg_float(0), arg_float(1), arg_float(2)))
+        // populates the input class's typed required properties from
+        // positional ESL args in `requires` declaration order
+        // (Phase 19d.7). For `WithinToleranceInput` the kernel sets
+        // `predicted_ic50`, `target_ic50`, `tolerance` from
+        // `decide(predicted, target, tol)`. Each is set as a wrapper
+        // resource (the kernel marshals `Val::ResourceVal` as
+        // `Value::Embedded`), so dig through with
+        // `first_float_property`.
+        let extract = |prop_iri: &str| -> Option<f64> {
+            match input.get(&iri(prop_iri))? {
+                Value::Float(f) => Some(*f),
+                Value::Integer(n) => Some(*n as f64),
+                Value::Embedded(r) => first_float_property(r),
+                _ => None,
             }
-            _ => None,
         };
-        let (predicted, target, tolerance) = from_args.unwrap_or_else(|| {
-            (
-                as_float(input.get(&iri(PREDICTED_IC50_PROP))),
-                as_float(input.get(&iri(TARGET_IC50_PROP))),
-                as_float(input.get(&iri(TOLERANCE_PROP))),
-            )
-        });
+        let predicted = extract(PREDICTED_IC50_PROP);
+        let target = extract(TARGET_IC50_PROP);
+        let tolerance = extract(TOLERANCE_PROP);
         match (predicted, target, tolerance) {
             (Some(p), Some(t), Some(tol)) if tol >= 0.0 => {
                 if (p - t).abs() <= tol {

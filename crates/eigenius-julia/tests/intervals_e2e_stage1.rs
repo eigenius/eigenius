@@ -63,6 +63,13 @@ const INSTITUTION_JSON: &str = include_str!(
     "../../../julia/institutions/intervals/declarations/intervals-institution.eigon.json"
 );
 
+// Phase 19d.2 added `BoundsRequest.expr: SymbolicExpression` to the
+// intervals ontology, so the symbolics ontology must be committed
+// before intervals can validate.
+const SYMBOLICS_ONTOLOGY_JSON: &str = include_str!(
+    "../../../julia/institutions/symbolics/declarations/symbolics-ontology.eigon.json"
+);
+
 // ─── Pinned IRIs ───────────────────────────────────────────────────────
 //
 // These match what the `.eigon.json` declarations carry; pinned here
@@ -130,6 +137,11 @@ fn intervals_install_lifecycle_produces_clean_external_institution_plan() {
 
     // 1. Bootstrap.
     let mut ctx = bootstrap().expect("bootstrap");
+
+    // 1.5 Symbolics ontology — must precede intervals because
+    //     `BoundsRequest.expr` references SymbolicExpression
+    //     (Phase 19d.2).
+    commit_layer(&mut ctx, SYMBOLICS_ONTOLOGY_JSON, "symbolics_ontology");
 
     // 2. Ontology layer — the BoundedBy class + value/lower/upper
     //    properties.

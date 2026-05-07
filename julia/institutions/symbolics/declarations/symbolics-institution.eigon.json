@@ -56,6 +56,79 @@
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
   },
   {
+    "@id": "urn:eigenius:symbolics:signatures:validate_symbolically_reduces_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_symbolically_reduces_to",
+    "urn:eigenius:core:description": "Julia entry point for the `symbolically_reduces_to_validity` AutoOnLoad gate. Takes a `SymbolicallyReducesTo` mirror struct, dispatches on the strategy ctor (`ReductionStrategy_Simplify` → `Symbolics.simplify`, `ReductionStrategy_Expand` → `Symbolics.expand`), applies the selected operation to the source, and compares structurally against the claimed result. Holds on `isequal` match (after symmetric `simplify` to absorb non-canonical authoring), Undecidable otherwise.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_symbolically_reduces_to",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SymbolicallyReducesTo"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:symbolically_reduces_to_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "symbolically_reduces_to_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `SymbolicallyReducesTo` resource. Re-runs the named strategy and produces the canonical D14 Verdict tri-state. The strategy parameter generalises `simplifies_to_validity`'s implicit `Symbolics.simplify` to a chain-typed parameter — the strategy IRI rides on every Verdict's provenance via the runtime invocation, so audit queries can answer `which strategy gave Holds?` without re-resolving the dispatch path.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SymbolicallyReducesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_symbolically_reduces_to",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:validate_substitutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_substitutes",
+    "urn:eigenius:core:description": "Julia entry point for the `substitutes_validity` AutoOnLoad gate. Takes a `Substitutes` mirror struct, runs `Symbolics.substitute(target, var => replacement)`, simplifies the actual and claimed results, and returns Holds on structural match, Undecidable otherwise.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_substitutes",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:Substitutes"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:substitutes_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "substitutes_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `Substitutes` resource. Re-runs Symbolics' substitute + simplify and produces the canonical D14 Verdict tri-state. `Fails` reserved for a future strict-decision path.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:Substitutes",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_substitutes",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:validate_satisfies_equation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_satisfies_equation",
+    "urn:eigenius:core:description": "Julia entry point for the `satisfies_equation_validity` AutoOnLoad gate. Takes a `SatisfiesEquation` mirror struct, builds a Symbolics substitution dict from `bindings`, applies it to both sides of the equation, simplifies the residue `lhs_subbed - rhs_subbed`, and returns Holds when the residue is `iszero`, Undecidable otherwise.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_satisfies_equation",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SatisfiesEquation"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:satisfies_equation_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "satisfies_equation_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `SatisfiesEquation` resource. Verifies the substitution-and-simplify residue is zero and produces the canonical D14 Verdict tri-state. Per D27 §4.1.1, `Symbolics.simplify` is heuristic — `Fails` is reserved for a future strict-decision path that can refute satisfaction on restricted fragments; the typical mismatch surfaces as `Undecidable`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SatisfiesEquation",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_satisfies_equation",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
     "@id": "urn:eigenius:symbolics:query_classes:qc_symb_check_equivalence",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
     "urn:eigenius:core:short_name": "qc_symb_check_equivalence",
