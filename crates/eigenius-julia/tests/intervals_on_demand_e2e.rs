@@ -39,15 +39,18 @@
 //!    confirm the response is a tight enclosure of `sin(x) + 0.5`
 //!    over `[0, π/2]`.
 //!
-//! Why we don't go through FIBER's textual surface: FIBER param values
-//! that reference chain-committed resources by IRI string flow to the
-//! worker as bare strings, but the mirror's typed decoders for class-
-//! typed fields expect fully-embedded resource maps. Wiring FIBER to
-//! dereference IRI references into embedded resources before
-//! serialising is a separate plumbing gap (issue-tracked) — orthogonal
-//! to whether OnDemand kernel-side dispatch *itself* works. The direct
-//! `Institution::query` call in this test is the same dispatch surface
-//! FIBER would compile down to once that gap closes.
+//! The test exercises *both* dispatch surfaces back-to-back against the
+//! same env image:
+//!
+//! - **Direct call** — `Institution::query(handler_iri, &input, &ctx)`
+//!   with a hand-built embedded `BoundsRequest`. Pins the institution-
+//!   runtime boundary itself.
+//! - **Textual FIBER** — `execute_with(FIBER cap:qc_compute_bounds {
+//!   expr: <iri>, domain: <iri> } AS ?bound RETURN …)` against a chain
+//!   carrying anchor `expr` / `domain` resources. Pins the kernel's
+//!   IRI-dereference pass on FIBER param values (Phase 19d.2 follow-on)
+//!   and the `?bound.lower` dot-path projection's overlay-aware
+//!   resolution.
 
 use eigenius_julia::mirror_gen::{mirror_to_resource, JuliaMirrorGenerator};
 use eigenius_julia::JuliaLanguageRuntime;
@@ -106,10 +109,15 @@ fn iri(s: &str) -> Iri {
 
 // ─── Chain construction ─────────────────────────────────────────────────
 
+const ANCHOR_EXPR_IRI: &str = "urn:eigenius:test:on_demand:expr";
+const ANCHOR_DOMAIN_IRI: &str = "urn:eigenius:test:on_demand:domain";
+
 /// Build the head layer with bootstrap + intervals + symbolics +
-/// intervals-institution declarations committed. The
-/// `qc_compute_bounds` QueryClass + `BoundsRequest` class flow through
-/// for the InstitutionIndex to discover.
+/// intervals-institution declarations committed, plus chain-anchored
+/// `expr` and `domain` resources used by the textual FIBER dispatch
+/// path. The textual path passes their IRIs as FIBER param values;
+/// the kernel's IRI-dereference pass embeds them before they flow to
+/// the institution.
 fn build_chain() -> (Arc<Layer>, LayerStorage) {
     let mut ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
     // Commit order: symbolics ontology first because intervals'
@@ -125,6 +133,63 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
         }
         ctx.commit(label).expect("commit");
     }
+
+    // Anchor a SymbolicExpression and a BoundedBy on the chain so the
+    // textual FIBER syntax can reference them by IRI. Plain `commit`
+    // (rather than `commit_with_validation`) because no
+    // InstitutionRuntime is wired during chain build — AutoOnLoad
+    // wouldn't fire even if we asked for it.
+    let mut expr = Resource::new(iri(ANCHOR_EXPR_IRI));
+    expr.set(
+        iri("urn:eigenius:core:is_a"),
+        Value::Array(vec![Value::ResourceRef(iri(SYMBOLIC_EXPRESSION_CLASS_IRI))]),
+    );
+    expr.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String("on_demand_test_expr".into()),
+    );
+    expr.set(
+        iri("urn:eigenius:symbolics:term"),
+        Value::Json(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {
+                    "ctor": "App",
+                    "args": [
+                        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+                        {
+                            "ctor": "App",
+                            "args": [
+                                {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:sin"]},
+                                {"ctor": "Var", "args": ["x"]}
+                            ]
+                        }
+                    ]
+                },
+                {"ctor": "LitFloat", "args": [0.5]}
+            ]
+        })),
+    );
+    ctx.add_resource(expr).expect("add chain expr");
+
+    let mut domain = Resource::new(iri(ANCHOR_DOMAIN_IRI));
+    domain.set(
+        iri("urn:eigenius:core:is_a"),
+        Value::Array(vec![Value::ResourceRef(iri(BOUNDED_BY_CLASS_IRI))]),
+    );
+    domain.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String("on_demand_test_domain".into()),
+    );
+    domain.set(iri("urn:eigenius:intervals:value"), Value::Float(0.0));
+    domain.set(iri("urn:eigenius:intervals:lower"), Value::Float(0.0));
+    domain.set(
+        iri("urn:eigenius:intervals:upper"),
+        Value::Float(std::f64::consts::FRAC_PI_2),
+    );
+    ctx.add_resource(domain).expect("add chain domain");
+    ctx.commit("chain_inputs").expect("commit chain inputs");
+
     (Arc::clone(ctx.head()), ctx.storage().clone())
 }
 
@@ -624,7 +689,96 @@ fn on_demand_dispatch_invokes_julia_institution_via_kernel_runtime() {
         "interval must be tight (within [0, 2]) — got [{lower}, {upper}]"
     );
 
-    // 5. Sanity: the LayerStorage we pulled from the bootstrap context
+    // 5. Textual FIBER dispatch — exercises the kernel's IRI-dereference
+    //    pass on FIBER param values (the chain-anchored `expr` and
+    //    `domain` flow in as IRI strings; the kernel embeds them
+    //    before serialising) plus the dot-path projection's
+    //    overlay-aware resolution (?bound.lower / ?bound.upper read
+    //    off the FIBER response which lives in the transient overlay,
+    //    not the chain).
+    let fiber_query = format!(
+        r#"
+USING INSTITUTION "{INSTITUTION_IRI}" AS cap
+FIBER cap:qc_compute_bounds {{
+    expr: "{ANCHOR_EXPR_IRI}",
+    domain: "{ANCHOR_DOMAIN_IRI}"
+}} AS ?bound
+RETURN [] {{
+    lower: ?bound.lower,
+    upper: ?bound.upper
+}}
+"#
+    );
+
+    let fiber_runtime = eigenius_kernel::query::evaluate::FiberRuntime {
+        index: Some(&index),
+        runtime: Some(&inst_runtime),
+        components: None,
+        overlay: None,
+        ctx: Some(&exec_ctx),
+    };
+
+    let document = match eigenius_kernel::query::execute_with(&fiber_query, &head, fiber_runtime) {
+        Ok(d) => d,
+        Err(errors) => {
+            let _ = runtime.drain();
+            let _ = std::fs::remove_dir_all(&depot);
+            panic!("textual FIBER query failed: {errors:?}");
+        }
+    };
+
+    // The document follows D2 Appendix A: a `ResultSet` resource
+    // carries an embedded `rows` array. Each row's properties map
+    // synthesized RETURN-item IRIs to the projected values. Find the
+    // ResultSet, walk its single row, and pull the two Float values.
+    let result_set = document
+        .iter()
+        .find(|r| {
+            r.get(&iri("urn:eigenius:core:is_a"))
+                .and_then(|v| v.as_iri_array().first().cloned())
+                .map(|i| i.as_str() == "urn:eigenius:query:ResultSet")
+                .unwrap_or(false)
+        })
+        .expect("textual FIBER query must produce a ResultSet");
+    let rows = match result_set.get(&iri("urn:eigenius:query:rows")) {
+        Some(Value::Array(a)) => a,
+        other => panic!("ResultSet missing rows array — got {other:?}"),
+    };
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected exactly one row, got {}",
+        rows.len()
+    );
+    let row = match &rows[0] {
+        Value::Embedded(r) => r,
+        other => panic!("row must be embedded — got {other:?}"),
+    };
+    let mut floats: Vec<f64> = row
+        .properties()
+        .values()
+        .filter_map(|v| if let Value::Float(f) = v { Some(*f) } else { None })
+        .collect();
+    floats.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        floats.len(),
+        2,
+        "row must carry exactly two Float values — got {floats:?}"
+    );
+    let (fiber_lower, fiber_upper) = (floats[0], floats[1]);
+    assert!(
+        fiber_lower <= 0.5 && fiber_upper >= 1.5,
+        "FIBER-path bounds must enclose [0.5, 1.5]; got [{fiber_lower}, {fiber_upper}]"
+    );
+    // Sanity: both dispatch surfaces returned the same interval —
+    // they're calling the same handler against the same env image.
+    assert!(
+        (fiber_lower - lower).abs() < 1e-12 && (fiber_upper - upper).abs() < 1e-12,
+        "direct and FIBER paths must return the same interval: \
+         direct=[{lower}, {upper}], fiber=[{fiber_lower}, {fiber_upper}]"
+    );
+
+    // 6. Sanity: the LayerStorage we pulled from the bootstrap context
     //    is reachable; flush nothing — we only used the head for index
     //    derivation, not for new commits.
     let _ = storage;
