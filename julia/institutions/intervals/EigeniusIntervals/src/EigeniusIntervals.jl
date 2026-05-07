@@ -215,6 +215,42 @@ function compute_bounds(
     return EigeniusMirror.BoundedBy((lo + hi) / 2, lo, hi)
 end
 
+# ─── OnDemand FIBER entry point (Phase 19d.2 / D14 §6.2) ────────────────
+#
+# `qc_compute_bounds` is the first OnDemand external-runtime QueryClass
+# wired against this institution. FIBER's institution-runtime boundary
+# is unary — the kernel packs a single typed input resource and the
+# institution returns a single typed output. We therefore expose
+# `compute_bounds_for_request(req::BoundsRequest)` as a thin
+# destructuring wrapper around `compute_bounds(expr, domain)`. Same
+# interval-arithmetic semantics, just a one-arg-call surface so the
+# kernel's `Institution::query` can dispatch it.
+#
+# Guarded by `@static if` because BoundsRequest (and the OnDemand
+# QueryClass that uses it) only enters the mirror when the kernel
+# closure walker reaches them — the IntervalArithmetic-only e2e
+# (mirror seed = `[BoundedBy]`) doesn't, so the handler must
+# precompile cleanly without the type.
+
+@static if isdefined(EigeniusMirror, :BoundsRequest)
+
+export compute_bounds_for_request
+
+"""
+    compute_bounds_for_request(req::BoundsRequest) -> BoundedBy
+
+Destructure the FIBER-packed `BoundsRequest`, run interval-arithmetic
+over `req.expr.term` with `x ∈ [req.domain.lower, req.domain.upper]`,
+and return a `BoundedBy` whose `[lower, upper]` rigorously encloses
+the function's range. Identical semantics to `compute_bounds(expr,
+domain)` — this wrapper exists only because the kernel's OnDemand
+dispatch boundary is unary.
+"""
+compute_bounds_for_request(req::EigeniusMirror.BoundsRequest) =
+    compute_bounds(req.expr, req.domain)
+
+end # @static if isdefined(EigeniusMirror, :BoundsRequest)
+
 end # @static if isdefined(EigeniusMirror, :FormulaTerm_Var)
 
 end # module

@@ -22,6 +22,31 @@
   },
 
   {
+    "@id": "urn:eigenius:intervals:signatures:compute_bounds_for_request",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "compute_bounds_for_request",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_compute_bounds` OnDemand QueryClass. Takes a `BoundsRequest` mirror struct (carrying a SymbolicExpression and a BoundedBy domain) and returns a `BoundedBy` whose `[lower, upper]` interval rigorously encloses the function's range over the domain. The handler destructures the composite, evaluates the FormulaTerm under interval-arithmetic semantics with `x` bound to `interval(domain.lower, domain.upper)`, and packs the resulting interval into a fresh BoundedBy.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "compute_bounds_for_request",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:intervals:BoundsRequest"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:intervals:BoundedBy"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:query_classes:qc_compute_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_compute_bounds",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `BoundsRequest(expr, domain)`, returns a `BoundedBy` enclosing `expr` over the `[domain.lower, domain.upper]` range. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5) — not fired on Load. The first OnDemand external-runtime QueryClass to land on the chain; turns the cross-institution probe's substrate-level dispatch into an EigenQL-addressable surface.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:intervals:BoundsRequest",
+    "urn:eigenius:institution:result_class": "urn:eigenius:intervals:BoundedBy",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:intervals:signatures:compute_bounds_for_request",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals"
+  },
+
+  {
     "@id": "urn:eigenius:intervals:formats:if_intv_function",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
     "urn:eigenius:core:short_name": "if_intv_function",

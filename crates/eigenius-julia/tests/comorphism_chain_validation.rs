@@ -50,9 +50,13 @@ fn iri(s: &str) -> Iri {
 fn symbolics_to_intervals_comorphism_validates_cleanly() {
     let mut ctx = bootstrap().expect("bootstrap");
 
+    // Commit order matters: intervals' BoundsRequest (added in Phase
+    // 19d.2) references SymbolicExpression as a `class_types`, so the
+    // symbolics ontology must be on the chain before intervals
+    // attempts to commit.
     for (label, json) in [
-        ("intervals_ontology", INTERVALS_ONTOLOGY_JSON),
         ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON),
+        ("intervals_ontology", INTERVALS_ONTOLOGY_JSON),
         ("intervals_institution", INTERVALS_INSTITUTION_JSON),
         ("symbolics_institution", SYMBOLICS_INSTITUTION_JSON),
         ("comorphism", COMORPHISM_JSON),

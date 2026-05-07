@@ -56,5 +56,36 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
     "urn:eigenius:core:domain": ["urn:eigenius:intervals:IntervalFunction"]
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:BoundsRequest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "BoundsRequest",
+    "urn:eigenius:core:description": "Composite OnDemand input class for `qc_compute_bounds`: pairs a `SymbolicExpression` (whose `term` is a FormulaTerm) with a `BoundedBy` carrying the domain `[lower, upper]` for the free variable `x`. FIBER dispatch packs both arguments into a single typed resource because the institution-runtime boundary is unary; the institution destructures and runs interval-arithmetic over the domain.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:intervals:expr",
+      "urn:eigenius:intervals:domain"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:intervals:expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr",
+    "urn:eigenius:core:description": "The SymbolicExpression to interval-extend. Its `term` carries the FormulaTerm the institution walks under interval-arithmetic semantics.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundsRequest"]
+  },
+  {
+    "@id": "urn:eigenius:intervals:domain",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "domain",
+    "urn:eigenius:core:description": "Domain interval for the free variable `x`. Carried as a `BoundedBy` resource — its `lower` and `upper` define the evaluation range; `value` is unused on the input side of `qc_compute_bounds`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:intervals:BoundedBy"],
+    "urn:eigenius:core:domain": ["urn:eigenius:intervals:BoundsRequest"]
   }
 ]
