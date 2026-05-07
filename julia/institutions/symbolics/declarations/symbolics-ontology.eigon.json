@@ -49,5 +49,48 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
     "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SimplifiesTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SimplifyRequest",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SimplifyRequest",
+    "urn:eigenius:core:description": "OnDemand input class for `qc_symb_simplify`: wraps a `SymbolicExpression` whose term will be re-run through `Symbolics.simplify`. The handler returns the simplified form as a fresh `SymbolicExpression`. The wrapper class exists because FIBER's institution-runtime boundary is unary — passing a SymbolicExpression directly via FIBER would force the user to construct a FormulaTerm value inline, which EigenQL's textual surface doesn't support; referencing a chain-committed SymbolicExpression by IRI through this wrapper is the natural shape.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:expr"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:EquivalenceCheck",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "EquivalenceCheck",
+    "urn:eigenius:core:description": "Decidable input class for `qc_symb_check_equivalence`: pairs two `SymbolicExpression` resources and asks whether they are algebraically equivalent. The handler simplifies both sides under the institution's pinned rewriter and returns `Holds` on structural match, `Undecidable` otherwise (Symbolics' simplifier is heuristic — D27 §4.1.1). `Fails` is reserved for a future strict-decision path (groebner-basis / polynomial canonicalisation) that can refute equivalence on restricted fragments.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:lhs",
+      "urn:eigenius:symbolics:rhs"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:lhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "lhs",
+    "urn:eigenius:core:description": "Left-hand symbolic expression of an equivalence check.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:EquivalenceCheck"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:rhs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "rhs",
+    "urn:eigenius:core:description": "Right-hand symbolic expression of an equivalence check.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:EquivalenceCheck"]
   }
 ]

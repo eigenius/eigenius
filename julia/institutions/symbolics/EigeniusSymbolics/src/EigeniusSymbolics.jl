@@ -44,6 +44,7 @@ operators land on the chain *and* in this map together.
 module EigeniusSymbolics
 
 using Symbolics
+using SymbolicUtils
 using EigeniusMirror
 
 export validate_simplifies_to
@@ -180,5 +181,142 @@ _verdict(ctor::AbstractString) = Dict{String, Any}(
     IS_A_PROP => [VERDICT_CLASS_IRI],
     CTOR_NAME_PROP => ctor,
 )
+
+# ─── Symbolics → FormulaTerm encoder (Phase 19d.3) ──────────────────────
+#
+# Inverse of `formula_to_num`. Walks a `Symbolics.Num` (post-simplify)
+# and produces the chain-shaped FormulaTerm value the mirror can
+# encode. Required for OnDemand handlers like `qc_symb_simplify` whose
+# output type is a `SymbolicExpression` carrying a typed `term`.
+#
+# The traversal dispatches on the underlying SymbolicUtils term shape
+# rather than on `Symbolics.Num` directly: a `Num` is a thin wrapper
+# around a `BasicSymbolic`, and pattern-matching the Sym / Term /
+# Number cases is what gives us the round-trip.
+#
+# This map is the inverse of `_OP_FN`. We use `IdDict` keyed on the
+# Julia function values themselves — `SymbolicUtils.operation(t)`
+# returns the actual function (`+`, `sin`, …), not a symbol or string.
+# Adding a new operator requires entries in BOTH directions: in `_OP_FN`
+# above (decode side) and in `_FN_TO_IRI` here (encode side).
+const _FN_TO_IRI = IdDict{Any, String}(
+    (+) => "urn:eigenius:formulas:ops:add",
+    (-) => "urn:eigenius:formulas:ops:sub",
+    (*) => "urn:eigenius:formulas:ops:mul",
+    (/) => "urn:eigenius:formulas:ops:div",
+    (^) => "urn:eigenius:formulas:ops:pow",
+    exp => "urn:eigenius:formulas:ops:exp",
+    log => "urn:eigenius:formulas:ops:log",
+    sin => "urn:eigenius:formulas:ops:sin",
+    cos => "urn:eigenius:formulas:ops:cos",
+    tan => "urn:eigenius:formulas:ops:tan",
+    sqrt => "urn:eigenius:formulas:ops:sqrt",
+    abs => "urn:eigenius:formulas:ops:abs",
+)
+
+"""
+    num_to_formula(n) -> FormulaTerm
+
+Translate a `Symbolics.Num` (or its underlying `BasicSymbolic` /
+plain numeric value) into a chain-shaped FormulaTerm value emitted
+by the mirror. The resulting tree round-trips through
+`formula_to_num` to a structurally-equal `Num`.
+
+`App` nodes are emitted left-spined: `App(App(OpRef(op), arg1), arg2)`
+for binary `op(arg1, arg2)`, matching the spine the decoder walks.
+"""
+num_to_formula(n::Symbolics.Num) = num_to_formula(Symbolics.value(n))
+
+function num_to_formula(v)
+    # Plain numeric leaf — Float, Int, Rational, etc. all coerce
+    # losslessly to the chain's `LitFloat` payload.
+    if v isa Real
+        return EigeniusMirror.FormulaTerm_LitFloat(Float64(v))
+    end
+    # Symbolic variable.
+    if SymbolicUtils.issym(v)
+        return EigeniusMirror.FormulaTerm_Var(string(SymbolicUtils.nameof(v)))
+    end
+    # Function application — left-spine the args.
+    if SymbolicUtils.iscall(v)
+        op = SymbolicUtils.operation(v)
+        args = SymbolicUtils.arguments(v)
+        op_iri = get(_FN_TO_IRI, op, nothing)
+        if op_iri === nothing
+            error("EigeniusSymbolics: Symbolics produced operation `$op` with no FormulaTerm encoding; add it to _FN_TO_IRI")
+        end
+        result = EigeniusMirror.FormulaTerm_App(
+            EigeniusMirror.FormulaTerm_OpRef(op_iri),
+            num_to_formula(args[1]),
+        )
+        for a in args[2:end]
+            result = EigeniusMirror.FormulaTerm_App(result, num_to_formula(a))
+        end
+        return result
+    end
+    error("EigeniusSymbolics: cannot encode Symbolics term of type $(typeof(v)) as FormulaTerm")
+end
+
+# ─── OnDemand: simplify_expression (qc_symb_simplify) ───────────────────
+
+@static if isdefined(EigeniusMirror, :SimplifyRequest)
+
+export simplify_expression
+
+"""
+    simplify_expression(req::SimplifyRequest) -> SymbolicExpression
+
+Simplify the input expression and return a fresh `SymbolicExpression`
+whose `term` is the simplified form re-encoded as a FormulaTerm.
+Dispatched by the `qc_symb_simplify` OnDemand QueryClass via FIBER.
+
+The `_id` keyword on the returned mirror struct is `nothing` because
+this is a synthesised result, not a chain-committed resource — the
+caller (or a downstream FIBER step) stamps an IRI on it before any
+chain commit.
+"""
+function simplify_expression(req::EigeniusMirror.SimplifyRequest)
+    simplified_num = Symbolics.simplify(formula_to_num(req.expr.term))
+    simplified_term = num_to_formula(simplified_num)
+    # `_id` defaults to `nothing` on the generated constructor — a
+    # synthesised result, not a chain-committed resource. Caller (or
+    # downstream FIBER step) stamps an IRI before any commit.
+    return EigeniusMirror.SymbolicExpression(simplified_term)
+end
+
+end # @static if isdefined(EigeniusMirror, :SimplifyRequest)
+
+# ─── Decidable: check_equivalence (qc_symb_check_equivalence) ───────────
+
+@static if isdefined(EigeniusMirror, :EquivalenceCheck)
+
+export check_equivalence
+
+"""
+    check_equivalence(check::EquivalenceCheck) -> Verdict
+
+Simplify both `lhs` and `rhs` under the institution's pinned
+rewriter and return a Verdict. `Holds` when the simplified forms
+are structurally equal via `isequal`; `Undecidable` otherwise.
+`Fails` is reserved for a future strict-decision path (groebner-
+basis / polynomial canonicalisation) — Symbolics' `simplify` is
+heuristic, so non-equality of representations does not imply
+algebraic non-equivalence (D27 §4.1.1).
+
+Decidable role: `Exp::NativeDecide` invokes this handler during
+type-check reduction. On `Holds` the constraint reduces to `Refl`,
+on `Undecidable` it stays a passthrough.
+"""
+function check_equivalence(check::EigeniusMirror.EquivalenceCheck)
+    lhs_simplified = Symbolics.simplify(formula_to_num(check.lhs.term))
+    rhs_simplified = Symbolics.simplify(formula_to_num(check.rhs.term))
+    if isequal(lhs_simplified, rhs_simplified)
+        return _verdict("Holds")
+    else
+        return _verdict("Undecidable")
+    end
+end
+
+end # @static if isdefined(EigeniusMirror, :EquivalenceCheck)
 
 end # module

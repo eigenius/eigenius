@@ -22,6 +22,54 @@
   },
 
   {
+    "@id": "urn:eigenius:symbolics:signatures:simplify_expression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "simplify_expression",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_symb_simplify` OnDemand QueryClass. Takes a `SimplifyRequest` mirror struct and returns a fresh `SymbolicExpression` whose `term` is the institution's pinned simplification of the input. The handler decodes `req.expr.term` into a `Symbolics.Num`, runs `Symbolics.simplify`, and re-encodes the result back into a chain-shaped `FormulaTerm`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "simplify_expression",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SimplifyRequest"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:symbolics:SymbolicExpression"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:signatures:check_equivalence",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "check_equivalence",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_symb_check_equivalence` Decidable QueryClass. Takes an `EquivalenceCheck` mirror struct and returns a `Verdict`: `Holds` when `simplify(lhs) == simplify(rhs)` structurally, `Undecidable` otherwise. Decidable role means `Exp::NativeDecide` reduces user programs by calling this handler; on `Holds` the constraint reduces to `Refl`, on `Fails` it produces a failing neutral, on `Undecidable` it stays a passthrough.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "check_equivalence",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:EquivalenceCheck"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:qc_symb_simplify",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_symb_simplify",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `SimplifyRequest(expr)`, returns the simplified `SymbolicExpression`. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5) — not fired on Load, so it doesn't gate commits. The OnDemand counterpart of the AutoOnLoad `simplifies_to_validity` gate: rather than verifying a user-supplied claim, it produces the institution's canonical simplification on demand.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SimplifyRequest",
+    "urn:eigenius:institution:result_class": "urn:eigenius:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:simplify_expression",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:qc_symb_check_equivalence",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_symb_check_equivalence",
+    "urn:eigenius:core:description": "Decidable QueryClass: given an `EquivalenceCheck(lhs, rhs)`, returns a `Verdict` — Holds when both sides simplify to the same form, Undecidable otherwise. Wired for `Exp::NativeDecide` so user programs can write `cap:qc_symb_check_equivalence(lhs, rhs)` predicates whose results reduce inline at type-check time. `Fails` is reserved for a future strict-equivalence path (groebner-basis / polynomial canonicalisation) per D27 §4.1.1.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:EquivalenceCheck",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:check_equivalence",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
     "@id": "urn:eigenius:symbolics:formats:ef_symb_expr",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
     "urn:eigenius:core:short_name": "ef_symb_expr",

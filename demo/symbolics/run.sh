@@ -98,7 +98,7 @@ trap 'rm -rf "$MIRROR_OUTPUT_DIR"' EXIT
 
 $EIGENIUS --endpoint "$ENDPOINT" mirror create \
     --layer "$LAYER_IRI" \
-    --filter 'MATCH "urn:eigenius:core:Class"(?iri) { "urn:eigenius:core:short_name": "SimplifiesTo" } RETURN [] { iri: ?iri }' \
+    --filter 'MATCH "urn:eigenius:core:Class"(?iri) { "urn:eigenius:core:short_name": ?name } WHERE ?name IN ["SimplifiesTo", "SimplifyRequest", "EquivalenceCheck"] RETURN [] { iri: ?iri }' \
     --language julia \
     --output "$MIRROR_OUTPUT_DIR" \
     --json | tee /tmp/eigenius-symbolics-mirror.json
@@ -186,6 +186,66 @@ echo
 echo "--- Step 8: Query Verdicts ---"
 $EIGENIUS --endpoint "$ENDPOINT" query \
     'MATCH "urn:eigenius:institution:Verdict"(?v) { "urn:eigenius:core:ctor_name": ?ctor } RETURN [] { verdict: ?v, ctor: ?ctor }'
+echo
+
+# Step 9: OnDemand FIBER dispatch — `qc_symb_simplify`. Pre-commit a
+# SymbolicExpression `(x + 0) * 1`, then ask the institution to
+# simplify it explicitly via FIBER. The kernel's IRI-dereference pass
+# embeds the chain-committed expr into the FIBER-synthesized
+# SimplifyRequest input; the worker decodes, runs Symbolics.simplify,
+# and re-encodes the result as a FormulaTerm-wrapped
+# SymbolicExpression.
+echo "--- Step 9: Commit input expression for FIBER simplify ---"
+INPUT_EXPR_FILE="$(mktemp -t eigenius-symbolics-input-XXXXXX.json)"
+trap 'rm -rf "$MIRROR_OUTPUT_DIR" "$INSTANCE_FILE" "$INPUT_EXPR_FILE"' EXIT
+cat >"$INPUT_EXPR_FILE" <<'EOF'
+[
+  {
+    "@id": "urn:eigenius:demo:symbolics:expr:x_plus_0_times_1",
+    "urn:eigenius:core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:short_name": "x_plus_0_times_1",
+    "urn:eigenius:symbolics:term": {
+      "ctor": "App",
+      "args": [
+        {
+          "ctor": "App",
+          "args": [
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
+            {
+              "ctor": "App",
+              "args": [
+                {
+                  "ctor": "App",
+                  "args": [
+                    {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
+                    {"ctor": "Var", "args": ["x"]}
+                  ]
+                },
+                {"ctor": "LitFloat", "args": [0.0]}
+              ]
+            }
+          ]
+        },
+        {"ctor": "LitFloat", "args": [1.0]}
+      ]
+    }
+  }
+]
+EOF
+$EIGENIUS --endpoint "$ENDPOINT" load "$INPUT_EXPR_FILE"
+echo
+
+echo "--- Step 10: FIBER qc_symb_simplify (OnDemand) ---"
+# The textual FIBER syntax: pass the chain-committed expr by IRI; the
+# kernel's IRI-dereference pass embeds it into the SimplifyRequest the
+# institution sees. Then project the simplified result's `term` (a
+# FormulaTerm tree) and `short_name` for inspection.
+$EIGENIUS --endpoint "$ENDPOINT" query \
+    'USING INSTITUTION "urn:eigenius:institutions:symbolics" AS cap
+     FIBER cap:qc_symb_simplify {
+       expr: "urn:eigenius:demo:symbolics:expr:x_plus_0_times_1"
+     } AS ?simplified
+     RETURN [] { result: ?simplified, term: ?simplified.term }'
 echo
 
 echo "=== Demo complete ==="

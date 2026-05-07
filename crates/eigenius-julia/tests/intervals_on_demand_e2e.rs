@@ -757,7 +757,13 @@ RETURN [] {{
     let mut floats: Vec<f64> = row
         .properties()
         .values()
-        .filter_map(|v| if let Value::Float(f) = v { Some(*f) } else { None })
+        .filter_map(|v| {
+            if let Value::Float(f) = v {
+                Some(*f)
+            } else {
+                None
+            }
+        })
         .collect();
     floats.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(

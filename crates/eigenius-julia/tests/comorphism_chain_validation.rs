@@ -67,14 +67,23 @@ fn symbolics_to_intervals_comorphism_validates_cleanly() {
         ctx.commit(label).expect("commit");
     }
 
-    // The Comorphism, both formats, the identity Lambda, and the
-    // IntervalFunction class must all be present on the head layer.
+    // The Comorphism, both formats, the identity Lambda, the
+    // IntervalFunction class, and the Symbolics deeper-surface
+    // QueryClasses + their input classes must all be present on the
+    // head layer.
     for required in [
         "urn:eigenius:intervals:IntervalFunction",
         "urn:eigenius:symbolics:formats:ef_symb_expr",
         "urn:eigenius:intervals:formats:if_intv_function",
         "urn:eigenius:comorphisms:symbolics_to_intervals:m_id_formula_term",
         "urn:eigenius:comorphisms:symbolics_to_intervals",
+        // Phase 19d.3 — Symbolics deeper surface.
+        "urn:eigenius:symbolics:SimplifyRequest",
+        "urn:eigenius:symbolics:EquivalenceCheck",
+        "urn:eigenius:symbolics:signatures:simplify_expression",
+        "urn:eigenius:symbolics:signatures:check_equivalence",
+        "urn:eigenius:symbolics:query_classes:qc_symb_simplify",
+        "urn:eigenius:symbolics:query_classes:qc_symb_check_equivalence",
     ] {
         assert!(
             ctx.head().resolve(&iri(required)).is_some(),
