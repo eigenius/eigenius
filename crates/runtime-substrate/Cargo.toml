@@ -22,6 +22,7 @@ docker-spawner = ["dep:bollard", "dep:tokio", "dep:futures-util"]
 
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
+eigenius-config = { path = "../eigenius-config" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -492,13 +492,21 @@ pub async fn env_build(
     // doing that from inside this `async` CLI context would panic with
     // "Cannot start a runtime from within a runtime", so the whole
     // sync subtree runs on a blocking thread.
+    let substrate_config = match eigenius_config::Loader::new().load() {
+        Ok(c) => c.substrate,
+        Err(e) => {
+            eprintln!("eigenius-config load failed: {e}");
+            std::process::exit(1);
+        }
+    };
     let depot_for_blocking = depot_path.clone();
     let worker_dir_for_blocking = worker_dir.clone();
     let base_image_for_blocking = base_image.to_string();
     let digest = match tokio::task::spawn_blocking(move || {
         let spawner = eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
-            eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(
+            eigenius_runtime_substrate::spawner::DockerSpawnerConfig::from_substrate_config(
                 depot_for_blocking.clone(),
+                &substrate_config,
             ),
         )
         .map_err(|e| {

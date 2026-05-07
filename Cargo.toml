@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "kernel",
+    "crates/eigenius-config",
     "crates/runtime-substrate",
     "crates/eigenius-julia",
     "crates/wasm-runtime",

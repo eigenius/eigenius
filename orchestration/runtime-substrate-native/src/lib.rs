@@ -49,6 +49,7 @@
 
 #![deny(clippy::all)]
 
+use eigenius_config::Loader as ConfigLoader;
 use eigenius_julia::JuliaLanguageRuntime;
 use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
 use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
@@ -134,8 +135,17 @@ pub fn register_julia_language_runtime(
     base_image_ref: String,
     depot_path: String,
 ) -> Result<()> {
+    // Load substrate config so daemon-socket / registry overrides
+    // declared in `eigenius.toml` (or `EIGENIUS_DOCKER_DAEMON_SOCKET`)
+    // flow through to the spawner without code edits.
+    let config = ConfigLoader::new()
+        .load()
+        .map_err(|e| into_napi_err(format!("eigenius-config load: {e}")))?;
+
     let depot = PathBuf::from(&depot_path);
-    let spawner = DockerServiceSpawner::new(DockerSpawnerConfig::new(depot.clone()))
+    let spawner_config =
+        DockerSpawnerConfig::from_substrate_config(depot.clone(), &config.substrate);
+    let spawner = DockerServiceSpawner::new(spawner_config)
         .map_err(|e| into_napi_err(format!("DockerServiceSpawner::new: {e}")))?;
     let runtime = JuliaLanguageRuntime::new(
         PathBuf::from(worker_project_dir),

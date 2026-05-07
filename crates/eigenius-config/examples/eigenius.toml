@@ -1,0 +1,47 @@
+# Eigenius platform configuration.
+#
+# This file is loaded by `eigenius-config`'s layered loader at
+# subsystem startup. Resolution order, lowest precedence first:
+#
+#   1. Schema defaults (the values shown commented-out below).
+#   2. This file (search path:
+#      $EIGENIUS_CONFIG → ./eigenius.toml → ~/.config/eigenius/config.toml).
+#   3. Environment variables (`EIGENIUS_<SECTION>_<FIELD>`, e.g.
+#      `EIGENIUS_DOCKER_DAEMON_SOCKET`).
+#   4. Construction-time overrides passed by tests / programmatic
+#      callers.
+#
+# Per-spawn env vars (`EIGENIUS_RUNTIME_ENV_DIGEST`,
+# `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH`, …) are deliberately *not*
+# managed here — they are per-invocation parameters the substrate
+# sets when spawning workers, read directly by the worker bootstrap.
+
+# ─── Image build / registry ──────────────────────────────────────
+#
+# v1 of the substrate pushes built env images to the local Docker
+# daemon only (via `buildah push docker-archive: → docker load`).
+# These fields are reserved for the future registry-push path and
+# have no consumer today; leaving them unset keeps the local-only
+# behaviour.
+
+[substrate.image]
+# registry_url            = "registry.example.com:5000"
+# registry_credentials_env = "EIGENIUS_REGISTRY_TOKEN"
+
+# ─── Docker spawner ──────────────────────────────────────────────
+#
+# Used by `DockerServiceSpawner` (the dev / single-node backend).
+# Override `daemon_socket` for rootless Docker (`$XDG_RUNTIME_DIR/docker.sock`)
+# or for macOS (`~/.docker/run/docker.sock`).
+
+[substrate.docker]
+# daemon_socket = "/var/run/docker.sock"
+
+# ─── Local-subprocess spawner ────────────────────────────────────
+#
+# Used by `LocalServiceSpawner`. The Julia binary is the fallback
+# when a `WorkerSpec` doesn't carry an explicit command — current
+# code always supplies one, so this is forward-looking.
+
+[substrate.local]
+# julia_binary = "julia"

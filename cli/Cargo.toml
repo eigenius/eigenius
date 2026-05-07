@@ -15,6 +15,7 @@ eigenius-storage-rocksdb = { path = "../storage/rocksdb" }
 # generation client-side via a RemoteChainAccessor over gRPC.
 eigenius-julia = { path = "../crates/eigenius-julia" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
+eigenius-config = { path = "../crates/eigenius-config" }
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 humantime = "2"
