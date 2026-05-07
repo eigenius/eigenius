@@ -22,6 +22,17 @@
   },
 
   {
+    "@id": "urn:eigenius:intervals:formats:if_intv_function",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_intv_function",
+    "urn:eigenius:core:description": "Typed inbound constructor for `IntervalFunction`: reifies a `formulas:FormulaTerm` payload as the `term` field of a fresh IntervalFunction (D14 §4.3). Target side of the identity Comorphism Symbolics → IntervalArithmetic — every other institution producing FormulaTerm payloads reuses this same import.",
+    "urn:eigenius:institution:to_class": "urn:eigenius:intervals:IntervalFunction",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:formulas:FormulaTerm",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:intervals:procedures:reify_function"
+  },
+
+  {
     "@id": "urn:eigenius:intervals:query_classes:bounded_by_validity",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
     "urn:eigenius:core:short_name": "bounded_by_validity",

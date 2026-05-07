@@ -22,6 +22,17 @@
   },
 
   {
+    "@id": "urn:eigenius:symbolics:formats:ef_symb_expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_symb_expr",
+    "urn:eigenius:core:description": "Typed outbound view of `SymbolicExpression`: extracts the `term` field as a `formulas:FormulaTerm` payload (D14 §4.2). Source side of the identity Comorphism Symbolics → IntervalArithmetic — every other numerical institution that consumes FormulaTerm reuses this same export.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:formulas:FormulaTerm",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:procedures:extract_term"
+  },
+
+  {
     "@id": "urn:eigenius:symbolics:query_classes:simplifies_to_validity",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
     "urn:eigenius:core:short_name": "simplifies_to_validity",
