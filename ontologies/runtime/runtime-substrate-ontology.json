@@ -429,10 +429,13 @@
   {
     "@id": "urn:eigenius:runtime:mirrored_classes",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The Eigon class IRIs this mirror covers. Used by the boundary check to confirm an input class has a corresponding mirror struct.",
+    "urn:eigenius:core:description": "The Eigon class and inductive-type IRIs this mirror covers. Used by the boundary check to confirm an input class or inductive value has a corresponding mirror struct. Accepts both `core:Class` and `core:InductiveType` references because mirror generation emits abstract+struct pairs for both kinds (D32 §3.6).",
     "urn:eigenius:core:short_name": "mirrored_classes",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:core:InductiveType"
+    ],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
   },
   {

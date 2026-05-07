@@ -76,6 +76,16 @@ const TARGET_PACKAGE_UUID: &str = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d";
 /// `julia/common/EigeniusJuliaCommon/Project.toml`.
 const COMMON_PACKAGE_UUID: &str = "9c8e7a4e-1f2b-4c3d-9e5f-6a7b8c9d0e1f";
 
+/// UUID of the third-party `CBOR.jl` package — the same registry
+/// UUID the worker's project pins (see
+/// `julia/runtime-worker/Project.toml`). The mirror module imports
+/// `CBOR` only to reference `CBOR.Tag` in the inductive-decoder
+/// tag-peeling overload (D32 §3.7 / Phase 19d.0.c); without it,
+/// dispatching a chain-side `Value::Json` payload (which Eigon-CBOR
+/// wraps in tag `27182`) into a `decode_<T>(d::AbstractDict)` method
+/// fails to match.
+const CBOR_PACKAGE_UUID: &str = "7f3e1038-61bc-5414-967e-017c9d82adda";
+
 const TARGET_PACKAGE_VERSION: &str = "0.1.0";
 
 // Core ontology IRIs the generator reads. Pinned as constants so a
@@ -302,6 +312,7 @@ fn emit_project_toml() -> String {
          \n\
          [deps]\n\
          EigeniusJuliaCommon = \"{COMMON_PACKAGE_UUID}\"\n\
+         CBOR = \"{CBOR_PACKAGE_UUID}\"\n\
          \n\
          [compat]\n\
          julia = \"1.10\"\n",
@@ -620,6 +631,12 @@ enum JuliaType {
     Primitive(&'static str),
     /// Reference to another mirror struct by class IRI.
     StructRef(Iri),
+    /// Reference to a chain-committed `InductiveType` (D32 §3.6).
+    /// Emitted for properties whose `data_type` is `core:inductive`.
+    /// Renders as the inductive's bare short_name (e.g. `FormulaTerm`)
+    /// — the Julia abstract type the per-ctor concrete structs
+    /// extend, accepted polymorphically as a struct field type.
+    InductiveRef(Iri),
     /// `Union{<C₁>, …, <Cₙ>}` — emitted when a `core:resource` (or
     /// the inner element of a `core:resource_array`) lists more than
     /// one class in `class_types`. IRIs are stored in IRI-sort order
@@ -635,10 +652,18 @@ impl JuliaType {
     /// `Abstract<C>` slot from the abstract+struct pair (D29 §7), so
     /// fields uniformly accept any concrete subtype of the declared
     /// class.
-    fn render(&self, class_lookup: &BTreeMap<Iri, String>) -> String {
+    fn render(
+        &self,
+        class_lookup: &BTreeMap<Iri, String>,
+        inductive_lookup: &BTreeMap<Iri, String>,
+    ) -> String {
         match self {
             JuliaType::Primitive(s) => (*s).to_string(),
             JuliaType::StructRef(iri) => class_abstract_name(iri, class_lookup),
+            JuliaType::InductiveRef(iri) => inductive_lookup
+                .get(iri)
+                .cloned()
+                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str())),
             JuliaType::UnionRef(iris) => {
                 let inners: Vec<String> = iris
                     .iter()
@@ -647,17 +672,21 @@ impl JuliaType {
                 format!("Union{{{}}}", inners.join(", "))
             }
             JuliaType::Vector(inner) => {
-                format!("Vector{{{}}}", inner.render(class_lookup))
+                format!("Vector{{{}}}", inner.render(class_lookup, inductive_lookup))
             }
         }
     }
 
     /// Class IRIs the type references — drives the closure walker,
     /// topological sort, and Union-helper leaves enumeration.
+    /// `InductiveRef` deliberately returns nothing: inductives don't
+    /// gate the class topological sort (their forward-declared
+    /// abstract types are emitted before any concrete struct).
     fn struct_refs(&self) -> Vec<Iri> {
         match self {
             JuliaType::Primitive(_) => Vec::new(),
             JuliaType::StructRef(iri) => vec![iri.clone()],
+            JuliaType::InductiveRef(_) => Vec::new(),
             JuliaType::UnionRef(iris) => iris.clone(),
             JuliaType::Vector(inner) => inner.struct_refs(),
         }
@@ -1359,6 +1388,24 @@ fn resolve_property_type(
             let inner = struct_or_union_ref(prop_def, prop_iri, TYPE_RESOURCE_ARRAY)?;
             Ok(JuliaType::Vector(Box::new(inner)))
         }
+        TYPE_INDUCTIVE => {
+            // D32 §3.5: a `core:inductive` property's `class_types`
+            // declares exactly one InductiveType IRI. The Julia field
+            // is typed at that inductive's abstract type — concrete
+            // ctor structs subtype it polymorphically.
+            let mut class_types = iri_array(prop_def, PROP_CLASS_TYPES);
+            if class_types.len() != 1 {
+                return Err(MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: prop_iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: format!(
+                        "data_type `{TYPE_INDUCTIVE}` requires exactly one `{PROP_CLASS_TYPES}` entry, got {}",
+                        class_types.len(),
+                    ),
+                });
+            }
+            Ok(JuliaType::InductiveRef(class_types.remove(0)))
+        }
         TYPE_VALUE_ARRAY => {
             let element_type =
                 resource_iri_value(prop_def, PROP_ELEMENT_TYPE).ok_or_else(|| {
@@ -1472,6 +1519,14 @@ fn emit_module(
         .values()
         .map(|d| (d.iri.clone(), d.short_name.clone()))
         .collect();
+    // Parallel lookup for InductiveType IRIs → their Julia abstract
+    // names (e.g. `formulas:FormulaTerm` → `"FormulaTerm"`). Used by
+    // `JuliaType::InductiveRef::render` for `core:inductive`-typed
+    // class fields.
+    let inductive_lookup: BTreeMap<Iri, String> = inductive_decls
+        .values()
+        .map(|d| (d.iri.clone(), d.short_name.clone()))
+        .collect();
 
     let mut s = String::new();
     s.push_str("# Auto-generated by eigon-julia-gen — DO NOT EDIT.\n");
@@ -1485,7 +1540,12 @@ fn emit_module(
     s.push_str(&format!("module {TARGET_MODULE_NAME}\n\n"));
 
     s.push_str("using EigeniusJuliaCommon: validate_min_value, validate_max_value, ");
-    s.push_str("validate_min_length, validate_max_length, validate_pattern, validate_format\n\n");
+    s.push_str("validate_min_length, validate_max_length, validate_pattern, validate_format\n");
+    // `CBOR` is needed by the inductive-decoder tag-peeling overload
+    // (D32 §3.7) — `Value::Json` payloads land wrapped in
+    // `CBOR.Tag(27182, ...)` per `eigon_cbor::EIGENIUS_JSON_TAG`, and
+    // the inductive `decode_<T>(t::CBOR.Tag)` method peels them.
+    s.push_str("using CBOR\n\n");
 
     // Phase 1: emit abstract type declarations in subclass_of-topo
     // order. Every class C produces `abstract type AbstractC end`
@@ -1532,7 +1592,7 @@ fn emit_module(
     for iri in struct_order {
         let decl = decls.get(iri).expect("struct order references decls");
         let layout = layouts.get(iri).expect("layout for every class");
-        emit_struct(&mut s, decl, layout, &class_lookup);
+        emit_struct(&mut s, decl, layout, &class_lookup, &inductive_lookup);
         s.push('\n');
         // D29 §8.3: emit per-field codec helpers for any property
         // whose type has more than one concrete leaf in the closure.
@@ -1548,9 +1608,23 @@ fn emit_module(
             emit_union_helpers(&mut s, decl, layout, concrete_descendants, &class_lookup);
             s.push('\n');
         }
-        emit_decoder(&mut s, decl, layout, concrete_descendants, &class_lookup);
+        emit_decoder(
+            &mut s,
+            decl,
+            layout,
+            concrete_descendants,
+            &class_lookup,
+            &inductive_lookup,
+        );
         s.push('\n');
-        emit_encoder(&mut s, decl, layout, concrete_descendants, &class_lookup);
+        emit_encoder(
+            &mut s,
+            decl,
+            layout,
+            concrete_descendants,
+            &class_lookup,
+            &inductive_lookup,
+        );
         s.push('\n');
     }
 
@@ -1727,6 +1801,19 @@ fn emit_inductive(out: &mut String, ind: &InductiveDecl) {
         out.push_str("end\n\n");
     }
 
+    // Tag-peeling overload: Eigon-CBOR wraps `Value::Json` payloads
+    // (which is how chain-side inductive values land on the wire) in
+    // `CBOR.Tag(27182, ...)`. The class-decoder path doesn't see this
+    // because chain Resources serialize as plain CBOR maps; inductive
+    // values do because the codec uses the tag to distinguish opaque
+    // JSON from typed Resources. Peel the wrapper here so callers
+    // can hand us either shape — see `EIGENIUS_JSON_TAG` in
+    // `kernel/src/ontology/eigon_cbor.rs`.
+    out.push_str(&format!(
+        "decode_{name}(t::CBOR.Tag)::{name} = decode_{name}(t.data)\n\n",
+        name = ind.short_name,
+    ));
+
     // Decoder: dispatches on `d["ctor"]`, recurses into args via the
     // worker-side `_eigenius_decoders` registry (keyed by IRI) for
     // any nested inductive arg types, primitive accessors for
@@ -1876,6 +1963,7 @@ fn emit_struct(
     decl: &ClassDecl,
     layout: &ClassLayout,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
 ) {
     let parent_clause = format!(" <: {}", class_abstract_name(&decl.iri, class_lookup));
     out.push_str(&format!("struct {}{}\n", decl.short_name, parent_clause));
@@ -1883,14 +1971,14 @@ fn emit_struct(
         out.push_str(&format!(
             "    {}::{}\n",
             prop.short_name,
-            prop.julia_type.render(class_lookup)
+            prop.julia_type.render(class_lookup, inductive_lookup)
         ));
     }
     for prop in &layout.recommends {
         out.push_str(&format!(
             "    {}::Union{{{}, Nothing}}\n",
             prop.short_name,
-            prop.julia_type.render(class_lookup)
+            prop.julia_type.render(class_lookup, inductive_lookup)
         ));
     }
     // D29 §8.4: `_id` is the mirror-managed @id round-trip slot.
@@ -1900,7 +1988,7 @@ fn emit_struct(
         "    {RESERVED_FIELD_ID}::Union{{String, Nothing}}\n"
     ));
     out.push('\n');
-    emit_inner_constructor(out, decl, layout, class_lookup);
+    emit_inner_constructor(out, decl, layout, class_lookup, inductive_lookup);
     out.push_str("end\n");
 }
 
@@ -1915,6 +2003,7 @@ fn emit_inner_constructor(
     decl: &ClassDecl,
     layout: &ClassLayout,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
 ) {
     out.push_str(&format!("    function {}(\n", decl.short_name));
 
@@ -1936,7 +2025,7 @@ fn emit_inner_constructor(
         out.push_str(&format!(
             "        {}::{}{trailer}\n",
             prop.short_name,
-            prop.julia_type.render(class_lookup)
+            prop.julia_type.render(class_lookup, inductive_lookup)
         ));
     }
     // Edge case: zero required fields. Julia needs `;` to open the
@@ -1948,7 +2037,7 @@ fn emit_inner_constructor(
         out.push_str(&format!(
             "        {}::Union{{{}, Nothing}} = nothing,\n",
             prop.short_name,
-            prop.julia_type.render(class_lookup)
+            prop.julia_type.render(class_lookup, inductive_lookup)
         ));
     }
     // `_id` last among kwargs (D29 §8.4).
@@ -2073,6 +2162,7 @@ fn emit_decoder(
     layout: &ClassLayout,
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
 ) {
     let cls = &decl.short_name;
     out.push_str(&format!("function decode_{cls}(m::AbstractDict)::{cls}\n"));
@@ -2095,6 +2185,7 @@ fn emit_decoder(
                 prop,
                 cls,
                 class_lookup,
+                inductive_lookup,
                 concrete_descendants,
                 /* required = */ true
             )
@@ -2113,6 +2204,7 @@ fn emit_decoder(
                 prop,
                 cls,
                 class_lookup,
+                inductive_lookup,
                 concrete_descendants,
                 /* required = */ false
             )
@@ -2132,6 +2224,7 @@ fn decode_property_expr(
     prop: &PropertyDecl,
     class_short: &str,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
     required: bool,
 ) -> String {
@@ -2143,6 +2236,7 @@ fn decode_property_expr(
             class_short,
             &prop.short_name,
             class_lookup,
+            inductive_lookup,
             concrete_descendants,
         )
     } else {
@@ -2154,6 +2248,7 @@ fn decode_property_expr(
             class_short,
             &prop.short_name,
             class_lookup,
+            inductive_lookup,
             concrete_descendants,
         );
         format!("(let _v = {raw}; isnothing(_v) ? nothing : ({inner}) end)")
@@ -2173,6 +2268,7 @@ fn decode_value_expr(
     class_short: &str,
     field_short: &str,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
 ) -> String {
     if let JuliaType::Primitive(name) = t {
@@ -2186,12 +2282,30 @@ fn decode_value_expr(
         // shape doesn't match the declared primitive.
         return primitive_coerce_expr(name, expr);
     }
+    if let JuliaType::InductiveRef(iri) = t {
+        // D32 §3.6: inductive-typed field decodes via the inductive's
+        // emitted `decode_<T>` (which dispatches on the value tree's
+        // `ctor`). The decoder is in the same module, so a direct
+        // call resolves at compile time.
+        let short = inductive_lookup
+            .get(iri)
+            .cloned()
+            .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+        return format!("decode_{short}({expr})");
+    }
     if let JuliaType::Vector(inner) = t {
         if let JuliaType::Primitive(name) = inner.as_ref() {
             return format!("[{} for _x in {expr}]", primitive_coerce_expr(name, "_x"));
         }
         if matches!(inner.as_ref(), JuliaType::Vector(_)) {
             return format!("# TODO: nested Vector decode unsupported in v1\n        {expr}");
+        }
+        if let JuliaType::InductiveRef(iri) = inner.as_ref() {
+            let short = inductive_lookup
+                .get(iri)
+                .cloned()
+                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+            return format!("[decode_{short}(_x) for _x in {expr}]");
         }
         let leaves = type_leaves(inner.as_ref(), concrete_descendants);
         if leaves.len() == 1 {
@@ -2229,6 +2343,7 @@ fn emit_encoder(
     layout: &ClassLayout,
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
 ) {
     let cls = &decl.short_name;
     out.push_str(&format!(
@@ -2248,6 +2363,7 @@ fn emit_encoder(
             cls,
             &prop.short_name,
             class_lookup,
+            inductive_lookup,
             concrete_descendants,
         );
         out.push_str(&format!("        {key} => {value},\n"));
@@ -2262,6 +2378,7 @@ fn emit_encoder(
             cls,
             field,
             class_lookup,
+            inductive_lookup,
             concrete_descendants,
         );
         out.push_str(&format!(
@@ -2284,10 +2401,18 @@ fn encode_value_expr(
     class_short: &str,
     field_short: &str,
     class_lookup: &BTreeMap<Iri, String>,
+    inductive_lookup: &BTreeMap<Iri, String>,
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
 ) -> String {
     if let JuliaType::Primitive(_) = t {
         return expr.to_string();
+    }
+    if let JuliaType::InductiveRef(iri) = t {
+        let short = inductive_lookup
+            .get(iri)
+            .cloned()
+            .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+        return format!("encode_{short}({expr})");
     }
     if let JuliaType::Vector(inner) = t {
         if matches!(inner.as_ref(), JuliaType::Primitive(_)) {
@@ -2295,6 +2420,13 @@ fn encode_value_expr(
         }
         if matches!(inner.as_ref(), JuliaType::Vector(_)) {
             return format!("# TODO: nested Vector encode unsupported in v1\n        {expr}");
+        }
+        if let JuliaType::InductiveRef(iri) = inner.as_ref() {
+            let short = inductive_lookup
+                .get(iri)
+                .cloned()
+                .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
+            return format!("[encode_{short}(_x) for _x in {expr}]");
         }
         let leaves = type_leaves(inner.as_ref(), concrete_descendants);
         if leaves.len() == 1 {
@@ -2911,6 +3043,7 @@ mod tests {
 module EigeniusMirror
 
 using EigeniusJuliaCommon: validate_min_value, validate_max_value, validate_min_length, validate_max_length, validate_pattern, validate_format
+using CBOR
 
 abstract type AbstractAssayProtocol end
 abstract type AbstractAssayResult end

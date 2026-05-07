@@ -1,0 +1,53 @@
+[
+  {
+    "@id": "urn:eigenius:symbolics:SymbolicExpression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicExpression",
+    "urn:eigenius:core:description": "A symbolic-algebra expression. Carries its term as a `formulas:FormulaTerm` value (D32 §4) — the shared formula language across every numerical institution. The Symbolics institution decodes the FormulaTerm into Symbolics.Num via the generated mirror, performs the requested operation (simplify, substitute, …), and re-encodes the result.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:term"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "term",
+    "urn:eigenius:core:description": "The expression's typed term — a FormulaTerm value (D32 §4). The chain validator type-checks the value against FormulaTerm's ctor schema at commit time; the mirror generator emits a typed Julia field whose value the worker decodes via `decode_FormulaTerm`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicExpression"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SimplifiesTo",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SimplifiesTo",
+    "urn:eigenius:core:description": "Claim that one symbolic expression simplifies to another under the institution's pinned rewriter configuration. Validated by re-running `Symbolics.simplify` on the source side and confirming the result equals the claimed simplified form. `Holds` when the simplifier converges to the claimed form; `Undecidable` otherwise (Symbolics 7's `simplify` is heuristic — D27 §4.1.1 — so non-equality of simplified-form representations does not imply algebraic non-equivalence).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:expr",
+      "urn:eigenius:symbolics:simplified"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expr",
+    "urn:eigenius:core:description": "Source expression of a SimplifiesTo claim — the term whose simplified form the claim asserts.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SimplifiesTo"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:simplified",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "simplified",
+    "urn:eigenius:core:description": "Claimed simplified form of a SimplifiesTo claim — what the source expression is asserted to reduce to.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SimplifiesTo"]
+  }
+]
