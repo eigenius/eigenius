@@ -1,0 +1,529 @@
+[
+  {
+    "@id": "urn:eigenius:formulas:FormulaTerm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "FormulaTerm",
+    "urn:eigenius:core:description": "Symbol-algebra-relevant fragment of Mini-TT Exp, lifted to the chain. The shared formula language across every numerical institution (Symbolics, IntervalArithmetic, JuMP, DiffEq, Catalyst). Constructors mirror Exp::Var / App / Lam / Pi one-for-one. Variables are introduced by Lam/Pi binders whose `ty` slot carries the variable's type — same discipline as Mini-TT itself. Free vars in an open expression are typed by the institution's ambient context (the dispatch's input typing or the operator catalog). See D32.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Var",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitFloat",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:float"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "OpRef",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "iri",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "App",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "head",
+            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "arg",
+            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Lam",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ty",
+            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pi",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ty",
+            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:Operator",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Operator",
+    "urn:eigenius:core:description": "A function symbol in the FormulaTerm language. Carries a typed Mini-TT signature so chain validation can rank-check App invocations at commit time and so cross-institution comorphisms can type-check at the chain boundary. The signature is itself a FormulaTerm value (via `Pi` ctors) so the type language dogfoods its own metasystem — types are nullary functions in this view. See D32 §5.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:formulas:operator_signature"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:formulas:operator_arity",
+      "urn:eigenius:formulas:operator_associativity",
+      "urn:eigenius:formulas:operator_commutativity"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:operator_signature",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "operator_signature",
+    "urn:eigenius:core:description": "The operator's Mini-TT type, encoded as a FormulaTerm value. Non-dependent operators use `Pi` with unnamed binders (`_`) chained left-to-right. Example for binary `add: Real -> Real -> Real`: `Pi(_, OpRef(formulas:types:Real), Pi(_, OpRef(formulas:types:Real), OpRef(formulas:types:Real)))`. The chain validator rank-checks `App(OpRef, args)` invocations against this signature.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:core:domain": ["urn:eigenius:formulas:Operator"]
+  },
+  {
+    "@id": "urn:eigenius:formulas:operator_arity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "operator_arity",
+    "urn:eigenius:core:description": "Number of arguments the operator takes. Redundant with `operator_signature` for non-dependent operators; the validator may use it as a fast-path arity check before walking the full signature.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:domain": ["urn:eigenius:formulas:Operator"]
+  },
+  {
+    "@id": "urn:eigenius:formulas:operator_associativity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "operator_associativity",
+    "urn:eigenius:core:description": "Algebraic associativity discipline. Allowed string values: `left`, `right`, `none`, `n_ary`. `n_ary` lets institutions internally flatten nested App spines (e.g. `App(App(add, a), b), c -> Add([a, b, c])`); the chain shape stays curried regardless. v1 doesn't add an `allows_only` constraint here because that property's `data_type: resource_array` would force the four values to be declared as separate Resources — overkill for a v1 enumeration.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:formulas:Operator"]
+  },
+  {
+    "@id": "urn:eigenius:formulas:operator_commutativity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "operator_commutativity",
+    "urn:eigenius:core:description": "Whether the operator is commutative under its declared algebra. Convenience for normal-form computation; not enforced by the validator.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:formulas:Operator"]
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:types:Real",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "Real",
+    "urn:eigenius:core:description": "The type of real-valued FormulaTerm expressions. Encoded as a nullary operator whose signature is itself — `Real : Real`. Same idiom Mini-TT uses internally for `Set : Set` (size-stratified at the kernel layer; flat at v1 of the chain).",
+    "urn:eigenius:formulas:operator_arity": 0,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "OpRef",
+      "args": ["urn:eigenius:formulas:types:Real"]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:types:Int",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "Int",
+    "urn:eigenius:core:description": "The type of integer-valued FormulaTerm expressions. Reserved for future numeric ladder expansion.",
+    "urn:eigenius:formulas:operator_arity": 0,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "OpRef",
+      "args": ["urn:eigenius:formulas:types:Int"]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:types:Bool",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "Bool",
+    "urn:eigenius:core:description": "The type of boolean-valued FormulaTerm expressions. Result type for comparison operators (eq, lt, le).",
+    "urn:eigenius:formulas:operator_arity": 0,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "OpRef",
+      "args": ["urn:eigenius:formulas:types:Bool"]
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:ops:add",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "add",
+    "urn:eigenius:core:description": "Binary addition: `Real -> Real -> Real`. Symbolics interprets symbolically; IntervalArithmetic via interval addition; JuMP as an objective term; etc.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_associativity": "n_ary",
+    "urn:eigenius:formulas:operator_commutativity": true,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:sub",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "sub",
+    "urn:eigenius:core:description": "Binary subtraction: `Real -> Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_associativity": "left",
+    "urn:eigenius:formulas:operator_commutativity": false,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:mul",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "mul",
+    "urn:eigenius:core:description": "Binary multiplication: `Real -> Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_associativity": "n_ary",
+    "urn:eigenius:formulas:operator_commutativity": true,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:div",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "div",
+    "urn:eigenius:core:description": "Binary division: `Real -> Real -> Real`. Singularities are the consuming institution's concern (Symbolics keeps them symbolic; IntervalArithmetic produces an empty / unbounded interval).",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_associativity": "left",
+    "urn:eigenius:formulas:operator_commutativity": false,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:pow",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "pow",
+    "urn:eigenius:core:description": "Power: `Real -> Real -> Real`. Integer exponents collapse to repeated multiplication in many institutions; the chain shape stays uniform.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_associativity": "right",
+    "urn:eigenius:formulas:operator_commutativity": false,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        }
+      ]
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:ops:neg",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "neg",
+    "urn:eigenius:core:description": "Unary negation: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:exp",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "exp",
+    "urn:eigenius:core:description": "Exponential: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:log",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "log",
+    "urn:eigenius:core:description": "Natural logarithm: `Real -> Real`. Domain restrictions belong to the consuming institution.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:sin",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "sin",
+    "urn:eigenius:core:description": "Sine: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:cos",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "cos",
+    "urn:eigenius:core:description": "Cosine: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:tan",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "tan",
+    "urn:eigenius:core:description": "Tangent: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:sqrt",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "sqrt",
+    "urn:eigenius:core:description": "Square root: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:abs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "abs",
+    "urn:eigenius:core:description": "Absolute value: `Real -> Real`.",
+    "urn:eigenius:formulas:operator_arity": 1,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+      ]
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:ops:eq",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "eq",
+    "urn:eigenius:core:description": "Equality: `Real -> Real -> Bool`. Reserved for the Decidable role on comparison-shaped predicates.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_commutativity": true,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Bool"]}
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:lt",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "lt",
+    "urn:eigenius:core:description": "Strict less-than: `Real -> Real -> Bool`.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_commutativity": false,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Bool"]}
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "@id": "urn:eigenius:formulas:ops:le",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "le",
+    "urn:eigenius:core:description": "Less-than-or-equal: `Real -> Real -> Bool`.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_commutativity": false,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "_",
+        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Bool"]}
+          ]
+        }
+      ]
+    }
+  },
+
+  {
+    "@id": "urn:eigenius:formulas:ops:derivative",
+    "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+    "urn:eigenius:core:short_name": "derivative",
+    "urn:eigenius:core:description": "Differentiation evaluated at a point: `(Real -> Real) -> Real -> Real`. Symbolics interprets symbolically (returning the derivative as a closed form); IntervalArithmetic interprets via interval-Newton; numerical institutions evaluate by finite differences with declared step.",
+    "urn:eigenius:formulas:operator_arity": 2,
+    "urn:eigenius:formulas:operator_signature": {
+      "ctor": "Pi",
+      "args": [
+        "f",
+        {
+          "ctor": "Pi",
+          "args": [
+            "_",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        },
+        {
+          "ctor": "Pi",
+          "args": [
+            "x",
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
+          ]
+        }
+      ]
+    }
+  }
+]

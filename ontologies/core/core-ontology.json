@@ -188,6 +188,7 @@
       "urn:eigenius:core:resource_array",
       "urn:eigenius:core:value_array",
       "urn:eigenius:core:json",
+      "urn:eigenius:core:inductive",
       "urn:eigenius:core:template"
     ]
   },
@@ -256,10 +257,13 @@
   {
     "@id": "urn:eigenius:core:class_types",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Allowed classes for resource or resource_array property values. Values must be instances of at least one listed class (including subclasses).",
+    "urn:eigenius:core:description": "Allowed classes for resource, resource_array, or inductive property values. For `data_type: core:resource(_array)` the listed IRIs must be `core:Class` references (instances must be subclasses); for `data_type: core:inductive` the listed IRI must be a `core:InductiveType` reference (D32 §3.5).",
     "urn:eigenius:core:short_name": "class_types",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:core:InductiveType"
+    ],
     "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
   },
   {
@@ -415,6 +419,12 @@
     "urn:eigenius:core:short_name": "json"
   },
   {
+    "@id": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "A typed inductive value — a tagged dict `{ \"ctor\": <ctor_name>, \"args\": [<arg_value>, ...] }` whose ctor is declared on a referenced InductiveType. The property's `class_types` must contain exactly one InductiveType IRI (D32 §3.5); the validator walks the value tree against the InductiveType's ctors and arg_types at commit time. The wire shape is opaque JSON to surrounding chain queries; institutions decode it into their target language for evaluation.",
+    "urn:eigenius:core:short_name": "inductive"
+  },
+  {
     "@id": "urn:eigenius:core:template",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
     "urn:eigenius:core:description": "A prompt template string with {{property_iri}} substitution patterns. The template's property references form a dependent type that determines input requirements.",
@@ -539,9 +549,10 @@
   {
     "@id": "urn:eigenius:core:InductiveArgType",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A constructor-argument type: a parameterised name reference. `type_name` is either a class IRI (Nat, ex:Foo) or a bare parameter name from the enclosing inductive's type parameters (e.g. `A` in List(A)). `type_args` carries the parameters when the reference itself is parametric (e.g. `List(A)`).",
+    "urn:eigenius:core:description": "A constructor-argument type: a parameterised name reference. `type_name` is either a class IRI (Nat, ex:Foo) or a bare parameter name from the enclosing inductive's type parameters (e.g. `A` in List(A)). `type_args` carries the parameters when the reference itself is parametric (e.g. `List(A)`). `arg_name` is an optional readable slot name used by JSON-authored ontologies and mirror generators.",
     "urn:eigenius:core:short_name": "InductiveArgType",
-    "urn:eigenius:core:requires": ["urn:eigenius:core:type_name"]
+    "urn:eigenius:core:requires": ["urn:eigenius:core:type_name"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:core:arg_name"]
   },
   {
     "@id": "urn:eigenius:core:InductiveParam",
@@ -596,6 +607,14 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Either a class IRI or a bare parameter name from the enclosing inductive's type parameters.",
     "urn:eigenius:core:short_name": "type_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
+  },
+  {
+    "@id": "urn:eigenius:core:arg_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional readable name for an InductiveArgType slot (e.g. `head`, `tail`, `name`, `body`). Mirror generators use it for typed-language struct field names; chain readers use it for diagnostics. ESL-compiled inductives may omit it (the compiler carries the source-position pattern through other channels). Recommended-not-required so existing ESL-emitted ctors continue to validate.",
+    "urn:eigenius:core:short_name": "arg_name",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
   },

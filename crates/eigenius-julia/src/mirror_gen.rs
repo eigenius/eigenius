@@ -103,6 +103,22 @@ const TYPE_RESOURCE: &str = "urn:eigenius:core:resource";
 const TYPE_RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
 const TYPE_VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
 const TYPE_JSON: &str = "urn:eigenius:core:json";
+/// `data_type` IRI declaring a property carries an inductive value
+/// (D32 §3.5). The property's `class_types` declares which
+/// `core:InductiveType` the value is shaped against; the closure walker
+/// mirrors that InductiveType into Julia (§4.2 of this module).
+const TYPE_INDUCTIVE: &str = "urn:eigenius:core:inductive";
+
+/// Property IRIs on `InductiveType` / `InductiveCtor` / `InductiveArgType`
+/// that the mirror generator reads to emit Julia for an inductive
+/// declaration. Pinned as constants so an ontology rename surfaces as
+/// a compile-time edit rather than a silent drift.
+const PROP_CTORS: &str = "urn:eigenius:core:ctors";
+const PROP_CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
+const PROP_ARG_TYPES: &str = "urn:eigenius:core:arg_types";
+const PROP_TYPE_NAME: &str = "urn:eigenius:core:type_name";
+const PROP_ARG_NAME: &str = "urn:eigenius:core:arg_name";
+const CLASS_INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
 
 /// Property IRI we stamp on every encoded resource so the receiver can
 /// re-validate the class. Mirrors the kernel's `is_a` convention.
@@ -198,13 +214,24 @@ impl MirrorGenerator for JuliaMirrorGenerator {
     ) -> Result<MirrorGenerationOutput, MirrorGeneratorError> {
         // 1. Collect closure: walk seed_classes transitively through
         //    resource-typed properties' class_types and through every
-        //    class's `subclass_of` ancestors (D29 §3.1, §3.2).
-        let closure = walk_closure(request)?;
+        //    class's `subclass_of` ancestors (D29 §3.1, §3.2). The
+        //    walker classifies each visited IRI as either a `Class`
+        //    (mirrored as Julia structs, the existing pipeline) or an
+        //    `InductiveType` (D32 §3.6 — mirrored as abstract +
+        //    per-ctor structs in the parallel pipeline below).
+        let ClosureResult {
+            classes: closure,
+            inductives: inductive_closure,
+        } = walk_closure(request)?;
 
         // 2. Resolve each class in the closure and gather its property
         //    metadata. Indexed by class IRI for stable lookup.
         //    Multi-supertype classes are rejected at this step.
         let class_decls = resolve_class_declarations(request, &closure)?;
+
+        // 2b. Same for inductives — pull each `InductiveType` resource
+        //     into its `InductiveDecl` projection.
+        let inductive_decls = resolve_inductive_declarations(request, &inductive_closure)?;
 
         // 3. Compute the transitive field layout per class (own +
         //    inherited via subclass_of, deduplicated by property IRI
@@ -234,12 +261,20 @@ impl MirrorGenerator for JuliaMirrorGenerator {
             &abstract_order,
             &struct_order,
             &concrete_descendants,
+            &inductive_decls,
             request,
         );
         let project_toml = emit_project_toml();
 
+        // The mirrored set is the union — Class struct order plus
+        // every inductive's IRI in stable BTreeSet order. Both kinds
+        // are content-addressed via the same library_content_hash.
+        let mut mirrored = struct_order.to_vec();
+        for ind in inductive_decls.values() {
+            mirrored.push(ind.iri.clone());
+        }
         Ok(MirrorGenerationOutput {
-            mirrored_classes: struct_order.to_vec(),
+            mirrored_classes: mirrored,
             library: LibraryContent::Embedded(vec![
                 LibraryFile {
                     path: TARGET_PROJECT_TOML_PATH.to_string(),
@@ -489,6 +524,41 @@ struct ClassDecl {
     subclass_of: Option<Iri>,
 }
 
+/// Inductive type declaration in the form the emitter consumes
+/// (D32 §3.6). Built from a chain `core:InductiveType` resource by
+/// [`resolve_inductive_declarations`]. A future parametric extension
+/// would carry `type_params` here; v1 covers monomorphic inductives.
+struct InductiveDecl {
+    iri: Iri,
+    short_name: String,
+    ctors: Vec<InductiveCtorDecl>,
+}
+
+/// One ctor on an inductive type. `args` carries the ordered argument
+/// declarations from the chain's `core:arg_types` list.
+struct InductiveCtorDecl {
+    /// Ctor name as it appears in the chain JSON (e.g. `"zero"`,
+    /// `"succ"`). The emitted concrete struct's Julia name is
+    /// derived from this — see [`inductive_ctor_struct_name`].
+    ctor_name: String,
+    args: Vec<InductiveArgDecl>,
+}
+
+/// One argument slot on an inductive ctor.
+struct InductiveArgDecl {
+    /// Optional readable name from `core:arg_name` (D32 §3.2). When
+    /// absent, the emitter generates a positional fallback
+    /// (`arg_0`, `arg_1`, …).
+    arg_name: Option<String>,
+    /// Verbatim `core:type_name` string. Resolves at emit time:
+    /// primitive type IRI → Julia primitive (Float64, String, …);
+    /// InductiveType IRI → the abstract Julia type for that inductive;
+    /// Class IRI → `Any` for v1 (Class-typed arg values are not
+    /// re-validated by the inductive's decoder, only by the chain
+    /// validator).
+    type_name: String,
+}
+
 /// One property's contribution to a struct field.
 #[derive(Clone)]
 struct PropertyDecl {
@@ -643,54 +713,140 @@ fn type_leaves(
     leaves
 }
 
-fn walk_closure(request: &MirrorGenerationRequest) -> Result<BTreeSet<Iri>, MirrorGeneratorError> {
-    let mut visited: BTreeSet<Iri> = BTreeSet::new();
+/// Closure walk result — separates `Class` IRIs (mirrored as Julia
+/// structs) from `InductiveType` IRIs (mirrored as Julia abstract +
+/// per-ctor concrete structs, D32 §3.6). The two flow through parallel
+/// emission pipelines and are split here so emit-time logic doesn't
+/// have to re-classify.
+struct ClosureResult {
+    classes: BTreeSet<Iri>,
+    inductives: BTreeSet<Iri>,
+}
+
+fn walk_closure(request: &MirrorGenerationRequest) -> Result<ClosureResult, MirrorGeneratorError> {
+    let mut classes: BTreeSet<Iri> = BTreeSet::new();
+    let mut inductives: BTreeSet<Iri> = BTreeSet::new();
     let mut queue: Vec<Iri> = request.seed_classes.to_vec();
 
-    while let Some(class_iri) = queue.pop() {
-        if !visited.insert(class_iri.clone()) {
+    while let Some(iri) = queue.pop() {
+        // Already visited (in either bucket)?
+        if classes.contains(&iri) || inductives.contains(&iri) {
             continue;
         }
 
-        let class_def = request
+        let def = request
             .chain
-            .resolve(request.source_layer, &class_iri)
-            .ok_or_else(|| MirrorGeneratorError::UnknownClass(class_iri.as_str().to_string()))?;
+            .resolve(request.source_layer, &iri)
+            .ok_or_else(|| MirrorGeneratorError::UnknownClass(iri.as_str().to_string()))?;
+
+        // Classify by `is_a`. An InductiveType lives in a parallel
+        // emit pipeline; everything else is treated as a Class.
+        let is_inductive = iri_array(&def, PROP_IS_A)
+            .iter()
+            .any(|t| t.as_str() == CLASS_INDUCTIVE_TYPE);
+
+        if is_inductive {
+            inductives.insert(iri.clone());
+            // Walk arg_types[].type_name to pull in transitively-
+            // referenced inductives or classes (e.g. FormulaTerm's
+            // ctors reference FormulaTerm itself; OpRef references
+            // a Class via its iri arg). Self-references are absorbed
+            // by the visited check.
+            for ctor in resource_array(&def, PROP_CTORS) {
+                for arg_type in resource_array(&ctor, PROP_ARG_TYPES) {
+                    if let Some(tn) = string_value(&arg_type, PROP_TYPE_NAME) {
+                        if let Ok(target) = Iri::parse(&tn) {
+                            if !is_core_meta_iri(&target)
+                                && !is_core_primitive_iri(&target)
+                                && !classes.contains(&target)
+                                && !inductives.contains(&target)
+                            {
+                                queue.push(target);
+                            }
+                        }
+                    }
+                    // Recurse into nested type_args for parametric
+                    // applications — best-effort; a fully-fledged
+                    // parametric walk lands when the first parametric
+                    // chain consumer materialises.
+                }
+            }
+            continue;
+        }
+
+        classes.insert(iri.clone());
 
         // Walk required + recommended property class_types →
-        // referenced classes.
-        for prop_iri in iri_array(&class_def, PROP_REQUIRES)
+        // referenced classes / inductives.
+        for prop_iri in iri_array(&def, PROP_REQUIRES)
             .into_iter()
-            .chain(iri_array(&class_def, PROP_RECOMMENDS))
+            .chain(iri_array(&def, PROP_RECOMMENDS))
         {
             let prop_def = match request.chain.resolve(request.source_layer, &prop_iri) {
                 Some(r) => r,
                 None => continue,
             };
             for r in property_class_references(&prop_def) {
-                if is_core_meta_iri(&r) || visited.contains(&r) {
+                if is_core_meta_iri(&r) || classes.contains(&r) || inductives.contains(&r) {
                     continue;
                 }
                 queue.push(r);
             }
         }
 
-        // Walk `subclass_of` ancestors transitively (D29 §3.2). Every
-        // ancestor must also be in the closure so the abstract type
-        // hierarchy is closed under emission. Core-namespace meta
-        // classes (`Class`, `Property`, `DataType`, …) are skipped
-        // for the same reason they're skipped above: they're the
-        // type system itself, not user data, and `EigeniusJuliaCommon`
-        // already supplies whatever the mirror needs.
-        for parent in iri_array(&class_def, PROP_SUBCLASS_OF) {
-            if is_core_meta_iri(&parent) || visited.contains(&parent) {
+        // Walk `subclass_of` ancestors transitively (D29 §3.2).
+        for parent in iri_array(&def, PROP_SUBCLASS_OF) {
+            if is_core_meta_iri(&parent)
+                || classes.contains(&parent)
+                || inductives.contains(&parent)
+            {
                 continue;
             }
             queue.push(parent);
         }
     }
 
-    Ok(visited)
+    Ok(ClosureResult {
+        classes,
+        inductives,
+    })
+}
+
+/// True for the seven primitive type IRIs the validator and emitter
+/// special-case. Used by the closure walker to skip primitive-type
+/// references (they don't need mirror emission).
+fn is_core_primitive_iri(iri: &Iri) -> bool {
+    matches!(
+        iri.as_str(),
+        TYPE_STRING
+            | TYPE_INTEGER
+            | TYPE_FLOAT
+            | TYPE_BOOLEAN
+            | TYPE_RESOURCE
+            | TYPE_RESOURCE_ARRAY
+            | TYPE_VALUE_ARRAY
+            | TYPE_JSON
+            | TYPE_INDUCTIVE
+    )
+}
+
+/// Read a property whose value is an array of embedded resources.
+/// Empty when the property is missing or its value isn't an array.
+fn resource_array(r: &Resource, prop_iri: &str) -> Vec<Resource> {
+    let iri = match Iri::parse(prop_iri) {
+        Ok(i) => i,
+        Err(_) => return Vec::new(),
+    };
+    match r.get(&iri) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| match v {
+                Value::Embedded(r) => Some(r.as_ref().clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// True when `iri` lives under the `urn:eigenius:core:` namespace —
@@ -715,7 +871,13 @@ fn property_class_references(prop_def: &Resource) -> Vec<Iri> {
         None => return Vec::new(),
     };
     match dt.as_str() {
-        TYPE_RESOURCE | TYPE_RESOURCE_ARRAY => iri_array(prop_def, PROP_CLASS_TYPES),
+        // `data_type: core:inductive` (D32 §3.5) routes the same as
+        // resource-typed properties — `class_types` declares the
+        // referent (an `InductiveType`), and the closure walker pulls
+        // it into the inductive bucket via its `is_a` discriminator.
+        TYPE_RESOURCE | TYPE_RESOURCE_ARRAY | TYPE_INDUCTIVE => {
+            iri_array(prop_def, PROP_CLASS_TYPES)
+        }
         _ => Vec::new(),
     }
 }
@@ -800,6 +962,74 @@ fn resolve_subclass_of(
 struct ClassLayout {
     requires: Vec<PropertyDecl>,
     recommends: Vec<PropertyDecl>,
+}
+
+/// Resolve every `InductiveType` IRI in `closure` into an
+/// [`InductiveDecl`] suitable for the emitter (D32 §3.6). Each
+/// inductive's `ctors` and per-ctor `arg_types` are pulled in
+/// declaration order; `arg_name` is read when present (`None` falls
+/// back to positional names at emit time).
+fn resolve_inductive_declarations(
+    request: &MirrorGenerationRequest,
+    closure: &BTreeSet<Iri>,
+) -> Result<BTreeMap<Iri, InductiveDecl>, MirrorGeneratorError> {
+    let mut decls = BTreeMap::new();
+    for ind_iri in closure {
+        let def = request
+            .chain
+            .resolve(request.source_layer, ind_iri)
+            .ok_or_else(|| MirrorGeneratorError::UnknownClass(ind_iri.as_str().to_string()))?;
+
+        let short_name = string_value(&def, PROP_SHORT_NAME).ok_or_else(|| {
+            MirrorGeneratorError::UnrepresentableClass {
+                class_iri: ind_iri.as_str().to_string(),
+                language: "julia".to_string(),
+                reason: "InductiveType missing `core:short_name`".into(),
+            }
+        })?;
+
+        let mut ctors = Vec::new();
+        for ctor_res in resource_array(&def, PROP_CTORS) {
+            let ctor_name = string_value(&ctor_res, PROP_CTOR_NAME).ok_or_else(|| {
+                MirrorGeneratorError::UnrepresentableClass {
+                    class_iri: ind_iri.as_str().to_string(),
+                    language: "julia".to_string(),
+                    reason: format!(
+                        "InductiveCtor on `{}` missing `core:ctor_name`",
+                        ind_iri.as_str()
+                    ),
+                }
+            })?;
+
+            let mut args = Vec::new();
+            for arg_res in resource_array(&ctor_res, PROP_ARG_TYPES) {
+                let type_name = string_value(&arg_res, PROP_TYPE_NAME).ok_or_else(|| {
+                    MirrorGeneratorError::UnrepresentableClass {
+                        class_iri: ind_iri.as_str().to_string(),
+                        language: "julia".to_string(),
+                        reason: format!(
+                            "InductiveArgType on ctor `{ctor_name}` missing `core:type_name`"
+                        ),
+                    }
+                })?;
+                args.push(InductiveArgDecl {
+                    arg_name: string_value(&arg_res, PROP_ARG_NAME),
+                    type_name,
+                });
+            }
+            ctors.push(InductiveCtorDecl { ctor_name, args });
+        }
+
+        decls.insert(
+            ind_iri.clone(),
+            InductiveDecl {
+                iri: ind_iri.clone(),
+                short_name,
+                ctors,
+            },
+        );
+    }
+    Ok(decls)
 }
 
 /// Compute the transitive field layout for every class in `decls` by
@@ -1235,6 +1465,7 @@ fn emit_module(
     abstract_order: &[Iri],
     struct_order: &[Iri],
     concrete_descendants: &BTreeMap<Iri, BTreeSet<Iri>>,
+    inductive_decls: &BTreeMap<Iri, InductiveDecl>,
     request: &MirrorGenerationRequest,
 ) -> String {
     let class_lookup: BTreeMap<Iri, String> = decls
@@ -1276,6 +1507,26 @@ fn emit_module(
         s.push('\n');
     }
 
+    // Phase 1b (D32 §3.6): emit inductive type abstracts + concrete
+    // per-ctor structs + decode/encode functions. Inductives come
+    // *before* class structs so a class field whose `data_type` is
+    // `core:inductive` can reference the inductive's abstract type.
+    // Order is BTreeMap iteration (IRI sort) — stable but doesn't
+    // pre-resolve cross-inductive references; mutually recursive
+    // inductives use the abstract type which Julia accepts as a
+    // forward reference within a module.
+    if !inductive_decls.is_empty() {
+        // Two passes so all abstract-type forward declarations are
+        // visible before any concrete struct references them.
+        for ind in inductive_decls.values() {
+            s.push_str(&format!("abstract type {} end\n", ind.short_name));
+        }
+        s.push('\n');
+        for ind in inductive_decls.values() {
+            emit_inductive(&mut s, ind);
+        }
+    }
+
     // Phase 2: emit concrete struct + helpers + codecs per class in
     // field-dependency topo order.
     for iri in struct_order {
@@ -1313,7 +1564,8 @@ fn emit_module(
     // - `_eigenius_encoders` — concrete struct type → `encode_<C>`
     //   function. The worker dispatches on `typeof(result)` to
     //   produce the output dict.
-    if !struct_order.is_empty() {
+    let any_emission = !struct_order.is_empty() || !inductive_decls.is_empty();
+    if any_emission {
         s.push_str("const _eigenius_decoders = Dict{String, Function}(\n");
         for iri in struct_order {
             if let Some(d) = decls.get(iri) {
@@ -1323,6 +1575,15 @@ fn emit_module(
                     d.short_name
                 ));
             }
+        }
+        // Inductive types: keyed on the InductiveType IRI, decoder
+        // dispatches on the value tree's `ctor` field.
+        for ind in inductive_decls.values() {
+            s.push_str(&format!(
+                "    {} => decode_{},\n",
+                julia_string_literal(ind.iri.as_str()),
+                ind.short_name
+            ));
         }
         s.push_str(")\n\n");
 
@@ -1335,10 +1596,21 @@ fn emit_module(
                 ));
             }
         }
+        // Inductives: every concrete per-ctor struct dispatches into
+        // its inductive's encode_* function via Julia's typeof().
+        for ind in inductive_decls.values() {
+            for ctor in &ind.ctors {
+                s.push_str(&format!(
+                    "    {} => encode_{},\n",
+                    inductive_ctor_struct_name(&ind.short_name, &ctor.ctor_name),
+                    ind.short_name
+                ));
+            }
+        }
         s.push_str(")\n\n");
     }
 
-    if !struct_order.is_empty() {
+    if any_emission {
         s.push_str("export ");
         let mut exports: Vec<String> = Vec::new();
         for iri in struct_order {
@@ -1350,6 +1622,16 @@ fn emit_module(
                 exports.push(format!("decode_{}", d.short_name));
                 exports.push(format!("encode_{}", d.short_name));
             }
+        }
+        for ind in inductive_decls.values() {
+            // Inductive abstract + every concrete ctor + the
+            // encode/decode pair.
+            exports.push(ind.short_name.clone());
+            for ctor in &ind.ctors {
+                exports.push(inductive_ctor_struct_name(&ind.short_name, &ctor.ctor_name));
+            }
+            exports.push(format!("decode_{}", ind.short_name));
+            exports.push(format!("encode_{}", ind.short_name));
         }
         // Codec registries are part of the worker dispatch contract;
         // export them so the worker's introspection finds them.
@@ -1370,6 +1652,223 @@ fn emit_module(
 /// shape).
 fn property_codec_type(p: &PropertyDecl) -> &JuliaType {
     p.julia_type.vector_inner().unwrap_or(&p.julia_type)
+}
+
+/// Per-ctor concrete struct name. Convention: `<InductiveName>_<CtorName>`.
+/// Concatenation rather than camel-casing keeps the chain `ctor_name`
+/// recoverable from the Julia struct name without a normalisation table.
+fn inductive_ctor_struct_name(inductive_short: &str, ctor_name: &str) -> String {
+    format!("{inductive_short}_{ctor_name}")
+}
+
+/// Map a chain `type_name` string to the Julia type it materialises
+/// into. Primitive type IRIs get the standard primitive types; an
+/// InductiveType IRI gets the abstract type (the concrete sub-type
+/// satisfies the field). Anything else (Class IRIs, parameter names,
+/// unresolved IRIs) falls back to `Any` — Class-typed args inside an
+/// inductive ctor aren't re-typechecked at the inductive layer
+/// (they're typechecked by the chain validator on the surrounding
+/// resource); parameter-name handling lands when the first parametric
+/// inductive consumer materialises.
+fn inductive_arg_julia_type(
+    type_name: &str,
+    inductive_decls: &BTreeMap<Iri, InductiveDecl>,
+) -> String {
+    match type_name {
+        TYPE_STRING => "String".to_string(),
+        TYPE_INTEGER => "Int64".to_string(),
+        TYPE_FLOAT => "Float64".to_string(),
+        TYPE_BOOLEAN => "Bool".to_string(),
+        other => {
+            if let Ok(iri) = Iri::parse(other) {
+                if let Some(ind) = inductive_decls.get(&iri) {
+                    return ind.short_name.clone();
+                }
+            }
+            "Any".to_string()
+        }
+    }
+}
+
+/// Emit the Julia for one [`InductiveDecl`] — concrete per-ctor
+/// structs (the abstract type was emitted in the forward-declaration
+/// pass) plus `decode_<T>(d::Dict)::<T>` and `encode_<T>(v::<T>)::Dict`.
+/// Both functions delegate per-ctor to recursive calls into other
+/// inductives' decoders/encoders, looked up via the closure's
+/// declaration map.
+///
+/// All callers operate on `inductive_decls` already on hand at
+/// emission time so type lookups for arg types are local.
+fn emit_inductive(out: &mut String, ind: &InductiveDecl) {
+    // Empty inductive (no ctors) is a degenerate case but valid as a
+    // declaration of an unconstructable type. Emit decoder/encoder
+    // stubs so the registry still resolves.
+    let inductive_decls_local = BTreeMap::from_iter([(
+        ind.iri.clone(),
+        InductiveDecl {
+            iri: ind.iri.clone(),
+            short_name: ind.short_name.clone(),
+            ctors: Vec::new(),
+        },
+    )]);
+
+    // Concrete structs per ctor.
+    for ctor in &ind.ctors {
+        let struct_name = inductive_ctor_struct_name(&ind.short_name, &ctor.ctor_name);
+        out.push_str(&format!(
+            "struct {struct_name} <: {parent}\n",
+            parent = ind.short_name,
+        ));
+        for (i, arg) in ctor.args.iter().enumerate() {
+            let field_name = arg.arg_name.clone().unwrap_or_else(|| format!("arg_{i}"));
+            let jty = inductive_arg_julia_type(&arg.type_name, &inductive_decls_local);
+            out.push_str(&format!("    {field_name}::{jty}\n"));
+        }
+        out.push_str("end\n\n");
+    }
+
+    // Decoder: dispatches on `d["ctor"]`, recurses into args via the
+    // worker-side `_eigenius_decoders` registry (keyed by IRI) for
+    // any nested inductive arg types, primitive accessors for
+    // primitives.
+    out.push_str(&format!(
+        "function decode_{name}(d::AbstractDict)::{name}\n",
+        name = ind.short_name,
+    ));
+    out.push_str("    ctor = d[\"ctor\"]\n");
+    out.push_str("    args = get(d, \"args\", Any[])\n");
+    let mut first = true;
+    for ctor in &ind.ctors {
+        let struct_name = inductive_ctor_struct_name(&ind.short_name, &ctor.ctor_name);
+        let kw = if first { "if" } else { "elseif" };
+        first = false;
+        out.push_str(&format!(
+            "    {kw} ctor == {ctor_lit}\n",
+            ctor_lit = julia_string_literal(&ctor.ctor_name),
+        ));
+        // Build the constructor-call arg expressions.
+        let arg_exprs: Vec<String> = ctor
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| inductive_decode_arg_expr(&arg.type_name, i, &ind.short_name))
+            .collect();
+        out.push_str(&format!(
+            "        return {struct_name}({})\n",
+            arg_exprs.join(", "),
+        ));
+    }
+    if !first {
+        out.push_str("    else\n");
+        out.push_str(&format!(
+            "        error(\"unknown ctor `$ctor` for inductive {}\")\n",
+            ind.short_name,
+        ));
+        out.push_str("    end\n");
+    } else {
+        out.push_str(&format!(
+            "    error(\"inductive {} has no declared ctors\")\n",
+            ind.short_name,
+        ));
+    }
+    out.push_str("end\n\n");
+
+    // Encoder: dispatches on `typeof(v)` against each concrete ctor
+    // struct. Recurses into nested inductive args via the same
+    // `encode_<T>` family.
+    out.push_str(&format!(
+        "function encode_{name}(v::{name})::Dict{{String, Any}}\n",
+        name = ind.short_name,
+    ));
+    let mut first = true;
+    for ctor in &ind.ctors {
+        let struct_name = inductive_ctor_struct_name(&ind.short_name, &ctor.ctor_name);
+        let kw = if first { "if" } else { "elseif" };
+        first = false;
+        out.push_str(&format!("    {kw} v isa {struct_name}\n"));
+        let arg_exprs: Vec<String> = ctor
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                let field_name = arg.arg_name.clone().unwrap_or_else(|| format!("arg_{i}"));
+                inductive_encode_arg_expr(&arg.type_name, &field_name)
+            })
+            .collect();
+        out.push_str(&format!(
+            "        return Dict{{String, Any}}(\"ctor\" => {ctor_lit}, \"args\" => Any[{args}])\n",
+            ctor_lit = julia_string_literal(&ctor.ctor_name),
+            args = arg_exprs.join(", "),
+        ));
+    }
+    if !first {
+        out.push_str("    else\n");
+        out.push_str(&format!(
+            "        error(\"unknown concrete type for inductive {}: $(typeof(v))\")\n",
+            ind.short_name,
+        ));
+        out.push_str("    end\n");
+    } else {
+        out.push_str(&format!(
+            "    error(\"inductive {} has no encoders (no ctors declared)\")\n",
+            ind.short_name,
+        ));
+    }
+    out.push_str("end\n\n");
+}
+
+/// Build the Julia expression that decodes one ctor argument from
+/// `args[i+1]` (Julia is 1-indexed). Primitive types get the value
+/// passed through; inductives get a recursive `decode_<T>(args[i+1])`
+/// call. Class-typed args (Any) pass the value through unchanged.
+fn inductive_decode_arg_expr(type_name: &str, idx: usize, parent_inductive: &str) -> String {
+    let one_indexed = idx + 1;
+    if let Ok(iri) = Iri::parse(type_name) {
+        // Self-reference?
+        if iri.as_str() == format!("urn:eigenius:formulas:{parent_inductive}")
+            || type_name.ends_with(&format!(":{parent_inductive}"))
+        {
+            return format!("decode_{parent_inductive}(args[{one_indexed}])");
+        }
+        // Primitive types: structural pass-through.
+        match type_name {
+            TYPE_STRING => return format!("convert(String, args[{one_indexed}])"),
+            TYPE_INTEGER => return format!("convert(Int64, args[{one_indexed}])"),
+            TYPE_FLOAT => return format!("convert(Float64, args[{one_indexed}])"),
+            TYPE_BOOLEAN => return format!("convert(Bool, args[{one_indexed}])"),
+            _ => {}
+        }
+        // Other IRI — assume it's an inductive sibling. The worker's
+        // `_eigenius_decoders` registry resolves it at call time;
+        // cheaper for v1 to defer the lookup to the registry rather
+        // than thread a global lookup through the emit path.
+        format!(
+            "Base.invokelatest(_eigenius_decoders[{}], args[{one_indexed}])",
+            julia_string_literal(type_name)
+        )
+    } else {
+        // Bare parameter name (or unresolvable): pass through.
+        format!("args[{one_indexed}]")
+    }
+}
+
+/// Inverse of [`inductive_decode_arg_expr`] — emit the Julia that
+/// re-encodes a struct field for the output dict.
+fn inductive_encode_arg_expr(type_name: &str, field_name: &str) -> String {
+    if let Ok(_iri) = Iri::parse(type_name) {
+        match type_name {
+            TYPE_STRING | TYPE_INTEGER | TYPE_FLOAT | TYPE_BOOLEAN => {
+                return format!("v.{field_name}");
+            }
+            _ => {}
+        }
+        // Recursive case: encode via the registry. A self-encoder call
+        // would also work but registry-routed keeps the symmetry with
+        // the decode path.
+        format!("Base.invokelatest(_eigenius_encoders[typeof(v.{field_name})], v.{field_name})")
+    } else {
+        format!("v.{field_name}")
+    }
 }
 
 fn emit_struct(
@@ -3357,5 +3856,179 @@ end # module EigeniusMirror
             src.contains("validate_format(:p, p, Symbol(\"urn:my:custom:format:foo\"))"),
             "expected full-IRI format passthrough, got source:\n{src}"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Inductive emission — D32 §3.6 / Phase 19d.0.c
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build a chain carrying a hand-rolled `Nat = zero | succ(Nat)`
+    /// and run the generator. Used by the inductive emission tests.
+    fn run_with_nat() -> MirrorGenerationOutput {
+        let mut chain = FlatChain::new();
+
+        // ctor `zero`: no args.
+        let mut zero = Resource::new(iri("urn:eigenius:test:Nat:zero"));
+        zero.set(
+            iri(PROP_IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(
+                "urn:eigenius:core:InductiveCtor",
+            ))]),
+        );
+        zero.set(iri(PROP_CTOR_NAME), Value::String("zero".into()));
+        zero.set(iri(PROP_ARG_TYPES), Value::Array(vec![]));
+
+        // ctor `succ(pred: Nat)`.
+        let mut succ_arg = Resource::new(iri("urn:eigenius:test:Nat:succ:pred"));
+        succ_arg.set(
+            iri(PROP_IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(
+                "urn:eigenius:core:InductiveArgType",
+            ))]),
+        );
+        succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
+        succ_arg.set(
+            iri(PROP_TYPE_NAME),
+            Value::String("urn:eigenius:test:Nat".into()),
+        );
+
+        let mut succ = Resource::new(iri("urn:eigenius:test:Nat:succ"));
+        succ.set(
+            iri(PROP_IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(
+                "urn:eigenius:core:InductiveCtor",
+            ))]),
+        );
+        succ.set(iri(PROP_CTOR_NAME), Value::String("succ".into()));
+        succ.set(
+            iri(PROP_ARG_TYPES),
+            Value::Array(vec![Value::Embedded(Box::new(succ_arg))]),
+        );
+
+        let mut nat = Resource::new(iri("urn:eigenius:test:Nat"));
+        nat.set(
+            iri(PROP_IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_TYPE))]),
+        );
+        nat.set(iri(PROP_SHORT_NAME), Value::String("Nat".into()));
+        nat.set(
+            iri(PROP_CTORS),
+            Value::Array(vec![
+                Value::Embedded(Box::new(zero)),
+                Value::Embedded(Box::new(succ)),
+            ]),
+        );
+
+        chain.add("urn:eigenius:test:Nat", nat);
+
+        let layer = iri("urn:eigenius:test:layer");
+        let seed = vec![iri("urn:eigenius:test:Nat")];
+        JuliaMirrorGenerator::new()
+            .generate(&MirrorGenerationRequest {
+                source_layer: &layer,
+                seed_classes: &seed,
+                chain: &chain,
+            })
+            .expect("nat mirror generation")
+    }
+
+    #[test]
+    fn inductive_emits_abstract_type_and_concrete_ctor_structs() {
+        let out = run_with_nat();
+        let src = extract_source(&out);
+
+        assert!(
+            src.contains("abstract type Nat end"),
+            "missing `abstract type Nat end`; got:\n{src}"
+        );
+        assert!(
+            src.contains("struct Nat_zero <: Nat"),
+            "missing `struct Nat_zero <: Nat`; got:\n{src}"
+        );
+        assert!(
+            src.contains("struct Nat_succ <: Nat"),
+            "missing `struct Nat_succ <: Nat`; got:\n{src}"
+        );
+        // `pred` field on Nat_succ is typed `Nat` (the abstract).
+        assert!(
+            src.contains("pred::Nat"),
+            "Nat_succ.pred must be typed `Nat`; got:\n{src}"
+        );
+    }
+
+    #[test]
+    fn inductive_emits_decoder_dispatching_on_ctor_string() {
+        let src = extract_source(&run_with_nat());
+        assert!(
+            src.contains("function decode_Nat(d::AbstractDict)::Nat"),
+            "missing decoder signature; got:\n{src}"
+        );
+        assert!(
+            src.contains("ctor == \"zero\""),
+            "decoder must dispatch on `zero`; got:\n{src}"
+        );
+        assert!(
+            src.contains("ctor == \"succ\""),
+            "decoder must dispatch on `succ`; got:\n{src}"
+        );
+        assert!(
+            src.contains("decode_Nat(args[1])"),
+            "succ branch must recurse via decode_Nat; got:\n{src}"
+        );
+    }
+
+    #[test]
+    fn inductive_emits_encoder_dispatching_on_concrete_struct_type() {
+        let src = extract_source(&run_with_nat());
+        assert!(
+            src.contains("function encode_Nat(v::Nat)::Dict{String, Any}"),
+            "missing encoder signature; got:\n{src}"
+        );
+        assert!(
+            src.contains("v isa Nat_zero"),
+            "encoder must isa-dispatch on Nat_zero; got:\n{src}"
+        );
+        assert!(
+            src.contains("v isa Nat_succ"),
+            "encoder must isa-dispatch on Nat_succ; got:\n{src}"
+        );
+        assert!(
+            src.contains("\"ctor\" => \"succ\""),
+            "encoder must produce the chain ctor name; got:\n{src}"
+        );
+    }
+
+    #[test]
+    fn inductive_registers_in_decoders_and_encoders_maps() {
+        let src = extract_source(&run_with_nat());
+        // Decoder map is keyed on the InductiveType IRI.
+        assert!(
+            src.contains("\"urn:eigenius:test:Nat\" => decode_Nat"),
+            "decoder map missing Nat IRI entry; got:\n{src}"
+        );
+        // Encoder map has one entry per concrete ctor struct.
+        assert!(
+            src.contains("Nat_zero => encode_Nat"),
+            "encoder map missing Nat_zero entry; got:\n{src}"
+        );
+        assert!(
+            src.contains("Nat_succ => encode_Nat"),
+            "encoder map missing Nat_succ entry; got:\n{src}"
+        );
+    }
+
+    #[test]
+    fn inductive_exports_abstract_concrete_decode_encode() {
+        let src = extract_source(&run_with_nat());
+        let export_line = src
+            .lines()
+            .find(|l| l.starts_with("export "))
+            .expect("export line present");
+        for token in ["Nat", "Nat_zero", "Nat_succ", "decode_Nat", "encode_Nat"] {
+            assert!(
+                export_line.contains(token),
+                "export line missing `{token}`: {export_line}"
+            );
+        }
     }
 }

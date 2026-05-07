@@ -38,6 +38,7 @@ pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
 pub const ARG_TYPES: &str = "urn:eigenius:core:arg_types";
 pub const TYPE_NAME: &str = "urn:eigenius:core:type_name";
 pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
+pub const ARG_NAME: &str = "urn:eigenius:core:arg_name";
 pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
 pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";
 pub const SET_KIND: &str = "urn:eigenius:core:Set";
@@ -231,6 +232,7 @@ pub const RESOURCE: &str = "urn:eigenius:core:resource";
 pub const RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
 pub const VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
 pub const JSON: &str = "urn:eigenius:core:json";
+pub const INDUCTIVE: &str = "urn:eigenius:core:inductive";
 pub const TEMPLATE: &str = "urn:eigenius:core:template";
 
 // --- Format IRIs ---

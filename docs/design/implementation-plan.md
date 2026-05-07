@@ -1667,23 +1667,90 @@ The original Phase 19b (`eigon-julia-gen` mirror generator) is folded into [Phas
 
 The 19b letter is preserved (rather than renumbering 19c–19h up) to keep cross-references in the codebase + downstream design docs stable.
 
-### Phase 19c — Per-environment images (~2 weeks)
+### Phase 19c — Per-environment images — *skipped*
 
-- Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated. Flips Julia from deployment shape (c) (bundled in orchestrator image, established in 19a) to shape (a) (per-env image).
-- `JuliaPackagePin` resources committed alongside the verbatim `Manifest.toml` for graph-side queryability.
+Mostly fictional once 19a.5/19a.6 landed. The original framing assumed the substrate POC would ship Julia bundled inside the orchestrator (deployment shape (c)) and that 19c would later flip to shape (a) (per-env image); in practice 19a built directly at shape (a) and the bundled-Julia intermediate step never existed. Concretely:
+
+- The deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile`, build-time provenance under `/etc/eigenius-runtime-env/`, and `RuntimeEnvironment.image_digest` commit all shipped in 19a — the IntervalArithmetic demo exercises every piece.
+- Registry push (vs. the current `buildah push docker-archive: → docker load` against the local daemon) is a multi-host deployment concern, not a shape flip. The `image.registry_url` field reserved in 19a.7's config schema is the consumer-side hook; lift the actual push when the first deployment that needs cross-host image distribution lands.
+- `JuliaPackagePin` projection (parsed Manifest.toml as one Resource per pinned dep) is genuinely not done, but it has no current consumer — the lockfile bytes already commit on `RuntimeEnvironment.lockfile`, and no EigenQL query depends on the parsed shape yet. Add when the first such query is written.
+
+The 19c letter is preserved (rather than renumbering 19d-19h up) to keep cross-references in downstream docs stable.
+
 - *Production scaling concerns (HPA / KEDA / ACA scale rules) sit in their respective deployment-platform configs, not in the substrate. The platform-managed `ServiceSpawner` backends (`K8sDeploymentSpawner`, `AzureContainerAppsSpawner`) land as a separate phase when production deployment ships.*
 
-### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~3 weeks)
+### Phase 19d.0 — Chain-mirrored Mini-TT inductives + `FormulaTerm` (~1.5–2 weeks)
 
-- `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes; ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
+**Goal.** Bring Mini-TT inductives onto the chain so cross-institution formulas have a typed shared representation. Spec: [D32](d32-chain-mirrored-mini-tt-inductives.md). Prerequisite for 19d (Symbolics needs `FormulaTerm` to type its `SymbolicExpression.term`) and for the comorphism story across 19e–19h (every numerical institution consumes the same `FormulaTerm` payload).
+
+Four independently-shippable landings, dependency-ordered:
+
+#### Phase 19d.0.a — `core:arg_name` ontology addition (~half day)
+
+**Goal.** Add the one missing piece on top of the chain ontology's existing inductive-ctor-arg surface (the `InductiveArgType` family is already in place from Phase 11b). Per [D32 §3.2](d32-chain-mirrored-mini-tt-inductives.md): `arg_name` lets JSON-authored ontologies and mirror generators give ctor argument slots readable names instead of falling back to positional defaults.
+
+**Files modified.**
+- `ontologies/core/core-ontology.json` — add `core:arg_name` Property (recommended-not-required on `InductiveArgType`). Triggers a `seed_manifest_v1` bump; existing dev DBs hit the `seed manifest drift` boot check and need `docker compose down -v` to re-seed.
+
+**Acceptance.**
+- `cargo test --workspace` clean (existing ESL-emitted inductives validate unchanged; new property surfaces).
+- `eigenius inspect "urn:eigenius:core:arg_name"` resolves and shows the recommended-on-InductiveArgType shape.
+
+#### Phase 19d.0.b — Validator + `core:inductive` primitive type (~2 days)
+
+**Goal.** Type-check inductive values at commit time per [D32 §3.2 + §3.4](d32-chain-mirrored-mini-tt-inductives.md). New primitive type `core:inductive`; new validator rule recursing through ctor_args; structured field-path errors.
+
+**Files modified.**
+- `kernel/src/validation/mod.rs` — new rule `check_inductive_value`; extend `check_class_types` to accept `InductiveType` references.
+- `kernel/src/ontology/well_known.rs` — `INDUCTIVE` primitive type IRI.
+- `kernel/src/ontology/value.rs` — wire-shape recognition for inductive values.
+
+**Acceptance.**
+- Hand-rolled `Nat = Zero | Succ(Nat)` declared in a test ontology; `Succ(Succ(Zero))`-shaped value validates; `Succ(LitFloat(1.0))` rejects with structured error.
+- `Verdict` continues to validate without modification (no `ctor_args` → no per-arg checks).
+
+#### Phase 19d.0.c — Mirror generator extends to `InductiveType` (~2–3 days)
+
+**Goal.** Emit Julia for chain-committed `InductiveType` resources per [D32 §3.3](d32-chain-mirrored-mini-tt-inductives.md): abstract type + per-ctor structs + decode/encode + `_eigenius_decoders` / `_eigenius_encoders` registry hooks.
+
+**Files modified.**
+- `crates/eigenius-julia/src/mirror_gen.rs` — extend the closure walker to visit `InductiveType` references via `arg_type`; add `inductive_emitter.rs` (or a new module) for the per-inductive emission.
+- `crates/eigenius-julia/tests/mirror_gen_test.rs` — golden test against a `Nat` fixture.
+- `crates/eigenius-julia/tests/mirror_inductive_round_trip.rs` — substrate-side e2e: build an env image with `Nat`, dispatch a script that constructs `Succ(Succ(Zero))` and round-trips the encoded value.
+
+**Acceptance.**
+- Generated `Nat.jl` produces `abstract type Nat end; struct Zero <: Nat end; struct Succ <: Nat; pred::Nat end` plus the decode/encode pair.
+- Round-trip test passes against `DockerServiceSpawner`.
+
+#### Phase 19d.0.d — `formulas:` ontology layer + initial operator catalog (~1 day)
+
+**Goal.** Commit `urn:eigenius:formulas:FormulaTerm` and the v1 operator catalog per [D32 §4 + §5](d32-chain-mirrored-mini-tt-inductives.md).
+
+**Files created.**
+- `ontologies/formulas/formulas-ontology.json` — `FormulaTerm` InductiveType (six ctors: Var, LitFloat, OpRef, App, Lam, Pi), `Operator` Class with `operator_signature` / `operator_arity` / `operator_associativity` / `operator_commutativity` properties, type-as-operator entries (`formulas:types:Real`, `Int`, `Bool`), and the initial operator set (arithmetic, unary numeric, comparisons, `derivative`).
+
+**Files modified.**
+- `kernel/src/bootstrap/mod.rs` — embed the new `formulas` ontology layer alongside core / program / reflection / institution / runtime / notebook.
+- `kernel/src/validation/mod.rs` — `App`-spine rank check against `Operator.operator_signature`.
+
+**Acceptance.**
+- `eigenius inspect "urn:eigenius:formulas:FormulaTerm"` resolves; `formulas:ops:add` resolves with its typed signature.
+- An `App(App(OpRef("formulas:ops:add"), Var("x")), LitFloat(2.0))` value validates as a `FormulaTerm`.
+- An arity-mismatched `App(OpRef("formulas:ops:add"), Var("x"))` (one arg short) rejects with `OperatorArityMismatch`.
+- Existing tests stay green; the new ontology layer adds to `seed manifest drift` detection on stale DBs.
+
+### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~2.5 weeks, was 3)
+
+**Prerequisite:** Phase 19d.0 (`FormulaTerm` available on the chain).
+
+- `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes — all carrying `term: FormulaTerm` (from 19d.0). ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
 - End-to-end demo: a notebook that loads physical-system equations, gets them simplified via `qc_symb_simplify`, runs a numerical solve via a substrate component.
 
-### Phase 19e — `IntervalArithmetic` institution + numerical hardening (~3 weeks)
+### Phase 19e — `IntervalArithmetic` institution (~2 weeks)
 
 - `eigenius-julia-intervals` crate. Declarations from D27 §4.3: `BoundedBy(value, interval)`, `ProvesBoundOn(function, domain, interval)`, `ContainsRoot` resource classes; Decidable role on `qc_intv_validate_bounded_by` so user programs can write `Exp::NativeDecide` predicates that reduce operationally.
-- Strict-determinism mode: BLAS pinning, FMA off, refusal to run on non-conforming hosts.
-- Cross-host reproducibility verification tooling: re-run an invocation on a different host, surface `numerical_metadata` divergences.
 - *Reordered ahead of JuMP* — IntervalArithmetic has no solver-dependency surface, the kinase CI columns map directly onto `BoundedBy`, and the Decidable role is the most novel piece of D14 runtime mechanics; we want it exercised early.
+- *Numerical hardening (BLAS pinning, FMA discipline, host-conformance gating, cross-host reproducibility tooling) split out and deferred to [issue #43](https://github.com/eigenius/eigenius/issues/43)*. Interval arithmetic is conservative under any IEEE-754-conforming host, so the institution itself doesn't depend on it; determinism becomes load-bearing once institutions chain (DiffEq → IntervalArithmetic, etc.). Land it before claiming reproducibility guarantees that compose across institutions.
 
 ### Phase 19f — `JuMP` institution (~2 weeks)
 
