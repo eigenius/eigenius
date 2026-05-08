@@ -93,7 +93,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 16 | Out-of-Core Query Execution | | Buffer-pool over storage, hash-join with spill, external sort, spillable group-by, per-query memory budget |
 | 17 | Chain Consolidation | | Squash a contiguous ancestral range into a resolve-equivalent layer; "git squash" for the typed knowledge graph |
 | 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; Service / Job lifecycle split (`JobSpawner` / `ServiceSpawner`); image-build pipeline; sandbox; CBOR + RFC 8746 wire format; CBOR consolidation across kernel ↔ orchestrator |
-| 19 | Julia Institutions | | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs) |
+| 19 | Julia Institutions | 19a ✓, 19d.0 ✓, 19d ✓, 19e ✓, 19g ✓, 19h ✓, 19h.1 ✓; 19f (JuMP) pending | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs); Catalyst → DiffEq comorphism live |
 | 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
 | 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
 
@@ -1228,7 +1228,7 @@ Cross-cutting codec change: replace Eigon-JSON with Eigon-CBOR on the `Component
 
 **Drives:** [D27 — Julia Institutions](d27-julia-institutions.md). Enables [`life-science-requirements.md`](life-science-requirements.md) worked examples in Phase 21 (PK ODEs, ML ensemble bounds, certified intervals, reaction-network dynamics).
 
-### Phase 19a — Julia substrate POC + mirror generator (~6 weeks)
+### Phase 19a — Julia substrate POC + mirror generator (~6 weeks) ✓
 
 The first production-shape milestone for Julia. Combines what earlier drafts split as 19a (substrate POC) and 19b (mirror generator) into a single phase, because the worker's dispatch contract is shaped by whether mirrors exist — separating them forces the worker-side dispatch logic to be written twice (once for raw-dict payloads, once for typed mirror struct payloads) and the interdependency is tight enough that one combined milestone is cleaner.
 
@@ -1236,7 +1236,7 @@ Stands up the `eigenius-julia` crate, lights up the Service-backed dispatcher (d
 
 Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology classes (`Compound`, `Target`, `AssayProtocol`, `AssayResult` from `ontologies/examples/kinase/`) are the test data that grounds every sub-milestone's worked example.
 
-#### Phase 19a.1 — `eigenius-julia` crate skeleton + LanguageRuntime impl (~2 days)
+#### Phase 19a.1 — `eigenius-julia` crate skeleton + LanguageRuntime impl (~2 days) ✓
 
 **Goal.** Promote the test-only `crates/runtime-substrate/src/test_runtime_julia.rs` into a real production crate. Capstone-equivalent functionality continues to pass.
 
@@ -1268,7 +1268,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.2 — `ServiceSpawner` trait + Local/Docker backends (~4 days)
+#### Phase 19a.2 — `ServiceSpawner` trait + Local/Docker backends (~4 days) ✓
 
 **Goal.** Per [D26 §8.2](d26-runtime-substrate.md), introduce long-lived per-environment workers. Two dev-side backends — host subprocess and DooD-launched persistent container. `eigenius-julia` switches to using the Service path; per-invocation spawn stays available for the bash test runtime and 18d's existing tests.
 
@@ -1301,7 +1301,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.3 — Mirror generator (~10 days)
+#### Phase 19a.3 — Mirror generator (~10 days) ✓
 
 **Goal.** Implement the mirror generator as substrate Rust code per [D27 §3](d27-julia-institutions.md). Walks the chain's ontology layer at image-build time, emits Julia source matching the [D29 faithful-translation specification](d29-eigon-julia-mirror-spec.md), commits the result as a `RuntimePackageMirror` resource, bakes the precompiled artifact into the env image. D29 v1 lands in 19a.3.c alongside the chain-commit work; the implementation is reconciled to it in 19a.3.d (subclass hierarchy + remaining gap items called out in [D29 §11.2](d29-eigon-julia-mirror-spec.md#112-planned-extensions)).
 
@@ -1345,7 +1345,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.3.d — D29 conformance pass (~3 days)
+#### Phase 19a.3.d — D29 conformance pass (~3 days) ✓
 
 **Goal.** Reconcile the v1 generator's actual output to [D29 v1](d29-eigon-julia-mirror-spec.md). 19a.3.a–c shipped the generator and the spec in parallel; 19a.3.d closes the gap items the spec calls out as bugs against the v1 implementation, plus implements the spec's required-but-not-yet-emitted features.
 
@@ -1370,7 +1370,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.4 — `CallRuntimeMethod` + `JuliaWorker.jl` method dispatch + `dispatched_to` wiring (~5 days)
+#### Phase 19a.4 — `CallRuntimeMethod` + `JuliaWorker.jl` method dispatch + `dispatched_to` wiring (~5 days) ✓
 
 **Status: substrate side landed (2026-05-04).** `target_kind` wire discriminator, `MethodInvocation` payload, JuliaWorker method dispatch with `Base.invokelatest`, `JuliaLanguageRuntime::call_method`, `DispatchTrace.dispatched_to` plumbing, substrate-side epistemic-category stamping (`urn:eigenius:reflection:DerivedResource`), and the codec registries (`_eigenius_decoders` / `_eigenius_encoders`) on each generated mirror are all in. Spec [D29 v1.2](d29-eigon-julia-mirror-spec.md#85-codec-registries) pins the registry shape and the world-age rule.
 
@@ -1416,7 +1416,7 @@ Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology cl
 
 ---
 
-#### Phase 19a.5 — D31 infrastructure (external institution lifecycle, ~3 weeks)
+#### Phase 19a.5 — D31 infrastructure (external institution lifecycle, ~3 weeks) ✓
 
 **Goal.** Land the framework that [D31](d31-external-institution-lifecycle.md) specifies: mirror generation CLI, env image build, institution registration, kernel-emits-request / orchestrator-services-IO dispatch, Verdict commit pipeline. Generator-agnostic; the surfaces light up against Julia first because that's the only generator shipped, but they accept any future language without protocol churn.
 
@@ -1534,7 +1534,7 @@ The work is split into five sub-milestones (a–e). Sub-milestones a–d build t
 
 ---
 
-#### Phase 19a.6 — IntervalArithmetic institution (~1 week, integration test for D31)
+#### Phase 19a.6 — IntervalArithmetic institution (~1 week, integration test for D31) ✓
 
 **Goal.** Bring up the first real external institution against 19a.5's framework. **Acts as the integration test for D31 end-to-end** — 19a.5 isn't done until IntervalArithmetic's `BoundedBy` AutoOnLoad gate fires correctly on commit, with a Verdict landing on the chain. Surfaces any 19a.5 gaps that need fixing before more institutions land.
 
@@ -1579,7 +1579,7 @@ If 19a.6 surfaces structural issues with 19a.5, fix them in 19a.5 (don't paper o
 
 ---
 
-#### Phase 19a.7 — Minimal config primitive (~3 days)
+#### Phase 19a.7 — Minimal config primitive (~3 days) ✓
 
 **Goal.** A small layered config loader (defaults → file → env → construction overrides) covering the substrate concerns 19a forces. New crate so the kernel and orchestrator can adopt it later without circular deps. Replaces ad-hoc env-var reads in the substrate. Per the [config-system memory](../../.claude/projects/-home-hm-src-eigenius/memory/project_config_system.md), the comprehensive settings story (audit, hot-reload, validation, per-namespace overrides) is a follow-on phase; this sub-milestone ships the *primitive*, not the full system.
 
@@ -1624,7 +1624,7 @@ If 19a.6 surfaces structural issues with 19a.5, fix them in 19a.5 (don't paper o
 
 ---
 
-#### Phase 19a.8 — End-to-end demo + integration tests (~4 days)
+#### Phase 19a.8 — End-to-end demo + integration tests (~4 days) ✓
 
 **Goal.** Kinase-grounded e2e exercise of all 19a pieces (`ServiceSpawner` lifecycle, mirror generator, `CallRuntimeMethod` with typed-mirror dispatch, `dispatched_to`, config-loaded backend tunables). Regression coverage anchors against Phase 18.
 
@@ -1679,13 +1679,13 @@ The 19c letter is preserved (rather than renumbering 19d-19h up) to keep cross-r
 
 - *Production scaling concerns (HPA / KEDA / ACA scale rules) sit in their respective deployment-platform configs, not in the substrate. The platform-managed `ServiceSpawner` backends (`K8sDeploymentSpawner`, `AzureContainerAppsSpawner`) land as a separate phase when production deployment ships.*
 
-### Phase 19d.0 — Chain-mirrored Mini-TT inductives + `FormulaTerm` (~1.5–2 weeks)
+### Phase 19d.0 — Chain-mirrored Mini-TT inductives + `FormulaTerm` (~1.5–2 weeks) ✓
 
 **Goal.** Bring Mini-TT inductives onto the chain so cross-institution formulas have a typed shared representation. Spec: [D32](d32-chain-mirrored-mini-tt-inductives.md). Prerequisite for 19d (Symbolics needs `FormulaTerm` to type its `SymbolicExpression.term`) and for the comorphism story across 19e–19h (every numerical institution consumes the same `FormulaTerm` payload).
 
 Four independently-shippable landings, dependency-ordered:
 
-#### Phase 19d.0.a — `core:arg_name` ontology addition (~half day)
+#### Phase 19d.0.a — `core:arg_name` ontology addition (~half day) ✓
 
 **Goal.** Add the one missing piece on top of the chain ontology's existing inductive-ctor-arg surface (the `InductiveArgType` family is already in place from Phase 11b). Per [D32 §3.2](d32-chain-mirrored-mini-tt-inductives.md): `arg_name` lets JSON-authored ontologies and mirror generators give ctor argument slots readable names instead of falling back to positional defaults.
 
@@ -1696,7 +1696,7 @@ Four independently-shippable landings, dependency-ordered:
 - `cargo test --workspace` clean (existing ESL-emitted inductives validate unchanged; new property surfaces).
 - `eigenius inspect "urn:eigenius:core:arg_name"` resolves and shows the recommended-on-InductiveArgType shape.
 
-#### Phase 19d.0.b — Validator + `core:inductive` primitive type (~2 days)
+#### Phase 19d.0.b — Validator + `core:inductive` primitive type (~2 days) ✓
 
 **Goal.** Type-check inductive values at commit time per [D32 §3.2 + §3.4](d32-chain-mirrored-mini-tt-inductives.md). New primitive type `core:inductive`; new validator rule recursing through ctor_args; structured field-path errors.
 
@@ -1709,7 +1709,7 @@ Four independently-shippable landings, dependency-ordered:
 - Hand-rolled `Nat = Zero | Succ(Nat)` declared in a test ontology; `Succ(Succ(Zero))`-shaped value validates; `Succ(LitFloat(1.0))` rejects with structured error.
 - `Verdict` continues to validate without modification (no `ctor_args` → no per-arg checks).
 
-#### Phase 19d.0.c — Mirror generator extends to `InductiveType` (~2–3 days)
+#### Phase 19d.0.c — Mirror generator extends to `InductiveType` (~2–3 days) ✓
 
 **Goal.** Emit Julia for chain-committed `InductiveType` resources per [D32 §3.3](d32-chain-mirrored-mini-tt-inductives.md): abstract type + per-ctor structs + decode/encode + `_eigenius_decoders` / `_eigenius_encoders` registry hooks.
 
@@ -1722,7 +1722,7 @@ Four independently-shippable landings, dependency-ordered:
 - Generated `Nat.jl` produces `abstract type Nat end; struct Zero <: Nat end; struct Succ <: Nat; pred::Nat end` plus the decode/encode pair.
 - Round-trip test passes against `DockerServiceSpawner`.
 
-#### Phase 19d.0.d — `formulas:` ontology layer + initial operator catalog (~1 day)
+#### Phase 19d.0.d — `formulas:` ontology layer + initial operator catalog (~1 day) ✓
 
 **Goal.** Commit `urn:eigenius:formulas:FormulaTerm` and the v1 operator catalog per [D32 §4 + §5](d32-chain-mirrored-mini-tt-inductives.md).
 
@@ -1739,14 +1739,16 @@ Four independently-shippable landings, dependency-ordered:
 - An arity-mismatched `App(OpRef("formulas:ops:add"), Var("x"))` (one arg short) rejects with `OperatorArityMismatch`.
 - Existing tests stay green; the new ontology layer adds to `seed manifest drift` detection on stale DBs.
 
-### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~2.5 weeks, was 3)
+### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~2.5 weeks, was 3) ✓
 
 **Prerequisite:** Phase 19d.0 (`FormulaTerm` available on the chain).
 
 - `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes — all carrying `term: FormulaTerm` (from 19d.0). ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
 - End-to-end demo: a notebook that loads physical-system equations, gets them simplified via `qc_symb_simplify`, runs a numerical solve via a substrate component.
 
-### Phase 19e — `IntervalArithmetic` institution (~2 weeks)
+### Phase 19e — `IntervalArithmetic` institution (~2 weeks) ✓
+
+*Landed under [Phase 19a.6](#phase-19a6--intervalarithmetic-institution-1-week-integration-test-for-d31) as the D31 framework's integration test rather than as a separate phase. The substantive deliverables (resource classes, Decidable role on `qc_intv_validate_bounded_by`, end-to-end e2e test) all shipped there; this section is preserved for the cross-reference.*
 
 - `eigenius-julia-intervals` crate. Declarations from D27 §4.3: `BoundedBy(value, interval)`, `ProvesBoundOn(function, domain, interval)`, `ContainsRoot` resource classes; Decidable role on `qc_intv_validate_bounded_by` so user programs can write `Exp::NativeDecide` predicates that reduce operationally.
 - *Reordered ahead of JuMP* — IntervalArithmetic has no solver-dependency surface, the kinase CI columns map directly onto `BoundedBy`, and the Decidable role is the most novel piece of D14 runtime mechanics; we want it exercised early.
@@ -1758,7 +1760,7 @@ Four independently-shippable landings, dependency-ordered:
 - Declarations from D27 §4.2: `OptimisationProblem`, `OptimisesTo`, `Infeasible`, `OptimisationBounds` resource classes; AutoOnLoad certificate-validation QueryClasses; OnDemand `qc_jump_solve`; Decidable `qc_jump_is_infeasible`.
 - Demo: a constrained design problem solved by the institution; solver certificate re-checked on commit.
 
-### Phase 19g — `DifferentialEquations.jl` institution — ODEs only (~3 weeks)
+### Phase 19g — `DifferentialEquations.jl` institution — ODEs only (~3 weeks) ✓
 
 - `eigenius-julia-diffeq` crate. **v1 scope: ODEs only.** SDEs, DAEs, DDEs, jump processes, and hybrid systems are deferred to follow-on milestones (19i and beyond) to be triggered by domain demand.
 - Resource classes (per D27 §4.5 verified note): `OdeProblem` (renamed from `OdeSystem` to avoid MTK collision), `OdeSolution`, `OdeSteadyState`, plus `ReproducibleIntegration` framing for AutoOnLoad re-validation. `IntegrationCertificate` / `BoundedError` IRIs reserved for a future TaylorModels-backed institution that produces rigorous interval enclosures. `ParameterFit` moved to the JuMP / Optimization institution scope.
@@ -1767,7 +1769,11 @@ Four independently-shippable landings, dependency-ordered:
 - Comorphism out to Phase 19e (DiffEq → IntervalArithmetic) — given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is one of the bridges Phase 21 needs for *operationally verified* PK predictions.
 - *Reordered ahead of Catalyst* — Catalyst's `qc_to_ode` Comorphism has nowhere to land if DiffEq isn't ready first; with this reordering, 19g ships using hand-written compartmental ODEs (PK two-compartment is well-defined without Catalyst), and the DiffEq institution is in place when 19h adds the Catalyst → DiffEq Comorphism.
 
-### Phase 19h — `Catalyst.jl` institution (~3 weeks)
+### Phase 19h — `Catalyst.jl` institution (~3 weeks) ✓
+
+**Landed scope:** `ReactionNetwork`, `ConservationLaw`, plus the `CatalystToOdeInput` composite class supporting the cross-institution comorphism. AutoOnLoad `qc_cat_validate_conservation_law`, OnDemand `qc_cat_to_ode` (the operational backing of the Catalyst → DiffEq comorphism). The `SteadyState` / `DeficiencyZero` / `DeficiencyOne` / `WeaklyReversible` / `ComplexBalanced` resource classes and their AutoOnLoad query classes are deferred until a domain-driven test case appears — adding them speculatively without a verifying example would compound rather than reduce risk in the chain ontology.
+
+**Sub-milestone Phase 19h.1 — Catalyst → DiffEq comorphism ✓:** Identity-on-`OdeProblem` Lambda, Comorphism triple linking `ef_cat_to_ode_input` + `m_id_ode_problem` + `if_diffeq_problem`, and the operational `qc_cat_to_ode` OnDemand QueryClass that compiles a `ReactionNetwork` to an `OdeProblem` with `FormulaTerm`-typed RHS. End-to-end test ([`crates/eigenius-julia/tests/catalyst_to_diffeq_e2e.rs`](../../crates/eigenius-julia/tests/catalyst_to_diffeq_e2e.rs)): `A → B; k*A` reaction → Catalyst compile → DiffEq integrate → `Holds` verdict against the closed-form trajectory. Three structural fixes uncovered along the way (CBOR.Tag-wrapping for inductive payloads in the mirror encoder; abstract-typed `Vector{Abstract<C>}` decode-side comprehension annotation; SymbolicUtils 4 / Symbolics 7 compat alignment) are documented inline at the call sites.
 
 - `eigenius-julia-catalyst` crate. Declarations promoted from D27 §4.4 (Catalyst is now a first-class reference institution given the life-science focus on PK / signaling pathways / metabolic networks).
 - Resource classes: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `DeficiencyZero` / `DeficiencyOne` relations, `WeaklyReversible` / `ComplexBalanced` markers. `MassActionKinetics` / `JumpProcessSemantics` reframed as compilation-path discriminators per D27 §4.4.1 verified note.

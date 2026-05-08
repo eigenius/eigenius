@@ -23,8 +23,13 @@ Key features that we still need to wire up:
   need to be implemented. [Garbage collection across graph layers has been
   implemented](docs/design/d23-out-of-core-layer-architecture.md), but it has yet to be integrated into the application 
   life-cycle.
-- The [generic runtime substrate](docs/design/d26-runtime-substrate.md) exists, but language-specific worker implementations still need to be implemented. In addition, we need to provide institution-level
-  integration into appropriate languages ([Julia Institutions](docs/design/d27-julia-institutions.md) [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) and [`JuMP`](https://jump.dev/); [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md)).
+- The [generic runtime substrate](docs/design/d26-runtime-substrate.md) is in place. The Julia worker is live with four reference [Julia Institutions](docs/design/d27-julia-institutions.md) landed end-to-end:
+  [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl) (symbolic algebra over a chain-typed
+  `FormulaTerm`), [`IntervalArithmetic`](https://juliaintervals.github.io/) (rigorous bounds; Decidable role), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) (chemical
+  reaction networks), and [`DifferentialEquations.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) (ODEs). The first cross-institution
+  comorphism — Catalyst → DiffEq, identity-on-`OdeProblem` over the shared `FormulaTerm` representation —
+  is wired and tested end-to-end. Still pending in this surface: [`JuMP`](https://jump.dev/) (optimisation) and
+  [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md).
 
 ## The notebook — start here
 
