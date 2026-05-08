@@ -69,6 +69,12 @@ const INSTITUTION_JSON: &str = include_str!(
 const SYMBOLICS_ONTOLOGY_JSON: &str = include_str!(
     "../../../julia/institutions/symbolics/declarations/symbolics-ontology.eigon.json"
 );
+// Phase 19f.1 added `SymbolicsToJuMPInput` to the symbolics ontology,
+// referencing `jump:VariableBound` and `jump:Constraint` via
+// class_types — the JuMP ontology must be on the chain before
+// symbolics validates.
+const JUMP_ONTOLOGY_JSON: &str =
+    include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
 
 // ─── Pinned IRIs ───────────────────────────────────────────────────────
 //
@@ -137,6 +143,11 @@ fn intervals_install_lifecycle_produces_clean_external_institution_plan() {
 
     // 1. Bootstrap.
     let mut ctx = bootstrap().expect("bootstrap");
+
+    // 1.4 JuMP ontology — must precede symbolics because
+    //     `SymbolicsToJuMPInput` references jump:VariableBound and
+    //     jump:Constraint via class_types (Phase 19f.1).
+    commit_layer(&mut ctx, JUMP_ONTOLOGY_JSON, "jump_ontology");
 
     // 1.5 Symbolics ontology — must precede intervals because
     //     `BoundsRequest.expr` references SymbolicExpression

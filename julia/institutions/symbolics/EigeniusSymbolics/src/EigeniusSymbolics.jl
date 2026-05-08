@@ -487,4 +487,66 @@ end
 
 end # @static if isdefined(EigeniusMirror, :SymbolicallyReducesTo)
 
+# ─── Symbolics → JuMP comorphism (D27 §4.2 / D32 §6 / Phase 19f.1) ─────
+#
+# `frame_as_optimisation_problem(input::SymbolicsToJuMPInput) ->
+# OptimisationProblem` is the operational backing of the chain-side
+# `Symbolics → JuMP` comorphism. The handler reads the FormulaTerm out
+# of `input.objective.term` (identity on the chain's flat formula
+# language) and forwards the input's framing fields (variable_names,
+# variable_bounds, sense, constraints) to a fresh `OptimisationProblem`.
+#
+# The handler is gated by `@static if isdefined(...)` because
+# `OptimisationProblem` and `SymbolicsToJuMPInput` only land in
+# `EigeniusMirror` when the consuming chain has the JuMP ontology
+# committed and the mirror seed includes them. Symbolics-only
+# deployments compile cleanly without these types.
+@static if isdefined(EigeniusMirror, :SymbolicsToJuMPInput) &&
+          isdefined(EigeniusMirror, :OptimisationProblem)
+
+export frame_as_optimisation_problem
+
+"""
+    frame_as_optimisation_problem(input::SymbolicsToJuMPInput) -> OptimisationProblem
+
+Frame a Symbolics-side optimisation candidate as a chain-typed
+`jump:OptimisationProblem`. The path:
+
+1. Read `input.objective.term` — the FormulaTerm wrapped in the
+   SymbolicExpression. No translation: the chain's FormulaTerm is the
+   shared formula language across every numerical institution
+   (D32 §6).
+2. Forward `input.variable_names`, `input.framing_variable_bounds`,
+   `input.sense`, and `input.framing_constraints` unchanged. The
+   `framing_*` properties already use JuMP-side resource types
+   (`jump:VariableBound`, `jump:Constraint`) so the cross-institution
+   boundary speaks one bound / constraint vocabulary.
+3. Pack into `EigeniusMirror.OptimisationProblem(...)`.
+
+The mirror generator types `OptimisationProblem.variable_bounds` as
+`Vector{AbstractVariableBound}` and `.constraints` as
+`Vector{AbstractConstraint}`. Julia's parametric types are invariant,
+so the comprehensions / explicit casts are necessary even though the
+input arrays already carry concrete subtype values.
+"""
+function frame_as_optimisation_problem(input::EigeniusMirror.SymbolicsToJuMPInput)
+    # Both `framing_variable_bounds` and `framing_constraints` are
+    # recommended (the chain rejects empty arrays at commit time, so
+    # an unconstrained / unbounded framing omits the field), and the
+    # mirror generator emits them as `Union{Vector{Abstract*}, Nothing}`.
+    # The OptimisationProblem constructor accepts `nothing` for both —
+    # pass-through preserves the abstract-typed array element shape
+    # without coercing into the concrete-typed vector that Julia's
+    # invariant parametric types would reject.
+    return EigeniusMirror.OptimisationProblem(
+        collect(String, input.variable_names),
+        input.objective.term,
+        String(input.sense);
+        constraints = input.framing_constraints,
+        variable_bounds = input.framing_variable_bounds,
+    )
+end
+
+end # @static if isdefined(EigeniusMirror, :SymbolicsToJuMPInput)
+
 end # module

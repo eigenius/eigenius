@@ -9,11 +9,11 @@
       "urn:eigenius:core:short_name",
       "urn:eigenius:jump:variable_names",
       "urn:eigenius:jump:objective",
-      "urn:eigenius:jump:sense",
-      "urn:eigenius:jump:constraints"
+      "urn:eigenius:jump:sense"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:jump:variable_bounds"
+      "urn:eigenius:jump:variable_bounds",
+      "urn:eigenius:jump:constraints"
     ]
   },
   {

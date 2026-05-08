@@ -59,6 +59,11 @@ const INTERVALS_ONTOLOGY_JSON: &str = include_str!(
 const SYMBOLICS_ONTOLOGY_JSON: &str = include_str!(
     "../../../julia/institutions/symbolics/declarations/symbolics-ontology.eigon.json"
 );
+// Phase 19f.1: symbolics ontology now references jump:VariableBound and
+// jump:Constraint via SymbolicsToJuMPInput, so the JuMP ontology must
+// be in the chain pool too.
+const JUMP_ONTOLOGY_JSON: &str =
+    include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
 const INTERVALS_HANDLER_PROJECT_TOML: &str =
     include_str!("../../../julia/institutions/intervals/EigeniusIntervals/Project.toml");
 const INTERVALS_HANDLER_SOURCE_JL: &str = include_str!(
@@ -98,6 +103,7 @@ impl CrossChain {
         for json in [
             INTERVALS_ONTOLOGY_JSON,
             SYMBOLICS_ONTOLOGY_JSON,
+            JUMP_ONTOLOGY_JSON,
             FORMULAS_ONTOLOGY_JSON,
         ] {
             for r in eigon_json::parse_document(json).expect("ontology must parse") {

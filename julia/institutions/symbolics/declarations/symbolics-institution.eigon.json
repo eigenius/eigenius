@@ -165,5 +165,39 @@
     ],
     "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_simplifies_to",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "frame_as_optimisation_problem",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_symb_to_jump` OnDemand QueryClass + the operational backing of the `Symbolics → JuMP` comorphism. Takes a `SymbolicsToJuMPInput` (objective: SymbolicExpression + variable_names + optional bounds + sense + constraints) and returns a `jump:OptimisationProblem` whose `objective` is the FormulaTerm extracted from `input.objective.term` (identity on FormulaTerm — D32 §6) and whose remaining fields are forwarded from the input's framing unchanged. Internally: the handler decodes the SymbolicExpression mirror struct, pulls its `term` field, and packs `OptimisationProblem(input.variable_names, input.framing_variable_bounds, input.objective.term, input.sense, input.framing_constraints)`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "frame_as_optimisation_problem",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:jump:OptimisationProblem"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:qc_symb_to_jump",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_symb_to_jump",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `SymbolicsToJuMPInput`, frame the underlying SymbolicExpression as a `jump:OptimisationProblem`. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5). The operational backing for the `Symbolics → JuMP` comorphism — the typed Comorphism resource at `julia/comorphisms/symbolics-to-jump.eigon.json` is the declarative contract; this QueryClass is what users call today (until D14's M5 evaluator wires up the four-step extract→m→reify pipeline as a single FIBER param coercion).",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:formats:ef_symb_to_jump_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_symb_to_jump_input",
+    "urn:eigenius:core:description": "Typed outbound view of `SymbolicsToJuMPInput`: extracts a chain-typed `jump:OptimisationProblem` via `frame_as_optimisation_problem`. Source side of the `Symbolics → JuMP` Comorphism. The payload type is `OptimisationProblem` because both ends of the comorphism speak the same shape on the JuMP side — the typed middle is the identity Lambda on OptimisationProblem.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:procedures:frame_as_optimisation_problem"
   }
 ]

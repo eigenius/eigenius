@@ -82,6 +82,11 @@ const INTERVALS_INSTITUTION_JSON: &str = include_str!(
 const SYMBOLICS_ONTOLOGY_JSON: &str = include_str!(
     "../../../julia/institutions/symbolics/declarations/symbolics-ontology.eigon.json"
 );
+// Phase 19f.1: symbolics ontology now references jump:VariableBound and
+// jump:Constraint via SymbolicsToJuMPInput's framing properties, so JuMP
+// ontology must precede symbolics on the chain.
+const JUMP_ONTOLOGY_JSON: &str =
+    include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
 const INTERVALS_HANDLER_PROJECT_TOML: &str =
     include_str!("../../../julia/institutions/intervals/EigeniusIntervals/Project.toml");
 const INTERVALS_HANDLER_SOURCE_JL: &str = include_str!(
@@ -120,10 +125,15 @@ const ANCHOR_DOMAIN_IRI: &str = "urn:eigenius:test:on_demand:domain";
 /// the institution.
 fn build_chain() -> (Arc<Layer>, LayerStorage) {
     let mut ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
-    // Commit order: symbolics ontology first because intervals'
-    // BoundsRequest declares `expr` with class_types: [SymbolicExpression]
-    // and the validator resolves that reference at commit time.
+    // Commit order:
+    //   - jump ontology first because symbolics now references
+    //     jump:VariableBound / jump:Constraint via class_types
+    //     (Phase 19f.1 / SymbolicsToJuMPInput).
+    //   - symbolics ontology before intervals because intervals'
+    //     BoundsRequest declares `expr` with class_types:
+    //     [SymbolicExpression].
     for (label, json) in [
+        ("jump_ontology", JUMP_ONTOLOGY_JSON),
         ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON),
         ("intervals_ontology", INTERVALS_ONTOLOGY_JSON),
         ("intervals_institution", INTERVALS_INSTITUTION_JSON),
@@ -219,6 +229,7 @@ fn build_on_demand_mirror() -> Resource {
     }
     let mut resources = HashMap::new();
     for json in [
+        JUMP_ONTOLOGY_JSON,
         INTERVALS_ONTOLOGY_JSON,
         SYMBOLICS_ONTOLOGY_JSON,
         FORMULAS_ONTOLOGY_JSON,

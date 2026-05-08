@@ -27,10 +27,11 @@ Key features that we still need to wire up:
   [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl) (symbolic algebra over a chain-typed
   `FormulaTerm`), [`IntervalArithmetic`](https://juliaintervals.github.io/) (rigorous bounds; Decidable role), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) (chemical
   reaction networks), [`DifferentialEquations.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) (ODEs), and [`JuMP`](https://jump.dev/) (mathematical
-  programming, HiGHS back end for LP/QP). The first cross-institution comorphism — Catalyst →
-  DiffEq, identity-on-`OdeProblem` over the shared `FormulaTerm` representation — is wired and
-  tested end-to-end. Still pending in this surface: nonlinear optimisation (Ipopt sibling of JuMP)
-  and [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md).
+  programming, HiGHS back end for LP/QP). Two cross-institution comorphisms over the shared
+  `FormulaTerm` representation are wired and tested end-to-end: Catalyst → DiffEq
+  (reaction-network compilation to ODE problems) and Symbolics → JuMP (symbolic-objective framing
+  into optimisation problems, demonstrated by a kinase Ki-fit). Still pending in this surface:
+  [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md).
 
 ## The notebook — start here
 

@@ -260,5 +260,67 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:ReductionStrategy"],
     "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicallyReducesTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "SymbolicsToJuMPInput",
+    "urn:eigenius:core:description": "Composite input to the `Symbolics → JuMP` Comorphism. Carries a Symbolics-side `SymbolicExpression` (the optimisation objective) plus the JuMP-side framing the chain author commits to: which variables are decision variables, what bounds apply, what constraints are imposed, which optimisation sense. The handler `frame_as_optimisation_problem` extracts the FormulaTerm from `objective.term` (identity on the chain's flat formula language — D32 §6) and packages it into a `jump:OptimisationProblem` ready for solver dispatch. Parallels `catalyst:CatalystToOdeInput`'s role in the Catalyst → DiffEq comorphism: a composite that combines a domain-side typed expression with the additional context the target institution requires. Constraints carry FormulaTerm LHS directly via `jump:Constraint` rather than a Symbolics-typed analogue — keeping a single chain-typed Constraint shape avoids forking the constraint vocabulary across institutions.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:symbolics:objective",
+      "urn:eigenius:symbolics:variable_names",
+      "urn:eigenius:symbolics:sense"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:symbolics:framing_variable_bounds",
+      "urn:eigenius:symbolics:framing_constraints"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:objective",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "objective",
+    "urn:eigenius:core:description": "The optimisation objective as a `SymbolicExpression`. Free variables in the wrapped FormulaTerm must appear in the enclosing `SymbolicsToJuMPInput.variable_names` (the comorphism's framing). The handler reads `objective.term` to extract the chain-typed FormulaTerm payload — identity on FormulaTerm — and uses it as `jump:OptimisationProblem.objective`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:variable_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "variable_names",
+    "urn:eigenius:core:description": "Decision-variable names in canonical positional order. Free `Var(name)` references in `objective.term` (and any `framing_constraints[*].lhs`) must appear here. Forwarded to the produced `jump:OptimisationProblem.variable_names` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:framing_variable_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "framing_variable_bounds",
+    "urn:eigenius:core:description": "Per-variable box constraints. Each entry is a `jump:VariableBound` resource — the JuMP-side type is reused directly so the chain has one bound vocabulary, not two. Forwarded to the produced `jump:OptimisationProblem.variable_bounds` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:VariableBound"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:sense",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "sense",
+    "urn:eigenius:core:description": "Optimisation sense — `Min` or `Max`. Forwarded to the produced `jump:OptimisationProblem.sense` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
+  },
+  {
+    "@id": "urn:eigenius:symbolics:framing_constraints",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "framing_constraints",
+    "urn:eigenius:core:description": "Ordered list of `jump:Constraint` resources framing the optimisation. Each constraint carries a FormulaTerm LHS, a `jump:ConstraintRelation` discriminator (`LE | GE | EQ`), and a Float64 RHS. May be empty. Forwarded to the produced `jump:OptimisationProblem.constraints` unchanged.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:jump:Constraint"],
+    "urn:eigenius:core:domain": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"]
   }
 ]

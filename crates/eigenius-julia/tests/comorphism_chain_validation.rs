@@ -39,6 +39,12 @@ const SYMBOLICS_ONTOLOGY_JSON: &str = include_str!(
 const SYMBOLICS_INSTITUTION_JSON: &str = include_str!(
     "../../../julia/institutions/symbolics/declarations/symbolics-institution.eigon.json"
 );
+// Phase 19f.1: symbolics ontology now references jump:VariableBound and
+// jump:Constraint via SymbolicsToJuMPInput's framing properties (the
+// Symbolics → JuMP comorphism), so the JuMP ontology must be on the
+// chain before symbolics validates.
+const JUMP_ONTOLOGY_JSON: &str =
+    include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
 const COMORPHISM_JSON: &str =
     include_str!("../../../julia/comorphisms/symbolics-to-intervals.eigon.json");
 
@@ -50,11 +56,15 @@ fn iri(s: &str) -> Iri {
 fn symbolics_to_intervals_comorphism_validates_cleanly() {
     let mut ctx = bootstrap().expect("bootstrap");
 
-    // Commit order matters: intervals' BoundsRequest (added in Phase
-    // 19d.2) references SymbolicExpression as a `class_types`, so the
-    // symbolics ontology must be on the chain before intervals
-    // attempts to commit.
+    // Commit order matters:
+    //   - intervals' BoundsRequest references SymbolicExpression as a
+    //     `class_types`, so the symbolics ontology must be on the chain
+    //     before intervals attempts to commit.
+    //   - symbolics' SymbolicsToJuMPInput references jump:VariableBound
+    //     and jump:Constraint via class_types, so jump ontology must be
+    //     on the chain before symbolics validates.
     for (label, json) in [
+        ("jump_ontology", JUMP_ONTOLOGY_JSON),
         ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON),
         ("intervals_ontology", INTERVALS_ONTOLOGY_JSON),
         ("intervals_institution", INTERVALS_INSTITUTION_JSON),

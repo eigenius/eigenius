@@ -274,9 +274,14 @@ function build_model(problem::EigeniusMirror.OptimisationProblem; smart_pow::Boo
     sense = _jump_sense(problem.sense)
     @objective(model, sense, obj_expr)
 
-    for cstr in problem.constraints
-        lhs_expr = formula_to_jump(cstr.lhs, env; smart_pow = smart_pow)
-        _add_constraint!(model, lhs_expr, cstr.relation, Float64(cstr.rhs))
+    # `constraints` is recommended (an unconstrained problem with only
+    # variable bounds is well-posed). `nothing` and the empty list both
+    # mean "no algebraic constraints"; only iterate when there are some.
+    if problem.constraints !== nothing
+        for cstr in problem.constraints
+            lhs_expr = formula_to_jump(cstr.lhs, env; smart_pow = smart_pow)
+            _add_constraint!(model, lhs_expr, cstr.relation, Float64(cstr.rhs))
+        end
     end
 
     return (model, var_refs)
