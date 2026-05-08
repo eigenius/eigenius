@@ -1,0 +1,37 @@
+[
+  {
+    "@id": "urn:eigenius:institutions:catalyst",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:core:short_name": "Catalyst",
+    "urn:eigenius:core:description": "Chemical-reaction-network institution backed by Catalyst.jl. v1 scope: validates `ConservationLaw` claims by re-running `Catalyst.conservationlaws(rn)` on the network and row-span-checking the claimed coefficient vector. Future scope (D27 §4.4): SteadyState validation, deficiency claims, the Catalyst → DiffEq comorphism for ODE compilation, the Catalyst → Symbolics comorphism via ModelingToolkit.",
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:institutions:catalyst",
+    "urn:eigenius:institution:institution_name": "Catalyst",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:institution:requires_environment": "urn:eigenius:catalyst:env:v1"
+  },
+
+  {
+    "@id": "urn:eigenius:catalyst:signatures:validate_conservation_law",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_conservation_law",
+    "urn:eigenius:core:description": "Julia entry point that takes a `ConservationLaw` mirror struct and returns a `Verdict`. The handler parses the claim's network source via `Core.eval` of `@reaction_network`, computes the conservation matrix via `Catalyst.conservationlaws(rn)`, and checks the claimed coefficient vector lies in the row span. `Holds` on a verified linear invariant; `Fails` on a refuted one (no Undecidable — conservation-law validity is a structural-rank question, not a heuristic).",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_conservation_law",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:catalyst:ConservationLaw"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:catalyst:query_classes:conservation_law_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "conservation_law_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `ConservationLaw` resource. Verdict shape is the canonical D14 tri-state, but for this institution `Holds` and `Fails` are the only outcomes the handler produces — `Undecidable` is reserved for future cases (e.g. a structural-simplification path that can't decide degenerate networks). A `Fails` verdict rejects the gated commit per D31 §6.3 and lands a `Verdict + RuntimeInvocation` audit anchor explaining the rejection.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:catalyst:ConservationLaw",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:catalyst:signatures:validate_conservation_law",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:catalyst"
+  }
+]

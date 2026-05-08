@@ -67,6 +67,10 @@ demo-intervals:
 demo-symbolics:
     ./demo/symbolics/run.sh
 
+# Run the Catalyst institution end-to-end demo (D27 §4.4 / Phase 19h)
+demo-catalyst:
+    ./demo/catalyst/run.sh
+
 # Start orchestrator locally (mock LLM)
 orchestrator-mock:
     cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env --allow-sys=hostname src/main.ts
