@@ -2301,19 +2301,32 @@ fn decode_value_expr(
             return format!("# TODO: nested Vector decode unsupported in v1\n        {expr}");
         }
         if let JuliaType::InductiveRef(iri) = inner.as_ref() {
+            // Inductive `decode_<T>` is typed `::T` where `T` is the
+            // abstract umbrella, so `[decode_T(_x) for _x in expr]`
+            // already lands as `Vector{T}` — matches the field type.
             let short = inductive_lookup
                 .get(iri)
                 .cloned()
                 .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
             return format!("[decode_{short}(_x) for _x in {expr}]");
         }
+        // For class-typed Vectors the field is rendered as
+        // `Vector{Abstract<C>}`, but `decode_<C>(_x)` returns the
+        // *concrete* struct type. Julia's parametric types are
+        // invariant, so an unannotated comprehension produces
+        // `Vector{C}` and the constructor rejects it. Type-annotate
+        // the comprehension with the abstract element type so the
+        // resulting array's element type lines up with the field.
+        let abstract_element = inner.render(class_lookup, inductive_lookup);
         let leaves = type_leaves(inner.as_ref(), concrete_descendants);
         if leaves.len() == 1 {
             let only = leaves.iter().next().expect("len 1");
             let cls = class_short_name(only, class_lookup);
-            return format!("[decode_{cls}(_x) for _x in {expr}]");
+            return format!("{abstract_element}[decode_{cls}(_x) for _x in {expr}]");
         }
-        return format!("[_decode_{class_short}_{field_short}(_x) for _x in {expr}]");
+        return format!(
+            "{abstract_element}[_decode_{class_short}_{field_short}(_x) for _x in {expr}]"
+        );
     }
     // Scalar struct ref / union ref.
     let leaves = type_leaves(t, concrete_descendants);
@@ -2412,7 +2425,15 @@ fn encode_value_expr(
             .get(iri)
             .cloned()
             .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
-        return format!("encode_{short}({expr})");
+        // Wrap inductive payloads in `CBOR.Tag(EIGENIUS_JSON_TAG, …)`
+        // so the kernel's CBOR decoder treats them as `Value::Json`
+        // (opaque) rather than trying to parse the bare-keyed
+        // `{ctor, args, …}` shape as an embedded Resource. The worker
+        // generates `decode_<T>(t::CBOR.Tag)` overloads to peel the
+        // wrapper on incoming traffic, so the round-trip stays
+        // symmetric. See `kernel/src/ontology/eigon_cbor.rs:330`
+        // (`EIGENIUS_JSON_TAG`).
+        return format!("CBOR.Tag(27182, encode_{short}({expr}))");
     }
     if let JuliaType::Vector(inner) = t {
         if matches!(inner.as_ref(), JuliaType::Primitive(_)) {
@@ -2426,7 +2447,8 @@ fn encode_value_expr(
                 .get(iri)
                 .cloned()
                 .unwrap_or_else(|| sanitise_for_identifier(iri.as_str()));
-            return format!("[encode_{short}(_x) for _x in {expr}]");
+            // Same tag-wrapping rationale as the scalar branch above.
+            return format!("[CBOR.Tag(27182, encode_{short}(_x)) for _x in {expr}]");
         }
         let leaves = type_leaves(inner.as_ref(), concrete_descendants);
         if leaves.len() == 1 {

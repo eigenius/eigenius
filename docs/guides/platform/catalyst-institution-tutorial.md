@@ -309,23 +309,35 @@ The kinase mechanism is now a chain-committed citizen: queryable, comorphism-add
 
 ## Where this is heading
 
-Catalyst v1 is the foundation; the interesting downstream pieces stack on top of the `ReactionNetwork` chain shape this tutorial committed.
+Catalyst v1's `ReactionNetwork` + `ConservationLaw` is the foundation. The downstream story stacks on top:
 
-**Catalyst v2** (independently shippable):
+### The `Catalyst → DiffEq` comorphism (shipped, Phase 19h.1)
+
+The `ReactionNetwork` chain shape exists precisely so that downstream institutions (DiffEq, Symbolics, JuMP) can consume it through typed cross-institution comorphisms. The first comorphism — `Catalyst → DiffEq` — is now wired:
+
+- A `CatalystToOdeInput { network, initial_conditions, parameter_values, time_span_start, time_span_end }` composite class on the Catalyst side bundles everything needed to compile a network to a solvable problem.
+- An `ExportFormat ef_cat_to_ode_input` (Catalyst-side) and an `ImportFormat if_diffeq_problem` (DiffEq-side) declare the typed boundary — both with `payload_type = diffeq:OdeProblem` (the same FormulaTerm-typed shape DiffEq's institution gates).
+- A chain-committed `Comorphism(ef_cat_to_ode_input, m_id_ode_problem, if_diffeq_problem)` triple at [`julia/comorphisms/catalyst-to-diffeq.eigon.json`](../../../julia/comorphisms/catalyst-to-diffeq.eigon.json) makes the typed contract first-class. The transformation `m_id_ode_problem` is the identity Lambda on `OdeProblem` — both ends speak the same shape, so the typed middle is a no-op (same pattern as the Symbolics → IntervalArithmetic identity comorphism).
+- The operational backing is an OnDemand `qc_cat_to_ode` QueryClass invokable via FIBER. The Catalyst handler's `compile_to_ode(input::CatalystToOdeInput)` walks `Catalyst.netstoichmat(rn) * Catalyst.oderatelaw.(reactions(rn))` to get the symbolic per-species RHS, translates each via `num_to_formula` to a chain-typed `FormulaTerm`, and packs them into an `OdeProblem` mirror struct DiffEq can integrate.
+
+In other words: with both institutions on the chain, the kinase mechanism flows end-to-end as **`ReactionNetwork → (qc_cat_to_ode FIBER) → OdeProblem (FormulaTerm RHS) → (DiffEq AutoOnLoad) → OdeSolution`** — a fully chain-typed pipeline from biochemical mechanism to integrated trajectory. See [the DiffEq tutorial](diffeq-institution-tutorial.md) for the receiving side.
+
+### Catalyst v2 (independently shippable)
+
 - `DeficiencyZero` / `DeficiencyOne` claim classes + AutoOnLoad gates over `Catalyst.deficiency(rn)`.
-- `qc_cat_check_deficiency` Decidable QueryClass — exposes the deficiency as a typed predicate that user programs can branch on.
+- `qc_cat_check_deficiency` Decidable QueryClass — exposes deficiency as a typed predicate user programs branch on.
 - `SteadyState` claim + AutoOnLoad gate (needs HomotopyContinuation.jl or NonlinearSolve.jl in the env image).
 
-**The DiffEq institution** (Phase 19g, blocked on this v1):
-- `OdeProblem`, `OdeSolution`, `ReproducibleIntegration` classes (D27 §4.5).
-- The **`Catalyst → DiffEq` comorphism** — takes a `ReactionNetwork` and produces an `OdeProblem` via the `ODEProblem(rn, u0_map, tspan, p_map)` map-form pipeline (D27 §4.4 verified API note). With both institutions on the chain, `qc_cat_to_ode(network)` becomes a single FIBER call that returns an `OdeProblem` ready to solve.
+### The kinase IC₅₀ pipeline (the real downstream value)
 
-**The kinase IC₅₀ pipeline** (real downstream value):
-- A new `KinaseAssayMechanism` chain class linking `(ReactionNetwork, parameter_assignments, IC50_measurement)` so the screening notebook's flat `AssayResult(compound, target, protocol, ic50_nm)` rows can carry a *mechanistic anchor* — "this IC₅₀ was measured under network N with parameters fitted to ⟨k_on_S, k_off_S, k_cat, k_on_I, k_off_I⟩ via assay protocol P."
-- A comorphism into `JuMP` that takes `(network, observed_IC50)` and produces a parameter-fit problem.
-- An interval-arithmetic verdict (via the existing IntervalArithmetic institution + the cross-institution probe story from D32 §6.2) that checks the fitted parameters reproduce the assay's 95% confidence interval.
+With Catalyst → DiffEq in place, the chain has the missing primitive for mechanistic kinase modelling. The full pipeline:
 
-That last one is where the kinase-screening notebook upgrades from "flat dataset of measurements" to "mechanistic claims with end-to-end provenance." The Catalyst institution this tutorial wires is the first foundation stone.
+- A new `KinaseAssayMechanism` chain class linking `(ReactionNetwork, parameter_assignments, IC50_measurement)` so the screening notebook's flat `AssayResult(compound, target, protocol, ic50_nm)` rows carry a *mechanistic anchor* — "this IC₅₀ was measured under network N with parameters fitted to ⟨k_on_S, k_off_S, k_cat, k_on_I, k_off_I⟩ via assay protocol P."
+- The Catalyst → DiffEq comorphism produces the `OdeProblem`; DiffEq integrates; a parameter sweep over inhibitor concentration produces a numerical IC₅₀ from the simulated time courses.
+- A comorphism into JuMP takes `(network, observed_IC50)` and produces a parameter-fit problem; the fitted parameters get committed back as `KinaseAssayMechanism.parameter_assignments`.
+- A `DiffEq → IntervalArithmetic` comorphism (the third in the chain) walks the FormulaTerm RHS under interval semantics + the integrated trajectory's time grid to produce rigorous bounds — the assay's 95% CI becomes a *mathematically-bounded* confidence interval rather than a statistical one.
+
+That's where the kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic claims with end-to-end interval-bounded provenance." The Catalyst institution + the comorphism wired in this session is the first two foundation stones.
 
 ## Common failure modes
 

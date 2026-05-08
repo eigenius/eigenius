@@ -233,6 +233,12 @@ function num_to_formula(v)
     if v isa Real
         return EigeniusMirror.FormulaTerm_LitFloat(Float64(v))
     end
+    # SymbolicUtils 4.x wraps surviving numeric constants as
+    # `BSImpl.Const` BasicSymbolics — neither `issym` nor `iscall`
+    # matches them. Detect and unwrap to a flat `LitFloat`.
+    if SymbolicUtils.isconst(v)
+        return EigeniusMirror.FormulaTerm_LitFloat(Float64(SymbolicUtils.unwrap_const(v)))
+    end
     # Symbolic variable.
     if SymbolicUtils.issym(v)
         return EigeniusMirror.FormulaTerm_Var(string(SymbolicUtils.nameof(v)))
@@ -241,6 +247,17 @@ function num_to_formula(v)
     if SymbolicUtils.iscall(v)
         op = SymbolicUtils.operation(v)
         args = SymbolicUtils.arguments(v)
+        # A callable Sym applied to args (e.g. a time-dependent
+        # variable `A(t)` from MTK/Catalyst inputs) reifies to a
+        # flat `Var` carrying the Sym's name — the chain's
+        # FormulaTerm has no time-dependence in its variable layer.
+        # Symbolics-only usage typically never produces this shape,
+        # but keeping the branch in lockstep with the duplicate in
+        # `EigeniusCatalyst` preserves the invariant that both
+        # translators agree on FormulaTerm encoding.
+        if SymbolicUtils.issym(op)
+            return EigeniusMirror.FormulaTerm_Var(string(SymbolicUtils.nameof(op)))
+        end
         op_iri = get(_FN_TO_IRI, op, nothing)
         if op_iri === nothing
             error("EigeniusSymbolics: Symbolics produced operation `$op` with no FormulaTerm encoding; add it to _FN_TO_IRI")

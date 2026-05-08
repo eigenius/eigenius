@@ -33,5 +33,40 @@
     ],
     "urn:eigenius:institution:query_handler": "urn:eigenius:catalyst:signatures:validate_conservation_law",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:catalyst"
+  },
+
+  {
+    "@id": "urn:eigenius:catalyst:signatures:compile_to_ode",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "compile_to_ode",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_cat_to_ode` OnDemand QueryClass + the operational backing of the `Catalyst → DiffEq` comorphism. Takes a `CatalystToOdeInput` (network + ICs + parameters + tspan) and returns an `OdeProblem` whose RHS is a list of FormulaTerm-typed `RhsComponent`s — the Nth component is the symbolic time-derivative of the Nth species in `network.species_declared`. Internally: parses the @reaction_network source, computes `netstoichmat(rn) * oderatelaw.(reactions(rn))` to get the symbolic RHS expressions, translates each to FormulaTerm via `num_to_formula` (D32 §6 — same SymbolicUtils-walking translator the Symbolics handler uses).",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "compile_to_ode",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:catalyst:CatalystToOdeInput"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:diffeq:OdeProblem"
+  },
+  {
+    "@id": "urn:eigenius:catalyst:query_classes:qc_cat_to_ode",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_cat_to_ode",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `CatalystToOdeInput(network, ics, params, tspan)`, compile to a chain-typed `OdeProblem` with FormulaTerm RHS. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5). The operational backing for the `Catalyst → DiffEq` comorphism — the typed Comorphism resource at `julia/comorphisms/catalyst-to-diffeq.eigon.json` is the declarative contract; this QueryClass is what users call today (until D14's M5 evaluator wires up the four-step extract→m→reify pipeline as a single FIBER param coercion).",
+    "urn:eigenius:institution:query_class": "urn:eigenius:catalyst:CatalystToOdeInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:diffeq:OdeProblem",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:catalyst:signatures:compile_to_ode",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:catalyst"
+  },
+
+  {
+    "@id": "urn:eigenius:catalyst:formats:ef_cat_to_ode_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_cat_to_ode_input",
+    "urn:eigenius:core:description": "Typed outbound view of `CatalystToOdeInput`: extracts a chain-typed `OdeProblem` with FormulaTerm RHS via `compile_to_ode`. Source side of the `Catalyst → DiffEq` Comorphism (D27 §4.4.4 / D32 §6.2 generalised). The payload type is `OdeProblem` because both ends of the comorphism speak the same shape — the typed middle is the identity Lambda.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:catalyst:CatalystToOdeInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:diffeq:OdeProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:catalyst:procedures:compile_to_ode"
   }
 ]

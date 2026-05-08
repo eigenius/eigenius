@@ -24,4 +24,4 @@ EigeniusMirror = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
 [compat]
 julia = "1.10"
 Symbolics = "7"
-SymbolicUtils = "3"
+SymbolicUtils = "4"

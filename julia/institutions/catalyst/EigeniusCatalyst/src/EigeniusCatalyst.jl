@@ -46,9 +46,11 @@ module EigeniusCatalyst
 
 using Catalyst
 using LinearAlgebra
+using Symbolics
+using SymbolicUtils
 using EigeniusMirror
 
-export validate_conservation_law
+export validate_conservation_law, compile_to_ode
 
 const VERDICT_CLASS_IRI = "urn:eigenius:institution:Verdict"
 const IS_A_PROP = "urn:eigenius:core:is_a"
@@ -158,5 +160,207 @@ function validate_conservation_law(c::EigeniusMirror.ConservationLaw)
         return _verdict("Fails")
     end
 end
+
+# ─── Catalyst → DiffEq comorphism (D27 §4.4.4 / D32 §6) ─────────────────
+#
+# `compile_to_ode(input::CatalystToOdeInput) -> OdeProblem` is the
+# operational backing of the chain-side `Catalyst → DiffEq` comorphism.
+# Takes a network + ICs + parameters + tspan, computes the symbolic
+# RHS via Catalyst's stoichiometry + rate-law machinery, and
+# translates each component to a chain-typed FormulaTerm. The result
+# is an `OdeProblem` mirror struct DiffEq can integrate as-is.
+#
+# The handler is gated by `@static if isdefined(...)` because
+# `CatalystToOdeInput` and `OdeProblem` only enter the closure when
+# the operator generates a mirror that includes them. The
+# conservation-law-only flow (the v1 Catalyst demo) uses a narrower
+# closure and skips compiling this handler.
+
+@static if isdefined(EigeniusMirror, :CatalystToOdeInput) &&
+          isdefined(EigeniusMirror, :OdeProblem)
+
+# ─── num_to_formula — translator from Symbolics.Num to FormulaTerm
+#
+# TODO(common-package): this translator is duplicated from
+# `EigeniusSymbolics`; both should share via a future
+# `EigeniusFormulas` / extended `EigeniusJuliaCommon` package once
+# more institutions need it. v1.6 keeps the duplication for cycle-
+# avoidance — Catalyst depending on Symbolics is non-obvious, and
+# adding Symbolics deps to EigeniusJuliaCommon currently changes
+# the picture for every mirror consumer.
+
+const _FN_TO_IRI = IdDict{Any, String}(
+    (+) => "urn:eigenius:formulas:ops:add",
+    (-) => "urn:eigenius:formulas:ops:sub",
+    (*) => "urn:eigenius:formulas:ops:mul",
+    (/) => "urn:eigenius:formulas:ops:div",
+    (^) => "urn:eigenius:formulas:ops:pow",
+    exp => "urn:eigenius:formulas:ops:exp",
+    log => "urn:eigenius:formulas:ops:log",
+    sin => "urn:eigenius:formulas:ops:sin",
+    cos => "urn:eigenius:formulas:ops:cos",
+    tan => "urn:eigenius:formulas:ops:tan",
+    sqrt => "urn:eigenius:formulas:ops:sqrt",
+    abs => "urn:eigenius:formulas:ops:abs",
+)
+
+"""
+    num_to_formula(n) -> FormulaTerm
+
+Translate a `Symbolics.Num` (or its underlying `BasicSymbolic` /
+plain numeric value) into a chain-shaped FormulaTerm value emitted
+by the mirror. Mirrors `EigeniusSymbolics.num_to_formula` exactly
+— see that module's docstring for design rationale.
+"""
+num_to_formula(n::Symbolics.Num) = num_to_formula(Symbolics.value(n))
+
+function num_to_formula(v)
+    if v isa Real
+        return EigeniusMirror.FormulaTerm_LitFloat(Float64(v))
+    end
+    # SymbolicUtils 4.x wraps numeric constants surviving simplification
+    # (and stoichiometry coefficients) as `BSImpl.Const` BasicSymbolics
+    # — neither `issym` nor `iscall` matches them. Detect and unwrap.
+    if SymbolicUtils.isconst(v)
+        return EigeniusMirror.FormulaTerm_LitFloat(Float64(SymbolicUtils.unwrap_const(v)))
+    end
+    if SymbolicUtils.issym(v)
+        return EigeniusMirror.FormulaTerm_Var(string(SymbolicUtils.nameof(v)))
+    end
+    if SymbolicUtils.iscall(v)
+        op = SymbolicUtils.operation(v)
+        args = SymbolicUtils.arguments(v)
+        # Catalyst represents species as time-dependent callable Syms
+        # (`A(t)`): the operation is the underlying Sym and the args
+        # are the independent variable(s). Chain-side `FormulaTerm`
+        # is intentionally flat — no time-dependence in the variable
+        # layer — so reify any "Sym applied to args" as a bare `Var`
+        # carrying the Sym's name. This keeps `compile_to_ode`'s
+        # output (FormulaTerm RHS over `[A, B, ...]`) aligned with
+        # the chain-typed `OdeProblem.state_names`.
+        if SymbolicUtils.issym(op)
+            return EigeniusMirror.FormulaTerm_Var(string(SymbolicUtils.nameof(op)))
+        end
+        op_iri = get(_FN_TO_IRI, op, nothing)
+        if op_iri === nothing
+            error("EigeniusCatalyst: Symbolics produced operation `$op` with no FormulaTerm encoding; add it to _FN_TO_IRI")
+        end
+        result = EigeniusMirror.FormulaTerm_App(
+            EigeniusMirror.FormulaTerm_OpRef(op_iri),
+            num_to_formula(args[1]),
+        )
+        for a in args[2:end]
+            result = EigeniusMirror.FormulaTerm_App(result, num_to_formula(a))
+        end
+        return result
+    end
+    error("EigeniusCatalyst: cannot encode Symbolics term of type $(typeof(v)) as FormulaTerm")
+end
+
+"""
+    compile_to_ode(input::CatalystToOdeInput) -> OdeProblem
+
+Compile a Catalyst reaction network to a chain-typed `OdeProblem`
+with FormulaTerm-typed RHS components. The path:
+
+1. Parse the network's `@reaction_network` source via the same
+   defensive eval-shape check `validate_conservation_law` uses.
+2. Extract the symbolic RHS for each species: walk
+   `netstoichmat(rn) * oderatelaw.(reactions(rn))`. The Nth row of
+   the stoichiometry matrix dotted with the rate-law vector gives
+   `du[N]/dt` as a `Symbolics.Num`.
+3. Translate each `Num` to a `FormulaTerm` via `num_to_formula`.
+4. Pack into an `OdeProblem` mirror struct, aligning species/
+   parameter names with the network's canonical ordering.
+
+The output's `state_names` and `parameter_names` come straight from
+the input network's `species_declared` / `parameters_declared` —
+the comorphism preserves the user's authored ordering through to
+the integrator's u/p vectors.
+"""
+"""
+    _bare_name(s) -> String
+
+Extract the bare textual name from a Catalyst species symbolic.
+Catalyst represents species as time-dependent variables `A(t)` — a
+`Term` whose operation is the underlying `Sym`. Plain (non-time-
+dependent) parameters come back as bare `Sym`s. Both shapes need to
+collapse to the user-visible name (`"A"`, `"k"`).
+"""
+function _bare_name(s)
+    v = Symbolics.unwrap(s)
+    if SymbolicUtils.iscall(v)
+        return string(SymbolicUtils.nameof(SymbolicUtils.operation(v)))
+    elseif SymbolicUtils.issym(v)
+        return string(SymbolicUtils.nameof(v))
+    else
+        error("EigeniusCatalyst: cannot extract bare name from $(typeof(v))")
+    end
+end
+
+function compile_to_ode(input::EigeniusMirror.CatalystToOdeInput)
+    rn = parse_network(input.network.network_source)
+    rn = Catalyst.complete(Catalyst.flatten(rn))
+
+    species_syms = Catalyst.species(rn)
+    rxs = Catalyst.reactions(rn)
+    n_species = length(species_syms)
+    n_reactions = length(rxs)
+
+    # Declared ordering from the chain side.
+    declared_species = collect(String, input.network.species_declared)
+    declared_params = collect(String, input.network.parameters_declared)
+
+    actual_species_names = [_bare_name(s) for s in species_syms]
+    if Set(actual_species_names) != Set(declared_species)
+        error("EigeniusCatalyst.compile_to_ode: declared species $(declared_species) do not match network's actual species $(actual_species_names)")
+    end
+
+    # Build the per-species symbolic RHS:  rhs[i] = Σⱼ N[i,j] · rate(j)
+    # where N is the net stoichiometric matrix. Using the explicit
+    # sum keeps the construction transparent (no MTK ODESystem
+    # round-trip needed; D27 §4.4 lists `oderatelaw` as the per-
+    # reaction rate-law accessor).
+    N = Catalyst.netstoichmat(rn)
+    rate_laws = [Catalyst.oderatelaw(r) for r in rxs]
+
+    # Map from Catalyst's species ordering to the user's
+    # declared ordering — `actual_species_names[i]` may not equal
+    # `declared_species[i]`, so we look up by name.
+    declared_idx_of_actual = Dict(name => i for (i, name) in enumerate(declared_species))
+
+    # `num_to_formula` reifies time-dependent Catalyst species
+    # (`A(t)` callable Syms) as flat `Var`s, matching the chain's
+    # flat variable layer.
+    rhs_terms = Vector{Any}(undef, n_species)
+    for (catalyst_i, name) in enumerate(actual_species_names)
+        rhs_sym = sum(N[catalyst_i, j] * rate_laws[j] for j in 1:n_reactions; init = Symbolics.Num(0))
+        declared_i = declared_idx_of_actual[name]
+        rhs_terms[declared_i] = num_to_formula(Symbolics.simplify(rhs_sym))
+    end
+
+    # Mirror generator types `OdeProblem.rhs` as
+    # `Vector{AbstractRhsComponent}` (D29 §7 — fields take the
+    # abstract base, not the concrete struct). Julia's parametric
+    # types are invariant, so `Vector{RhsComponent}` would not match;
+    # build the comprehension as `AbstractRhsComponent[...]` so the
+    # element type lines up with the constructor's signature.
+    rhs_components = EigeniusMirror.AbstractRhsComponent[
+        EigeniusMirror.RhsComponent(t)
+        for t in rhs_terms
+    ]
+
+    return EigeniusMirror.OdeProblem(
+        declared_species,
+        declared_params,
+        rhs_components,
+        Float64.(input.initial_conditions),
+        Float64.(input.parameter_values),
+        Float64(input.time_span_start),
+        Float64(input.time_span_end),
+    )
+end
+
+end # @static if isdefined(EigeniusMirror, :CatalystToOdeInput)
 
 end # module

@@ -1,0 +1,30 @@
+name = "EigeniusDiffEq"
+uuid = "6d5c4b3a-2e1f-4a09-9b8c-7e6f5a4b3c2d"
+authors = ["The Eigenius Authors"]
+version = "0.1.0"
+
+[deps]
+# OrdinaryDiffEq.jl — the integrator suite this institution wraps.
+# Pinned at the verified API surface from D27 §4.5
+# (OrdinaryDiffEq 6.111 / SciMLBase 2.155, 2026-05-03): ODEProblem,
+# ODESolution, solve, successful_retcode, the named integrators
+# (Tsit5, Vern9, Rosenbrock23, Rodas5, Rodas5P, QNDF, FBDF). v1
+# uses the OrdinaryDiffEq umbrella for breadth; future releases
+# may switch to the per-algorithm sub-packages
+# (OrdinaryDiffEqTsit5, etc.) for slimmer images.
+OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
+
+# SciMLBase — for `successful_retcode` and the ReturnCode enum used
+# in the verdict-policy decisions. Re-exported by OrdinaryDiffEq
+# but pinned explicitly so the version is visible in the lockfile.
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+
+# Generated mirror module. Same UUID as the other Eigenius mirror
+# consumers — the substrate's mirror generator emits `EigeniusMirror`
+# per Phase 19a.3.
+EigeniusMirror = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+
+[compat]
+julia = "1.10"
+OrdinaryDiffEq = "6"
+SciMLBase = "2"

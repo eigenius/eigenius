@@ -71,6 +71,10 @@ demo-symbolics:
 demo-catalyst:
     ./demo/catalyst/run.sh
 
+# Run the DiffEq institution end-to-end demo (D27 §4.5 / Phase 19g)
+demo-diffeq:
+    ./demo/diffeq/run.sh
+
 # Start orchestrator locally (mock LLM)
 orchestrator-mock:
     cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env --allow-sys=hostname src/main.ts

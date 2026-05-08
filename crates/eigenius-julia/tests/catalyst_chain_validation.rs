@@ -36,6 +36,12 @@ const CATALYST_ONTOLOGY_JSON: &str =
 const CATALYST_INSTITUTION_JSON: &str = include_str!(
     "../../../julia/institutions/catalyst/declarations/catalyst-institution.eigon.json"
 );
+// Phase 19h.1: the Catalyst institution declarations now reference
+// `diffeq:OdeProblem` as `payload_type` of `ef_cat_to_ode_input`
+// and `result_class` of `qc_cat_to_ode`, so the DiffEq ontology
+// must be on the chain before the Catalyst institution validates.
+const DIFFEQ_ONTOLOGY_JSON: &str =
+    include_str!("../../../julia/institutions/diffeq/declarations/diffeq-ontology.eigon.json");
 
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
@@ -46,6 +52,7 @@ fn catalyst_ontology_and_institution_validate_cleanly() {
     let mut ctx = bootstrap().expect("bootstrap");
 
     for (label, json) in [
+        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON),
         ("catalyst_ontology", CATALYST_ONTOLOGY_JSON),
         ("catalyst_institution", CATALYST_INSTITUTION_JSON),
     ] {
@@ -66,6 +73,15 @@ fn catalyst_ontology_and_institution_validate_cleanly() {
         "urn:eigenius:institutions:catalyst",
         "urn:eigenius:catalyst:signatures:validate_conservation_law",
         "urn:eigenius:catalyst:query_classes:conservation_law_validity",
+        // Phase 19h.1 — Catalyst → DiffEq comorphism source side.
+        "urn:eigenius:catalyst:CatalystToOdeInput",
+        "urn:eigenius:catalyst:initial_conditions",
+        "urn:eigenius:catalyst:parameter_values",
+        "urn:eigenius:catalyst:time_span_start",
+        "urn:eigenius:catalyst:time_span_end",
+        "urn:eigenius:catalyst:signatures:compile_to_ode",
+        "urn:eigenius:catalyst:query_classes:qc_cat_to_ode",
+        "urn:eigenius:catalyst:formats:ef_cat_to_ode_input",
     ] {
         assert!(
             ctx.head().resolve(&iri(required)).is_some(),
