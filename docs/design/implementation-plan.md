@@ -93,7 +93,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 16 | Out-of-Core Query Execution | | Buffer-pool over storage, hash-join with spill, external sort, spillable group-by, per-query memory budget |
 | 17 | Chain Consolidation | | Squash a contiguous ancestral range into a resolve-equivalent layer; "git squash" for the typed knowledge graph |
 | 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; Service / Job lifecycle split (`JobSpawner` / `ServiceSpawner`); image-build pipeline; sandbox; CBOR + RFC 8746 wire format; CBOR consolidation across kernel ↔ orchestrator |
-| 19 | Julia Institutions | 19a ✓, 19d.0 ✓, 19d ✓, 19e ✓, 19g ✓, 19h ✓, 19h.1 ✓; 19f (JuMP) pending | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs); Catalyst → DiffEq comorphism live |
+| 19 | Julia Institutions | 19a ✓, 19d.0 ✓, 19d ✓, 19e ✓, 19f ✓ (HiGHS), 19g ✓, 19h ✓, 19h.1 ✓ | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs); Catalyst → DiffEq comorphism live |
 | 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
 | 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
 
@@ -1754,11 +1754,15 @@ Four independently-shippable landings, dependency-ordered:
 - *Reordered ahead of JuMP* — IntervalArithmetic has no solver-dependency surface, the kinase CI columns map directly onto `BoundedBy`, and the Decidable role is the most novel piece of D14 runtime mechanics; we want it exercised early.
 - *Numerical hardening (BLAS pinning, FMA discipline, host-conformance gating, cross-host reproducibility tooling) split out and deferred to [issue #43](https://github.com/eigenius/eigenius/issues/43)*. Interval arithmetic is conservative under any IEEE-754-conforming host, so the institution itself doesn't depend on it; determinism becomes load-bearing once institutions chain (DiffEq → IntervalArithmetic, etc.). Land it before claiming reproducibility guarantees that compose across institutions.
 
-### Phase 19f — `JuMP` institution (~2 weeks)
+### Phase 19f — `JuMP` institution (~2 weeks; ~1 day landed) ✓
 
-- `eigenius-julia-jump` per-solver registrations: HiGHS (default), GLPK, Ipopt; Gurobi if licensed. Each is a separate `Institution` resource referencing its own `JuliaEnvironment`.
-- Declarations from D27 §4.2: `OptimisationProblem`, `OptimisesTo`, `Infeasible`, `OptimisationBounds` resource classes; AutoOnLoad certificate-validation QueryClasses; OnDemand `qc_jump_solve`; Decidable `qc_jump_is_infeasible`.
-- Demo: a constrained design problem solved by the institution; solver certificate re-checked on commit.
+**Landed scope (HiGHS only):** `OptimisationProblem` (variable_names, variable_bounds, objective, sense, constraints — objective and each constraint LHS as `FormulaTerm`), `VariableBound`, `Constraint`, `ConstraintRelation` inductive (`LE | GE | EQ`), `OptimisesTo` (problem, termination_status, objective_value, variable_values, abstol, reltol). AutoOnLoad `validate_optimum` re-solves the model and tolerance-checks the resolved objective against the claim; OnDemand `qc_jump_solve` materialises an `OptimisesTo` from a fresh solve.
+
+**Walker design:** structurally identical to EigeniusDiffEq's `formula_to_value` (left-spine collection, OpRef dispatch, recursive descent), with the operator catalog mapped to Julia's general-arithmetic operators rather than Float64-only operators — JuMP's overloading on `JuMP.VariableRef` promotes the result to `AffExpr` / `QuadExpr` / `NonlinearExpr` automatically. The walker has a **smart-pow flag** (default `true`) that recognises integer-valued `LitFloat` exponents on `pow` with `n ≤ 2` and unrolls to repeated multiplication, so HiGHS sees a `QuadExpr` rather than a `NonlinearExpr` it would reject. See [`julia/research/jump-formula-term-probe.md`](../../julia/research/jump-formula-term-probe.md) for the empirical demonstration (LP + QP + NL through the walker, all four cases landing on their analytical optima).
+
+**Why one solver and not all four (HiGHS / GLPK / Ipopt / Gurobi).** Per-solver siblings reuse the same ontology + handler walker; only the `Model(SolverFoo.Optimizer)` line and the `Project.toml` deps change. `urn:eigenius:institutions:jump_ipopt` is the natural next drop (general nonlinear; smart-pow flag flips to `false` since Ipopt accepts `NonlinearExpr` directly), and lands when a downstream worked example needs it.
+
+**Comorphism out (sketched, not landed):** `Symbolics → JuMP` is the identity on FormulaTerm — a `SymbolicExpression`'s `term` field is exactly an OptimisationProblem-shaped objective candidate. Lands when the kinase parameter-fit demo wants to author the loss function symbolically before optimising.
 
 ### Phase 19g — `DifferentialEquations.jl` institution — ODEs only (~3 weeks) ✓
 

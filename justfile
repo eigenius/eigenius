@@ -75,6 +75,10 @@ demo-catalyst:
 demo-diffeq:
     ./demo/diffeq/run.sh
 
+# Run the JuMP-HiGHS institution end-to-end demo (D27 §4.2 / Phase 19f)
+demo-jump-highs:
+    ./demo/jump-highs/run.sh
+
 # Start orchestrator locally (mock LLM)
 orchestrator-mock:
     cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env --allow-sys=hostname src/main.ts
