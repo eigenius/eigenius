@@ -1692,6 +1692,43 @@ mod tests {
     }
 
     #[test]
+    fn compile_formula_sublanguage() {
+        // `formula(...)` lowers through the same Value::CtorApp path
+        // as the explicit `App(...)` literal form, producing the
+        // canonical chain `{ctor, args}` JSON. Verify the SSE-residual
+        // shape from the kinase Ki-fit demo collapses cleanly.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+
+            resource ex:t : ex:Holder {
+                ex:term = formula((4 - 2 * Ki) ^ 2);
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let term = r
+            .get(&iri("urn:eigenius:example:term"))
+            .expect("term property");
+        let Value::Json(json) = term else {
+            panic!("expected Value::Json on ex:term");
+        };
+        // Outermost is pow; rhs is the LitFloat(2.0) exponent.
+        assert_eq!(json["ctor"], serde_json::json!("App"));
+        assert_eq!(
+            json["args"][0]["args"][0]["ctor"],
+            serde_json::json!("OpRef")
+        );
+        assert_eq!(
+            json["args"][0]["args"][0]["args"][0],
+            serde_json::json!("urn:eigenius:formulas:ops:pow")
+        );
+        assert_eq!(json["args"][1]["ctor"], serde_json::json!("LitFloat"));
+        assert_eq!(json["args"][1]["args"][0], serde_json::json!(2.0));
+    }
+
+    #[test]
     fn compile_nullary_ctor_value() {
         // Nullary ctor (`LE()`) lowers to `{ "ctor": "LE", "args": [] }`.
         let resources = compile_esl(

@@ -17,6 +17,9 @@ import { Button, makeStyles, tokens } from "@fluentui/react-components";
 import { Edit16Regular, Eye16Regular } from "@fluentui/react-icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { CodeMirrorEditor } from "../editors/CodeMirrorEditor";
 
 const useStyles = makeStyles({
@@ -68,7 +71,12 @@ export function MarkdownCell({ source, onChange }: MarkdownCellProps) {
         )
         : (
           <div className="markdown-cell">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+            >
+              {source}
+            </ReactMarkdown>
           </div>
         )}
     </div>

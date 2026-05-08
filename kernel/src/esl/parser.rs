@@ -46,6 +46,18 @@ impl<'a> Parser<'a> {
         &self.tokens[self.pos].kind
     }
 
+    /// Look ahead `offset` tokens past the current position. `offset = 0`
+    /// is the same as `peek()`. Returns the EOF kind if the lookahead
+    /// would step past the end.
+    fn peek_at(&self, offset: usize) -> &TokenKind {
+        let idx = self.pos.saturating_add(offset);
+        if idx < self.tokens.len() {
+            &self.tokens[idx].kind
+        } else {
+            &TokenKind::Eof
+        }
+    }
+
     fn current_pos(&self) -> Position {
         self.tokens[self.pos].pos.clone()
     }
@@ -484,10 +496,52 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Value::Bool(b))
             }
+            // Unary minus on a numeric literal — preserves the
+            // pre-Phase-19f.3 shape `ex:value = -1.5;`. Lexer used to
+            // sign-fold negative numbers; now it always emits `Minus`
+            // (so `formula(x - 2)` lexes correctly), and the
+            // negation is applied here. Only literals are accepted in
+            // this position; arithmetic on arbitrary refs lives
+            // inside `formula(...)`.
+            TokenKind::Minus => {
+                let pos = self.current_pos();
+                self.advance();
+                match self.peek().clone() {
+                    TokenKind::IntLit(n) => {
+                        self.advance();
+                        Ok(Value::Int(-n))
+                    }
+                    TokenKind::FloatLit(f) => {
+                        self.advance();
+                        Ok(Value::Float(-f))
+                    }
+                    other => Err(EslError::parser(
+                        Some(pos),
+                        format!(
+                            "unary `-` outside `formula(...)` only applies to numeric literals; got {other:?}"
+                        ),
+                    )),
+                }
+            }
             TokenKind::LBracket => self.parse_array_value(),
             TokenKind::LBrace => self.parse_block_value(),
-            TokenKind::Ident(_) => {
+            TokenKind::Ident(name) => {
                 let qn_pos = self.current_pos();
+                // `formula(...)` switches into the Pratt-parsed
+                // math-expression sublanguage (Phase 19f.3): infix
+                // arithmetic with conventional precedence, function
+                // calls (`sin(x)`), parens for grouping, bare names
+                // as `Var`, decimal numbers as `LitFloat`. The parsed
+                // tree is a chain-typed FormulaTerm — same `Value::CtorApp`
+                // shape the `App(...)` / `OpRef(...)` literal form
+                // produces.
+                if name == "formula" && self.peek_at(1) == &TokenKind::LParen {
+                    self.advance(); // consume `formula`
+                    self.expect(&TokenKind::LParen)?;
+                    let expr = self.parse_formula_expr(0)?;
+                    self.expect(&TokenKind::RParen)?;
+                    return Ok(expr);
+                }
                 let qn = self.parse_qualified_name()?;
                 // Bare `Ident` followed by `(` is an inductive-ctor
                 // application — `Foo(arg1, arg2, ...)` per D32
@@ -535,6 +589,147 @@ impl<'a> Parser<'a> {
             _ => Err(EslError::parser(
                 Some(self.current_pos()),
                 format!("expected value, found {:?}", self.peek()),
+            )),
+        }
+    }
+
+    // ─── formula(...) sublanguage (Phase 19f.3) ─────────────────────────
+    //
+    // Pratt parser for math-style infix expressions inside
+    // `formula(...)`. Output is a `Value::CtorApp` tree mirroring the
+    // chain-typed FormulaTerm; the existing `compile_value` lowers it
+    // to `Value::Json` carrying the `{ctor, args}` tagged-dict shape.
+    //
+    // Operator catalog (left-to-right precedence levels):
+    //
+    //   prec 4 (left assoc):  +    →  ops:add
+    //   prec 4 (left assoc):  -    →  ops:sub  (binary)
+    //   prec 5 (left assoc):  *    →  ops:mul
+    //   prec 5 (left assoc):  /    →  ops:div
+    //   prec 6 (prefix):       -   →  ops:neg  (or LitFloat sign-fold for literals)
+    //   prec 7 (right assoc): ^    →  ops:pow
+    //
+    // Atoms:
+    //   IntLit/FloatLit  →  LitFloat(value)
+    //   Ident            →  Var("name")
+    //   Ident "(" args ")" →  App-spine over `urn:eigenius:formulas:ops:<name>`
+    //   "(" expr ")"     →  grouped expression
+
+    /// Operator-IRI table for binary infix operators inside
+    /// `formula(...)`. Returns `(precedence, right_associative, op_iri)`.
+    fn formula_binop_table(token: &TokenKind) -> Option<(u8, bool, &'static str)> {
+        match token {
+            TokenKind::Plus => Some((4, false, "urn:eigenius:formulas:ops:add")),
+            TokenKind::Minus => Some((4, false, "urn:eigenius:formulas:ops:sub")),
+            TokenKind::Star => Some((5, false, "urn:eigenius:formulas:ops:mul")),
+            TokenKind::Slash => Some((5, false, "urn:eigenius:formulas:ops:div")),
+            TokenKind::Caret => Some((7, true, "urn:eigenius:formulas:ops:pow")),
+            _ => None,
+        }
+    }
+
+    /// Parse one formula expression at or above the given minimum
+    /// precedence. Standard Pratt-parser shape — atom first, then
+    /// fold binary operators of sufficient precedence into the
+    /// running result.
+    fn parse_formula_expr(&mut self, min_prec: u8) -> Result<Value, EslError> {
+        let mut left = self.parse_formula_atom()?;
+        while let Some((prec, right_assoc, op_iri)) = Self::formula_binop_table(self.peek()) {
+            if prec < min_prec {
+                break;
+            }
+            let op_pos = self.current_pos();
+            self.advance(); // consume binop
+            let next_min = if right_assoc { prec } else { prec + 1 };
+            let right = self.parse_formula_expr(next_min)?;
+            left = formula_binary_app(op_iri, left, right, op_pos);
+        }
+        Ok(left)
+    }
+
+    /// Parse a formula-expression atom: literal, var, function call,
+    /// parens, or unary `+` / `-`.
+    fn parse_formula_atom(&mut self) -> Result<Value, EslError> {
+        let pos = self.current_pos();
+        match self.peek().clone() {
+            TokenKind::IntLit(n) => {
+                self.advance();
+                Ok(formula_lit_float(n as f64, pos))
+            }
+            TokenKind::FloatLit(f) => {
+                self.advance();
+                Ok(formula_lit_float(f, pos))
+            }
+            // Unary minus: fold sign into a numeric atom; otherwise
+            // wrap with `urn:eigenius:formulas:ops:neg`.
+            TokenKind::Minus => {
+                self.advance();
+                match self.peek().clone() {
+                    TokenKind::IntLit(n) => {
+                        self.advance();
+                        Ok(formula_lit_float(-(n as f64), pos))
+                    }
+                    TokenKind::FloatLit(f) => {
+                        self.advance();
+                        Ok(formula_lit_float(-f, pos))
+                    }
+                    _ => {
+                        let inner = self.parse_formula_atom()?;
+                        Ok(Value::CtorApp {
+                            ctor: "App".to_string(),
+                            args: vec![
+                                formula_op_ref("urn:eigenius:formulas:ops:neg", pos.clone()),
+                                inner,
+                            ],
+                            pos,
+                        })
+                    }
+                }
+            }
+            // Unary plus: just discard.
+            TokenKind::Plus => {
+                self.advance();
+                self.parse_formula_atom()
+            }
+            // Parenthesised sub-expression.
+            TokenKind::LParen => {
+                self.advance();
+                let inner = self.parse_formula_expr(0)?;
+                self.expect(&TokenKind::RParen)?;
+                Ok(inner)
+            }
+            // Identifier — either a function call (`sin(x)`) or a
+            // bare `Var(name)`. Function names map directly to the
+            // chain operator catalog at `urn:eigenius:formulas:ops:<name>`.
+            TokenKind::Ident(name) => {
+                self.advance();
+                if self.at(&TokenKind::LParen) {
+                    self.expect(&TokenKind::LParen)?;
+                    let mut args: Vec<Value> = Vec::new();
+                    if !self.at(&TokenKind::RParen) {
+                        args.push(self.parse_formula_expr(0)?);
+                        while self.at(&TokenKind::Comma) {
+                            self.advance();
+                            if self.at(&TokenKind::RParen) {
+                                break;
+                            }
+                            args.push(self.parse_formula_expr(0)?);
+                        }
+                    }
+                    self.expect(&TokenKind::RParen)?;
+                    let op_iri = format!("urn:eigenius:formulas:ops:{name}");
+                    Ok(formula_function_call(&op_iri, args, pos))
+                } else {
+                    Ok(Value::CtorApp {
+                        ctor: "Var".to_string(),
+                        args: vec![Value::String(name)],
+                        pos,
+                    })
+                }
+            }
+            other => Err(EslError::parser(
+                Some(pos),
+                format!("expected formula atom, found {other:?}"),
             )),
         }
     }
@@ -1521,6 +1716,83 @@ impl<'a> Parser<'a> {
     }
 }
 
+// ─── formula(...) tree builders (Phase 19f.3) ──────────────────────────
+//
+// Free helpers that produce `Value::CtorApp` nodes for the
+// chain-typed FormulaTerm shape. Free rather than methods on Parser
+// because they're pure — they don't touch parser state — and the
+// formula sub-parser uses them at multiple call sites.
+
+fn formula_lit_float(value: f64, pos: Position) -> Value {
+    Value::CtorApp {
+        ctor: "LitFloat".to_string(),
+        args: vec![Value::Float(value)],
+        pos,
+    }
+}
+
+fn formula_op_ref(iri: &str, pos: Position) -> Value {
+    Value::CtorApp {
+        ctor: "OpRef".to_string(),
+        args: vec![Value::String(iri.to_string())],
+        pos,
+    }
+}
+
+/// Build a binary `App(App(OpRef(op), lhs), rhs)` for an infix
+/// operator at the given position.
+fn formula_binary_app(op_iri: &str, lhs: Value, rhs: Value, pos: Position) -> Value {
+    Value::CtorApp {
+        ctor: "App".to_string(),
+        args: vec![
+            Value::CtorApp {
+                ctor: "App".to_string(),
+                args: vec![formula_op_ref(op_iri, pos.clone()), lhs],
+                pos: pos.clone(),
+            },
+            rhs,
+        ],
+        pos,
+    }
+}
+
+/// Build a function-call expression `f(arg1, arg2, …)` as a
+/// left-spined App tree over `OpRef(op_iri)`. Mirrors what
+/// `EigeniusCatalyst.num_to_formula` and `EigeniusSymbolics.num_to_formula`
+/// emit when SymbolicUtils gives them n-ary calls (Phase 19f.1 fix):
+/// each App node is binary, so a 3-arg function call becomes
+/// `App(App(App(OpRef, a), b), c)` is wrong (3-arg App-spine the
+/// chain validator rejects); the right shape is left-folding into
+/// nested binary apps. Unary calls are a single binary App; nullary
+/// is a special case (just the OpRef alone — no current operator
+/// in the catalog needs this shape, but the helper handles it).
+fn formula_function_call(op_iri: &str, args: Vec<Value>, pos: Position) -> Value {
+    if args.is_empty() {
+        return formula_op_ref(op_iri, pos);
+    }
+    let mut iter = args.into_iter();
+    let first = iter.next().expect("non-empty");
+    if iter.len() == 0 {
+        // Unary call: `App(OpRef(op), arg1)`.
+        return Value::CtorApp {
+            ctor: "App".to_string(),
+            args: vec![formula_op_ref(op_iri, pos.clone()), first],
+            pos,
+        };
+    }
+    // Binary or n-ary: left-fold so each App carries the operator's
+    // declared arity at every step. `f(a, b, c)` →
+    // `f(f(a, b), c)` — a fresh OpRef at each level.
+    let mut iter = std::iter::once(first).chain(iter);
+    let a = iter.next().expect("len ≥ 1");
+    let b = iter.next().expect("len ≥ 2");
+    let mut acc = formula_binary_app(op_iri, a, b, pos.clone());
+    for next in iter {
+        acc = formula_binary_app(op_iri, acc, next, pos.clone());
+    }
+    acc
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1788,6 +2060,274 @@ mod tests {
         "#,
         );
         assert!(result.is_err(), "qualified ctor name should error");
+    }
+
+    /// Helper: extract the parsed `Value::CtorApp` from the first
+    /// resource-field's value position.
+    fn first_field_value(file: &File) -> &Value {
+        match &file.declarations[0] {
+            Declaration::Resource(r) => &r.body[0].value,
+            _ => panic!("expected resource"),
+        }
+    }
+
+    #[test]
+    fn formula_simple_binary() {
+        // `x + 2` → `add(Var("x"), LitFloat(2.0))`.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula(x + 2);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { ctor, args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        assert_eq!(ctor, "App");
+        assert_eq!(args.len(), 2);
+        // args[0] should be App(OpRef("...:add"), Var("x")).
+        let Value::CtorApp {
+            ctor: c1, args: a1, ..
+        } = &args[0]
+        else {
+            panic!("expected nested App on lhs");
+        };
+        assert_eq!(c1, "App");
+        let Value::CtorApp {
+            ctor: c_op,
+            args: a_op,
+            ..
+        } = &a1[0]
+        else {
+            panic!("expected OpRef");
+        };
+        assert_eq!(c_op, "OpRef");
+        assert!(matches!(&a_op[0], Value::String(s) if s == "urn:eigenius:formulas:ops:add"));
+        let Value::CtorApp {
+            ctor: c_var,
+            args: a_var,
+            ..
+        } = &a1[1]
+        else {
+            panic!("expected Var");
+        };
+        assert_eq!(c_var, "Var");
+        assert!(matches!(&a_var[0], Value::String(s) if s == "x"));
+        // args[1] should be LitFloat(2.0).
+        let Value::CtorApp {
+            ctor: c_lit,
+            args: a_lit,
+            ..
+        } = &args[1]
+        else {
+            panic!("expected LitFloat");
+        };
+        assert_eq!(c_lit, "LitFloat");
+        assert!(matches!(&a_lit[0], Value::Float(f) if (*f - 2.0).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn formula_precedence_and_associativity() {
+        // `1 + 2 * 3` should parse as `add(1, mul(2, 3))` — `*` binds
+        // tighter than `+`.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula(1 + 2 * 3);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        // args[0]'s App has op = add; args[1] should be the mul(2, 3).
+        let Value::CtorApp { args: rhs_args, .. } = &args[1] else {
+            panic!("expected nested mul");
+        };
+        let Value::CtorApp {
+            args: rhs_inner, ..
+        } = &rhs_args[0]
+        else {
+            panic!("expected App on rhs");
+        };
+        let Value::CtorApp { args: op_ref, .. } = &rhs_inner[0] else {
+            panic!("expected OpRef");
+        };
+        assert!(matches!(&op_ref[0], Value::String(s) if s == "urn:eigenius:formulas:ops:mul"));
+    }
+
+    #[test]
+    fn formula_pow_is_right_associative() {
+        // `a ^ b ^ c` should parse as `pow(a, pow(b, c))` — Symbolics
+        // / mathematical convention.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula(a ^ b ^ c);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        // Outer App: pow(a, <inner pow>). args[1] is the inner pow.
+        let Value::CtorApp {
+            ctor: inner_ctor,
+            args: inner_args,
+            ..
+        } = &args[1]
+        else {
+            panic!("expected inner App for pow");
+        };
+        assert_eq!(inner_ctor, "App");
+        let Value::CtorApp { args: inner_op, .. } = &inner_args[0] else {
+            panic!("expected App with OpRef");
+        };
+        let Value::CtorApp { args: op_args, .. } = &inner_op[0] else {
+            panic!("expected OpRef");
+        };
+        assert!(matches!(&op_args[0], Value::String(s) if s == "urn:eigenius:formulas:ops:pow"));
+    }
+
+    #[test]
+    fn formula_unary_minus_on_literal_folds() {
+        // `-2` should fold the sign into the LitFloat rather than
+        // wrap with neg.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula(-2);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { ctor, args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        assert_eq!(ctor, "LitFloat");
+        assert!(matches!(&args[0], Value::Float(f) if (*f + 2.0).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn formula_unary_minus_on_var_wraps_in_neg() {
+        // `-x` → `neg(Var("x"))`. Folding only applies to numeric atoms.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula(-x);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { ctor, args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        assert_eq!(ctor, "App");
+        let Value::CtorApp { args: op_args, .. } = &args[0] else {
+            panic!("expected OpRef");
+        };
+        assert!(matches!(&op_args[0], Value::String(s) if s == "urn:eigenius:formulas:ops:neg"));
+        let Value::CtorApp {
+            ctor: var_ctor,
+            args: var_args,
+            ..
+        } = &args[1]
+        else {
+            panic!("expected Var");
+        };
+        assert_eq!(var_ctor, "Var");
+        assert!(matches!(&var_args[0], Value::String(s) if s == "x"));
+    }
+
+    #[test]
+    fn formula_function_call() {
+        // `sin(x)` → `App(OpRef(...:sin), Var("x"))`.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula(sin(x));
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        let Value::CtorApp { args: op_args, .. } = &args[0] else {
+            panic!("expected OpRef");
+        };
+        assert!(matches!(&op_args[0], Value::String(s) if s == "urn:eigenius:formulas:ops:sin"));
+    }
+
+    #[test]
+    fn formula_parens_override_precedence() {
+        // `(1 + 2) * 3` should parse as `mul(add(1, 2), 3)` — parens
+        // beat * over +.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula((1 + 2) * 3);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { args, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        // Outer App is mul; args[0] is the App(App(OpRef(mul),
+        // App(...)), …); descend into its first leaf which is the
+        // mul OpRef.
+        let Value::CtorApp { args: outer_op, .. } = &args[0] else {
+            panic!("expected outer App");
+        };
+        let Value::CtorApp { args: op_args, .. } = &outer_op[0] else {
+            panic!("expected OpRef");
+        };
+        assert!(matches!(&op_args[0], Value::String(s) if s == "urn:eigenius:formulas:ops:mul"));
+        // outer_op[1] should be the (1+2) sub-add.
+        let Value::CtorApp { args: lhs_op, .. } = &outer_op[1] else {
+            panic!("expected lhs sub-expression");
+        };
+        let Value::CtorApp {
+            args: lhs_inner, ..
+        } = &lhs_op[0]
+        else {
+            panic!("expected nested App for add");
+        };
+        let Value::CtorApp {
+            args: lhs_op_args, ..
+        } = &lhs_inner[0]
+        else {
+            panic!("expected OpRef");
+        };
+        assert!(
+            matches!(&lhs_op_args[0], Value::String(s) if s == "urn:eigenius:formulas:ops:add")
+        );
+    }
+
+    #[test]
+    fn formula_kinase_ki_residual() {
+        // The shape used in the kinase Ki-fit demo:
+        //   pow(IC50_obs - c * Ki, 2)
+        // This previously took ~15 lines of nested ctor literals
+        // (cell 8 of kinase-institutions.json); the formula(...)
+        // sublanguage compresses it to one readable line.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formula((4 - 2 * Ki) ^ 2);
+            }
+        "#,
+        )
+        .unwrap();
+        let Value::CtorApp { ctor, .. } = first_field_value(&file) else {
+            panic!("expected CtorApp");
+        };
+        assert_eq!(ctor, "App");
     }
 
     #[test]
