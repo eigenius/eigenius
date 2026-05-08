@@ -70,6 +70,34 @@ impl ContextError {
     }
 }
 
+/// Successful outcome of [`ExecutionContext::commit_with_validation`].
+///
+/// Carries both the user-authored layer (the gated subject's commit)
+/// and the optional follow-up `verdict_provenance` layer ([D31 §6.3])
+/// that AutoOnLoad dispatches add when at least one Holds /
+/// Undecidable Verdict landed against the gated subject. Both must
+/// be persisted by the caller — the provenance layer is the parent
+/// of the next user commit (`ctx.head` is advanced to it), so a
+/// caller that persists only `user_layer` would leave the
+/// provenance layer as an in-memory ghost. The next commit would
+/// reference a parent the backend doesn't know about, and
+/// `update_branch`'s LCA walk would fail with
+/// "merge during update_branch: no common ancestor". Persisting
+/// both keeps the chain on the backend in lockstep with `ctx.head`.
+#[derive(Debug, Clone)]
+pub struct CommitOutcome {
+    /// The committed layer carrying the user-authored resources from
+    /// this batch.
+    pub user_layer: Arc<Layer>,
+    /// The follow-up `verdict_provenance` layer — `Some` iff at least
+    /// one AutoOnLoad QueryClass on a Holds / Undecidable path
+    /// produced a chain-side `Verdict` + `RuntimeInvocation` audit
+    /// pair. Mirrors the Fails-path `ContextError::ValidationFailed
+    /// { provenance_layer, .. }` shape so the caller's persist logic
+    /// is identical across both branches.
+    pub provenance_layer: Option<Arc<Layer>>,
+}
+
 impl fmt::Display for ContextError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -250,7 +278,7 @@ impl ExecutionContext {
         name: &str,
         index: &crate::institution::registry::InstitutionIndex,
         runtime: &crate::institution::runtime::InstitutionRuntime,
-    ) -> Result<Arc<Layer>, ContextError> {
+    ) -> Result<CommitOutcome, ContextError> {
         if self.mode == ExecutionMode::ReadOnly {
             return Err(ContextError::ReadOnly);
         }
@@ -400,7 +428,14 @@ impl ExecutionContext {
         // RuntimeInvocation + Verdict resources. Both layers commit
         // before this method returns — that's the [D31 §6.3]
         // "transactional" guarantee from the caller's perspective.
-        if !provenance.is_empty() {
+        // The caller MUST persist both via the [`CommitOutcome`] —
+        // returning only `user_layer` would leave `prov_layer` as an
+        // in-memory ghost (`ctx.head` advances to it but the backend
+        // never sees it), and the next commit would reference a
+        // parent the backend doesn't know about, surfacing later as
+        // "merge during update_branch: no common ancestor" when the
+        // LCA walk fails to load the missing layer's parent chain.
+        let provenance_layer = if !provenance.is_empty() {
             self.working = LayerBuilder::new("verdict_provenance", Some(Arc::clone(&self.head)));
             for r in provenance {
                 self.working.add_resource(r).map_err(ContextError::Layer)?;
@@ -412,9 +447,15 @@ impl ExecutionContext {
             let prov_layer = Arc::new(working.build(self.storage.clone()));
             self.head = Arc::clone(&prov_layer);
             self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
-        }
+            Some(prov_layer)
+        } else {
+            None
+        };
 
-        Ok(new_layer)
+        Ok(CommitOutcome {
+            user_layer: new_layer,
+            provenance_layer,
+        })
     }
 }
 
@@ -696,10 +737,14 @@ mod tests {
         ))
         .unwrap();
 
-        let layer = ctx
+        let outcome = ctx
             .commit_with_validation("loaded", &idx, &runtime)
             .expect("commit_with_validation");
-        assert!(!layer.is_root());
+        assert!(!outcome.user_layer.is_root());
+        assert!(
+            outcome.provenance_layer.is_none(),
+            "no AutoOnLoad QueryClass matched, so no provenance layer"
+        );
     }
 
     /// Stub institution that returns a Holds Verdict alongside a
@@ -793,9 +838,10 @@ mod tests {
         ))
         .unwrap();
 
-        let gated_layer = ctx
+        let outcome = ctx
             .commit_with_validation("loaded", &idx, &runtime)
             .expect("Holds dispatch must commit cleanly");
+        let gated_layer = outcome.user_layer.clone();
         // Gated resource is on the gated layer.
         assert!(
             gated_layer
@@ -805,12 +851,22 @@ mod tests {
         );
 
         // Head advances past the gated layer to a follow-up
-        // verdict_provenance layer per D31 §6.3.
+        // verdict_provenance layer per D31 §6.3 — and that prov
+        // layer is exposed on the outcome so callers can persist it.
         assert_ne!(ctx.head().id().to_string(), prior_head_id);
         assert_ne!(
             ctx.head().id().to_string(),
             gated_layer.id().to_string(),
             "Holds dispatch must commit a separate provenance layer on top of the gated layer"
+        );
+        let outcome_prov = outcome
+            .provenance_layer
+            .as_ref()
+            .expect("Holds outcome carries the provenance layer for the caller to persist");
+        assert_eq!(
+            outcome_prov.id().to_string(),
+            ctx.head().id().to_string(),
+            "outcome.provenance_layer must equal ctx.head() so the caller can persist it"
         );
 
         // The provenance layer carries one RuntimeInvocation and one

@@ -205,3 +205,67 @@ fn deref_iri_to_embedded(iri: &Iri, param_iri: &Iri, layer: &Layer) -> Result<Va
         }),
     }
 }
+
+/// Walk a resource and dereference every IRI-shaped value sitting in
+/// a property whose `data_type` is `core:resource` or
+/// `core:resource_array` — recursively, so nested embedded resources
+/// also have their IRI references inlined. Used by the AutoOnLoad /
+/// post-translation dispatch path before the input resource is
+/// serialised onto the wire: the worker's mirror decoders expect
+/// embedded maps in resource-typed fields, not chain-bound IRI
+/// strings.
+///
+/// Properties whose `data_type` is something else (`core:inductive`,
+/// `core:json`, `core:value_array`, primitives, …) pass through
+/// unchanged. Inductive payloads (`Value::Json` for FormulaTerm,
+/// `Verdict`, etc.) are *not* walked — chain-bound IRI strings
+/// inside an inductive payload don't denote chain references the
+/// way `class_types: [...]`-typed properties do, and walking them
+/// would corrupt FormulaTerm trees that legitimately carry IRI
+/// strings as `OpRef` payloads.
+pub fn embed_typed_resource_refs_recursively(
+    resource: Resource,
+    layer: &Layer,
+) -> Result<Resource, MarshalError> {
+    let id = resource.id().cloned();
+    let mut out = match id {
+        Some(iri) => Resource::new(iri),
+        None => Resource::new_embedded(),
+    };
+    for (prop_iri, value) in resource.properties() {
+        // Skip kernel-managed metadata properties — `core:is_a`,
+        // `core:short_name`, etc. live in the `urn:eigenius:core:`
+        // namespace and carry chain-bookkeeping shapes (class refs,
+        // requires lists, …) the mirror decoder doesn't see.
+        // Dereferencing `core:is_a` would try to resolve every class
+        // IRI as a domain resource and fail noisily for classes the
+        // chain references but doesn't define inline. Same convention
+        // the mirror generator's `is_core_meta_iri` filter applies
+        // (D29 §11; user data uses non-core namespaces).
+        if prop_iri.as_str().starts_with("urn:eigenius:core:") {
+            out.set(prop_iri.clone(), value.clone());
+            continue;
+        }
+        let new_value = embed_typed_resource_arg(prop_iri, value.clone(), layer)?;
+        let recursed = recurse_into_embedded(new_value, layer)?;
+        out.set(prop_iri.clone(), recursed);
+    }
+    Ok(out)
+}
+
+fn recurse_into_embedded(value: Value, layer: &Layer) -> Result<Value, MarshalError> {
+    match value {
+        Value::Embedded(r) => {
+            let recursed = embed_typed_resource_refs_recursively(*r, layer)?;
+            Ok(Value::Embedded(Box::new(recursed)))
+        }
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(recurse_into_embedded(item, layer)?);
+            }
+            Ok(Value::Array(out))
+        }
+        other => Ok(other),
+    }
+}

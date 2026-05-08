@@ -262,12 +262,38 @@ function num_to_formula(v)
         if op_iri === nothing
             error("EigeniusSymbolics: Symbolics produced operation `$op` with no FormulaTerm encoding; add it to _FN_TO_IRI")
         end
+        # SymbolicUtils represents associative ops (`*`, `+`, `min`,
+        # `max`, …) as n-ary internally; the chain's operator catalog
+        # declares them as binary. Left-fold: `op(a, b, c, …)` →
+        # `op(op(op(a, b), c), …)` so each App-spine the chain
+        # validator collects carries exactly the operator's declared
+        # arity (binary for `mul`/`add`, unary for `neg`/`sin`/etc.).
+        # Same fold lives in `EigeniusCatalyst` — duplicated
+        # translators per the existing TODO(common-package).
+        n_args = length(args)
+        n_args >= 1 ||
+            error("EigeniusSymbolics: operator `$op` produced zero arguments — Symbolics shouldn't emit nullary calls")
+        if n_args == 1
+            return EigeniusMirror.FormulaTerm_App(
+                EigeniusMirror.FormulaTerm_OpRef(op_iri),
+                num_to_formula(args[1]),
+            )
+        end
         result = EigeniusMirror.FormulaTerm_App(
-            EigeniusMirror.FormulaTerm_OpRef(op_iri),
-            num_to_formula(args[1]),
+            EigeniusMirror.FormulaTerm_App(
+                EigeniusMirror.FormulaTerm_OpRef(op_iri),
+                num_to_formula(args[1]),
+            ),
+            num_to_formula(args[2]),
         )
-        for a in args[2:end]
-            result = EigeniusMirror.FormulaTerm_App(result, num_to_formula(a))
+        for a in args[3:end]
+            result = EigeniusMirror.FormulaTerm_App(
+                EigeniusMirror.FormulaTerm_App(
+                    EigeniusMirror.FormulaTerm_OpRef(op_iri),
+                    result,
+                ),
+                num_to_formula(a),
+            )
         end
         return result
     end

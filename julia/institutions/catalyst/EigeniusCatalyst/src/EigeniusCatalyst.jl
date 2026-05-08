@@ -245,12 +245,41 @@ function num_to_formula(v)
         if op_iri === nothing
             error("EigeniusCatalyst: Symbolics produced operation `$op` with no FormulaTerm encoding; add it to _FN_TO_IRI")
         end
+        # SymbolicUtils represents associative ops (`*`, `+`, `min`,
+        # `max`, …) as n-ary internally, so `args` may carry more
+        # operands than the chain's binary operator catalog declares.
+        # Left-fold: `op(a, b, c, …)` → `op(op(op(a, b), c), …)`,
+        # introducing a fresh `OpRef` at each step so each App-spine
+        # collected by the chain validator carries exactly the
+        # operator's declared arity (binary for `mul`/`add`, unary
+        # for `neg`/`sin`/`cos`/etc.).
+        n_args = length(args)
+        n_args >= 1 ||
+            error("EigeniusCatalyst: operator `$op` produced zero arguments — Symbolics shouldn't emit nullary calls")
+        if n_args == 1
+            return EigeniusMirror.FormulaTerm_App(
+                EigeniusMirror.FormulaTerm_OpRef(op_iri),
+                num_to_formula(args[1]),
+            )
+        end
+        # n_args ≥ 2 — start from a well-formed binary App on the
+        # first two operands, then left-fold the remainder by
+        # nesting `op(prev_result, next)` at each step.
         result = EigeniusMirror.FormulaTerm_App(
-            EigeniusMirror.FormulaTerm_OpRef(op_iri),
-            num_to_formula(args[1]),
+            EigeniusMirror.FormulaTerm_App(
+                EigeniusMirror.FormulaTerm_OpRef(op_iri),
+                num_to_formula(args[1]),
+            ),
+            num_to_formula(args[2]),
         )
-        for a in args[2:end]
-            result = EigeniusMirror.FormulaTerm_App(result, num_to_formula(a))
+        for a in args[3:end]
+            result = EigeniusMirror.FormulaTerm_App(
+                EigeniusMirror.FormulaTerm_App(
+                    EigeniusMirror.FormulaTerm_OpRef(op_iri),
+                    result,
+                ),
+                num_to_formula(a),
+            )
         end
         return result
     end

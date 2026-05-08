@@ -487,8 +487,50 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => self.parse_array_value(),
             TokenKind::LBrace => self.parse_block_value(),
             TokenKind::Ident(_) => {
+                let qn_pos = self.current_pos();
                 let qn = self.parse_qualified_name()?;
-                Ok(Value::Ref(qn))
+                // Bare `Ident` followed by `(` is an inductive-ctor
+                // application — `Foo(arg1, arg2, ...)` per D32
+                // inductive-value literals. Nullary ctors require
+                // empty parens (`Foo()`) so this peek is the only
+                // place the parser disambiguates ctors vs. resource
+                // refs. Namespace-qualified names (`ns:Foo`) followed
+                // by `(` are not v1 — ctors live in an inductive's
+                // per-type scope, not a global namespace, and
+                // resolving `ns:Foo` to a ctor would require chain
+                // context the parser doesn't have.
+                if qn.namespace.is_none() && self.at(&TokenKind::LParen) {
+                    self.expect(&TokenKind::LParen)?;
+                    let mut args = Vec::new();
+                    if !self.at(&TokenKind::RParen) {
+                        args.push(self.parse_value()?);
+                        while self.at(&TokenKind::Comma) {
+                            self.advance();
+                            if self.at(&TokenKind::RParen) {
+                                break; // trailing comma
+                            }
+                            args.push(self.parse_value()?);
+                        }
+                    }
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Value::CtorApp {
+                        ctor: qn.name,
+                        args,
+                        pos: qn_pos,
+                    })
+                } else if qn.namespace.is_some() && self.at(&TokenKind::LParen) {
+                    Err(EslError::parser(
+                        Some(qn_pos),
+                        format!(
+                            "qualified name `{}:{}` cannot be used as a constructor — \
+                             ctor names are unqualified single-segment identifiers",
+                            qn.namespace.as_deref().unwrap_or(""),
+                            qn.name
+                        ),
+                    ))
+                } else {
+                    Ok(Value::Ref(qn))
+                }
             }
             _ => Err(EslError::parser(
                 Some(self.current_pos()),
@@ -1663,6 +1705,89 @@ mod tests {
             }
             _ => panic!("expected resource"),
         }
+    }
+
+    #[test]
+    fn resource_with_inductive_ctor_app() {
+        // D32 inductive-value literals: `Var("x")` is a 1-arg ctor;
+        // `App(head, arg)` is a 2-arg ctor; literals nest.
+        let file = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = App(OpRef("urn:eigenius:formulas:ops:mul"), Var("x"));
+            }
+        "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Resource(r) => {
+                let body = &r.body[0];
+                let Value::CtorApp { ctor, args, .. } = &body.value else {
+                    panic!("expected CtorApp");
+                };
+                assert_eq!(ctor, "App");
+                assert_eq!(args.len(), 2);
+                let Value::CtorApp {
+                    ctor: c1, args: a1, ..
+                } = &args[0]
+                else {
+                    panic!("expected nested OpRef CtorApp");
+                };
+                assert_eq!(c1, "OpRef");
+                assert_eq!(a1.len(), 1);
+                assert!(matches!(&a1[0], Value::String(s) if s == "urn:eigenius:formulas:ops:mul"));
+                let Value::CtorApp { ctor: c2, .. } = &args[1] else {
+                    panic!("expected nested Var CtorApp");
+                };
+                assert_eq!(c2, "Var");
+            }
+            _ => panic!("expected resource"),
+        }
+    }
+
+    #[test]
+    fn nullary_ctor_requires_parens() {
+        // `LE` (no parens) is a resource ref, NOT a ctor — the
+        // disambiguation rule is "always require parens for ctors".
+        let file = parse_str(
+            r#"
+            resource ex:c : ex:Constraint {
+                ex:relation = LE();
+                ex:other    = LE;
+            }
+        "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Resource(r) => {
+                // First field: `LE()` → CtorApp.
+                let Value::CtorApp { ctor, args, .. } = &r.body[0].value else {
+                    panic!("expected CtorApp");
+                };
+                assert_eq!(ctor, "LE");
+                assert!(args.is_empty(), "nullary ctor should have empty args");
+                // Second field: `LE` (no parens) → Ref.
+                let Value::Ref(qn) = &r.body[1].value else {
+                    panic!("expected Ref");
+                };
+                assert_eq!(qn.name, "LE");
+                assert!(qn.namespace.is_none());
+            }
+            _ => panic!("expected resource"),
+        }
+    }
+
+    #[test]
+    fn qualified_ctor_name_is_rejected() {
+        // `formulas:App(...)` is not v1 — ctors are unqualified.
+        let result = parse_str(
+            r#"
+            resource ex:t : ex:Holder {
+                ex:term = formulas:App(Var("x"), Var("y"));
+            }
+        "#,
+        );
+        assert!(result.is_err(), "qualified ctor name should error");
     }
 
     #[test]

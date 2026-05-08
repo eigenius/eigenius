@@ -32,6 +32,7 @@
 //! alongside the legacy retirement.
 
 use crate::context::ExecutionContext;
+use crate::institution::marshal::embed_typed_resource_refs_recursively;
 use crate::institution::registry::{DispatchRole, InstitutionIndex};
 use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::Layer;
@@ -190,7 +191,39 @@ pub fn dispatch_auto_on_load_for_resource(
                 .institution(&query_class.institution_ref)
                 .and_then(|e| e.requires_environment.clone());
 
-            match institution.query(&query_class.query_handler, resource, ctx) {
+            // Marshal IRI-shaped resource references in the input
+            // resource into embedded resources before dispatch. The
+            // worker's mirror decoders expect resource-typed fields
+            // to carry an embedded map, not a chain-bound IRI string;
+            // a chain-author writing
+            //   resource :s : SomeClass {
+            //       :referenced_field = :other_resource;
+            //   }
+            // expects the kernel to inline `:other_resource` before
+            // serialising — same dereference pass FIBER param values
+            // get (D2 v2 §6.12 / Phase 19d.2 follow-on), now extended
+            // to AutoOnLoad-gated subjects so the recursion walks
+            // nested resource refs (e.g. an OdeSolution → OdeProblem
+            // → Vector<RhsComponent> chain).
+            let marshaled = match embed_typed_resource_refs_recursively(
+                resource.clone(),
+                ctx.head(),
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    outcome.errors.push(ValidationError {
+                        resource_id: res_id.clone(),
+                        property: None,
+                        rule: ValidationRule::InstitutionValidation,
+                        message: format!(
+                            "AutoOnLoad QueryClass `{query_class_iri}`: failed to marshal resource references: {e:?}"
+                        ),
+                    });
+                    continue;
+                }
+            };
+
+            match institution.query(&query_class.query_handler, &marshaled, ctx) {
                 Ok(out) => {
                     let verdict = parse_verdict(&out.output);
                     if let VerdictReading::Malformed(reason) = &verdict {
@@ -638,6 +671,170 @@ mod tests {
             outcome.dispatches[0].verdict,
             VerdictReading::Fails
         ));
+    }
+
+    /// AutoOnLoad's recursive resource-ref dereference (Phase 19h.2).
+    /// The institution's `query` is given a subject that has a
+    /// `core:resource`-typed property pointing to an IRI string —
+    /// the kernel must inline the referenced resource as an
+    /// `Value::Embedded` *before* the institution's handler runs,
+    /// because external-runtime mirror decoders can't follow chain
+    /// refs themselves.
+    #[test]
+    fn auto_on_load_inlines_iri_resource_refs_in_subject() {
+        use std::sync::Mutex;
+
+        // Capture the input the institution receives so we can assert
+        // its shape post-marshal. Mutex (rather than Rc<RefCell>) so
+        // the stub satisfies the `Send + Sync` bounds the institution
+        // trait carries.
+        struct CaptureStub {
+            iri: Iri,
+            captured: Arc<Mutex<Option<Resource>>>,
+        }
+        impl Institution for CaptureStub {
+            fn institution_iri(&self) -> &Iri {
+                &self.iri
+            }
+            fn extract_typed(
+                &self,
+                _: &Iri,
+                _: &Resource,
+                _: &ExecutionContext,
+            ) -> Result<Val, InstitutionError> {
+                unreachable!()
+            }
+            fn reify(
+                &self,
+                _: &Iri,
+                _: &Val,
+                _: &ExecutionContext,
+            ) -> Result<Resource, InstitutionError> {
+                unreachable!()
+            }
+            fn query(
+                &self,
+                _: &Iri,
+                input: &Resource,
+                _: &ExecutionContext,
+            ) -> Result<QueryOutcome, InstitutionError> {
+                *self.captured.lock().unwrap() = Some(input.clone());
+                let mut r = Resource::new_embedded();
+                r.set(
+                    iri(wk::IS_A),
+                    Value::Array(vec![Value::String(wk::VERDICT.into())]),
+                );
+                r.set(iri(wk::CTOR_NAME), Value::String(wk::VERDICT_HOLDS.into()));
+                Ok(QueryOutcome::from_output(r))
+            }
+        }
+
+        let mut b = LayerBuilder::new("test", None);
+
+        let inst_iri = "urn:eigenius:test:deref:inst";
+        let qc_iri = "urn:eigenius:test:deref:check";
+        let subject_class = "urn:eigenius:test:deref:Subject";
+        let inner_class = "urn:eigenius:test:deref:Inner";
+        let nested_prop = "urn:eigenius:test:deref:nested";
+
+        // Property declaration for the resource-typed reference. The
+        // marshaler reads `data_type` to decide which properties to
+        // dereference; without this declaration on chain the value
+        // would pass through unchanged.
+        let mut prop_decl = Resource::new(iri(nested_prop));
+        prop_decl.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::PROPERTY.into())]),
+        );
+        prop_decl.set(iri(wk::DATA_TYPE_PROP), Value::String(wk::RESOURCE.into()));
+        prop_decl.set(
+            iri("urn:eigenius:core:class_types"),
+            Value::Array(vec![Value::String(inner_class.into())]),
+        );
+        b.add_resource(prop_decl).unwrap();
+
+        // Inner referenced resource.
+        let mut inner = Resource::new(iri("urn:eigenius:test:deref:inner_x"));
+        inner.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(inner_class.into())]),
+        );
+        inner.set(
+            iri("urn:eigenius:test:deref:label"),
+            Value::String("the-inner-payload".into()),
+        );
+        b.add_resource(inner).unwrap();
+
+        // AutoOnLoad QueryClass on the subject class.
+        let mut qc = Resource::new(iri(qc_iri));
+        qc.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::QUERY_CLASS_CLASS.into())]),
+        );
+        qc.set(iri(wk::QUERY_CLASS), Value::String(subject_class.into()));
+        qc.set(iri(wk::RESULT_CLASS), Value::String(wk::VERDICT.into()));
+        qc.set(
+            iri(wk::DISPATCH_ROLE),
+            Value::Array(vec![Value::String(wk::DISPATCH_AUTO_ON_LOAD.into())]),
+        );
+        qc.set(
+            iri(wk::QUERY_HANDLER),
+            Value::String("urn:eigenius:test:deref:proc:check".into()),
+        );
+        qc.set(
+            iri("urn:eigenius:institution:institution_ref"),
+            Value::String(inst_iri.into()),
+        );
+        b.add_resource(qc).unwrap();
+
+        let storage = crate::layer::LayerStorage::in_memory();
+        let layer = Arc::new(b.build(storage.clone()));
+        let (idx, errors) = InstitutionIndex::from_layer(&layer);
+        assert!(errors.is_empty(), "{errors:?}");
+
+        let captured = Arc::new(Mutex::new(None));
+        let mut runtime = InstitutionRuntime::new();
+        runtime
+            .register(Box::new(CaptureStub {
+                iri: iri(inst_iri),
+                captured: Arc::clone(&captured),
+            }))
+            .unwrap();
+        let exec_ctx = ExecutionContext::new(layer, "test", ExecutionMode::ReadOnly, storage);
+
+        // Subject carries `nested = "urn:eigenius:test:deref:inner_x"` as
+        // an IRI string — the on-the-wire shape an ESL `nested = inner_x`
+        // declaration produces.
+        let mut subject = Resource::new(iri("urn:eigenius:test:deref:s1"));
+        subject.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(subject_class.into())]),
+        );
+        subject.set(
+            iri(nested_prop),
+            Value::String("urn:eigenius:test:deref:inner_x".into()),
+        );
+
+        let outcome = dispatch_auto_on_load_for_resource(&subject, &idx, &runtime, &exec_ctx);
+        assert!(outcome.errors.is_empty(), "errors: {:?}", outcome.errors);
+        assert_eq!(outcome.dispatches.len(), 1);
+
+        // The captured input must carry an embedded inner resource —
+        // the kernel dereferenced the IRI before dispatch.
+        let captured = captured.lock().unwrap();
+        let captured = captured.as_ref().expect("query was called");
+        let nested_value = captured
+            .get(&iri(nested_prop))
+            .expect("nested property present on captured input");
+        let Value::Embedded(inner_r) = nested_value else {
+            panic!(
+                "expected nested ref to be dereferenced into Value::Embedded; got {nested_value:?}"
+            );
+        };
+        let label = inner_r
+            .get(&iri("urn:eigenius:test:deref:label"))
+            .expect("inner resource has its label");
+        assert!(matches!(label, Value::String(s) if s == "the-inner-payload"));
     }
 
     #[test]

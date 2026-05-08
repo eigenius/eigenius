@@ -127,6 +127,21 @@ pub enum Value {
     Ref(QualifiedName),
     Array(Vec<Value>),
     Block(Vec<ResourceField>),
+    /// Inductive constructor application: `Foo(arg1, arg2, ...)`.
+    /// Lands in property positions whose `data_type` is
+    /// `core:inductive` — D32 inductive-value literals on the
+    /// surface. Nullary ctors require parentheses (`Foo()`) so
+    /// the parser can disambiguate against bare resource
+    /// references at parse time without needing the target
+    /// property's type. The `ctor` name is unqualified — ctor
+    /// names live in a per-inductive scope and the compiler
+    /// resolves the ctor against the target property's
+    /// declared `class_types` inductive at commit time.
+    CtorApp {
+        ctor: String,
+        args: Vec<Value>,
+        pos: Position,
+    },
 }
 
 /// `program ex:summarize : ex:Document -> ex:Summary { expr }`

@@ -1424,7 +1424,8 @@ impl EigeniusKernel for EigeniusService {
             let index_snapshot = Arc::clone(&*self.institution_index.read().await);
             let runtime_snapshot = Arc::clone(&*self.institution_runtime.read().await);
             match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
-                Ok(layer) => {
+                Ok(outcome) => {
+                    let layer = outcome.user_layer;
                     layer_id = layer.id().to_string();
                     tracing::info!(
                         { field::OPERATION } = operation::LAYER_COMMIT,
@@ -1436,6 +1437,21 @@ impl EigeniusKernel for EigeniusService {
                     drop(ctx);
                     if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
                         errors.push(err);
+                    }
+                    // Persist the AutoOnLoad provenance layer too if
+                    // one was produced (D31 §6.3 Holds/Undecidable
+                    // path). The kernel's commit pipeline advances
+                    // `ctx.head` to the provenance layer, so failing
+                    // to persist it leaves `ctx.head` pointing at a
+                    // backend-unknown layer — the next commit's CAS
+                    // would surface as "merge during update_branch:
+                    // no common ancestor" when the LCA walk hit the
+                    // ghost.
+                    if let Some(prov) = outcome.provenance_layer {
+                        if let Some(err) = self.persist_layer_if_backend(&branch, &prov) {
+                            errors.push(err);
+                        }
+                        self.rebuild_institution_index(&prov).await;
                     }
                     // Rebuild the D14 institution index from the new
                     // chain so subsequent commits see the just-loaded
