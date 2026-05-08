@@ -100,16 +100,33 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
 }
 
 /// Phase 11e: `function(source)` where `function` is a registered
-/// Comorphism — emits `Exp::InstitutionInvoke { iri, source }`.
+/// Comorphism — emits
+/// `Exp::InstitutionInvoke { iri, source, target_iri }`.
+///
+/// `target_iri` is the optional explicit IRI override that surface
+/// languages may set (EigenQL `INTO` clause). When absent the kernel
+/// assigns a deterministic content-hash IRI at evaluation time.
 fn parse_comorphism_invoke_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let func_str = get_string(resource, "urn:eigenius:program:function")?;
     let comorphism_iri = Iri::parse(&func_str)
         .map_err(|e| format!("ComorphismInvokeApply function `{func_str}` invalid IRI: {e}"))?;
     let source_resource = get_embedded(resource, "urn:eigenius:program:source")?;
     let source_exp = parse_expression(&source_resource, layer)?;
+    let target_iri_prop = Iri::parse("urn:eigenius:program:target_iri").unwrap();
+    let target_iri = match resource.get(&target_iri_prop) {
+        Some(Value::String(s)) => Some(
+            Iri::parse(s)
+                .map_err(|e| format!("ComorphismInvokeApply target_iri `{s}` invalid IRI: {e}"))?,
+        ),
+        Some(_) => {
+            return Err("ComorphismInvokeApply target_iri must be a string IRI".to_string());
+        }
+        None => None,
+    };
     Ok(Exp::InstitutionInvoke {
         comorphism_iri,
         source: Box::new(source_exp),
+        target_iri,
     })
 }
 

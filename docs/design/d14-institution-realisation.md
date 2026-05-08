@@ -432,13 +432,14 @@ Given `NativeDecide(Constraint::Institution { iri, args }, v)`:
 
 ### 9.3 What the kernel does on `Exp::InstitutionInvoke`
 
-Given `Exp::InstitutionInvoke { comorphism_iri, source }`:
+Given `Exp::InstitutionInvoke { comorphism_iri, source, target_iri }`:
 
 1. Resolve the Comorphism resource from the registry.
 2. Look up the source institution from `export_format.institution_ref`. Call `extract_typed(export_format.procedure, source, ctx)` → typed value $v_S$ of type $S$.
 3. Look up the transformation Component. Apply it to $v_S$ → typed value $v_T$ of type $T$. Component application uses the existing kernel evaluator.
-4. Look up the target institution from `import_format.institution_ref`. Call `reify(import_format.procedure, v_T, ctx)` → target-class resource.
+4. Look up the target institution from `import_format.institution_ref`. Call `reify(import_format.procedure, v_T, ctx)` → target-class resource. Assign the produced resource a chain-resident `@id`: the optional `target_iri` (set by surface-language overrides such as EigenQL `INTO`) takes precedence; otherwise the kernel mints a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex>` over the canonical Eigon-CBOR of the resource (with `@id` cleared). Identical reify outputs collide on the same IRI, which is the cross-fibre dedup property the Grothendieck construction wants.
 5. **Post-translation validation invariant.** Run any `AutoOnLoad` QueryClasses bound to the target class on the produced resource. Failure surfaces as a typed `EvalError::ComorphismProducedInvalidResource` — this distinguishes a comorphism implementation bug from a user error, and operationalises the Satisfaction Condition (§5) as a runtime invariant.
+6. **Reinsert the produced resource into the chain.** The IRI'd resource is collected at the run-boundary and committed to the program-run layer alongside the trace artefacts via [`commit_with_validation`](../../kernel/src/context/mod.rs), so AutoOnLoad fires *as part of* normal chain entry. The resource is then addressable to downstream EigenQL, Inspect, and component-side `resolve` — comorphism-translated sentences are first-class chain residents, not transport-only values. The same elevation applies to a program's final-step Resource value (under namespace `urn:eigenius:program-output:<program-tail>:<hex>`); a `RunProgramResponse.output_resource_iris` field exposes the assigned IRIs to clients.
 
 ### 9.4 What the kernel does on EigenQL FIBER
 
@@ -457,6 +458,16 @@ RETURN [] { result: ?s2, factor: ?sf, delta: ?delta }
 ```
 
 For queries requiring institutional reasoning (e.g. "is this mesh converged?"), the FIBER clause names a `QueryClass`; the evaluator resolves the QueryClass, runs its implementation (Component-orchestrated or institution-runtime), and binds the resulting resource for downstream pattern matching.
+
+A FIBER clause may carry an optional `INTO "<iri>"` suffix that pins the response in the regular chain:
+
+```eigenql
+FIBER assay:validate_prediction {
+    candidate: dock_to_assay(?d)
+} AS ?v INTO "urn:eigenius:my:validation_run_42"
+```
+
+Without `INTO`, the response lives in the per-query overlay and disappears at query end (no chain entry, no AutoOnLoad firing — the query is read-only). With `INTO`, the response stamps the named IRI, the query's commit cycle lifts it through `commit_with_validation` so AutoOnLoad QueryClasses bound to its class fire on chain entry, and the IRI surfaces back to the caller via `QueryResponse.output_resource_iris`. This is the EigenQL surface for §9.3 chain reinsertion — paralleling what `Exp::InstitutionInvoke`'s `target_iri: Option<Iri>` does for ESL / programmatic dispatch.
 
 ### 9.5 IRI classification at parse time
 

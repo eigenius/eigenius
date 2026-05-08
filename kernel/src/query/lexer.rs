@@ -47,6 +47,12 @@ pub enum TokenKind {
     // FIBER-clause keywords (D2 §3.3.1, §3.5)
     Fiber,
     Institution,
+    /// Optional FIBER suffix that names a chain-resident IRI for the
+    /// response resource. Without `INTO`, the FIBER response stays in
+    /// the transient query overlay; with `INTO "<iri>"`, the response
+    /// is committed to the regular chain at the named IRI as part of
+    /// the query's commit cycle (D14 §9.3 chain-reinsertion).
+    Into,
     // Postfix Verdict predicates (D2 v2 §3.7, §3.8)
     Holds,
     Fails,
@@ -601,6 +607,7 @@ impl<'a> Lexer<'a> {
             "OFFSET" => TokenKind::Offset,
             "FIBER" => TokenKind::Fiber,
             "INSTITUTION" => TokenKind::Institution,
+            "INTO" => TokenKind::Into,
             "HOLDS" => TokenKind::Holds,
             "FAILS" => TokenKind::Fails,
             "UNDECIDABLE" => TokenKind::Undecidable,

@@ -169,6 +169,11 @@ message QueryResponse {
   bytes document = 2;
   string content_type = 3;      // "application/cbor"
   string error = 4;             // Error message if !success
+  // IRIs of resources committed to the chain by FIBER ... INTO clauses
+  // (D14 §9.3 chain-reinsertion via EigenQL). Each entry corresponds to
+  // exactly one chain-resident response resource the query just
+  // produced. Clients can resolve them via Inspect or follow-on queries.
+  repeated string output_resource_iris = 5;
 }
 
 // --- ValidateProgram ---
@@ -202,6 +207,11 @@ message RunProgramResponse {
   string task_id = 5;           // Task UUID (D21). Empty string if no
                                 // persistent backend — the task is ephemeral
                                 // and cannot be looked up via GetTaskStatus.
+  // IRIs of resources committed to the chain by this run (D14 §9.3 step 4):
+  // comorphism reify outputs and the program's final Resource value, each
+  // assigned a deterministic content-hash IRI. Clients can resolve these
+  // against the chain to get the chain-resident copies.
+  repeated string output_resource_iris = 6;
 }
 
 // --- RunProgramByIri ---

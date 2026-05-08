@@ -1222,6 +1222,7 @@ impl EigeniusService {
                         }],
                         trace_iri: String::new(),
                         task_id: task_id_str.clone(),
+                        output_resource_iris: Vec::new(),
                     }));
                 }
             }
@@ -1230,6 +1231,7 @@ impl EigeniusService {
         let completed_at_ms = now_millis();
         let mut output = exec_result.output;
         let dispatched_traces = exec_result.dispatched_traces;
+        let produced_resources = exec_result.produced_resources;
         let root_trace = exec_result.root_trace;
 
         // Compute metrics from the tree-structured trace (preferred) or
@@ -1309,9 +1311,32 @@ impl EigeniusService {
             crate::ontology::resource::Value::Integer(0),
         );
 
-        // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
+        // Auto-commit program-run layer: produced domain resources
+        // (comorphism reify outputs, program-final output) +
+        // ProgramTrace + all IO ComponentTraces. The commit goes
+        // through `commit_with_validation` so AutoOnLoad QueryClasses
+        // bound to the produced resources' classes fire on chain
+        // entry (D14 §9.3 step 5).
+        let output_resource_iris: Vec<String> = produced_resources
+            .iter()
+            .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect();
         let result_layer_head = {
             let mut ctx = ctx_arc.write().await;
+            // Add domain resources produced by the run (chain-resident
+            // outputs of comorphism reify and the program's final
+            // Resource value).
+            for r in &produced_resources {
+                if let Err(e) = ctx.add_resource(r.clone()) {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::PROGRAM_RUN,
+                        { field::ERROR_KIND } = "produced_add_failed",
+                        { field::ERROR_MESSAGE } = %e,
+                        resource_iri = ?r.id(),
+                        "failed to add produced resource to program-run layer"
+                    );
+                }
+            }
             // Add ProgramTrace
             if let Err(e) = ctx.add_resource(trace_resource) {
                 tracing::warn!(
@@ -1328,28 +1353,50 @@ impl EigeniusService {
                 );
                 let _ = ctx.add_resource(ct_resource);
             }
-            match ctx.commit("trace") {
-                Ok(layer) => {
-                    // Best-effort persist of the trace layer. A failure here
-                    // logs but doesn't fail the RunProgram call — the output
-                    // is still valid, the trace just isn't durable.
-                    if let Some(err) = self.persist_layer_if_backend(branch, &layer) {
+            let index = Arc::clone(&*self.institution_index.read().await);
+            let runtime = Arc::clone(&*self.institution_runtime.read().await);
+            match ctx.commit_with_validation("program-run", &index, &runtime) {
+                Ok(outcome) => {
+                    // Persist user layer; provenance layer (when
+                    // present, from Holds/Undecidable AutoOnLoad
+                    // verdicts) follows. A failure to persist either
+                    // logs but doesn't fail RunProgram — the eval
+                    // output is still valid; the chain just isn't
+                    // durable.
+                    if let Some(err) = self.persist_layer_if_backend(branch, &outcome.user_layer) {
                         tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
-                            { field::ERROR_KIND } = "trace_persist_failed",
-                            { field::LAYER_ID } = %layer.id(),
+                            { field::ERROR_KIND } = "program_run_persist_failed",
+                            { field::LAYER_ID } = %outcome.user_layer.id(),
                             { field::ERROR_MESSAGE } = %err.message,
-                            "failed to persist trace layer (output still returned)"
+                            "failed to persist program-run layer (output still returned)"
                         );
                     }
-                    Some(layer.id().clone())
+                    if let Some(prov) = outcome.provenance_layer.as_ref() {
+                        if let Some(err) = self.persist_layer_if_backend(branch, prov) {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::LAYER_COMMIT,
+                                { field::ERROR_KIND } = "program_run_provenance_persist_failed",
+                                { field::LAYER_ID } = %prov.id(),
+                                { field::ERROR_MESSAGE } = %err.message,
+                                "failed to persist program-run provenance layer"
+                            );
+                        }
+                    }
+                    Some(
+                        outcome
+                            .provenance_layer
+                            .as_ref()
+                            .map(|l| l.id().clone())
+                            .unwrap_or_else(|| outcome.user_layer.id().clone()),
+                    )
                 }
                 Err(e) => {
                     tracing::warn!(
                         { field::OPERATION } = operation::LAYER_COMMIT,
-                        { field::ERROR_KIND } = "trace_commit_failed",
+                        { field::ERROR_KIND } = "program_run_commit_failed",
                         { field::ERROR_MESSAGE } = %e,
-                        "trace layer commit failed (output still returned)"
+                        "program-run layer commit failed (output still returned)"
                     );
                     None
                 }
@@ -1383,6 +1430,7 @@ impl EigeniusService {
             errors: Vec::new(),
             trace_iri: trace_iri_str,
             task_id: task_id_str,
+            output_resource_iris,
         }))
     }
 }
@@ -1628,44 +1676,116 @@ impl EigeniusKernel for EigeniusService {
         let layer = self.resolve_read_layer(&req.at_layer, &req.branch).await?;
         let branch_name = resolve_branch_name(&req.branch).to_string();
         let ctx_arc = self.get_branch_context(&branch_name).await?;
-        let ctx = ctx_arc.read().await;
         let index = Arc::clone(&*self.institution_index.read().await);
         let inst_runtime = Arc::clone(&*self.institution_runtime.read().await);
         let components = Arc::clone(&*self.components.read().await);
 
-        let runtime = query::evaluate::FiberRuntime {
-            index: Some(&index),
-            runtime: Some(&inst_runtime),
-            components: Some(&components),
-            overlay: None,
-            ctx: Some(&ctx),
+        let outcome = {
+            let ctx = ctx_arc.read().await;
+            let runtime = query::evaluate::FiberRuntime {
+                index: Some(&index),
+                runtime: Some(&inst_runtime),
+                components: Some(&components),
+                overlay: None,
+                ctx: Some(&ctx),
+            };
+
+            match query::execute_with_into(&req.eigenql, &layer, runtime) {
+                Ok(o) => o,
+                Err(errors) => {
+                    let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
+                    guard.fail("query_failed");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::QUERY_EVALUATE,
+                        { field::COUNT } = errors.len(),
+                        { field::ERROR_MESSAGE } = %msgs.join("; "),
+                        "query failed"
+                    );
+                    return Ok(Response::new(QueryResponse {
+                        success: false,
+                        document: Vec::new(),
+                        content_type: String::new(),
+                        error: format!("query error: {}", msgs.join("; ")),
+                        output_resource_iris: Vec::new(),
+                    }));
+                }
+            }
         };
 
-        let document = match query::execute_with(&req.eigenql, &layer, runtime) {
-            Ok(doc) => doc,
-            Err(errors) => {
-                let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
-                guard.fail("query_failed");
-                tracing::warn!(
-                    { field::OPERATION } = operation::QUERY_EVALUATE,
-                    { field::COUNT } = errors.len(),
-                    { field::ERROR_MESSAGE } = %msgs.join("; "),
-                    "query failed"
-                );
-                return Ok(Response::new(QueryResponse {
-                    success: false,
-                    document: Vec::new(),
-                    content_type: String::new(),
-                    error: format!("query error: {}", msgs.join("; ")),
-                }));
+        // FIBER ... INTO produced chain-bound resources — commit them
+        // through `commit_with_validation` so AutoOnLoad QueryClasses
+        // bound to their classes fire on chain entry (D14 §9.3 step 5
+        // chain-reinsertion via EigenQL).
+        let output_resource_iris: Vec<String> = if outcome.into_resources.is_empty() {
+            Vec::new()
+        } else {
+            let iris: Vec<String> = outcome
+                .into_resources
+                .iter()
+                .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+                .collect();
+            let mut ctx = ctx_arc.write().await;
+            for r in &outcome.into_resources {
+                if let Err(e) = ctx.add_resource(r.clone()) {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::RPC_QUERY,
+                        { field::ERROR_KIND } = "fiber_into_add_failed",
+                        { field::ERROR_MESSAGE } = %e,
+                        resource_iri = ?r.id(),
+                        "failed to add FIBER INTO resource to chain layer"
+                    );
+                }
             }
+            match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
+                Ok(co) => {
+                    if let Some(err) = self.persist_layer_if_backend(&branch_name, &co.user_layer) {
+                        tracing::warn!(
+                            { field::OPERATION } = operation::LAYER_COMMIT,
+                            { field::ERROR_KIND } = "eigenql_into_persist_failed",
+                            { field::LAYER_ID } = %co.user_layer.id(),
+                            { field::ERROR_MESSAGE } = %err.message,
+                            "failed to persist eigenql-into layer (query result still returned)"
+                        );
+                    }
+                    if let Some(prov) = co.provenance_layer.as_ref() {
+                        if let Some(err) = self.persist_layer_if_backend(&branch_name, prov) {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::LAYER_COMMIT,
+                                { field::ERROR_KIND } = "eigenql_into_provenance_persist_failed",
+                                { field::LAYER_ID } = %prov.id(),
+                                { field::ERROR_MESSAGE } = %err.message,
+                                "failed to persist eigenql-into provenance layer"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    guard.fail("eigenql_into_commit_failed");
+                    let msg = format!("{e}");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::LAYER_COMMIT,
+                        { field::ERROR_KIND } = "eigenql_into_commit_failed",
+                        { field::ERROR_MESSAGE } = %msg,
+                        "FIBER INTO commit failed; surfacing error to caller"
+                    );
+                    return Ok(Response::new(QueryResponse {
+                        success: false,
+                        document: Vec::new(),
+                        content_type: String::new(),
+                        error: format!("FIBER INTO commit failed: {msg}"),
+                        output_resource_iris: Vec::new(),
+                    }));
+                }
+            }
+            iris
         };
 
         Ok(Response::new(QueryResponse {
             success: true,
-            document: eigon_cbor::serialize_document(&document),
+            document: eigon_cbor::serialize_document(&outcome.document),
             content_type: "application/cbor".to_string(),
             error: String::new(),
+            output_resource_iris,
         }))
     }
 

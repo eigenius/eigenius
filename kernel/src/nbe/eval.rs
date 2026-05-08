@@ -90,6 +90,13 @@ pub enum EvalCtx {
         trace_store: Option<Arc<dyn TraceStore>>,
         /// ComponentTraces produced during this evaluation (for trace layer commits).
         dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
+        /// Top-level resources produced during this evaluation that
+        /// must be committed to the chain at the run-boundary
+        /// (D14 §9.3 step 4 — comorphism reify outputs). Each entry
+        /// has a deterministic content-hash IRI assigned at the
+        /// reify boundary; the run-boundary commits them as part of
+        /// the program-run layer.
+        produced_resources: Arc<Mutex<Vec<crate::ontology::resource::Resource>>>,
         /// Optional task context. When present, IO dispatches route
         /// through per-task positional trace keys (D21 §3.2) instead
         /// of the cross-task content-address cache. Synchronous
@@ -338,6 +345,7 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::InstitutionInvoke {
             comorphism_iri,
             source,
+            target_iri,
         } => {
             let source_val = ev(source)?;
             if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
@@ -346,7 +354,8 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                     format!("__institution_invoke_no_registry:{comorphism_iri}"),
                 )));
             }
-            match try_d14_institution_invoke(comorphism_iri, &source_val, ctx)? {
+            match try_d14_institution_invoke(comorphism_iri, &source_val, target_iri.as_ref(), ctx)?
+            {
                 Some(translated) => Ok(translated),
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
@@ -1220,6 +1229,35 @@ fn build_recursor_ih(
     }
 }
 
+/// Compute a deterministic content-hash IRI for a resource produced
+/// during program execution (D14 §9.3 step 4 — comorphism reify
+/// outputs; the program-run final output).
+///
+/// Shape: `urn:eigenius:<namespace>:<origin-tail>:<hex>` where
+/// `<hex>` is the first 16 hex chars of SHA-256 over the canonical
+/// Eigon-CBOR of the resource with `@id` cleared. Two calls that
+/// produce identical resource content collide on the same IRI —
+/// that is the dedup we want.
+pub(crate) fn deterministic_run_output_iri(
+    namespace: &str,
+    origin_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Iri {
+    use sha2::{Digest, Sha256};
+    let mut for_hashing = resource.clone();
+    for_hashing.set_id(None);
+    let cbor = crate::ontology::eigon_cbor::canonicalize(&for_hashing);
+    let digest = Sha256::digest(&cbor);
+    let hex = digest
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let tail = origin_iri.as_str().rsplit(':').next().unwrap_or("anon");
+    Iri::parse(format!("urn:eigenius:{namespace}:{tail}:{hex}").as_str())
+        .expect("deterministic run-output IRI is well-formed")
+}
+
 /// D14 four-step InstitutionInvoke pipeline.
 ///
 /// Returns:
@@ -1236,6 +1274,7 @@ fn build_recursor_ih(
 fn try_d14_institution_invoke(
     comorphism_iri: &Iri,
     source_val: &Val,
+    target_iri: Option<&Iri>,
     ctx: &EvalCtx,
 ) -> Result<Option<Val>, EvalError> {
     let (Some(index), Some(runtime)) = (ctx.institution_index(), ctx.institution_runtime()) else {
@@ -1334,7 +1373,7 @@ fn try_d14_institution_invoke(
             import.institution_ref
         ))
     })?;
-    let target_resource = target_inst
+    let mut target_resource = target_inst
         .reify(&import.procedure, &transformed, &exec_ctx)
         .map_err(|e| {
             EvalError::InvalidCaseTarget(format!(
@@ -1342,6 +1381,17 @@ fn try_d14_institution_invoke(
                 import.procedure
             ))
         })?;
+
+    // D14 §9.3 step 4: assign a chain-resident IRI to the produced
+    // target-class resource. Caller-supplied `target_iri` (e.g. from
+    // EigenQL `INTO`) overrides; otherwise the kernel mints a
+    // deterministic content-hash IRI so identical reify outputs
+    // dedupe naturally on commit.
+    let assigned_iri = match target_iri {
+        Some(iri) => iri.clone(),
+        None => deterministic_run_output_iri("comorphism-output", comorphism_iri, &target_resource),
+    };
+    target_resource.set_id(Some(assigned_iri));
 
     // Step 5 (D14 §9.3): post-translation validation invariant. Run
     // any AutoOnLoad QueryClasses bound to the produced target
@@ -1366,6 +1416,19 @@ fn try_d14_institution_invoke(
             "comorphism `{comorphism_iri}`: post-translation validation rejected the \
              reified resource: {reasons}"
         )));
+    }
+
+    // Push the IRI'd resource into the run-boundary collector so the
+    // server's RunProgram path commits it to the chain alongside
+    // ProgramTrace + ComponentTrace observability resources.
+    if let EvalCtx::IO {
+        produced_resources, ..
+    } = ctx
+    {
+        produced_resources
+            .lock()
+            .expect("produced_resources mutex poisoned")
+            .push(target_resource.clone());
     }
 
     Ok(Some(Val::ResourceVal(Box::new(target_resource))))
@@ -2258,6 +2321,7 @@ mod tests {
             registry: std::sync::Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            produced_resources: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             task_context: None,
             institution_index: None,
             institution_runtime: None,
@@ -3214,6 +3278,7 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:marker_cm").unwrap(),
             source: Box::new(source),
+            target_iri: None,
         };
         let v = eval(&exp, &Rho::Nil).expect("eval");
         match v {
@@ -3439,6 +3504,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::clone(&idx)),
             institution_runtime: Some(Arc::new(runtime)),
@@ -3457,6 +3523,7 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:d14_pipe:cm").unwrap(),
             source: Box::new(source),
+            target_iri: None,
         };
         let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("D14 pipeline eval");
         let result = match v {
@@ -3554,6 +3621,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::new(new_idx)),
             institution_runtime: Some(Arc::new(runtime)),
@@ -3566,6 +3634,7 @@ mod tests {
                     Iri::parse("urn:eigenius:test:src").unwrap(),
                 ),
             ))),
+            target_iri: None,
         };
         let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
         let msg = format!("{err}");
@@ -3729,6 +3798,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::new(idx)),
             institution_runtime: Some(Arc::new(runtime)),
@@ -3795,6 +3865,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::new(idx)),
             institution_runtime: Some(Arc::new(InstitutionRuntime::new())),

@@ -321,6 +321,7 @@ fn run_within_tolerance(
         registry: components,
         trace_store: None,
         dispatched_traces,
+        produced_resources: Arc::new(Mutex::new(Vec::new())),
         task_context: None,
         institution_index: Some(index),
         institution_runtime: Some(runtime),

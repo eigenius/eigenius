@@ -1787,6 +1787,37 @@ Four independently-shippable landings, dependency-ordered:
 - Comorphism into Symbolics/MTK: deferred until the Symbolics institution gets a typed `ODESystem`-equivalent class (and the Catalyst→ODESystem path itself is settled — the probe shows the conversion to `ODESystem` is broken in 16.1.1).
 - Why an institution and not just a substrate component: the fibre has structural invariants (linear conservation laws, deficiency classes, mass-action equivalence) that EigenQL FIBER queries can traverse; substrate components alone would just return numbers without the typed-relation status.
 
+### Phase 19i — D14 §9.3 chain reinsertion ✓ (Phase 1)
+
+**Goal:** Close the spec gap that `Exp::InstitutionInvoke` (and program output more generally) was producing typed Resources but never inserting them into the chain. D14 §9.3 step 4 specifies that the comorphism's reified target-class resource enters the graph through the target institution; step 5's post-translation invariant relies on this entry to operationalise the Satisfaction Condition (§5). Pre-Phase 19i the produced resource only existed in transit as a `Val::ResourceVal` and a serialised RPC payload — addressable from neither EigenQL nor `Inspect`.
+
+**Landed scope (Phase 1).** The same elevation applies uniformly to comorphism reify outputs and to a program's final-step Resource value — they're the same kind of thing, "domain resources the run emitted":
+
+- `Exp::InstitutionInvoke { comorphism_iri, source, target_iri }` — AST node gains an optional `target_iri` for surface-language overrides (default `None` from ESL; Phase 2 EigenQL `INTO X` sets `Some(X)`).
+- `EvalCtx::IO { ..., produced_resources: Arc<Mutex<Vec<Resource>>> }` — collector that the reify boundary pushes to.
+- `try_d14_institution_invoke` — after reify, mints a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex>` from SHA-256 over the canonical Eigon-CBOR of the resource (with `@id` cleared), sets the `@id`, runs the in-eval AutoOnLoad gate (rejects bad outputs before they touch the chain), and pushes into `produced_resources`. Identical reify outputs collide on the same IRI — that is the cross-fibre dedup property the Grothendieck construction wants.
+- Run-boundary (`execute_program_nbe_with_institutions_d14`) — when the program's final value is a non-empty Resource with no `@id`, the same scheme assigns `urn:eigenius:program-output:<program-tail>:<hex>` and pushes to the collector. Top-level passthrough (output already has an `@id`) is left alone; primitive values are returned without commit.
+- `run_program_inner` (server) — adds `produced_resources` to the program-run layer alongside `ProgramTrace` + `ComponentTrace` observability, switches `ctx.commit("trace")` → `ctx.commit_with_validation("program-run", ...)` (so AutoOnLoad fires on chain entry per D14 §9.3 step 5 as part of normal chain mechanics), and persists both `user_layer` and `provenance_layer` from the `CommitOutcome`.
+- `RunProgramResponse.output_resource_iris: Vec<String>` — proto field exposing the assigned IRIs to clients so the notebook / `eigen` SDK can resolve them.
+
+**Tests.** [`kernel/src/program/eval_io.rs::tests::run_boundary_elevates_output_to_chain_resource`](../../kernel/src/program/eval_io.rs) and `…does_not_elevate_when_output_already_has_iri`; the comorphism path extension in [`kernel/tests/d14_dock_assay_demo.rs::comorphism_translates_dock_to_assay`](../../kernel/tests/d14_dock_assay_demo.rs) asserting the reified `AssayPrediction` carries a deterministic `comorphism-output:dock_to_assay:<hex>` IRI; full server-boundary coverage in [`storage/rocksdb/tests/program_output_chain_commit_test.rs`](../../storage/rocksdb/tests/program_output_chain_commit_test.rs) (load ontology, run Construct program over RPC, assert output IRI resolves through `Inspect`, identical input dedupes, distinct input doesn't).
+
+**Notebook demo.** Cells 12–15 of `notebooks/examples/kinase-institutions.json` invoke `comorphisms:symbolics_to_jump` through a one-line wrapper program; the produced `OptimisationProblem` lands at `urn:eigenius:comorphism-output:symbolics_to_jump:<hex>` and is queryable via EigenQL pattern-match on the IRI prefix.
+
+**Phase 2 — EigenQL `INTO` clause ✓.** Same chain-reinsertion semantics, exposed at the EigenQL surface so callers can dispatch via interactive query rather than a wrapper program:
+
+- `FIBER <institution>:<QueryClass> { ... } AS ?var INTO "<iri>"` — optional suffix; without it, current overlay-only behaviour preserved.
+- Lexer: `INTO` keyword. AST: `FiberClause.into: Option<Iri>`. Parser: literal-string IRI argument.
+- Evaluator (`apply_fiber_clause`): when `into` is set, the response stamps the user-named IRI rather than the synthesized `<doc-iri>:fiber:<clause-idx>:<binding-idx>` transient, and the resource is pushed onto a per-query collector that bubbles up via the new [`query::QueryOutcome`](../../kernel/src/query/mod.rs).
+- Server-side `Query` RPC handler: drains `outcome.into_resources` and commits them to the regular chain via `commit_with_validation` (so AutoOnLoad fires uniformly), persisting both `user_layer` and `provenance_layer` on backed sessions. Failure of the INTO commit fails the query — surfacing the validation error to the caller rather than silently dropping the resource.
+- Proto: `QueryResponse.output_resource_iris: repeated string` returns the chain-resident IRIs to clients.
+
+A multi-row FIBER with `INTO` (whose IRI is fixed across rows) is rejected at evaluation time with a clear error — the alternative would silently overwrite or fail a chain-validation step, both worse than refusing up front.
+
+**Tests.** Parser: [`fiber_with_into_clause_parses`](../../kernel/src/query/parser.rs), `fiber_without_into_clause_has_none`, `fiber_into_rejects_non_string_argument`. Evaluator: [`eigenql_fiber_into_collects_response_for_chain_commit`](../../kernel/tests/d14_dock_assay_demo.rs) — the dock-assay `validate_prediction` FIBER + INTO produces a Verdict resource in `into_resources` carrying the user-named IRI.
+
+**Notebook demo.** Cells 16–18 of `notebooks/examples/kinase-institutions.json` invoke `qc_symb_to_jump` (the operational backing of the comorphism) via FIBER + INTO, pinning the produced `OptimisationProblem` at a caller-named IRI and verifying it resolves through a follow-up MATCH.
+
 ### Phase 19 — Test plan
 
 - Per-institution: AutoOnLoad-on-commit acceptance and rejection, OnDemand FIBER queries, Decidable `Exp::NativeDecide` reduction (where applicable).

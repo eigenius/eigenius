@@ -182,6 +182,13 @@ impl Resource {
         self.id.as_ref()
     }
 
+    /// Promote an embedded resource to a top-level resource by
+    /// assigning an `@id`, or rebrand an existing top-level resource.
+    /// Pass `None` to demote a top-level resource to embedded.
+    pub fn set_id(&mut self, id: Option<Iri>) {
+        self.id = id;
+    }
+
     /// Returns true if this is a top-level resource (has an `@id`).
     pub fn is_top_level(&self) -> bool {
         self.id.is_some()

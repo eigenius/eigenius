@@ -86,7 +86,7 @@ pub fn evaluate(
     layer: &Layer,
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
-) -> Result<Vec<Resource>, QueryError> {
+) -> Result<(Vec<Resource>, Vec<Resource>), QueryError> {
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
     // 1. Evaluate DEFINE rules with seminaive fixpoint
@@ -123,8 +123,15 @@ pub fn evaluate(
         }
     }
 
-    // 2. Evaluate the query
+    // 2. Evaluate the query.
+    //
+    // The transient `overlay` holds every FIBER response (so
+    // subsequent patterns and the WHERE/RETURN expression evaluator
+    // can decompose them by IRI). The `into_collector` holds only
+    // the responses committed by `FIBER ... INTO "<iri>"` — the
+    // run-boundary lifts that subset to the regular chain.
     let mut overlay = FiberOverlay::default();
+    let mut into_collector: Vec<Resource> = Vec::new();
     let mut bindings = evaluate_match_part_with_fiber(
         &program.query.body,
         layer,
@@ -132,6 +139,7 @@ pub fn evaluate(
         runtime,
         fp,
         &mut overlay,
+        &mut into_collector,
     )?;
 
     // The overlay must remain visible to GROUP BY and RETURN shaping
@@ -201,7 +209,7 @@ pub fn evaluate(
         results.truncate(limit);
     }
 
-    Ok(results)
+    Ok((results, into_collector))
 }
 
 /// Evaluate a MatchPart's pattern-only bodies (DEFINE rules).
@@ -255,6 +263,7 @@ fn evaluate_match_part(
 /// normal equi-join mechanism, Fiber clauses dispatch once per binding,
 /// inject the response into the overlay, and extend the binding with
 /// the bound variable. WHERE is applied once after all clauses.
+#[allow(clippy::too_many_arguments)]
 fn evaluate_match_part_with_fiber(
     part: &MatchPart,
     layer: &Layer,
@@ -262,6 +271,7 @@ fn evaluate_match_part_with_fiber(
     runtime: FiberRuntime<'_>,
     fp: &QueryFingerprint,
     overlay: &mut FiberOverlay,
+    into_collector: &mut Vec<Resource>,
 ) -> Result<Vec<Binding>, QueryError> {
     let mut bindings: Vec<Binding> = vec![BTreeMap::new()];
 
@@ -284,7 +294,15 @@ fn evaluate_match_part_with_fiber(
             }
             Clause::Fiber(fc) => {
                 bindings = apply_fiber_clause(
-                    fc, clause_idx, layer, runtime, fp, &aliases, overlay, bindings,
+                    fc,
+                    clause_idx,
+                    layer,
+                    runtime,
+                    fp,
+                    &aliases,
+                    overlay,
+                    into_collector,
+                    bindings,
                 )?;
             }
         }
@@ -329,6 +347,7 @@ fn apply_fiber_clause(
     fp: &QueryFingerprint,
     aliases: &BTreeMap<&str, &Iri>,
     overlay: &mut FiberOverlay,
+    into_collector: &mut Vec<Resource>,
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
     // D14 dispatch (D2 §6.12): FIBER requires both halves of the
@@ -461,15 +480,49 @@ fn apply_fiber_clause(
         // whose audit trail rides on the EigenQL trace, not the chain.
         let response = outcome.output;
 
-        // Stamp response with a synthesized @id + attach to overlay.
-        let response_iri = fp.fiber_response_iri(clause_idx, binding_idx);
+        // Stamp response with an `@id` and attach to the transient
+        // overlay so subsequent patterns and the WHERE/RETURN
+        // expression evaluator can resolve `?var` back to the
+        // response resource. The IRI choice depends on FIBER `INTO`:
+        //
+        // - With `INTO "<iri>"` (D14 §9.3 chain-reinsertion via
+        //   EigenQL): the user-named IRI stamps both the overlay
+        //   entry and the chain-commit collector. After the query
+        //   commits, the response is a first-class chain resident
+        //   addressable at that IRI. Each input binding produces its
+        //   own response — a multi-row FIBER with INTO would attempt
+        //   to commit multiple resources at the same IRI. For v1 we
+        //   reject the second arrival with a clear error so the
+        //   semantics stay obvious.
+        // - Without `INTO`: synthesize a query-scope transient IRI
+        //   (the prior behaviour); the response disappears at query
+        //   end.
+        let (response_iri, persist_to_chain) = match &fc.into {
+            Some(target) => {
+                if into_collector.iter().any(|r| r.id() == Some(target)) {
+                    return Err(QueryError::evaluation(format!(
+                        "FIBER `INTO \"{target}\"` matched more than one input binding; \
+                         a single INTO IRI cannot name two distinct chain resources. \
+                         Constrain the FIBER inputs so it fires once, or drop INTO and \
+                         let the response stay query-scoped."
+                    )));
+                }
+                (target.clone(), true)
+            }
+            None => (fp.fiber_response_iri(clause_idx, binding_idx), false),
+        };
         let mut stamped = Resource::new(response_iri.clone());
         for (k, v) in response.properties() {
             stamped.set(k.clone(), v.clone());
         }
+        if persist_to_chain {
+            into_collector.push(stamped.clone());
+        }
         overlay.push(response_iri.clone(), stamped);
 
-        // Extend the binding with ?var → response_iri.
+        // Extend the binding with ?var → response_iri (the chain-
+        // resident IRI when INTO is set; the transient overlay IRI
+        // otherwise).
         let mut new_binding = binding.clone();
         new_binding.insert(
             fc.binding.name.clone(),
@@ -1797,7 +1850,9 @@ mod tests {
         let tokens = tokenize(query_str).unwrap();
         let program = parser::parse(tokens).unwrap();
         let fp = QueryFingerprint::of(query_str);
-        evaluate(&program, layer, &fp, FiberRuntime::default()).unwrap()
+        evaluate(&program, layer, &fp, FiberRuntime::default())
+            .unwrap()
+            .0
     }
 
     #[test]

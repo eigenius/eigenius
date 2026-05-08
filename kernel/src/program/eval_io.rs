@@ -34,6 +34,13 @@ pub struct NbeExecutionResult {
     pub output: Resource,
     /// ComponentTraces produced during execution (for trace layer commits).
     pub dispatched_traces: Vec<ComponentTrace>,
+    /// Top-level resources produced during execution that must be
+    /// committed to the chain at the run-boundary (D14 §9.3 step 4 —
+    /// comorphism reify outputs). Each carries a deterministic
+    /// content-hash IRI assigned at the reify boundary; the caller
+    /// adds them to the program-run layer alongside the trace
+    /// resources.
+    pub produced_resources: Vec<Resource>,
     /// Tree-structured trace from `eval_traced` (D6b §2).
     pub root_trace: Option<Trace>,
 }
@@ -90,13 +97,18 @@ pub fn execute_program_nbe_with_institutions_d14(
     let body_exp =
         crate::program::expr::parse_expression(body, &layer).map_err(ProgramError::Parse)?;
 
-    // Build the IO evaluation context with trace collection
+    // Build the IO evaluation context with trace collection +
+    // produced-resources collector (D14 §9.3 — comorphism outputs
+    // and the program's final Resource value land here for chain
+    // commit at the run-boundary).
     let dispatched_traces = Arc::new(Mutex::new(Vec::new()));
+    let produced_resources = Arc::new(Mutex::new(Vec::new()));
     let ctx = EvalCtx::IO {
         layer,
         registry,
         trace_store,
         dispatched_traces: Arc::clone(&dispatched_traces),
+        produced_resources: Arc::clone(&produced_resources),
         task_context,
         institution_index,
         institution_runtime,
@@ -134,7 +146,7 @@ pub fn execute_program_nbe_with_institutions_d14(
     };
 
     // Convert the result Val back to a Resource
-    let output = val_to_resource(&result)?;
+    let mut output = val_to_resource(&result)?;
 
     // Extract collected traces
     let traces = match Arc::try_unwrap(dispatched_traces) {
@@ -142,9 +154,35 @@ pub fn execute_program_nbe_with_institutions_d14(
         Err(arc) => arc.lock().unwrap().clone(),
     };
 
+    // Extract produced resources (comorphism reify outputs that
+    // received deterministic IRIs at the reify boundary). The
+    // run-boundary caller commits these to the chain alongside the
+    // ProgramTrace + ComponentTrace observability resources.
+    let mut produced = match Arc::try_unwrap(produced_resources) {
+        Ok(mutex) => mutex.into_inner().unwrap_or_default(),
+        Err(arc) => arc.lock().unwrap().clone(),
+    };
+
+    // Elevate the program's final output to a chain-resident
+    // resource if it carries domain content but no caller-assigned
+    // IRI (e.g. a `Construct` returning an embedded resource). When
+    // `output` already has an `@id` it either came from a comorphism
+    // reify (already in `produced`) or is a passthrough of a chain
+    // resource — in either case the run-boundary should not re-id
+    // or re-push it.
+    if output.id().is_none() && !output.properties().is_empty() {
+        if let Some(prog_iri) = program.id() {
+            let iri =
+                crate::nbe::eval::deterministic_run_output_iri("program-output", prog_iri, &output);
+            output.set_id(Some(iri));
+            produced.push(output.clone());
+        }
+    }
+
     Ok(NbeExecutionResult {
         output,
         dispatched_traces: traces,
+        produced_resources: produced,
         root_trace,
     })
 }
@@ -296,6 +334,124 @@ mod tests {
         assert!(
             result.root_trace.is_none(),
             "identity (Var) should have no trace"
+        );
+    }
+
+    #[test]
+    fn run_boundary_elevates_output_to_chain_resource() {
+        // The run-boundary mints a deterministic content-hash IRI for
+        // any non-empty Resource the program produces with no
+        // caller-assigned `@id`, and pushes it into
+        // `produced_resources` so the server can commit it to the
+        // chain. The identity program suffices to drive this: it
+        // returns its input (an embedded Resource with one property)
+        // unchanged, which the boundary then promotes.
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                "urn:eigenius:program:name": "input"
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+
+        let mut input = Resource::new_embedded();
+        input.set(
+            Iri::parse("urn:eigenius:example:x").unwrap(),
+            Value::String("val".into()),
+        );
+
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
+        let registry = Arc::new(ComponentRegistry::default());
+
+        let result = execute_program_nbe(
+            &program,
+            &input,
+            Arc::clone(&layer),
+            Arc::clone(&registry),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.produced_resources.len(),
+            1,
+            "expected one elevated program-output resource"
+        );
+        let produced = &result.produced_resources[0];
+        let produced_iri = produced.id().expect("elevated output has @id");
+        assert!(
+            produced_iri
+                .as_str()
+                .starts_with("urn:eigenius:program-output:prog:"),
+            "expected `urn:eigenius:program-output:prog:<hex>` IRI, got {produced_iri}"
+        );
+        // The transport `output` resource should carry the same
+        // assigned IRI so callers can correlate it with the chain.
+        assert_eq!(result.output.id(), Some(produced_iri));
+
+        // Determinism: re-running with identical input mints the
+        // identical content-hash IRI (chain-dedup property).
+        let result2 = execute_program_nbe(
+            &program,
+            &input,
+            Arc::clone(&layer),
+            Arc::clone(&registry),
+            None,
+        )
+        .unwrap();
+        let produced2_iri = result2.produced_resources[0]
+            .id()
+            .expect("re-run elevated output has @id");
+        assert_eq!(
+            produced_iri, produced2_iri,
+            "identical input must mint the same deterministic IRI"
+        );
+    }
+
+    #[test]
+    fn run_boundary_does_not_elevate_when_output_already_has_iri() {
+        // If the program returns a value that already carries an
+        // `@id` (e.g. a passthrough of a chain-resident input or a
+        // comorphism reify result), the run-boundary must not re-id
+        // or re-push it. The identity program over a top-level input
+        // returns the input verbatim — the input's IRI carries
+        // through, and the elevation path is skipped.
+        let json = r#"{
+            "@id": "urn:eigenius:test:prog",
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+            "urn:eigenius:program:body": {
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+                "urn:eigenius:program:name": "input"
+            }
+        }"#;
+        let program = eigon_json::parse_document(json).unwrap().remove(0);
+
+        let mut input = Resource::new(Iri::parse("urn:eigenius:test:input1").unwrap());
+        input.set(
+            Iri::parse("urn:eigenius:example:x").unwrap(),
+            Value::String("val".into()),
+        );
+
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
+        let registry = Arc::new(ComponentRegistry::default());
+
+        let result = execute_program_nbe(&program, &input, layer, registry, None).unwrap();
+        assert!(
+            result.produced_resources.is_empty(),
+            "run-boundary must not elevate when output already has an @id"
+        );
+        assert_eq!(
+            result.output.id().map(|i| i.as_str()),
+            Some("urn:eigenius:test:input1"),
+            "output retains the input IRI it passed through"
         );
     }
 
