@@ -159,10 +159,17 @@ setup_institution() {
     local mirror_dir="$MIRROR_BASE_DIR/$handler_pkg"
     mkdir -p "$mirror_dir"
 
+    # `--institution-file` augments the seed with cross-institution
+    # return classes by reading the institution declaration file's
+    # `RuntimeMethodSignature` resources directly. The file is the
+    # source of truth at this stage of the pipeline; the institution
+    # itself is only committed to the chain at `institution install`
+    # time later in this function.
     local mirror_json="$MIRROR_BASE_DIR/$handler_pkg-mirror.json"
     $EIGENIUS mirror create \
         --layer "$layer" \
         --filter "$mirror_seed_filter" \
+        --institution-file "$institution_file" \
         --language julia \
         --output "$mirror_dir" \
         --json | tee "$mirror_json" >/dev/null
@@ -216,6 +223,14 @@ echo
 
 # ─── Step 2: Per-institution mirror + env + install ─────────────────────
 
+# Each institution's seed filter selects only its *own* declared
+# classes. Cross-institution return classes (e.g. `OptimisationProblem`
+# returned from `Symbolics → JuMP`'s `frame_as_optimisation_problem`)
+# are discovered automatically by `mirror create --institution-file`,
+# which parses the institution declaration and folds every
+# `RuntimeMethodSignature.input_types` / `output_type` class into the
+# seed before closure expansion.
+
 # JuMP-HiGHS — LP/QP solver (D27 §4.2).
 setup_institution \
     "JuMP-HiGHS" \
@@ -241,17 +256,8 @@ setup_institution \
      }
      WHERE ?name IN ["SymbolicExpression", "SimplifiesTo", "SimplifyRequest",
                      "EquivalenceCheck", "SatisfiesEquation", "Substitutes",
-                     "SymbolicallyReducesTo", "SymbolicsToJuMPInput",
-                     "OptimisationProblem"]
+                     "SymbolicallyReducesTo", "SymbolicsToJuMPInput"]
      RETURN [] { iri: ?iri }'
-
-# `OptimisationProblem` is included in the Symbolics seed even though
-# it is a JuMP-side class because `frame_as_optimisation_problem` (the
-# operational backing of the `Symbolics → JuMP` comorphism) returns
-# one — and the closure walker only follows class property references,
-# not RuntimeMethodSignature output_types. A more general fix would
-# extend the mirror generator to walk signatures by institution; until
-# then, cross-institution return classes get listed here explicitly.
 
 # IntervalArithmetic — rigorous bounds (D27 §4.3).
 setup_institution \
@@ -280,11 +286,6 @@ setup_institution \
      RETURN [] { iri: ?iri }'
 
 # Catalyst — chemical-reaction networks (D27 §4.4).
-# Includes the cross-institution `OdeProblem` and `RhsComponent`
-# classes for the same reason Symbolics includes `OptimisationProblem`:
-# `compile_to_ode` (the operational backing of the `Catalyst → DiffEq`
-# comorphism) returns an `OdeProblem`, and that struct must be in the
-# Catalyst worker's mirror to encode on the way out.
 setup_institution \
     "Catalyst" \
     "EigeniusCatalyst" \
@@ -294,8 +295,7 @@ setup_institution \
     'MATCH "urn:eigenius:core:Class"(?iri) {
         "urn:eigenius:core:short_name": ?name
      }
-     WHERE ?name IN ["ReactionNetwork", "ConservationLaw", "CatalystToOdeInput",
-                     "OdeProblem", "RhsComponent"]
+     WHERE ?name IN ["ReactionNetwork", "ConservationLaw", "CatalystToOdeInput"]
      RETURN [] { iri: ?iri }'
 
 # ─── Step 3: Comorphisms ────────────────────────────────────────────────

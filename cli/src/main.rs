@@ -358,6 +358,23 @@ enum MirrorCommands {
         /// Output directory the source files will be written to (D31 §3.2).
         #[arg(long, value_name = "DIR")]
         output: String,
+
+        /// Optional path to an institution declaration file (the same
+        /// file passed to `eigenius institution install`). When set,
+        /// the seed is augmented with every class referenced by the
+        /// file's `RuntimeMethodSignature.input_types` / `output_type`
+        /// declarations. Lets notebook authors omit cross-institution
+        /// return classes (e.g. `OptimisationProblem` in a Symbolics
+        /// mirror seed) — the closure walker discovers them
+        /// automatically from the institution's signature contracts.
+        ///
+        /// Reads the file directly rather than querying the chain
+        /// because mirror generation runs *before* the institution is
+        /// installed (the env image bakes the mirror in, and the
+        /// institution declaration references the env IRI). The file
+        /// is the source of truth at this stage of the pipeline.
+        #[arg(long, value_name = "FILE")]
+        institution_file: Option<String>,
     },
 
     /// Retrieve a previously-created mirror's source files (D31 §3.5). No commit.
@@ -1794,6 +1811,7 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             filter_file,
             language,
             output,
+            institution_file,
         } => {
             d31::mirror_create(
                 endpoint,
@@ -1802,6 +1820,7 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
                 filter_file.as_deref(),
                 &language,
                 &output,
+                institution_file.as_deref(),
                 json,
             )
             .await

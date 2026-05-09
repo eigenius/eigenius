@@ -39,6 +39,7 @@ use tonic::transport::Channel;
 /// that does per-resource gRPC roundtrips, commits the resulting
 /// `RuntimePackageMirror` to the chain, and writes the source files to
 /// `--output`.
+#[allow(clippy::too_many_arguments)]
 pub async fn mirror_create(
     endpoint: &str,
     layer: &str,
@@ -46,6 +47,7 @@ pub async fn mirror_create(
     filter_file: Option<&str>,
     language: &str,
     output: &str,
+    institution_file: Option<&str>,
     json: bool,
 ) {
     if language != "julia" {
@@ -78,16 +80,58 @@ pub async fn mirror_create(
 
     let mut client = crate::connect_client(endpoint).await;
     let rows = crate::run_query(&mut client, &query).await;
-    let seed_iris: Vec<Iri> = rows
+    let mut seed_iris: Vec<Iri> = rows
         .iter()
         .filter_map(|r| r.get("iri").and_then(|v| v.as_str()))
         .filter_map(|s| Iri::parse(s).ok())
         .collect();
-    if seed_iris.is_empty() {
+    if seed_iris.is_empty() && institution_file.is_none() {
         eprintln!(
             "Filter query returned no class IRIs. Confirm the query has a \
              RETURN clause that exposes the class IRI column as `iri`."
         );
+        std::process::exit(1);
+    }
+
+    // Institution-aware seed augmentation. When `--institution-file
+    // <path>` is set, parse the institution declaration file and pull
+    // every `RuntimeMethodSignature.input_types` / `output_type`
+    // class into the seed. Closes the gap that previously forced
+    // notebook authors to manually list cross-institution return
+    // classes (e.g. `OptimisationProblem` in a Symbolics mirror seed
+    // because `frame_as_optimisation_problem` returns one).
+    //
+    // The augmentation reads the file rather than querying the chain
+    // because, in the canonical flow, the institution declaration
+    // only lands on the chain at `eigenius institution install` time
+    // — which runs *after* mirror generation (env build bakes the
+    // mirror in; the institution declaration references the env
+    // IRI). The file is the source of truth at this stage.
+    if let Some(file_path) = institution_file {
+        let added = match augment_seed_from_institution_file(Path::new(file_path)) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("--institution-file `{file_path}`: {e}");
+                std::process::exit(1);
+            }
+        };
+        let before = seed_iris.len();
+        for iri in added {
+            if !seed_iris.contains(&iri) {
+                seed_iris.push(iri);
+            }
+        }
+        let after = seed_iris.len();
+        if !json && after > before {
+            eprintln!(
+                "  +{} class(es) discovered from `{}` signature contracts",
+                after - before,
+                file_path
+            );
+        }
+    }
+    if seed_iris.is_empty() {
+        eprintln!("Combined filter + institution augmentation returned no class IRIs.");
         std::process::exit(1);
     }
 
@@ -1261,6 +1305,98 @@ impl ChainAccessor for RemoteChainAccessor {
         // Same reasoning — mirror generation only resolves at the
         // single source layer; cross-layer comparisons are kernel-side.
         true
+    }
+}
+
+/// Read the institution declaration file, walk every
+/// `RuntimeMethodSignature` resource it carries, and collect the
+/// class IRIs in those signatures' `input_types` + `output_type`
+/// lists. Used by `mirror create --institution-file` to augment the
+/// user-supplied filter seed with cross-institution classes the
+/// institution's handlers must encode/decode (e.g. the JuMP
+/// `OptimisationProblem` returned by Symbolics'
+/// `frame_as_optimisation_problem`).
+///
+/// Reads the file rather than querying the chain because the
+/// declarations only land on the chain at `eigenius institution
+/// install` time — which runs *after* mirror generation in the
+/// canonical setup flow (env build bakes the mirror in; the
+/// institution declaration references the env IRI). The file is the
+/// source of truth at this stage.
+fn augment_seed_from_institution_file(file_path: &Path) -> Result<Vec<Iri>, String> {
+    use eigenius_kernel::ontology::eigon_json;
+
+    let extension = file_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if !matches!(extension, "json" | "eigon-json") {
+        return Err(format!(
+            "expected an Eigon-JSON file (.json or .eigon-json); got `.{extension}`"
+        ));
+    }
+
+    let bytes =
+        std::fs::read_to_string(file_path).map_err(|e| format!("failed to read file: {e}"))?;
+    let document =
+        eigon_json::parse_document(&bytes).map_err(|e| format!("failed to parse: {e}"))?;
+
+    let signature_class_iri = "urn:eigenius:runtime:RuntimeMethodSignature";
+    let is_a_iri = Iri::parse("urn:eigenius:core:is_a").expect("well-known IRI");
+    let input_types_iri = Iri::parse("urn:eigenius:runtime:input_types").expect("well-known IRI");
+    let output_type_iri = Iri::parse("urn:eigenius:runtime:output_type").expect("well-known IRI");
+
+    let mut classes: Vec<Iri> = Vec::new();
+    for resource in &document {
+        // `is_a` is an array of class IRIs. Match against the
+        // RuntimeMethodSignature class.
+        let is_a_match = match resource.get(&is_a_iri) {
+            Some(Value::Array(items)) => items.iter().any(|v| match v {
+                Value::ResourceRef(i) => i.as_str() == signature_class_iri,
+                Value::String(s) => s == signature_class_iri,
+                _ => false,
+            }),
+            _ => false,
+        };
+        if !is_a_match {
+            continue;
+        }
+        if let Some(value) = resource.get(&input_types_iri) {
+            for c in iri_array_from_value(value) {
+                if !classes.contains(&c) {
+                    classes.push(c);
+                }
+            }
+        }
+        if let Some(value) = resource.get(&output_type_iri) {
+            if let Some(c) = single_iri_from_value(value) {
+                if !classes.contains(&c) {
+                    classes.push(c);
+                }
+            }
+        }
+    }
+    Ok(classes)
+}
+
+/// Extract every IRI-shaped element from a `core:resource_array`
+/// property value. Tolerates the post-`canonicalise_resource_refs`
+/// `ResourceRef` shape and the pre-canonical `String` shape.
+fn iri_array_from_value(value: &eigenius_kernel::ontology::resource::Value) -> Vec<Iri> {
+    use eigenius_kernel::ontology::resource::Value;
+    match value {
+        Value::Array(items) => items.iter().filter_map(single_iri_from_value).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Extract an IRI from a `core:resource` property value (single).
+fn single_iri_from_value(value: &eigenius_kernel::ontology::resource::Value) -> Option<Iri> {
+    use eigenius_kernel::ontology::resource::Value;
+    match value {
+        Value::ResourceRef(i) => Some(i.clone()),
+        Value::String(s) => Iri::parse(s).ok(),
+        _ => None,
     }
 }
 
