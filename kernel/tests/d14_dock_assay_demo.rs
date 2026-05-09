@@ -499,6 +499,41 @@ fn comorphism_translates_dock_to_assay() {
         "expected output @id under comorphism-output: namespace, got {output_iri}"
     );
 
+    // The eval_traced wrapper produces a `Trace::Comorphism` node
+    // for `Exp::InstitutionInvoke`. Without it, comorphism-only
+    // programs would have `root_trace = None` and the run-boundary's
+    // ProgramTrace commit would fail validation on missing
+    // `trace_tree`. The trace records the dispatched comorphism IRI
+    // and the produced resource's chain IRI + class — the structural
+    // audit anchor for "this program ran this comorphism".
+    let root_trace = result
+        .root_trace
+        .as_ref()
+        .expect("comorphism dispatch produces a non-empty root trace");
+    match root_trace {
+        eigenius_kernel::program::trace::Trace::Comorphism {
+            comorphism_iri,
+            target_iri: trace_target_iri,
+            target_class,
+            ..
+        } => {
+            assert_eq!(
+                comorphism_iri, "urn:eigenius:demo:d14:dock_to_assay",
+                "trace records the dispatched comorphism IRI"
+            );
+            assert_eq!(
+                trace_target_iri,
+                output_iri.as_str(),
+                "trace's target_iri matches the output Resource @id"
+            );
+            assert_eq!(
+                target_class, ASSAY_PREDICTION_CLASS,
+                "trace records the produced resource's class"
+            );
+        }
+        other => panic!("expected Trace::Comorphism root, got {other:?}"),
+    }
+
     // D14 §9.3 step 4: the reified target-class resource must enter
     // the chain. The reify boundary stamps a deterministic
     // `urn:eigenius:comorphism-output:<tail>:<hex>` IRI and pushes

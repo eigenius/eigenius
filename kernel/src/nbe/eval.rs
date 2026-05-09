@@ -972,6 +972,65 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
             }
         }
 
+        // --- InstitutionInvoke: comorphism dispatch (D14 §9.3) ---
+        //
+        // The four-step pipeline (extract → m → reify) lives in
+        // `try_d14_institution_invoke`; here we wrap the source
+        // expression in `eval_traced` to nest its trace, drive the
+        // pipeline through `eval_ctx`, and synthesise a
+        // `Trace::Comorphism` node from the produced
+        // `Val::ResourceVal`'s `@id` and class. Pure-mode passthrough
+        // (no D14 backing attached) and downstream errors propagate
+        // unchanged.
+        Exp::InstitutionInvoke {
+            comorphism_iri,
+            source,
+            target_iri,
+        } => {
+            let (source_val, source_trace) = eval_traced(source, rho, ctx)?;
+            if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
+                return Ok((
+                    Val::Nt(Neut::Gen(
+                        usize::MAX,
+                        format!("__institution_invoke_no_registry:{comorphism_iri}"),
+                    )),
+                    None,
+                ));
+            }
+            let translated = match try_d14_institution_invoke(
+                comorphism_iri,
+                &source_val,
+                target_iri.as_ref(),
+                ctx,
+            )? {
+                Some(v) => v,
+                None => {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                            "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
+                        )));
+                }
+            };
+            let (target_iri_str, target_class_str) = match &translated {
+                Val::ResourceVal(r) => {
+                    let id = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
+                    let class = r
+                        .is_a()
+                        .first()
+                        .map(|i| i.as_str().to_string())
+                        .unwrap_or_default();
+                    (id, class)
+                }
+                _ => (String::new(), String::new()),
+            };
+            let trace = Trace::Comorphism {
+                comorphism_iri: comorphism_iri.as_str().to_string(),
+                source_trace: source_trace.map(Box::new),
+                target_iri: target_iri_str,
+                target_class: target_class_str,
+            };
+            Ok((translated, Some(trace)))
+        }
+
         // --- All other forms: structural, no trace ---
         _ => Ok((eval_ctx(exp, rho, ctx)?, None)),
     }

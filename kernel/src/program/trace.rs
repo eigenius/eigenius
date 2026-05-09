@@ -39,6 +39,24 @@ pub enum Trace {
     Component(ComponentTrace),
     /// Trace of a pure (non-IO) component invocation.
     Pure { component: String, output: Resource },
+    /// Trace of a comorphism dispatch (D14 §9.3 four-step pipeline).
+    ///
+    /// Records the structural fact that the program ran a comorphism:
+    /// which one (`comorphism_iri`), the trace of the source
+    /// expression evaluation (`source_trace`), and the chain IRI the
+    /// kernel committed the produced target-class resource at
+    /// (`target_iri`, `target_class` — D14 §9.3 step 4 chain
+    /// reinsertion). Substrate-side per-step provenance
+    /// (extract/reify timestamps, image_digest, dispatched_to) lives
+    /// in the chain-resident `RuntimeInvocation` (D31 §6.2),
+    /// referenced from the audit chain via the produced resource's
+    /// `derivation` link rather than carried inline here.
+    Comorphism {
+        comorphism_iri: String,
+        source_trace: Option<Box<Trace>>,
+        target_iri: String,
+        target_class: String,
+    },
     /// Trace of a Map over a collection.
     Map { element_traces: Vec<Option<Trace>> },
     /// Trace of a Reduce (fold).
@@ -121,6 +139,12 @@ impl ProgramMetrics {
             }
             Trace::Pure { .. } => {
                 self.executed_steps += 1;
+            }
+            Trace::Comorphism { source_trace, .. } => {
+                self.executed_steps += 1;
+                if let Some(t) = source_trace {
+                    self.accumulate(t);
+                }
             }
             Trace::Let {
                 value_trace,
@@ -298,6 +322,34 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                 Iri::parse("urn:eigenius:reflection:output").unwrap(),
                 Value::Embedded(Box::new(output.clone())),
             );
+            r
+        }
+        Trace::Comorphism {
+            comorphism_iri,
+            source_trace,
+            target_iri,
+            target_class,
+        } => {
+            let mut r = Resource::new_embedded();
+            set_is_a(&mut r, "urn:eigenius:reflection:ComorphismTrace");
+            r.set(
+                Iri::parse("urn:eigenius:reflection:comorphism").unwrap(),
+                Value::String(comorphism_iri.clone()),
+            );
+            r.set(
+                Iri::parse("urn:eigenius:reflection:target_iri").unwrap(),
+                Value::String(target_iri.clone()),
+            );
+            r.set(
+                Iri::parse("urn:eigenius:reflection:target_class").unwrap(),
+                Value::String(target_class.clone()),
+            );
+            if let Some(st) = source_trace {
+                r.set(
+                    Iri::parse("urn:eigenius:reflection:source_trace").unwrap(),
+                    Value::Embedded(Box::new(trace_to_resource(st))),
+                );
+            }
             r
         }
         Trace::Map { element_traces } => {
