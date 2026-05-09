@@ -101,7 +101,7 @@
     {
       "id": "10000001-0001-4000-8000-000000000018",
       "type": "eigenql",
-      "source": "// Inspect the FIBER-INTO result: it should resolve as a chain-\n// resident OptimisationProblem at the user-named IRI, with the\n// same JuMP-side framing the comorphism produced above.\n\nMATCH \"urn:eigenius:notebook:kinase_demo:fiber_problem\"(?p) {\n    \"urn:eigenius:jump:sense\":           ?sense,\n    \"urn:eigenius:jump:variable_names\":  ?vars\n}\nRETURN [] {\n    iri:   ?p,\n    sense: ?sense,\n    vars:  ?vars\n}\n"
+      "source": "// Inspect the FIBER-INTO result: it should resolve as a chain-\n// resident OptimisationProblem at the user-named IRI, with the\n// same JuMP-side framing the comorphism produced above.\n//\n// `MATCH ClassIri(?var)` matches every resource whose `is_a`\n// includes the class. We then narrow with WHERE to the one IRI\n// the previous cell pinned via INTO.\n\nMATCH \"urn:eigenius:jump:OptimisationProblem\"(?p) {\n    \"urn:eigenius:jump:sense\":           ?sense,\n    \"urn:eigenius:jump:variable_names\":  ?vars\n}\nWHERE ?p = \"urn:eigenius:notebook:kinase_demo:fiber_problem\"\nRETURN [] {\n    iri:   ?p,\n    sense: ?sense,\n    vars:  ?vars\n}\n"
     },
     {
       "id": "10000001-0001-4000-8000-000000000019",

@@ -17,17 +17,24 @@
 //!
 //! An `ExternalInstitution` holds the per-institution metadata
 //! resolved from the chain at registration time (env IRI + image
-//! digest, plus a `query_handler → (method_name, signature_iri)`
-//! lookup) and dispatches `query` calls into the orchestrator's
+//! digest, plus a per-procedure `(method_name, signature_iri)`
+//! lookup populated from every `QueryClass.query_handler`,
+//! `ExportFormat.procedure`, and `ImportFormat.procedure` anchored on
+//! this institution) and dispatches all three D14 boundary calls —
+//! `extract_typed`, `reify`, and `query` — through the orchestrator's
 //! `DispatchExternal` gRPC method. The orchestrator routes the call
 //! into the substrate (Phase 19a's Docker-spawner + Julia worker for
 //! the v1 backend), returning a CBOR-encoded output Resource that
-//! flows back through the `Institution::query` boundary.
+//! flows back through the matching kernel-side boundary.
 //!
-//! Boundary methods (`extract_typed`, `reify`) currently return
-//! `NotImplemented`. They land in 19a.6 alongside `IntervalArithmetic`
-//! end-to-end, where extract/reify on an external runtime first
-//! hits the kernel.
+//! The wire protocol does not distinguish among the three boundary
+//! kinds — they all serialise the input Resource as CBOR, dispatch a
+//! `(method_name, signature_iri)` pair, and decode a Resource on the
+//! way back. Differentiation lives at the kernel boundary: `query`
+//! returns a [`QueryOutcome`] with the substrate-captured partial
+//! `RuntimeInvocation`; `extract_typed` wraps the response Resource
+//! as `Val::ResourceVal`; `reify` requires `ResourceVal` input and
+//! returns the response Resource verbatim.
 
 use crate::context::ExecutionContext;
 use crate::institution::error::InstitutionError;
@@ -102,28 +109,46 @@ impl Institution for ExternalInstitution {
     fn extract_typed(
         &self,
         procedure_iri: &Iri,
-        _resource: &Resource,
+        resource: &Resource,
         _ctx: &ExecutionContext,
     ) -> Result<Val, InstitutionError> {
-        // 19a.6 wires Comorphism dispatch into external runtimes; until
-        // then the kernel orchestrates extract/reify directly only for
-        // WASM and in-process institutions.
-        Err(InstitutionError::NotImplemented(format!(
-            "ExternalInstitution `{}` does not yet implement `extract_typed` for `{procedure_iri}`",
-            self.institution_iri
-        )))
+        // The source-side D14 §9.3 step 2: an ExportFormat-anchored
+        // procedure on this institution's runtime extracts a typed
+        // payload from the chain-resident source resource. Wire-level
+        // identical to `query` — both serialize the input Resource as
+        // CBOR, route through `DispatchExternal`, and decode a
+        // Resource on the way back. Wrapped here as `Val::ResourceVal`
+        // because the kernel's typed middle (the comorphism's
+        // transformation Component) operates on `Val`s.
+        let resp = self.dispatch_substrate(procedure_iri, resource)?;
+        Ok(Val::ResourceVal(Box::new(resp)))
     }
 
     fn reify(
         &self,
         procedure_iri: &Iri,
-        _value: &Val,
+        value: &Val,
         _ctx: &ExecutionContext,
     ) -> Result<Resource, InstitutionError> {
-        Err(InstitutionError::NotImplemented(format!(
-            "ExternalInstitution `{}` does not yet implement `reify` for `{procedure_iri}`",
-            self.institution_iri
-        )))
+        // The target-side D14 §9.3 step 4: an ImportFormat-anchored
+        // procedure on this institution's runtime constructs a
+        // chain-typed resource from the typed payload. The substrate
+        // wire protocol is Resource-shaped, so the only payloads we
+        // can ship across are `Val::ResourceVal`. Anything else
+        // surfaces as a typed kernel-side error so the comorphism
+        // implementation bug is unmistakable.
+        let input = match value {
+            Val::ResourceVal(r) => r.as_ref().clone(),
+            other => {
+                return Err(InstitutionError::ComputationFailed(format!(
+                    "ExternalInstitution `{}`: reify via `{procedure_iri}` requires a \
+                     ResourceVal payload — the substrate dispatch wire only carries Eigon-CBOR \
+                     resources. Got {other:?}",
+                    self.institution_iri
+                )));
+            }
+        };
+        self.dispatch_substrate(procedure_iri, &input)
     }
 
     fn query(
@@ -132,9 +157,49 @@ impl Institution for ExternalInstitution {
         input: &Resource,
         _ctx: &ExecutionContext,
     ) -> Result<QueryOutcome, InstitutionError> {
+        let (output, partial_invocation) =
+            self.dispatch_substrate_with_invocation(procedure_iri, input)?;
+        Ok(QueryOutcome {
+            output,
+            partial_invocation,
+        })
+    }
+}
+
+impl ExternalInstitution {
+    /// Boundary-call dispatch shared by `query`, `extract_typed`, and
+    /// `reify`. Marshals the input as Eigon-CBOR, routes through
+    /// `DispatchExternal`, and decodes the response Resource. The
+    /// substrate wire protocol does not distinguish between the three
+    /// D14 boundary kinds — it's the caller's job to wrap the
+    /// returned Resource in the appropriate kernel-side type.
+    fn dispatch_substrate(
+        &self,
+        procedure_iri: &Iri,
+        input: &Resource,
+    ) -> Result<Resource, InstitutionError> {
+        self.dispatch_substrate_with_invocation(procedure_iri, input)
+            .map(|(output, _)| output)
+    }
+
+    /// Same as [`Self::dispatch_substrate`] but also returns the
+    /// substrate-captured partial RuntimeInvocation (D26 §5.5 / D31
+    /// §6.2). Only `query` (gated AutoOnLoad / OnDemand FIBER) needs
+    /// the partial invocation today; extract_typed and reify discard
+    /// it because the comorphism's audit trail rides on the
+    /// enclosing program's trace, not on a per-step RuntimeInvocation.
+    fn dispatch_substrate_with_invocation(
+        &self,
+        procedure_iri: &Iri,
+        input: &Resource,
+    ) -> Result<(Resource, Option<Resource>), InstitutionError> {
         let handler = self.handlers.get(procedure_iri).ok_or_else(|| {
             InstitutionError::UnknownType(format!(
-                "external institution `{}` has no registered handler for procedure `{procedure_iri}`",
+                "external institution `{}` has no registered handler for procedure \
+                 `{procedure_iri}` — every D14 declaration anchored on this institution \
+                 (QueryClass.query_handler / ExportFormat.procedure / ImportFormat.procedure) \
+                 must reference a chain-resident RuntimeMethodSignature carrying a \
+                 `runtime:method_name`",
                 self.institution_iri
             ))
         })?;
@@ -201,9 +266,6 @@ impl Institution for ExternalInstitution {
             }
         };
 
-        Ok(QueryOutcome {
-            output,
-            partial_invocation,
-        })
+        Ok((output, partial_invocation))
     }
 }

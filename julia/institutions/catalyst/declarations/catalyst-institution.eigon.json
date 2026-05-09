@@ -63,10 +63,10 @@
     "@id": "urn:eigenius:catalyst:formats:ef_cat_to_ode_input",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
     "urn:eigenius:core:short_name": "ef_cat_to_ode_input",
-    "urn:eigenius:core:description": "Typed outbound view of `CatalystToOdeInput`: extracts a chain-typed `OdeProblem` with FormulaTerm RHS via `compile_to_ode`. Source side of the `Catalyst → DiffEq` Comorphism (D27 §4.4.4 / D32 §6.2 generalised). The payload type is `OdeProblem` because both ends of the comorphism speak the same shape — the typed middle is the identity Lambda.",
+    "urn:eigenius:core:description": "Typed outbound view of `CatalystToOdeInput`: extracts a chain-typed `OdeProblem` with FormulaTerm RHS via `compile_to_ode`. Source side of the `Catalyst → DiffEq` Comorphism (D27 §4.4.4 / D32 §6.2 generalised). The payload type is `OdeProblem` because both ends of the comorphism speak the same shape — the typed middle is the identity Lambda. Anchored on the `compile_to_ode` Julia handler.",
     "urn:eigenius:institution:from_class": "urn:eigenius:catalyst:CatalystToOdeInput",
     "urn:eigenius:institution:payload_type": "urn:eigenius:diffeq:OdeProblem",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:catalyst",
-    "urn:eigenius:institution:procedure": "urn:eigenius:catalyst:procedures:compile_to_ode"
+    "urn:eigenius:institution:procedure": "urn:eigenius:catalyst:signatures:compile_to_ode"
   }
 ]

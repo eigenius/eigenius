@@ -59,13 +59,24 @@
   },
 
   {
+    "@id": "urn:eigenius:jump_highs:signatures:reify_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "reify_problem",
+    "urn:eigenius:core:description": "Julia entry point for the target-side reify of the `Symbolics → JuMP` Comorphism (D14 §9.3 step 4). The comorphism's typed middle is the identity Lambda on `OptimisationProblem` (D32 §6.2 generalised) — both ends speak the same chain shape, so the reify is identity at the boundary. The Julia handler returns its `OptimisationProblem` argument unchanged; the function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism reify calls through the substrate uniformly with `query` and `extract_typed`, rather than special-casing `no-op` procedures kernel-side.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "reify_problem",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:jump:OptimisationProblem"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:jump:OptimisationProblem"
+  },
+
+  {
     "@id": "urn:eigenius:jump_highs:formats:if_jump_optimisation_problem",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
     "urn:eigenius:core:short_name": "if_jump_optimisation_problem",
-    "urn:eigenius:core:description": "Typed inbound constructor for `OptimisationProblem`: reifies a FormulaTerm-typed OptimisationProblem payload as itself (identity reify — both source and target speak the same shape). Target side of the `Symbolics → JuMP` comorphism: any institution producing a chain-typed OptimisationProblem (via the FormulaTerm-everywhere story) imports through this format. The procedure IRI exists for the M5 four-step pipeline (when it lands); the payload-shape identity makes the actual reify a no-op.",
+    "urn:eigenius:core:description": "Typed inbound constructor for `OptimisationProblem`: reifies a FormulaTerm-typed OptimisationProblem payload as itself (identity reify — both source and target speak the same shape). Target side of the `Symbolics → JuMP` comorphism: any institution producing a chain-typed OptimisationProblem (via the FormulaTerm-everywhere story) imports through this format. Anchored on the `reify_problem` Julia handler — the kernel's `ExternalInstitution::reify` dispatches through the substrate the same way `query` does (D14 §9.3 step 4).",
     "urn:eigenius:institution:to_class": "urn:eigenius:jump:OptimisationProblem",
     "urn:eigenius:institution:payload_type": "urn:eigenius:jump:OptimisationProblem",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:jump_highs",
-    "urn:eigenius:institution:procedure": "urn:eigenius:jump_highs:procedures:reify_problem"
+    "urn:eigenius:institution:procedure": "urn:eigenius:jump_highs:signatures:reify_problem"
   }
 ]

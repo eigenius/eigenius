@@ -6,7 +6,6 @@
     "urn:eigenius:core:description": "A first-order ODE initial-value problem `du/dt = f(u, p, t), u(t_start) = u_0` lifted onto the chain. Carries the RHS as a list of `formulas:FormulaTerm`-typed components — the Nth `RhsComponent` is the FormulaTerm for `du[N]/dt` — plus initial conditions, time span, parameter values, and the named species/parameter ordering the FormulaTerms reference. The institution rebuilds an `OrdinaryDiffEq.ODEProblem` at dispatch time by walking each FormulaTerm under a numerical interpreter driven by the `(u, p, t)` env. Not a claim — no AutoOnLoad gate fires on commit; only `OdeSolution` claims about a problem trigger validation. See D27 §4.5.1 + D32 §6.2 for the FormulaTerm-everywhere comorphism story this lift unlocks.",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
-      "urn:eigenius:core:short_name",
       "urn:eigenius:diffeq:state_names",
       "urn:eigenius:diffeq:parameter_names",
       "urn:eigenius:diffeq:rhs",
@@ -14,6 +13,9 @@
       "urn:eigenius:diffeq:parameters",
       "urn:eigenius:diffeq:time_span_start",
       "urn:eigenius:diffeq:time_span_end"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:short_name"
     ]
   },
   {

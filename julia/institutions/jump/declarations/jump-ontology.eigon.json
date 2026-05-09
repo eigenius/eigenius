@@ -6,12 +6,12 @@
     "urn:eigenius:core:description": "A mathematical-programming problem `min/max f(x) s.t. g_i(x) ⋄ b_i, l ≤ x ≤ u` lifted onto the chain. The objective and each constraint LHS are `formulas:FormulaTerm`-typed expressions over the variable names; the relation discriminator on each constraint (`LE | GE | EQ`) is a chain-typed inductive (`ConstraintRelation`); per-variable bounds are an optional list of `VariableBound` resources. The institution rebuilds a `JuMP.Model` at dispatch time by walking each FormulaTerm under a JuMP-expression interpreter (`+` / `*` / `^` over `JuMP.VariableRef` produces `AffExpr` / `QuadExpr`; integer-valued `LitFloat` exponents on `pow` unroll to repeated multiplication so HiGHS sees `QuadExpr` rather than `NonlinearExpr`). Not a claim — no AutoOnLoad gate fires on commit; only `OptimisesTo` claims about a problem trigger validation. See D27 §4.2.",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
-      "urn:eigenius:core:short_name",
       "urn:eigenius:jump:variable_names",
       "urn:eigenius:jump:objective",
       "urn:eigenius:jump:sense"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:short_name",
       "urn:eigenius:jump:variable_bounds",
       "urn:eigenius:jump:constraints"
     ]

@@ -73,7 +73,7 @@ using OrdinaryDiffEq
 using SciMLBase: successful_retcode, ReturnCode
 using EigeniusMirror
 
-export validate_solution
+export validate_solution, reify_problem
 
 const VERDICT_CLASS_IRI = "urn:eigenius:institution:Verdict"
 const IS_A_PROP = "urn:eigenius:core:is_a"
@@ -293,6 +293,31 @@ function _within_tolerance(
         abs(c - a) <= bound || return false
     end
     return true
+end
+
+# ─── reify_problem (Comorphism target-side reify) ───────────────────────
+
+"""
+    reify_problem(problem::OdeProblem) -> OdeProblem
+
+Target-side reify for the `Catalyst -> DiffEq` Comorphism (D14 §9.3
+step 4). The comorphism's typed middle is the identity Lambda on
+`OdeProblem` (D32 §6.2 generalised) — Catalyst's `compile_to_ode`
+produces a chain-typed `OdeProblem` with FormulaTerm RHS, and the
+DiffEq side speaks the same shape, so the reify is identity at the
+boundary. The Julia function exists so the kernel's
+`Exp::InstitutionInvoke` dispatch can route comorphism reify calls
+through the substrate uniformly with `query` and `extract_typed`,
+rather than special-casing no-op procedures kernel-side.
+
+Sibling institutions targeting DiffEq for non-ODE problems (DDE, SDE,
+DAE) can introduce their own ImportFormats with non-identity
+reifies; this one stays identity because `OdeProblem` is the
+shared chain shape between Catalyst's compile output and DiffEq's
+solver entry.
+"""
+function reify_problem(problem::EigeniusMirror.OdeProblem)
+    return problem
 end
 
 end # module

@@ -90,7 +90,7 @@ using MathOptInterface
 const MOI = MathOptInterface
 using EigeniusMirror
 
-export validate_optimum, solve_problem
+export validate_optimum, solve_problem, reify_problem
 
 const VERDICT_CLASS_IRI = "urn:eigenius:institution:Verdict"
 const IS_A_PROP = "urn:eigenius:core:is_a"
@@ -408,6 +408,30 @@ function validate_optimum(claim::EigeniusMirror.OptimisesTo)
     # agrees with the claim that the problem has no feasible optimum;
     # there's no numeric optimum to compare.
     return _verdict("Holds")
+end
+
+# ─── reify_problem (Comorphism target-side reify) ───────────────────────
+
+"""
+    reify_problem(problem::OptimisationProblem) -> OptimisationProblem
+
+Target-side reify for the `Symbolics -> JuMP` Comorphism (D14 §9.3
+step 4). The comorphism's typed middle is the identity Lambda on
+`OptimisationProblem` (D32 §6.2 generalised) — both ends of the
+comorphism speak the same chain shape, with FormulaTerm carried
+verbatim. The reify is therefore identity at the institution boundary;
+the Julia function exists so the kernel's `Exp::InstitutionInvoke`
+dispatch can route comorphism reify calls through the substrate
+uniformly with `query` and `extract_typed`, rather than special-casing
+no-op procedures kernel-side.
+
+Sibling institutions targeting JuMP (e.g. an Ipopt-backed institution
+for nonlinear programming) reuse the same `OptimisationProblem` shape
+and the same identity reify; only the dispatch package and the
+accepted constraint/objective complexity differ.
+"""
+function reify_problem(problem::EigeniusMirror.OptimisationProblem)
+    return problem
 end
 
 end # module

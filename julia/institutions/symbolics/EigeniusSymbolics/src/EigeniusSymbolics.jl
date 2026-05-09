@@ -300,6 +300,30 @@ function num_to_formula(v)
     error("EigeniusSymbolics: cannot encode Symbolics term of type $(typeof(v)) as FormulaTerm")
 end
 
+# ─── Comorphism source-side: extract_term (Symbolics → Intervals) ────────
+
+export extract_term
+
+"""
+    extract_term(expr::SymbolicExpression) -> FormulaTerm
+
+Source-side `extract_typed` for the `Symbolics -> IntervalArithmetic`
+Comorphism (D14 §9.3 step 2). Pulls the `term` field off a
+`SymbolicExpression`, surfacing the chain-typed FormulaTerm as the
+typed payload that flows through the comorphism's middle and into
+the IntervalArithmetic-side reify.
+
+Identity-on-FormulaTerm — both ends of this comorphism speak the same
+flat formula language (D32 §6 generalised), so the extraction is just
+the field accessor. The Julia function exists so the kernel's
+`Exp::InstitutionInvoke` dispatch can route comorphism extract calls
+through the substrate uniformly with `query` and `reify`, rather than
+special-casing field-projection procedures kernel-side.
+"""
+function extract_term(expr::EigeniusMirror.SymbolicExpression)
+    return expr.term
+end
+
 # ─── OnDemand: simplify_expression (qc_symb_simplify) ───────────────────
 
 @static if isdefined(EigeniusMirror, :SimplifyRequest)

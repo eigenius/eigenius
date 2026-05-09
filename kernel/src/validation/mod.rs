@@ -2030,11 +2030,18 @@ mod tests {
     }
 
     #[test]
-    fn derived_resource_without_derivation_fails() {
+    fn derived_resource_without_derivation_passes_with_recommendation() {
+        // Per the reflection ontology, `derivation` is *recommended*
+        // (not required) on `DerivedResource`. A resource carrying the
+        // epistemic stamp without a chain-resident trace IRI still
+        // validates — substrate-produced resources from FIBER ... INTO
+        // commits and post-translation comorphism reify outputs are
+        // derived by construction but may not have a kernel-generated
+        // ProgramTrace yet (D14 §9.3 chain reinsertion). When the
+        // kernel does generate a trace (RunProgram, AutoOnLoad fires),
+        // it sets `derivation` so the audit trail is complete.
         let base = build_full_bootstrap_layer();
         let mut builder = LayerBuilder::new("test", Some(base));
-
-        // A resource claiming to be DerivedResource but missing 'derivation'
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:bad_derived",
@@ -2059,8 +2066,8 @@ mod tests {
             })
             .collect();
         assert!(
-            !derived_errors.is_empty(),
-            "DerivedResource without 'derivation' property should fail"
+            derived_errors.is_empty(),
+            "DerivedResource without 'derivation' should validate (derivation is recommended, not required), got: {derived_errors:?}"
         );
     }
 

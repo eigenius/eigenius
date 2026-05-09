@@ -1322,11 +1322,29 @@ fn try_d14_institution_invoke(
         )
     });
     let exec_ctx = crate::context::ExecutionContext::new(
-        head,
+        Arc::clone(&head),
         "__invoke__",
         crate::context::ExecutionMode::ReadOnly,
         storage,
     );
+
+    // The chain stores resource-typed properties as IRI references
+    // (post `canonicalise_resource_refs`). Substrate-runtime decoders
+    // expect each nested chain resource embedded — a bare IRI string
+    // hits no decoder and surfaces as `MethodError(decode_X, ("urn:...",))`
+    // at the boundary. Walk the source resource and dereference every
+    // resource-typed IRI to its embedded form before handing off.
+    // Same fix the FIBER path applies (`embed_typed_resource_param`)
+    // and the AutoOnLoad path applies (D14 §9.1 dispatch).
+    let source_resource =
+        crate::institution::marshal::embed_typed_resource_refs_recursively(source_resource, &head)
+            .map_err(|e| {
+                EvalError::InvalidCaseTarget(format!(
+                    "comorphism `{comorphism_iri}`: source-resource embedding failed before \
+                     extract_typed via `{}`: {e}",
+                    export.procedure
+                ))
+            })?;
 
     // Step 2: extract typed payload from source-side resource.
     let typed_source = source_inst

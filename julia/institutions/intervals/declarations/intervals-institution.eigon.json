@@ -47,14 +47,25 @@
   },
 
   {
+    "@id": "urn:eigenius:intervals:signatures:reify_function",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "reify_function",
+    "urn:eigenius:core:description": "Julia entry point for the target-side reify of the `Symbolics → IntervalArithmetic` Comorphism (D14 §9.3 step 4). Wraps a chain-typed FormulaTerm payload in a fresh `IntervalFunction(term)` resource — the typed inbound constructor for the IntervalArithmetic side of the bridge. Symmetric to the source side's `extract_term`: that pulls the FormulaTerm out of a SymbolicExpression; this puts it into an IntervalFunction. The function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism reify calls through the substrate uniformly with `query` and `extract_typed`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "reify_function",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:intervals:IntervalFunction"
+  },
+
+  {
     "@id": "urn:eigenius:intervals:formats:if_intv_function",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
     "urn:eigenius:core:short_name": "if_intv_function",
-    "urn:eigenius:core:description": "Typed inbound constructor for `IntervalFunction`: reifies a `formulas:FormulaTerm` payload as the `term` field of a fresh IntervalFunction (D14 §4.3). Target side of the identity Comorphism Symbolics → IntervalArithmetic — every other institution producing FormulaTerm payloads reuses this same import.",
+    "urn:eigenius:core:description": "Typed inbound constructor for `IntervalFunction`: reifies a `formulas:FormulaTerm` payload as the `term` field of a fresh IntervalFunction (D14 §4.3). Target side of the identity Comorphism Symbolics → IntervalArithmetic — every other institution producing FormulaTerm payloads reuses this same import. Anchored on the `reify_function` Julia handler.",
     "urn:eigenius:institution:to_class": "urn:eigenius:intervals:IntervalFunction",
     "urn:eigenius:institution:payload_type": "urn:eigenius:formulas:FormulaTerm",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals",
-    "urn:eigenius:institution:procedure": "urn:eigenius:intervals:procedures:reify_function"
+    "urn:eigenius:institution:procedure": "urn:eigenius:intervals:signatures:reify_function"
   },
 
   {

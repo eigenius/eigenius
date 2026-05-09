@@ -29,9 +29,9 @@
   {
     "@id": "urn:eigenius:reflection:DerivedResource",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A resource produced by a typed program from other resources. Its derivation trace records the complete computation.",
+    "urn:eigenius:core:description": "A resource produced by a typed program from other resources. The epistemic category is asserted by `is_a`; the audit trail (a `derivation` pointer to the chain-resident `ProgramTrace`) is recorded when the kernel can produce one. RunProgram outputs and AutoOnLoad-fired Verdicts always carry a trace. EigenQL `FIBER ... INTO` commits and post-translation comorphism reify outputs are still derived by construction (the substrate produced them) but may not have a kernel-generated trace yet — `derivation` is recommended rather than required so those still validate cleanly.",
     "urn:eigenius:core:short_name": "DerivedResource",
-    "urn:eigenius:core:requires": [
+    "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:derivation"
     ]
   },

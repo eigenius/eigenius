@@ -143,14 +143,25 @@
   },
 
   {
+    "@id": "urn:eigenius:symbolics:signatures:extract_term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "extract_term",
+    "urn:eigenius:core:description": "Julia entry point for the source-side extract of the `Symbolics → IntervalArithmetic` Comorphism (D14 §9.3 step 2). Pulls the `term` field off a `SymbolicExpression`, surfacing the chain-typed FormulaTerm as the typed payload that flows through the comorphism's identity middle and into the IntervalArithmetic-side reify. Identity-on-FormulaTerm — both ends speak the same flat formula language (D32 §6 generalised), so the extraction is just the field accessor; the function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism extract calls through the substrate uniformly with `query` and `reify`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "extract_term",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:formulas:FormulaTerm"
+  },
+
+  {
     "@id": "urn:eigenius:symbolics:formats:ef_symb_expr",
     "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
     "urn:eigenius:core:short_name": "ef_symb_expr",
-    "urn:eigenius:core:description": "Typed outbound view of `SymbolicExpression`: extracts the `term` field as a `formulas:FormulaTerm` payload (D14 §4.2). Source side of the identity Comorphism Symbolics → IntervalArithmetic — every other numerical institution that consumes FormulaTerm reuses this same export.",
+    "urn:eigenius:core:description": "Typed outbound view of `SymbolicExpression`: extracts the `term` field as a `formulas:FormulaTerm` payload (D14 §4.2). Source side of the identity Comorphism Symbolics → IntervalArithmetic — every other numerical institution that consumes FormulaTerm reuses this same export. Anchored on the `extract_term` Julia handler.",
     "urn:eigenius:institution:from_class": "urn:eigenius:symbolics:SymbolicExpression",
     "urn:eigenius:institution:payload_type": "urn:eigenius:formulas:FormulaTerm",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics",
-    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:procedures:extract_term"
+    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:signatures:extract_term"
   },
 
   {
@@ -198,6 +209,6 @@
     "urn:eigenius:institution:from_class": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
     "urn:eigenius:institution:payload_type": "urn:eigenius:jump:OptimisationProblem",
     "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics",
-    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:procedures:frame_as_optimisation_problem"
+    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem"
   }
 ]

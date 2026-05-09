@@ -379,38 +379,125 @@ pub fn validate_external_institution_chain(
 
         let mut handlers: BTreeMap<Iri, ExternalQueryHandler> = BTreeMap::new();
         let mut handler_errors: Vec<String> = Vec::new();
-        for qc in index.query_classes() {
-            if qc.institution_ref.as_str() != iri.as_str() {
-                continue;
+
+        // Harvest the procedure → method_name dispatch table from
+        // every D14 declaration that anchors a runtime entry on this
+        // institution: QueryClass.query_handler (FIBER / AutoOnLoad
+        // dispatch), ExportFormat.procedure (comorphism source-side
+        // extract_typed), ImportFormat.procedure (comorphism
+        // target-side reify). All three resolve through the same
+        // `RuntimeMethodSignature.method_name` property and dispatch
+        // through the same `DispatchExternal` RPC — D14 §9.3 doesn't
+        // distinguish source-side / target-side at the wire level.
+        //
+        // QueryClass entries are *required* — their AutoOnLoad /
+        // OnDemand FIBER gates are the institution's published
+        // surface, and missing dispatch metadata there is a
+        // structural failure. ExportFormat / ImportFormat entries
+        // are *recommended* (D14): the comorphism dispatch path
+        // (`Exp::InstitutionInvoke`) errors with a clear
+        // `UnknownType` at runtime when a procedure is missing here,
+        // but rejecting the whole institution at registration time
+        // would brick its working AutoOnLoad / FIBER gates over a
+        // comorphism gap that may or may not be exercised on this
+        // chain. Surface missing format procedures as warnings so
+        // operators see them on each rebuild without losing the
+        // institution.
+        let mut handler_warnings: Vec<String> = Vec::new();
+        let record_handler = |kind: &str,
+                              owner_iri: &Iri,
+                              signature_iri: &Iri,
+                              handlers: &mut BTreeMap<Iri, ExternalQueryHandler>,
+                              handler_errors: &mut Vec<String>,
+                              handler_warnings: &mut Vec<String>,
+                              tolerate_missing: bool| {
+            if handlers.contains_key(signature_iri) {
+                return;
             }
-            let signature_iri = qc.query_handler.clone();
-            let method_name = match resolve_via_layer(layer, &signature_iri) {
+            let method_name = match resolve_via_layer(layer, signature_iri) {
                 Some(sig) => match sig.get(&method_name_prop) {
                     Some(Value::String(s)) => s.clone(),
                     _ => {
-                        handler_errors.push(format!(
-                            "QueryClass `{}`: `query_handler` -> `{signature_iri}` carries no \
-                             `method_name` (RuntimeMethodSignature property)",
-                            qc.iri
-                        ));
-                        continue;
+                        let msg = format!(
+                            "{kind} `{owner_iri}`: procedure -> `{signature_iri}` carries no \
+                                 `method_name` (RuntimeMethodSignature property)"
+                        );
+                        if tolerate_missing {
+                            handler_warnings.push(msg);
+                        } else {
+                            handler_errors.push(msg);
+                        }
+                        return;
                     }
                 },
                 None => {
-                    handler_errors.push(format!(
-                        "QueryClass `{}`: `query_handler` -> `{signature_iri}` did not resolve to \
-                         a RuntimeMethodSignature in the chain",
-                        qc.iri
-                    ));
-                    continue;
+                    let msg = format!(
+                        "{kind} `{owner_iri}`: procedure -> `{signature_iri}` did not resolve \
+                             to a RuntimeMethodSignature in the chain"
+                    );
+                    if tolerate_missing {
+                        handler_warnings.push(msg);
+                    } else {
+                        handler_errors.push(msg);
+                    }
+                    return;
                 }
             };
             handlers.insert(
                 signature_iri.clone(),
                 ExternalQueryHandler {
                     method_name,
-                    signature_iri,
+                    signature_iri: signature_iri.clone(),
                 },
+            );
+        };
+
+        for qc in index.query_classes() {
+            if qc.institution_ref.as_str() != iri.as_str() {
+                continue;
+            }
+            record_handler(
+                "QueryClass",
+                &qc.iri,
+                &qc.query_handler,
+                &mut handlers,
+                &mut handler_errors,
+                &mut handler_warnings,
+                /* tolerate_missing */ false,
+            );
+        }
+        for ef in index.export_formats() {
+            if ef.institution_ref.as_str() != iri.as_str() {
+                continue;
+            }
+            record_handler(
+                "ExportFormat",
+                &ef.iri,
+                &ef.procedure,
+                &mut handlers,
+                &mut handler_errors,
+                &mut handler_warnings,
+                /* tolerate_missing */ true,
+            );
+        }
+        for f in index.import_formats() {
+            if f.institution_ref.as_str() != iri.as_str() {
+                continue;
+            }
+            record_handler(
+                "ImportFormat",
+                &f.iri,
+                &f.procedure,
+                &mut handlers,
+                &mut handler_errors,
+                &mut handler_warnings,
+                /* tolerate_missing */ true,
+            );
+        }
+        for w in &handler_warnings {
+            tracing::warn!(
+                institution_iri = %iri,
+                "comorphism dispatch metadata gap: {w} — `Exp::InstitutionInvoke` calls through this procedure will fail at runtime; the institution's AutoOnLoad / FIBER gates remain operational",
             );
         }
         if !handler_errors.is_empty() {

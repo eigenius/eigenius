@@ -599,10 +599,10 @@
   {
     "@id": "urn:eigenius:runtime:input_types",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Ordered list of Eigon class IRIs declaring the method's input types. The boundary check verifies the resolved method's argument types match these.",
+    "urn:eigenius:core:description": "Ordered list of Eigon class IRIs declaring the method's input types. The boundary check verifies the resolved method's argument types match these. Accepts both Class and InductiveType references — comorphism import-side handlers like the IntervalArithmetic `reify_function` take a `FormulaTerm` (an InductiveType) directly, paralleling `output_type`'s acceptance of inductive returns.",
     "urn:eigenius:core:short_name": "input_types",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
   },
   {

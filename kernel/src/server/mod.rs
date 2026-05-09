@@ -763,15 +763,27 @@ impl EigeniusService {
     }
 
     /// Parse resources from CBOR, JSON, or ESL based on content_type.
+    ///
+    /// For ESL inputs, the kernel's live `InstitutionIndex` is threaded
+    /// into the compiler so function-call IRIs can be classified as
+    /// Comorphism / Decidable QueryClass / OnDemand QueryClass per
+    /// D14 §9.5. Without the index, qualified-name function calls
+    /// fall through to plain `Apply(Var, ...)` and the comorphism
+    /// dispatch path is silently bypassed at runtime.
     #[allow(clippy::result_large_err)]
-    fn parse_resources(data: &[u8], content_type: &str) -> Result<Vec<Resource>, Status> {
+    async fn parse_resources(
+        &self,
+        data: &[u8],
+        content_type: &str,
+    ) -> Result<Vec<Resource>, Status> {
         if content_type.contains("cbor") {
             eigon_cbor::parse_document(data)
                 .map_err(|e| Status::invalid_argument(format!("CBOR parse error: {e}")))
         } else if content_type.contains("esl") {
             let source = std::str::from_utf8(data)
                 .map_err(|e| Status::invalid_argument(format!("invalid UTF-8: {e}")))?;
-            crate::esl::compile(source).map_err(|errors| {
+            let index = Arc::clone(&*self.institution_index.read().await);
+            crate::esl::compile_with_institutions(source, index).map_err(|errors| {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
                 Status::invalid_argument(format!("ESL compile error: {}", msgs.join("; ")))
             })
@@ -1449,7 +1461,9 @@ impl EigeniusKernel for EigeniusService {
             branch = %branch,
             "load payload"
         );
-        let resources = Self::parse_resources(&req.resources, &req.content_type)?;
+        let resources = self
+            .parse_resources(&req.resources, &req.content_type)
+            .await?;
         let count = resources.len() as u32;
 
         let ctx_arc = self.get_branch_context(&branch).await?;
@@ -1795,7 +1809,9 @@ impl EigeniusKernel for EigeniusService {
     ) -> Result<Response<ValidateProgramResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_VALIDATE_PROGRAM);
         let req = request.into_inner();
-        let resources = Self::parse_resources(&req.program, &req.content_type)?;
+        let resources = self
+            .parse_resources(&req.program, &req.content_type)
+            .await?;
         let program = resources
             .into_iter()
             .next()
@@ -1909,13 +1925,15 @@ impl EigeniusKernel for EigeniusService {
             { field::CONTENT_TYPE } = %req.content_type,
             "run_program payload"
         );
-        let program_resources = Self::parse_resources(&req.program, &req.content_type)?;
+        let program_resources = self
+            .parse_resources(&req.program, &req.content_type)
+            .await?;
         let program = program_resources
             .into_iter()
             .next()
             .ok_or_else(|| Status::invalid_argument("no program resource"))?;
 
-        let input_resources = Self::parse_resources(&req.input, &req.content_type)?;
+        let input_resources = self.parse_resources(&req.input, &req.content_type).await?;
         let input = input_resources
             .into_iter()
             .next()
@@ -1973,7 +1991,7 @@ impl EigeniusKernel for EigeniusService {
     ) -> Result<Response<ReflectResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_REFLECT);
         let req = request.into_inner();
-        let resources = Self::parse_resources(&req.trace, &req.content_type)?;
+        let resources = self.parse_resources(&req.trace, &req.content_type).await?;
 
         if resources.is_empty() {
             return Ok(Response::new(ReflectResponse {

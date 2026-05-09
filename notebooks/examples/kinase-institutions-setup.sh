@@ -241,8 +241,17 @@ setup_institution \
      }
      WHERE ?name IN ["SymbolicExpression", "SimplifiesTo", "SimplifyRequest",
                      "EquivalenceCheck", "SatisfiesEquation", "Substitutes",
-                     "SymbolicallyReducesTo", "SymbolicsToJuMPInput"]
+                     "SymbolicallyReducesTo", "SymbolicsToJuMPInput",
+                     "OptimisationProblem"]
      RETURN [] { iri: ?iri }'
+
+# `OptimisationProblem` is included in the Symbolics seed even though
+# it is a JuMP-side class because `frame_as_optimisation_problem` (the
+# operational backing of the `Symbolics → JuMP` comorphism) returns
+# one — and the closure walker only follows class property references,
+# not RuntimeMethodSignature output_types. A more general fix would
+# extend the mirror generator to walk signatures by institution; until
+# then, cross-institution return classes get listed here explicitly.
 
 # IntervalArithmetic — rigorous bounds (D27 §4.3).
 setup_institution \
@@ -271,6 +280,11 @@ setup_institution \
      RETURN [] { iri: ?iri }'
 
 # Catalyst — chemical-reaction networks (D27 §4.4).
+# Includes the cross-institution `OdeProblem` and `RhsComponent`
+# classes for the same reason Symbolics includes `OptimisationProblem`:
+# `compile_to_ode` (the operational backing of the `Catalyst → DiffEq`
+# comorphism) returns an `OdeProblem`, and that struct must be in the
+# Catalyst worker's mirror to encode on the way out.
 setup_institution \
     "Catalyst" \
     "EigeniusCatalyst" \
@@ -280,7 +294,8 @@ setup_institution \
     'MATCH "urn:eigenius:core:Class"(?iri) {
         "urn:eigenius:core:short_name": ?name
      }
-     WHERE ?name IN ["ReactionNetwork", "ConservationLaw", "CatalystToOdeInput"]
+     WHERE ?name IN ["ReactionNetwork", "ConservationLaw", "CatalystToOdeInput",
+                     "OdeProblem", "RhsComponent"]
      RETURN [] { iri: ?iri }'
 
 # ─── Step 3: Comorphisms ────────────────────────────────────────────────

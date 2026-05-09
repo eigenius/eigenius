@@ -232,6 +232,30 @@ end
 # (mirror seed = `[BoundedBy]`) doesn't, so the handler must
 # precompile cleanly without the type.
 
+@static if isdefined(EigeniusMirror, :IntervalFunction)
+
+export reify_function
+
+"""
+    reify_function(term::FormulaTerm) -> IntervalFunction
+
+Target-side reify for the `Symbolics -> IntervalArithmetic` Comorphism
+(D14 §9.3 step 4). Wraps a chain-typed FormulaTerm payload in a fresh
+`IntervalFunction(term)` resource — the typed inbound constructor for
+the IntervalArithmetic side of the bridge. Symmetric to the source
+side's `extract_term`: that pulls the FormulaTerm out of a
+SymbolicExpression; this puts it into an IntervalFunction.
+
+The Julia function exists so the kernel's `Exp::InstitutionInvoke`
+dispatch can route comorphism reify calls through the substrate
+uniformly with `query` and `extract_typed`.
+"""
+function reify_function(term::EigeniusMirror.FormulaTerm)
+    return EigeniusMirror.IntervalFunction(term)
+end
+
+end # @static if isdefined(EigeniusMirror, :IntervalFunction)
+
 @static if isdefined(EigeniusMirror, :BoundsRequest)
 
 export compute_bounds_for_request
