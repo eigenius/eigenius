@@ -8,7 +8,7 @@ The implementer view (writing a new institution as a WASM binary) lives in [plat
 
 ## 9.1. What an institution declares
 
-Five resource shapes carry the institution surface (D14 §4). All of them are ordinary typed resources: an ESL author can read and write them with `class`, `property`, and `resource` declarations, but in practice they are usually shipped alongside the institution's WASM binary as Eigon-JSON.
+Five resource shapes carry the institution surface (D14 §4). All of them are ordinary typed resources: an ESL author can read and write them with `class`, `property`, and `resource` declarations, but in practice they are usually shipped alongside the institution's WASM binary or substrate handler package as Eigon-JSON. The `Institution` resource's `runtime` property selects the host kind: `wasm` for sandboxed WASM institutions ([platform §10](../platform/10-wasm-institutions.md)), `external` for substrate-hosted institutions running in sibling containers ([platform §11](../platform/11-runtime-substrate.md), Julia in v1), or `in_process` for kernel-embedded Rust institutions. From ESL's perspective there's no difference between the three — the same compile-time classifier and runtime dispatch path applies, and the same `Institution::query` / `extract_typed` / `reify` trait surface answers calls.
 
 | Shape | Carries |
 |---|---|
@@ -90,7 +90,7 @@ OnDemand QueryClasses are not directly callable from ESL expressions. They are r
 
 This is a deliberate scope decision. Decidable handles the common cap-as-predicate case from program bodies; the FIBER form handles the multi-property-response case from EigenQL. Putting OnDemand calls back into ESL expression position would mean two return shapes (Verdict vs. arbitrary resource) and two dispatch paths in the compiler — the FIBER form covers that surface unambiguously.
 
-## 9.5. Comorphisms — declared, not invoked from ESL
+## 9.5. Invoking comorphisms from ESL programs
 
 Under D14, a `Comorphism` is a typed resource:
 
@@ -104,17 +104,40 @@ Comorphism dock_to_assay
 
 The kernel statically type-checks at commit time that the transformation Component's signature matches `(payload_type(export_format)) → (payload_type(import_format))` (D14 §4.5). A comorphism with mismatched types is rejected.
 
-ESL doesn't surface comorphisms as expressions — there is no `cap:dock_to_assay(input)` call form. Three ways to use a comorphism from program code:
+A program body invokes a comorphism as a **qualified-name function call in expression position**. The compiler classifier resolves the qualified name through the `InstitutionIndex`; if it classifies as a `Comorphism`, the call lowers to `Exp::InstitutionInvoke { comorphism_iri, source, target_iri: None }` (D14 §9.3).
 
-1. **Run the constituent Component directly.** The transformation is a regular Mini-TT Component (`cm_arrhenius` in the example). If your ESL program already has the typed payload, it can apply the Component:
+Example from the kinase-institutions notebook ([cell 13](../../../notebooks/examples/kinase-institutions.json)):
+
+```esl
+namespace symbolics   = "urn:eigenius:symbolics";
+namespace jump        = "urn:eigenius:jump";
+namespace comorphisms = "urn:eigenius:comorphisms";
+
+program nb:produce_problem
+    : symbolics:SymbolicsToJuMPInput -> jump:OptimisationProblem
+{
+    comorphisms:symbolics_to_jump(input)
+}
+```
+
+The wrapper program takes a `SymbolicsToJuMPInput` (carrying a typed objective expression as `FormulaTerm`) and produces a JuMP `OptimisationProblem`. Running the program runs the four-step D14 §9.3 pipeline:
+
+1. The kernel resolves the `Comorphism` resource and reads `export_format` / `transformation` / `import_format`.
+2. **Extract.** Calls the source institution's `Institution::extract_typed(export_format.procedure, input, ctx)` → typed payload of the export's `payload_type`.
+3. **Transform.** Applies the transformation Component to the payload via the Mini-TT evaluator → typed payload of the import's `payload_type`.
+4. **Reify.** Calls the target institution's `Institution::reify(import_format.procedure, payload, ctx)` → the target-class resource.
+
+**Chain reinsertion.** The reify output commits to the chain at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (SHA-256 over the canonical Eigon-CBOR of the produced resource, with `@id` cleared). Re-running the same input dedupes to the same IRI — the cross-fibre identity property the Grothendieck construction wants.
+
+**Audit.** The program trace gets a `Trace::Comorphism { comorphism_iri, source_trace, target_iri, target_class }` audit variant naming both endpoints. The reify output's commit goes through the same `commit_with_validation` machinery as any chain entry, so AutoOnLoad gates bound to the produced class fire on the resulting resource exactly as if it had been authored by hand.
+
+**Two alternative shapes** — useful when the program already has the payload, or when chain reinsertion isn't wanted:
+
+1. **Run the constituent Component directly.** The transformation is a regular Mini-TT Component (`cm_arrhenius` in the example). If your ESL program already has the typed payload, it can apply the Component without the extract/reify round trip:
    ```esl
    let ic50 : core:float = cm_arrhenius(delta_g);
    ```
-   The composition extract → component → reify is what the kernel does on the user's behalf inside FIBER param coercion; programs that have the payload already only need the middle step.
-
-2. **Translate inside an EigenQL query.** Use a `FIBER` clause whose param value is `comorphism(source)` (see [EigenQL §8.6](../eigenql/08-institutions.md)). The query runs the four-step pipeline and the resulting reified resource flows into the FIBER's input.
-
-3. **Wrap as a Component-implemented OnDemand QueryClass and invoke via FIBER.** A `OnDemand` QueryClass whose `implementation` is a Component IRI dispatches as `extract → component → reify` automatically (D14 §6.2). EigenQL FIBER reaches it; from ESL, embed the FIBER call into an EigenQL query.
+2. **Translate inside an EigenQL query.** Use a `FIBER` clause whose param value is `comorphism(source)` (see [EigenQL §8.6](../eigenql/08-institutions.md#86-comorphism-coercion-in-fiber-params)). The query runs the four-step pipeline and the resulting reified resource flows into the FIBER's input — without chain reinsertion unless `INTO "<iri>"` is added (see [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri)).
 
 ## 9.6. Constraints attached to properties
 
@@ -202,7 +225,7 @@ The same classification mechanism powers ESL and EigenQL. When the same IRI appe
 |---|---|---|---|
 | `Decidable` QueryClass | `Exp::NativeDecide(Constraint::Institution { … }, Unit)` | Same — projected to Boolean by postfix `HOLDS`/`FAILS`/`UNDECIDABLE` | `Institution::query(query_handler, synthetic_input, ctx)` |
 | `OnDemand` QueryClass | not exposed in ESL expression position | `FIBER` clause | `Institution::query(query_handler, input, ctx)` |
-| `Comorphism` | declared, not invoked from ESL expressions | only in FIBER param coercion | `extract_typed → transformation → reify` four-step pipeline |
+| `Comorphism` | qualified-name function call in expression position — `comorphisms:foo(input)` — lowers to `Exp::InstitutionInvoke` (D14 §9.3); reify output commits at `urn:eigenius:comorphism-output:…` | FIBER param coercion (overlay-only); or `FIBER ... INTO "<iri>"` for chain reinsertion at a caller-named IRI | `extract_typed → transformation → reify` four-step pipeline; reify output commits to the chain |
 | Class / primitive / literal | `Exp::EigonClass(iri)` etc. | resolved via layer | various |
 
 Cross-link: [EigenQL chapter 8](../eigenql/08-institutions.md) covers the same table from the query-language side.

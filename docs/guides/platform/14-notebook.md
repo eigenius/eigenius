@@ -1,4 +1,4 @@
-# 13. Notebook
+# 14. Notebook
 
 The Eigenius notebook is the most accessible way to use the platform. It is a single-page React app served by the orchestrator at `/notebooks/`; cells run ESL, EigenQL, TypeScript, program invocations, and form-based charts against the live kernel via Connect-RPC; outputs auto-render as typed inspectors, result tables, layer-stack diagrams, program-trace trees, and Fluent charts.
 
@@ -6,9 +6,9 @@ If you have the docker stack up (`docker compose up -d`), you already have the n
 
 ![The Eigenius notebook — top of the patent-analysis demo](../assets/eigenius_notebook_ux.png)
 
-This chapter is the operational reference for the notebook UX. The TypeScript SDK that powers it (and that you can use programmatically from outside the notebook) gets its own chapter — see [chapter 14](14-typescript-sdk.md).
+This chapter is the operational reference for the notebook UX. The TypeScript SDK that powers it (and that you can use programmatically from outside the notebook) gets its own chapter — see [chapter 15](15-typescript-sdk.md).
 
-## 13.1. What's in a notebook
+## 14.1. What's in a notebook
 
 A notebook is an ordered sequence of typed cells. Six cell types are supported:
 
@@ -21,11 +21,11 @@ A notebook is an ordered sequence of typed cells. Six cell types are supported:
 | `program-run` | Form-based program invocation: program IRI + one or more input IRIs. Single input renders as inspector + trace; multiple inputs render as a results table. | `eigen.runProgramByIri(programIri, inputIri)` per input |
 | `chart` | Form-based chart: pick a chart kind (`grouped-bar` / `vertical-bar` / `horizontal-bar` / `donut` / `line` / `area`), write an EigenQL query, bind axis columns by `RETURN` short-name. Output is the corresponding Fluent `@fluentui/react-charts` component. | `eigen.query(query)` then pivot rows into the kind's data shape |
 
-Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete). Notebook-level toolbar (top): editable title · cell count · `Open…` (file picker) · `Save` (browser download) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §13.5) · `Run all` (top-to-bottom, halts on first error).
+Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete). Notebook-level toolbar (top): editable title · cell count · `Open…` (file picker) · `Save` (browser download) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §14.5) · `Run all` (top-to-bottom, halts on first error).
 
 Source: [`notebooks/`](../../../notebooks/).
 
-## 13.2. Running the notebook
+## 14.2. Running the notebook
 
 ### Production (docker stack)
 
@@ -51,9 +51,13 @@ npm run dev
 
 This is the path to use when iterating on the notebook itself.
 
-## 13.3. The patent-analysis demo
+## 14.3. Bundled example notebooks
 
-On first load the notebook seeds with the patent-analysis demo at [`notebooks/examples/patent-analysis.json`](../../../notebooks/examples/patent-analysis.json). Six cells:
+Two example notebooks ship with the repository. The patent-analysis demo is what loads on first start; both are importable via the **Open…** button.
+
+### Patent-analysis demo
+
+[`notebooks/examples/patent-analysis.json`](../../../notebooks/examples/patent-analysis.json). Six cells:
 
 1. **markdown** — what the demo does
 2. **esl** — the patent ontology (`PatentClaim`, `PatentAnalysis`, `PatentBrief`) plus the `analyze_patent` program
@@ -66,7 +70,22 @@ Click **Run all**. The first four cells finish in milliseconds; the program-run 
 
 Requires `ANTHROPIC_API_KEY` in the orchestrator's environment. Without it (`EIGENIUS_MOCK_LLM=true`), the LLM components return canned responses but the rest of the flow still works end-to-end.
 
-## 13.4. The notebook file format
+### Kinase-institutions demo
+
+[`notebooks/examples/kinase-institutions.json`](../../../notebooks/examples/kinase-institutions.json). The end-to-end showcase for the runtime substrate ([chapter 11](11-runtime-substrate.md)) — five Julia institutions installed, three cross-institution comorphisms registered, two storylines (Catalyst → DiffEq forward simulation; Symbolics → JuMP parameter fit). Setup script: [`notebooks/examples/kinase-institutions-setup.sh`](../../../notebooks/examples/kinase-institutions-setup.sh) (run once, ~30–60 minutes cold for the five Julia env builds; subsequent runs are fast due to the buildah cache).
+
+Cells 13–18 exercise both surfaces of the comorphism chain-reinsertion contract (D14 §9.3):
+
+- ESL `program` invocation as a qualified-name function call (`comorphisms:symbolics_to_jump(input)`) — output commits at a deterministic content-hash IRI.
+- EigenQL `FIBER ... AS ?var INTO "<iri>"` — output commits at a caller-named IRI.
+
+See [chapter 8 §8.4](08-demos.md#84-kinase-institutions--multi-institution-julia-stack) for the storyline overview and the per-institution walkthroughs under [`platform/julia-institutions/`](julia-institutions/) for one-at-a-time slow-walks.
+
+### Markdown maths
+
+Markdown cells render `$inline$` and `$$display$$` LaTeX via [remark-math](https://github.com/remarkjs/remark-math) + [rehype-katex](https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex). The kinase notebook uses this extensively to render the Michaelis–Menten / competitive-inhibition equations alongside the FormulaTerm encodings of the same expressions, so the surface and the chain payload align visually.
+
+## 14.4. The notebook file format
 
 Notebooks are versioned JSON with a discriminated cell-type union. Schema in [`notebooks/src/persistence/notebook-format.ts`](../../../notebooks/src/persistence/notebook-format.ts):
 
@@ -92,7 +111,7 @@ Notebooks are versioned JSON with a discriminated cell-type union. Schema in [`n
 
 `Save` from the toolbar serialises the current store state to this JSON (with `meta.modified` updated to the save time) and triggers a browser download. `Open…` reads a file via `<input type="file">`, validates the shape, and replaces the store contents. Cell outputs are NOT persisted — they're re-derived by re-running the cells.
 
-## 13.5. Publish to layer
+## 14.5. Publish to layer
 
 Beyond the on-disk file, a notebook can be published as resources in the kernel's knowledge graph. Click **Publish** in the toolbar; the SDK translates the notebook into a `notebook:Notebook` resource referencing one `notebook:Cell` resource per cell, then loads them into a new layer. The accompanying ontology — [`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json) — is part of the kernel's boot chain (5th layer, after core / program / reflection / institution), so publish succeeds without first registering anything.
 
@@ -105,7 +124,7 @@ Identical cells across notebooks share a single `Cell` resource — useful for t
 
 Translator source: [`clients/eigenius-ts/src/notebook.ts`](../../../clients/eigenius-ts/src/notebook.ts).
 
-## 13.6. Auto-rendering of cell outputs
+## 14.6. Auto-rendering of cell outputs
 
 The notebook has type-driven renderers under [`notebooks/src/components/output/`](../../../notebooks/src/components/output/):
 
@@ -119,7 +138,7 @@ The ESL-cell load output also has a "View layer stack" accordion that lazy-fetch
 
 Chart cells handle one Fluent quirk worth knowing about: `LineChart` and `AreaChart` only support numeric or `Date` x-axes natively. When the EigenQL query returns categorical x values (target names, compound IDs, …), `renderChart` maps each unique label to an integer index in encounter order — so the EigenQL `ORDER BY` controls layout — and labels each tick via the chart's `xAxis.tickText` array. Per-point `xAxisCalloutData` carries the original label into hover callouts. ISO date strings (`YYYY-MM-DD`) are detected separately and converted to `Date` objects so date-axis charts render correctly without a categorical index.
 
-## 13.7. Where it lives
+## 14.7. Where it lives
 
 ```
 notebooks/
@@ -131,7 +150,7 @@ notebooks/
 │   │   ├── CellInsertGap.tsx     # Hover-revealed "+" between cells
 │   │   ├── cells/                # MarkdownCell, ProgramRunCell, ChartCell form editors
 │   │   ├── editors/              # CodeMirror wrapper + ESL/EigenQL language modes
-│   │   └── output/               # The renderers listed in §13.6
+│   │   └── output/               # The renderers listed in §14.6
 │   ├── persistence/notebook-format.ts   # NotebookJson + parseNotebook validator
 │   └── runtime/
 │       ├── EigenProvider.tsx     # React context for the SDK client
@@ -149,9 +168,9 @@ notebooks/
 └── package.json                  # @eigenius/client + Fluent UI v9 + CodeMirror
 ```
 
-The SDK consumed by the notebook is a `file:` workspace dep on [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) — see [chapter 14](14-typescript-sdk.md).
+The SDK consumed by the notebook is a `file:` workspace dep on [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) — see [chapter 15](15-typescript-sdk.md).
 
-## 13.8. CI
+## 14.8. CI
 
 Two Playwright specs cover the notebook end-to-end:
 
@@ -170,11 +189,11 @@ npm run test:e2e
 
 The test assumes the orchestrator stack is already up at `http://localhost:8080`.
 
-## 13.9. Design references
+## 14.9. Design references
 
 - [**D22** — Notebook UX and TypeScript SDK](../../design/d22-notebook-and-typescript-sdk.md) — the spec this guide describes
-- [**chapter 14** — TypeScript SDK](14-typescript-sdk.md) — the programmatic API the notebook is built on, also usable from your own code
+- [**chapter 15** — TypeScript SDK](15-typescript-sdk.md) — the programmatic API the notebook is built on, also usable from your own code
 
 ---
 
-Next: **[14. TypeScript SDK →](14-typescript-sdk.md)**
+Next: **[15. TypeScript SDK →](15-typescript-sdk.md)**

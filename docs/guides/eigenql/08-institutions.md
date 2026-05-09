@@ -21,7 +21,7 @@ EigenQL's parser, type checker, and evaluator consult two derived structures bui
 - [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) — by-IRI lookups for the five shapes above. Built by `InstitutionIndex::from_layer` on the active layer chain. EigenQL's compile-time classifier (§8.5) uses it to decide what kind of call a qualified-name IRI is.
 - [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) — `BTreeMap<Iri, Box<dyn Institution>>` keyed by the institution's IRI. Used to dispatch `extract_typed` / `reify` / `query` calls (D14 §8) when an EigenQL evaluator step needs runtime-side reasoning.
 
-The runtime is rebuilt on every commit by the kernel's [`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs) — every `Institution` resource on the chain whose `runtime` is `wasm` produces a `WasmInstitution` registered against its IRI; in-process / external runtimes are caller-registered.
+The runtime is rebuilt on every commit by the kernel's [`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs) — every `Institution` resource on the chain whose `runtime` is `wasm` produces a `WasmInstitution` registered against its IRI. **Substrate-hosted institutions** (`runtime: external`, where the worker lives in a sibling container managed by the orchestrator's substrate addon — Julia v1, Python and others tracked in [issue #41](https://github.com/eigenius/eigenius/issues/41)) are registered through a parallel mechanism that resolves `Institution.requires_environment` to a `RuntimeEnvironment` resource and dispatches via the substrate's `LanguageRuntime` trait. From EigenQL's perspective there's no difference: both kinds answer `Institution::query` against the same trait surface, with the same `extract_typed` / `reify` four-step pipeline. See [platform §10](../platform/10-wasm-institutions.md) for the WASM-hosted path and [platform §11](../platform/11-runtime-substrate.md) for the substrate path. **In-process** runtimes (`runtime: in_process`, kernel-embedded Rust) are caller-registered.
 
 ## 8.2. The classification at parse time
 
@@ -117,7 +117,9 @@ The coerced resource is set on the input as the property whose short name is `ca
 
 **v1 restriction** (D2 §3.5): the comorphism's `transformation` Component must have `capability_level` `Pure` or `Read`. A Component requiring `IO` is rejected at parse time with `comorphism_io_not_supported_in_v1`. This lets the EigenQL evaluator run the coercion inline without standing up an IO backing for the FIBER path.
 
-Comorphisms are not first-class in expression position — there is no `RETURN [...] { x: cap:translate(?d) }`. Translations always cross an institution boundary into a typed input slot.
+Comorphisms are not first-class in expression position inside an EigenQL query — there is no `RETURN [...] { x: cap:translate(?d) }`. EigenQL surfaces comorphisms only as FIBER param coercions, and (by way of `INTO`, see [§7.6](07-fiber-clauses.md#76-into--pinning-the-response-iri)) lets the caller pin the reified output at a named chain IRI. ESL programs *do* invoke comorphisms in expression position; see [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
+
+**Chain reinsertion (D14 §9.3).** Whichever surface invokes the comorphism, the reified output commits to the chain. With `FIBER ... AS ?var` (no `INTO`), the response lives in the transient overlay only — the v0 behaviour, kept for queries that don't want side effects. With `FIBER ... AS ?var INTO "<iri>"`, the response commits to the regular chain at the caller-named IRI. With ESL `comorphisms:foo(input)` from a program body, the response commits at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (kernel-minted). All three paths share the same `commit_with_validation` machinery — AutoOnLoad gates bound to the produced class fire on commit; the audit closure (Verdict + RuntimeInvocation) is the standard one.
 
 ## 8.7. A complete worked example
 
@@ -168,7 +170,7 @@ let fiber_runtime = FiberRuntime {
 let results = eigenius_kernel::query::execute_with(query_text, &layer, fiber_runtime)?;
 ```
 
-When the kernel hosts the institutions as WASM (D14 §12), the wiring is even shorter — the `InstitutionRuntime` is auto-built by `build_wasm_institution_runtime` from the `runtime: wasm` declarations on the chain (see [platform §10](../platform/10-wasm-institutions.md) and [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)).
+When the kernel hosts the institutions as WASM (D14 §13), the wiring is even shorter — the `InstitutionRuntime` is auto-built by `build_wasm_institution_runtime` from the `runtime: wasm` declarations on the chain (see [platform §10](../platform/10-wasm-institutions.md) and [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)).
 
 ## 8.8. Comparison with FIBER
 
@@ -189,7 +191,7 @@ Quick reference — the same classifier ESL uses (see [ESL chapter 9](../esl/09-
 |---|---|---|---|
 | `Decidable` QueryClass | `Exp::NativeDecide(Constraint::Institution { … }, Unit)` (Verdict-typed) | Same as ESL — and the postfix predicate projects to Boolean | `Institution::query(query_handler, synthetic_input, ctx)` |
 | `OnDemand` QueryClass | not exposed in ESL expression position | `FIBER` clause | `Institution::query(query_handler, input, ctx)` |
-| `Comorphism` | reserved for kernel AST `Exp::InstitutionInvoke` (Phase 12 internal) | only in FIBER param value coercion | `extract_typed → transformation Component → reify` four-step pipeline |
+| `Comorphism` | qualified-name function call in program body — `comorphisms:foo(input)` — lowers to `Exp::InstitutionInvoke` (D14 §9.3) | FIBER param value coercion (overlay-only); or `FIBER ... INTO "<iri>"` for chain reinsertion at a caller-named IRI | `extract_typed → transformation Component → reify` four-step pipeline; reify output commits to the chain |
 | Class / property / built-in / aggregate | various | various | no institution call |
 
 Both surface languages share `InstitutionIndex` so the same IRI dispatches identically.

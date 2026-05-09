@@ -1,12 +1,12 @@
 # Tutorial: typed formulas across institutions, end-to-end
 
-This walkthrough exercises the Symbolics institution and, through it, the chain-shared formula language [D32](../../design/d32-chain-mirrored-mini-tt-inductives.md) prescribes. By the end you will have:
+This walkthrough exercises the Symbolics institution and, through it, the chain-shared formula language [D32](../../../design/d32-chain-mirrored-mini-tt-inductives.md) prescribes. By the end you will have:
 
 - Committed a typed inductive expression tree on the chain and watched the validator type-check it against a constructor schema and a typed operator catalog.
 - Watched four kinds of chain-committable claims (`SimplifiesTo`, `Substitutes`, `SatisfiesEquation`, `SymbolicallyReducesTo`) fire AutoOnLoad gates that re-run Symbolics' simplifier and produce a `Verdict` per claim.
 - Dispatched an OnDemand QueryClass via FIBER and a Decidable QueryClass via EigenQL, both passing chain-committed `SymbolicExpression`s by IRI and seeing them land on the worker as fully-decoded mirror structs.
 
-The script form of this tutorial lives at [`demo/symbolics/run.sh`](../../../demo/symbolics/run.sh) — `./demo/symbolics/run.sh` runs the same sequence non-interactively. Read this if you want to understand *why* the chain shapes look the way they do and *what D32 buys you* once they're in place.
+The script form of this tutorial lives at [`demo/symbolics/run.sh`](../../../../demo/symbolics/run.sh) — `./demo/symbolics/run.sh` runs the same sequence non-interactively. Read this if you want to understand *why* the chain shapes look the way they do and *what D32 buys you* once they're in place.
 
 If you haven't seen [the intervals tutorial](intervals-institution-tutorial.md) yet, read that first — it covers the substrate plumbing (mirror, env build, AutoOnLoad dispatch) at a slower pace. This tutorial assumes those mechanics and focuses on what makes the Symbolics institution structurally different.
 
@@ -22,10 +22,10 @@ i.e. `x + 0`. That's a typed inductive value, validated at commit time against a
 
 The IntervalArithmetic institution has the *same* FormulaTerm machinery available — its `qc_compute_bounds` OnDemand QueryClass takes a `BoundsRequest` carrying a SymbolicExpression, and its `IntervalFunction` class wraps a FormulaTerm too (see [the intervals tutorial step 10](intervals-institution-tutorial.md#step-10--beyond-the-autoonload-gate)). The difference is one of *scope*: in intervals the FormulaTerm-consuming surface is a step beyond the basic AutoOnLoad gate over flat `BoundedBy(value, lower, upper)` triples; in Symbolics, FormulaTerm is the *whole institution* — every chain-committable claim is a statement about expression trees. That's also why Symbolics is the natural place to ground the D32 walkthrough: it's where the typed-formula machinery is load-bearing top-to-bottom rather than scoped to one OnDemand path.
 
-[D32](../../design/d32-chain-mirrored-mini-tt-inductives.md) is the design doc that makes that work. Its three load-bearing claims:
+[D32](../../../design/d32-chain-mirrored-mini-tt-inductives.md) is the design doc that makes that work. Its three load-bearing claims:
 
 1. **`FormulaTerm` is a fragment of Mini-TT `Exp`.** Constructors mirror `Exp::Var`, `Exp::App`, `Exp::Lam`, `Exp::Pi` one-for-one (D32 §4.1). The chain doesn't need a separate term language; it lifts a chosen subset of the kernel's existing `Exp` onto the chain via the `core:InductiveType` surface that the chain already had (D32 §3.1).
-2. **`FormulaTerm` is shared across every numerical institution** — it lives at `urn:eigenius:formulas:`, *not* at `urn:eigenius:symbolics:`. A `Comorphism` Symbolics → IntervalArithmetic carries the *identity* function on `FormulaTerm` as its typed middle (D32 §6.2). The cross-institution claim is operationally proven by [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../crates/eigenius-julia/tests/cross_institution_probe.rs) — and chain-formalised by the comorphism resources at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../julia/comorphisms/symbolics-to-intervals.eigon.json).
+2. **`FormulaTerm` is shared across every numerical institution** — it lives at `urn:eigenius:formulas:`, *not* at `urn:eigenius:symbolics:`. A `Comorphism` Symbolics → IntervalArithmetic carries the *identity* function on `FormulaTerm` as its typed middle (D32 §6.2). The cross-institution claim is operationally proven by [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs) — and chain-formalised by the comorphism resources at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../../julia/comorphisms/symbolics-to-intervals.eigon.json).
 3. **Operators carry on-chain Mini-TT type signatures** (D32 §5.2). `formulas:ops:add` declares `Real → Real → Real` as a chain-committed `FormulaTerm`. The validator rank-checks every `App` invocation in a `FormulaTerm` value against the spine of `Pi` binders in the operator's signature (D32 §5.4). Mismatched arity is rejected at commit, not at dispatch.
 
 Everything else in this tutorial is downstream of those three claims.
@@ -38,7 +38,7 @@ Before any of the JSON in the upcoming steps will make sense, you need the encod
 { "ctor": "<CtorName>", "args": [ <arg₀>, <arg₁>, ... ] }
 ```
 
-`<CtorName>` is one of `Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi` — the six ctors of the `formulas:FormulaTerm` `InductiveType`. `args` is an ordered list whose contents match the ctor's `arg_types` declared in [`formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json):
+`<CtorName>` is one of `Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi` — the six ctors of the `formulas:FormulaTerm` `InductiveType`. `args` is an ordered list whose contents match the ctor's `arg_types` declared in [`formulas-ontology.json`](../../../../ontologies/formulas/formulas-ontology.json):
 
 | Ctor | `args` shape |
 |---|---|
@@ -84,7 +84,7 @@ To keep the JSON readable, this document uses the shorthand
 "symbolics:term": { ...FormulaTerm for <surface notation>... }
 ```
 
-as a placeholder for the full nested expansion. **It's purely editorial — neither the chain nor the demo accepts that literal text.** [Step 7](#step-7--first-autoonload-simplifiesto-says-x0-simplifies-to-0) shows one full expansion inline so you have a concrete reference; later steps elide their `term` payloads. The exact JSON every step actually loads lives in [`demo/symbolics/run.sh`](../../../demo/symbolics/run.sh).
+as a placeholder for the full nested expansion. **It's purely editorial — neither the chain nor the demo accepts that literal text.** [Step 7](#step-7--first-autoonload-simplifiesto-says-x0-simplifies-to-0) shows one full expansion inline so you have a concrete reference; later steps elide their `term` payloads. The exact JSON every step actually loads lives in [`demo/symbolics/run.sh`](../../../../demo/symbolics/run.sh).
 
 ## Prerequisites
 
@@ -93,7 +93,7 @@ as a placeholder for the full nested expansion. **It's purely editorial — neit
 - `jq` for parsing JSON output.
 - The workspace built once.
 
-The institution sources used throughout live at [`julia/institutions/symbolics/`](../../../julia/institutions/symbolics/):
+The institution sources used throughout live at [`julia/institutions/symbolics/`](../../../../julia/institutions/symbolics/):
 
 ```
 julia/institutions/symbolics/
@@ -112,7 +112,7 @@ julia/institutions/symbolics/
                                           # QueryClasses
 ```
 
-The shared formula language lives separately in [`ontologies/formulas/formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json) and is part of the kernel bootstrap — it's already on every chain by the time you start.
+The shared formula language lives separately in [`ontologies/formulas/formulas-ontology.json`](../../../../ontologies/formulas/formulas-ontology.json) and is part of the kernel bootstrap — it's already on every chain by the time you start.
 
 ## Step 1 — Load the Symbolics ontology
 
@@ -151,7 +151,7 @@ The validator checks each at commit. Worth pausing on `SymbolicExpression.term`:
 
 The `data_type: core:inductive` plus `class_types: [formulas:FormulaTerm]` is what triggers the validator's inductive-value rule (D32 §3.5): when a `SymbolicExpression` lands carrying a `term` field, the validator walks the tagged-dict tree, looks up `formulas:FormulaTerm` on the chain, finds the six ctors (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`), and recursively type-checks every node against the matching ctor's `arg_types`. Bad ctor names, bad argument types, and missing required arguments all reject at commit.
 
-The `formulas:FormulaTerm` declaration itself is already on the chain — the kernel's bootstrap embeds [`ontologies/formulas/formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json) as a layer below `notebook`, so every chain has it. You're committing the *Symbolics-specific* surface on top of it.
+The `formulas:FormulaTerm` declaration itself is already on the chain — the kernel's bootstrap embeds [`ontologies/formulas/formulas-ontology.json`](../../../../ontologies/formulas/formulas-ontology.json) as a layer below `notebook`, so every chain has it. You're committing the *Symbolics-specific* surface on top of it.
 
 ## Steps 2–6 — Mirror, env image, env Resource, institution
 
@@ -194,7 +194,7 @@ That last pair — `decode_FormulaTerm` / `encode_FormulaTerm` — is what makes
 
 ### The handler does both directions
 
-The intervals handler decodes `BoundedBy → Interval`, returns a Verdict (a Dict). The Symbolics handler also goes the other way for OnDemand: it decodes `FormulaTerm → Symbolics.Num`, runs `Symbolics.simplify`, then encodes the result *back* into a `FormulaTerm`. The `num_to_formula` direction lives at [`EigeniusSymbolics.jl`](../../../julia/institutions/symbolics/EigeniusSymbolics/src/EigeniusSymbolics.jl); it walks the underlying `SymbolicUtils.BasicSymbolic` (Sym / Term / Number cases) and emits chain-shaped `FormulaTerm` ctors via the mirror's per-ctor structs. Adding a new operator requires entries in both directions: `_OP_FN` (decode) and `_FN_TO_IRI` (encode).
+The intervals handler decodes `BoundedBy → Interval`, returns a Verdict (a Dict). The Symbolics handler also goes the other way for OnDemand: it decodes `FormulaTerm → Symbolics.Num`, runs `Symbolics.simplify`, then encodes the result *back* into a `FormulaTerm`. The `num_to_formula` direction lives at [`EigeniusSymbolics.jl`](../../../../julia/institutions/symbolics/EigeniusSymbolics/src/EigeniusSymbolics.jl); it walks the underlying `SymbolicUtils.BasicSymbolic` (Sym / Term / Number cases) and emits chain-shaped `FormulaTerm` ctors via the mirror's per-ctor structs. Adding a new operator requires entries in both directions: `_OP_FN` (decode) and `_FN_TO_IRI` (encode).
 
 ### The institution declares more dispatch roles
 
@@ -211,7 +211,7 @@ Where intervals declared one `QueryClass` (`bounded_by_validity`, AutoOnLoad), S
 
 Three different dispatch roles, all on one institution. Worth understanding what that means before walking through the demo's invocations:
 
-- **`AutoOnLoad`** ([D14 §6.1](../../design/d14-institution-realisation.md#6-verdicts)) — fires automatically every time a resource of the bound class is committed. The kernel runs the gate; on `Holds` the commit goes through with a `Verdict + RuntimeInvocation` audit anchor; on `Fails` the commit is rejected; on `Undecidable` the commit goes through but the verdict carries no domain commitment.
+- **`AutoOnLoad`** ([D14 §6.1](../../../design/d14-institution-realisation.md#6-verdicts)) — fires automatically every time a resource of the bound class is committed. The kernel runs the gate; on `Holds` the commit goes through with a `Verdict + RuntimeInvocation` audit anchor; on `Fails` the commit is rejected; on `Undecidable` the commit goes through but the verdict carries no domain commitment.
 - **`OnDemand`** — fired explicitly via EigenQL FIBER (D2 v2 §3.5). The user writes a query that calls into the institution; the handler returns a typed result that flows into the query result set. Doesn't gate commits.
 - **`Decidable`** — referenced from `Exp::NativeDecide` (D14 §6.2). User programs (and EigenQL `WHERE` predicates) call the QueryClass like a function; on `Holds` the constraint reduces to `Refl`, on `Fails` to a failing neutral, on `Undecidable` to a passthrough neutral. The kernel evaluates it during type-check reduction.
 
@@ -272,7 +272,7 @@ After the value validates, the chain commit pipeline fires the `simplifies_to_va
 5. `simplify(x*0)` returns `0`; `isequal(0, 0)` holds; the handler returns `_verdict("Holds")`.
 6. The kernel commits the original `SimplifiesTo` resource, plus a `Verdict + RuntimeInvocation` audit anchor.
 
-If you change the claim to assert `x*0` simplifies to `1`, you'd get `Undecidable` — Symbolics' simplifier is heuristic ([D27 §4.1.1](../../design/d27-julia-institutions.md)), so a representational mismatch doesn't refute the claim, and `Fails` is reserved for a future strict-decision path.
+If you change the claim to assert `x*0` simplifies to `1`, you'd get `Undecidable` — Symbolics' simplifier is heuristic ([D27 §4.1.1](../../../design/d27-julia-institutions.md)), so a representational mismatch doesn't refute the claim, and `Fails` is reserved for a future strict-decision path.
 
 ## Step 8 — Inspect the Verdict
 
@@ -437,9 +437,9 @@ eigenius query \
 
 ### What just happened
 
-This is the third dispatch role at work. The Decidable surface ([D14 §6.2](../../design/d14-institution-realisation.md#6-verdicts)) treats a QueryClass as a *function call* in EigenQL expression position. `cap:qc_symb_check_equivalence(?lhs_iri, ?rhs_iri)` parses as a function-call expression; the kernel's expression evaluator recognises that the qualified function name resolves to a Decidable-role QueryClass and dispatches it.
+This is the third dispatch role at work. The Decidable surface ([D14 §6.2](../../../design/d14-institution-realisation.md#6-verdicts)) treats a QueryClass as a *function call* in EigenQL expression position. `cap:qc_symb_check_equivalence(?lhs_iri, ?rhs_iri)` parses as a function-call expression; the kernel's expression evaluator recognises that the qualified function name resolves to a Decidable-role QueryClass and dispatches it.
 
-The pipeline is structurally identical to the OnDemand FIBER one — and shares the same kernel helper [`institution::marshal::marshal_decidable_input`](../../../kernel/src/institution/marshal.rs):
+The pipeline is structurally identical to the OnDemand FIBER one — and shares the same kernel helper [`institution::marshal::marshal_decidable_input`](../../../../kernel/src/institution/marshal.rs):
 
 1. The kernel resolves `cap:qc_symb_check_equivalence` to its QueryClass entry, confirms `Decidable` is one of its dispatch roles.
 2. Reads the input class (`EquivalenceCheck`) and its `requires: [lhs, rhs]` (excluding kernel-managed `is_a` / `short_name`).
@@ -475,14 +475,14 @@ After the full demo runs, the following resources have been committed (all reach
 | `SymbolicallyReducesTo` claim + Verdict | step 13 |
 | Two `SymbolicExpression`s (`x + 0`, `x`) | step 15 |
 
-The OnDemand and Decidable invocations (steps 10 and 16) don't commit anything — both surfaces are read-only with respect to the chain ([D14 §6.2](../../design/d14-institution-realisation.md#6-verdicts)). Their audit trail rides on the EigenQL query trace, not on the chain.
+The OnDemand and Decidable invocations (steps 10 and 16) don't commit anything — both surfaces are read-only with respect to the chain ([D14 §6.2](../../../design/d14-institution-realisation.md#6-verdicts)). Their audit trail rides on the EigenQL query trace, not on the chain.
 
 ## What this exercises about D32
 
 Everything in this demo is downstream of the three D32 claims listed at the top:
 
 - **`FormulaTerm` is a fragment of Mini-TT.** Every `term` field on every `SymbolicExpression` is a typed inductive value validated against the `core:InductiveType` schema D32 §3 specifies. Steps 7, 11, 12, 13 commit four different shapes of FormulaTerm and each is type-checked at commit.
-- **`FormulaTerm` is shared across institutions.** The same FormulaTerm shape that this demo's Symbolics handler decodes is also what the IntervalArithmetic handler in the cross-institution probe ([`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../crates/eigenius-julia/tests/cross_institution_probe.rs)) decodes — different institutions, identical chain-side payload. Step 9's pre-committed SymbolicExpression could have been authored in a Catalyst or DiffEq context with the same wire shape.
+- **`FormulaTerm` is shared across institutions.** The same FormulaTerm shape that this demo's Symbolics handler decodes is also what the IntervalArithmetic handler in the cross-institution probe ([`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs)) decodes — different institutions, identical chain-side payload. Step 9's pre-committed SymbolicExpression could have been authored in a Catalyst or DiffEq context with the same wire shape.
 - **Operators carry typed signatures.** Every `OpRef` in every FormulaTerm in this demo got rank-checked against an on-chain `Operator.operator_signature` at commit time (D32 §5.4). Authoring `App(App(OpRef("formulas:ops:add"), Var("x")), LitFloat(0.0), LitFloat(1.0))` — an extra arg — gets rejected before the worker ever sees it.
 
 The runtime mechanics — three dispatch roles, six QueryClasses, four claim types — are the surface. The chain shapes underneath (typed inductive values, typed operator signatures, mirror-driven Julia dispatch) are what makes them composable across institutions.

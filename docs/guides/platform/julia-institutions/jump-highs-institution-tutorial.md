@@ -10,7 +10,7 @@ By the end you will have:
 - Built the env image with the `EigeniusJuMPHiGHS` handler package + JuMP + HiGHS.
 - Watched two `OptimisesTo` claims fire the AutoOnLoad gate — Holds on the right-objective cases, Fails on a wildly wrong claimed objective.
 
-The script form lives at [`demo/jump-highs/run.sh`](../../../demo/jump-highs/run.sh) — `just demo-jump-highs` runs it end-to-end. Read this if you want to understand why the JuMP institution forks per-solver, what the smart-pow walker rule buys, and where this institution sits in the broader life-science modelling story (D27 §4.2).
+The script form lives at [`demo/jump-highs/run.sh`](../../../../demo/jump-highs/run.sh) — `just demo-jump-highs` runs it end-to-end. Read this if you want to understand why the JuMP institution forks per-solver, what the smart-pow walker rule buys, and where this institution sits in the broader life-science modelling story (D27 §4.2).
 
 If you haven't seen [the intervals tutorial](intervals-institution-tutorial.md) yet, read that first — it covers the substrate plumbing at a slower pace. The [Symbolics tutorial](symbolics-institution-tutorial.md) introduces the chain-side typed-formula machinery from D32; the [DiffEq tutorial](diffeq-institution-tutorial.md) walks through FormulaTerm-typed payloads in a comparable institution (the JuMP walker is structurally identical to DiffEq's `formula_to_value`, only the operator semantics differ).
 
@@ -26,7 +26,7 @@ v1 ships **one** institution, `urn:eigenius:institutions:jump_highs`, wrapping H
 
 ### The smart-pow rule
 
-`pow(x, LitFloat(2.0))` translated naively (`x ^ 2.0`) produces `MOI.ScalarNonlinearFunction` because JuMP's overload of `^` on `(VariableRef, Float64)` emits a nonlinear node. HiGHS rejects nonlinear-typed objectives even when the underlying math is quadratic. The walker's smart-pow rule recognises integer-valued `LitFloat` exponents on `pow` and unrolls to repeated multiplication so the result lands as `QuadExpr` instead — see [the JuMP/FormulaTerm probe](../../../julia/research/jump-formula-term-probe.md) for the empirical demonstration. Only `n=2` actually buys QuadExpr (JuMP's MOI core types stop at quadratic), so the unroll is bounded; for `n ≥ 3` you get NonlinearExpr regardless.
+`pow(x, LitFloat(2.0))` translated naively (`x ^ 2.0`) produces `MOI.ScalarNonlinearFunction` because JuMP's overload of `^` on `(VariableRef, Float64)` emits a nonlinear node. HiGHS rejects nonlinear-typed objectives even when the underlying math is quadratic. The walker's smart-pow rule recognises integer-valued `LitFloat` exponents on `pow` and unrolls to repeated multiplication so the result lands as `QuadExpr` instead — see [the JuMP/FormulaTerm probe](../../../../julia/research/jump-formula-term-probe.md) for the empirical demonstration. Only `n=2` actually buys QuadExpr (JuMP's MOI core types stop at quadratic), so the unroll is bounded; for `n ≥ 3` you get NonlinearExpr regardless.
 
 The chain-side `FormulaTerm` shape does *not* change — `pow(x, LitFloat(2.0))` stays the canonical encoding (it's what Symbolics emits for `x^2`, what Catalyst's mass-action ODE compiler emits for second-order rate terms, etc.). The fix lives entirely inside the JuMP walker.
 
@@ -89,7 +89,7 @@ Constraints follow the same shape, plus a `ConstraintRelation` ctor and a Float6
 - The workspace built once.
 - **Patience for the cold env build.** JuMP + HiGHS_jll precompile in ~2–3 minutes — much lighter than the SciML dep tail DiffEq pulls. Cached after that.
 
-The institution sources used throughout live at [`julia/institutions/jump/`](../../../julia/institutions/jump/):
+The institution sources used throughout live at [`julia/institutions/jump/`](../../../../julia/institutions/jump/):
 
 ```
 julia/institutions/jump/
@@ -122,7 +122,7 @@ The institution-installation pattern is identical to the [DiffEq tutorial](diffe
 
 ## Step 3 — Commit the LP problem
 
-`min x + 2y` subject to `x + y ≤ 10` and `0 ≤ x, y ≤ 10`. Optimum at `(x, y) = (0, 0)` with objective value `0`. The full JSON form is in [`demo/jump-highs/run.sh`](../../../demo/jump-highs/run.sh) (Step 7); the structure is:
+`min x + 2y` subject to `x + y ≤ 10` and `0 ≤ x, y ≤ 10`. Optimum at `(x, y) = (0, 0)` with objective value `0`. The full JSON form is in [`demo/jump-highs/run.sh`](../../../../demo/jump-highs/run.sh) (Step 7); the structure is:
 
 - Two `VariableBound` resources (`x ∈ [0, 10]`, `y ∈ [0, 10]`).
 - One `Constraint` resource (`x + y ≤ 10`, with the LHS as a FormulaTerm).

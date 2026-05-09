@@ -6,21 +6,21 @@ This walkthrough builds an external-runtime institution backed by Julia's [`Inte
 - Generated a Julia mirror package that maps `BoundedBy` and the chain-shared `formulas:FormulaTerm` to typed Julia structs and back.
 - Built and pinned an OCI image containing your handler + the mirror + Julia 1.12.
 - Wired the handler as an `AutoOnLoad` gate so that **every** `BoundedBy` instance committed to the chain is automatically validated, with a `Verdict` resource committed alongside as the audit anchor.
-- Wired a second `OnDemand` QueryClass (`qc_compute_bounds`) that takes a SymbolicExpression and a domain interval and returns a rigorous `BoundedBy` enclosing the function's range — this is where the institution earns its keep as a *cross-institution citizen* under [D32](../../design/d32-chain-mirrored-mini-tt-inductives.md).
-- Authored the chain-side `Comorphism` triple `(ef_symb_expr, m_id, if_intv_function)` that formalises Symbolics → IntervalArithmetic as the **identity function on `FormulaTerm`** ([D32 §6.2](../../design/d32-chain-mirrored-mini-tt-inductives.md#62-concrete-example---symbolics--intervalarithmetic)).
+- Wired a second `OnDemand` QueryClass (`qc_compute_bounds`) that takes a SymbolicExpression and a domain interval and returns a rigorous `BoundedBy` enclosing the function's range — this is where the institution earns its keep as a *cross-institution citizen* under [D32](../../../design/d32-chain-mirrored-mini-tt-inductives.md).
+- Authored the chain-side `Comorphism` triple `(ef_symb_expr, m_id, if_intv_function)` that formalises Symbolics → IntervalArithmetic as the **identity function on `FormulaTerm`** ([D32 §6.2](../../../design/d32-chain-mirrored-mini-tt-inductives.md#62-concrete-example---symbolics--intervalarithmetic)).
 
-The first half of the tutorial (steps 1–9) walks through the AutoOnLoad gate against `BoundedBy` — the simplest external-runtime institution possible, the one [`demo/intervals/run.sh`](../../../demo/intervals/run.sh) executes step-by-step. The second half (steps 10–11) covers the broader surface that lands when interval arithmetic becomes a *consumer of typed expression trees*; that part doesn't have a shell-demo equivalent, but is exercised end-to-end by the kernel test [`intervals_on_demand_e2e.rs`](../../../crates/eigenius-julia/tests/intervals_on_demand_e2e.rs) and the cross-institution probe [`cross_institution_probe.rs`](../../../crates/eigenius-julia/tests/cross_institution_probe.rs).
+The first half of the tutorial (steps 1–9) walks through the AutoOnLoad gate against `BoundedBy` — the simplest external-runtime institution possible, the one [`demo/intervals/run.sh`](../../../../demo/intervals/run.sh) executes step-by-step. The second half (steps 10–11) covers the broader surface that lands when interval arithmetic becomes a *consumer of typed expression trees*; that part doesn't have a shell-demo equivalent, but is exercised end-to-end by the kernel test [`intervals_on_demand_e2e.rs`](../../../../crates/eigenius-julia/tests/intervals_on_demand_e2e.rs) and the cross-institution probe [`cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs).
 
 Read this if you want to understand *why* each step matters and *what the platform is doing behind the scenes*.
 
 ## Prerequisites
 
-- The compose stack running: `EIGENIUS_MOCK_LLM=true docker compose up -d`. This brings up the kernel (port 50051) and the orchestrator (port 8080), with the orchestrator's substrate addon pre-registered for Julia ([§7](07-orchestrator.md)).
+- The compose stack running: `EIGENIUS_MOCK_LLM=true docker compose up -d`. This brings up the kernel (port 50051) and the orchestrator (port 8080), with the orchestrator's substrate addon pre-registered for Julia ([§7](../07-orchestrator.md)).
 - A reachable Docker daemon on the host. The orchestrator's runtime substrate spawns Julia worker containers as **siblings** of the orchestrator container via the bind-mounted Docker socket — Docker-out-of-Docker, not nested. The shared depot path (`/var/lib/eigenius/substrate-depot/`) is bind-mounted into the orchestrator at the *same* path it appears on the host so worker UDS sockets are reachable from both sides.
 - `jq` for parsing the JSON output `eigenius env build` emits.
 - The workspace built once: the demo invokes `cargo build -q -p eigenius-cli` and runs the result from `target/debug/eigenius`.
 
-The institution sources used throughout live at [`julia/institutions/intervals/`](../../../julia/institutions/intervals/):
+The institution sources used throughout live at [`julia/institutions/intervals/`](../../../../julia/institutions/intervals/):
 
 ```
 julia/institutions/intervals/
@@ -36,7 +36,7 @@ julia/institutions/intervals/
                                            # compute_bounds_for_request handlers
 ```
 
-The chain-side cross-institution `Comorphism` triple linking Symbolics → IntervalArithmetic lives at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../julia/comorphisms/symbolics-to-intervals.eigon.json) and is loaded via the symbolics demo's setup, not this one — but it references `if_intv_function` declared in the intervals institution.
+The chain-side cross-institution `Comorphism` triple linking Symbolics → IntervalArithmetic lives at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../../julia/comorphisms/symbolics-to-intervals.eigon.json) and is loaded via the symbolics demo's setup, not this one — but it references `if_intv_function` declared in the intervals institution.
 
 ## Step 1 — Load the typed shape
 
@@ -110,7 +110,7 @@ The mirror is the **typed bridge** between Eigon and Julia. It's why your handle
 
 ## Step 4 — Read the handler
 
-Before baking anything into an image, take a moment to look at what the handler actually does. The full source is at [`julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl`](../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl); the load-bearing parts are:
+Before baking anything into an image, take a moment to look at what the handler actually does. The full source is at [`julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl`](../../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl); the load-bearing parts are:
 
 ```julia
 module EigeniusIntervals
@@ -150,7 +150,7 @@ A few non-obvious choices are worth pausing on, because they're the conventions 
 
 - **`using EigeniusMirror: BoundedBy`** is the line that ties the handler to the chain's typed shape. The mirror you committed in step 3 *is* the source of `BoundedBy`. The handler's signature `validate_bounded_by(b::BoundedBy)` therefore commits to a specific layer's view of the class — change `BoundedBy` on the chain (say, add a fourth required property) and a new mirror has to be generated, a new image built, and a new env Resource committed before the new shape can flow through. The chain pin propagates all the way to the Julia type system.
 - **`interval(b.value)` is a degenerate (point) interval.** It's tempting to write `b.value ∈ target`, but that compares a `Float64` to an `Interval{Float64}` and silently drops you into ordinary float comparison — losing the rounding-mode discipline `IntervalArithmetic.jl` exists to provide. By wrapping the value as a degenerate interval first, both sides get the same rigorous treatment, so `Holds` is a *proof* of containment rather than a heuristic.
-- **The three-valued return is structural, not a workaround.** `IntervalArithmetic.jl` distinguishes "proven subset" (`issubset_interval`) from "proven disjoint" (`isdisjoint_interval`) from the residual "overlap exists but isn't full subset" — typically the case where `value` lands exactly on a bound that has multiple `Float64` representations. That residual maps directly onto Eigenius's `Undecidable` verdict; the dispatch role decides what to do with it (an `auto_on_load` accepts the load on `Undecidable` but won't claim domain commitment, per [D14 §6.1](../../design/d14-institution-realisation.md#6-verdicts)).
+- **The three-valued return is structural, not a workaround.** `IntervalArithmetic.jl` distinguishes "proven subset" (`issubset_interval`) from "proven disjoint" (`isdisjoint_interval`) from the residual "overlap exists but isn't full subset" — typically the case where `value` lands exactly on a bound that has multiple `Float64` representations. That residual maps directly onto Eigenius's `Undecidable` verdict; the dispatch role decides what to do with it (an `auto_on_load` accepts the load on `Undecidable` but won't claim domain commitment, per [D14 §6.1](../../../design/d14-institution-realisation.md#6-verdicts)).
 - **The verdict is a `Dict`, not a typed struct.** `Verdict` is declared on the chain as an `InductiveType` (a sum type with `Holds`/`Fails`/`Undecidable` constructors), and the mirror generator only emits typed structs for `Class` resources. The handler therefore returns a Dict shaped exactly like a Eigon-JSON resource — `is_a: [Verdict]` plus `ctor_name: "Holds"` — and the worker forwards it as-is. The kernel's lenient parser reads `ctor_name` to apply the gating decision.
 
 The handler is small (about 20 lines of substantive code) because most of the work — typing the inputs, decoding from CBOR, dispatching the right method, encoding the output back to CBOR — happens in the substrate and the generated mirror. The handler is just the institution-specific reasoning step.
@@ -232,7 +232,7 @@ The kernel's commit pipeline did three things on top of the standard validation:
 
 1. **Indexed both `QueryClass`es.** `bounded_by_validity` carries `dispatch_role: auto_on_load` and `query_class: BoundedBy` — the kernel adds an entry to its `auto_on_load_by_class` map so future `BoundedBy` loads dispatch the gate. `qc_compute_bounds` carries `dispatch_role: on_demand` and `query_class: BoundsRequest` — the kernel adds it to its OnDemand index so FIBER calls to `cap:qc_compute_bounds` can resolve.
 2. **Resolved the runtime environment reference.** The `Institution` resource's `requires_environment` property points at the `urn:eigenius:intervals:env:v1` we committed in step 6. Validation walked the parent chain to confirm that env exists; if it didn't, the install would have been rejected.
-3. **Cross-checked types.** Both `RuntimeMethodSignature`s and both `QueryClass`es declare `output_type` / `result_class`. For `bounded_by_validity` it's `Verdict` (an `InductiveType` with `Holds` / `Fails` / `Undecidable` ctors); for `qc_compute_bounds` it's `BoundedBy` (a `Class`). The `class_types` of `result_class` accepts both kinds — see the structural fix in [D32 §3](../../design/d32-chain-mirrored-mini-tt-inductives.md#3-design--mini-tt-inductives-reach-the-chain) that extended class-typed reference props to admit `InductiveType` references too. The `ImportFormat`'s `to_class` references `IntervalFunction` and its `payload_type` references `formulas:FormulaTerm` — both are now resolved on the chain (the formulas layer is part of the kernel bootstrap; IntervalFunction was committed in step 1).
+3. **Cross-checked types.** Both `RuntimeMethodSignature`s and both `QueryClass`es declare `output_type` / `result_class`. For `bounded_by_validity` it's `Verdict` (an `InductiveType` with `Holds` / `Fails` / `Undecidable` ctors); for `qc_compute_bounds` it's `BoundedBy` (a `Class`). The `class_types` of `result_class` accepts both kinds — see the structural fix in [D32 §3](../../../design/d32-chain-mirrored-mini-tt-inductives.md#3-design--mini-tt-inductives-reach-the-chain) that extended class-typed reference props to admit `InductiveType` references too. The `ImportFormat`'s `to_class` references `IntervalFunction` and its `payload_type` references `formulas:FormulaTerm` — both are now resolved on the chain (the formulas layer is part of the kernel bootstrap; IntervalFunction was committed in step 1).
 
 After this commit, the kernel knows: when a `BoundedBy` resource lands, run `validate_bounded_by` against it via the external Julia runtime in env `v1`, and treat the returned `Verdict` as the gating decision. When an EigenQL FIBER query asks for `cap:qc_compute_bounds(...)`, route it to `compute_bounds_for_request` in the same env. When a comorphism reifies a FormulaTerm payload through `if_intv_function`, the chain knows the import target is `IntervalFunction`.
 
@@ -305,9 +305,9 @@ The `BoundedBy` instance was rejected; the chain is unchanged on `main`, but the
 
 ## Step 10 — Beyond the AutoOnLoad gate
 
-Steps 1–9 covered the simplest possible external-runtime institution: one resource class (`BoundedBy`), one QueryClass (`bounded_by_validity`, AutoOnLoad), one handler (`validate_bounded_by`). That's the foundation. The intervals institution actually ships a broader surface — what makes it useful as a *cross-institution citizen* — and it's worth understanding what's there even though [`demo/intervals/run.sh`](../../../demo/intervals/run.sh) doesn't exercise it.
+Steps 1–9 covered the simplest possible external-runtime institution: one resource class (`BoundedBy`), one QueryClass (`bounded_by_validity`, AutoOnLoad), one handler (`validate_bounded_by`). That's the foundation. The intervals institution actually ships a broader surface — what makes it useful as a *cross-institution citizen* — and it's worth understanding what's there even though [`demo/intervals/run.sh`](../../../../demo/intervals/run.sh) doesn't exercise it.
 
-The full surface declared in [`intervals-ontology.eigon.json`](../../../julia/institutions/intervals/declarations/intervals-ontology.eigon.json) and [`intervals-institution.eigon.json`](../../../julia/institutions/intervals/declarations/intervals-institution.eigon.json):
+The full surface declared in [`intervals-ontology.eigon.json`](../../../../julia/institutions/intervals/declarations/intervals-ontology.eigon.json) and [`intervals-institution.eigon.json`](../../../../julia/institutions/intervals/declarations/intervals-institution.eigon.json):
 
 | Resource | Kind | Role |
 |---|---|---|
@@ -331,7 +331,7 @@ RETURN [] { lower: ?bound.lower, upper: ?bound.upper }
 
 The kernel's IRI-dereference pass embeds both chain-committed resources into the synthetic `BoundsRequest` input; the worker's mirror decodes it as a typed `BoundsRequest{expr: SymbolicExpression{term: FormulaTerm{...}}, domain: BoundedBy{...}}` mirror struct; the handler `compute_bounds_for_request` destructures and runs interval arithmetic over the FormulaTerm with `x` bound to `interval(domain.lower, domain.upper)`; the response is a fresh `BoundedBy` whose `[lower, upper]` rigorously encloses the function's range.
 
-The interval-arithmetic walk over `FormulaTerm` is in [`EigeniusIntervals.jl`](../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl) — `formula_to_interval` dispatches on the per-ctor mirror structs (`FormulaTerm_Var`, `FormulaTerm_LitFloat`, `FormulaTerm_OpRef`, `FormulaTerm_App`), with the operator catalog `_OP_INTERVAL` mapping IRIs to the right `IntervalArithmetic.jl` functions:
+The interval-arithmetic walk over `FormulaTerm` is in [`EigeniusIntervals.jl`](../../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl) — `formula_to_interval` dispatches on the per-ctor mirror structs (`FormulaTerm_Var`, `FormulaTerm_LitFloat`, `FormulaTerm_OpRef`, `FormulaTerm_App`), with the operator catalog `_OP_INTERVAL` mapping IRIs to the right `IntervalArithmetic.jl` functions:
 
 ```julia
 formula_to_interval(t::EigeniusMirror.FormulaTerm_Var, env) =
@@ -350,13 +350,13 @@ const _OP_INTERVAL = Dict{String, Function}(
 
 No string parsing, no JSON walking — Julia's multiple dispatch on the mirror's per-ctor types is the dispatch.
 
-The end-to-end test that exercises this is [`intervals_on_demand_e2e.rs`](../../../crates/eigenius-julia/tests/intervals_on_demand_e2e.rs). It builds the chain, registers the institution, dispatches `qc_compute_bounds` for `sin(x) + 0.5` over `[0, π/2]`, and asserts the returned interval brackets `[0.5, 1.5]` — a rigorous bound by interval-arithmetic discipline, not a heuristic.
+The end-to-end test that exercises this is [`intervals_on_demand_e2e.rs`](../../../../crates/eigenius-julia/tests/intervals_on_demand_e2e.rs). It builds the chain, registers the institution, dispatches `qc_compute_bounds` for `sin(x) + 0.5` over `[0, π/2]`, and asserts the returned interval brackets `[0.5, 1.5]` — a rigorous bound by interval-arithmetic discipline, not a heuristic.
 
 ## Step 11 — The cross-institution comorphism
 
 The IntervalArithmetic institution declares an `ImportFormat` `if_intv_function` whose `to_class: IntervalFunction` and `payload_type: formulas:FormulaTerm`. Symbolics declares a symmetric `ExportFormat` `ef_symb_expr` whose `from_class: SymbolicExpression` and `payload_type: formulas:FormulaTerm`. Both ends carry the same payload type — `FormulaTerm`.
 
-That sets up the **identity comorphism**: a chain-committed `Comorphism(ef_symb_expr, m_id_formula_term, if_intv_function)` whose typed middle `m` is `Lambda(t: FormulaTerm. Var(t))` — the identity function on FormulaTerm. The whole triple lives at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../julia/comorphisms/symbolics-to-intervals.eigon.json):
+That sets up the **identity comorphism**: a chain-committed `Comorphism(ef_symb_expr, m_id_formula_term, if_intv_function)` whose typed middle `m` is `Lambda(t: FormulaTerm. Var(t))` — the identity function on FormulaTerm. The whole triple lives at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../../julia/comorphisms/symbolics-to-intervals.eigon.json):
 
 ```json
 {
@@ -371,9 +371,9 @@ That sets up the **identity comorphism**: a chain-committed `Comorphism(ef_symb_
 
 `exact: true` — bit-for-bit payload preservation, no semantic loss.
 
-This is the **load-bearing claim of D32 §6.2** in chain form: when two institutions speak the same typed payload language (FormulaTerm), the comorphism between them collapses to the identity. The Symbolics handler can hand its `SymbolicExpression.term` to the IntervalArithmetic handler with no per-institution translation — operationally proven by [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../crates/eigenius-julia/tests/cross_institution_probe.rs), declaratively pinned by the chain-committed Comorphism resource above.
+This is the **load-bearing claim of D32 §6.2** in chain form: when two institutions speak the same typed payload language (FormulaTerm), the comorphism between them collapses to the identity. The Symbolics handler can hand its `SymbolicExpression.term` to the IntervalArithmetic handler with no per-institution translation — operationally proven by [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs), declaratively pinned by the chain-committed Comorphism resource above.
 
-The runtime evaluator that walks Comorphism triples and composes the `(extract → m → reify)` pipeline is M5 in D14's milestone ladder — still ahead. But the chain-side declaration (and the kernel-side static type-checking of the triple, [Rule 15](../../../kernel/src/validation/mod.rs)) is in place today.
+The runtime evaluator that walks Comorphism triples and composes the `(extract → m → reify)` pipeline is M5 in D14's milestone ladder — still ahead. But the chain-side declaration (and the kernel-side static type-checking of the triple, [Rule 15](../../../../kernel/src/validation/mod.rs)) is in place today.
 
 ## What now lives on the chain
 
@@ -402,8 +402,8 @@ Together they form the full audit closure D31 prescribes: every Verdict points a
 ## Where to go next
 
 - [Symbolics institution tutorial](symbolics-institution-tutorial.md) — same shape but exercises three dispatch roles (AutoOnLoad / OnDemand / Decidable) over four chain-committable claim types. Goes deep on the FormulaTerm-as-Mini-TT-fragment story from D32.
-- [D32 — Chain-Mirrored Mini-TT Inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md) — the design doc that pins why FormulaTerm sits at `urn:eigenius:formulas:` rather than under any one institution, and what the typed operator catalog buys you.
-- [D14 — Institution Realisation](../../design/d14-institution-realisation.md) — the canonical spec for QueryClass / Comorphism / ExportFormat / ImportFormat. §5 covers comorphisms; §6 covers the three dispatch roles.
+- [D32 — Chain-Mirrored Mini-TT Inductives](../../../design/d32-chain-mirrored-mini-tt-inductives.md) — the design doc that pins why FormulaTerm sits at `urn:eigenius:formulas:` rather than under any one institution, and what the typed operator catalog buys you.
+- [D14 — Institution Realisation](../../../design/d14-institution-realisation.md) — the canonical spec for QueryClass / Comorphism / ExportFormat / ImportFormat. §5 covers comorphisms; §6 covers the three dispatch roles.
 
 ## Common failure modes
 

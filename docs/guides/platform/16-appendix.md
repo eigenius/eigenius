@@ -1,10 +1,11 @@
-# 15. Appendix
+# 16. Appendix
 
-## 15.1. Environment variables
+## 16.1. Environment variables
 
 | Variable | Default | Used by | Effect |
 |---|---|---|---|
 | `EIGENIUS_DB` | (none, in-memory) | `eigenius serve` | Path to the RocksDB persistence directory |
+| `EIGENIUS_HOME` | workspace root in dev / `/opt/eigenius` in containers | `eigenius env build` | Base path for resolving the default Julia worker source (`$EIGENIUS_HOME/julia/runtime-worker/`). Overridden per invocation by `--worker-source-dir`. |
 | `EIGENIUS_ORCHESTRATOR_ENDPOINT` | (none) | `eigenius serve` | Kernel's URL for the orchestrator (alternative to `--orchestrator`) |
 | `EIGENIUS_KERNEL_ENDPOINT` | `http://localhost:50051` | Orchestrator | Endpoint the orchestrator uses for kernel callbacks (read/query host imports) |
 | `EIGENIUS_ORCHESTRATOR_PORT` | `8080` | Orchestrator | Port the orchestrator binds to |
@@ -14,7 +15,7 @@
 
 CLI commands also accept `--endpoint <url>` as an alternative to setting an env var; the flag takes precedence.
 
-## 15.2. File and directory locations
+## 16.2. File and directory locations
 
 | Location | Contents |
 |---|---|
@@ -25,15 +26,20 @@ CLI commands also accept `--endpoint <url>` as an alternative to setting an env 
 | `kernel/tests/fixtures/*.wasm` | Test fixtures copied from WASM examples |
 | `~/.cache/deno/` | Deno-cached TypeScript dependencies |
 | `<rocksdb-path>/` (e.g. `/var/lib/eigenius`) | Persisted state when `serve --db` is used |
+| `/var/lib/eigenius/substrate-depot/` | Runtime-substrate depot path (chapter 11). Bind-mounted into the orchestrator at the *same* path so worker UDS sockets are reachable from both host and orchestrator container. |
+| `julia/runtime-worker/` | Julia worker source baked into substrate env images |
+| `julia/common/EigeniusJuliaCommon/` | Substrate-side Julia utilities shared across institutions |
+| `julia/institutions/<institution>/` | Per-institution handler package (`Project.toml` + `src/`) and chain declarations |
+| `julia/comorphisms/` | Cross-institution comorphism declarations |
 
-## 15.3. Default ports
+## 16.3. Default ports
 
 | Port | Service | Configuration |
 |---|---|---|
 | 50051 | Kernel gRPC | `eigenius serve --port <N>` |
 | 8080 | Orchestrator HTTP | `EIGENIUS_ORCHESTRATOR_PORT=<N>` |
 
-## 15.4. The four embedded ontology layers
+## 16.4. The four embedded ontology layers
 
 Loaded at every kernel startup; their parent-pointer chain forms the bootstrap:
 
@@ -46,7 +52,7 @@ Loaded at every kernel startup; their parent-pointer chain forms the bootstrap:
 
 When `serve --db <path>` is used, a SHA-256 manifest of these is written on first start and verified on subsequent starts (drift refusal — see [chapter 6](06-database-management.md) §6.3).
 
-## 15.5. Source index — implementation files referenced in this guide
+## 16.5. Source index — implementation files referenced in this guide
 
 ### CLI
 
@@ -74,6 +80,19 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`crates/wasm-runtime/`](../../../crates/wasm-runtime/) — Wasmtime integration, fuel/memory limits
 - [`sdk/wasm-sdk/`](../../../sdk/wasm-sdk/) — Rust SDK for authoring components and institutions
 - [`wit/eigenius-component.wit`](../../../wit/eigenius-component.wit) — WIT interface contracts
+
+### Runtime substrate (chapter 11)
+
+- [`crates/runtime-substrate/`](../../../crates/runtime-substrate/) — substrate hosting layer (loaded into the orchestrator)
+- [`crates/runtime-substrate/src/language_runtime.rs`](../../../crates/runtime-substrate/src/language_runtime.rs) — `LanguageRuntime` trait
+- [`crates/runtime-substrate/src/spawner/`](../../../crates/runtime-substrate/src/spawner/) — container lifecycle
+- [`crates/runtime-substrate/src/image_build/`](../../../crates/runtime-substrate/src/image_build/) — buildah-driven env image construction
+- [`crates/runtime-substrate/src/rpc/`](../../../crates/runtime-substrate/src/rpc/) — Eigon-CBOR-over-UDS protocol
+- [`crates/runtime-substrate/src/mirror_generator.rs`](../../../crates/runtime-substrate/src/mirror_generator.rs) — closure walker for chain shapes
+- [`crates/eigenius-julia/`](../../../crates/eigenius-julia/) — Julia v1 instantiation of `LanguageRuntime`
+- [`julia/runtime-worker/`](../../../julia/runtime-worker/) — Julia worker (PID 1 in env images)
+- [`julia/institutions/`](../../../julia/institutions/) — five v1 Julia institutions (Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS)
+- [`julia/comorphisms/`](../../../julia/comorphisms/) — cross-institution comorphism declarations
 
 ### Examples
 
@@ -111,7 +130,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 - [`justfile`](../../../justfile) — task recipes (`build`, `test`, `check`, `up`, `serve`, etc.)
 
-## 15.6. Related documents
+## 16.6. Related documents
 
 - [**ESL user guide**](../esl/README.md) — the surface language for ontologies and programs
 - [**EigenQL user guide**](../eigenql/README.md) — the query language
@@ -121,14 +140,18 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [**D6b — Reasoning trace schema**](../../design/d6b-reasoning-trace-schema.md) — trace storage
 - [**D7 — ESL surface syntax**](../../design/d7-esl-surface-syntax.md) — ESL spec
 - [**D8 — CompleteJson component**](../../design/d8-complete-json-component.md) — structured LLM output
-- [**D14 — Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10)
+- [**D14 — Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10); §9.3 covers comorphism chain reinsertion
 - [**D12 — WASM extensibility**](../../design/d12-wasm-extensibility.md) — capability levels, host imports, fuel/memory
 - [**D13 — Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec, restart re-registration
 - [**D21 — Task traces and checkpointing**](../../design/d21-task-traces-and-checkpointing.md) — task model and resume sweep
+- [**D26 — Runtime substrate**](../../design/d26-runtime-substrate.md) — substrate hosting layer, `LanguageRuntime` trait
+- [**D29 — Mirror generator**](../../design/d29-runtime-mirror-generator.md) — closure walker, content-addressed mirror IRIs
+- [**D31 — Runtime-language-substrate institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — install flow, env image lifecycle
+- [**D32 — Chain-mirrored Mini-TT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — `formulas:FormulaTerm` as a Mini-TT fragment on the chain
 
 The full design-document set lives in [`docs/design/`](../../design/).
 
-## 15.7. Phase status
+## 16.7. Phase status
 
 The platform is currently complete through Phase 11e (see top-level [README.md](../../../README.md)):
 

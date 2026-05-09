@@ -1,8 +1,8 @@
 # 8. Worked demos
 
-Three end-to-end demos in [`demo/`](../../../demo/), each driven by a shell script. They're the fastest way to see the platform working as a whole — and the most reliable smoke test that an install is correct.
+Four end-to-end demos. Three live in [`demo/`](../../../demo/), each driven by a shell script; the fourth (the multi-institution Julia stack) lives under [`notebooks/examples/`](../../../notebooks/examples/). They're the fastest way to see the platform working as a whole — and the most reliable smoke test that an install is correct.
 
-All three assume the kernel and orchestrator are running. The easiest path: `EIGENIUS_MOCK_LLM=true docker compose up --build -d` (no API key needed) followed by the demo command.
+All four assume the kernel and orchestrator are running. The easiest path: `EIGENIUS_MOCK_LLM=true docker compose up --build -d` (no API key needed) followed by the demo command.
 
 ## 8.1. `demo/run.sh` — the basic document demo
 
@@ -102,7 +102,41 @@ This demo is the smoke test for the WASM extension surface for components. After
 
 For D14 institutions (the dock-assay worked example): see [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs), which exercises the full WASM-institution surface end-to-end via auto-registration from the layer chain. Both WASM extension paths are walked through in [chapter 9](09-wasm-components.md) (components) and [chapter 10](10-wasm-institutions.md) (institutions).
 
-## 8.4. Running the demos as smoke tests
+## 8.4. `kinase-institutions` — multi-institution Julia stack
+
+Source: [`notebooks/examples/kinase-institutions-setup.sh`](../../../notebooks/examples/kinase-institutions-setup.sh) and [`notebooks/examples/kinase-institutions.json`](../../../notebooks/examples/kinase-institutions.json).
+
+The canonical end-to-end demo for the runtime substrate ([chapter 11](11-runtime-substrate.md)). Brings up **five Julia institutions** wrapping `Symbolics.jl`, `IntervalArithmetic.jl`, `Catalyst.jl`, `OrdinaryDiffEq.jl`, and `JuMP+HiGHS`, plus **three cross-institution comorphisms** that compose them via the chain-typed `formulas:FormulaTerm` shared formula language ([formula language guide](../formula/README.md), D32 §6).
+
+```bash
+# Cold first run is heavy (~30–60 minutes — five Julia env builds);
+# subsequent runs reuse the buildah cache.
+EIGENIUS_MOCK_LLM=true docker compose up -d
+./notebooks/examples/kinase-institutions-setup.sh
+
+# Then in a browser: http://localhost:8080/notebooks/
+# Import notebooks/examples/kinase-institutions.json and Run All.
+```
+
+Two storylines exercised end-to-end:
+
+| Storyline | Comorphism | What's verified |
+|---|---|---|
+| **Forward simulation** (cells 3–6) | `Catalyst → DiffEq` | A reaction network is committed, an `OdeProblem` with FormulaTerm-typed RHS is hand-authored as the "what the comorphism would produce", and an `OdeSolution` claim fires the DiffEq AutoOnLoad gate. The institution re-integrates the RHS via `OrdinaryDiffEq.solve(Tsit5)` and confirms the closed-form final state within tolerance. |
+| **Parameter fitting** (cells 7–9) | `Symbolics → JuMP` | A Kᵢ-fit SSE objective is authored as a `SymbolicExpression` carrying a FormulaTerm; wrapped in a `SymbolicsToJuMPInput` composite; the comorphism reifies it as a JuMP `OptimisationProblem`; an `OptimisesTo` claim fires the JuMP-HiGHS AutoOnLoad gate, which re-solves and verifies `Kᵢ* = 2.0`, `SSE* = 0`. The smart-pow walker keeps the QP in `QuadExpr` rather than `NonlinearExpr` territory. |
+
+Both AutoOnLoad gates produce `Holds` Verdicts that commit back to the chain alongside `RuntimeInvocation` audit anchors.
+
+Cells 12–18 close the [D14 §9.3](../../design/d14-institution-realisation.md) chain-reinsertion contract directly through both surfaces:
+
+- **ESL program** (cells 13–15): a wrapper invokes the `symbolics_to_jump` comorphism via the qualified-name function-call form (`comorphisms:symbolics_to_jump(input)`); the produced `OptimisationProblem` lands at a deterministic content-hash IRI `urn:eigenius:comorphism-output:symbolics_to_jump:<hex>`. See [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
+- **EigenQL `FIBER ... INTO`** (cells 16–18): the operational backing of the same translation, dispatched interactively via FIBER, with the user pinning the result at a caller-named IRI. See [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri).
+
+Both paths use the same `commit_with_validation` machinery — comorphism-translated resources, however dispatched, are first-class chain residents.
+
+The per-institution slow-walks under [`platform/julia-institutions/`](julia-institutions/) cover each piece in isolation; the kinase notebook is the one place the whole stack runs together against a single chain.
+
+## 8.5. Running the demos as smoke tests
 
 Each demo exits 0 on success and non-zero on any step failure. They're suitable as part of CI or pre-deployment verification:
 
@@ -125,7 +159,7 @@ The three demos exercise overlapping but distinct subsystems:
 
 For coverage, run all three. For speed, `demo/run.sh` alone covers the most common failure modes.
 
-## 8.5. Customising the demos
+## 8.6. Customising the demos
 
 Each demo script accepts the kernel endpoint as the first positional argument, so you can point them at a kernel running anywhere:
 

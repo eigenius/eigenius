@@ -1,12 +1,12 @@
-# 11. Deployment
+# 12. Deployment
 
 Deployment shapes covered in this chapter:
 
 - **Docker Compose** — local or single-host. The fastest way to get the full stack running outside a developer environment. Used regularly; treated as the production-quality shape today.
-- **Azure ContainerApps via Bicep** — *preliminary*. Templates exist in the repository as a starting point but have not been deployed end-to-end yet. See §11.2 for the caveat in detail.
+- **Azure ContainerApps via Bicep** — *preliminary*. Templates exist in the repository as a starting point but have not been deployed end-to-end yet. See §12.2 for the caveat in detail.
 - **Embedding the kernel as a library** — for advanced cases where the kernel runs inside another Rust process rather than as a separate gRPC service.
 
-## 11.1. Docker Compose
+## 12.1. Docker Compose
 
 The provided [`docker-compose.yml`](../../../docker-compose.yml) brings up both services with one command.
 
@@ -86,7 +86,7 @@ docker compose up -d
 
 Build time is significant (full Rust workspace + WASM examples). For iterative development, prefer the three-terminal model from [chapter 5](05-running-locally.md).
 
-## 11.2. Azure ContainerApps via Bicep
+## 12.2. Azure ContainerApps via Bicep
 
 > **Status: preliminary, not yet exercised end-to-end.** The Bicep
 > templates are committed to the repository as a starting point and are
@@ -202,7 +202,7 @@ The container app's managed identity must be granted `Key Vault Secrets User` on
 - Persistent storage (Azure Files) is billed separately.
 - ACR has tier-based pricing; Standard is sufficient for typical image sizes.
 
-## 11.3. Embedding the kernel as a library
+## 12.3. Embedding the kernel as a library
 
 For consumers that want to embed the kernel directly in another Rust application — without running it as a separate gRPC service — the kernel is published as a Cargo crate.
 
@@ -242,7 +242,7 @@ let result = query::execute(
 
 The CLI binary itself is a thin user of this API ([`cli/src/main.rs`](../../../cli/src/main.rs)). Embedding gives you direct in-process access at the cost of accepting Rust as your application language.
 
-## 11.4. Running without an orchestrator
+## 12.4. Running without an orchestrator
 
 For deployments where you only need read-only operations (queries, file inspection, type-check) and no IO components, the orchestrator is unnecessary. Run the kernel without `--orchestrator`:
 
@@ -254,7 +254,7 @@ CLI commands `load`, `query`, `inspect`, `program-validate` continue to work. `r
 
 This deployment shape is suitable for read-heavy workloads (pure-data services), embedded analytics, or institutions that don't depend on LLM dispatch.
 
-## 11.5. gRPC clients beyond the CLI
+## 12.5. gRPC clients beyond the CLI
 
 The kernel's gRPC service (defined in [`proto/`](../../../proto/)) is consumable by any tonic-compatible Rust client or any standard gRPC client (Python, Go, TypeScript, etc.) generated from the protobuf definitions.
 
@@ -268,9 +268,9 @@ grpcurl -plaintext -d '{"iri":"urn:eigenius:core:Class"}' \
 
 For production clients, generate stubs from the `.proto` files and call them via your language's standard gRPC client library.
 
-## 11.6. Deployment checklist
+## 12.6. Deployment checklist
 
-If you're deploying to Azure ContainerApps, *also* see the §11.2 caveat — the templates are a starting point that hasn't been validated end-to-end. Plan for iteration on the first deploy.
+If you're deploying to Azure ContainerApps, *also* see the §12.2 caveat — the templates are a starting point that hasn't been validated end-to-end. Plan for iteration on the first deploy.
 
 Before going live with a deployment:
 
@@ -285,4 +285,4 @@ Before going live with a deployment:
 
 ---
 
-Next: **[12. Troubleshooting and FAQ →](12-troubleshooting.md)**
+Next: **[13. Troubleshooting and FAQ →](13-troubleshooting.md)**

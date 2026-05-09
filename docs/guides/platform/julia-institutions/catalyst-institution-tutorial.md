@@ -8,7 +8,7 @@ This walkthrough wires the Catalyst institution end-to-end, using the classical 
 - Committed the kinase reaction network to the chain.
 - Committed three `ConservationLaw` claims (enzyme, substrate-or-product, inhibitor); the AutoOnLoad gate re-derived each from `Catalyst.conservationlaws(rn)` and produced three `Holds` verdicts.
 
-The script form lives at [`demo/catalyst/run.sh`](../../../demo/catalyst/run.sh) — `just demo-catalyst` runs it end-to-end. Read this if you want to understand what each step proves and where the broader kinase-modelling story fits in.
+The script form lives at [`demo/catalyst/run.sh`](../../../../demo/catalyst/run.sh) — `just demo-catalyst` runs it end-to-end. Read this if you want to understand what each step proves and where the broader kinase-modelling story fits in.
 
 If you haven't seen [the intervals tutorial](intervals-institution-tutorial.md) yet, read that first — it covers the substrate plumbing (mirror, env build, AutoOnLoad dispatch) at a slower pace. This tutorial assumes those mechanics. The [Symbolics tutorial](symbolics-institution-tutorial.md) covers the chain-side typed-formula machinery from D32; Catalyst doesn't yet consume FormulaTerms (it carries network sources as Julia macro strings), so D32 is background rather than load-bearing here.
 
@@ -20,7 +20,7 @@ The institutional value is what this gives downstream consumers:
 
 - **Chain-typed conservation laws** become indexable. EigenQL queries can ask "which conservation laws hold in network N?" or "across all networks committed to layer L, which share a conservation law with coefficient pattern P?".
 - **Reaction networks become first-class chain resources**, available as inputs to comorphisms. The `Catalyst → DiffEq` comorphism (D27 §4.4.4, still ahead) takes a `ReactionNetwork` and produces an `OdeProblem` for time-course simulation. The `Catalyst → Symbolics` comorphism (via ModelingToolkit) takes the same network and produces an `ODESystem` for symbolic manipulation. Both depend on `ReactionNetwork` being a typed chain shape — which is what this v1 lands.
-- **The kinase assay's IC₅₀ measurements gain a mechanistic anchor.** The kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../notebooks/examples/kinase-screening.json)) is currently flat — IC₅₀ values for each (compound, target, protocol) row, no model behind them. With Catalyst on the chain, the *enzyme-kinetic mechanism* underneath each measurement can be a chain-committed network that downstream comorphisms can solve, fit, or compare. v1 doesn't wire that pipeline end-to-end (DiffEq isn't here yet), but it lays the network-and-conservation-law foundation that makes it possible.
+- **The kinase assay's IC₅₀ measurements gain a mechanistic anchor.** The kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../../notebooks/examples/kinase-screening.json)) is currently flat — IC₅₀ values for each (compound, target, protocol) row, no model behind them. With Catalyst on the chain, the *enzyme-kinetic mechanism* underneath each measurement can be a chain-committed network that downstream comorphisms can solve, fit, or compare. v1 doesn't wire that pipeline end-to-end (DiffEq isn't here yet), but it lays the network-and-conservation-law foundation that makes it possible.
 
 ## The kinase mechanism
 
@@ -51,7 +51,7 @@ If you committed a fourth claim with coefficients that *aren't* in the conservat
 - The workspace built once.
 - **Patience for the cold env build.** Catalyst.jl pulls ModelingToolkit, SymbolicUtils, DiffEqBase, and a long tail of SciML dependencies; first-run `Pkg.precompile` takes ~10 minutes. Subsequent rebuilds hit buildah's layer cache and finish in seconds.
 
-The institution sources used throughout live at [`julia/institutions/catalyst/`](../../../julia/institutions/catalyst/):
+The institution sources used throughout live at [`julia/institutions/catalyst/`](../../../../julia/institutions/catalyst/):
 
 ```
 julia/institutions/catalyst/
@@ -119,7 +119,7 @@ Where Symbolics declared six QueryClasses across three dispatch roles, Catalyst 
 
 ## Step 4 — Read the handler
 
-The handler at [`EigeniusCatalyst.jl`](../../../julia/institutions/catalyst/EigeniusCatalyst/src/EigeniusCatalyst.jl) is small. The three pieces worth reading:
+The handler at [`EigeniusCatalyst.jl`](../../../../julia/institutions/catalyst/EigeniusCatalyst/src/EigeniusCatalyst.jl) is small. The three pieces worth reading:
 
 ### Network parsing
 
@@ -317,7 +317,7 @@ The `ReactionNetwork` chain shape exists precisely so that downstream institutio
 
 - A `CatalystToOdeInput { network, initial_conditions, parameter_values, time_span_start, time_span_end }` composite class on the Catalyst side bundles everything needed to compile a network to a solvable problem.
 - An `ExportFormat ef_cat_to_ode_input` (Catalyst-side) and an `ImportFormat if_diffeq_problem` (DiffEq-side) declare the typed boundary — both with `payload_type = diffeq:OdeProblem` (the same FormulaTerm-typed shape DiffEq's institution gates).
-- A chain-committed `Comorphism(ef_cat_to_ode_input, m_id_ode_problem, if_diffeq_problem)` triple at [`julia/comorphisms/catalyst-to-diffeq.eigon.json`](../../../julia/comorphisms/catalyst-to-diffeq.eigon.json) makes the typed contract first-class. The transformation `m_id_ode_problem` is the identity Lambda on `OdeProblem` — both ends speak the same shape, so the typed middle is a no-op (same pattern as the Symbolics → IntervalArithmetic identity comorphism).
+- A chain-committed `Comorphism(ef_cat_to_ode_input, m_id_ode_problem, if_diffeq_problem)` triple at [`julia/comorphisms/catalyst-to-diffeq.eigon.json`](../../../../julia/comorphisms/catalyst-to-diffeq.eigon.json) makes the typed contract first-class. The transformation `m_id_ode_problem` is the identity Lambda on `OdeProblem` — both ends speak the same shape, so the typed middle is a no-op (same pattern as the Symbolics → IntervalArithmetic identity comorphism).
 - The operational backing is an OnDemand `qc_cat_to_ode` QueryClass invokable via FIBER. The Catalyst handler's `compile_to_ode(input::CatalystToOdeInput)` walks `Catalyst.netstoichmat(rn) * Catalyst.oderatelaw.(reactions(rn))` to get the symbolic per-species RHS, translates each via `num_to_formula` to a chain-typed `FormulaTerm`, and packs them into an `OdeProblem` mirror struct DiffEq can integrate.
 
 In other words: with both institutions on the chain, the kinase mechanism flows end-to-end as **`ReactionNetwork → (qc_cat_to_ode FIBER) → OdeProblem (FormulaTerm RHS) → (DiffEq AutoOnLoad) → OdeSolution`** — a fully chain-typed pipeline from biochemical mechanism to integrated trajectory. See [the DiffEq tutorial](diffeq-institution-tutorial.md) for the receiving side.
@@ -337,7 +337,7 @@ With Catalyst → DiffEq in place, the chain has the missing primitive for mecha
 - A comorphism into JuMP takes `(network, observed_IC50)` and produces a parameter-fit problem; the fitted parameters get committed back as `KinaseAssayMechanism.parameter_assignments`.
 - A `DiffEq → IntervalArithmetic` comorphism (the third in the chain) walks the FormulaTerm RHS under interval semantics + the integrated trajectory's time grid to produce rigorous bounds — the assay's 95% CI becomes a *mathematically-bounded* confidence interval rather than a statistical one.
 
-That's where the kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic claims with end-to-end interval-bounded provenance." The Catalyst institution + the comorphism wired in this session is the first two foundation stones.
+That's where the kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic claims with end-to-end interval-bounded provenance." The Catalyst institution + the comorphism wired in this session is the first two foundation stones.
 
 ## Common failure modes
 

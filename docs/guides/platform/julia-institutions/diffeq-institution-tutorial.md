@@ -8,7 +8,7 @@ This walkthrough wires the DiffEq institution end-to-end — the Eigenius instit
 - Built the env image with the `EigeniusDiffEq` handler package + a precompiled `OrdinaryDiffEq.jl`.
 - Watched two `OdeSolution` claims fire the AutoOnLoad gate — one with the right closed-form final state (Holds, accepted), one with a wildly wrong final state (Fails, rejected at commit).
 
-The script form lives at [`demo/diffeq/run.sh`](../../../demo/diffeq/run.sh) — `just demo-diffeq` runs it end-to-end. Read this if you want to understand why DiffEq carries its RHS as a FormulaTerm rather than a Julia source string, what that buys you in cross-institution composition, and where this institution sits in the broader life-science modelling story (D27 §4.5, D32 §6).
+The script form lives at [`demo/diffeq/run.sh`](../../../../demo/diffeq/run.sh) — `just demo-diffeq` runs it end-to-end. Read this if you want to understand why DiffEq carries its RHS as a FormulaTerm rather than a Julia source string, what that buys you in cross-institution composition, and where this institution sits in the broader life-science modelling story (D27 §4.5, D32 §6).
 
 If you haven't seen [the intervals tutorial](intervals-institution-tutorial.md) yet, read that first — it covers the substrate plumbing at a slower pace. The [Symbolics tutorial](symbolics-institution-tutorial.md) introduces the chain-side typed-formula machinery from D32; **DiffEq is the second institution to consume FormulaTerms** (after IntervalArithmetic's `qc_compute_bounds`), and the comorphism story really starts paying off here. The [Catalyst tutorial](catalyst-institution-tutorial.md) introduces the kinase mechanism whose time-course this institution can integrate via the `Catalyst → DiffEq` comorphism — see [Where this is heading](#where-this-is-heading).
 
@@ -34,8 +34,8 @@ The RHS function `f(u, p, t) = du/dt` is exactly the kind of expression D32's `f
 Three things this buys, none of which work if the RHS is a Julia source string:
 
 1. **Validator type-checking at commit.** A FormulaTerm value gets structurally validated against the chain's ctor schema and the operator catalog. A source string sails through unchecked; an unknown operator IRI shows up only at dispatch time when the worker explodes mid-integration.
-2. **Cross-institution comorphism.** A `Symbolics.SymbolicExpression` carries a FormulaTerm; with DiffEq also speaking FormulaTerm, a `Symbolics → DiffEq` comorphism is the identity on FormulaTerm (per [D32 §6.2](../../design/d32-chain-mirrored-mini-tt-inductives.md#62-concrete-example---symbolics--intervalarithmetic)). Source strings broke that pairing.
-3. **Interval-extension reuse.** [`EigeniusIntervals.formula_to_interval`](../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl) walks FormulaTerm under interval semantics. The (still-ahead) `DiffEq → IntervalArithmetic` comorphism that bounds an integrated trajectory reuses that machinery — only because DiffEq's RHS is *the same FormulaTerm shape* the interval institution already understands.
+2. **Cross-institution comorphism.** A `Symbolics.SymbolicExpression` carries a FormulaTerm; with DiffEq also speaking FormulaTerm, a `Symbolics → DiffEq` comorphism is the identity on FormulaTerm (per [D32 §6.2](../../../design/d32-chain-mirrored-mini-tt-inductives.md#62-concrete-example---symbolics--intervalarithmetic)). Source strings broke that pairing.
+3. **Interval-extension reuse.** [`EigeniusIntervals.formula_to_interval`](../../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl) walks FormulaTerm under interval semantics. The (still-ahead) `DiffEq → IntervalArithmetic` comorphism that bounds an integrated trajectory reuses that machinery — only because DiffEq's RHS is *the same FormulaTerm shape* the interval institution already understands.
 
 ## How a FormulaTerm RHS encodes
 
@@ -81,7 +81,7 @@ Free variables outside this set raise an error from the handler — there's no i
 - The workspace built once.
 - **Patience for the cold env build.** OrdinaryDiffEq.jl pulls the SciML dep tail (SciMLBase, RecursiveArrayTools, FunctionWrappers, NonlinearSolve, …); first-run `Pkg.precompile` takes ~5 minutes. Cached after that.
 
-The institution sources used throughout live at [`julia/institutions/diffeq/`](../../../julia/institutions/diffeq/):
+The institution sources used throughout live at [`julia/institutions/diffeq/`](../../../../julia/institutions/diffeq/):
 
 ```
 julia/institutions/diffeq/
@@ -116,7 +116,7 @@ The ontology declares three classes:
 
 A few worth pausing on:
 
-- **`rhs: resource_array<RhsComponent>`** — a list of typed wrappers. `RhsComponent` is a one-property class wrapping a FormulaTerm. The wrapper exists because the chain doesn't have a parametric `core:List<T>` shape yet ([D32 §3.4](../../design/d32-chain-mirrored-mini-tt-inductives.md) sketches it as future work); the wrapper class works with existing chain machinery and leaves room for per-component metadata to grow later (provenance refs, doc strings, etc.).
+- **`rhs: resource_array<RhsComponent>`** — a list of typed wrappers. `RhsComponent` is a one-property class wrapping a FormulaTerm. The wrapper exists because the chain doesn't have a parametric `core:List<T>` shape yet ([D32 §3.4](../../../design/d32-chain-mirrored-mini-tt-inductives.md) sketches it as future work); the wrapper class works with existing chain machinery and leaves room for per-component metadata to grow later (provenance refs, doc strings, etc.).
 - **`state_names` / `parameter_names`** — value arrays of strings. These are the canonical positional ordering the FormulaTerms reference by name. Length must match `initial_conditions` / `parameters`; the handler enforces this at dispatch.
 - **`abstol` / `reltol`** — both required on every `OdeSolution`. The institution enforces no defaults at the chain shape (you choose your fidelity at commit time and live with it forever).
 - **`algorithm: string`** — the named OrdinaryDiffEq integrator. v1 supports `Tsit5` (5th-order RK, default for non-stiff problems), `Vern9` (9th-order, high accuracy), `Rosenbrock23` / `Rodas5` / `Rodas5P` (stiff), and `QNDF` / `FBDF` (very stiff). Adding an algorithm = one entry in the handler's `_ALG_REGISTRY` map. The validator doesn't restrict the string at commit; an unsupported name shows up as `Fails` at dispatch.
@@ -152,7 +152,7 @@ Cold runs take ~5 minutes — OrdinaryDiffEq's dep tree is substantial. Faster t
 
 ## Step 4 — Read the handler
 
-The handler at [`EigeniusDiffEq.jl`](../../../julia/institutions/diffeq/EigeniusDiffEq/src/EigeniusDiffEq.jl) has four pieces worth reading.
+The handler at [`EigeniusDiffEq.jl`](../../../../julia/institutions/diffeq/EigeniusDiffEq/src/EigeniusDiffEq.jl) has four pieces worth reading.
 
 ### The algorithm registry
 
@@ -314,7 +314,7 @@ Load failed:
   InstitutionValidation: AutoOnLoad QueryClass `solution_validity` returned Fails
 ```
 
-The tolerance check refutes: `|0.5 - 0.368| = 0.132`, bound is `1e-8`, way over. Per [D31 §6.3](../../design/d31-external-institution-lifecycle.md), the gated commit is rejected; the chain stays consistent. The `Verdict + RuntimeInvocation` audit anchor *does* commit (on a side layer) so the rejection has a verifiable cause.
+The tolerance check refutes: `|0.5 - 0.368| = 0.132`, bound is `1e-8`, way over. Per [D31 §6.3](../../../design/d31-external-institution-lifecycle.md), the gated commit is rejected; the chain stays consistent. The `Verdict + RuntimeInvocation` audit anchor *does* commit (on a side layer) so the rejection has a verifiable cause.
 
 ## Step 10 — Inspect the verdicts
 
@@ -355,7 +355,7 @@ DiffEq v1.5 (this version, with FormulaTerm-typed RHS) is the foundation. The in
 
 **The `DiffEq → IntervalArithmetic` comorphism** (eventually):
 - A `BoundedTrajectory` claim class on the IntervalArithmetic side: claim that `u(t)` stays within an interval over the time domain.
-- The transformation walks DiffEq's FormulaTerm RHS under interval-arithmetic semantics + the OdeSolution's time grid to produce the bound. Reuses [`EigeniusIntervals.formula_to_interval`](../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl) — the *same FormulaTerm walker* the cross-institution probe ([`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../crates/eigenius-julia/tests/cross_institution_probe.rs)) already demonstrates for `compute_bounds`.
+- The transformation walks DiffEq's FormulaTerm RHS under interval-arithmetic semantics + the OdeSolution's time grid to produce the bound. Reuses [`EigeniusIntervals.formula_to_interval`](../../../../julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl) — the *same FormulaTerm walker* the cross-institution probe ([`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs)) already demonstrates for `compute_bounds`.
 
 **DiffEq v2** (independent of comorphism work):
 - **`ReproducibleIntegration`** claims with trajectory-hash content addressing — bit-reproducibility audits per D27 §4.5.1.
@@ -366,7 +366,7 @@ DiffEq v1.5 (this version, with FormulaTerm-typed RHS) is the foundation. The in
 - ReactionNetwork (Catalyst) → OdeProblem (Catalyst→DiffEq comorphism) → OdeSolution (DiffEq AutoOnLoad).
 - Parameter sweep over inhibitor concentration → numerical IC₅₀.
 - IntervalArithmetic-bounded confidence intervals via the FormulaTerm-shared interval extension.
-- The kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic predictions cross-checked against assay measurements with rigorous confidence intervals."
+- The kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic predictions cross-checked against assay measurements with rigorous confidence intervals."
 
 Each of these stacks on top of the FormulaTerm-typed RHS this version pins. They wouldn't compose if DiffEq's RHS were a Julia source string.
 

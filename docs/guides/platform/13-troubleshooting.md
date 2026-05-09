@@ -1,8 +1,8 @@
-# 12. Troubleshooting and FAQ
+# 13. Troubleshooting and FAQ
 
 Common issues organised by symptom. For each, the diagnosis and the fix.
 
-## 12.1. Build failures
+## 13.1. Build failures
 
 ### `error: failed to run custom build command for prost-build`
 
@@ -48,7 +48,7 @@ error: the 'wasm32-unknown-unknown' target may not be installed
 
 **Fix:** `cd orchestration && deno cache --reload src/main.ts`.
 
-## 12.2. Server startup
+## 13.2. Server startup
 
 ### `Error: Address already in use (os error 98)` on port 50051
 
@@ -83,7 +83,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** Start the orchestrator first; verify with `curl http://localhost:8080/health`. The kernel won't fail outright on a missing orchestrator (some operations work without it), but it will retry the connection — which can look like a hang.
 
-## 12.3. Orchestrator
+## 13.3. Orchestrator
 
 ### `Error: Module not found "ai" or "@ai-sdk/anthropic"`
 
@@ -109,7 +109,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** Switch to real mode (set `ANTHROPIC_API_KEY`, unset `EIGENIUS_MOCK_LLM`) for end-to-end testing of LLM behaviour.
 
-## 12.4. CLI ↔ kernel connection
+## 13.4. CLI ↔ kernel connection
 
 ### `Error: connection error` when running CLI commands
 
@@ -129,7 +129,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** Either use `--endpoint <url>` with a running kernel (load and query against the same chain), or use the `--file` option of `query` to load and query in one invocation.
 
-## 12.5. Capability install
+## 13.5. Capability install
 
 ### `Error: WIT mismatch: expected 'eigenius-component', got '...'`
 
@@ -157,7 +157,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** Verify the orchestrator can reach the kernel: from the orchestrator's container, `curl http://kernel:50051/health` (or whatever endpoint is configured). Restart both services with consistent endpoints.
 
-## 12.6. Layer / data issues
+## 13.6. Layer / data issues
 
 ### `Validation failed: required property 'X' missing on resource 'Y'`
 
@@ -177,7 +177,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** Find the cycle in your ontology and break it. Subclass chains must be acyclic.
 
-## 12.7. Performance
+## 13.7. Performance
 
 ### Queries slow down over time
 
@@ -191,7 +191,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** For repeated runs of the same program over the same input, the kernel's trace store memoises component dispatches — the second run is much faster than the first. For development iteration, use `EIGENIUS_MOCK_LLM=true` to skip the LLM round-trip.
 
-## 12.8. Frequently-asked questions
+## 13.8. Frequently-asked questions
 
 ### Can I run the kernel without the orchestrator?
 
@@ -238,4 +238,4 @@ Containers don't share the host's `localhost` namespace. From inside a container
 
 ---
 
-Next: **[13. Notebook →](13-notebook.md)**
+Next: **[14. Notebook →](14-notebook.md)**
