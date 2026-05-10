@@ -32,6 +32,7 @@ mod cache;
 mod handle;
 mod index;
 mod storage;
+mod supporting;
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{
@@ -44,6 +45,7 @@ pub use index::{
     scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
 pub use storage::LayerStorage;
+pub use supporting::compute_supporting_layer;
 
 /// Construct an `Arc<Layer>` chain from chain metadata.
 ///
@@ -79,7 +81,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
-/// Content-addressed layer identifier (SHA-256 hash).
+/// Position-addressed layer identifier (SHA-256 hash).
+///
+/// Encodes a layer's *position* in the DAG: the hash covers the layer's
+/// content hash and the (sorted) ids of its topological parents. Two
+/// layers with identical content but different parent sets get
+/// different `LayerId`s — the structural payoff of the position/content
+/// split per [D25 §11.0](../../docs/design/d25-chain-consolidation.md)
+/// and [D33 §5.1](../../docs/design/d33-partial-order-chains.md).
+///
+/// [`PositionHash`] is the precision-preferred alias used by code that
+/// is making the position-vs-content distinction explicit; `LayerId` is
+/// the historical name retained for call-site stability. They are the
+/// same type.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct LayerId(pub [u8; 32]);
 
@@ -90,6 +104,42 @@ impl fmt::Debug for LayerId {
 }
 
 impl fmt::Display for LayerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
+
+/// Position-addressed layer identifier — alias for [`LayerId`].
+///
+/// Prefer this name in new code where the position-vs-content
+/// distinction matters (chain walks, parent pointers, branch refs).
+/// `LayerId` remains as the historical name; both resolve to the same
+/// type.
+pub type PositionHash = LayerId;
+
+/// Content-only hash of a layer (SHA-256 over its resources).
+///
+/// Distinct from [`PositionHash`]: two layers committed at different
+/// positions in the DAG with the same resources share a `ContentHash`
+/// but have different `PositionHash`es. Used by content-hash dedup
+/// (D25 §11.0), tag targets (D25 §12.1), cell-output cache keys
+/// (D33 §6), and commutativity-equivalence checks (D33 §5.2) — all of
+/// which need a stable identity for chain *content* that's independent
+/// of where in the DAG the content was first committed.
+///
+/// `ContentHash` is a distinct type from `PositionHash` so the type
+/// checker catches accidental mixing: passing a content hash where a
+/// position hash is expected (or vice versa) is a compile error.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct ContentHash(pub [u8; 32]);
+
+impl fmt::Debug for ContentHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ContentHash({})", hex::encode(self.0))
+    }
+}
+
+impl fmt::Display for ContentHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0))
     }
@@ -127,6 +177,20 @@ impl fmt::Display for LayerId {
 #[derive(Clone)]
 pub struct Layer {
     id: LayerId,
+    /// Content-only hash of this layer's resources, independent of position.
+    /// Two layers with identical resources at different DAG positions share
+    /// this hash. Used by content-hash dedup (D25 §11.0), cell-output cache
+    /// keys (D33 §6), and tag targets (D25 §12.1).
+    content_hash: ContentHash,
+    /// Supporting layer per D33 §4.3 — the youngest ancestor this
+    /// layer explicitly depends on. `None` for the root layer, for
+    /// layers with no external references, and (transiently) for
+    /// pre-PR-0 layers whose supporting layer hasn't been back-filled
+    /// yet. Computed by `compute_supporting_layer` and cached here
+    /// from `LayerBuilder::build`; PR 0 step 4 adds the persistent
+    /// supporting-layer index that back-fills handles loaded from
+    /// older storage.
+    supporting_layer: Option<LayerId>,
     name: String,
     /// Topological parents. Empty for the root layer; one entry for
     /// every Phase-14d-and-prior layer; multiple entries for
@@ -166,6 +230,10 @@ impl Layer {
     /// (handle), parent pointer (single-parent path; for multi-parent
     /// merge layers, see `from_handle_multi`), the set of IRIs this
     /// layer defines, and the storage bundle for lazy reads.
+    ///
+    /// The handle carries both the position hash (`handle.id`) and the
+    /// content hash (`handle.content_hash`); both are written into the
+    /// reconstructed `Layer` unchanged.
     pub fn from_handle(
         handle: LayerHandle,
         parent: Option<Arc<Layer>>,
@@ -174,6 +242,8 @@ impl Layer {
     ) -> Self {
         Self {
             id: handle.id,
+            content_hash: handle.content_hash,
+            supporting_layer: handle.supporting_layer,
             name: handle.name,
             parents: parent.into_iter().collect(),
             defined_iris,
@@ -185,7 +255,7 @@ impl Layer {
     /// trivial-merge case). The parents must be supplied in the
     /// canonical order they appear in `LayerHandle.parents` — that
     /// order is part of the layer's identity (see
-    /// `LayerBuilder::compute_layer_id`).
+    /// `LayerBuilder::compute_position_hash`).
     pub fn from_handle_multi(
         handle: LayerHandle,
         parents: Vec<Arc<Layer>>,
@@ -194,6 +264,8 @@ impl Layer {
     ) -> Self {
         Self {
             id: handle.id,
+            content_hash: handle.content_hash,
+            supporting_layer: handle.supporting_layer,
             name: handle.name,
             parents,
             defined_iris,
@@ -201,9 +273,32 @@ impl Layer {
         }
     }
 
-    /// Returns the content-addressed identifier of this layer.
+    /// Returns the position-addressed identifier of this layer.
     pub fn id(&self) -> &LayerId {
         &self.id
+    }
+
+    /// Returns the content-only hash of this layer (independent of position).
+    /// See [`ContentHash`] for the position-vs-content distinction.
+    pub fn content_hash(&self) -> &ContentHash {
+        &self.content_hash
+    }
+
+    /// Returns the cached supporting layer per D33 §4.3 — the youngest
+    /// ancestor this layer explicitly depends on.
+    ///
+    /// `None` means one of:
+    /// - This is the root layer (no ancestors).
+    /// - The layer has no external references (pure top-level
+    ///   definitions only).
+    /// - The layer was committed by a pre-PR-0 kernel and the
+    ///   supporting layer hasn't been back-filled yet (PR 0 step 4
+    ///   ships the lazy back-fill path).
+    ///
+    /// To compute the supporting layer for a not-yet-committed
+    /// resource set, use [`compute_supporting_layer`] directly.
+    pub fn supporting_layer(&self) -> Option<&LayerId> {
+        self.supporting_layer.as_ref()
     }
 
     /// Returns the human-readable name of this layer.
@@ -485,8 +580,18 @@ impl LayerBuilder {
         // canonicalisation pass.
         canonicalise_resource_refs(&mut self.resources, &self.parents);
 
-        let id = self.compute_layer_id();
+        let content_hash = compute_content_hash(&self.resources);
+        let id = compute_position_hash(&content_hash, &self.parents);
         let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
+        // Supporting layer (D33 §4.3). Computed against the builder's
+        // owned resources before they move into the cache; the result
+        // is cached on the `Layer` and (PR 0 step 4) persisted to the
+        // supporting-layer index. Multi-parent merge layers use
+        // `parents.first()` — matches `Layer::parent()`'s chain-walk
+        // contract; trivial-merge's union-of-defined-iris discipline
+        // means everything below LCA is reachable via the first parent.
+        let supporting_layer =
+            compute_supporting_layer(&self.resources, &defined_iris, self.parents.first());
         for (iri, resource) in self.resources {
             let key = ResourceKey::new(id.clone(), iri);
             // Freshly-built layers are top-of-stack by definition.
@@ -502,6 +607,8 @@ impl LayerBuilder {
         storage.bloom_cache.put(id.clone(), Arc::new(bloom));
         let layer = Layer {
             id,
+            content_hash,
+            supporting_layer,
             name: self.name,
             parents: self.parents,
             defined_iris,
@@ -532,44 +639,68 @@ impl LayerBuilder {
         }
         layer
     }
+}
 
-    /// Compute the content-and-parent-addressed `LayerId`.
-    ///
-    /// **Phase 14e**: parent IDs are hashed into the layer ID alongside
-    /// the resource content. This was a pre-existing latent bug that
-    /// trivial merge would have exposed: two layers with identical
-    /// content but different parents would collide on `LayerId`, and
-    /// `put_topology_entry` would overwrite the first's parents with the
-    /// second's. With parents in the hash, distinct positions in the
-    /// DAG always produce distinct ids.
-    ///
-    /// **Hash domain.** Parent IDs first (in the order supplied to the
-    /// builder — that order is part of the layer's identity), then
-    /// resource content in IRI-sorted order. Same SHA-256 algorithm.
-    /// Pre-14e DBs that still contain content-only-hashed layers must
-    /// be rebuilt; recovery is `rm -rf <db>` + reload.
-    fn compute_layer_id(&self) -> LayerId {
-        let mut hasher = Sha256::new();
-
-        // Domain-separator + parent count, so a layer with no parents and
-        // the same resource set as one with parents can never collide.
-        hasher.update(b"layer:v2:");
-        hasher.update((self.parents.len() as u64).to_le_bytes());
-        for parent in &self.parents {
-            hasher.update(parent.id().0);
-        }
-
-        // Resource content in IRI-sorted order (BTreeMap iteration).
-        for (iri, resource) in &self.resources {
-            hasher.update(iri.as_str().as_bytes());
-            hasher.update(crate::ontology::eigon_cbor::canonicalize(resource));
-        }
-
-        let hash = hasher.finalize();
-        let mut id = [0u8; 32];
-        id.copy_from_slice(&hash);
-        LayerId(id)
+/// Compute the content-only hash of a resource set.
+///
+/// Hash domain: `b"content:v1:"` (domain separator) ‖ for each
+/// `(iri, resource)` pair in IRI-sorted order, the IRI bytes followed
+/// by `canonical_eigon_cbor(resource)`. The result identifies the
+/// chain *content* independent of where in the DAG the content was
+/// committed: see [`ContentHash`].
+///
+/// This pairs with [`compute_position_hash`] which folds the content
+/// hash together with the sorted parent ids to produce the position
+/// hash that addresses the layer's slot in the DAG.
+pub fn compute_content_hash(resources: &BTreeMap<Iri, Resource>) -> ContentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(b"content:v1:");
+    // Resource content in IRI-sorted order (BTreeMap iteration).
+    for (iri, resource) in resources {
+        hasher.update(iri.as_str().as_bytes());
+        hasher.update(crate::ontology::eigon_cbor::canonicalize(resource));
     }
+    let hash = hasher.finalize();
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&hash);
+    ContentHash(bytes)
+}
+
+/// Compute the position-addressed `PositionHash` (aka `LayerId`) of a
+/// layer.
+///
+/// Hash domain: `b"position:v1:"` (domain separator) ‖ content hash ‖
+/// parent count (little-endian u64) ‖ sorted parent position-hash
+/// bytes. Sorting the parent ids makes the hash commutative over
+/// parent order — a merge that combines (A, B) is the same layer as
+/// one that combines (B, A), matching trivial-merge semantics
+/// (D33 §4.5).
+///
+/// **Wire-format note.** This is a deliberate break from Phase 14e's
+/// `b"layer:v2:"` hash domain. The new content/position split makes
+/// existing persistent DBs unreadable; recovery is `rm -rf <db>` +
+/// reload. The break is justified per
+/// [D25 §11.0](../../docs/design/d25-chain-consolidation.md) and
+/// [D33 §5.1](../../docs/design/d33-partial-order-chains.md).
+pub fn compute_position_hash(content_hash: &ContentHash, parents: &[Arc<Layer>]) -> PositionHash {
+    let mut hasher = Sha256::new();
+    hasher.update(b"position:v1:");
+    hasher.update(content_hash.0);
+    hasher.update((parents.len() as u64).to_le_bytes());
+
+    // Sort parent ids so merge layers hash commutatively over parent
+    // order. Single-parent and root layers are unaffected; the sort is
+    // a no-op for those cases.
+    let mut sorted_parent_ids: Vec<&[u8; 32]> = parents.iter().map(|p| &p.id().0).collect();
+    sorted_parent_ids.sort();
+    for pid in sorted_parent_ids {
+        hasher.update(pid);
+    }
+
+    let hash = hasher.finalize();
+    let mut id = [0u8; 32];
+    id.copy_from_slice(&hash);
+    LayerId(id)
 }
 
 // ─── Canonical resource-reference shape ────────────────────────────────
@@ -973,6 +1104,291 @@ mod tests {
                 .get(&iri("urn:eigenius:core:description"))
                 .and_then(|v| v.as_str()),
             Some("from_root"),
+        );
+    }
+
+    // ─── PR 0 cross-cutting: two-hash identity + supporting layer ──────────
+    //
+    // Each test below pins one structural invariant of the two-hash split
+    // (D25 §11.0 / D33 §5.1) or the supporting-layer computation
+    // (D33 §4.3). They share the convention that `position_hash` is
+    // `Layer::id` and `content_hash` is `Layer::content_hash` — the
+    // type-system layer pinning is in the `LayerId` / `ContentHash`
+    // definitions, here we pin the *runtime* invariants.
+
+    /// Same resources + same parents must yield the same content hash
+    /// AND the same position hash. Strengthens `deterministic_layer_id`
+    /// (which only pins the position hash) and is the minimum
+    /// reproducibility property for cell-output cache hits (D33 §6).
+    #[test]
+    fn deterministic_two_hashes() {
+        let build = || {
+            let storage = test_storage();
+            let mut builder = LayerBuilder::new("test", None);
+            builder
+                .add_resource(make_resource(
+                    "urn:eigenius:core:A",
+                    vec![(
+                        "urn:eigenius:core:description",
+                        Value::String("hello".into()),
+                    )],
+                ))
+                .unwrap();
+            builder.build(storage)
+        };
+        let l1 = build();
+        let l2 = build();
+        assert_eq!(
+            l1.content_hash(),
+            l2.content_hash(),
+            "same resources must produce identical content hashes"
+        );
+        assert_eq!(
+            l1.id(),
+            l2.id(),
+            "same resources + same parents must produce identical position hashes"
+        );
+    }
+
+    /// The structural payoff of the position/content split:
+    /// same resources committed against different parents share a
+    /// `ContentHash` but get distinct `PositionHash`es. Without the
+    /// split there would be only one hash and the chain couldn't tell
+    /// a content-equivalent commit from a structurally-distinct one.
+    #[test]
+    fn content_hash_invariant_under_parent_change() {
+        let storage = test_storage();
+
+        // Two distinct root layers — they differ in their own content
+        // (and therefore their position hashes), but neither is referenced
+        // by the child built below.
+        let root_a = {
+            let mut b = LayerBuilder::new("root_a", None);
+            b.add_resource(make_resource("urn:eigenius:core:RootA", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        let root_b = {
+            let mut b = LayerBuilder::new("root_b", None);
+            b.add_resource(make_resource("urn:eigenius:core:RootB", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        assert_ne!(root_a.id(), root_b.id());
+        assert_ne!(root_a.content_hash(), root_b.content_hash());
+
+        // Two child layers with byte-identical resource content,
+        // attached to different parents.
+        let make_child = |parent: Arc<Layer>| -> Layer {
+            let mut b = LayerBuilder::new("child", Some(parent));
+            b.add_resource(make_resource(
+                "urn:eigenius:demo:shared",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("identical".into()),
+                )],
+            ))
+            .unwrap();
+            b.build(storage.clone())
+        };
+        let c_a = make_child(Arc::clone(&root_a));
+        let c_b = make_child(Arc::clone(&root_b));
+
+        assert_eq!(
+            c_a.content_hash(),
+            c_b.content_hash(),
+            "identical resource sets must share a content hash regardless of parent"
+        );
+        assert_ne!(
+            c_a.id(),
+            c_b.id(),
+            "different parents must produce distinct position hashes"
+        );
+    }
+
+    /// Multi-parent (merge) position hash is commutative over parent
+    /// order: merging `[A, B]` produces the same layer as merging
+    /// `[B, A]`. Pinned by `compute_position_hash` sorting parent ids
+    /// before hashing (D33 §5.1).
+    #[test]
+    fn position_hash_commutes_over_parent_order() {
+        let storage = test_storage();
+
+        let parent_a = {
+            let mut b = LayerBuilder::new("a", None);
+            b.add_resource(make_resource("urn:eigenius:core:A", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        let parent_b = {
+            let mut b = LayerBuilder::new("b", None);
+            b.add_resource(make_resource("urn:eigenius:core:B", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        assert_ne!(parent_a.id(), parent_b.id());
+
+        // Two merge layers with identical content but reversed parent
+        // ordering at construction time.
+        let merge_ab = {
+            let b = LayerBuilder::with_parents(
+                "merge",
+                vec![Arc::clone(&parent_a), Arc::clone(&parent_b)],
+            );
+            b.build(storage.clone())
+        };
+        let merge_ba = {
+            let b = LayerBuilder::with_parents(
+                "merge",
+                vec![Arc::clone(&parent_b), Arc::clone(&parent_a)],
+            );
+            b.build(storage.clone())
+        };
+        assert_eq!(
+            merge_ab.content_hash(),
+            merge_ba.content_hash(),
+            "merge layers with no resources have identical content hashes"
+        );
+        assert_eq!(
+            merge_ab.id(),
+            merge_ba.id(),
+            "position hash must commute over parent order for trivial-merge semantics"
+        );
+    }
+
+    /// Layers committed against different parents have different
+    /// position hashes even when content is identical — confirms the
+    /// position hash is genuinely parent-dependent.
+    #[test]
+    fn position_hash_distinguishes_distinct_parents() {
+        let storage = test_storage();
+
+        let p1 = {
+            let mut b = LayerBuilder::new("p1", None);
+            b.add_resource(make_resource("urn:eigenius:core:P1", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        let p2 = {
+            let mut b = LayerBuilder::new("p2", None);
+            b.add_resource(make_resource("urn:eigenius:core:P2", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+
+        // Same trivial child content against each parent.
+        let c1 = {
+            let mut b = LayerBuilder::new("child", Some(Arc::clone(&p1)));
+            b.add_resource(make_resource("urn:eigenius:demo:X", vec![]))
+                .unwrap();
+            b.build(storage.clone())
+        };
+        let c2 = {
+            let mut b = LayerBuilder::new("child", Some(Arc::clone(&p2)));
+            b.add_resource(make_resource("urn:eigenius:demo:X", vec![]))
+                .unwrap();
+            b.build(storage.clone())
+        };
+
+        assert_eq!(c1.content_hash(), c2.content_hash());
+        assert_ne!(c1.id(), c2.id());
+    }
+
+    /// Layer name is metadata-only: two layers with the same resources
+    /// + parents but different names must share both hashes. Pins that
+    /// the `name` field is *not* in the content hash (cell-output
+    /// cache must hit across cosmetic renames).
+    #[test]
+    fn name_is_not_in_content_or_position_hash() {
+        let storage = test_storage();
+        let make = |name: &str| {
+            let mut b = LayerBuilder::new(name, None);
+            b.add_resource(make_resource(
+                "urn:eigenius:core:A",
+                vec![("urn:eigenius:core:description", Value::String("x".into()))],
+            ))
+            .unwrap();
+            b.build(storage.clone())
+        };
+        let l_alpha = make("alpha");
+        let l_beta = make("beta");
+        assert_eq!(l_alpha.content_hash(), l_beta.content_hash());
+        assert_eq!(l_alpha.id(), l_beta.id());
+        assert_ne!(l_alpha.name(), l_beta.name());
+    }
+
+    /// Supporting-layer computation is deterministic: rebuilding the
+    /// same layer against the same parent chain produces the same
+    /// supporting-layer answer. This matches the back-fill-free
+    /// migration story (no need to coordinate concurrent recomputes —
+    /// they always agree).
+    #[test]
+    fn supporting_layer_is_deterministic() {
+        let storage = test_storage();
+
+        let root = {
+            let mut b = LayerBuilder::new("root", None);
+            b.add_resource(make_resource("urn:eigenius:core:ClassA", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        let make_child = || {
+            let mut b = LayerBuilder::new("child", Some(Arc::clone(&root)));
+            let mut r = Resource::new(iri("urn:eigenius:demo:X"));
+            r.set(
+                iri("urn:eigenius:core:is_a"),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+            );
+            b.add_resource(r).unwrap();
+            b.build(storage.clone())
+        };
+        let c1 = make_child();
+        let c2 = make_child();
+        assert_eq!(c1.id(), c2.id());
+        assert_eq!(c1.supporting_layer(), c2.supporting_layer());
+        assert_eq!(c1.supporting_layer(), Some(root.id()));
+    }
+
+    /// Position hash distinguishes a single-parent layer from a
+    /// no-parent layer with the same resources. Pins that the
+    /// parent count is folded into the position hash; a root layer
+    /// can never collide with a non-root layer. Uses a non-core
+    /// namespace for the shared resource so the core-namespace
+    /// restriction (only-on-root) doesn't reject the descendant build.
+    #[test]
+    fn parent_count_distinguishes_root_from_descendant() {
+        let storage = test_storage();
+
+        let parent = {
+            let mut b = LayerBuilder::new("p", None);
+            b.add_resource(make_resource("urn:eigenius:core:P", vec![]))
+                .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        // Two layers with the same resources: one as a root, one as a
+        // child of `parent`. Content hash is the same; position hash
+        // is different (different parent count + parent set).
+        let mut r_root = LayerBuilder::new("rooted", None);
+        r_root
+            .add_resource(make_resource("urn:eigenius:demo:X", vec![]))
+            .unwrap();
+        let l_root = r_root.build(storage.clone());
+
+        let mut r_child = LayerBuilder::new("rooted", Some(Arc::clone(&parent)));
+        r_child
+            .add_resource(make_resource("urn:eigenius:demo:X", vec![]))
+            .unwrap();
+        let l_child = r_child.build(storage.clone());
+
+        assert_eq!(
+            l_root.content_hash(),
+            l_child.content_hash(),
+            "same resources → same content hash"
+        );
+        assert_ne!(
+            l_root.id(),
+            l_child.id(),
+            "root vs. descendant must produce distinct position hashes"
         );
     }
 }

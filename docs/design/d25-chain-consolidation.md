@@ -352,7 +352,32 @@ The user inspects the pinned traces, decides they're stale, prunes them via the 
 
 ## 11. Test plan and sub-milestone sequencing
 
+### 11.0 Shared foundation with D33
+
+Phase 17's implementation rests on a foundation shared with D33 (partial-order chains). Bundling both phases on the same foundation avoids paying migration costs twice and keeps the two design docs in sync on their shared structural commitments. The shared foundation lands in a single prerequisite PR that PR 17a depends on:
+
+**PR 0 — Shared foundation** (~4–5 days; preconditions both this phase and D33's milestones 20b–20e):
+
+- **Two-hash identity split** in `kernel/src/layer/mod.rs`. Replace the existing single `compute_layer_id` with `compute_content_hash` (hashes resources only) + `compute_position_hash` (hashes content_hash + sorted parent ids). `LayerId` becomes an alias for `PositionHash`; `ContentHash` is added as a distinct type. `Layer` and `LayerHandle` carry both hashes.
+- **Supporting-layer computation** in `kernel/src/layer/supporting.rs` (new). Hooks into `LayerBuilder::build` alongside the existing `canonicalise_resource_refs` pass. Reference-extraction shares structure with the triple-index pass in `kernel/src/layer/index.rs`. Result is cached on `Layer.supporting_layer` and persisted on `LayerHandle.supporting_layer`; no separate index is needed for the forward query.
+- **Content-hash dedup index** as a dedicated column family. Enables `Storage::lookup_by_content_hash(ContentHash) -> Vec<PositionHash>` which 17a uses to dedup consolidated-layer content across branches that share a sub-history. This *is* a separate index because it serves reverse lookup (`ContentHash → Vec<PositionHash>`), which the topology entry can't answer on its own.
+
+Migration discipline: PR 0 changes the position-hash byte layout and adds two `LayerHandle` fields. Existing persistent DBs are unreadable after PR 0; recovery is `rm -rf <db>` + reload from source files. This matches the wire-format-break pattern already accepted for Phase 14e (see [`kernel/src/layer/mod.rs`](../../kernel/src/layer/mod.rs)'s `compute_position_hash` docstring). No back-fill path is needed.
+
+Three pre-flight decisions for PR 0:
+
+1. **`LayerId` type discipline.** Introduce `PositionHash` and `ContentHash` as distinct types with `LayerId = PositionHash` alias. Static type safety pays back when comorphism-output IRIs (content-keyed) interact with branch-ref code (position-keyed).
+2. **Supporting-layer storage location.** As a field on `LayerHandle`, computed at commit time and serialized through the existing topology entry — forward lookup is the only PR 0 / D25 v1 / D33 v1 access pattern, and the field already covers it. A reverse-lookup index (`supporting_layer → Vec<LayerId>`) is a v2 addition iff a use case lands.
+3. **Cost-cap default.** `5_000_000` walk entries for `ConsolidateOpts.max_walk_entries`; deployment-tunable via `EIGENIUS_CONSOLIDATE_MAX_WALK_ENTRIES`.
+
+This phase's 17a precondition tightens once PR 0 lands: every layer in `[from..to]` must have `supporting_layer ◁* parent(from)`. The supporting-layer field on `LayerHandle` makes the check O(|range|) lookups against already-loaded topology entries; the resolve-equivalence invariant (§4) becomes structurally guaranteed rather than hand-rolled.
+
+### 11.1 Phase 17 milestones
+
 ```
+PR 0 — shared foundation (two-hash + supporting layer + indexes)
+                              │
+                              ▼
 17a top-of-stack algorithm + atomic commit ──┐
                                               │
                                               ├─→ 17b range validation (ancestral / merge-free / pin-free)
@@ -383,13 +408,61 @@ Cross-cutting tests:
 
 ### 12.1 Auto-consolidation policy
 
-When (if ever) does the kernel consolidate without explicit user request? Three candidate shapes:
+When (if ever) does the kernel consolidate without explicit user request? The structural difficulty isn't *when* to consolidate but *what range* to pick — any auto-policy that has the kernel guess what's significant fights with the epistemic posture (§2) that says layer history matters.
 
-- **Idle-time policy.** Background task runs when the kernel has been idle for N minutes; consolidates ranges meeting heuristics (chain depth > threshold; range age > threshold).
-- **Size-pressure policy.** Triggered when chain depth or storage size crosses a threshold.
-- **Postgres-VACUUM analog.** A configured cadence runs consolidation against a sliding window.
+**Anchors as the resolution.** Rather than have the kernel guess range boundaries, define the consolidation surface in terms of *anchors* — structurally-derivable or operator-marked points the kernel never consolidates across. Three categories cluster naturally:
 
-v1 ships explicit-only. v2 will likely add an idle-time policy with conservative defaults; the size-pressure and cadence policies are deployment-tuneable.
+1. **User-authored tags.** Explicit operator-marked milestones on the chain — a release, a regulatory checkpoint, a published intermediate result, a notebook save point. Tags are first-class chain resources (sketch below).
+2. **Branch events.** Layers that any branch ref currently points at, plus layers where branches were forked (structurally derivable from the topology; Phase 14g already maintains the index).
+3. **Merge events.** Multi-parent layers from Phase 14e (trivial merge) and Phase 15 (D20). §8.1's "consolidation refuses to span merge nodes" generalises to "consolidation refuses to span anchors," with merge nodes being the canonical built-in anchor.
+
+Under the anchor framing, the auto-policy becomes structurally simple:
+
+> A range `[from..to]` is *consolidation-candidate* iff no anchor sits strictly between `from` and `to`. The auto-policy picks the oldest unconsolidated candidate range.
+
+The operator places anchors where they care about preserving chain history; the kernel consolidates within the spaces between. No heuristic about "when is a range significant" — significance is operator-declared.
+
+**Tag primitive (v2 sketch).** A new chain-resident class:
+
+```esl
+class chain:Tag {
+    requires chain:tag_name, chain:tag_target_content;
+    recommends chain:tag_message, chain:tag_target_position,
+               chain:branch, chain:created_at, chain:created_by;
+}
+```
+
+Two structural choices worth flagging:
+
+- The target is `chain:tag_target_content` (a `ContentHash`, not a `PositionHash`). Tags survive canonical-linearization rewrites (D33 v2) because the tagged *content* is durable across reordering. `chain:tag_target_position` is recommended as a convenience cache.
+- Tags are themselves chain commits — creating, listing, and deleting tags goes through the standard `eigenius load` / commit pipeline. The history of tag operations is as auditable as any other content; deletion is a tombstone resource, not an out-of-band mutation.
+
+CLI surface (v2):
+
+```
+eigenius tag create <name> [<layer-id> default head] [--message "..."] [--branch <name>]
+eigenius tag list   [--branch <name>]
+eigenius tag show   <name>
+eigenius tag delete <name>
+```
+
+**Range validation extends.** §11.0's range-validation check gains a new clause: `range_contains_anchor(from, to)` returns true if any `chain:Tag` targets a layer in `(from, to)`, if any branch ref currently points at a layer in `(from, to)`, or — the existing rule — if any layer in `(from, to)` has `parents.len() > 1`. Explicit consolidation in v1 already enforces the merge-node case; the anchor framing absorbs it cleanly when v2 adds the tag and branch-event checks.
+
+**Other uses of tags beyond consolidation.** Tags are a chain-management primitive whose primary motivator here is auto-consolidation but whose other uses are independently valuable:
+
+- `eigenius inspect <iri> --at-tag release-v1.0` — time-travel reads against a memorable name rather than a layer-id hex.
+- Regulatory audit checkpoints — quarterly review boundaries tagged for later "as of" queries.
+- Branch fork points — `branch create feature-x` could implicitly tag the fork layer.
+- Notebook breakpoints — cells that publish meaningful intermediate state tag the resulting chain state.
+- GC reachability — tagged layers and their ancestor closure don't get reclaimed; tags give operators a precise mechanism for "preserve this point in chain history."
+
+**Scoping.** v1 ships explicit-only consolidation; tags are a v2 addition. The tag primitive is small enough to land alongside v2's auto-policy as a single phase (probably Phase 17.5 or whenever auto-consolidation is wanted), but tags' other uses (above) may justify shipping them earlier as their own small phase. The decision is operator-demand-driven; the design surface is small either way.
+
+Three sub-questions that fall out of the anchor framing:
+
+- **Anchor scope:** are tags global (chain-wide) or branch-local? Recommended: branch-local namespace, with the option to declare a tag global by qualifying its name.
+- **Anchor deletion semantics:** if an operator deletes a tag and the auto-policy then consolidates across what was previously protected, is that surprising? Recommended: tag deletion writes a tombstone that prevents auto-consolidation for a configurable cool-down (default: 24 hours) so operators have time to notice.
+- **Anchor count limits:** very large tag sets (10⁴+) might slow consolidation validation. Recommended: an indexed lookup so per-range anchor-containment is O(log n) rather than O(n); no v1 concern.
 
 ### 12.2 v2 multi-parent consolidation
 

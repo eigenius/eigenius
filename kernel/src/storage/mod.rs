@@ -282,8 +282,9 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
 
     /// Atomically delete every storage entry associated with `layer`:
     /// the `topo:<id>` topology entry, the `bloom:<id>` shadowing bloom,
-    /// the `chain:<id>` parent pointer, and every `layer:<id>:res:*`
-    /// resource entry. Used by Phase 14f garbage collection (D23 §5.7)
+    /// the `chain:<id>` parent pointer, every `layer:<id>:res:*`
+    /// resource entry, and the content-hash dedup index entry for the
+    /// layer's content. Used by Phase 14f garbage collection (D23 §5.7)
     /// to reclaim storage for unreachable layers.
     ///
     /// The delete is one atomic write (per D23 §6.3) — partial deletion
@@ -294,6 +295,35 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// No-op if the layer doesn't exist (idempotent — safe to call
     /// during a re-run of GC against the same id).
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError>;
+
+    /// Look up every layer whose content matches `content_hash`.
+    ///
+    /// Returns the set of position hashes (layer ids) currently in
+    /// storage that share the given content hash. An empty result is
+    /// normal: not every content hash that ever existed maps to a live
+    /// layer. Multiple results indicate the same content has been
+    /// committed at multiple DAG positions — e.g. the same notebook
+    /// cell run against two different parent chains, or the same
+    /// comorphism reify output produced from two different invocations.
+    ///
+    /// Used by:
+    /// - [D25 §11.0](../../docs/design/d25-chain-consolidation.md)
+    ///   consolidated-layer dedup: before producing a new consolidated
+    ///   layer, check whether identical content already exists at a
+    ///   compatible position to skip the redundant commit.
+    /// - [D33 §6](../../docs/design/d33-partial-order-chains.md)
+    ///   cell-output cache (joined with supporting-layer lookup on the
+    ///   consumer side to form the `(content_hash, supporting_layer)`
+    ///   cache key).
+    /// - [D25 §12.1](../../docs/design/d25-chain-consolidation.md)
+    ///   tag-target resolution: `chain:tag_target_content` resolves to
+    ///   every position carrying that content.
+    ///
+    /// Result order is unspecified; callers that care should sort.
+    fn lookup_by_content_hash(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+    ) -> Result<Vec<LayerId>, StorageError>;
 }
 
 /// A single operation inside a `write_batch` call.

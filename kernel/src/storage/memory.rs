@@ -31,7 +31,8 @@
 #![cfg(test)]
 
 use crate::layer::{
-    BloomFilter, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex, TripleIndex,
+    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex,
+    TripleIndex,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
@@ -71,6 +72,12 @@ struct MemoryState {
     /// only head-pointer surface — the legacy single-`head` field is
     /// gone.
     branches: BTreeMap<String, LayerId>,
+    /// `ContentHash → set of position hashes` — the content-hash dedup
+    /// index introduced by D25 §11.0 / D33 §6. Many position hashes can
+    /// share a content hash (same notebook cell committed against
+    /// different parent chains); the index makes
+    /// `lookup_by_content_hash` O(log n).
+    content_index: BTreeMap<ContentHash, BTreeSet<LayerId>>,
 }
 
 impl MemoryPersistentBackend {
@@ -83,6 +90,7 @@ impl MemoryPersistentBackend {
                 meta: BTreeMap::new(),
                 blooms: BTreeMap::new(),
                 branches: BTreeMap::new(),
+                content_index: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
             triple_index: Arc::new(MemoryTripleIndex::new()),
@@ -177,6 +185,8 @@ impl PersistentBackend for MemoryPersistentBackend {
         let canonical_parent = all_parents.first().cloned();
         let handle = LayerHandle {
             id: id.clone(),
+            content_hash: layer.content_hash().clone(),
+            supporting_layer: layer.supporting_layer().cloned(),
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
@@ -185,6 +195,8 @@ impl PersistentBackend for MemoryPersistentBackend {
         // Build the bloom outside the lock (it's a hash-heavy loop) and
         // insert it together with the rest of the layer's state.
         let bloom = BloomFilter::for_iris(layer.defined_iris());
+
+        let content_hash = layer.content_hash().clone();
 
         let mut state = self.inner.write().expect("poisoned");
         state.topology.insert(id.clone(), handle);
@@ -195,6 +207,11 @@ impl PersistentBackend for MemoryPersistentBackend {
                 .insert((id.clone(), iri), (*resource).clone());
         }
         state.blooms.insert(id.clone(), bloom);
+        state
+            .content_index
+            .entry(content_hash)
+            .or_default()
+            .insert(id.clone());
         Ok(id)
     }
 
@@ -316,15 +333,38 @@ impl PersistentBackend for MemoryPersistentBackend {
 
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
         let mut state = self.inner.write().expect("poisoned");
+        // Pull the content hash off the topology entry before we remove
+        // it so we can clean the content-hash index in the same write.
+        let content_hash = state.topology.get(layer).map(|h| h.content_hash.clone());
         state.topology.remove(layer);
         state.chain.remove(layer);
         state.blooms.remove(layer);
         state.resources.retain(|(lid, _), _| lid != layer);
+        if let Some(ch) = content_hash {
+            if let Some(set) = state.content_index.get_mut(&ch) {
+                set.remove(layer);
+                if set.is_empty() {
+                    state.content_index.remove(&ch);
+                }
+            }
+        }
         // Don't touch branches — branches pointing at deleted layers
         // would be a caller bug and we don't masquerade by silently
         // unsetting them. GC ensures branch-pointed layers stay in
         // the reachable set.
         Ok(())
+    }
+
+    fn lookup_by_content_hash(
+        &self,
+        content_hash: &ContentHash,
+    ) -> Result<Vec<LayerId>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state
+            .content_index
+            .get(content_hash)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default())
     }
 }
 
@@ -379,6 +419,93 @@ mod tests {
 
         let topology = backend.load_topology().unwrap();
         assert_eq!(topology.layer_count(), 1);
+    }
+
+    /// Two layers with the same single resource but different parents
+    /// share a `ContentHash` (the resource set is identical) but get
+    /// distinct `PositionHash`es (parents differ). `lookup_by_content_hash`
+    /// must return both positions; deleting one cleans only its entry.
+    #[test]
+    fn content_hash_index_dedup_and_cleanup() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = crate::layer::LayerStorage::in_memory();
+
+        // Two distinct root layers (different content) so each presents
+        // a different parent to the child layers below.
+        let root_a = {
+            let mut b = LayerBuilder::new("root_a", None);
+            b.add_resource(make_resource(
+                "urn:eigenius:core:root_a_marker",
+                vec![("urn:eigenius:core:description", Value::String("a".into()))],
+            ))
+            .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        let root_b = {
+            let mut b = LayerBuilder::new("root_b", None);
+            b.add_resource(make_resource(
+                "urn:eigenius:core:root_b_marker",
+                vec![("urn:eigenius:core:description", Value::String("b".into()))],
+            ))
+            .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        backend.store_layer(&root_a).unwrap();
+        backend.store_layer(&root_b).unwrap();
+
+        // Two child layers carrying byte-identical resources but rooted
+        // at different parents. Same content hash; different position.
+        let make_child = |parent: Arc<crate::layer::Layer>| -> crate::layer::Layer {
+            let mut b = LayerBuilder::new("child", Some(parent));
+            b.add_resource(make_resource(
+                "urn:eigenius:demo:shared",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("shared".into()),
+                )],
+            ))
+            .unwrap();
+            b.build(storage.clone())
+        };
+        let child_a = make_child(Arc::clone(&root_a));
+        let child_b = make_child(Arc::clone(&root_b));
+
+        assert_eq!(
+            child_a.content_hash(),
+            child_b.content_hash(),
+            "identical resource sets must share a content hash"
+        );
+        assert_ne!(
+            child_a.id(),
+            child_b.id(),
+            "different parents must yield distinct position hashes"
+        );
+
+        backend.store_layer(&child_a).unwrap();
+        backend.store_layer(&child_b).unwrap();
+
+        let mut hits = backend
+            .lookup_by_content_hash(child_a.content_hash())
+            .unwrap();
+        hits.sort();
+        let mut expected = vec![child_a.id().clone(), child_b.id().clone()];
+        expected.sort();
+        assert_eq!(hits, expected);
+
+        // Delete one position; the other remains.
+        backend.delete_layer(child_a.id()).unwrap();
+        let remaining = backend
+            .lookup_by_content_hash(child_a.content_hash())
+            .unwrap();
+        assert_eq!(remaining, vec![child_b.id().clone()]);
+
+        // Delete the second; index is empty (not just emptied — the
+        // memory backend prunes the now-empty bucket).
+        backend.delete_layer(child_b.id()).unwrap();
+        let empty = backend
+            .lookup_by_content_hash(child_a.content_hash())
+            .unwrap();
+        assert!(empty.is_empty());
     }
 
     #[test]

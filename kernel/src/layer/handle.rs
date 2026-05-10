@@ -33,7 +33,7 @@
 //! Phase 14a-i ships these types as pure additions; they are not yet wired
 //! into `Layer` or the persistent backend (those are 14a-ii and 14a-iii).
 
-use crate::layer::LayerId;
+use crate::layer::{ContentHash, LayerId};
 use std::collections::BTreeMap;
 
 /// Metadata-only handle for a layer.
@@ -45,10 +45,31 @@ use std::collections::BTreeMap;
 /// `parents` is a `Vec` to support multi-parent merge layers introduced in
 /// Phase 15. In Phase 14 it is always 0 or 1 entries: `[]` for the root layer,
 /// `[parent_id]` for every other layer.
+///
+/// **Two-hash identity (D25 §11.0 / D33 §5.1).** Handles carry both the
+/// position-addressed `id` and the content-only `content_hash`. Content
+/// hash duplicates across positions are expected (cell-output cache,
+/// content-hash dedup); position hashes are globally unique.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayerHandle {
-    /// Content-addressed identifier for this layer.
+    /// Position-addressed identifier for this layer. Folds content
+    /// hash + sorted parent ids; uniquely identifies the layer's slot
+    /// in the DAG.
     pub id: LayerId,
+
+    /// Content-only hash of the layer's resources (independent of
+    /// position). Two layers with identical resources at different DAG
+    /// positions share this hash. See [`ContentHash`] for the
+    /// position-vs-content distinction.
+    pub content_hash: ContentHash,
+
+    /// Supporting layer per D33 §4.3 — the youngest ancestor this
+    /// layer explicitly depends on. `None` for the root layer, for
+    /// layers with no external references, and (transiently) for
+    /// pre-PR-0 layers whose supporting layer hasn't been
+    /// back-filled. Carried on the topology entry so resume reads
+    /// don't need to recompute on every load.
+    pub supporting_layer: Option<LayerId>,
 
     /// Parent layer ids. Empty for the root layer; one entry for every other
     /// Phase-14 layer; multiple entries for Phase-15 merge layers.
@@ -161,6 +182,8 @@ mod tests {
     fn handle(byte: u8, parents: Vec<LayerId>) -> LayerHandle {
         LayerHandle {
             id: lid(byte),
+            content_hash: ContentHash([byte; 32]),
+            supporting_layer: None,
             parents,
             name: format!("layer-{byte}"),
             resource_count: 0,
