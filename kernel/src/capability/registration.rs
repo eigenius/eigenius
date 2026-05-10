@@ -29,14 +29,21 @@
 //! Institutions use the `urn:eigenius:institution:` namespace for the same properties.
 //! `wasm_binary_ref` (blob store IRI) is reserved for future use.
 
+use super::external_institution::{ExternalInstitution, ExternalQueryHandler};
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
 use super::wasm_institution_d14::WasmInstitution;
+use crate::institution::registry::InstitutionIndex;
 use crate::institution::runtime::{Institution, InstitutionRuntime};
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::program::component::ComponentRegistry;
+use crate::server::proto::component_executor_client::ComponentExecutorClient;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tonic::transport::Channel;
 
 /// Protected namespace prefixes. Domain-supplied WASM modules cannot register
 /// IRIs under these (D12 §8.4).
@@ -212,11 +219,16 @@ pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, Reg
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
-        let runtime_kind = match resource.get(&runtime_prop) {
-            Some(Value::String(s)) if s == wk::RUNTIME_WASM => s,
-            _ => continue, // not WASM-runtime — caller's responsibility
-        };
-        let _ = runtime_kind;
+        // `runtime` is `data_type: resource`; canonicalises to
+        // `ResourceRef`. `as_iri` accepts both that and the
+        // pre-canonical `String` shape.
+        let is_wasm = resource
+            .get(&runtime_prop)
+            .and_then(|v| v.as_iri())
+            .is_some_and(|i| i.as_str() == wk::RUNTIME_WASM);
+        if !is_wasm {
+            continue; // not WASM-runtime — caller's responsibility
+        }
 
         match load_wasm_institution(&resource, &iri, layer) {
             Ok(wasm_inst) => {
@@ -242,6 +254,317 @@ pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, Reg
     }
 
     (runtime, report)
+}
+
+/// One entry per external Institution declaration that resolves
+/// cleanly against the chain. Returned by
+/// [`validate_external_institution_chain`] for use both in install-
+/// time cross-checks and in [`register_external_institutions`].
+#[derive(Debug, Clone)]
+pub struct ExternalInstitutionPlan {
+    pub institution_iri: Iri,
+    pub env_iri: Iri,
+    pub image_digest: String,
+    pub language: String,
+    pub handlers: BTreeMap<Iri, ExternalQueryHandler>,
+}
+
+/// One install-time error produced by
+/// [`validate_external_institution_chain`].
+#[derive(Debug, Clone)]
+pub struct ExternalInstitutionCheckError {
+    pub institution_iri: String,
+    pub message: String,
+}
+
+/// Walk the chain for `runtime: external` institutions and resolve
+/// the metadata each one needs to dispatch (env IRI + image digest +
+/// per-`query_handler` method name + signature IRI). Returns `(plans,
+/// errors)`: every well-formed external institution lands in `plans`,
+/// every malformed one in `errors`.
+///
+/// Pure data check — does **not** open a gRPC connection. Used by
+/// [`crate::context::ExecutionContext::commit_with_validation`] to
+/// reject a Load whose external-institution shape can't be wired up,
+/// and by [`register_external_institutions`] to feed the registration
+/// loop without re-walking the chain.
+pub fn validate_external_institution_chain(
+    layer: &Layer,
+    index: &InstitutionIndex,
+) -> (
+    Vec<ExternalInstitutionPlan>,
+    Vec<ExternalInstitutionCheckError>,
+) {
+    let mut plans = Vec::new();
+    let mut errors = Vec::new();
+
+    let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
+    let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
+    let env_ref_prop = Iri::parse(wk::INSTITUTION_REQUIRES_ENVIRONMENT).expect("well-known IRI");
+    let image_digest_prop = Iri::parse(wk::RUNTIME_IMAGE_DIGEST).expect("well-known IRI");
+    let method_name_prop = Iri::parse(wk::RUNTIME_METHOD_NAME).expect("well-known IRI");
+    let language_prop = Iri::parse(wk::RUNTIME_LANGUAGE).expect("well-known IRI");
+
+    for (iri, resource) in layer.iter_all_resources() {
+        if !resource.is_instance_of(&institution_class_iri) {
+            continue;
+        }
+        // `runtime` is `data_type: resource` post-canonicalisation,
+        // so the value is a `ResourceRef`. `Value::as_iri` accepts
+        // both ResourceRef and (legacy/parse-time) String, so this
+        // also handles intermediates that haven't been through
+        // `canonicalise_resource_refs` yet.
+        match resource.get(&runtime_prop).and_then(|v| v.as_iri()) {
+            Some(i) if i.as_str() == wk::RUNTIME_EXTERNAL => {}
+            _ => continue,
+        }
+
+        let inst_iri_str = iri.as_str().to_string();
+
+        let env_iri = match resource.get(&env_ref_prop).and_then(|v| v.as_iri()) {
+            Some(i) => i,
+            None => {
+                errors.push(ExternalInstitutionCheckError {
+                    institution_iri: inst_iri_str,
+                    message:
+                        "external institution missing `requires_environment` — D31 §5 requires \
+                        every external institution to declare an env it dispatches into"
+                            .to_string(),
+                });
+                continue;
+            }
+        };
+
+        let env_resource = match resolve_via_layer(layer, &env_iri) {
+            Some(r) => r,
+            None => {
+                errors.push(ExternalInstitutionCheckError {
+                    institution_iri: inst_iri_str,
+                    message: format!(
+                        "`requires_environment` -> `{env_iri}` did not resolve to a \
+                         RuntimeEnvironment in the chain"
+                    ),
+                });
+                continue;
+            }
+        };
+
+        let image_digest = match env_resource.get(&image_digest_prop) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                errors.push(ExternalInstitutionCheckError {
+                    institution_iri: inst_iri_str,
+                    message: format!(
+                        "RuntimeEnvironment `{env_iri}` carries no `image_digest` — \
+                         orchestrator cannot dispatch without one"
+                    ),
+                });
+                continue;
+            }
+        };
+
+        let language = match env_resource.get(&language_prop) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                errors.push(ExternalInstitutionCheckError {
+                    institution_iri: inst_iri_str,
+                    message: format!(
+                        "RuntimeEnvironment `{env_iri}` carries no `language` — orchestrator \
+                         cannot route to a LanguageRuntime without one"
+                    ),
+                });
+                continue;
+            }
+        };
+
+        let mut handlers: BTreeMap<Iri, ExternalQueryHandler> = BTreeMap::new();
+        let mut handler_errors: Vec<String> = Vec::new();
+
+        // Harvest the procedure → method_name dispatch table from
+        // every D14 declaration that anchors a runtime entry on this
+        // institution: QueryClass.query_handler (FIBER / AutoOnLoad
+        // dispatch), ExportFormat.procedure (comorphism source-side
+        // extract_typed), ImportFormat.procedure (comorphism
+        // target-side reify). All three resolve through the same
+        // `RuntimeMethodSignature.method_name` property and dispatch
+        // through the same `DispatchExternal` RPC — D14 §9.3 doesn't
+        // distinguish source-side / target-side at the wire level.
+        //
+        // QueryClass entries are *required* — their AutoOnLoad /
+        // OnDemand FIBER gates are the institution's published
+        // surface, and missing dispatch metadata there is a
+        // structural failure. ExportFormat / ImportFormat entries
+        // are *recommended* (D14): the comorphism dispatch path
+        // (`Exp::InstitutionInvoke`) errors with a clear
+        // `UnknownType` at runtime when a procedure is missing here,
+        // but rejecting the whole institution at registration time
+        // would brick its working AutoOnLoad / FIBER gates over a
+        // comorphism gap that may or may not be exercised on this
+        // chain. Surface missing format procedures as warnings so
+        // operators see them on each rebuild without losing the
+        // institution.
+        let mut handler_warnings: Vec<String> = Vec::new();
+        let record_handler = |kind: &str,
+                              owner_iri: &Iri,
+                              signature_iri: &Iri,
+                              handlers: &mut BTreeMap<Iri, ExternalQueryHandler>,
+                              handler_errors: &mut Vec<String>,
+                              handler_warnings: &mut Vec<String>,
+                              tolerate_missing: bool| {
+            if handlers.contains_key(signature_iri) {
+                return;
+            }
+            let method_name = match resolve_via_layer(layer, signature_iri) {
+                Some(sig) => match sig.get(&method_name_prop) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => {
+                        let msg = format!(
+                            "{kind} `{owner_iri}`: procedure -> `{signature_iri}` carries no \
+                                 `method_name` (RuntimeMethodSignature property)"
+                        );
+                        if tolerate_missing {
+                            handler_warnings.push(msg);
+                        } else {
+                            handler_errors.push(msg);
+                        }
+                        return;
+                    }
+                },
+                None => {
+                    let msg = format!(
+                        "{kind} `{owner_iri}`: procedure -> `{signature_iri}` did not resolve \
+                             to a RuntimeMethodSignature in the chain"
+                    );
+                    if tolerate_missing {
+                        handler_warnings.push(msg);
+                    } else {
+                        handler_errors.push(msg);
+                    }
+                    return;
+                }
+            };
+            handlers.insert(
+                signature_iri.clone(),
+                ExternalQueryHandler {
+                    method_name,
+                    signature_iri: signature_iri.clone(),
+                },
+            );
+        };
+
+        for qc in index.query_classes() {
+            if qc.institution_ref.as_str() != iri.as_str() {
+                continue;
+            }
+            record_handler(
+                "QueryClass",
+                &qc.iri,
+                &qc.query_handler,
+                &mut handlers,
+                &mut handler_errors,
+                &mut handler_warnings,
+                /* tolerate_missing */ false,
+            );
+        }
+        for ef in index.export_formats() {
+            if ef.institution_ref.as_str() != iri.as_str() {
+                continue;
+            }
+            record_handler(
+                "ExportFormat",
+                &ef.iri,
+                &ef.procedure,
+                &mut handlers,
+                &mut handler_errors,
+                &mut handler_warnings,
+                /* tolerate_missing */ true,
+            );
+        }
+        for f in index.import_formats() {
+            if f.institution_ref.as_str() != iri.as_str() {
+                continue;
+            }
+            record_handler(
+                "ImportFormat",
+                &f.iri,
+                &f.procedure,
+                &mut handlers,
+                &mut handler_errors,
+                &mut handler_warnings,
+                /* tolerate_missing */ true,
+            );
+        }
+        for w in &handler_warnings {
+            tracing::warn!(
+                institution_iri = %iri,
+                "comorphism dispatch metadata gap: {w} — `Exp::InstitutionInvoke` calls through this procedure will fail at runtime; the institution's AutoOnLoad / FIBER gates remain operational",
+            );
+        }
+        if !handler_errors.is_empty() {
+            errors.push(ExternalInstitutionCheckError {
+                institution_iri: inst_iri_str,
+                message: format!(
+                    "external institution dispatch metadata incomplete: {}",
+                    handler_errors.join("; ")
+                ),
+            });
+            continue;
+        }
+
+        plans.push(ExternalInstitutionPlan {
+            institution_iri: iri.clone(),
+            env_iri,
+            image_digest,
+            language,
+            handlers,
+        });
+    }
+
+    (plans, errors)
+}
+
+/// Walk the chain for D14 Institution declarations whose `runtime` is
+/// `urn:eigenius:institution:runtimes:external` (D31 §5) and register
+/// an [`ExternalInstitution`] in `runtime` for each. Each registered
+/// institution holds the env IRI + image digest resolved from the
+/// chain plus a per-`query_handler` lookup of method-dispatch
+/// metadata, all wired against the shared orchestrator gRPC `client`.
+///
+/// Institutions whose `requires_environment` cannot be resolved (or
+/// whose env carries no `image_digest`) are skipped with an error
+/// recorded in `report` — the kernel will not gate Loads against an
+/// institution it cannot reach.
+pub fn register_external_institutions(
+    layer: &Layer,
+    index: &InstitutionIndex,
+    runtime: &mut InstitutionRuntime,
+    client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
+    report: &mut RegistrationReport,
+) {
+    let (plans, errors) = validate_external_institution_chain(layer, index);
+    for err in errors {
+        report.errors.push(RegistrationError {
+            resource_iri: err.institution_iri,
+            message: err.message,
+        });
+    }
+    for plan in plans {
+        let inst = ExternalInstitution::new(
+            plan.institution_iri.clone(),
+            plan.env_iri,
+            plan.image_digest,
+            plan.language,
+            plan.handlers,
+            client.clone(),
+        );
+        let registered_iri = plan.institution_iri.as_str().to_string();
+        runtime.replace(Box::new(inst));
+        report.institutions_registered.push(registered_iri);
+    }
+}
+
+fn resolve_via_layer(layer: &Layer, iri: &Iri) -> Option<Arc<Resource>> {
+    layer.resolve(iri)
 }
 
 /// Load a WASM institution from an Institution resource declaring

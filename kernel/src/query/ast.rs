@@ -99,6 +99,14 @@ pub struct FiberClause {
     pub params: Vec<ParamBinding>,
     /// Variable the response resource is bound to.
     pub binding: Variable,
+    /// Optional `INTO "<iri>"` suffix (D14 §9.3 chain-reinsertion via
+    /// EigenQL). When `Some`, the FIBER response is committed to the
+    /// regular chain at the named IRI as part of the query's commit
+    /// cycle, and the binding variable resolves to that IRI rather
+    /// than to the transient query-overlay IRI. When `None`, the
+    /// response stays in the per-query overlay and disappears at
+    /// query end.
+    pub into: Option<Iri>,
 }
 
 /// A single `name: <value>` param inside a FIBER clause's braces. The

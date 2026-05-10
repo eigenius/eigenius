@@ -202,7 +202,7 @@ For production-sized deployments, the dominant growth factor is usually trace st
 
 [`storage/tikv/`](../../../storage/tikv/) exists as a placeholder for a future distributed-storage backend. The kernel has the abstraction in place ([`kernel/src/storage/`](../../../kernel/src/storage/) traits) but the TiKV implementation is not production-ready and is not covered by this guide.
 
-For multi-node deployments today, the recommended pattern is per-node RocksDB with the kernel as a single-tenant service — see [chapter 11](11-deployment.md) for the deployment models we support.
+For multi-node deployments today, the recommended pattern is per-node RocksDB with the kernel as a single-tenant service — see [chapter 12](12-deployment.md) for the deployment models we support.
 
 ---
 

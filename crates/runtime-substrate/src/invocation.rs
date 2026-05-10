@@ -97,6 +97,42 @@ pub struct DispatchTrace {
     /// instance, only populates `host_kernel`); the substrate does not
     /// fail dispatch on missing health data.
     pub numerical_metadata: NumericalMetadata,
+    /// Worker-reported `dispatched_to` — the resolved method signature
+    /// (e.g. Julia's `which(...)` output) for `CallRuntimeMethod`.
+    /// `None` for `RunRuntimeScript` and for runtimes that don't
+    /// implement method dispatch (D26 §4.2).
+    pub dispatched_to: Option<String>,
+}
+
+/// Outcome of a [`crate::language_runtime::LanguageRuntime`] dispatch.
+/// Bundles the result resource with the trace fields the runtime is
+/// uniquely positioned to know (timestamps, image digest the worker
+/// actually ran against, numerical metadata the worker reported).
+///
+/// The runtime owns its dispatch lifecycle (spawn, attach, dispatch,
+/// cleanup) and produces this struct at the end. The substrate facade
+/// adds the language tag (which it already knows from the dispatch
+/// argument) and assembles the partial `RuntimeInvocation`.
+#[derive(Debug)]
+pub struct RunOutcome {
+    /// The output resource produced by the dispatch.
+    pub output: eigenius_kernel::ontology::resource::Resource,
+    /// Image digest the worker actually ran against. `None` under
+    /// host-subprocess backends with no built image.
+    pub image_digest: Option<ImageDigest>,
+    /// RFC3339 timestamp captured immediately before the worker-side
+    /// dispatch began.
+    pub started_at: String,
+    /// RFC3339 timestamp captured immediately after the worker-side
+    /// dispatch returned (success or failure).
+    pub completed_at: String,
+    /// Worker-reported numerical metadata (Health RPC). Empty is valid.
+    pub numerical_metadata: NumericalMetadata,
+    /// Worker-reported `dispatched_to` — the resolved method signature
+    /// for `CallRuntimeMethod`. `None` for `RunRuntimeScript` and for
+    /// runtimes that don't implement method dispatch (Phase 19a.4
+    /// lights this up for the Julia runtime).
+    pub dispatched_to: Option<String>,
 }
 
 impl DispatchTrace {
@@ -132,6 +168,9 @@ impl DispatchTrace {
             parse_iri(PROP_NUMERICAL_METADATA),
             Value::Json(numerical_metadata_to_json(&self.numerical_metadata)),
         );
+        if let Some(dt) = self.dispatched_to {
+            r.set(parse_iri(PROP_DISPATCHED_TO), Value::String(dt));
+        }
         r
     }
 }
@@ -201,6 +240,7 @@ mod tests {
                 fma_enabled: Some(true),
                 ..Default::default()
             },
+            dispatched_to: None,
         }
     }
 

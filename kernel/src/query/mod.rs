@@ -32,6 +32,24 @@ use crate::ontology::resource::Resource;
 use document::QueryFingerprint;
 use error::QueryError;
 
+/// Outcome of executing an EigenQL program: the wrapped result
+/// document, plus the chain-commit resources accumulated by `FIBER ...
+/// INTO "<iri>"` clauses (D14 §9.3 chain-reinsertion via EigenQL).
+///
+/// Server-side callers commit `into_resources` to the regular chain
+/// and surface their IRIs to clients via `QueryResponse.output_resource_iris`.
+/// Local callers (CLI, in-process tests) typically discard them via
+/// the [`execute`] / [`execute_with`] convenience wrappers.
+#[derive(Debug, Default)]
+pub struct QueryOutcome {
+    /// Eigon document (array of resources) shaped per D2 Appendix A.
+    pub document: Vec<Resource>,
+    /// Resources the query accumulated under `FIBER ... INTO "<iri>"`,
+    /// each carrying the caller-named `@id`. Empty when no FIBER
+    /// clause used INTO.
+    pub into_resources: Vec<Resource>,
+}
+
 /// Execute an EigenQL program against a layer chain.
 ///
 /// Convenience wrapper for callers that don't dispatch FIBER clauses
@@ -43,16 +61,33 @@ pub fn execute(program_str: &str, layer: &Layer) -> Result<Vec<Resource>, Vec<Qu
 /// Execute an EigenQL program, optionally supplying an institution
 /// registry + execution context so FIBER clauses can dispatch.
 ///
-/// Pipeline: lex → parse → stratify → type_check → evaluate → document wrap.
-/// Returns an Eigon document (array of resources) shaped per D2 Appendix A:
-/// synthesized Property resources, a row Class, and a ResultSet referencing
-/// them. Callers typically hand this straight to
-/// `eigon_cbor::serialize_document`.
+/// Returns just the wrapped document; any `FIBER ... INTO "<iri>"`
+/// resources the query produced are discarded. Callers that need the
+/// chain-commit list (server-side `Query` RPC) should use
+/// [`execute_with_into`].
 pub fn execute_with(
     program_str: &str,
     layer: &Layer,
     runtime: evaluate::FiberRuntime<'_>,
 ) -> Result<Vec<Resource>, Vec<QueryError>> {
+    execute_with_into(program_str, layer, runtime).map(|outcome| outcome.document)
+}
+
+/// Execute an EigenQL program and return both the wrapped result
+/// document and the chain-commit resources accumulated by
+/// `FIBER ... INTO "<iri>"` clauses.
+///
+/// Pipeline: lex → parse → stratify → type_check → evaluate → document wrap.
+/// The returned [`QueryOutcome::document`] follows D2 Appendix A:
+/// synthesized Property resources, a row Class, and a ResultSet
+/// referencing them. [`QueryOutcome::into_resources`] is the list of
+/// FIBER responses that the caller declared with `INTO`, ready for
+/// the server's commit cycle.
+pub fn execute_with_into(
+    program_str: &str,
+    layer: &Layer,
+    runtime: evaluate::FiberRuntime<'_>,
+) -> Result<QueryOutcome, Vec<QueryError>> {
     // 1. Lex
     let tokens = lexer::tokenize(program_str).map_err(|e| vec![e])?;
 
@@ -68,9 +103,11 @@ pub fn execute_with(
         return Err(type_errors);
     }
 
-    // 5. Evaluate — row resources with synthesized Property IRIs
+    // 5. Evaluate — row resources with synthesized Property IRIs;
+    //    INTO-named FIBER responses bubble up alongside.
     let fp = QueryFingerprint::of(program_str);
-    let rows = evaluate::evaluate(&program, layer, &fp, runtime).map_err(|e| vec![e])?;
+    let (rows, into_resources) =
+        evaluate::evaluate(&program, layer, &fp, runtime).map_err(|e| vec![e])?;
 
     tracing::debug!(
         { field::OPERATION } = operation::QUERY_EVALUATE,
@@ -80,7 +117,11 @@ pub fn execute_with(
     );
 
     // 6. Wrap into a self-describing document (Appendix A).
-    Ok(document::wrap(&program.query, program_str, rows))
+    let document = document::wrap(&program.query, program_str, rows);
+    Ok(QueryOutcome {
+        document,
+        into_resources,
+    })
 }
 
 #[cfg(test)]

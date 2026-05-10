@@ -1,0 +1,82 @@
+[
+  {
+    "@id": "urn:eigenius:institutions:jump_highs",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:core:short_name": "JuMP-HiGHS",
+    "urn:eigenius:core:description": "Mathematical-programming institution backed by JuMP.jl with HiGHS as the solver back end. Scope: linear programs and convex quadratic programs (LP / QP). v1 validates `OptimisesTo` claims by rebuilding the JuMP model from the chain-typed `OptimisationProblem` (walking each FormulaTerm under a JuMP-expression interpreter), calling `optimize!`, and comparing the re-solved objective + termination status against the claim within tolerance. Sibling institutions targeting nonlinear programming (Ipopt) and integer programming (HiGHS-MIP, GLPK) ship as separate `Institution` resources reusing the same `OptimisationProblem` shape — only the dispatch package, JuliaEnvironment image, and accepted constraint/objective complexity vary. The smart-pow walker rule (integer-valued `LitFloat` exponent on `pow` unrolls to repeated multiplication) is on by default for this institution because HiGHS does not accept `MOI.ScalarNonlinearFunction` even when the underlying math is quadratic.",
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:institutions:jump_highs",
+    "urn:eigenius:institution:institution_name": "JuMP-HiGHS",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:institution:requires_environment": "urn:eigenius:jump_highs:env:v1"
+  },
+
+  {
+    "@id": "urn:eigenius:jump_highs:signatures:validate_optimum",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_optimum",
+    "urn:eigenius:core:description": "Julia entry point that takes an `OptimisesTo` mirror struct and returns a `Verdict`. The handler rebuilds the JuMP model from `claim.problem` (parses variables + bounds, walks objective + each constraint LHS to a JuMP expression with smart-pow on, dispatches `@objective` / `@constraint`), calls `optimize!`, checks `termination_status` against the claim, and tolerance-checks `objective_value`. Variable-value comparison is omitted by design (LP degeneracy). Holds on a successful re-solve that matches; Fails on a status mismatch or objective-value mismatch beyond tolerance; Undecidable on indeterminate solver states (`ITERATION_LIMIT`, `TIME_LIMIT`, `NUMERICAL_ERROR`, `SLOW_PROGRESS`).",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_optimum",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:jump:OptimisesTo"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+  {
+    "@id": "urn:eigenius:jump_highs:query_classes:optimum_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "optimum_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `OptimisesTo` resource. Re-solves the referenced problem and produces the canonical D14 Verdict tri-state. A `Fails` verdict rejects the gated commit per D31 §6.3 — the chain only persists OptimisesTo claims whose objective value the institution can independently reproduce.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:jump:OptimisesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:jump_highs:signatures:validate_optimum",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:jump_highs"
+  },
+
+  {
+    "@id": "urn:eigenius:jump_highs:signatures:solve_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "solve_problem",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_jump_solve` OnDemand QueryClass. Takes an `OptimisationProblem` and returns an `OptimisesTo` whose `objective_value` / `variable_values` / `termination_status` come from a fresh `optimize!` call. The returned claim's `abstol` / `reltol` are stamped at sensible defaults (1e-6 each) so a downstream AutoOnLoad re-validation gate can run cleanly without the caller having to specify tolerances explicitly. Internally: walks each FormulaTerm under the JuMP-expression interpreter (smart-pow on), constructs a fresh `Model(HiGHS.Optimizer)`, attaches variables + bounds + objective + constraints, optimises, reads back the solution.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "solve_problem",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:jump:OptimisationProblem"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:jump:OptimisesTo"
+  },
+  {
+    "@id": "urn:eigenius:jump_highs:query_classes:qc_jump_solve",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_jump_solve",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given an `OptimisationProblem`, solve it via JuMP/HiGHS and return an `OptimisesTo` carrying the optimum. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5). Useful for parameter-fitting and design-optimisation flows where the chain has the typed problem but doesn't already carry a claimed optimum — the OnDemand call materialises one, which a follow-on commit can record as the chain's recorded optimum (and trigger the AutoOnLoad gate as a re-check).",
+    "urn:eigenius:institution:query_class": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:result_class": "urn:eigenius:jump:OptimisesTo",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:jump_highs:signatures:solve_problem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:jump_highs"
+  },
+
+  {
+    "@id": "urn:eigenius:jump_highs:signatures:reify_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "reify_problem",
+    "urn:eigenius:core:description": "Julia entry point for the target-side reify of the `Symbolics → JuMP` Comorphism (D14 §9.3 step 4). The comorphism's typed middle is the identity Lambda on `OptimisationProblem` (D32 §6.2 generalised) — both ends speak the same chain shape, so the reify is identity at the boundary. The Julia handler returns its `OptimisationProblem` argument unchanged; the function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism reify calls through the substrate uniformly with `query` and `extract_typed`, rather than special-casing `no-op` procedures kernel-side.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "reify_problem",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:jump:OptimisationProblem"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:jump:OptimisationProblem"
+  },
+
+  {
+    "@id": "urn:eigenius:jump_highs:formats:if_jump_optimisation_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_jump_optimisation_problem",
+    "urn:eigenius:core:description": "Typed inbound constructor for `OptimisationProblem`: reifies a FormulaTerm-typed OptimisationProblem payload as itself (identity reify — both source and target speak the same shape). Target side of the `Symbolics → JuMP` comorphism: any institution producing a chain-typed OptimisationProblem (via the FormulaTerm-everywhere story) imports through this format. Anchored on the `reify_problem` Julia handler — the kernel's `ExternalInstitution::reify` dispatches through the substrate the same way `query` does (D14 §9.3 step 4).",
+    "urn:eigenius:institution:to_class": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:jump_highs",
+    "urn:eigenius:institution:procedure": "urn:eigenius:jump_highs:signatures:reify_problem"
+  }
+]

@@ -147,7 +147,7 @@ impl Write for WorkerRpcClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rpc::protocol::{HealthInfo, NumericalMetadata};
+    use crate::rpc::protocol::{HealthInfo, NumericalMetadata, TargetKind};
     use std::thread;
 
     /// In-memory pair of UnixStreams. Used to drive the client on one
@@ -206,6 +206,7 @@ mod tests {
             let (invocation_id, target, inputs) = match req {
                 Request::DispatchMethod {
                     invocation_id,
+                    target_kind: _,
                     target,
                     inputs,
                 } => (invocation_id, target, inputs),
@@ -229,6 +230,7 @@ mod tests {
         let resp = client
             .call(&Request::DispatchMethod {
                 invocation_id: "inv-7".to_string(),
+                target_kind: TargetKind::Script,
                 target: serde_bytes::ByteBuf::from(vec![0xa0, 0x42, 0x01]),
                 inputs: vec![
                     serde_bytes::ByteBuf::from(vec![0x01, 0x02]),

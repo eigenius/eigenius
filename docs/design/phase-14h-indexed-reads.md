@@ -176,7 +176,7 @@ No legacy DBs exist. Bootstrap doesn't verify index/layer consistency; the atomi
 | `kernel/src/query/evaluate.rs` | `collect_candidates` indexed path + `class_with_subclass_closure` + scan fallback |
 | `storage/rocksdb/tests/triple_index_test.rs` | New: 7 integration tests |
 | `docs/design/d23-out-of-core-layer-architecture.md` | §5.9 / §6.2 / §6.3 rewrite |
-| `docs/design/implementation-plan.md` + `docs/guides/platform/15-appendix.md` | References updated |
+| `docs/design/implementation-plan.md` + `docs/guides/platform/16-appendix.md` | References updated |
 | `Cargo.toml` + `storage/indexing/` | Workspace member removed; superseded crate deleted |
 
 ## Risk areas

@@ -71,7 +71,7 @@ After installation, `just build` (or `just build-wasm`) builds every WASM exampl
 
 ## 2.4. Optional: Docker
 
-The end-to-end demo can run entirely in containers — skips Rust and Deno on the host. Install Docker Engine and Compose v2 per your distribution's instructions, then see [chapter 11](11-deployment.md).
+The end-to-end demo can run entirely in containers — skips Rust and Deno on the host. Install Docker Engine and Compose v2 per your distribution's instructions, then see [chapter 12](12-deployment.md).
 
 ## 2.5. Optional: GitHub `gh` CLI
 

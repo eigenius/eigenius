@@ -68,21 +68,22 @@ fn run_script_round_trips_through_real_worker() {
     let env = make_env();
     let script = make_script("echo runtime-trait-validated");
 
-    let handle = runtime.spawn_worker(&env, None).expect("spawn worker");
-    let output = runtime
-        .run_script(&handle, &script, &[])
-        .expect("run_script");
+    let outcome = runtime.run_script(&env, &script, &[]).expect("run_script");
 
-    let stdout = output
+    let stdout = outcome
+        .output
         .get(&Iri::parse(PROP_TEST_BASH_STDOUT).unwrap())
         .and_then(Value::as_str)
         .expect("bash_stdout property");
     assert_eq!(stdout.trim(), "runtime-trait-validated");
-    let lang = output
+    let lang = outcome
+        .output
         .get(&Iri::parse(PROP_LANGUAGE).unwrap())
         .and_then(Value::as_str)
         .expect("language property");
     assert_eq!(lang, LANGUAGE);
+    assert!(!outcome.started_at.is_empty());
+    assert!(!outcome.completed_at.is_empty());
 }
 
 #[test]
@@ -91,9 +92,8 @@ fn run_script_surfaces_dispatch_failed_as_runtime_error() {
     let env = make_env();
     let script = make_script("echo nope 1>&2; exit 5");
 
-    let handle = runtime.spawn_worker(&env, None).expect("spawn worker");
     let err = runtime
-        .run_script(&handle, &script, &[])
+        .run_script(&env, &script, &[])
         .expect_err("expected runtime_error");
     match err {
         RunError::RuntimeError(msg) => {
@@ -114,9 +114,8 @@ fn run_script_rejects_missing_source() {
         Value::String(LANGUAGE.to_string()),
     );
 
-    let handle = runtime.spawn_worker(&env, None).expect("spawn worker");
     let err = runtime
-        .run_script(&handle, &script, &[])
+        .run_script(&env, &script, &[])
         .expect_err("expected method_signature_mismatch when source is missing");
     assert!(matches!(err, RunError::MethodSignatureMismatch(_)));
 }
@@ -126,9 +125,8 @@ fn call_method_is_unsupported_in_test_runtime() {
     let runtime = TestLanguageRuntime::with_worker_binary(worker_binary());
     let env = make_env();
     let signature = make_script("ignored");
-    let handle = runtime.spawn_worker(&env, None).expect("spawn worker");
     let err = runtime
-        .call_method(&handle, &signature, &[])
+        .call_method(&env, &signature, &[])
         .expect_err("call_method should not be supported");
     assert!(matches!(err, RunError::MethodSignatureMismatch(_)));
 }

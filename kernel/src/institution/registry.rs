@@ -52,6 +52,11 @@ pub struct InstitutionEntry {
     pub iri: Iri,
     pub name: String,
     pub runtime: Option<RuntimeKind>,
+    /// IRI of the `RuntimeEnvironment` this institution dispatches
+    /// into. Carried for `runtime: external` institutions (D31 §5);
+    /// `None` for WASM and in-process kinds. Resolved from the
+    /// `requires_environment` property at index time.
+    pub requires_environment: Option<Iri>,
 }
 
 /// One declared `ExportFormat` — a typed outbound view of a source
@@ -400,10 +405,15 @@ fn is_a_iris(resource: &Resource) -> Vec<String> {
 fn require_iri_property(resource: &Resource, property: &str, label: &str) -> Result<Iri, String> {
     let prop_iri = Iri::parse(property).expect("well-known IRI");
     match resource.get(&prop_iri) {
+        // `ResourceRef` is the canonical shape post-`canonicalise_resource_refs`;
+        // `String` is accepted as a fallback for resources read off the wire
+        // before canonicalisation (in-flight gRPC payloads, FIBER-synthesised
+        // intermediates) where the layer's data_type pass hasn't run.
+        Some(Value::ResourceRef(i)) => Ok(i.clone()),
         Some(Value::String(s)) => {
             Iri::parse(s).map_err(|e| format!("{label}: invalid IRI `{s}`: {e}"))
         }
-        Some(other) => Err(format!("{label}: expected IRI string, got {other:?}")),
+        Some(other) => Err(format!("{label}: expected IRI reference, got {other:?}")),
         None => Err(format!("{label}: missing")),
     }
 }
@@ -429,10 +439,11 @@ fn optional_iri_property(
     let prop_iri = Iri::parse(property).expect("well-known IRI");
     match resource.get(&prop_iri) {
         None => Ok(None),
+        Some(Value::ResourceRef(i)) => Ok(Some(i.clone())),
         Some(Value::String(s)) => Iri::parse(s)
             .map(Some)
             .map_err(|e| format!("{label}: invalid IRI `{s}`: {e}")),
-        Some(other) => Err(format!("{label}: expected IRI string, got {other:?}")),
+        Some(other) => Err(format!("{label}: expected IRI reference, got {other:?}")),
     }
 }
 
@@ -463,10 +474,16 @@ fn parse_institution(resource: &Resource) -> Result<InstitutionEntry, String> {
     let runtime = optional_iri_property(resource, wk::RUNTIME, "Institution.runtime")?
         .map(|i| parse_runtime_kind(i.as_str()))
         .transpose()?;
+    let requires_environment = optional_iri_property(
+        resource,
+        wk::INSTITUTION_REQUIRES_ENVIRONMENT,
+        "Institution.requires_environment",
+    )?;
     Ok(InstitutionEntry {
         iri: institution_iri,
         name,
         runtime,
+        requires_environment,
     })
 }
 
@@ -556,10 +573,14 @@ fn parse_query_class(resource: &Resource) -> Result<QueryClassEntry, String> {
     let mut dispatch_roles = Vec::with_capacity(role_values.len());
     for v in &role_values {
         match v {
+            // Post-canonicalisation, IRI references in resource_array
+            // values are `ResourceRef`; `String` is a parse-time
+            // fallback for intermediate (uncommitted) shapes.
+            Value::ResourceRef(i) => dispatch_roles.push(parse_dispatch_role(i.as_str())?),
             Value::String(s) => dispatch_roles.push(parse_dispatch_role(s)?),
             other => {
                 return Err(format!(
-                    "QueryClass.dispatch_role: expected IRI string, got {other:?}"
+                    "QueryClass.dispatch_role: expected IRI reference, got {other:?}"
                 ))
             }
         }

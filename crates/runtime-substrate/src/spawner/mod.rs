@@ -41,10 +41,14 @@
 #[cfg(feature = "docker-spawner")]
 pub mod docker;
 pub mod local;
+pub mod service;
 
 #[cfg(feature = "docker-spawner")]
 pub use docker::{DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy};
 pub use local::LocalSpawner;
+#[cfg(feature = "docker-spawner")]
+pub use service::DockerServiceSpawner;
+pub use service::{LocalServiceSpawner, ServiceHandle, ServiceSpawner};
 
 use crate::error::SpawnError;
 use crate::types::{WorkerHandle, WorkerSpec};

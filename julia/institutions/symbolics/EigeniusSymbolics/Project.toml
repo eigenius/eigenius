@@ -1,0 +1,27 @@
+name = "EigeniusSymbolics"
+uuid = "9b8a7c6d-5e4f-4b3a-9c2d-1e7f6a5b4c3d"
+authors = ["The Eigenius Authors"]
+version = "0.1.0"
+
+[deps]
+# Symbolics.jl — the symbolic-algebra library this institution wraps.
+# Pinned at the verified API surface from D27 §4.1 (Symbolics 7.21,
+# `simplify`, `expand`, `substitute`, `Num`, `isequal`).
+Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
+
+# SymbolicUtils.jl — the term-traversal API (`issym`, `iscall`,
+# `operation`, `arguments`) used by `num_to_formula` to re-encode a
+# simplified `Symbolics.Num` back into a chain-shaped `FormulaTerm`.
+# Symbolics depends on SymbolicUtils transitively; we pin it here to
+# make the `using SymbolicUtils` import explicit and version-stable.
+SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
+
+# Generated mirror module. Same UUID as `JuMP`/`Catalyst`/etc. consumers
+# use — the substrate's mirror generator emits `EigeniusMirror` per
+# Phase 19a.3, including `FormulaTerm` per Phase 19d.0.
+EigeniusMirror = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+
+[compat]
+julia = "1.10"
+Symbolics = "7"
+SymbolicUtils = "4"

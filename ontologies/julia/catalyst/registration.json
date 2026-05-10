@@ -1,0 +1,162 @@
+[
+  {
+    "@id": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:institution_name": "Catalyst",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:core:description": "The Catalyst institution — D27 §4.4. Wraps Catalyst.jl for chemical-reaction-network modelling. Verifies conservation laws, deficiency, weak reversibility, and complex balance against the structural network. Steady-state computation goes through HomotopyContinuation.jl / NonlinearSolve.jl (the institution's image bakes in both). The Catalyst→DiffEq compilation Comorphism is declared separately (see registration-diffeq-comorphism.json) — open issue: `convert(ODESystem, rn)` errors in Catalyst 16.1.1, and the comorphism v1 will compile direct to `OdeProblem` skipping the ODESystem intermediate."
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:ef_network",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_network",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:catalyst:ReactionNetwork",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:catalyst:ReactionNetwork",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:extract_network"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:ef_to_ode_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_to_ode_input",
+    "urn:eigenius:core:description": "Export the (network + ICs + parameters + tspan) bundle used as the source payload of the Catalyst→DiffEq Comorphism.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:catalyst:CatalystToOdeInput",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:extract_to_ode_input"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:ef_conservation_law",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_conservation_law",
+    "urn:eigenius:institution:from_class": "urn:eigenius:julia:catalyst:ConservationLaw",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:catalyst:ConservationLaw",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:extract_conservation_law"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:if_steady_state",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_steady_state",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:catalyst:SteadyState",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:catalyst:SteadyState",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:reify_steady_state"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:if_conservation_law",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_conservation_law",
+    "urn:eigenius:institution:to_class": "urn:eigenius:julia:catalyst:ConservationLaw",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:julia:catalyst:ConservationLaw",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst",
+    "urn:eigenius:institution:procedure": "urn:eigenius:julia:catalyst:proc:reify_conservation_law"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_validate_conservation_law",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_conservation_law",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-runs `Catalyst.conservationlaws(rn)` and checks the claimed coefficient vector lies in the row span of the returned matrix.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:ConservationLaw",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:validate_conservation_law",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_validate_steady_state",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_steady_state",
+    "urn:eigenius:core:description": "AutoOnLoad. Re-solves the steady-state nonlinear system at the given parameters and total-conservation constants; Holds iff the institution converges to the same concentrations within tolerance, Undecidable on solver non-convergence.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:SteadyState",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:validate_steady_state",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_validate_deficiency_zero",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_deficiency_zero",
+    "urn:eigenius:core:description": "AutoOnLoad. Holds iff `Catalyst.deficiency(network) == 0`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:DeficiencyZero",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:validate_deficiency_zero",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_validate_deficiency_one",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_deficiency_one",
+    "urn:eigenius:core:description": "AutoOnLoad. Holds iff `Catalyst.deficiency(network) == 1`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:DeficiencyOne",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:validate_deficiency_one",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_validate_weakly_reversible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_weakly_reversible",
+    "urn:eigenius:core:description": "AutoOnLoad. Holds iff `Catalyst.isweaklyreversible(network)`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:WeaklyReversible",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:validate_weakly_reversible",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_validate_complex_balanced",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_validate_complex_balanced",
+    "urn:eigenius:core:description": "AutoOnLoad. Holds iff `Catalyst.iscomplexbalanced(network)`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:ComplexBalanced",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:auto_on_load"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:validate_complex_balanced",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_compute_steady_states",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_compute_steady_states",
+    "urn:eigenius:core:description": "OnDemand. Solves the network's steady-state system at the given parameters via HomotopyContinuation (multiple equilibria) or NonlinearSolve (single root from initial guess); returns a SteadyStateSet.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:CatalystSteadyStateInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:catalyst:SteadyStateSet",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:compute_steady_states",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_extract_invariants",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_extract_invariants",
+    "urn:eigenius:core:description": "OnDemand. Returns the full conservation-law matrix as a ConservationLawSet, one ConservationLaw per row.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:ReactionNetwork",
+    "urn:eigenius:institution:result_class": "urn:eigenius:julia:catalyst:ConservationLawSet",
+    "urn:eigenius:institution:dispatch_role": ["urn:eigenius:institution:dispatch_roles:on_demand"],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:extract_invariants",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  },
+  {
+    "@id": "urn:eigenius:julia:catalyst:qc_check_deficiency",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_check_deficiency",
+    "urn:eigenius:core:description": "OnDemand + Decidable. Holds iff `Catalyst.deficiency(network) == expected_deficiency`. Lets `Exp::NativeDecide` reduce in user programs.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:julia:catalyst:CatalystDeficiencyClaim",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand",
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:julia:catalyst:proc:check_deficiency",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:julia:catalyst"
+  }
+]

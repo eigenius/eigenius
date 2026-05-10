@@ -301,7 +301,12 @@ impl Parser {
         Ok(InstitutionAlias { iri, alias })
     }
 
-    /// `FIBER institution_ref : QueryClass { params } AS ?var`
+    /// `FIBER institution_ref : QueryClass { params } AS ?var [INTO "<iri>"]`
+    ///
+    /// The optional `INTO` suffix names a chain-resident IRI for the
+    /// FIBER's response resource (D14 §9.3 chain-reinsertion via
+    /// EigenQL). With `INTO`, the response is committed to the regular
+    /// chain as part of the query's commit cycle.
     fn parse_fiber_clause(&mut self) -> Result<FiberClause, QueryError> {
         self.expect(&TokenKind::Fiber)?;
         let institution = self.parse_name()?;
@@ -310,11 +315,36 @@ impl Parser {
         let params = self.parse_fiber_params()?;
         self.expect(&TokenKind::As)?;
         let binding = self.parse_variable()?;
+        let into = if self.at(&TokenKind::Into) {
+            self.advance();
+            let iri_str = match self.peek().clone() {
+                TokenKind::StringLit(s) => {
+                    self.advance();
+                    s
+                }
+                other => {
+                    return Err(QueryError::parser(
+                        self.position(),
+                        format!("expected quoted IRI string after FIBER `INTO`, got {other:?}"),
+                    ));
+                }
+            };
+            let iri = Iri::parse(&iri_str).map_err(|e| {
+                QueryError::parser(
+                    self.position(),
+                    format!("FIBER INTO target `{iri_str}` is not a valid IRI: {e}"),
+                )
+            })?;
+            Some(iri)
+        } else {
+            None
+        };
         Ok(FiberClause {
             institution,
             query_class,
             params,
             binding,
+            into,
         })
     }
 
@@ -1387,6 +1417,63 @@ mod tests {
         }
         assert!(matches!(clauses[2], Clause::Pattern(_)));
         assert!(prog.query.body.has_fiber());
+    }
+
+    #[test]
+    fn fiber_with_into_clause_parses() {
+        let prog = parse_str(
+            r#"
+            USING INSTITUTION "urn:eigenius:test:wasm:ordering" AS ord
+            MATCH ?m { latest_delta: ?d }
+            FIBER ord:ConvergenceQuery { tolerance: 0.01, latest_delta: ?d } AS ?conv
+                INTO "urn:eigenius:test:wasm:my_conv"
+            "#,
+        )
+        .unwrap();
+        let clauses = &prog.query.body.clauses;
+        match &clauses[1] {
+            Clause::Fiber(fc) => {
+                let into = fc.into.as_ref().expect("INTO clause should be parsed");
+                assert_eq!(into.as_str(), "urn:eigenius:test:wasm:my_conv");
+            }
+            _ => panic!("expected Fiber clause at index 1"),
+        }
+    }
+
+    #[test]
+    fn fiber_without_into_clause_has_none() {
+        // Sanity check: FIBER without INTO leaves the field as None
+        // (back-compat with all pre-Phase 19i queries).
+        let prog = parse_str(
+            r#"
+            MATCH ?m { latest_delta: ?d }
+            FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
+                { tolerance: 0.01, latest_delta: ?d } AS ?conv
+            "#,
+        )
+        .unwrap();
+        let clauses = &prog.query.body.clauses;
+        match &clauses[1] {
+            Clause::Fiber(fc) => assert!(fc.into.is_none()),
+            _ => panic!("expected Fiber clause"),
+        }
+    }
+
+    #[test]
+    fn fiber_into_rejects_non_string_argument() {
+        let err = parse_str(
+            r#"
+            MATCH ?m { latest_delta: ?d }
+            FIBER "urn:eigenius:test:wasm:ordering":ConvergenceQuery
+                { tolerance: 0.01, latest_delta: ?d } AS ?conv INTO ?out
+            "#,
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("expected quoted IRI string"),
+            "expected `INTO` to require a quoted IRI string, got: {msg}"
+        );
     }
 
     #[test]

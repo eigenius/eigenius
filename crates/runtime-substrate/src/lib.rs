@@ -49,8 +49,9 @@ pub mod spawner;
 pub mod test_runtime;
 #[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
 pub mod test_runtime_docker;
-#[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
-pub mod test_runtime_julia;
+// `test_runtime_julia` removed in Phase 19a.1 — the production
+// implementation moved to the `eigenius-julia` crate. See
+// `eigenius_julia::JuliaLanguageRuntime`.
 pub mod types;
 
 pub use boundary::{check_call_method, check_run_script};
@@ -68,7 +69,7 @@ pub use image_build::{
     DockerfileSpec, ImageBuilder, IncludedPackage, LanguageAsset, MirrorMaterialization,
     PackageMaterialization,
 };
-pub use invocation::{numerical_metadata_to_json, DispatchTrace};
+pub use invocation::{numerical_metadata_to_json, DispatchTrace, RunOutcome};
 pub use language_runtime::LanguageRuntime;
 pub use mirror_generator::{
     LibraryContent, LibraryFile, MirrorGenerationOutput, MirrorGenerationRequest, MirrorGenerator,
@@ -80,12 +81,16 @@ pub use rpc::{
     MAX_FRAME_SIZE_DEFAULT,
 };
 #[cfg(feature = "docker-spawner")]
-pub use spawner::{DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy};
-pub use spawner::{LocalSpawner, WorkerSpawner};
+pub use spawner::{
+    DockerServiceSpawner, DockerSpawner, DockerSpawnerConfig, NetworkMode, PullPolicy,
+};
+pub use spawner::{
+    LocalServiceSpawner, LocalSpawner, ServiceHandle, ServiceSpawner, WorkerSpawner,
+};
 #[cfg(feature = "test-runtime")]
 pub use test_runtime::TestLanguageRuntime;
 #[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
 pub use test_runtime_docker::TestLanguageRuntimeDocker;
-#[cfg(all(feature = "test-runtime", feature = "docker-spawner"))]
-pub use test_runtime_julia::TestLanguageRuntimeJulia;
+// `TestLanguageRuntimeJulia` re-export removed in Phase 19a.1 —
+// production type is `eigenius_julia::JuliaLanguageRuntime`.
 pub use types::{DockerfileFragments, ImageDigest, ImageDigestError, WorkerHandle, WorkerSpec};

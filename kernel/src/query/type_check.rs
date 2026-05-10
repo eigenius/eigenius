@@ -450,7 +450,20 @@ fn check_fiber_clauses(
 
         for iri in collect_property_iris(&input_class_resource, &requires_prop) {
             allowed_prop_iris.insert(iri.as_str().to_string());
-            required_prop_iris.insert(iri.as_str().to_string());
+            // `is_a` is auto-stamped by `apply_fiber_clause` from the
+            // QueryClass's declared input class — the user can't be
+            // required to supply it. `short_name` is chain-commit
+            // bookkeeping (used for short-name resolution on persisted
+            // resources) and irrelevant to a FIBER-synthesized
+            // transient input. Both legitimately appear in the input
+            // class's `requires` (a FIBER QueryClass may still admit
+            // direct chain commits, where these matter), but for the
+            // FIBER dispatch the kernel handles them — the type-check
+            // must skip them or every FIBER call ends up boilerplated
+            // with `is_a: …, short_name: …` lines.
+            if iri.as_str() != wk::IS_A && iri.as_str() != wk::SHORT_NAME {
+                required_prop_iris.insert(iri.as_str().to_string());
+            }
         }
         for iri in collect_property_iris(&input_class_resource, &recommends_prop) {
             allowed_prop_iris.insert(iri.as_str().to_string());

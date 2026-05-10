@@ -1,0 +1,53 @@
+[
+  {
+    "@id": "urn:eigenius:demo:assay:compound_kinase_binding",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:catalyst:ReactionNetwork"],
+    "urn:eigenius:core:short_name": "compound_kinase_binding",
+    "urn:eigenius:core:description": "Binding kinetics for a kinase inhibitor: `compound + kinase ⇌ complex`. Forward rate `k_on` (1/(nM·s)), reverse rate `k_off` (1/s). Dissociation constant Kd = k_off / k_on relates to the assay-level IC50 via Cheng-Prusoff. Three species, two reactions (one reversible split into forward + backward), two parameters.",
+    "urn:eigenius:julia:catalyst:network_source": "@reaction_network begin\n    k_on,  C + K --> CK\n    k_off, CK --> C + K\nend",
+    "urn:eigenius:julia:catalyst:species_declared": ["C", "K", "CK"],
+    "urn:eigenius:julia:catalyst:parameters_declared": ["k_on", "k_off"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:total_compound_conserved",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:catalyst:ConservationLaw"],
+    "urn:eigenius:core:short_name": "total_compound_conserved",
+    "urn:eigenius:core:description": "Total compound (free + bound) is conserved: `C + CK = constant`. Coefficients [1, 0, 1] aligned with species [C, K, CK]. AutoOnLoad confirms via `Catalyst.conservationlaws`.",
+    "urn:eigenius:julia:catalyst:network": "urn:eigenius:demo:assay:compound_kinase_binding",
+    "urn:eigenius:julia:catalyst:coefficients": [1, 0, 1]
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:total_kinase_conserved",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:catalyst:ConservationLaw"],
+    "urn:eigenius:core:short_name": "total_kinase_conserved",
+    "urn:eigenius:core:description": "Total kinase (free + bound) is conserved: `K + CK = constant`. Coefficients [0, 1, 1].",
+    "urn:eigenius:julia:catalyst:network": "urn:eigenius:demo:assay:compound_kinase_binding",
+    "urn:eigenius:julia:catalyst:coefficients": [0, 1, 1]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:binding_deficiency_zero",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:catalyst:DeficiencyZero"],
+    "urn:eigenius:core:short_name": "binding_deficiency_zero",
+    "urn:eigenius:core:description": "The compound-kinase-binding network has structural deficiency = 0 — Feinberg formula: 2 complexes (C+K, CK) − 1 linkage class − 1 stoichiometric rank = 0. By Feinberg's deficiency-zero theorem, this guarantees a unique positive steady state in each compatibility class for any positive rate constants.",
+    "urn:eigenius:julia:catalyst:network": "urn:eigenius:demo:assay:compound_kinase_binding"
+  },
+  {
+    "@id": "urn:eigenius:demo:assay:binding_weakly_reversible",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:catalyst:WeaklyReversible"],
+    "urn:eigenius:core:short_name": "binding_weakly_reversible",
+    "urn:eigenius:core:description": "Both reactions are present in opposite directions, so the network is weakly reversible.",
+    "urn:eigenius:julia:catalyst:network": "urn:eigenius:demo:assay:compound_kinase_binding"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:binding_steady_state_eig0042_cdk2",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:catalyst:SteadyState"],
+    "urn:eigenius:core:short_name": "binding_steady_state_eig0042_cdk2",
+    "urn:eigenius:core:description": "Steady-state concentrations for the compound-kinase-binding network parameterised at Kd = 42 nM (matching EIG_0042 vs CDK2 from R0001). Initial conditions Ctot = Ktot = 100 nM. Solution: CK ≈ 52.87 nM, C = K ≈ 47.13 nM. AutoOnLoad re-solves and confirms within tolerance.",
+    "urn:eigenius:julia:catalyst:network": "urn:eigenius:demo:assay:compound_kinase_binding",
+    "urn:eigenius:julia:catalyst:parameters_kv": {"k_on": 0.01, "k_off": 0.42},
+    "urn:eigenius:julia:catalyst:concentrations_kv": {"C": 47.13, "K": 47.13, "CK": 52.87}
+  }
+]

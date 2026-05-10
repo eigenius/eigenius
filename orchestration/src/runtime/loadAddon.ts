@@ -48,6 +48,19 @@ export interface RuntimeSubstrateAddon {
    * `eigenius-test-worker` binary (e.g. `target/debug/eigenius-test-worker`). */
   registerTestLanguageRuntime(workerBinaryPath: string): void;
 
+  /** Register the Julia language runtime under language_id="julia".
+   * `workerProjectDir` points at `julia/runtime-worker/` (the directory
+   * containing `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`).
+   * `baseImageRef` is the digest-pinned Julia base image. `depotPath`
+   * is the shared host/container path used for substrate artifacts —
+   * must match the orchestrator's bind-mount so DooD-spawned worker
+   * containers see the same path the orchestrator wrote (D26 §9.5). */
+  registerJuliaLanguageRuntime(
+    workerProjectDir: string,
+    baseImageRef: string,
+    depotPath: string,
+  ): void;
+
   /** Dispatch a `RunRuntimeScript` invocation. Both args are
    * Eigon-CBOR `Buffer`s; returns the output Resource and a partial
    * `RuntimeInvocation` Resource (Phase 18c.5 / D26 §5.5) carrying the
@@ -63,6 +76,22 @@ export interface RuntimeSubstrateAddon {
   dispatchCallRuntimeMethod(
     input: Uint8Array,
     argument: Uint8Array,
+  ): Promise<DispatchOutcome>;
+
+  /** Dispatch an external-institution invocation (D31 §6.2 / Phase
+   * 19a.5.c). The kernel sends the dispatch metadata as structured
+   * gRPC fields rather than as a single argument Resource, so this
+   * method takes them as direct parameters. `inputCbors` is the
+   * multi-input list per D31 §6.5 — exactly one element for an
+   * AutoOnLoad / Decidable QueryClass dispatch. Same outcome shape
+   * as the script / method dispatchers. */
+  dispatchExternalInstitution(
+    language: string,
+    envIri: string,
+    imageDigest: string,
+    methodName: string,
+    signatureIri: string,
+    inputCbors: Uint8Array[],
   ): Promise<DispatchOutcome>;
 
   /** Language IDs of currently-registered runtimes. */

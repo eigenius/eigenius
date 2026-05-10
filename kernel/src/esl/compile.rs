@@ -740,6 +740,58 @@ impl Compiler {
                 }
                 Ok(Value::Embedded(Box::new(embedded)))
             }
+            // D32 inductive-value literals. Lower to a chain `Value::Json`
+            // carrying the canonical tagged-dict shape (`{ctor, args}`)
+            // the kernel's inductive-value validator (Phase 19d.0.b)
+            // walks against the target property's declared
+            // `class_types` InductiveType. The ctor name + arity
+            // type-check happens at commit time on the kernel side;
+            // ESL compile is structurally agnostic to which inductive
+            // a `CtorApp` lands against — the chain validator has the
+            // full ctor schema and reports a clean structural error
+            // if the name + arg shapes don't match.
+            ast::Value::CtorApp { .. } => Ok(Value::Json(self.ctor_value_to_json(value)?)),
+        }
+    }
+
+    /// Recursively convert a ctor-context value into the chain's
+    /// inductive tagged-dict JSON. Called for `CtorApp` itself and
+    /// for each arg position inside a CtorApp.
+    ///
+    /// String / Int / Float / Bool become their JSON counterparts;
+    /// `Ref` resolves to its IRI string (consistent with how `Ref`
+    /// flows in `Value::String` for ordinary properties); `Array`
+    /// becomes a JSON array of recursively-converted elements;
+    /// `CtorApp` becomes `{"ctor": ..., "args": [...]}`. `Block`
+    /// embedded resources are rejected — inductive ctor args are
+    /// flat values or other ctors, not nested resources.
+    fn ctor_value_to_json(&self, value: &ast::Value) -> Result<serde_json::Value, EslError> {
+        match value {
+            ast::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+            ast::Value::Int(n) => Ok(serde_json::Value::Number((*n).into())),
+            ast::Value::Float(f) => Ok(serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null)),
+            ast::Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+            ast::Value::Ref(qn) => Ok(serde_json::Value::String(self.resolve(qn)?)),
+            ast::Value::Array(items) => {
+                let json_items: Result<Vec<_>, _> =
+                    items.iter().map(|v| self.ctor_value_to_json(v)).collect();
+                Ok(serde_json::Value::Array(json_items?))
+            }
+            ast::Value::Block(_) => Err(EslError::compiler(
+                None,
+                "embedded `{...}` resource blocks cannot appear as constructor arguments — \
+                 ctor args are flat values or nested constructor applications",
+            )),
+            ast::Value::CtorApp { ctor, args, .. } => {
+                let json_args: Result<Vec<_>, _> =
+                    args.iter().map(|v| self.ctor_value_to_json(v)).collect();
+                let mut obj = serde_json::Map::new();
+                obj.insert("ctor".to_string(), serde_json::Value::String(ctor.clone()));
+                obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
+                Ok(serde_json::Value::Object(obj))
+            }
         }
     }
 
@@ -1600,6 +1652,298 @@ mod tests {
         assert_eq!(
             r.get(&iri("urn:eigenius:example:name")).unwrap().as_str(),
             Some("Rex")
+        );
+    }
+
+    #[test]
+    fn compile_resource_with_inductive_ctor_value() {
+        // D32 inductive-value literals lower to `Value::Json` carrying
+        // the canonical `{ctor, args}` tagged-dict shape — the same
+        // shape the kernel's inductive-value validator (Phase 19d.0.b)
+        // walks against the target property's class_types InductiveType.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+
+            resource ex:t : ex:Holder {
+                ex:term = App(OpRef("urn:eigenius:formulas:ops:mul"),
+                              LitFloat(2.0));
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let term = r
+            .get(&iri("urn:eigenius:example:term"))
+            .expect("term property must be set");
+        let Value::Json(json) = term else {
+            panic!("expected Value::Json, got {term:?}");
+        };
+        assert_eq!(json["ctor"], serde_json::json!("App"));
+        let args = json["args"].as_array().expect("args must be array");
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0]["ctor"], serde_json::json!("OpRef"));
+        assert_eq!(
+            args[0]["args"][0],
+            serde_json::json!("urn:eigenius:formulas:ops:mul")
+        );
+        assert_eq!(args[1]["ctor"], serde_json::json!("LitFloat"));
+        assert_eq!(args[1]["args"][0], serde_json::json!(2.0));
+    }
+
+    #[test]
+    fn compile_formula_sublanguage() {
+        // `formula(...)` lowers through the same Value::CtorApp path
+        // as the explicit `App(...)` literal form, producing the
+        // canonical chain `{ctor, args}` JSON. Verify the SSE-residual
+        // shape from the kinase Ki-fit demo collapses cleanly.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+
+            resource ex:t : ex:Holder {
+                ex:term = formula((4 - 2 * Ki) ^ 2);
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let term = r
+            .get(&iri("urn:eigenius:example:term"))
+            .expect("term property");
+        let Value::Json(json) = term else {
+            panic!("expected Value::Json on ex:term");
+        };
+        // Outermost is pow; rhs is the LitFloat(2.0) exponent.
+        assert_eq!(json["ctor"], serde_json::json!("App"));
+        assert_eq!(
+            json["args"][0]["args"][0]["ctor"],
+            serde_json::json!("OpRef")
+        );
+        assert_eq!(
+            json["args"][0]["args"][0]["args"][0],
+            serde_json::json!("urn:eigenius:formulas:ops:pow")
+        );
+        assert_eq!(json["args"][1]["ctor"], serde_json::json!("LitFloat"));
+        assert_eq!(json["args"][1]["args"][0], serde_json::json!(2.0));
+    }
+
+    #[test]
+    fn compile_nullary_ctor_value() {
+        // Nullary ctor (`LE()`) lowers to `{ "ctor": "LE", "args": [] }`.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+
+            resource ex:c : ex:Constraint {
+                ex:relation = LE();
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let rel = r
+            .get(&iri("urn:eigenius:example:relation"))
+            .expect("relation property must be set");
+        let Value::Json(json) = rel else {
+            panic!("expected Value::Json, got {rel:?}");
+        };
+        assert_eq!(json["ctor"], serde_json::json!("LE"));
+        assert_eq!(json["args"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn compile_kinase_institutions_notebook_esl() {
+        // Smoke-test the ESL flavour the
+        // `notebooks/examples/kinase-institutions.json` notebook uses
+        // — moderate-depth FormulaTerm trees in resource fields, mixed
+        // with the existing array / Ref / scalar shapes. Catches
+        // regressions in the inductive-value literal surface that
+        // would silently break the notebook on Run All.
+        let resources = compile_esl(
+            r#"
+            namespace core   = "urn:eigenius:core";
+            namespace diffeq = "urn:eigenius:diffeq";
+            namespace nb     = "urn:eigenius:notebook:kinase_demo";
+
+            resource nb:rhs_A : diffeq:RhsComponent {
+                diffeq:term = App(
+                    App(
+                        App(OpRef("urn:eigenius:formulas:ops:mul"), LitFloat(-1.0)),
+                        Var("A")
+                    ),
+                    Var("k")
+                );
+            }
+
+            resource nb:rhs_B : diffeq:RhsComponent {
+                diffeq:term = App(
+                    App(OpRef("urn:eigenius:formulas:ops:mul"), Var("A")),
+                    Var("k")
+                );
+            }
+
+            resource nb:ode_problem : diffeq:OdeProblem {
+                core:short_name           = "ab_decay";
+                diffeq:state_names        = ["A", "B"];
+                diffeq:parameter_names    = ["k"];
+                diffeq:rhs                = [nb:rhs_A, nb:rhs_B];
+                diffeq:initial_conditions = [1.0, 0.0];
+                diffeq:parameters         = [1.0];
+                diffeq:time_span_start    = 0.0;
+                diffeq:time_span_end      = 1.0;
+            }
+
+            resource nb:ode_solution : diffeq:OdeSolution {
+                core:short_name    = "ab_solution";
+                diffeq:problem     = nb:ode_problem;
+                diffeq:algorithm   = "Tsit5";
+                diffeq:abstol      = 0.00000001;
+                diffeq:reltol      = 0.00000001;
+                diffeq:final_state = [0.36787944117144233, 0.6321205588285577];
+            }
+        "#,
+        );
+        assert_eq!(resources.len(), 4, "expected 4 resources committed");
+
+        let rhs_a = resources
+            .iter()
+            .find(|r| r.id().is_some_and(|i| i.as_str().ends_with(":rhs_A")))
+            .expect("rhs_A");
+        let term = rhs_a
+            .get(&iri("urn:eigenius:diffeq:term"))
+            .expect("term property");
+        let Value::Json(json) = term else {
+            panic!("expected Value::Json on diffeq:term");
+        };
+        assert_eq!(json["ctor"], serde_json::json!("App"));
+        // Walk the App-spine: App(App(App(OpRef, Lit), Var(A)), Var(k)).
+        // args[0] is the inner App(App(OpRef, Lit), Var(A));
+        // args[0]["args"][0] is App(OpRef, Lit);
+        // args[0]["args"][0]["args"][0] is OpRef(...:mul).
+        assert_eq!(
+            json["args"][0]["args"][0]["args"][0]["ctor"],
+            serde_json::json!("OpRef")
+        );
+        assert_eq!(
+            json["args"][0]["args"][0]["args"][0]["args"][0],
+            serde_json::json!("urn:eigenius:formulas:ops:mul")
+        );
+        assert_eq!(
+            json["args"][0]["args"][0]["args"][1]["ctor"],
+            serde_json::json!("LitFloat")
+        );
+        assert_eq!(
+            json["args"][0]["args"][0]["args"][1]["args"][0],
+            serde_json::json!(-1.0)
+        );
+        assert_eq!(json["args"][1]["ctor"], serde_json::json!("Var"));
+        assert_eq!(json["args"][1]["args"][0], serde_json::json!("k"));
+    }
+
+    /// Pull every ESL cell out of the shipped kinase-institutions
+    /// notebook, compile each one, AND run the chain validator over
+    /// the resulting resources after loading every institution
+    /// ontology the cells reference. Catches two classes of drift:
+    ///
+    /// 1. *Parse / compile* failures (a future ESL grammar change
+    ///    inadvertently breaks the notebook's syntax).
+    /// 2. *Validator* failures (operator-arity mismatches, missing
+    ///    required properties, malformed inductive payloads, …).
+    ///
+    /// The arity-mismatch error that surfaced when the user ran cell
+    /// 5 against a live kernel — `mul` declares arity 2 but the
+    /// FormulaTerm supplied 3 args — is exactly the class of bug
+    /// the parse-only smoke test would have missed; the validator
+    /// drive here forces it into compile-time.
+    #[test]
+    fn compile_every_esl_cell_in_kinase_institutions_notebook_validates_cleanly() {
+        use crate::bootstrap::bootstrap;
+        use crate::validation::Validator;
+
+        const NOTEBOOK_JSON: &str =
+            include_str!("../../../notebooks/examples/kinase-institutions.json");
+        // Institution ontologies the notebook cells reference. The
+        // commit order matches the cross-reference dependency graph
+        // (jump before symbolics because Symbolics' SymbolicsToJuMPInput
+        // class_types reach into jump:VariableBound / jump:Constraint;
+        // diffeq before catalyst because Catalyst's qc_cat_to_ode
+        // result_class reaches into diffeq:OdeProblem; symbolics
+        // before intervals because intervals' BoundsRequest reaches
+        // into symbolics:SymbolicExpression).
+        const JUMP_ONTOLOGY: &str =
+            include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
+        const SYMBOLICS_ONTOLOGY: &str = include_str!(
+            "../../../julia/institutions/symbolics/declarations/symbolics-ontology.eigon.json"
+        );
+        const INTERVALS_ONTOLOGY: &str = include_str!(
+            "../../../julia/institutions/intervals/declarations/intervals-ontology.eigon.json"
+        );
+        const DIFFEQ_ONTOLOGY: &str = include_str!(
+            "../../../julia/institutions/diffeq/declarations/diffeq-ontology.eigon.json"
+        );
+        const CATALYST_ONTOLOGY: &str = include_str!(
+            "../../../julia/institutions/catalyst/declarations/catalyst-ontology.eigon.json"
+        );
+
+        let mut ctx = bootstrap().expect("bootstrap");
+        for (label, json) in [
+            ("jump_ontology", JUMP_ONTOLOGY),
+            ("symbolics_ontology", SYMBOLICS_ONTOLOGY),
+            ("intervals_ontology", INTERVALS_ONTOLOGY),
+            ("diffeq_ontology", DIFFEQ_ONTOLOGY),
+            ("catalyst_ontology", CATALYST_ONTOLOGY),
+        ] {
+            for r in eigon_json::parse_document(json).expect("parse ontology") {
+                ctx.add_resource(r).expect("add ontology resource");
+            }
+            ctx.commit(label).expect("commit ontology layer");
+        }
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(NOTEBOOK_JSON).expect("notebook JSON parses");
+        let cells = parsed["cells"]
+            .as_array()
+            .expect("notebook has a cells array");
+
+        let mut esl_cell_count = 0;
+        for cell in cells {
+            let cell_type = cell["type"].as_str().unwrap_or("");
+            if cell_type != "esl" {
+                continue;
+            }
+            esl_cell_count += 1;
+            let id = cell["id"].as_str().unwrap_or("?");
+            let source = cell["source"].as_str().expect("esl cell has source");
+
+            let resources = std::panic::catch_unwind(|| compile_esl(source))
+                .unwrap_or_else(|_| panic!("ESL cell {id} failed to compile"));
+            assert!(
+                !resources.is_empty(),
+                "ESL cell {id} compiled to zero resources"
+            );
+            for r in resources {
+                ctx.add_resource(r)
+                    .unwrap_or_else(|e| panic!("ESL cell {id}: add_resource: {e:?}"));
+            }
+            ctx.commit(&format!("notebook_cell_{id}"))
+                .unwrap_or_else(|e| panic!("ESL cell {id}: commit failed: {e:?}"));
+        }
+        assert!(
+            esl_cell_count >= 3,
+            "expected the notebook to ship ≥ 3 ESL cells; got {esl_cell_count}"
+        );
+
+        let validator = Validator::new(ctx.head());
+        let errors = validator.validate();
+        assert!(
+            errors.is_empty(),
+            "notebook chain must validate cleanly; got errors:\n{}",
+            errors
+                .iter()
+                .map(|e| format!("  [{:?}] {} on {:?}", e.rule, e.message, e.resource_id))
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 

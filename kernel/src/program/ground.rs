@@ -168,9 +168,12 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
     let resource: &crate::ontology::resource::Resource = &resource_arc;
 
     let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
-    let data_type_str = match resource.get(&dt_iri) {
-        Some(Value::String(s)) => s.clone(),
-        _ => return Ok(Val::Set), // Unknown data type
+    // `data_type` is a `data_type: resource` property — canonical
+    // shape is `ResourceRef`, but `as_iri` also accepts the
+    // pre-canonical `String` shape from intermediate resources.
+    let data_type_str = match resource.get(&dt_iri).and_then(|v| v.as_iri()) {
+        Some(i) => i.as_str().to_string(),
+        None => return Ok(Val::Set), // Unknown data type
     };
 
     match data_type_str.as_str() {
@@ -212,10 +215,13 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
         }
 
         wk::VALUE_ARRAY => {
-            // Array of values — wrap element type in a list type
+            // Array of values — wrap element type in a list type.
+            // `element_type` is `data_type: resource`, post-canonical
+            // shape is `ResourceRef`.
             let et_iri = Iri::parse(wk::ELEMENT_TYPE).unwrap();
-            let elem_type = if let Some(Value::String(et_str)) = resource.get(&et_iri) {
-                match et_str.as_str() {
+            let elem_type = if let Some(et_iri_val) = resource.get(&et_iri).and_then(|v| v.as_iri())
+            {
+                match et_iri_val.as_str() {
                     wk::STRING => Val::EigonPrimitive(PrimitiveType::String),
                     wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
                     wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
@@ -441,6 +447,18 @@ fn decode_codata_observation_type(
     value: &Value,
 ) -> Result<Exp, String> {
     match value {
+        // `ResourceRef` is the canonical post-`canonicalise_resource_refs`
+        // shape for an IRI value; the bare-name forms (`Inf`, `Size`,
+        // identifier `Var`) only ever come through `Value::String`
+        // because they're not parseable as IRIs.
+        Value::ResourceRef(parsed) => {
+            if parsed == class_iri {
+                Ok(Exp::CodataType(self_ref.clone(), Vec::new()))
+            } else {
+                let v = resolve_class_type(parsed, layer)?;
+                Ok(crate::nbe::readback::readback_val(0, &v))
+            }
+        }
         Value::String(s) => {
             // Bare name forms first.
             if !s.contains(':') {

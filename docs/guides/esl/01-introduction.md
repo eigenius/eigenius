@@ -73,7 +73,7 @@ The rest of the guide proceeds bottom-up:
 - **[Chapter 8](08-capability-modes.md)** — `Pure` / `Read` / `Check` / `IO` and what kernel nodes can or can't do in each.
 - **[Chapter 9](09-institutions.md)** — how programs reach into institutions for domain reasoning.
 - **[Chapter 10](10-error-messages.md)** — common errors and fixes.
-- **[Chapter 11](11-appendix.md)** — grammar reference and source index.
+- **[Chapter 12](11-appendix.md)** — grammar reference and source index.
 
 ## 1.4. What this guide does not cover
 

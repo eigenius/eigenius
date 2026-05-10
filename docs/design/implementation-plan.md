@@ -93,7 +93,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 16 | Out-of-Core Query Execution | | Buffer-pool over storage, hash-join with spill, external sort, spillable group-by, per-query memory budget |
 | 17 | Chain Consolidation | | Squash a contiguous ancestral range into a resolve-equivalent layer; "git squash" for the typed knowledge graph |
 | 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; Service / Job lifecycle split (`JobSpawner` / `ServiceSpawner`); image-build pipeline; sandbox; CBOR + RFC 8746 wire format; CBOR consolidation across kernel ↔ orchestrator |
-| 19 | Julia Institutions | | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs) |
+| 19 | Julia Institutions | 19a ✓, 19d.0 ✓, 19d ✓, 19e ✓, 19f ✓ (HiGHS), 19f.1 ✓, 19g ✓, 19h ✓, 19h.1 ✓ | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs); Catalyst → DiffEq + Symbolics → JuMP comorphisms live |
 | 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
 | 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
 
@@ -702,7 +702,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - **Phase 2 — Static viewer ✓** — read-only notebook rendering with the four MVP cell types.
 - **Phase 3 — Manual execution ✓** — Run / Run all / Reset, per-cell run states, output panels.
 - **Phase 4 — Authoring (the MVP) ✓** — full editing UX, file Open / Save, the program-run cell, layer-stack and trace-tree visualisations, multi-stage `Dockerfile.orchestration` so the SPA serves alongside the RPC paths at `http://localhost:8080/notebooks/`.
-- **Phase 5 — Visualisation ✓** — `@fluentui/react-charts` integration via TS-cell sandbox helpers (5a), `@xyflow/react` topology graph with per-layer drilldown (5b), and a dedicated form-based **chart cell** type covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area kinds (5d). The `kinase-screening` notebook exercises every chart kind plus the topology graph.
+- **Phase 5 — Visualisation ✓** — `@fluentui/react-charts` integration via TS-cell sandbox helpers (5a), `@xyflow/react` topology graph with per-layer drilldown (5b), and a dedicated form-based **chart cell** type covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area kinds (5d). The `kinase-institutions` notebook exercises every chart kind plus the topology graph.
 - **Phase 6 — Reactivity + polish ✓** — sticky header with Pin toggle, file IO renamed Import / Export, dedicated **Open published notebook** dialog backed by EigenQL search, dismissable header MessageBars, mandatory `notebook:title` (ontology + SDK + UI guards), per-cell collapse/expand + global Expand/Collapse all, edit-metadata dialog with description editing, on-demand resource fetch for the per-layer topology graph. Reactivity: `Run` per cell becomes a `SplitButton` with `Run` / `Run from here…` / `Run to here…`; subdued cell-order **stale** marker tracks `lastRunCellId` honestly without pretending to model TS-to-TS dataflow (the explicit DAG approach was rejected because it can't see kernel-layer side effects — see [eigenius#33](https://github.com/eigenius/eigenius/issues/33) for the proper EigenQL `OPTIONAL` follow-on).
 - **Cross-cutting fixes during the polish round:** topology walker edge dedup on first sighting (was emitting each schema edge once per layer, blowing up the displayed edge count); chart titles wrapped externally for the cartesian + horizontal-bar + donut kinds for visual consistency (Fluent's `CartesianChart` `chartTitle` prop is aria-only).
 
@@ -712,13 +712,13 @@ The phase decomposes into two milestones that are separately reviewable:
 - `notebooks/` — Vite + React + TypeScript SPA. Cell types: `markdown`, `esl`, `eigenql`, `typescript`, `program-run`, `chart`. Auto-renderers for ResultSet, Resource, ProgramTrace, LayerStack, Topology, raw values.
 - `ontologies/notebook/notebook-ontology.json` — `Notebook`, `Cell`, `CellType` classes; baked into the kernel as the 5th bootstrap layer so publish succeeds without first registering anything.
 - `deploy/Dockerfile.orchestration` — multi-stage build that compiles the SPA and serves it from `EIGENIUS_NOTEBOOK_STATIC=/app/notebooks` at `/notebooks/*`.
-- Two Playwright e2e tests: `patent-demo.spec.ts` (the LLM-free critical path through the patent demo) and `kinase-screening.spec.ts` (chart-cell regression coverage across all six kinds).
+- Two Playwright e2e tests: `patent-demo.spec.ts` (the LLM-free critical path through the patent demo) and `kinase-charts.spec.ts` (chart-cell regression coverage across all six kinds).
 
 ### Phase D22 — References
 
 - [D22 — Notebook UX and TypeScript SDK](d22-notebook-and-typescript-sdk.md) — full spec including the Eigon-CBOR ↔ TypeScript marshalling rules
-- [Platform guide chapter 13 — Notebook](../guides/platform/13-notebook.md)
-- [Platform guide chapter 14 — TypeScript SDK](../guides/platform/14-typescript-sdk.md)
+- [Platform guide chapter 14 — Notebook](../guides/platform/14-notebook.md)
+- [Platform guide chapter 15 — TypeScript SDK](../guides/platform/15-typescript-sdk.md)
 
 ---
 
@@ -1228,62 +1228,595 @@ Cross-cutting codec change: replace Eigon-JSON with Eigon-CBOR on the `Component
 
 **Drives:** [D27 — Julia Institutions](d27-julia-institutions.md). Enables [`life-science-requirements.md`](life-science-requirements.md) worked examples in Phase 21 (PK ODEs, ML ensemble bounds, certified intervals, reaction-network dynamics).
 
-### Phase 19a — Julia substrate proof of concept + Service lifecycle (~3 weeks)
+### Phase 19a — Julia substrate POC + mirror generator (~6 weeks) ✓
 
-- `eigenius-julia` crate implements `LanguageRuntime`. Default Julia env declares `lifecycle: Service` (D26 §5.3.1) — Julia's ~30s cold start is the first concrete forcing function for the Service-backed dispatcher.
-- **Service-backed dispatcher lands here**, deferred from Phase 18c. New traits and backends per [D26 §8.2](d26-runtime-substrate.md): `ServiceSpawner`, `LocalServiceSpawner` (long-lived host subprocess pool), `DockerServiceSpawner` (DooD-launched persistent service container per env). Pool layered above the trait — lease/release worker handles, idle timeout, max size, health checks. `CallRuntimeMethod` becomes wireable for the first time in this phase.
-- **Wire `dispatched_to` on `RuntimeInvocation` (deferred from Phase 18c.5).** With `CallRuntimeMethod` lighting up here, the resolved `RuntimeMethodSignature` IRI becomes available — `eigenius-julia`'s method-dispatch path returns it through `LanguageRuntime`, the substrate facade puts it on `DispatchTrace`, and the orchestrator-side handler stamps it on the committed `RuntimeInvocation`. Until 19a, Phase 18c.5 leaves the property unset on `RunRuntimeScript` invocations (it has no resolved-method semantics for raw scripts). Decide alongside this work whether to also add `urn:eigenius:runtime:spawner_backend` (string, "local" / "docker" / …) — useful for audit queries like "was this run on Docker or LocalSpawner?", trivial ontology + trace addition, but skipped in 18c.5 in the absence of a forcing query.
-- Demonstrates: a `JuliaScript` resource committed to the chain, dispatched via `RunRuntimeScript`, producing a `JuliaInvocation` provenance record served by the warm pool; a `JuliaMethodSignature` (e.g. `Symbolics.simplify`) dispatched via `CallRuntimeMethod` against the same warm pool. `image_digest` left empty initially (deployment shape (c) — Julia bundled into the orchestrator image); 19c flips to shape (a).
-- Validates the substrate shape against a real language and against the Service-backed dispatcher both; flushes out anything missing in Phase 18a / 18c.
+The first production-shape milestone for Julia. Combines what earlier drafts split as 19a (substrate POC) and 19b (mirror generator) into a single phase, because the worker's dispatch contract is shaped by whether mirrors exist — separating them forces the worker-side dispatch logic to be written twice (once for raw-dict payloads, once for typed mirror struct payloads) and the interdependency is tight enough that one combined milestone is cleaner.
 
-### Phase 19b — `eigon-julia-gen` mirror generator (~3 weeks)
+Stands up the `eigenius-julia` crate, lights up the Service-backed dispatcher (deferred from Phase 18c), implements the mirror generator as substrate Rust code (D27 §3), wires `CallRuntimeMethod` end-to-end with typed mirror struct dispatch, populates `dispatched_to` on `RuntimeInvocation` (also 18c-deferred), and ships a minimal config primitive that future tunables extend. Deployment shape (c) for the entire phase — Julia bundled in the orchestrator image; the renumbered 19b (formerly 19c) flips to shape (a) once the per-env image-build path is exercised.
 
-- Deterministic Julia mirror generator. Faithful-translation specification authored in parallel as a design doc (D29, see Design Documents §9).
-- `JuliaPackageMirror` resources committed back to the chain.
-- `CallRuntimeMethod` (Julia variant) using mirror-struct dispatch.
-- Wire format flips to CBOR with RFC 8746 typed-array tags.
+Sub-milestones below. Total estimate ≈ 30 working days. The kinase ontology classes (`Compound`, `Target`, `AssayProtocol`, `AssayResult` from `ontologies/examples/kinase/`) are the test data that grounds every sub-milestone's worked example.
 
-### Phase 19c — Per-environment images + pool tuning (~2 weeks)
+#### Phase 19a.1 — `eigenius-julia` crate skeleton + LanguageRuntime impl (~2 days) ✓
 
-- Julia variant of substrate Phase 18c: deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile` baked into the image build, build-time provenance under `/etc/eigenius-runtime-env/`, registry push with digest capture, `JuliaEnvironment.image_digest` populated. Flips Julia from deployment shape (c) (bundled in orchestrator image, established in 19a) to shape (a) (per-env image).
-- Pool tuning for Julia at production scale — the `ServiceSpawner` trait + pool already shipped in 19a; this milestone exercises and tunes idle timeout, max size, and health-check policy against realistic Julia workloads (long-running notebook sessions, AutoOnLoad bursts on commit, Symbolics simplification floods during type-checking).
-- `JuliaPackagePin` resources committed alongside the verbatim `Manifest.toml` for graph-side queryability.
+**Goal.** Promote the test-only `crates/runtime-substrate/src/test_runtime_julia.rs` into a real production crate. Capstone-equivalent functionality continues to pass.
 
-### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~3 weeks)
+**No mirror artifacts in 19a.1.** The mirror generator lands in 19a.3 of this same phase. 19a.1 ships only the crate skeleton + `RunRuntimeScript` regression coverage; `call_method` returns `Err(NotImplemented)` until 19a.4 wires it up against generator-produced mirrors.
 
-- `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes; ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
+**Files created.**
+- `crates/eigenius-julia/Cargo.toml` — new workspace member.
+- `crates/eigenius-julia/src/lib.rs` — public surface (re-exports `JuliaLanguageRuntime`).
+- `crates/eigenius-julia/src/runtime.rs` — `JuliaLanguageRuntime` struct implementing `LanguageRuntime`.
+- `crates/eigenius-julia/src/dockerfile.rs` — Dockerfile-fragment provider (Julia install, worker copy, env-var stamping).
+- `crates/eigenius-julia/src/conventions.rs` — shared constants (manifest-hash file path, env-var names) so Rust + Julia sides don't drift.
+- `crates/eigenius-julia/tests/round_trip_test.rs` — capstone-equivalent round trip.
+
+**Files modified.**
+- Workspace `Cargo.toml` — add `crates/eigenius-julia` member.
+- `crates/runtime-substrate/src/test_runtime_julia.rs` — collapse to a thin re-export of the production type, or delete entirely if `eigenius-julia` is reachable from substrate tests via dev-dep.
+- `crates/runtime-substrate/tests/julia_capstone_integration.rs` — point at the production crate.
+
+**Tasks.**
+1. Crate scaffold (`Cargo.toml`, `lib.rs`, license header).
+2. `JuliaLanguageRuntime`: `language_id() = "julia"`, `dockerfile_fragments` returns Julia-specific fragments, `build_environment_image` delegates to the 18c.1 builder with those fragments, `spawn_worker` initially uses 18c's `LocalSpawner` / `DockerSpawner` (per-invocation; the Service path lands in 19a.2), `run_script` mirrors the capstone, `call_method` returns `Err(NotImplemented)` (lights up in 19a.3), `query_health` already shipped on `JuliaWorker.jl`.
+3. Update the 18d capstone integration test to point at the production crate; confirm green.
+4. Document in the crate's `lib.rs` docstring that 19a operates without a mirror package — payloads are raw IRI-keyed dicts; 19b's mirror generator changes that.
+
+**Acceptance.**
+- `cargo build --workspace` clean.
+- `cargo test -p eigenius-julia` passes (round-trip test against `RunRuntimeScript`).
+- 18d capstone integration test passes against the production crate (regression anchor).
+
+---
+
+#### Phase 19a.2 — `ServiceSpawner` trait + Local/Docker backends (~4 days) ✓
+
+**Goal.** Per [D26 §8.2](d26-runtime-substrate.md), introduce long-lived per-environment workers. Two dev-side backends — host subprocess and DooD-launched persistent container. `eigenius-julia` switches to using the Service path; per-invocation spawn stays available for the bash test runtime and 18d's existing tests.
+
+**Pooling deferred.** Production-target backends (Azure Container Apps, Kubernetes) handle scaling, max-replica enforcement, idle eviction, and liveness/readiness probing at the platform level (HPA / KEDA / ACA scale rules). A substrate-side pool would duplicate and potentially conflict with the platform's scaling decisions. Local subprocess and Docker backends are dev-only; their concurrent dispatch story is "one long-lived worker per env, dispatches share it" — sufficient for dev usage without a pool layer. The `ServiceSpawner` trait shape (`ensure_service` / `attach_uds` / `drain` / `backend`) generalises cleanly to future K8s and ACA spawners — those don't lease/release, they ensure-and-route.
+
+**Files created.**
+- `crates/runtime-substrate/src/spawner/service/mod.rs` — `ServiceSpawner` trait + `ServiceHandle` type.
+- `crates/runtime-substrate/src/spawner/service/local.rs` — `LocalServiceSpawner` (long-lived host subprocess, UDS RPC).
+- `crates/runtime-substrate/src/spawner/service/docker.rs` — `DockerServiceSpawner` (Bollard, persistent container per `(env_iri, image_digest)`, `auto_remove: false`).
+- `crates/runtime-substrate/tests/service_spawner_test.rs` — backend matrix (Local always, Docker gated on `--features docker-spawner` + reachable daemon).
+
+**Files modified.**
+- `crates/runtime-substrate/src/spawner/mod.rs` — expose `service` submodule.
+- `crates/runtime-substrate/src/lib.rs` — re-exports.
+- `crates/runtime-substrate/src/facade.rs` — Service-backed dispatch path; on dispatch, `ensure_service` then `attach_uds`, send the request.
+- `crates/eigenius-julia/src/runtime.rs` — `spawn_worker` uses `ServiceSpawner`; per-invocation `DockerSpawner` behaviour preserved as a fallback.
+
+**Tasks.**
+1. `ServiceSpawner` trait: `ensure_service(spec) -> Result<ServiceHandle, SpawnError>` (idempotent — same env returns same handle), `attach_uds(service) -> Result<UnixStream, SpawnError>`, `drain(service) -> Result<(), SpawnError>`, `backend() -> &'static str`. No leasing, no health-check, no max-size — those are the platform's concern (or the worker's, for concurrent dispatch on one process).
+2. `LocalServiceSpawner`: `std::process::Command` to spawn the worker; UDS bound to a per-service tempdir; `Request::Evict` on drain followed by SIGKILL on timeout. Cross-check against `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH` happens in the worker as today.
+3. `DockerServiceSpawner`: Bollard, `auto_remove: false` (vs the per-invocation `DockerSpawner`'s `auto_remove: true`). Container persists across invocations; one container per `(env_iri, image_digest)`. UDS bind-mounted per 18c.3 DooD discipline. `drain` calls `docker stop` + `docker rm` (or Bollard equivalents).
+4. `eigenius-julia` rewires `spawn_worker` to call `ServiceSpawner::ensure_service` and return a connection-attaching handle. `run_script` / `call_method` become "ensure_service, attach_uds, dispatch" instead of "spawn, dispatch, terminate".
+5. The Job-style `WorkerSpawner` trait stays in place for the bash test runtime + 18d's existing tests — they're explicitly per-invocation, no migration needed.
+
+**Acceptance.**
+- Both backends pass a smoke test: `ensure_service` → `attach_uds` → dispatch a Health RPC → `drain`.
+- Cold-start vs warm-reuse timing measurable (Julia first call ≥ several seconds; subsequent calls against the same service handle sub-100ms — no pool needed because the worker stays alive).
+- Docker-backed service keeps the container alive across invocations until `drain` (verify via `docker ps`).
+- 18d capstone integration test still passes (regression — the bash + Julia per-invocation paths stay green via `WorkerSpawner`).
+
+---
+
+#### Phase 19a.3 — Mirror generator (~10 days) ✓
+
+**Goal.** Implement the mirror generator as substrate Rust code per [D27 §3](d27-julia-institutions.md). Walks the chain's ontology layer at image-build time, emits Julia source matching the [D29 faithful-translation specification](d29-eigon-julia-mirror-spec.md), commits the result as a `RuntimePackageMirror` resource, bakes the precompiled artifact into the env image. D29 v1 lands in 19a.3.c alongside the chain-commit work; the implementation is reconciled to it in 19a.3.d (subclass hierarchy + remaining gap items called out in [D29 §11.2](d29-eigon-julia-mirror-spec.md#112-planned-extensions)).
+
+**Files created.**
+- `crates/eigenius-julia/src/mirror_gen.rs` — generator entry point: `generate_mirror(layer: &Layer, classes: &[Iri]) -> Result<MirrorOutput, GenError>` returning `(julia_source, content_hash, mirrored_class_iris)`.
+- `crates/eigenius-julia/src/mirror_gen/struct_emitter.rs` — emits Julia struct definitions from class declarations.
+- `crates/eigenius-julia/src/mirror_gen/codec_emitter.rs` — emits `decode_*` / `encode_*` per class for IRI-keyed CBOR round-trip.
+- `crates/eigenius-julia/src/mirror_gen/validator_emitter.rs` — emits constructor-level format-constraint validation (`min_value`, `max_value`, `pattern`, etc.) per the faithful-translation spec.
+- `crates/eigenius-julia/tests/mirror_gen_test.rs` — golden-file tests against the kinase ontology.
+- `julia/common/EigeniusJuliaCommon/Project.toml` — shared package providing helpers the generated code calls (`validate_min`, `validate_pattern`, `decode_iri_keyed_map`, etc.).
+- `julia/common/EigeniusJuliaCommon/src/EigeniusJuliaCommon.jl`.
+- `julia/env/Project.toml` — the shared env's Pkg env; declares path-deps on `EigeniusJuliaCommon` and (at build time) on the generated mirror packages.
+- [`docs/design/d29-eigon-julia-mirror-spec.md`](d29-eigon-julia-mirror-spec.md) — faithful-translation specification (D29). v1 draft committed in 19a.3.c.
+
+**Files modified.**
+- `crates/eigenius-julia/src/runtime.rs` — `build_environment_image` invokes `generate_mirror` for the env's mirror class list, copies the generated source into the build context, commits the `JuliaPackageMirror` resource alongside the image digest.
+- `crates/eigenius-julia/src/dockerfile.rs` — Dockerfile fragments grow a `COPY mirror/ /julia-src/mirrors/<name>/` step plus precompile invocation.
+- `julia/runtime-worker/src/JuliaWorker.jl` — worker bootstrap loads each mirror package via `using <PackageName>` based on the env's `mirror_dependency` list (passed via env var or config).
+- The ontology / class-walking helpers in `crates/runtime-substrate/src/boundary.rs` may need refactoring for reuse by the generator (the boundary check already walks classes; the generator does similar walking).
+
+**Tasks.**
+1. Class-walking pass: from a layer + a list of class IRIs, transitively collect all reachable classes (via `requires` / `recommends` resource-typed property class_types) and topologically sort so structs can be emitted in dependency order.
+2. Per-class emit pipeline: `class → (struct decl, decode fn, encode fn, constructor with validation)`. Each piece in its own emitter module so the spec stays readable.
+3. Faithful-translation spec D29 — capture the full mapping table from D27 §3.3 plus edge cases (empty `recommends`, polymorphic `class_types`, format constraints by data type, value_arrays with element_type, nested embedded resources). Author this concurrently with the generator so the spec and the implementation co-evolve.
+4. Generator self-tests:
+   - Determinism: same `(layer_hash, class_iris)` input → byte-identical Julia source.
+   - Idempotence: regenerating against an unchanged ontology produces the same `content_hash`.
+   - Spec conformance: golden-file tests for the kinase ontology (the four classes + their properties → exact expected Julia source).
+5. `JuliaPackageMirror` resource commit: at build time, the substrate creates a `JuliaPackageMirror` resource with `library_content` = generated source, `library_content_hash`, `mirrored_classes` = the class IRIs, `source_layer` = the head layer, `generator_identifier` = the substrate version, `generator_content_hash` = the substrate binary hash.
+6. Image-build wiring: the Dockerfile composer pulls the generated mirror into the build context; `Pkg.precompile()` runs over `julia/env/` so the mirror is precompiled at build time, not at first dispatch.
+7. `EigeniusJuliaCommon` shared helpers — kept minimal (only what the generated code needs).
+
+**Acceptance.**
+- Generator produces a valid `EigeniusKinaseMirror` Julia package from `ontologies/examples/kinase/kinase-ontology.json`.
+- Generated package compiles + precompiles cleanly in the env image.
+- Round-trip test: a `Compound` resource → CBOR → `decode_compound` → `encode_compound` → CBOR → equals original.
+- Determinism: regenerating the kinase mirror twice produces byte-identical source.
+- A `JuliaPackageMirror` resource is committed with the right content hash, source layer, and mirrored class IRIs on each `build_environment_image` call.
+
+**Sub-milestones.** 19a.3 ships in four chunks: 19a.3.a (class-walking + struct emitter), 19a.3.b (codec emitters + validating constructors + `EigeniusJuliaCommon`), 19a.3.c (`RuntimePackageMirror` chain commit + image-build wiring + [D29 v1 draft](d29-eigon-julia-mirror-spec.md)), 19a.3.d (reconcile generator output to D29 — see below).
+
+---
+
+#### Phase 19a.3.d — D29 conformance pass (~3 days) ✓
+
+**Goal.** Reconcile the v1 generator's actual output to [D29 v1](d29-eigon-julia-mirror-spec.md). 19a.3.a–c shipped the generator and the spec in parallel; 19a.3.d closes the gap items the spec calls out as bugs against the v1 implementation, plus implements the spec's required-but-not-yet-emitted features.
+
+**In scope.**
+- **Pattern anchoring** ([D29 §9.4](d29-eigon-julia-mirror-spec.md#94-validator-semantics-delegated-to-eigeniusjuliacommon)): `validate_pattern` wraps the user's pattern in `^(?:…)$` so Julia-side validation matches the kernel-side semantics in `kernel/src/validation/mod.rs:check_pattern`.
+- **Polymorphic `class_types` as `Union`** ([D29 §4](d29-eigon-julia-mirror-spec.md#4-faithful-type-translation)): a property with multiple `class_types` produces a `Union{T₁, …, Tₙ}` field type (sorted by IRI), with helper-driven encode dispatch on `typeof` and decode dispatch on the input dict's `is_a` list ([D29 §8.3](d29-eigon-julia-mirror-spec.md#83-polymorphic-union-field-codecs)). Extends the kinase fixture with a polymorphic case.
+- **Format IRI passthrough** ([D29 §9.3](d29-eigon-julia-mirror-spec.md#93-format-symbol-rendering)): non-`urn:eigenius:core:formats:` format IRIs are passed to `validate_format` as-is rather than silently dropped; `validate_format` raises on unknown formats.
+- **Cycle detection** ([D29 §3.3](d29-eigon-julia-mirror-spec.md#33-topological-order)): closure containing class cycles raises `MirrorGeneratorError::UnrepresentableClass`. Currently the topological sort silently produces invalid Julia.
+- **Subclass hierarchy emission** ([D29 §3.2](d29-eigon-julia-mirror-spec.md#32-subclass-closure-planned-112) / §11.2): `subclass_of` walked into the closure; abstract types emitted (`abstract type SuperType end`) before concrete structs; `struct Sub <: SuperType`. Bumps the spec to v1.1.
+- **Generator self-tests** for each of the above + a snapshot test that the kinase-fixture output matches the post-fix shape.
+
+**Out of scope** (pinned for later milestones in [D29 §11.2](d29-eigon-julia-mirror-spec.md#112-planned-extensions)).
+- Multi-mirror per `RuntimeEnvironment` (lands in 19a.4 alongside `CallRuntimeMethod`).
+- Per-class file split.
+- `core:allows_only` enum support, embedded resources.
+- Real generator binary content hash (replaces the `sha256("eigon-julia-gen:<version>")` v1 placeholder).
+
+**Acceptance.**
+- D29 v1.1 published; generator output conforms by every spec rule it cites.
+- Existing kinase snapshot test updated; new snapshot covers a polymorphic field and a subclass relationship.
+- Pattern-anchoring regression: `pattern: "abc"` rejects `"xxxabcxxx"` on both kernel and Julia validators.
+
+---
+
+#### Phase 19a.4 — `CallRuntimeMethod` + `JuliaWorker.jl` method dispatch + `dispatched_to` wiring (~5 days) ✓
+
+**Status: substrate side landed (2026-05-04).** `target_kind` wire discriminator, `MethodInvocation` payload, JuliaWorker method dispatch with `Base.invokelatest`, `JuliaLanguageRuntime::call_method`, `DispatchTrace.dispatched_to` plumbing, substrate-side epistemic-category stamping (`urn:eigenius:reflection:DerivedResource`), and the codec registries (`_eigenius_decoders` / `_eigenius_encoders`) on each generated mirror are all in. Spec [D29 v1.2](d29-eigon-julia-mirror-spec.md#85-codec-registries) pins the registry shape and the world-age rule.
+
+**Orchestrator-side glue and chain commit pipeline** are subsumed by Phase 19a.5 (D31 infrastructure) — they were originally framed as a "carry-over" sub-milestone but D31 settled the broader institution lifecycle, of which the orchestrator commit pipeline is one component. See [Phase 19a.5](#phase-19a5--d31-infrastructure-external-institution-lifecycle-3-weeks) below.
+
+**Goal.** Light up `CallRuntimeMethod` end-to-end against the generator-produced mirror from 19a.3. Worker dispatches by `RuntimeMethodSignature` IRI, performs Julia multiple dispatch on typed mirror struct inputs, captures `which()` for `dispatched_to`. Substrate propagates `dispatched_to` through `DispatchTrace` to the orchestrator, which stamps it on the committed `RuntimeInvocation` (closing the 18c.5-deferred property).
+
+**Files created.**
+- `crates/runtime-substrate/src/components/call_method.rs` — kernel-registered `CallRuntimeMethod` Component (substrate-level; resolves a `RuntimeMethodSignature`, leases worker, dispatches).
+- `julia/institutions/kinase-demo/EigeniusKinaseDemo/Project.toml` — small demo handler package depending on the generator-produced `EigeniusKinaseMirror`.
+- `julia/institutions/kinase-demo/EigeniusKinaseDemo/src/EigeniusKinaseDemo.jl` — sample method handlers operating on the typed mirror structs (e.g. `compute_selectivity_index(c::Compound, t1::Target, t2::Target)::Float64` reading `c.compound_id` etc.). Used as the test fixture for 19a.4 and the 19a.8 e2e demo; not a real institution. (The first real institution lands in 19a.6 — IntervalArithmetic.)
+- `crates/eigenius-julia/tests/call_method_test.rs` — kinase-grounded e2e.
+
+**Files modified.**
+- `julia/runtime-worker/src/JuliaWorker.jl` — `dispatch_method` evolves substantially:
+  - Maintains a *method registry*: at boot, walks loaded mirror + handler modules' exports and registers `(method_name, parameter types)` entries against `RuntimeMethodSignature` IRIs.
+  - On `dispatch_method`: decodes `target` as the `RuntimeMethodSignature` IRI; decodes `inputs` as CBOR-encoded mirror struct values via the per-class `decode_*` functions the generator emitted; looks up the handler; invokes it via Julia's multiple dispatch; captures `which(handler, typeof.(args))` for `dispatched_to`; encodes return value as CBOR via the per-class `encode_*` (or a primitive encoder).
+  - Returns `Response::DispatchOk { invocation_id, output, dispatched_to: <which-string> }` (the previously-`nothing` field is now real).
+  - Old eval-Julia-source behaviour preserved under a `target_kind = "script"` discriminator on the wire so the 18d capstone path stays green.
+- `crates/runtime-substrate/src/language_runtime.rs` — `call_method` signature stable; the impl now does real work.
+- `crates/runtime-substrate/src/invocation.rs` — `DispatchTrace.dispatched_to` field (likely already exists from 18c.5 stub).
+- `crates/runtime-substrate/src/facade.rs` — propagate `dispatched_to` from the language-runtime call up to the trace.
+- Orchestrator-side `JuliaInvocation` handler — accept `dispatched_to` from substrate, stamp on `RuntimeInvocation` resource.
+- `crates/eigenius-julia/src/runtime.rs` — `call_method` implemented (was `Err(NotImplemented)` in 19a.1).
+- `julia/env/Project.toml` — adds the `EigeniusKinaseDemo` handler package as a path-dep so it's part of the env image.
+
+**Tasks.**
+1. Settle the method-IRI scheme. Proposal: `urn:eigenius:julia:method:<package_iri>:<method_name>(<param_class_iri_1>,<param_class_iri_2>,…)`. The class IRIs are meaningful now that mirrors are typed; multi-method dispatch by class IRI works from day one.
+2. `JuliaWorker.jl` registry: a `Dict{String, Function}` keyed on the method IRI; a `register_methods(mod)` function called at boot for each loaded handler module.
+3. `dispatch_method` rewrite:
+   - Old behaviour (eval Julia source) preserved when `target_kind = "script"` — keeps the 18d capstone test green.
+   - New behaviour for `target_kind = "method"`: registry lookup + multiple-dispatch invocation on typed mirror struct args.
+   - The `Request::DispatchMethod` shape on the wire grows a `target_kind` discriminator.
+4. `CallRuntimeMethod` Component: substrate-level, kernel-registered. Input: `(method_signature_iri, inputs)`. Output: a `RuntimeInvocation` resource. Internally: resolves the signature → resolves the env → `ServiceSpawner::ensure_service` (idempotent) → `attach_uds` → dispatch → assembles the invocation.
+5. `dispatched_to` propagation: language-runtime → facade → trace → orchestrator → `RuntimeInvocation` property.
+6. Decision for the 18c.5-deferred `spawner_backend` trace property: I'd land it (one-line addition; useful for audit queries; trivial test).
+
+**Acceptance.**
+- `CallRuntimeMethod` invokes a kinase handler (`compute_selectivity_index(c::Compound, t1::Target, t2::Target)`) and returns the expected value.
+- The committed `RuntimeInvocation` has `dispatched_to` populated with the `Module.method(::Compound, ::Target, ::Target)` string Julia's `which()` returned — typed class-IRI-bearing dispatch info, useful for audit.
+- Mirror struct values round-trip across the boundary correctly (kinase resources committed in tests are usable as `CallRuntimeMethod` inputs via the generator's `decode_*` / `encode_*` helpers).
+- Test exercises both `RunRuntimeScript` and `CallRuntimeMethod` against the same warm `ServiceHandle` to confirm coexistence.
+
+---
+
+#### Phase 19a.5 — D31 infrastructure (external institution lifecycle, ~3 weeks) ✓
+
+**Goal.** Land the framework that [D31](d31-external-institution-lifecycle.md) specifies: mirror generation CLI, env image build, institution registration, kernel-emits-request / orchestrator-services-IO dispatch, Verdict commit pipeline. Generator-agnostic; the surfaces light up against Julia first because that's the only generator shipped, but they accept any future language without protocol churn.
+
+The work is split into five sub-milestones (a–e). Sub-milestones a–d build the framework; sub-milestone e is the **acceptance test for the framework** — the first real external institution (IntervalArithmetic) ships in 19a.6 and exercises every piece of 19a.5 end-to-end.
+
+##### 19a.5.a — Mirror CLI (~3 days)
+
+**Files created.**
+- `cli/src/commands/mirror.rs` — `mirror create`, `mirror get`, `mirror list`, `mirror inspect` subcommand handlers.
+
+**Files modified.**
+- `cli/src/main.rs` — register the new `mirror` subcommand group.
+
+**Tasks.**
+1. `mirror create`: resolve `--filter` / `--filter-file` query against `--layer`, materialize seed class IRIs, dispatch to language-specific generator (`JuliaMirrorGenerator` from `eigenius-julia`), commit `RuntimePackageMirror` to chain via `LoadRequest`, write source files to `--output`. Idempotence: same inputs produce same `library_content_hash` → kernel deduplicates the commit.
+2. `mirror get`: read `RuntimePackageMirror.library_content` from the chain by IRI, base64-decode the embedded files, write to `--output`. Read-only; no commit.
+3. `mirror list`: EigenQL query for all `RuntimePackageMirror` resources, optional `--language` / `--layer` filters.
+4. `mirror inspect <iri>`: fetch the resource, print its metadata (generator id/version, source layer, mirrored class IRIs, library_content_hash).
+5. Tests: a fake-chain integration test exercising `create` + `get` round-trip, and a CLI smoke test against the kinase mirror.
+
+**Acceptance.**
+- `eigenius mirror create --layer <l> --filter-file ./classes.eigenql --language julia --output ./out` produces files matching what the existing `JuliaMirrorGenerator` integration test expects, plus a chain commit.
+- `eigenius mirror get --iri <mirror-iri> --output ./out` produces byte-identical files to what `create` wrote.
+- Re-running `mirror create` with the same inputs produces no new commit (idempotence).
+
+---
+
+##### 19a.5.b — `env create` for Julia (~3 days)
+
+**Files created.**
+- `cli/src/commands/env.rs` — `env create`, `env list`, `env inspect` subcommand handlers.
+- `crates/eigenius-julia/src/env_builder.rs` — high-level builder that takes `--handler-package` + `--mirror` and produces an env image + RuntimeEnvironment commit. Wraps the existing `JuliaLanguageRuntime::build_environment_image` machinery.
+
+**Files modified.**
+- `crates/eigenius-julia/src/runtime.rs` — extend `build_environment_image` to accept an optional handler-package path that gets baked in alongside `EigeniusJuliaCommon` and the mirror.
+- `crates/eigenius-julia/src/dockerfile.rs` — extend `JuliaImagePlan` with handler-package fields; install_packages fragment runs `Pkg.develop` for the handler package.
+
+**Tasks.**
+1. CLI surface per [D31 §4.2](d31-external-institution-lifecycle.md#42-phase-3--build-the-env-image-with-eigenius-env-create): `--lang`, `--handler-package`, `--mirror`, `--include-package` (repeatable), `--as-iri`, `--base-image`, `--push-to`.
+2. Validation: handler-package's `Project.toml` must declare deps on `EigeniusMirror` + `EigeniusJuliaCommon`; mirror IRI must resolve to a chain-committed `RuntimePackageMirror`.
+3. Image build: extend the existing `eigenius-julia` build pipeline to bake the handler-package source into the image alongside the mirror, set the worker's `Project.toml` deps to include it, run `Pkg.develop` + `Pkg.precompile` in install_packages so the handler module is precompiled at image-build time.
+4. Commit `RuntimeEnvironment` resource with `image_digest`, `language`, references to mirror + handler-package metadata.
+5. Tests: end-to-end test that builds an env image with a fake handler package, verifies the worker can `using` the handler module after spawn.
+
+**Acceptance.**
+- `eigenius env create --lang julia --handler-package ./TestHandler --mirror <iri> --as-iri <env-iri>` produces an image_digest + committed RuntimeEnvironment.
+- The built image's worker boots, finds the handler module in `Base.loaded_modules`, finds its handler functions in `Main` after `using`.
+- Re-running `env create` with the same inputs produces the same digest (deterministic image build).
+
+---
+
+##### 19a.5.c — `DispatchExternal` RPC + orchestrator handler (~5 days)
+
+**Files created.**
+- `proto/external_dispatch.proto` (or extend existing kernel proto) — `DispatchExternalRequest`, `DispatchExternalResponse`, `DispatchExternalError` messages per [D31 §6.2](d31-external-institution-lifecycle.md#62-wire-shape).
+- `kernel/src/server/external_dispatch.rs` — kernel-side RPC stub: emits a `DispatchExternalRequest` over a back-channel during commit pipeline processing, blocks on the orchestrator's response.
+- `orchestration/runtime-substrate-native/src/dispatch_external.rs` — napi addon method `addon.dispatchExternal(institution_iri, env_iri, image_digest, method_name, signature_iri, input_cbors)` → `{ output_cbor, runtime_invocation_partial_cbor }`.
+- `orchestration/src/components/dispatch_external.ts` — TS handler that receives the kernel's request, routes to the addon method, returns the response.
+
+**Files modified.**
+- Kernel commit pipeline (`kernel/src/server/mod.rs` — `Load` RPC handler) — when the new layer's institutions include `runtime: external` and the commit triggers AutoOnLoad, route the dispatch through `external_dispatch.rs` rather than via the in-process `Institution::query`.
+
+**Tasks.**
+1. Wire shape exactly per D31 §6.2 — list-of-CBOR for inputs (Sigma-lowering happens in the kernel before the request).
+2. Channel mechanics: regular request/response gRPC. Kernel already holds an `orchestrator_client` ([kernel/src/server/mod.rs:1051](../../kernel/src/server/mod.rs#L1051)) for IO-WASM-component registration and dispatch — same pattern reused for `DispatchExternal`. The orchestrator's gRPC server gains a new RPC method; the kernel's institution dispatch path calls it via the existing client. No streaming, no polling.
+3. Failure path mapping per [D31 §6.4](d31-external-institution-lifecycle.md#64-failure-paths) — orchestrator unreachable → `ExternalDispatchUnavailable`; substrate failed → Verdict.Fails with diagnostic; etc.
+4. Tests: integration test with a stub external institution that always returns Verdict.Holds; verify the kernel-orchestrator round-trip works end-to-end.
+
+**Acceptance.**
+- A test institution with a stub Julia handler + AutoOnLoad QueryClass fires correctly on commit; Verdict round-trips via DispatchExternal.
+- All four failure modes from §6.4 produce the expected error shape.
+
+---
+
+##### 19a.5.d — Verdict commit pipeline (~3 days)
+
+**Files modified.**
+- `kernel/src/institution/dispatch.rs` — extend `dispatch_auto_on_load_for_resource` to handle `runtime: external` institutions: emit `DispatchExternalRequest` (via 19a.5.c's mechanism), parse the returned Verdict resource, apply the gate.
+- `kernel/src/server/mod.rs` — commit pipeline integration: AutoOnLoad runs as part of the commit transaction; Verdict + RuntimeInvocation commit transactionally with the gated resource per [D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
+
+**Tasks.**
+1. Extend `dispatch_auto_on_load_for_resource` to branch on `Institution.runtime`. WASM/InProcess use the existing `InstitutionRuntime::query`. External emits via 19a.5.c.
+2. Verdict commit: when an external dispatch returns successfully, build the Verdict resource (IRI, ctor_name, verdict_subject, verdict_query_class, runtime_invocation, dispatched_to, optional diagnostic) and add to the same kernel commit transaction as the gated resource.
+3. RuntimeInvocation commit: build from the orchestrator's `runtime_invocation_partial_cbor` (carrying dispatched_to, image_digest, started_at/completed_at, numerical_metadata) plus kernel-known fields (script ← signature IRI, environment ← env IRI, inputs ← gated resource IRI, output ← Verdict IRI). Commit transactionally.
+4. Failure-mode handling: Verdict.Fails commits Verdict but rejects gated resource; orchestrator-unreachable aborts the entire transaction; etc.
+5. Tests: a stub external institution fixture that returns Holds/Fails/Undecidable on demand; verify the gate behavior + Verdict commit semantics for all three.
+
+**Acceptance.**
+- Verdict.Holds → both gated resource and Verdict committed.
+- Verdict.Fails → Verdict committed; gated resource rejected; the `Load` request errors out with a typed error pointing at the Verdict IRI.
+- Verdict.Undecidable → both committed (audit-only).
+- All three commits land in one kernel transaction; no partial-state windows.
+
+---
+
+##### 19a.5.e — `institution install` external mode (~2 days)
+
+**Files created.**
+- `cli/src/commands/institution.rs` — `institution install`, `institution list`, `institution inspect` subcommand handlers.
+
+**Files modified.**
+- `cli/src/main.rs` — register the `institution` subcommand group; `capability install` becomes a deprecation alias dispatching to `component install` / `institution install` (per [issue #42](https://github.com/eigenius/eigenius/issues/42)).
+
+**Tasks.**
+1. `institution install --definition <file>` per [D31 §5.1](d31-external-institution-lifecycle.md#51-cli-surface). Sends LoadRequest with auto_commit; kernel cross-checks env_iri + mirror IRI references at commit time.
+2. Cross-checks: `Institution.runtime_environment` must resolve to a `RuntimeEnvironment`; `Institution.mirror` must resolve to a `RuntimePackageMirror`; QueryClass.query_handler procedure IRIs must be unique within the institution.
+3. Definition file shape per [D31 §5.2](d31-external-institution-lifecycle.md#52-definition-file-structure) — Eigon-JSON with Institution + QueryClass + ExportFormat + ImportFormat + Comorphism declarations, no inline binary, references to chain-pinned env/mirror.
+4. `institution list` / `inspect` for visibility into installed institutions.
+5. Tests: install a stub external institution (no real worker yet); verify the chain commits correctly and that subsequent commits trigger AutoOnLoad dispatch via 19a.5.d.
+
+**Acceptance.**
+- A definition file with all the institution-shape resources commits cleanly.
+- Cross-checks reject definitions referencing non-existent env or mirror IRIs.
+- `eigenius institution list` shows installed institutions with their runtime kind.
+
+---
+
+#### Phase 19a.6 — IntervalArithmetic institution (~1 week, integration test for D31) ✓
+
+**Goal.** Bring up the first real external institution against 19a.5's framework. **Acts as the integration test for D31 end-to-end** — 19a.5 isn't done until IntervalArithmetic's `BoundedBy` AutoOnLoad gate fires correctly on commit, with a Verdict landing on the chain. Surfaces any 19a.5 gaps that need fixing before more institutions land.
+
+**Why IntervalArithmetic first.** Smallest non-trivial institution in the Phase 19 plan:
+- One resource class (`BoundedBy`).
+- One QueryClass (`AutoOnLoad` validator).
+- No outgoing Comorphisms (defer §6.6 until a second institution exists).
+- Verified API surface ([D27 §4.0.2](d27-julia-institutions.md): `inf`/`sup` accessors, `interval` constructor, `issubset_interval`).
+- No parameter macros, no MTK, no JuMP — cleanest of the five Julia institutions.
+
+**Files created.**
+- `crates/eigenius-julia-intervals/Cargo.toml` — new workspace member, the institution's Rust crate.
+- `crates/eigenius-julia-intervals/src/lib.rs` — institution declarations (Institution + BoundedBy class + QueryClass + ExportFormat + ImportFormat resources as Eigon-JSON / ESL).
+- `julia/institutions/intervals/EigeniusIntervals/Project.toml` — handler package per [D31 §4.1](d31-external-institution-lifecycle.md#41-phase-2--author-the-handler-package).
+- `julia/institutions/intervals/EigeniusIntervals/src/EigeniusIntervals.jl` — `validate_bounded_by(b::BoundedBy)` handler returning Verdict.
+- `crates/eigenius-julia-intervals/tests/end_to_end.rs` — full e2e: commit BoundedBy ontology → mirror create → env create → institution install → commit a BoundedBy instance → verify AutoOnLoad fires + Verdict committed.
+
+**Tasks.**
+1. Author the institution's resource ontology (BoundedBy class, BoundedBy properties: value/lower/upper, ExportFormat/ImportFormat for the typed payload).
+2. Generate the mirror against the BoundedBy class via `eigenius mirror create`.
+3. Author the handler package per D31 §4.1; `validate_bounded_by` calls `IntervalArithmetic.issubset_interval`.
+4. Build env image via `eigenius env create`.
+5. Author institution declaration; `eigenius institution install`.
+6. **Trait-shape change carried over from 19a.5.d** — thread `runtime_invocation_partial_cbor` from `DispatchExternalResponse` back through `Institution::query` so the kernel can fold the substrate-captured provenance (image digest echo, started/completed timestamps, numerical_metadata, dispatched_to) into a full `RuntimeInvocation` and commit it transactionally with the gated resource and the Verdict per [D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics). This requires:
+   - Growing the `Institution::query` return type from `Result<Resource, InstitutionError>` to a richer struct that carries optional invocation provenance (or adding a sibling `query_with_provenance` default method that other impls fall back to).
+   - Updating every existing impl: `WasmInstitution`, in-process institutions, `ExternalInstitution`, and the test stubs in `kernel/src/institution/dispatch.rs::tests`.
+   - Wiring `dispatch_auto_on_load_for_resource` to receive the provenance and surface it to the commit caller.
+   - Building the full `RuntimeInvocation` resource in the commit pipeline (kernel fills `script` ← signature_iri, `environment` ← env_iri, `inputs` ← gated resource IRI, `output` ← Verdict IRI) and adding it to the same transaction as the gated resource + Verdict.
+   The IntervalArithmetic e2e is the first verified consumer — design the trait shape against its actual needs rather than guessing now. **No "we'll do this later" deferrals**: 19a.6 is incomplete until the provenance commit lands.
+7. Test the full lifecycle: commit a BoundedBy(value=2, lower=1, upper=3) → expect Verdict.Holds + commit succeeds with both Verdict and RuntimeInvocation resources committed alongside. Commit a BoundedBy(value=5, lower=1, upper=3) → expect Verdict.Fails + commit rejected with the Verdict IRI in the error.
+8. Document the bring-up as the canonical "how to add an institution" tutorial.
+
+**Acceptance.**
+- The full e2e test passes against `DockerServiceSpawner` (with buildah).
+- Verdict resources land on the chain with the expected shape ([D31 §6.3](d31-external-institution-lifecycle.md#63-verdict-commit-semantics)).
+- `RuntimeInvocation` resources land alongside, carrying the substrate-captured provenance — provenance commit, **not deferred any further**.
+- Failed commits return errors that point at the rejecting Verdict IRI.
+- Docs cover the "fresh institution from scratch" workflow.
+- **D31 acceptance criterion fulfilled**: the framework supports a real external institution end-to-end without structural gaps.
+
+If 19a.6 surfaces structural issues with 19a.5, fix them in 19a.5 (don't paper over in IntervalArithmetic). The framework's correctness is what 19a.6 validates.
+
+---
+
+#### Phase 19a.7 — Minimal config primitive (~3 days) ✓
+
+**Goal.** A small layered config loader (defaults → file → env → construction overrides) covering the substrate concerns 19a forces. New crate so the kernel and orchestrator can adopt it later without circular deps. Replaces ad-hoc env-var reads in the substrate. Per the [config-system memory](../../.claude/projects/-home-hm-src-eigenius/memory/project_config_system.md), the comprehensive settings story (audit, hot-reload, validation, per-namespace overrides) is a follow-on phase; this sub-milestone ships the *primitive*, not the full system.
+
+**Files created.**
+- `crates/eigenius-config/Cargo.toml` — new workspace member.
+- `crates/eigenius-config/src/lib.rs` — `Config` struct, layered `Loader`, search-path conventions.
+- `crates/eigenius-config/src/substrate.rs` — `SubstrateConfig` schema (image registry, backend selection, per-backend tunables).
+- `crates/eigenius-config/tests/loader_test.rs` — defaults / file / env / override precedence tests.
+- `crates/eigenius-config/examples/eigenius.toml` — annotated sample config.
+
+**Files modified.**
+- Workspace `Cargo.toml` — add `crates/eigenius-config`.
+- `crates/runtime-substrate/Cargo.toml` — depend on `eigenius-config`.
+- `crates/runtime-substrate/src/facade.rs` — read substrate-level config (image registry, default spawner backend) from `SubstrateConfig` instead of constants.
+- `crates/runtime-substrate/src/spawner/service/local.rs` + `docker.rs` — read backend-specific config (registry URL, daemon socket override).
+- `kernel/src/main.rs` (or wherever the substrate is constructed) — load config at startup, pass to substrate.
+
+**Tasks.**
+1. Schema:
+   ```toml
+   [image]
+   registry_url = "localhost:5000"
+   registry_credentials_env = ""  # name of env var holding the auth token
+
+   [docker]
+   daemon_socket = "unix:///var/run/docker.sock"
+
+   [local]
+   julia_binary = "julia"        # PATH lookup if relative
+   ```
+   Pool / scaling tunables are deliberately absent — production scaling is the platform's concern (HPA / KEDA / ACA scale rules), not the substrate's. Add per-backend knobs only as concrete needs arise.
+2. Loader: load from $EIGENIUS_CONFIG, then ./eigenius.toml, then ~/.config/eigenius/config.toml; layer env vars (`EIGENIUS_IMAGE_REGISTRY_URL`, `EIGENIUS_DOCKER_DAEMON_SOCKET`, …) on top; allow construction-time overrides for tests.
+3. Validation: registry URL parseable, daemon socket reachable when its backend is selected.
+4. Replace direct env reads in substrate. NB: per-spawn env vars (`EIGENIUS_RUNTIME_ENV_DIGEST`, `EIGENIUS_RUNTIME_ENV_MANIFEST_HASH`) are *not* config — they're per-invocation parameters and stay as direct env reads inside the worker bootstrap.
+5. Document the precedence rules in the crate docstring.
+
+**Acceptance.**
+- `cargo test -p eigenius-config` passes (defaults / file / env / override precedence).
+- Substrate boots with explicit `SubstrateConfig`; ad-hoc env-var reads removed for image / backend-selection concerns.
+- Sample `eigenius.toml` loads cleanly and yields the documented defaults.
+- Validation rejects malformed config with clear errors.
+
+---
+
+#### Phase 19a.8 — End-to-end demo + integration tests (~4 days) ✓
+
+**Goal.** Kinase-grounded e2e exercise of all 19a pieces (`ServiceSpawner` lifecycle, mirror generator, `CallRuntimeMethod` with typed-mirror dispatch, `dispatched_to`, config-loaded backend tunables). Regression coverage anchors against Phase 18.
+
+**Files created.**
+- `crates/eigenius-julia/tests/e2e_kinase.rs` — full e2e exercising `CallRuntimeMethod` against the generator-produced kinase mirror.
+- `crates/eigenius-julia/tests/service_lifecycle_test.rs` — `ensure_service` idempotence; warm-reuse timing across multiple dispatches against the same service handle; `drain` tears down cleanly.
+- `crates/eigenius-julia/tests/regression_18d_capstone.rs` — explicit 18d capstone path against the production crate.
+- `crates/eigenius-julia/tests/mirror_regeneration_test.rs` — verifies that regenerating the kinase mirror against an unchanged ontology layer produces byte-identical output (determinism anchor).
+
+**Tasks.**
+1. e2e scenario:
+   - Commit the kinase ontology layer (`ontologies/examples/kinase/kinase-ontology.json`).
+   - Commit a few `Compound` and `Target` instances from the notebook fixture.
+   - Define a `JuliaMethodSignature` resource for `compute_selectivity_index(::Compound, ::Target, ::Target) -> Float64`.
+   - Invoke `CallRuntimeMethod` against the signature; substrate `decode_*`s the resources via the generator-emitted helpers, worker dispatches on typed mirror structs.
+   - Assertions: result correct (verified against hand-computed selectivity); `RuntimeInvocation.dispatched_to` shows `Module.method(::Compound, ::Target, ::Target)`; second `CallRuntimeMethod` against the same `ServiceHandle` is warm (sub-100ms after the first cold start) — the worker stays alive across dispatches without any pool layer.
+2. Service lifecycle test:
+   - `ensure_service(spec)` → `attach_uds` → dispatch a Health RPC (sub-100ms; service is warm) → `attach_uds` again → dispatch (also warm) → `drain` → `attach_uds` returns `Err` (service is gone).
+   - Idempotence: second `ensure_service(spec)` with the same spec returns the same `ServiceHandle`.
+3. Mirror regeneration test:
+   - Build the env image; capture the kinase mirror's `library_content_hash`.
+   - Build again from the same ontology layer; assert the new hash matches.
+   - Modify a property in the kinase ontology (in a test-local layer); assert the new hash differs.
+4. Regression coverage:
+   - All Phase 18 substrate tests pass (`cargo test --workspace`).
+   - 18d capstone test passes against the production crate.
+   - The bash test runtime (Phase 18c.6) still works alongside the Julia production crate (no shared-state interference).
+5. Document the test scenarios in `crates/eigenius-julia/tests/README.md` so future contributors can extend rather than re-derive.
+
+**Acceptance.**
+- e2e kinase test passes against both `LocalServiceSpawner` and `DockerServiceSpawner`.
+- Warm-reuse timing assertion holds: first dispatch into a fresh service ≥ several seconds (Julia cold-start); subsequent dispatches against the same service handle sub-100ms.
+- Mirror determinism test passes (same ontology → same hash; modified ontology → different hash).
+- All Phase 18 tests pass.
+- `dispatched_to` shows the expected `Module.method(::Compound, ::Target, ::Target)` string in the test's assertion.
+
+### Phase 19b — Folded into 19a
+
+The original Phase 19b (`eigon-julia-gen` mirror generator) is folded into [Phase 19a.3](#phase-19a3--mirror-generator-10-days). The worker dispatch contract is shaped by whether mirrors exist; separating the substrate POC from the mirror generator would force the worker-side dispatch logic to be written twice (raw-dict payloads in 19a, typed-mirror-struct payloads in 19b) and the interdependency is tight enough to address them together. RFC 8746 typed-array tags for numerical arrays also land in 19a.3 alongside the rest of the CBOR codec work.
+
+The 19b letter is preserved (rather than renumbering 19c–19h up) to keep cross-references in the codebase + downstream design docs stable.
+
+### Phase 19c — Per-environment images — *skipped*
+
+Mostly fictional once 19a.5/19a.6 landed. The original framing assumed the substrate POC would ship Julia bundled inside the orchestrator (deployment shape (c)) and that 19c would later flip to shape (a) (per-env image); in practice 19a built directly at shape (a) and the bundled-Julia intermediate step never existed. Concretely:
+
+- The deterministic two-stage Dockerfile, `Pkg.instantiate` + `Pkg.precompile`, build-time provenance under `/etc/eigenius-runtime-env/`, and `RuntimeEnvironment.image_digest` commit all shipped in 19a — the IntervalArithmetic demo exercises every piece.
+- Registry push (vs. the current `buildah push docker-archive: → docker load` against the local daemon) is a multi-host deployment concern, not a shape flip. The `image.registry_url` field reserved in 19a.7's config schema is the consumer-side hook; lift the actual push when the first deployment that needs cross-host image distribution lands.
+- `JuliaPackagePin` projection (parsed Manifest.toml as one Resource per pinned dep) is genuinely not done, but it has no current consumer — the lockfile bytes already commit on `RuntimeEnvironment.lockfile`, and no EigenQL query depends on the parsed shape yet. Add when the first such query is written.
+
+The 19c letter is preserved (rather than renumbering 19d-19h up) to keep cross-references in downstream docs stable.
+
+- *Production scaling concerns (HPA / KEDA / ACA scale rules) sit in their respective deployment-platform configs, not in the substrate. The platform-managed `ServiceSpawner` backends (`K8sDeploymentSpawner`, `AzureContainerAppsSpawner`) land as a separate phase when production deployment ships.*
+
+### Phase 19d.0 — Chain-mirrored Mini-TT inductives + `FormulaTerm` (~1.5–2 weeks) ✓
+
+**Goal.** Bring Mini-TT inductives onto the chain so cross-institution formulas have a typed shared representation. Spec: [D32](d32-chain-mirrored-mini-tt-inductives.md). Prerequisite for 19d (Symbolics needs `FormulaTerm` to type its `SymbolicExpression.term`) and for the comorphism story across 19e–19h (every numerical institution consumes the same `FormulaTerm` payload).
+
+Four independently-shippable landings, dependency-ordered:
+
+#### Phase 19d.0.a — `core:arg_name` ontology addition (~half day) ✓
+
+**Goal.** Add the one missing piece on top of the chain ontology's existing inductive-ctor-arg surface (the `InductiveArgType` family is already in place from Phase 11b). Per [D32 §3.2](d32-chain-mirrored-mini-tt-inductives.md): `arg_name` lets JSON-authored ontologies and mirror generators give ctor argument slots readable names instead of falling back to positional defaults.
+
+**Files modified.**
+- `ontologies/core/core-ontology.json` — add `core:arg_name` Property (recommended-not-required on `InductiveArgType`). Triggers a `seed_manifest_v1` bump; existing dev DBs hit the `seed manifest drift` boot check and need `docker compose down -v` to re-seed.
+
+**Acceptance.**
+- `cargo test --workspace` clean (existing ESL-emitted inductives validate unchanged; new property surfaces).
+- `eigenius inspect "urn:eigenius:core:arg_name"` resolves and shows the recommended-on-InductiveArgType shape.
+
+#### Phase 19d.0.b — Validator + `core:inductive` primitive type (~2 days) ✓
+
+**Goal.** Type-check inductive values at commit time per [D32 §3.2 + §3.4](d32-chain-mirrored-mini-tt-inductives.md). New primitive type `core:inductive`; new validator rule recursing through ctor_args; structured field-path errors.
+
+**Files modified.**
+- `kernel/src/validation/mod.rs` — new rule `check_inductive_value`; extend `check_class_types` to accept `InductiveType` references.
+- `kernel/src/ontology/well_known.rs` — `INDUCTIVE` primitive type IRI.
+- `kernel/src/ontology/value.rs` — wire-shape recognition for inductive values.
+
+**Acceptance.**
+- Hand-rolled `Nat = Zero | Succ(Nat)` declared in a test ontology; `Succ(Succ(Zero))`-shaped value validates; `Succ(LitFloat(1.0))` rejects with structured error.
+- `Verdict` continues to validate without modification (no `ctor_args` → no per-arg checks).
+
+#### Phase 19d.0.c — Mirror generator extends to `InductiveType` (~2–3 days) ✓
+
+**Goal.** Emit Julia for chain-committed `InductiveType` resources per [D32 §3.3](d32-chain-mirrored-mini-tt-inductives.md): abstract type + per-ctor structs + decode/encode + `_eigenius_decoders` / `_eigenius_encoders` registry hooks.
+
+**Files modified.**
+- `crates/eigenius-julia/src/mirror_gen.rs` — extend the closure walker to visit `InductiveType` references via `arg_type`; add `inductive_emitter.rs` (or a new module) for the per-inductive emission.
+- `crates/eigenius-julia/tests/mirror_gen_test.rs` — golden test against a `Nat` fixture.
+- `crates/eigenius-julia/tests/mirror_inductive_round_trip.rs` — substrate-side e2e: build an env image with `Nat`, dispatch a script that constructs `Succ(Succ(Zero))` and round-trips the encoded value.
+
+**Acceptance.**
+- Generated `Nat.jl` produces `abstract type Nat end; struct Zero <: Nat end; struct Succ <: Nat; pred::Nat end` plus the decode/encode pair.
+- Round-trip test passes against `DockerServiceSpawner`.
+
+#### Phase 19d.0.d — `formulas:` ontology layer + initial operator catalog (~1 day) ✓
+
+**Goal.** Commit `urn:eigenius:formulas:FormulaTerm` and the v1 operator catalog per [D32 §4 + §5](d32-chain-mirrored-mini-tt-inductives.md).
+
+**Files created.**
+- `ontologies/formulas/formulas-ontology.json` — `FormulaTerm` InductiveType (six ctors: Var, LitFloat, OpRef, App, Lam, Pi), `Operator` Class with `operator_signature` / `operator_arity` / `operator_associativity` / `operator_commutativity` properties, type-as-operator entries (`formulas:types:Real`, `Int`, `Bool`), and the initial operator set (arithmetic, unary numeric, comparisons, `derivative`).
+
+**Files modified.**
+- `kernel/src/bootstrap/mod.rs` — embed the new `formulas` ontology layer alongside core / program / reflection / institution / runtime / notebook.
+- `kernel/src/validation/mod.rs` — `App`-spine rank check against `Operator.operator_signature`.
+
+**Acceptance.**
+- `eigenius inspect "urn:eigenius:formulas:FormulaTerm"` resolves; `formulas:ops:add` resolves with its typed signature.
+- An `App(App(OpRef("formulas:ops:add"), Var("x")), LitFloat(2.0))` value validates as a `FormulaTerm`.
+- An arity-mismatched `App(OpRef("formulas:ops:add"), Var("x"))` (one arg short) rejects with `OperatorArityMismatch`.
+- Existing tests stay green; the new ontology layer adds to `seed manifest drift` detection on stale DBs.
+
+### Phase 19d — `Symbolics` / `ModelingToolkit` institution (~2.5 weeks, was 3) ✓
+
+**Prerequisite:** Phase 19d.0 (`FormulaTerm` available on the chain).
+
+- `eigenius-julia-symbolics` crate implementing the D14 `Institution` trait with declarations from D27 §4.1: `SymbolicExpression`, `SymbolicallyReducesTo`, `Substitutes`, `SimplifiesTo`, `SatisfiesEquation` resource classes — all carrying `term: FormulaTerm` (from 19d.0). ExportFormats, ImportFormats, QueryClasses (AutoOnLoad on commit-time validation; OnDemand for FIBER-side; Decidable for `qc_symb_check_equivalence`).
 - End-to-end demo: a notebook that loads physical-system equations, gets them simplified via `qc_symb_simplify`, runs a numerical solve via a substrate component.
 
-### Phase 19e — `JuMP` institution (~2 weeks)
+### Phase 19e — `IntervalArithmetic` institution (~2 weeks) ✓
 
-- `eigenius-julia-jump` per-solver registrations: HiGHS (default), GLPK, Ipopt; Gurobi if licensed. Each is a separate `Institution` resource referencing its own `JuliaEnvironment`.
-- Declarations from D27 §4.2: `OptimisationProblem`, `OptimisesTo`, `Infeasible`, `BoundedBy` resource classes; AutoOnLoad certificate-validation QueryClasses; OnDemand `qc_jump_solve`; Decidable `qc_jump_is_infeasible`.
-- Demo: a constrained design problem solved by the institution; solver certificate re-checked on commit.
-
-### Phase 19f — `IntervalArithmetic` institution + numerical hardening (~3 weeks)
+*Landed under [Phase 19a.6](#phase-19a6--intervalarithmetic-institution-1-week-integration-test-for-d31) as the D31 framework's integration test rather than as a separate phase. The substantive deliverables (resource classes, Decidable role on `qc_intv_validate_bounded_by`, end-to-end e2e test) all shipped there; this section is preserved for the cross-reference.*
 
 - `eigenius-julia-intervals` crate. Declarations from D27 §4.3: `BoundedBy(value, interval)`, `ProvesBoundOn(function, domain, interval)`, `ContainsRoot` resource classes; Decidable role on `qc_intv_validate_bounded_by` so user programs can write `Exp::NativeDecide` predicates that reduce operationally.
-- Strict-determinism mode: BLAS pinning, FMA off, refusal to run on non-conforming hosts.
-- Cross-host reproducibility verification tooling: re-run an invocation on a different host, surface `numerical_metadata` divergences.
+- *Reordered ahead of JuMP* — IntervalArithmetic has no solver-dependency surface, the kinase CI columns map directly onto `BoundedBy`, and the Decidable role is the most novel piece of D14 runtime mechanics; we want it exercised early.
+- *Numerical hardening (BLAS pinning, FMA discipline, host-conformance gating, cross-host reproducibility tooling) split out and deferred to [issue #43](https://github.com/eigenius/eigenius/issues/43)*. Interval arithmetic is conservative under any IEEE-754-conforming host, so the institution itself doesn't depend on it; determinism becomes load-bearing once institutions chain (DiffEq → IntervalArithmetic, etc.). Land it before claiming reproducibility guarantees that compose across institutions.
 
-### Phase 19g — `Catalyst.jl` institution (~3 weeks)
+### Phase 19f — `JuMP` institution (~2 weeks; ~1 day landed) ✓
 
-- `eigenius-julia-catalyst` crate. Declarations promoted from D27 §4.4 (Catalyst is now a first-class reference institution given the life-science focus on PK / signaling pathways / metabolic networks).
-- Resource classes: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `MassActionKinetics` / `JumpProcessSemantics` markers, `DeficiencyZero` / `DeficiencyOne` relations.
-- ExportFormats / ImportFormats: extract a `ReactionNetwork` into a `CatalystNetworkRepr` Mini-TT payload; reify steady-state and conservation-law results.
-- QueryClasses: `qc_cat_validate_conservation_law` (`AutoOnLoad`), `qc_cat_validate_steady_state` (`AutoOnLoad`), `qc_cat_compute_steady_states` (`OnDemand`), `qc_cat_to_ode` (`OnDemand`) producing an `OdeSystemRepr` for handoff to Phase 19h, `qc_cat_check_deficiency` (`OnDemand`, `Decidable`).
-- Comorphism into Symbolics/MTK: declared as a typed D14 Comorphism so the cross-fibre move from a reaction network to its symbolic ODE form is a tracked translation.
-- Why an institution and not just a substrate component: the fibre has structural invariants (linear conservation laws, deficiency classes, mass-action equivalence) that EigenQL FIBER queries can traverse; substrate components alone would just return numbers without the typed-relation status.
+**Landed scope (HiGHS only):** `OptimisationProblem` (variable_names, variable_bounds, objective, sense, constraints — objective and each constraint LHS as `FormulaTerm`), `VariableBound`, `Constraint`, `ConstraintRelation` inductive (`LE | GE | EQ`), `OptimisesTo` (problem, termination_status, objective_value, variable_values, abstol, reltol). AutoOnLoad `validate_optimum` re-solves the model and tolerance-checks the resolved objective against the claim; OnDemand `qc_jump_solve` materialises an `OptimisesTo` from a fresh solve.
 
-### Phase 19h — `DifferentialEquations.jl` institution — ODEs only (~3 weeks)
+**Walker design:** structurally identical to EigeniusDiffEq's `formula_to_value` (left-spine collection, OpRef dispatch, recursive descent), with the operator catalog mapped to Julia's general-arithmetic operators rather than Float64-only operators — JuMP's overloading on `JuMP.VariableRef` promotes the result to `AffExpr` / `QuadExpr` / `NonlinearExpr` automatically. The walker has a **smart-pow flag** (default `true`) that recognises integer-valued `LitFloat` exponents on `pow` with `n ≤ 2` and unrolls to repeated multiplication, so HiGHS sees a `QuadExpr` rather than a `NonlinearExpr` it would reject. See [`julia/research/jump-formula-term-probe.md`](../../julia/research/jump-formula-term-probe.md) for the empirical demonstration (LP + QP + NL through the walker, all four cases landing on their analytical optima).
+
+**Why one solver and not all four (HiGHS / GLPK / Ipopt / Gurobi).** Per-solver siblings reuse the same ontology + handler walker; only the `Model(SolverFoo.Optimizer)` line and the `Project.toml` deps change. `urn:eigenius:institutions:jump_ipopt` is the natural next drop (general nonlinear; smart-pow flag flips to `false` since Ipopt accepts `NonlinearExpr` directly), and lands when a downstream worked example needs it.
+
+**Sub-milestone Phase 19f.1 — Symbolics → JuMP comorphism ✓:** Composite-input pattern parallel to Catalyst → DiffEq. New `symbolics:SymbolicsToJuMPInput` composite class (objective: SymbolicExpression + variable_names + framing variable_bounds + sense + framing constraints), Symbolics-side `frame_as_optimisation_problem` handler, OnDemand `qc_symb_to_jump` QueryClass, ExportFormat `ef_symb_to_jump_input`, JuMP-side ImportFormat `if_jump_optimisation_problem`, identity Lambda on OptimisationProblem, and the Comorphism triple at [`julia/comorphisms/symbolics-to-jump.eigon.json`](../../julia/comorphisms/symbolics-to-jump.eigon.json). The handler reads `objective.term` (identity on FormulaTerm — D32 §6) and forwards the framing fields unchanged to `OptimisationProblem`. End-to-end test ([`crates/eigenius-julia/tests/symbolics_to_jump_e2e.rs`](../../crates/eigenius-julia/tests/symbolics_to_jump_e2e.rs)): kinase Ki-fit example — fit the inhibition constant `Ki` from observed IC50 measurements at known substrate concentrations via the closed-form competitive-inhibition relation `IC50 = Ki·(1 + [S]/Km)`, expressed as an SSE objective `Σ(IC50_obs_i − Ki·c_i)²` authored as a SymbolicExpression. The test exercises the full pipeline: SymbolicsToJuMPInput → `frame_as_optimisation_problem` → OptimisationProblem → `qc_jump_solve` → OptimisesTo (`Ki* = 2.0`, SSE = 0) → `validate_optimum` → Holds. One structural fix discovered along the way: chain rejects empty arrays at commit, so `OptimisationProblem.constraints` and `SymbolicsToJuMPInput.framing_constraints` were promoted from required to recommended (an unconstrained problem with only variable bounds is well-posed and shouldn't need a redundant constraint to satisfy the schema).
+
+### Phase 19g — `DifferentialEquations.jl` institution — ODEs only (~3 weeks) ✓
 
 - `eigenius-julia-diffeq` crate. **v1 scope: ODEs only.** SDEs, DAEs, DDEs, jump processes, and hybrid systems are deferred to follow-on milestones (19i and beyond) to be triggered by domain demand.
-- Resource classes: `OdeSystem(equations, parameters, state_variables)`, `OdeSolution(system, parameters, initial_conditions, trajectory, integrator)`, `IntegrationCertificate(solution, tolerance, error_bound)`, `BoundedError(solution, norm, bound)`, `ParameterFit(system, observations, fitted_parameters, residual)`.
-- ExportFormats / ImportFormats: extract an `OdeSystem` into the solver's representation; reify trajectory and certificate results back as typed resources.
-- QueryClasses: `qc_diffeq_validate_solution` (`AutoOnLoad` — re-integrates and confirms within tolerance), `qc_diffeq_validate_certificate` (`AutoOnLoad`), `qc_diffeq_solve(system, params, ic, [t0, t1])` (`OnDemand`), `qc_diffeq_steady_state` (`OnDemand`), `qc_diffeq_continuation` (parameter sweeps; `OnDemand`), `qc_diffeq_sensitivity` (`OnDemand`).
-- Comorphisms in: from Phase 19g (Catalyst → DiffEq) and from Phase 19d (MTK → DiffEq) — both directly supported by the Julia libraries; under D14 they're typed Comorphism resources.
-- Comorphisms out: to Phase 19f (DiffEq → IntervalArithmetic) — given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is one of the bridges Phase 21 needs for *operationally verified* PK predictions.
-- Why ODEs only in v1: bread-and-butter life-science modelling (PK compartmental models, mechanistic dose-response, steady-state cell-cycle) is ~95% deterministic ODE; SDEs / jump processes are warranted only for low-copy-number stochastic kinetics, which can land when a domain consumer asks.
+- Resource classes (per D27 §4.5 verified note): `OdeProblem` (renamed from `OdeSystem` to avoid MTK collision), `OdeSolution`, `OdeSteadyState`, plus `ReproducibleIntegration` framing for AutoOnLoad re-validation. `IntegrationCertificate` / `BoundedError` IRIs reserved for a future TaylorModels-backed institution that produces rigorous interval enclosures. `ParameterFit` moved to the JuMP / Optimization institution scope.
+- ExportFormats / ImportFormats: extract an `OdeProblem` and an `OdeSolution`; reify solution and steady-state results back as typed resources.
+- QueryClasses: `qc_diffeq_validate_solution` (`AutoOnLoad` — re-solves and checks the trajectory hash), `qc_diffeq_solve(input)` (`OnDemand`), `qc_diffeq_steady_state` (`OnDemand`).
+- Comorphism out to Phase 19e (DiffEq → IntervalArithmetic) — given an `OdeSolution` plus an interval-extension of the vector field, produce a `ProvesBoundOn` resource. This is one of the bridges Phase 21 needs for *operationally verified* PK predictions.
+- *Reordered ahead of Catalyst* — Catalyst's `qc_to_ode` Comorphism has nowhere to land if DiffEq isn't ready first; with this reordering, 19g ships using hand-written compartmental ODEs (PK two-compartment is well-defined without Catalyst), and the DiffEq institution is in place when 19h adds the Catalyst → DiffEq Comorphism.
+
+### Phase 19h — `Catalyst.jl` institution (~3 weeks) ✓
+
+**Landed scope:** `ReactionNetwork`, `ConservationLaw`, plus the `CatalystToOdeInput` composite class supporting the cross-institution comorphism. AutoOnLoad `qc_cat_validate_conservation_law`, OnDemand `qc_cat_to_ode` (the operational backing of the Catalyst → DiffEq comorphism). The `SteadyState` / `DeficiencyZero` / `DeficiencyOne` / `WeaklyReversible` / `ComplexBalanced` resource classes and their AutoOnLoad query classes are deferred until a domain-driven test case appears — adding them speculatively without a verifying example would compound rather than reduce risk in the chain ontology.
+
+**Sub-milestone Phase 19h.1 — Catalyst → DiffEq comorphism ✓:** Identity-on-`OdeProblem` Lambda, Comorphism triple linking `ef_cat_to_ode_input` + `m_id_ode_problem` + `if_diffeq_problem`, and the operational `qc_cat_to_ode` OnDemand QueryClass that compiles a `ReactionNetwork` to an `OdeProblem` with `FormulaTerm`-typed RHS. End-to-end test ([`crates/eigenius-julia/tests/catalyst_to_diffeq_e2e.rs`](../../crates/eigenius-julia/tests/catalyst_to_diffeq_e2e.rs)): `A → B; k*A` reaction → Catalyst compile → DiffEq integrate → `Holds` verdict against the closed-form trajectory. Three structural fixes uncovered along the way (CBOR.Tag-wrapping for inductive payloads in the mirror encoder; abstract-typed `Vector{Abstract<C>}` decode-side comprehension annotation; SymbolicUtils 4 / Symbolics 7 compat alignment) are documented inline at the call sites.
+
+- `eigenius-julia-catalyst` crate. Declarations promoted from D27 §4.4 (Catalyst is now a first-class reference institution given the life-science focus on PK / signaling pathways / metabolic networks).
+- Resource classes: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `DeficiencyZero` / `DeficiencyOne` relations, `WeaklyReversible` / `ComplexBalanced` markers. `MassActionKinetics` / `JumpProcessSemantics` reframed as compilation-path discriminators per D27 §4.4.1 verified note.
+- ExportFormats / ImportFormats: extract a `ReactionNetwork` and a `ConservationLaw`; reify steady-state and conservation-law results.
+- QueryClasses: `qc_cat_validate_conservation_law` (`AutoOnLoad`), `qc_cat_validate_steady_state` (`AutoOnLoad`), `qc_cat_validate_deficiency_zero` / `_one` (`AutoOnLoad`), `qc_cat_compute_steady_states` (`OnDemand`), `qc_cat_extract_invariants` (`OnDemand`), `qc_cat_check_deficiency` (`OnDemand`, `Decidable`).
+- **Comorphism into DiffEq**: declared as a typed D14 Comorphism. Per the Catalyst-ODE probe (`julia/research/catalyst-ode-probe.md`): in Catalyst 16.1.1 the canonical entry point is the symbolic-keyed map form `ODEProblem(rn, [species_sym => value, ...], tspan, [param_sym => value, ...])`; positional-vector form errors with `BoundsError`, `convert(ODESystem, rn)` is broken. The Comorphism's transformation Component compiles direct to `OdeProblem` skipping the `ODESystem` intermediate.
+- Comorphism into Symbolics/MTK: deferred until the Symbolics institution gets a typed `ODESystem`-equivalent class (and the Catalyst→ODESystem path itself is settled — the probe shows the conversion to `ODESystem` is broken in 16.1.1).
+- Why an institution and not just a substrate component: the fibre has structural invariants (linear conservation laws, deficiency classes, mass-action equivalence) that EigenQL FIBER queries can traverse; substrate components alone would just return numbers without the typed-relation status.
+
+### Phase 19i — D14 §9.3 chain reinsertion ✓ (Phase 1)
+
+**Goal:** Close the spec gap that `Exp::InstitutionInvoke` (and program output more generally) was producing typed Resources but never inserting them into the chain. D14 §9.3 step 4 specifies that the comorphism's reified target-class resource enters the graph through the target institution; step 5's post-translation invariant relies on this entry to operationalise the Satisfaction Condition (§5). Pre-Phase 19i the produced resource only existed in transit as a `Val::ResourceVal` and a serialised RPC payload — addressable from neither EigenQL nor `Inspect`.
+
+**Landed scope (Phase 1).** The same elevation applies uniformly to comorphism reify outputs and to a program's final-step Resource value — they're the same kind of thing, "domain resources the run emitted":
+
+- `Exp::InstitutionInvoke { comorphism_iri, source, target_iri }` — AST node gains an optional `target_iri` for surface-language overrides (default `None` from ESL; Phase 2 EigenQL `INTO X` sets `Some(X)`).
+- `EvalCtx::IO { ..., produced_resources: Arc<Mutex<Vec<Resource>>> }` — collector that the reify boundary pushes to.
+- `try_d14_institution_invoke` — after reify, mints a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex>` from SHA-256 over the canonical Eigon-CBOR of the resource (with `@id` cleared), sets the `@id`, runs the in-eval AutoOnLoad gate (rejects bad outputs before they touch the chain), and pushes into `produced_resources`. Identical reify outputs collide on the same IRI — that is the cross-fibre dedup property the Grothendieck construction wants.
+- Run-boundary (`execute_program_nbe_with_institutions_d14`) — when the program's final value is a non-empty Resource with no `@id`, the same scheme assigns `urn:eigenius:program-output:<program-tail>:<hex>` and pushes to the collector. Top-level passthrough (output already has an `@id`) is left alone; primitive values are returned without commit.
+- `run_program_inner` (server) — adds `produced_resources` to the program-run layer alongside `ProgramTrace` + `ComponentTrace` observability, switches `ctx.commit("trace")` → `ctx.commit_with_validation("program-run", ...)` (so AutoOnLoad fires on chain entry per D14 §9.3 step 5 as part of normal chain mechanics), and persists both `user_layer` and `provenance_layer` from the `CommitOutcome`.
+- `RunProgramResponse.output_resource_iris: Vec<String>` — proto field exposing the assigned IRIs to clients so the notebook / `eigen` SDK can resolve them.
+
+**Tests.** [`kernel/src/program/eval_io.rs::tests::run_boundary_elevates_output_to_chain_resource`](../../kernel/src/program/eval_io.rs) and `…does_not_elevate_when_output_already_has_iri`; the comorphism path extension in [`kernel/tests/d14_dock_assay_demo.rs::comorphism_translates_dock_to_assay`](../../kernel/tests/d14_dock_assay_demo.rs) asserting the reified `AssayPrediction` carries a deterministic `comorphism-output:dock_to_assay:<hex>` IRI; full server-boundary coverage in [`storage/rocksdb/tests/program_output_chain_commit_test.rs`](../../storage/rocksdb/tests/program_output_chain_commit_test.rs) (load ontology, run Construct program over RPC, assert output IRI resolves through `Inspect`, identical input dedupes, distinct input doesn't).
+
+**Notebook demo.** Cells 12–15 of `notebooks/examples/kinase-institutions.json` invoke `comorphisms:symbolics_to_jump` through a one-line wrapper program; the produced `OptimisationProblem` lands at `urn:eigenius:comorphism-output:symbolics_to_jump:<hex>` and is queryable via EigenQL pattern-match on the IRI prefix.
+
+**Phase 2 — EigenQL `INTO` clause ✓.** Same chain-reinsertion semantics, exposed at the EigenQL surface so callers can dispatch via interactive query rather than a wrapper program:
+
+- `FIBER <institution>:<QueryClass> { ... } AS ?var INTO "<iri>"` — optional suffix; without it, current overlay-only behaviour preserved.
+- Lexer: `INTO` keyword. AST: `FiberClause.into: Option<Iri>`. Parser: literal-string IRI argument.
+- Evaluator (`apply_fiber_clause`): when `into` is set, the response stamps the user-named IRI rather than the synthesized `<doc-iri>:fiber:<clause-idx>:<binding-idx>` transient, and the resource is pushed onto a per-query collector that bubbles up via the new [`query::QueryOutcome`](../../kernel/src/query/mod.rs).
+- Server-side `Query` RPC handler: drains `outcome.into_resources` and commits them to the regular chain via `commit_with_validation` (so AutoOnLoad fires uniformly), persisting both `user_layer` and `provenance_layer` on backed sessions. Failure of the INTO commit fails the query — surfacing the validation error to the caller rather than silently dropping the resource.
+- Proto: `QueryResponse.output_resource_iris: repeated string` returns the chain-resident IRIs to clients.
+
+A multi-row FIBER with `INTO` (whose IRI is fixed across rows) is rejected at evaluation time with a clear error — the alternative would silently overwrite or fail a chain-validation step, both worse than refusing up front.
+
+**Tests.** Parser: [`fiber_with_into_clause_parses`](../../kernel/src/query/parser.rs), `fiber_without_into_clause_has_none`, `fiber_into_rejects_non_string_argument`. Evaluator: [`eigenql_fiber_into_collects_response_for_chain_commit`](../../kernel/tests/d14_dock_assay_demo.rs) — the dock-assay `validate_prediction` FIBER + INTO produces a Verdict resource in `into_resources` carrying the user-named IRI.
+
+**Notebook demo.** Cells 16–18 of `notebooks/examples/kinase-institutions.json` invoke `qc_symb_to_jump` (the operational backing of the comorphism) via FIBER + INTO, pinning the produced `OptimisationProblem` at a caller-named IRI and verifying it resolves through a follow-up MATCH.
 
 ### Phase 19 — Test plan
 
@@ -1298,7 +1831,7 @@ Cross-cutting codec change: replace Eigon-JSON with Eigon-CBOR on the `Component
 - [D27 — Julia Institutions](d27-julia-institutions.md) — full specification
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate this layers on
 - D14 — institution protocol (each Julia institution is a D14 institution)
-- D29 (to be written) — Faithful translation specification for `eigon-julia-gen`
+- [D29](d29-eigon-julia-mirror-spec.md) — Faithful translation specification for `eigon-julia-gen`
 
 ---
 
@@ -1441,8 +1974,10 @@ The following design documents must be written and reviewed before the phase tha
 | D26 | **Runtime Substrate** | **DRAFT** — `docs/design/d26-runtime-substrate.md`. Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. `LanguageRuntime` trait, parent ontology classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`), image-vs-graph boundary, deterministic image-build pipeline with digest capture, worker pool + sandbox, mirror-anchor compositionality, `RunRuntimeScript` / `CallRuntimeMethod` substrate components. Cross-language wire format = CBOR + RFC 8746 typed-array tags. | Phase 18 | Draft |
 | D27 | **Julia Institutions** | **DRAFT** — `docs/design/d27-julia-institutions.md`. First concrete substrate instance plus reference institutions wrapping Julia libraries under D14. `JuliaScript` / `JuliaPackage` / `JuliaEnvironment` / `JuliaPackageMirror` / `JuliaInvocation` / `JuliaMethodSignature` / `JuliaPackagePin` subclasses. `eigon-julia-gen` mirror generator. Five reference institutions: `Symbolics`/`ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` (ODEs). Future Lean / Julia bridge sketch (interval-bound proof obligations). | Phase 19 | Draft |
 | D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
-| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19b | 8–12 pages |
+| D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.4 (v1.2 draft) | Draft v1.2 |
 | D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
+| D31 | **External Institution Authoring & Dispatch Lifecycle** | The end-to-end lifecycle for institutions whose `runtime` is `external`: mirror generation CLI, institution registration, kernel-emits-request / orchestrator-services-IO dispatch routing. Generator-agnostic; per-language faithful-translation specs (D29 / D30 / D32) plug in independently. Implementation milestone: Phase 19a.5 (framework) + Phase 19a.6 (IntervalArithmetic, the framework's integration test). | Phase 19a.5 (v1.1 draft) | Draft v1.1 |
+| D32 | **Faithful Translation Specification — `eigon-rust-gen`** | The mapping from Eigon class structure to Rust struct / trait / impl form for WASM institution authoring. Tracked in [#41](https://github.com/eigenius/eigenius/issues/41). | TBD | Planned |
 
 **Reference documents** (analysis rather than specification):
 

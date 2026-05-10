@@ -1,0 +1,33 @@
+name = "EigeniusJuMPHiGHS"
+uuid = "5b4a3c2d-1e0f-4a09-9b8c-7e6f5a4b3c2d"
+authors = ["The Eigenius Authors"]
+version = "0.1.0"
+
+[deps]
+# JuMP.jl — the modelling DSL this institution wraps. Pinned at the
+# verified API surface from the FormulaTerm-translation probe at
+# `julia/research/jump-formula-term-probe.md` (JuMP 1.30.1, 2026-05-08):
+# `Model`, `@variable`, `@objective`, `@constraint`, `optimize!`,
+# `termination_status`, `objective_value`, `value`, `set_silent`.
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+
+# HiGHS.jl — open-source LP/QP solver. v1 institution wraps HiGHS only;
+# Ipopt for nonlinear and GLPK / Gurobi for advanced use cases ship as
+# sibling institutions reusing the same OptimisationProblem shape.
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
+
+# MathOptInterface — for the TerminationStatusCode enum used in the
+# verdict-policy decisions. Re-exported by JuMP but pinned explicitly
+# so the version is visible in the lockfile.
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+
+# Generated mirror module. Same UUID as the other Eigenius mirror
+# consumers — the substrate's mirror generator emits `EigeniusMirror`
+# per Phase 19a.3.
+EigeniusMirror = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+
+[compat]
+julia = "1.10"
+JuMP = "1"
+HiGHS = "1"
+MathOptInterface = "1"

@@ -220,8 +220,20 @@ fn parse_value(value: &serde_json::Value, property: &str) -> Result<Value, Parse
                     property: property.to_string(),
                 });
             }
-            let resource = parse_embedded_resource(value, property)?;
-            Ok(Value::Embedded(Box::new(resource)))
+            // Discriminate Resource-shape vs. opaque JSON: a Resource
+            // has IRI-shaped keys (or `@id`) so its property keys
+            // resolve in the chain. An object whose keys are all
+            // bare strings (`ctor`, `args`, …) is opaque JSON — used
+            // for `data_type: core:json` and `core:inductive`
+            // property values where the wire shape is a tagged dict
+            // tree, not a typed Resource. D32 §3.7.
+            let any_iri_key = obj.keys().any(|k| k == "@id" || Iri::parse(k).is_ok());
+            if any_iri_key {
+                let resource = parse_embedded_resource(value, property)?;
+                Ok(Value::Embedded(Box::new(resource)))
+            } else {
+                Ok(Value::Json(value.clone()))
+            }
         }
     }
 }

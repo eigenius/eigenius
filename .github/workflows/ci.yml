@@ -24,19 +24,41 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          # cargo-component (installed below) ships its own wasm32-unknown-unknown
+          # / wasm32-wasip1 toolchain components on demand, but doing it here too
+          # lets the rust-cache step capture them.
+          targets: wasm32-unknown-unknown, wasm32-wasip1
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      # Swatinem/rust-cache is the de-facto standard for Rust on GHA:
+      # - splits the cache into deps (keyed on Cargo.lock) and workspace
+      #   (keyed on source-only changes), so a Cargo.toml addition still
+      #   hits the closest matching cache via restore-keys.
+      # - prunes unused targets automatically; cache size stays bounded.
+      # - preserves ~/.cargo/bin so cargo-component (gated below) survives
+      #   across runs without a separate cache.
+      # Drop-in replacement for the previous flat actions/cache step that
+      # invalidated everything on any Cargo.toml change.
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          # Bump this when the cache schema changes (rare).
+          prefix-key: v1-rust
+          # Cache cargo-component too — it lives in ~/.cargo/bin.
+          cache-bin: true
+          # Cache the WASM example crates' build dirs alongside the main
+          # workspace target; their `cargo component build` outputs are
+          # what feeds the WASM fixtures cache below.
+          workspaces: |
+            .
+            examples/wasm-cbor-echo
+            examples/wasm-doc-validator
+            examples/wasm-d14-echo
+            examples/wasm-d14-dock
+            examples/wasm-d14-assay
+            examples/wasm-d14-arrhenius
+            examples/wasm-http-shout
+            examples/wasm-read-query-probe
+            orchestration/runtime-substrate-native
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -60,9 +82,6 @@ jobs:
           else
             cargo install --locked --force cargo-component@^0.21
           fi
-
-      - name: Add wasm32 target
-        run: rustup target add wasm32-unknown-unknown wasm32-wasip1
 
       # The WASM fixtures only change when their source trees change.
       # Cache the built `.wasm` artifacts under `kernel/tests/fixtures/`

@@ -1,6 +1,6 @@
 # 10. Building WASM institutions
 
-Institutions are domain-specific reasoning systems — typed reasoners that contribute structured fibres to the knowledge graph. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md)) they are *declared* as ontology resources committed to the layer chain (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) and *implemented* as a runtime that handles boundary translations and any opaque reasoning. The same WASM hosting machinery that runs components also hosts institutions, but against the dedicated `eigenius-institution-d14` WIT world (D14 §12).
+Institutions are domain-specific reasoning systems — typed reasoners that contribute structured fibres to the knowledge graph. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md)) they are *declared* as ontology resources committed to the layer chain (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) and *implemented* as a runtime that handles boundary translations and any opaque reasoning. The same WASM hosting machinery that runs components also hosts institutions, but against the dedicated `eigenius-institution-d14` WIT world (D14 §13).
 
 Cross-link: this chapter is the **implementer** view. The **user** view (how programs and queries invoke institutions) is in [ESL §9](../esl/09-institutions.md) and [EigenQL §8](../eigenql/08-institutions.md).
 
@@ -267,4 +267,4 @@ For example code:
 
 ---
 
-Next: **[11. Deployment →](11-deployment.md)**
+Next: **[11. Runtime substrate →](11-runtime-substrate.md)**
