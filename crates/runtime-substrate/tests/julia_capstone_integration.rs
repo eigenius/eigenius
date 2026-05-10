@@ -145,6 +145,8 @@ fn build_argument(language: &str, source: &str) -> Vec<u8> {
     eigon_cbor::serialize_resource(&arg)
 }
 
+#[ignore = "heavy E2E: full Julia capstone (env image + cross-check trace)."]
+
 #[test]
 fn julia_capstone_full_e2e() {
     if let Some(reason) = skip_unless_full_environment() {
@@ -254,6 +256,8 @@ fn julia_capstone_full_e2e() {
 
     let _ = std::fs::remove_dir_all(&depot);
 }
+
+#[ignore = "heavy E2E: full Julia capstone with provenance-tampering check."]
 
 #[test]
 fn julia_capstone_cross_check_tampering_fires() {

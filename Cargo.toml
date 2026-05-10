@@ -50,3 +50,17 @@ eigenius-wasm-runtime = { path = "crates/wasm-runtime" }
 # Testing
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
+
+# `ci` profile — middle ground between `dev` (no opt) and `release` (full LTO,
+# slow to build). Used by Dockerfile.kernel and Dockerfile.orchestration when
+# `CARGO_PROFILE=ci` is passed as a build arg from the CI workflow. Compile
+# time on a cold runner: ~3-5 min, vs. ~12-15 min for `release`. Binary is
+# functionally identical for e2e purposes (we don't benchmark in e2e).
+[profile.ci]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+debug = false
+incremental = false
+strip = "debuginfo"

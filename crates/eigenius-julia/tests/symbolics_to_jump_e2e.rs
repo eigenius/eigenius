@@ -550,6 +550,8 @@ fn string_property(r: &Resource, prop_iri: &str) -> String {
 
 // ─── The probe ──────────────────────────────────────────────────────────
 
+#[ignore = "heavy E2E: Symbolics + JuMP env image builds."]
+
 #[test]
 fn symbolics_to_jump_e2e_via_kinase_ki_fit() {
     if let Some(reason) = skip_unless_full_environment() {

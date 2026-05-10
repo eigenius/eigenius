@@ -587,6 +587,8 @@ fn string_property(r: &Resource, prop_iri: &str) -> String {
 
 // ─── The probe ──────────────────────────────────────────────────────────
 
+#[ignore = "heavy E2E: JuMP+HiGHS env image build (LP/QP round-trip)."]
+
 #[test]
 fn jump_highs_e2e_lp_and_qp_round_trip() {
     if let Some(reason) = skip_unless_full_environment() {

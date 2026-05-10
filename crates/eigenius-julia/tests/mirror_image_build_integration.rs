@@ -317,6 +317,7 @@ fn build_argument(language: &str, source: &str) -> Vec<u8> {
 /// in one shot. Cold run: ~3-5 min (pulls Julia + precompiles
 /// EigeniusJuliaCommon + EigeniusMirror); warm runs hit the substrate's
 /// image cache and Docker's layer cache (~30s).
+#[ignore = "heavy E2E: full Julia env image build."]
 #[test]
 fn julia_env_image_with_mirror_dispatches_typed_struct() {
     if let Some(reason) = skip_unless_full_environment() {
@@ -484,6 +485,7 @@ fn build_demo_resource(name: &str, id: Option<&str>) -> Resource {
 /// 4. Verify the output Resource is the round-tripped Demo.
 /// 5. Verify `dispatched_to` is populated on the partial
 ///    `RuntimeInvocation` (D26 §4.2 / §5.5).
+#[ignore = "heavy E2E: full Julia env image build."]
 #[test]
 fn julia_call_runtime_method_dispatches_typed_handler() {
     if let Some(reason) = skip_unless_full_environment() {

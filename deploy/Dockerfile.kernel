@@ -8,6 +8,12 @@ FROM rust:1.95-bookworm AS builder
 
 RUN apt-get update && apt-get install -y protobuf-compiler libclang-dev && rm -rf /var/lib/apt/lists/*
 
+# `release` for production builds (full LTO, opt-level 3); `ci` for CI builds
+# (opt-level 1, no LTO, parallel codegen — ~3-5x faster compile, functionally
+# identical binary for e2e). Pass `--build-arg CARGO_PROFILE=ci` from the
+# workflow when building for the notebook E2E job.
+ARG CARGO_PROFILE=release
+
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY kernel/ kernel/
@@ -21,15 +27,23 @@ COPY ontologies/ ontologies/
 # `include_str!`s of julia/common/EigeniusJuliaCommon/ at compile time.
 COPY julia/ julia/
 
-# Build the CLI binary (includes serve command)
-RUN cargo build --release -p eigenius-cli
+# Build the CLI binary (includes serve command). Cargo cache mounts persist
+# the dependency build across buildkit invocations of the same context;
+# combined with buildx's --cache-from/--cache-to GHA cache they persist across
+# CI runs. The final binary is staged under /out/ so the cache-mounted target/
+# directory doesn't shadow it on the way out.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --profile ${CARGO_PROFILE} -p eigenius-cli \
+    && mkdir -p /out \
+    && cp /build/target/${CARGO_PROFILE}/eigenius /out/eigenius
 
 # --- Runtime stage ---
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/eigenius /usr/local/bin/eigenius
+COPY --from=builder /out/eigenius /usr/local/bin/eigenius
 
 EXPOSE 50051
 

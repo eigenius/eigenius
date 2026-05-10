@@ -351,6 +351,8 @@ fn skip_unless_full_environment() -> Option<String> {
 
 // ─── The probe ──────────────────────────────────────────────────────────
 
+#[ignore = "heavy E2E: cross-institution Julia env image build."]
+
 #[test]
 fn cross_institution_typed_transfer_via_formula_term() {
     if let Some(reason) = skip_unless_full_environment() {

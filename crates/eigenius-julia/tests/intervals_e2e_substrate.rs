@@ -283,6 +283,8 @@ fn parse_verdict_ctor(output_cbor: &[u8]) -> String {
 
 // ─── The test ───────────────────────────────────────────────────────────
 
+#[ignore = "heavy E2E: IntervalArithmetic.jl env image build."]
+
 #[test]
 fn intervals_substrate_dispatch_round_trip() {
     if let Some(reason) = skip_unless_full_environment() {

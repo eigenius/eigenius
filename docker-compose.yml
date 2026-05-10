@@ -20,6 +20,12 @@
 
 services:
   kernel:
+    # An explicit `image:` tag lets CI build the image once with
+    # `docker buildx build --tag eigenius-kernel:local --load` (with
+    # GHA layer caching) and then `docker compose up -d --no-build` to
+    # run it. Local devs still get the regular `docker compose build`
+    # behaviour because `build:` is also present.
+    image: eigenius-kernel:local
     build:
       context: .
       dockerfile: deploy/Dockerfile.kernel
@@ -41,6 +47,7 @@ services:
       start_period: 5s
 
   orchestrator:
+    image: eigenius-orchestrator:local
     build:
       context: .
       dockerfile: deploy/Dockerfile.orchestration
