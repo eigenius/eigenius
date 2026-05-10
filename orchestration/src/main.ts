@@ -72,7 +72,9 @@ const TEST_WORKER_BIN = Deno.env.get("EIGENIUS_TEST_WORKER_BIN");
  * container layout (`/opt/eigenius/julia-runtime-worker/` for the
  * worker source, `/var/lib/eigenius/substrate-depot/` for the shared
  * depot). */
-const JULIA_WORKER_PROJECT_DIR = Deno.env.get("EIGENIUS_JULIA_WORKER_PROJECT_DIR");
+const JULIA_WORKER_PROJECT_DIR = Deno.env.get(
+  "EIGENIUS_JULIA_WORKER_PROJECT_DIR",
+);
 const JULIA_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_JULIA_BASE_IMAGE_REF");
 const JULIA_DEPOT_PATH = Deno.env.get("EIGENIUS_JULIA_DEPOT_PATH");
 
