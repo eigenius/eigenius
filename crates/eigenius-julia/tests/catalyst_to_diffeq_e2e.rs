@@ -517,7 +517,6 @@ fn skip_unless_full_environment() -> Option<String> {
 // ─── The probe ──────────────────────────────────────────────────────────
 
 #[ignore = "heavy E2E: builds a Julia env image (buildah + Pkg.precompile, ~30-90s cold). Run with `cargo test -- --include-ignored`."]
-
 #[test]
 fn catalyst_to_diffeq_e2e_via_kinase_style_pipeline() {
     if let Some(reason) = skip_unless_full_environment() {

@@ -18,20 +18,13 @@ name: Julia E2E (nightly)
 # so subsequent tests after the first env image build are amortised.
 
 on:
-  # Nightly at 04:00 UTC.
+  # Nightly at 04:00 UTC. Only trigger — the heavy Julia E2E suite is
+  # too expensive to run on every PR (each test pays a buildah + Julia
+  # precompile bill of 30-90s; full suite is 10-20min cold). To run
+  # against a feature branch ad-hoc, push a one-off cron change or
+  # temporarily add `workflow_dispatch:`.
   schedule:
     - cron: "0 4 * * *"
-  # Manual run from the Actions tab.
-  workflow_dispatch:
-  # Run on PRs that touch the substrate, the Julia institutions, or the
-  # mirror generator — those are the surfaces the heavy tests cover.
-  pull_request:
-    branches: [main]
-    paths:
-      - "crates/runtime-substrate/**"
-      - "crates/eigenius-julia/**"
-      - "julia/**"
-      - ".github/workflows/julia-e2e.yml"
 
 env:
   CARGO_TERM_COLOR: always

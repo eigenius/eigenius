@@ -24,8 +24,8 @@
  */
 
 import { createConnectRouter } from "@connectrpc/connect";
-import { ComponentRegistry } from "../components/registry.ts";
-import { KernelClient } from "../client/kernel_client.ts";
+import type { ComponentRegistry } from "../components/registry.ts";
+import type { KernelClient } from "../client/kernel_client.ts";
 import * as log from "../observability/mod.ts";
 import { operation } from "../observability/mod.ts";
 import {

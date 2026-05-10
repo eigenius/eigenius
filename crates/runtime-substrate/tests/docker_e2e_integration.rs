@@ -136,7 +136,6 @@ fn build_argument(language: &str, source: &str) -> Vec<u8> {
 }
 
 #[ignore = "heavy E2E: substrate-built image + DooD UDS round-trip; CI runners often lack UDS-friendly Docker."]
-
 #[test]
 fn end_to_end_build_spawn_dispatch_trace_against_substrate_built_image() {
     if let Some(reason) = skip_unless_full_environment() {

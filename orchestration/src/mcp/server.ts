@@ -29,7 +29,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { KernelClient } from "../client/kernel_client.ts";
+import type { KernelClient } from "../client/kernel_client.ts";
 import * as log from "../observability/mod.ts";
 import { operation } from "../observability/mod.ts";
 

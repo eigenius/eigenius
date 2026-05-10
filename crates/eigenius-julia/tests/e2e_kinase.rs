@@ -261,7 +261,6 @@ fn skip_unless_full_environment() -> Option<String> {
 // ─── The test ───────────────────────────────────────────────────────────
 
 #[ignore = "heavy E2E: Julia env image build + multi-call dispatch."]
-
 #[test]
 fn kinase_call_method_multi_input_dispatch_and_warm_reuse() {
     if let Some(reason) = skip_unless_full_environment() {

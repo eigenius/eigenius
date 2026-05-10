@@ -241,7 +241,6 @@ fn build_argument(language: &str, source: &str) -> Vec<u8> {
 // ─── The test ───────────────────────────────────────────────────────────
 
 #[ignore = "heavy E2E: Julia env image build for inductive mirror generator round-trip."]
-
 #[test]
 fn nat_inductive_round_trips_through_generated_mirror() {
     if let Some(reason) = skip_unless_full_environment() {

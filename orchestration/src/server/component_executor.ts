@@ -43,7 +43,7 @@ import type {
   DispatchExternalResponse,
   RegisterWasmComponentRequest,
 } from "../gen/eigenius_pb.ts";
-import { ComponentRegistry } from "../components/registry.ts";
+import type { ComponentRegistry } from "../components/registry.ts";
 import type { WasmComponentRegistry } from "../wasm/registry.ts";
 import {
   createWasmComponentHandler,

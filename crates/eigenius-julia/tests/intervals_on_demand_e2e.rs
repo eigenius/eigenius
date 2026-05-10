@@ -532,7 +532,6 @@ fn skip_unless_full_environment() -> Option<String> {
 // ─── The test ───────────────────────────────────────────────────────────
 
 #[ignore = "heavy E2E: Julia env image build for OnDemand FIBER dispatch."]
-
 #[test]
 fn on_demand_dispatch_invokes_julia_institution_via_kernel_runtime() {
     if let Some(reason) = skip_unless_full_environment() {

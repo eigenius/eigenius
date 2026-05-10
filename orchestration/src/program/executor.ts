@@ -23,8 +23,8 @@
  * Architecture reference: D6 (execution architecture)
  */
 
-import { KernelClient } from "../client/kernel_client.ts";
-import { ComponentRegistry } from "../components/registry.ts";
+import type { KernelClient } from "../client/kernel_client.ts";
+import type { ComponentRegistry } from "../components/registry.ts";
 import type { RunProgramResponse } from "../gen/eigenius_pb.ts";
 
 export class ProgramExecutor {
