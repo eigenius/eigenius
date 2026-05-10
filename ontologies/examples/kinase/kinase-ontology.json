@@ -3,7 +3,7 @@
     "@id": "urn:eigenius:demo:assay:Compound",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "Compound",
-    "urn:eigenius:core:description": "A small-molecule compound under screening. Promoted from notebooks/examples/kinase-screening.json so per-institution Phase-19 ontologies can ground their worked examples on the same shared compound identities.",
+    "urn:eigenius:core:description": "A small-molecule compound under screening. Promoted from notebooks/examples/kinase-institutions.json so per-institution Phase-19 ontologies can ground their worked examples on the same shared compound identities.",
     "urn:eigenius:core:requires": [
       "urn:eigenius:demo:assay:compound_id",
       "urn:eigenius:demo:assay:scaffold_class",

@@ -702,7 +702,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - **Phase 2 — Static viewer ✓** — read-only notebook rendering with the four MVP cell types.
 - **Phase 3 — Manual execution ✓** — Run / Run all / Reset, per-cell run states, output panels.
 - **Phase 4 — Authoring (the MVP) ✓** — full editing UX, file Open / Save, the program-run cell, layer-stack and trace-tree visualisations, multi-stage `Dockerfile.orchestration` so the SPA serves alongside the RPC paths at `http://localhost:8080/notebooks/`.
-- **Phase 5 — Visualisation ✓** — `@fluentui/react-charts` integration via TS-cell sandbox helpers (5a), `@xyflow/react` topology graph with per-layer drilldown (5b), and a dedicated form-based **chart cell** type covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area kinds (5d). The `kinase-screening` notebook exercises every chart kind plus the topology graph.
+- **Phase 5 — Visualisation ✓** — `@fluentui/react-charts` integration via TS-cell sandbox helpers (5a), `@xyflow/react` topology graph with per-layer drilldown (5b), and a dedicated form-based **chart cell** type covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area kinds (5d). The `kinase-institutions` notebook exercises every chart kind plus the topology graph.
 - **Phase 6 — Reactivity + polish ✓** — sticky header with Pin toggle, file IO renamed Import / Export, dedicated **Open published notebook** dialog backed by EigenQL search, dismissable header MessageBars, mandatory `notebook:title` (ontology + SDK + UI guards), per-cell collapse/expand + global Expand/Collapse all, edit-metadata dialog with description editing, on-demand resource fetch for the per-layer topology graph. Reactivity: `Run` per cell becomes a `SplitButton` with `Run` / `Run from here…` / `Run to here…`; subdued cell-order **stale** marker tracks `lastRunCellId` honestly without pretending to model TS-to-TS dataflow (the explicit DAG approach was rejected because it can't see kernel-layer side effects — see [eigenius#33](https://github.com/eigenius/eigenius/issues/33) for the proper EigenQL `OPTIONAL` follow-on).
 - **Cross-cutting fixes during the polish round:** topology walker edge dedup on first sighting (was emitting each schema edge once per layer, blowing up the displayed edge count); chart titles wrapped externally for the cartesian + horizontal-bar + donut kinds for visual consistency (Fluent's `CartesianChart` `chartTitle` prop is aria-only).
 
@@ -712,7 +712,7 @@ The phase decomposes into two milestones that are separately reviewable:
 - `notebooks/` — Vite + React + TypeScript SPA. Cell types: `markdown`, `esl`, `eigenql`, `typescript`, `program-run`, `chart`. Auto-renderers for ResultSet, Resource, ProgramTrace, LayerStack, Topology, raw values.
 - `ontologies/notebook/notebook-ontology.json` — `Notebook`, `Cell`, `CellType` classes; baked into the kernel as the 5th bootstrap layer so publish succeeds without first registering anything.
 - `deploy/Dockerfile.orchestration` — multi-stage build that compiles the SPA and serves it from `EIGENIUS_NOTEBOOK_STATIC=/app/notebooks` at `/notebooks/*`.
-- Two Playwright e2e tests: `patent-demo.spec.ts` (the LLM-free critical path through the patent demo) and `kinase-screening.spec.ts` (chart-cell regression coverage across all six kinds).
+- Two Playwright e2e tests: `patent-demo.spec.ts` (the LLM-free critical path through the patent demo) and `kinase-charts.spec.ts` (chart-cell regression coverage across all six kinds).
 
 ### Phase D22 — References
 

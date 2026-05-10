@@ -20,7 +20,7 @@
 # the local docker-compose stack. The worked example is the classical
 # kinase-inhibition reaction network — the mechanism underneath the
 # IC50 measurements you'd find in the Phase 5 kinase-screening
-# notebook (see notebooks/examples/kinase-screening.json):
+# notebook (see notebooks/examples/kinase-institutions.json):
 #
 #   E + S  ⇌  ES  →  E + P    (Michaelis-Menten catalysis)
 #   E + I  ⇌  EI              (competitive inhibition)

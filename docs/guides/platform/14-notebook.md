@@ -158,11 +158,12 @@ notebooks/
 │       ├── resultDocument.ts     # Eigon-CBOR ResultSet decoder
 │       └── traceResource.ts      # ProgramTrace decoder
 ├── examples/
-│   ├── patent-analysis.json      # Seeded on first load
-│   └── kinase-screening.json     # Demonstrates every chart kind
+│   ├── patent-analysis.json            # Seeded on first load
+│   ├── kinase-institutions.json        # Three-part walkthrough: flat data → institutions → chain reinsertion
+│   └── kinase-institutions-setup.sh    # Installs five Julia institutions + three comorphisms
 ├── e2e/
-│   ├── patent-demo.spec.ts       # Playwright golden flow
-│   └── kinase-screening.spec.ts  # Chart-cell coverage (all six kinds)
+│   ├── patent-demo.spec.ts             # Playwright golden flow
+│   └── kinase-charts.spec.ts           # Chart-cell coverage (Part A of the kinase-institutions notebook)
 ├── playwright.config.ts
 ├── vite.config.ts                # /notebooks/ base + Connect-RPC proxy in dev
 └── package.json                  # @eigenius/client + Fluent UI v9 + CodeMirror
@@ -175,7 +176,7 @@ The SDK consumed by the notebook is a `file:` workspace dep on [`clients/eigeniu
 Two Playwright specs cover the notebook end-to-end:
 
 - [`notebooks/e2e/patent-demo.spec.ts`](../../../notebooks/e2e/patent-demo.spec.ts) — the LLM-free critical path: open `/notebooks/`, assert the cells render, click `Run all`, assert both ESL load outputs appear, assert the EigenQL grid shows patent-namespace IRIs.
-- [`notebooks/e2e/kinase-screening.spec.ts`](../../../notebooks/e2e/kinase-screening.spec.ts) — chart-cell regression coverage: opens the kinase-screening demo via the `Open…` file picker, runs every cell, asserts that `.fui-cart__root` × 4 (cartesian charts), `.fui-hbc__root` × 1 (horizontal-bar), and `.fui-donut__root` × 1 are mounted, and that no cell surfaced a `Cell failed` MessageBar. This catches regressions in the categorical-x → numeric-index → tickText mapping that line/area charts depend on.
+- [`notebooks/e2e/kinase-charts.spec.ts`](../../../notebooks/e2e/kinase-charts.spec.ts) — chart-cell regression coverage: opens the consolidated kinase-institutions demo via the `Open…` file picker, runs Part A's cells (1–13) individually, asserts that `.fui-cart__root` × 4 (cartesian charts), `.fui-hbc__root` × 1 (horizontal-bar), and `.fui-donut__root` × 1 are mounted, and that no Part-A cell surfaced a `Cell failed` MessageBar. Parts B/C are skipped because they require the Julia institutions setup, which CI does not run. This catches regressions in the categorical-x → numeric-index → tickText mapping that line/area charts depend on.
 
 Both are wired up in [`.github/workflows/notebooks-tests.yml`](../../../.github/workflows/notebooks-tests.yml) — brings the docker stack up with `EIGENIUS_MOCK_LLM=true`, runs Playwright, uploads the report on failure.
 

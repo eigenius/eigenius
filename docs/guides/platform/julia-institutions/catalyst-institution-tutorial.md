@@ -20,7 +20,7 @@ The institutional value is what this gives downstream consumers:
 
 - **Chain-typed conservation laws** become indexable. EigenQL queries can ask "which conservation laws hold in network N?" or "across all networks committed to layer L, which share a conservation law with coefficient pattern P?".
 - **Reaction networks become first-class chain resources**, available as inputs to comorphisms. The `Catalyst → DiffEq` comorphism (D27 §4.4.4, still ahead) takes a `ReactionNetwork` and produces an `OdeProblem` for time-course simulation. The `Catalyst → Symbolics` comorphism (via ModelingToolkit) takes the same network and produces an `ODESystem` for symbolic manipulation. Both depend on `ReactionNetwork` being a typed chain shape — which is what this v1 lands.
-- **The kinase assay's IC₅₀ measurements gain a mechanistic anchor.** The kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../../notebooks/examples/kinase-screening.json)) is currently flat — IC₅₀ values for each (compound, target, protocol) row, no model behind them. With Catalyst on the chain, the *enzyme-kinetic mechanism* underneath each measurement can be a chain-committed network that downstream comorphisms can solve, fit, or compare. v1 doesn't wire that pipeline end-to-end (DiffEq isn't here yet), but it lays the network-and-conservation-law foundation that makes it possible.
+- **The kinase assay's IC₅₀ measurements gain a mechanistic anchor.** The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](../../../../notebooks/examples/kinase-institutions.json)) is currently flat — IC₅₀ values for each (compound, target, protocol) row, no model behind them. With Catalyst on the chain, the *enzyme-kinetic mechanism* underneath each measurement can be a chain-committed network that downstream comorphisms can solve, fit, or compare. v1 doesn't wire that pipeline end-to-end (DiffEq isn't here yet), but it lays the network-and-conservation-law foundation that makes it possible.
 
 ## The kinase mechanism
 
@@ -337,7 +337,7 @@ With Catalyst → DiffEq in place, the chain has the missing primitive for mecha
 - A comorphism into JuMP takes `(network, observed_IC50)` and produces a parameter-fit problem; the fitted parameters get committed back as `KinaseAssayMechanism.parameter_assignments`.
 - A `DiffEq → IntervalArithmetic` comorphism (the third in the chain) walks the FormulaTerm RHS under interval semantics + the integrated trajectory's time grid to produce rigorous bounds — the assay's 95% CI becomes a *mathematically-bounded* confidence interval rather than a statistical one.
 
-That's where the kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic claims with end-to-end interval-bounded provenance." The Catalyst institution + the comorphism wired in this session is the first two foundation stones.
+That's where the kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](../../../../notebooks/examples/kinase-institutions.json)) upgrades from "flat dataset of measurements" to "mechanistic claims with end-to-end interval-bounded provenance." The Catalyst institution + the comorphism wired in this session is the first two foundation stones.
 
 ## Common failure modes
 

@@ -366,7 +366,7 @@ DiffEq v1.5 (this version, with FormulaTerm-typed RHS) is the foundation. The in
 - ReactionNetwork (Catalyst) → OdeProblem (Catalyst→DiffEq comorphism) → OdeSolution (DiffEq AutoOnLoad).
 - Parameter sweep over inhibitor concentration → numerical IC₅₀.
 - IntervalArithmetic-bounded confidence intervals via the FormulaTerm-shared interval extension.
-- The kinase-screening notebook ([`notebooks/examples/kinase-screening.json`](../../../../notebooks/examples/kinase-screening.json)) upgrades from "flat dataset of measurements" to "mechanistic predictions cross-checked against assay measurements with rigorous confidence intervals."
+- The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](../../../../notebooks/examples/kinase-institutions.json)) upgrades from "flat dataset of measurements" to "mechanistic predictions cross-checked against assay measurements with rigorous confidence intervals."
 
 Each of these stacks on top of the FormulaTerm-typed RHS this version pins. They wouldn't compose if DiffEq's RHS were a Julia source string.
 

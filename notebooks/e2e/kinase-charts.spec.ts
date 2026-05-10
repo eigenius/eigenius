@@ -19,11 +19,15 @@
  * query, bind axis columns. Execution runs the query against the
  * kernel and renders the result as a Fluent chart.
  *
- * The kinase-screening demo exercises every supported chart kind
- * (grouped-bar / donut / vertical-bar / horizontal-bar / line / area),
- * making it the natural regression target. This test asserts that
- * after a single Run all click, every chart cell renders an SVG and
- * none of the cells surface a "Cell failed" message.
+ * The consolidated `kinase-institutions` notebook's **Part A**
+ * (cells 1-13) exercises every supported chart kind (grouped-bar /
+ * donut / vertical-bar / horizontal-bar / line / area), making it
+ * the natural regression target. Parts B and C of that notebook
+ * require the Julia institutions setup (`kinase-institutions-setup.sh`)
+ * and are intentionally not exercised here — CI doesn't install the
+ * Julia stack. We open the notebook, then run the **Part A cells
+ * individually** rather than clicking Run all so the institutions
+ * cells never fire.
  *
  * The categorical-x → numeric-index → tickText mapping for line/area
  * is the most fragile path (Fluent's LineChart/AreaChart only support
@@ -37,15 +41,18 @@ import { fileURLToPath } from "node:url";
 
 const KINASE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../examples/kinase-screening.json",
+  "../examples/kinase-institutions.json",
 );
 
-// Run All in this notebook does ESL load + EigenQL queries + six
-// chart-cell queries + topology graph fetch — comfortably more than
-// Playwright's default 30s budget on first kernel boot.
+// Part A is small (3 ESL cells + 2 EigenQL cells + 6 chart cells +
+// 1 topology cell — 12 runnable cells total). Each cell click waits
+// for completion before the next runs. The 120s budget covers cold
+// kernel boot + the ESL commits + the chart queries.
 test.setTimeout(120_000);
 
-test("kinase-screening: open → run all → six chart cells render", async ({ page }) => {
+test("kinase-institutions Part A: open → run cells 1-13 → six chart cells render", async ({
+  page,
+}) => {
   await page.goto("/notebooks/");
 
   // 1. SPA up; the patent demo is what App.tsx auto-loads on first
@@ -54,24 +61,47 @@ test("kinase-screening: open → run all → six chart cells render", async ({ p
     page.getByRole("heading", { name: /Patent Analysis/i }),
   ).toBeVisible({ timeout: 10_000 });
 
-  // 2. Open the kinase-screening notebook through the hidden file
-  //    input wired to the toolbar's "Import…" button.
+  // 2. Open the consolidated kinase-institutions notebook through the
+  //    hidden file input wired to the toolbar's "Import…" button.
   await page.locator('input[type="file"]').setInputFiles(KINASE_PATH);
 
-  // 3. Title swaps — confirms the file was parsed and loaded.
+  // 3. Title swaps — confirms the file was parsed and loaded. The
+  //    consolidated notebook's title starts with "Kinase Inhibitor
+  //    Screening — From Flat Data to Typed Institutions".
   await expect(
     page.getByRole("heading", { name: /Kinase Inhibitor Screening/i }),
   ).toBeVisible({ timeout: 10_000 });
 
-  // 4. Six chart-cell type badges visible — confirms the parser
-  //    accepted every chart cell shape (catches regressions in
-  //    parseCell or the CellType union). The badge's DOM text is
-  //    "Chart"; CSS uppercases it visually.
-  await expect(page.getByText("Chart", { exact: true })).toHaveCount(6);
+  // 4. Seven chart-cell type badges visible — Part A has six (cells
+  //    7-12: grouped-bar, donut, vertical-bar, horizontal-bar, line,
+  //    area); Part B's Verdict donut adds a seventh that we don't
+  //    run. The badge's DOM text is "Chart"; CSS uppercases it
+  //    visually.
+  await expect(page.getByText("Chart", { exact: true })).toHaveCount(7);
 
-  // 5. Run all — ESL cells commit layers, EigenQL cells query, chart
-  //    cells query + render, topology cell calls layerTopology.
-  await page.getByRole("button", { name: "Run all", exact: true }).click();
+  // 5. Run only Part A's cells (1-13) by clicking each cell's per-cell
+  //    Run button. Cells 1, 14, 15, 19, 20, 25, 28 are markdown — no
+  //    Run button on those. Cell 13 is the topology graph TS cell;
+  //    cells 14+ would invoke the Julia institutions and fail without
+  //    the setup script having run, so we stop after cell 13.
+  //
+  //    The notebook UI exposes a Run button per runnable cell; we
+  //    click them in order to mirror "Run all but only up to cell 13"
+  //    semantics without a built-in Run-to-here helper.
+  const runButtons = page.locator('[aria-label="Run cell"], button:has-text("Run")').filter({
+    hasNot: page.locator('button:has-text("Run all")'),
+  });
+
+  // The runnable cells in Part A: 2, 3, 4 (ESL), 5, 6 (EigenQL),
+  // 7-12 (charts), 13 (TypeScript) = 12 cells.
+  const PART_A_RUNNABLE_CELLS = 12;
+
+  for (let i = 0; i < PART_A_RUNNABLE_CELLS; i += 1) {
+    await runButtons.nth(i).click();
+    // Brief settle so the next click doesn't race the previous run's
+    // pending state. The actual completion assertions follow below.
+    await page.waitForTimeout(200);
+  }
 
   // 6. ESL load completes (matches Cell 2/3/4). The kinase ontology
   //    has many resources; the data cells have ~24.
@@ -95,7 +125,8 @@ test("kinase-screening: open → run all → six chart cells render", async ({ p
   //      - `.fui-hbc__root`   — horizontal-bar (own implementation)
   //      - `.fui-donut__root` — donut (non-cartesian)
   //    Asserting each per-class count catches a silent mis-mapping
-  //    in renderChart's switch.
+  //    in renderChart's switch. Only Part A's charts run; Part B's
+  //    Verdict donut (cell 24) is not exercised here.
   await expect(page.locator(".fui-cart__root")).toHaveCount(4, {
     timeout: 60_000,
   });
