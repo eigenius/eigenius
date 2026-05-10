@@ -27,7 +27,7 @@
 //! **Milestone status (D25 §11.1):**
 //! - 17a — top-of-stack algorithm + branch CAS for `to = head`. ✅
 //! - 17b — range validation: ancestral / merge-free / pin-free. ✅
-//! - 17c — bloom-cache eviction for collapsed layers. *pending*
+//! - 17c — bloom-cache eviction for collapsed layers. ✅
 //! - 17d — cost estimation gate + dry-run surface. *pending*
 //! - 17e — CLI (`db consolidate`) + gRPC (`ConsolidateChain`) surfaces. *pending*
 //!
@@ -390,11 +390,18 @@ fn consolidate_chain_locked(
             ConsolidateError::Internal(format!("consolidated layer rejected resource: {e}"))
         })?;
     }
+    // Capture an Arc to the bloom cache before `storage` is consumed
+    // by `builder.build`; we evict the collapsed layers' bloom entries
+    // at the tail of the operation (D25 §9). Cloning is cheap — the
+    // bundle holds Arcs internally.
+    let bloom_cache = Arc::clone(&storage.bloom_cache);
     let consolidated_layer = builder.build(storage);
 
     // Persist the consolidated layer. `store_layer` writes the topo
     // entry, bloom, content-hash index, resources, and chain pointer
-    // in one atomic WriteBatch per D23 §6.3.
+    // in one atomic WriteBatch per D23 §6.3. The fresh bloom for
+    // `consolidated_layer` is pre-populated in the cache by
+    // `LayerBuilder::build` — no separate insert needed.
     backend
         .store_layer(&consolidated_layer)
         .map_err(ConsolidateError::WriteFailed)?;
@@ -405,6 +412,19 @@ fn consolidate_chain_locked(
     backend
         .put_branch(branch, consolidated_layer.id())
         .map_err(ConsolidateError::WriteFailed)?;
+
+    // Bloom-cache eviction for the collapsed range (D25 §9). After
+    // the branch CAS, head-rooted resolves no longer reach these
+    // layers; their bloom entries are dead weight in the cache.
+    // GC reuses the same `evict_layer` hook when it actually deletes
+    // the layers; consolidation is an early trigger for bloom-side
+    // eviction. (The resource cache and triple index entries stay
+    // until GC actually removes the layers — they're keyed by
+    // `LayerId` and won't be queried after the branch advances, so
+    // the cost is bounded.)
+    for layer in &range_layers {
+        bloom_cache.evict_layer(layer.id());
+    }
 
     Ok(ConsolidationOutcome {
         consolidated_layer: consolidated_layer.id().clone(),
@@ -795,6 +815,67 @@ mod tests {
             }
             other => panic!("expected RangeContainsTracePin, got {other:?}"),
         }
+    }
+
+    /// 17c: after consolidation, the bloom cache no longer holds
+    /// entries for collapsed layers, and *does* hold an entry for
+    /// the consolidated layer. Subsequent resolves get the shallow
+    /// path immediately, without probing dead bloom entries.
+    #[test]
+    fn bloom_cache_drops_collapsed_layers_and_caches_consolidated_layer() {
+        use crate::layer::BloomCache;
+
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(5, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        // Pre-condition: every range layer's bloom is in the cache
+        // (LayerBuilder::build inserted it at construction time).
+        let range_ids: Vec<LayerId> = layers
+            .iter()
+            .skip(1) // layers[0] is root; consolidation range is layers[1..]
+            .map(|l| l.id().clone())
+            .collect();
+        for id in &range_ids {
+            assert!(
+                storage.bloom_cache.get_or_load(id).unwrap().is_some(),
+                "pre-condition: layer {id} should be in the bloom cache"
+            );
+        }
+
+        let outcome = consolidate_chain(
+            "main",
+            layers[1].id().clone(),
+            head.id().clone(),
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+
+        // Post-condition (collapsed layers): no longer in the cache.
+        // The in-memory bloom cache has no backend fall-through here
+        // (the chain's storage bundle was built via `in_memory()`), so
+        // a `None` return means truly evicted, not just-not-loaded.
+        for id in &range_ids {
+            assert!(
+                storage.bloom_cache.get_or_load(id).unwrap().is_none(),
+                "post-condition: collapsed layer {id} should be evicted from the bloom cache"
+            );
+        }
+
+        // Post-condition (consolidated layer): its fresh bloom IS in
+        // the cache, populated by `LayerBuilder::build` during
+        // `consolidate_chain`. Subsequent resolves through the new
+        // head hit this entry on the first probe.
+        assert!(
+            storage
+                .bloom_cache
+                .get_or_load(&outcome.consolidated_layer)
+                .unwrap()
+                .is_some(),
+            "the consolidated layer's bloom must be cached after consolidation"
+        );
     }
 
     /// Pins on layers *outside* the consolidation range do not block
