@@ -1,0 +1,276 @@
+[
+  {
+    "@id": "urn:eigenius:julia:diffeq:OdeProblem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OdeProblem",
+    "urn:eigenius:core:description": "A SciMLBase `ODEProblem` as a typed resource. Renamed from D27's earlier `OdeSystem` (which would collide with MTK's symbolic `ODESystem` once Symbolics/MTK is wired). v1 carries the ODE right-hand side as Julia source for an in-place function `f!(du, u, p, t)`. Initial state `u0` and parameter map `parameters_kv` plus `tspan_start` / `tspan_end` complete the problem. State component names in `state_names` align positional `u` indices with human-readable names (e.g. `\"compound_concentration\"`).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:diffeq:function_source",
+      "urn:eigenius:julia:diffeq:u0",
+      "urn:eigenius:julia:diffeq:tspan_start",
+      "urn:eigenius:julia:diffeq:tspan_end",
+      "urn:eigenius:julia:diffeq:state_names"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:julia:diffeq:parameters_kv"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:function_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "function_source",
+    "urn:eigenius:core:description": "Julia source for the ODE right-hand side as an in-place function `f!(du, u, p, t)`. The institution evaluates this in a scope where SciMLBase / OrdinaryDiffEq are imported.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 16384,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:u0",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "u0",
+    "urn:eigenius:core:description": "Initial state vector, indexed by `state_names` order.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:tspan_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tspan_start",
+    "urn:eigenius:core:description": "Start of integration interval.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:tspan_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tspan_end",
+    "urn:eigenius:core:description": "End of integration interval.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:state_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "state_names",
+    "urn:eigenius:core:description": "Names of state components, indexed positionally with `u0` and the trajectory's `u_json` arrays.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeProblem"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:parameters_kv",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "parameters_kv",
+    "urn:eigenius:core:description": "JSON map from parameter name to numeric value. The Julia worker passes the corresponding ordered vector to the integrator as `p` (canonical ordering recorded by the institution at extract time).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:diffeq:OdeProblem",
+      "urn:eigenius:julia:diffeq:OdeSteadyState",
+      "urn:eigenius:julia:diffeq:DiffEqSolveInput"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:OdeSolution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OdeSolution",
+    "urn:eigenius:core:description": "A SciMLBase `ODESolution` projected onto Eigon. Carries the saved time points (`trajectory_t`), the saved state vectors (`trajectory_u`), the per-segment interpolation coefficients (`trajectory_k`), the algorithm name and `alg_choice` (for auto-switching integrators), the return code, and a content-addressed `trajectory_hash` over the full `(t, u, k, algorithm, alg_choice)` tuple. AutoOnLoad re-solves with the same algorithm + tolerances and confirms `trajectory_hash` matches — that's *reproducibility*, not *certification* (DiffEq's tolerances are heuristic local-truncation bounds, not rigorous global enclosures; rigorous-numerics ODE bounds belong to a future TaylorModels institution).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:diffeq:problem",
+      "urn:eigenius:julia:diffeq:algorithm",
+      "urn:eigenius:julia:diffeq:abstol",
+      "urn:eigenius:julia:diffeq:reltol",
+      "urn:eigenius:julia:diffeq:trajectory_t",
+      "urn:eigenius:julia:diffeq:trajectory_u",
+      "urn:eigenius:julia:diffeq:retcode",
+      "urn:eigenius:julia:diffeq:trajectory_hash"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:julia:diffeq:trajectory_k",
+      "urn:eigenius:julia:diffeq:alg_choice"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "problem",
+    "urn:eigenius:core:description": "The OdeProblem this solution is about.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:diffeq:OdeProblem"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:diffeq:OdeSolution",
+      "urn:eigenius:julia:diffeq:OdeSteadyState",
+      "urn:eigenius:julia:diffeq:DiffEqSolveInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:algorithm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "algorithm",
+    "urn:eigenius:core:description": "OrdinaryDiffEq algorithm name as a string: `\"Tsit5\"`, `\"Vern9\"`, `\"Rosenbrock23\"`, `\"Rodas5P\"`, `\"QNDF\"`, `\"FBDF\"`, `\"AutoTsit5(Rosenbrock23())\"`, etc. The institution maps these to the corresponding algorithm constructor calls.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:diffeq:OdeSolution",
+      "urn:eigenius:julia:diffeq:DiffEqSolveInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:abstol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "abstol",
+    "urn:eigenius:core:description": "Absolute tolerance for adaptive step control. DiffEq default is 1e-6.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:diffeq:OdeSolution",
+      "urn:eigenius:julia:diffeq:DiffEqSolveInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:reltol",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "reltol",
+    "urn:eigenius:core:description": "Relative tolerance for adaptive step control. DiffEq default is 1e-3.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:julia:diffeq:OdeSolution",
+      "urn:eigenius:julia:diffeq:DiffEqSolveInput"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:trajectory_t",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "trajectory_t",
+    "urn:eigenius:core:description": "Saved time points (`sol.t`).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:trajectory_u",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "trajectory_u",
+    "urn:eigenius:core:description": "Saved state vectors (`sol.u`), as a JSON array-of-arrays. Outer index aligns with `trajectory_t`; inner index aligns with `problem.state_names`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:trajectory_k",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "trajectory_k",
+    "urn:eigenius:core:description": "Per-segment interpolation coefficients (`sol.k`), as nested JSON arrays. Required for dense-output reproducibility — `sol(t)` between saved time points reconstructs from these. Optional in v1; the institution may set `dense=false` to skip them when interpolation isn't needed downstream.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:alg_choice",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "alg_choice",
+    "urn:eigenius:core:description": "For composite/auto-switching algorithms, the per-step record of which sub-algorithm was used (`sol.alg_choice`). Required for reproducible re-integration of switched runs.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:retcode",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "retcode",
+    "urn:eigenius:core:description": "SciMLBase return code as a stringified enum: `\"Success\"`, `\"Failure\"`, `\"MaxIters\"`, `\"DtNaN\"`, `\"Unstable\"`, `\"ConvergenceFailure\"`, `\"MaxTime\"`, etc. (full set in api-survey.md).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSolution"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:trajectory_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "trajectory_hash",
+    "urn:eigenius:core:description": "Content hash over `(trajectory_t, trajectory_u, trajectory_k, algorithm, alg_choice)`. The reproducibility anchor — AutoOnLoad re-solves and confirms the new run produces a matching hash.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSolution"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:OdeSteadyState",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "OdeSteadyState",
+    "urn:eigenius:core:description": "A claimed steady state of an OdeProblem at given parameters. Distinct from `julia:catalyst:SteadyState` (different fibre — that one is about reaction networks; this is about ODE problems). AutoOnLoad re-runs `SteadyStateProblem(prob)` with `DynamicSS(Tsit5())` (or `SSRootfind(NonlinearSolve.NewtonRaphson())`) and confirms convergence to the same state within tolerance.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:diffeq:problem",
+      "urn:eigenius:julia:diffeq:parameters_kv",
+      "urn:eigenius:julia:diffeq:steady_state_u"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:steady_state_u",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "steady_state_u",
+    "urn:eigenius:core:description": "Steady-state vector, indexed by `problem.state_names`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:OdeSteadyState"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DiffEqToIntervalBoundInput",
+    "urn:eigenius:core:description": "Source-payload class for the DiffEq→IntervalArithmetic Comorphism. Bundles an OdeSolution with an interval-extension of the vector field (`vector_field_interval_source` is a Julia anonymous-function literal taking an Interval-typed state and parameters, returning an Interval-typed time derivative) and the time domain over which to bound. The transformation Component applies interval analysis to produce a `ProvesBoundOn` claim about the trajectory.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:diffeq:solution",
+      "urn:eigenius:julia:diffeq:vector_field_interval_source",
+      "urn:eigenius:julia:diffeq:bound_domain_start",
+      "urn:eigenius:julia:diffeq:bound_domain_end"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "solution",
+    "urn:eigenius:core:description": "Reference to an OdeSolution.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:julia:diffeq:OdeSolution"],
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:vector_field_interval_source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "vector_field_interval_source",
+    "urn:eigenius:core:description": "Julia source for the interval-extended vector field. Function shape: `(u_interval, p, t) -> du_interval`. The institution evaluates this in a scope where IntervalArithmetic operators dispatch.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:max_length": 16384,
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:bound_domain_start",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "bound_domain_start",
+    "urn:eigenius:core:description": "Start of the time interval over which to bound the trajectory.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+  {
+    "@id": "urn:eigenius:julia:diffeq:bound_domain_end",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "bound_domain_end",
+    "urn:eigenius:core:description": "End of the time interval over which to bound the trajectory.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:julia:diffeq:DiffEqToIntervalBoundInput"]
+  },
+
+  {
+    "@id": "urn:eigenius:julia:diffeq:DiffEqSolveInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DiffEqSolveInput",
+    "urn:eigenius:core:description": "OnDemand input class for qc_solve: an OdeProblem plus algorithm choice and tolerances. Optional `parameters_kv` overrides the problem's parameter map for parameter-sweep use.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:julia:diffeq:problem",
+      "urn:eigenius:julia:diffeq:algorithm",
+      "urn:eigenius:julia:diffeq:abstol",
+      "urn:eigenius:julia:diffeq:reltol"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:julia:diffeq:parameters_kv"
+    ]
+  }
+]

@@ -60,6 +60,16 @@ pub enum TokenKind {
     Colon,     // :
     Comma,     // ,
     Less,      // < (size bound in `j : Size < i`, Phase 11b step 15h)
+    // Arithmetic operators — used by the formula(...) sublanguage
+    // (Phase 19f.3) and by parse_value for unary minus on numeric
+    // literals (`ex:value = -1.5;` preserves its old shape via the
+    // parser). Tokens emitted unconditionally; consumers outside the
+    // formula path only ever see Minus, never the others.
+    Plus,  // +
+    Minus, // -
+    Star,  // *
+    Slash, // /
+    Caret, // ^
 
     // Structural
     LParen,   // (
@@ -204,6 +214,10 @@ impl<'a> Lexer<'a> {
             b'=' => Some(TokenKind::Eq),
             b'\\' => Some(TokenKind::Backslash),
             b'<' => Some(TokenKind::Less),
+            b'+' => Some(TokenKind::Plus),
+            b'*' => Some(TokenKind::Star),
+            b'/' => Some(TokenKind::Slash),
+            b'^' => Some(TokenKind::Caret),
             _ => None,
         };
 
@@ -221,7 +235,20 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        // Arrow ->
+        // Arrow ->  /  Minus -
+        //
+        // `-` followed by `>` is the function-arrow token used in
+        // program type signatures and lambda binders. Any other `-`
+        // emits as a `Minus` token; the parser decides whether it's
+        // unary minus on a numeric literal (existing
+        // `ex:value = -1.5;` shape, handled in `parse_value`),
+        // unary or binary inside `formula(...)` (the Pratt parser
+        // handles both cases), or an error in any other position.
+        // Older sign-folding-at-lex behaviour (`-1.5` → single
+        // `FloatLit(-1.5)` token) was retired in Phase 19f.3 because
+        // it produced surprises inside `formula(x-2)` (the lexer
+        // would have consumed `-2` as a signed literal, leaving no
+        // operator between `x` and `2`).
         if ch == b'-' {
             if self.peek_at(1) == Some(b'>') {
                 self.advance();
@@ -231,11 +258,11 @@ impl<'a> Lexer<'a> {
                     pos,
                 });
             }
-            // Negative number
-            if self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
-                return self.lex_number(pos);
-            }
-            return Err(EslError::lexer(pos, "unexpected '-'"));
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Minus,
+                pos,
+            });
         }
 
         // String literal
@@ -300,10 +327,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_number(&mut self, pos: Position) -> Result<Token, EslError> {
+        // `-` is no longer consumed here — the lexer always emits a
+        // separate `Minus` token (Phase 19f.3). Sign folding now
+        // happens in `parse_value` for the `ex:value = -1.5;` shape
+        // (unary minus on a numeric literal), or implicitly in the
+        // formula(...) Pratt parser's prefix-minus rule.
         let start = self.pos;
-        if self.peek() == Some(b'-') {
-            self.advance();
-        }
         while self.peek().is_some_and(|c| c.is_ascii_digit()) {
             self.advance();
         }
@@ -471,13 +500,50 @@ mod tests {
 
     #[test]
     fn numbers() {
+        // Phase 19f.3: `-` no longer folds into the numeric literal at
+        // the lexer level — it always emits `Minus` (sign folding
+        // happens in the parser, where context determines whether it's
+        // unary minus on a literal or the binary subtraction operator
+        // inside a formula(...) expression).
         assert_eq!(
             kinds("42 2.72 -7 1e10"),
             vec![
                 TokenKind::IntLit(42),
                 TokenKind::FloatLit(2.72),
-                TokenKind::IntLit(-7),
+                TokenKind::Minus,
+                TokenKind::IntLit(7),
                 TokenKind::FloatLit(1e10),
+            ]
+        );
+    }
+
+    #[test]
+    fn arithmetic_operators_emit_distinct_tokens() {
+        // The formula(...) sublanguage uses these directly (Pratt
+        // parser); outside formula(...) only `Minus` is consumed by
+        // `parse_value` for unary-minus on numeric literals.
+        assert_eq!(
+            kinds("+ - * / ^"),
+            vec![
+                TokenKind::Plus,
+                TokenKind::Minus,
+                TokenKind::Star,
+                TokenKind::Slash,
+                TokenKind::Caret,
+            ]
+        );
+    }
+
+    #[test]
+    fn arrow_still_takes_priority_over_minus() {
+        // `->` must continue to parse as Arrow even after the lexer
+        // started emitting bare `-` as Minus.
+        assert_eq!(
+            kinds("a -> b"),
+            vec![
+                TokenKind::Ident("a".into()),
+                TokenKind::Arrow,
+                TokenKind::Ident("b".into()),
             ]
         );
     }

@@ -29,6 +29,7 @@
 
 pub mod dispatch;
 pub mod error;
+pub mod marshal;
 pub mod registry;
 pub mod runtime;
 

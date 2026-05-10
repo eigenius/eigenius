@@ -24,6 +24,30 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
+/// Discriminator on [`Request::DispatchMethod`] selecting the worker's
+/// dispatch path.
+///
+/// `Script` (the default for back-compat with the 19a.1 wire format)
+/// treats `target` as a Julia source string and `eval`s it. `Method`
+/// treats `target` as a [`crate::rpc::method::MethodInvocation`] and
+/// performs typed multiple-dispatch over CBOR-decoded mirror struct
+/// inputs — the path that lights up `CallRuntimeMethod` (D26 §4.1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    /// Script-eval path: `target` is CBOR-encoded source text the
+    /// worker `eval`s. Output is the eval'd value, stringified.
+    /// 18d capstone shape; preserved for `RunRuntimeScript`.
+    #[default]
+    Script,
+    /// Method-call path: `target` is a CBOR-encoded
+    /// [`MethodInvocation`](crate::rpc::method::MethodInvocation);
+    /// `inputs` are CBOR-encoded mirror struct values; the worker
+    /// decodes by `is_a`, dispatches via Julia multiple-dispatch, and
+    /// returns the encoded result.
+    Method,
+}
+
 /// A request from the substrate to a worker. Internal-tag layout: each
 /// variant becomes a CBOR map with a `verb` key whose value is the
 /// snake-case verb name, plus the variant's named fields at the same
@@ -62,9 +86,22 @@ pub enum Request {
     DispatchMethod {
         /// Substrate-assigned correlation ID for the invocation.
         invocation_id: String,
-        /// CBOR-encoded `RuntimeScript` or `RuntimeMethodSignature`.
+        /// What `target` is — script source vs. method invocation
+        /// directive. Defaults to `Script` for back-compat with the
+        /// 19a.1 worker.
+        #[serde(default)]
+        target_kind: TargetKind,
+        /// Payload whose meaning depends on `target_kind`.
+        /// - `TargetKind::Script` — CBOR-encoded `String` carrying the
+        ///   script source; the worker `eval`s it.
+        /// - `TargetKind::Method` — CBOR-encoded
+        ///   [`MethodInvocation`](crate::rpc::method::MethodInvocation)
+        ///   carrying the function name + signature IRI; the worker
+        ///   does typed multiple-dispatch on `inputs`.
         target: ByteBuf,
-        /// CBOR-encoded input resources, in argument order.
+        /// CBOR-encoded input resources, in argument order. Each
+        /// resource carries an `is_a` list the worker uses to dispatch
+        /// to the matching mirror struct's decoder.
         inputs: Vec<ByteBuf>,
     },
 
@@ -186,11 +223,50 @@ mod tests {
     fn dispatch_method_request_round_trips() {
         let req = Request::DispatchMethod {
             invocation_id: "inv-42".to_string(),
+            target_kind: TargetKind::Script,
             target: ByteBuf::from(vec![0xa0, 0x42, 0x01]),
             inputs: vec![ByteBuf::from(vec![0x01, 0x02]), ByteBuf::from(vec![0x03])],
         };
         let after: Request = cbor_round_trip(&req);
         assert_eq!(req, after);
+    }
+
+    #[test]
+    fn dispatch_method_request_omits_target_kind_default() {
+        // `target_kind` is `#[serde(default)]` so old workers receiving
+        // payloads from a new substrate that omits the field still
+        // decode correctly. Verify by encoding without target_kind and
+        // decoding back to the new shape.
+        let req = Request::DispatchMethod {
+            invocation_id: "inv-old".to_string(),
+            target_kind: TargetKind::Script,
+            target: ByteBuf::from(vec![0xa0]),
+            inputs: vec![],
+        };
+        let after: Request = cbor_round_trip(&req);
+        match after {
+            Request::DispatchMethod { target_kind, .. } => {
+                assert_eq!(target_kind, TargetKind::Script);
+            }
+            other => panic!("expected DispatchMethod, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_method_request_with_target_kind_method_round_trips() {
+        let req = Request::DispatchMethod {
+            invocation_id: "inv-method".to_string(),
+            target_kind: TargetKind::Method,
+            target: ByteBuf::from(vec![0xa1]),
+            inputs: vec![ByteBuf::from(vec![0x01])],
+        };
+        let after: Request = cbor_round_trip(&req);
+        match after {
+            Request::DispatchMethod { target_kind, .. } => {
+                assert_eq!(target_kind, TargetKind::Method);
+            }
+            other => panic!("expected DispatchMethod, got {other:?}"),
+        }
     }
 
     #[test]

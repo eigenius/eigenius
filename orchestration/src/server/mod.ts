@@ -24,8 +24,8 @@
  */
 
 import { createConnectRouter } from "@connectrpc/connect";
-import { ComponentRegistry } from "../components/registry.ts";
-import { KernelClient } from "../client/kernel_client.ts";
+import type { ComponentRegistry } from "../components/registry.ts";
+import type { KernelClient } from "../client/kernel_client.ts";
 import * as log from "../observability/mod.ts";
 import { operation } from "../observability/mod.ts";
 import {
@@ -54,9 +54,10 @@ export function startServer(
   kernel: KernelClient,
   port: number,
   wasm?: ComponentExecutorDeps["wasm"],
+  substrate?: ComponentExecutorDeps["substrate"],
 ): void {
   const router = createConnectRouter();
-  registerComponentExecutor(router, { registry, wasm });
+  registerComponentExecutor(router, { registry, wasm, substrate });
   registerNotebookService(router, { kernel });
   registerEigeniusKernelPassthrough(router, { kernel });
 

@@ -429,10 +429,13 @@
   {
     "@id": "urn:eigenius:runtime:mirrored_classes",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The Eigon class IRIs this mirror covers. Used by the boundary check to confirm an input class has a corresponding mirror struct.",
+    "urn:eigenius:core:description": "The Eigon class and inductive-type IRIs this mirror covers. Used by the boundary check to confirm an input class or inductive value has a corresponding mirror struct. Accepts both `core:Class` and `core:InductiveType` references because mirror generation emits abstract+struct pairs for both kinds (D32 §3.6).",
     "urn:eigenius:core:short_name": "mirrored_classes",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:core:InductiveType"
+    ],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimePackageMirror"]
   },
   {
@@ -596,19 +599,19 @@
   {
     "@id": "urn:eigenius:runtime:input_types",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Ordered list of Eigon class IRIs declaring the method's input types. The boundary check verifies the resolved method's argument types match these.",
+    "urn:eigenius:core:description": "Ordered list of Eigon class IRIs declaring the method's input types. The boundary check verifies the resolved method's argument types match these. Accepts both Class and InductiveType references — comorphism import-side handlers like the IntervalArithmetic `reify_function` take a `FormulaTerm` (an InductiveType) directly, paralleling `output_type`'s acceptance of inductive returns.",
     "urn:eigenius:core:short_name": "input_types",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
   },
   {
     "@id": "urn:eigenius:runtime:output_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Eigon class IRI of the method's return type.",
+    "urn:eigenius:core:description": "Eigon class IRI of the method's return type. Accepts both Class and InductiveType references — institution-runtime methods like the IntervalArithmetic validator return a `Verdict` (an InductiveType), not a class instance.",
     "urn:eigenius:core:short_name": "output_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeMethodSignature"]
   },
   {
@@ -638,5 +641,15 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeMethodSignature"],
     "urn:eigenius:core:domain": ["urn:eigenius:runtime:DispatchedTo"]
+  },
+
+  {
+    "@id": "urn:eigenius:institution:requires_environment",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the RuntimeEnvironment this institution dispatches into. Required for institutions whose `runtime` is `external` — the kernel resolves the env's `image_digest` and forwards it to the orchestrator on every DispatchExternal call (D31 §5 / §6.2). Declared in the runtime layer (rather than institution) because RuntimeEnvironment is defined here.",
+    "urn:eigenius:core:short_name": "requires_environment",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeEnvironment"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
   }
 ]

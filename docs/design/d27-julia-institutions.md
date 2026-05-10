@@ -126,6 +126,10 @@ Pins are content-addressed; a fresh `env create` against an unchanged Project + 
 
 A deterministic generator producing a Julia package mirroring Eigon class structure as Julia structs. Its outputs are committed back to Eigenius as `JuliaPackageMirror` resources.
 
+The "generator" is **substrate Rust code**, not a separate CLI binary. It runs as part of the substrate's image-build pipeline (D26 §9.2): when `build_environment_image` walks the chain to assemble the `JuliaEnvironment`'s image, a generator pass walks the relevant ontology classes and emits the Julia source mirror. The output gets committed as a `JuliaPackageMirror` resource (content-addressed) and baked into the env image. Earlier drafts of D27 framed the generator as `eigon-julia-gen`, an externally-runnable tool — that framing is misleading. Auditability comes from the *deterministic output spec* ([D29](d29-eigon-julia-mirror-spec.md)), not from the generator being an out-of-process binary; anyone with the substrate source + the layer chain can re-derive byte-identical mirror source. There is no v1 use case for invoking the generator outside the image-build pipeline.
+
+The substrate POC and the mirror generator ship together as a single milestone (Phase 19a in [implementation-plan.md](implementation-plan.md)) because the worker's dispatch contract is shaped by whether mirrors exist — separating them would force two passes over the worker-side dispatch logic, and the interdependency is tight enough that addressing them in one milestone is cleaner than the original 19a/19b split.
+
 ### 3.1 What the mirror contains
 
 For each Eigon class the user might call into Julia about:
@@ -166,7 +170,7 @@ The generator binary is content-hashed; that hash is recorded in every `JuliaPac
 
 ## 4. Reference institutions
 
-Three Julia libraries that wrap as Eigenius institutions cleanly under D14. Each is its own crate (`eigenius-julia-symbolics`, `eigenius-julia-jump`, `eigenius-julia-intervals`) depending on `eigenius-julia` (the language crate, which depends on `eigenius-runtime-substrate`). Each crate ships:
+Five Julia libraries that wrap as Eigenius institutions cleanly under D14 (Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq). Each is its own crate (`eigenius-julia-symbolics`, `eigenius-julia-jump`, `eigenius-julia-intervals`, `eigenius-julia-catalyst`, `eigenius-julia-diffeq`) depending on `eigenius-julia` (the language crate, which depends on `eigenius-runtime-substrate`). Each crate ships:
 
 1. An `Institution` resource declaring its IRI and its `External` runtime kind (it dispatches into a substrate-hosted Julia worker rather than running in-process).
 2. A set of **resource classes** representing intra-fibre structure (the relations / typed claims the institution contributes).
@@ -175,6 +179,40 @@ Three Julia libraries that wrap as Eigenius institutions cleanly under D14. Each
 5. **`QueryClass`** declarations with appropriate `dispatch_role`s — `AutoOnLoad` for relations the institution validates on commit, `OnDemand` for queries fired from EigenQL FIBER, `Decidable` for predicates referenced from `Exp::NativeDecide`.
 6. Optionally **`Comorphism`** declarations bridging into other institutions (Julia ↔ Lean, Julia ↔ Julia, Julia → external).
 7. A Rust `Institution` trait implementation. `extract_typed` / `reify` marshal between Eigon resources and CBOR-encoded Mini-TT payloads on the substrate RPC; `query` dispatches procedure IRIs to the worker over substrate RPC.
+
+### 4.0 IRI conventions
+
+Every Phase-19 institution lives under the substrate-prefixed namespace `urn:eigenius:julia:<inst>:`. The institution *is* its Julia implementation under D14 — a hypothetical Python competitor implementing the same fibre would be a *different* institution with a different IRI (e.g. `urn:eigenius:python:sympy:`), composed via Comorphism, not by sharing a fibre namespace. The substrate prefix makes the implementation origin auditable from the IRI alone.
+
+Within each institution, the local-name structure is:
+
+| Kind | IRI form | Example |
+|---|---|---|
+| Institution itself | `urn:eigenius:julia:<inst>` | `urn:eigenius:julia:intervals` |
+| Resource class | `urn:eigenius:julia:<inst>:<ClassName>` | `urn:eigenius:julia:intervals:BoundedBy` |
+| Property | `urn:eigenius:julia:<inst>:<property_name>` | `urn:eigenius:julia:intervals:lower` |
+| ExportFormat | `urn:eigenius:julia:<inst>:ef_<name>` | `urn:eigenius:julia:intervals:ef_bounded_by` |
+| ImportFormat | `urn:eigenius:julia:<inst>:if_<name>` | `urn:eigenius:julia:intervals:if_bounded_by` |
+| QueryClass | `urn:eigenius:julia:<inst>:qc_<name>` | `urn:eigenius:julia:intervals:qc_validate_bounded_by` |
+| Worker procedure | `urn:eigenius:julia:<inst>:proc:<verb>` | `urn:eigenius:julia:intervals:proc:validate_bounded_by` |
+
+The §4.1–§4.5 tables below use the bare `ef_` / `if_` / `qc_` short names for readability; the canonical IRIs follow this convention.
+
+### 4.0.1 Payload-type simplification for v1
+
+D14's `payload_type` is meant to be a Mini-TT type — a primitive (`core:float`), an InductiveType (`Verdict`, a tuple-shaped inductive), or a class IRI (whose dependent-record type is induced from `requires`). The §4.x tables below describe payloads as tuples (`(Float, IntervalRepr)`, `(SymbolicTerm, SymbolicTerm, RuleSetIri)`) for narrative clarity. In v1 the registration IRIs use the resource's own class as the payload type — `extract_typed` is structurally identity, returning the resource's CBOR-encoded shape verbatim, and the language-side handler decomposes into library-native values. Once Phase-11b inductive types are in widespread use across the chain, the typed-tuple payloads become declarable as InductiveTypes and the registrations can be tightened. The kernel does not require the v1 simplification — it just keeps initial registrations from forcing tuple-shaped inductives ahead of demand.
+
+### 4.0.2 Library version pins and verified API surface
+
+The §4.1–§4.5 vocabulary is verified against installed Julia packages, not training-data recall. The probing script lives at [`julia/research/introspect-libraries.jl`](../../julia/research/introspect-libraries.jl) and writes a survey to [`api-survey.md`](../../julia/research/api-survey.md) in the same directory; refresh both whenever a Julia institution's pinned versions move.
+
+**Versions verified as of 2026-05-03**: IntervalArithmetic 1.0.8, IntervalRootFinding 0.6.3, Symbolics 7.21.0, ModelingToolkit 11.24.1 (note v11 — `states` was renamed to `unknowns` back in v9), SymbolicUtils 4.25.2, JuMP 1.30.1, MathOptInterface 1.51.0, Catalyst 16.1.1, OrdinaryDiffEq 6.111.0, SciMLBase 2.155.1.
+
+**Cross-cutting findings** (those that affect more than one institution):
+
+- **`@variables` is exported by Symbolics, JuMP, MTK, Catalyst, and ModelingToolkitBase** — five-way conflict. Per-institution Julia handler code must qualify the macro by module. Worker-side dispatch needs to be written assuming the worker has all of these in scope.
+- **`@parameters` is NOT in Symbolics** — it's MTK / ModelingToolkitBase / Catalyst. So "parameter" vocabulary belongs to the MTK institution, not the Symbolics one. The §4.1 (Symbolics) declarations should not reach for it.
+- **`OrdinaryDiffEq`, not the `DifferentialEquations` umbrella, is the right `using` for the DiffEq institution image**. The umbrella pulls SDE/DAE/jump dependencies the v1 ODE-only institution doesn't need.
 
 ### 4.1 `Symbolics` / `ModelingToolkit` — symbolic algebra and equation simplification
 
@@ -185,8 +223,10 @@ The fibre of symbolic expressions has structure: equivalences modulo a rule set,
 - **`SymbolicExpression`** — a symbolic-algebra expression resource. Carries the expression's typed term (a Mini-TT inductive shape representing the expression tree) and the rule set IRI it belongs to.
 - **`SymbolicallyReducesTo`** — relates two `SymbolicExpression` resources under a rule set. Carries `expr1`, `expr2`, `rule_set`. The kernel auto-validates this on commit (§4.1.3 below).
 - **`Substitutes`** — relates `(expr, var, value, result)`. Auto-validated on commit.
-- **`SimplifiesTo`** — relates `(expr, normal_form, rule_set)`. Auto-validated.
-- **`SatisfiesEquation`** — relates `(expr_lhs, expr_rhs, rule_set)`; "both sides simplify to the same normal form." Auto-validated.
+- **`SimplifiesTo`** — relates `(expr, simplified_form, rule_set)`. Auto-validated by re-running `simplify` and confirming the claimed simplified form. **`simplified_form`, not `normal_form`** — Symbolics 7's `simplify` is *heuristic*, not normalising; calling it twice on the same expression need not converge to a unique canonical form, and `simplify(a) == simplify(b)` does not decide algebraic equivalence. The institution must not promise normal forms.
+- **`SatisfiesEquation`** — relates `(expr_lhs, expr_rhs, rule_set)`. "Both sides reduce to the same simplified form" is the default-rewrite check; the institution returns `Verdict::Holds` on convergence, `Verdict::Undecidable` on disagreement (since `simplify` is heuristic). Hard equivalence over polynomial fragments goes through `Symbolics.groebner_basis` / `polynomial_coeffs`, returning `Holds`/`Fails` cleanly.
+
+**Verified API note (Symbolics 7.21 / SymbolicUtils 4.25 / MTK 11.24 / Latexify 0.16, 2026-05-03)**: `Num`, `Equation` (with `(:lhs, :rhs)` fields, `~` infix constructor), `simplify`, `expand`, `substitute`, `get_variables`, `derivative`, `jacobian`, `hessian`, `gradient`, `polynomial_coeffs`, `groebner_basis`, `Differential`, `expand_derivatives` are all in Symbolics. **`@parameters` is in MTK / ModelingToolkitBase / Catalyst, NOT Symbolics** — parameter declaration belongs to the MTK part of the institution. **`SymbolicUtils.Pow` does NOT exist** in v4 (the `BasicSymbolic` union folded it into other cases); the SymbolicTerm Mini-TT inductive should mirror `(Sym, Term, Add, Mul, Const)` plus power-as-application, not `(Sym, Term, Add, Mul, Pow, …)`. `RuleSet` and `@rule` exist but are *power-user extensibility hooks*, not a stable named catalog the institution can treat as IRI-able rule sets — `rule_set` IRIs in the resource shapes above must be interpreted as "the institution's pinned rewriter configuration" (a registration-time parameter), not per-resource discriminators.
 
 #### 4.1.2 ExportFormats / ImportFormats
 
@@ -256,9 +296,11 @@ The institution registers per-solver: `eigenius-julia-jump-highs`, `eigenius-jul
 
 #### 4.3.1 Resource classes
 
-- **`BoundedBy`** — relates `(value, interval)` where the value's true magnitude is guaranteed to lie in the interval. Auto-validated on commit by re-running the interval extension and checking the claimed bound is at least as tight as the institution computes (or rejecting if the claimed bound is tighter than provably possible).
-- **`ProvesBoundOn`** — relates `(function, domain, interval)`. The interval-extended function on the stated domain is bounded by the interval. Auto-validated.
+- **`BoundedBy`** — relates `(value, interval)`. v1 semantics: the institution validates `interval.inf ≤ value ≤ interval.sup` on commit (the typing/sanity use, which is what grounds the kinase IC50-with-CI columns). The full "value's true magnitude is guaranteed to lie in the interval" reading depends on a `derivation` linking `value` to a function the institution can interval-extend; that's added when Phase 19d (Symbolics) lands and `function` becomes typed.
+- **`ProvesBoundOn`** — relates `(function, domain, interval)`. The interval extension of `function` over `domain` is bounded by `interval`. Auto-validated by re-running the institution's interval extension and confirming `interval` is at least as tight as what the institution computes (rejecting if the claim is tighter than provably possible). v1: `function` is carried as `function_source` (a Julia source string, anonymous-function literal `c -> ...`); 19d tightens this to a typed `SymbolicExpression` reference.
 - **`ContainsRoot`** — relates `(function, domain)` with an interval-Newton-style witness that a root exists in the domain (or, dually, that no root exists). Auto-validated.
+
+**Verified API note (IntervalArithmetic 1.0.8 / IntervalRootFinding 0.6.3, 2026-05-03)**: endpoint accessors are **`inf(x)` / `sup(x)`** (the `Interval` ontology class uses these as property names). `lower`/`upper`/`infimum`/`supremum`/`lo`/`hi` are NOT defined in IA 1.0; `bounds(x)` returns the pair as a tuple. Construction is `interval(lo, hi)` (lowercase, validated); `Interval(lo, hi)` errors — only single-arg `Interval(::Real)` exists. The `..` infix syntax lives in IntervalSets, not IntervalArithmetic. **Decoration** (`com` / `dac` / `def` / `trv` / `ill` and the `_NG` Not-Guaranteed flag) is real and printed; v1 uses common-decoration intervals exclusively and does not surface decoration as an ontology property. **`ContainsRoot` belongs to IntervalRootFinding.jl**, not IntervalArithmetic — `roots`, `Krawczyk`, `Newton`, `Bisection`, `Root`, `RootProblem`, `root_status` are exported there. The institution image must include both packages.
 
 #### 4.3.2 ExportFormats / ImportFormats
 
@@ -294,8 +336,20 @@ Catalyst is structurally interesting for an institution because reaction network
 - **`ReactionNetwork`** — typed network: species, reactions, rate laws, parameters.
 - **`ConservationLaw`** — typed linear invariant on species (a vector in the left-nullspace of the stoichiometry matrix). Auto-validated on commit by recomputing the conservation matrix and checking the claimed law lies in its row span.
 - **`SteadyState`** — relates `(network, parameter_assignment, species_concentrations)`. Auto-validated on commit by re-solving the steady-state system at the given parameters.
-- **`MassActionKinetics`** / **`JumpProcessSemantics`** — discriminator-style markers for the dynamical interpretation a network should compile under.
-- **`DeficiencyZero`** / **`DeficiencyOne`** — relations witnessing classical deficiency theorems. Auto-validated.
+- **`MassActionKinetics`** / **`JumpProcessSemantics`** — discriminator-style markers for the *compilation path*, not network properties. A `ReactionNetwork` is a single object; the discriminator selects whether it gets compiled to `ODEProblem` (mass-action ODEs) or `JumpProblem` (stochastic kinetics) — affects which D14 ImportFormat / Comorphism to fire, not the network's identity.
+- **`DeficiencyZero`** / **`DeficiencyOne`** — claims that the network's structural deficiency equals 0 / 1. Auto-validated by calling `Catalyst.deficiency(rn)` (returns `Int`) and comparing. Catalyst does NOT export theorem-named entry points (`deficiencyzerotheorem` / `deficiencyonetheorem`); the validation is a numeric comparison, not a theorem check. `Catalyst.isweaklyreversible(rn)` and `Catalyst.iscomplexbalanced(rn)` are also exported and could underpin secondary AutoOnLoad classes if motivated.
+
+**Verified API note (Catalyst 16.1.1 / MTK 11.24.1, 2026-05-03)**: `@reaction_network` returns a `ReactionSystem`. Exported and confirmed: `species`, `parameters`, `reactions`, `equations`, `unknowns`, `netstoichmat`, `substoichmat`, `prodstoichmat`, **`conservationlaws`** (returns `Matrix{Int64}`), `conservedequations`, `conservationlaw_constants`, `complexstoichmat`, `reactioncomplexes`, `deficiency`, `isweaklyreversible`, `iscomplexbalanced`. Catalyst pulls in 426 names from MTK + extensions.
+
+**Catalyst → ODE / SDE / Jump compilation pipeline** (probe results in [`julia/research/catalyst-ode-probe.md`](../../julia/research/catalyst-ode-probe.md), confirmed against an SciML expert):
+
+- `convert(ODESystem, rn)` is **dead** in Catalyst 16 / MTK 11 (the `ModelingToolkitBase.IntermediateDeprecationSystem` layer).
+- The canonical replacement family is **`ode_model(rn)` / `jump_model(rn)` / `sde_model(rn)`** — explicit model constructors that produce symbolic `ODESystem` / `JumpSystem` / `SDESystem` objects respectively, performing rate-law generation and combinatoric handling. This is the entry point for any Catalyst → MTK / Catalyst → Symbolics Comorphism that needs the symbolic system.
+- For direct compilation to a solvable problem: **`ODEProblem(rn, u0_map, tspan, p_map)`** with **map-form** `u0` and `p`: `[species_sym => value, ...]` and `[param_sym => value, ...]`. Positional-vector form errors with `BoundsError` — this is a deliberate consequence of MTK 11's lazy indexing on hierarchical systems, not a bug. The Catalyst → DiffEq Comorphism uses this map-form path direct to `OdeProblem`, no `ODESystem` intermediate needed.
+- **`complete(rn)`** is required best-practice before any model conversion or Problem construction (incomplete systems are treated as open / hierarchical and trigger warnings or errors). Standard pipeline: `rn = complete(flatten(rn))` then `ode_model(rn)` or `ODEProblem(rn, u0_map, …)`.
+- Other useful Catalyst 16 exports: `oderatelaw` (symbolic rate law for a single reaction; useful diagnostic), `balance_system` (conservation laws + reduced-rank system; alternative to the `conservationlaws(rn)` matrix path the institution currently uses), `make_si_ode` (Species-Indexed ODE — sparse-solver-optimised, niche), `ss_ode_model` (steady-state ODE for `NonlinearProblem`; relevant for the institution's steady-state work), `symbolic_solve_ode` (analytic solver for simple linear-rate systems; not needed v1).
+- **Structural simplification policy for v1**: do NOT call `structural_simplify` at the institution boundary by default. Keep the user-named species and parameters as the system's variables, so `species_declared` aligns with the state vector and downstream `SteadyState` claims map back cleanly. v2 may add an opt-in `structurally_simplified: bool` flag on `ReactionNetwork` or the produced `OdeProblem`, with the institution exposing eliminated quantities via `observed(sys)`.
+- **`JumpProblem(rn, u0_map, tspan, p_map)` and `SDEProblem(rn, u0_map, tspan, p_map)`** are the v2-scope direct entry points for stochastic mass-action and Chemical Langevin compilation; same map-form discipline.
 
 #### 4.4.2 ExportFormats / ImportFormats
 
@@ -343,11 +397,13 @@ The "ODE solution" fibre has structure: convergence proofs, error bounds, step r
 
 #### 4.5.1 Resource classes
 
-- **`OdeSystem`** — typed system: equations, parameters, state variables, jacobian (optional).
-- **`OdeSolution`** — relates `(system, parameter_assignment, initial_conditions, time_span, integrator, trajectory)`. The trajectory is content-addressed; the integrator records solver, tolerance, step strategy.
-- **`IntegrationCertificate`** — relates `(solution, tolerance, error_bound)`. Auto-validated on commit by re-running the integrator and confirming the claimed bound holds.
-- **`BoundedError`** — relates `(solution, norm, bound)`. Auto-validated.
-- **`ParameterFit`** — relates `(system, observations, fitted_parameters, residual)`. Auto-validated by re-fitting (subject to non-determinism caveats — see verdict diagnostics §5.1).
+- **`OdeProblem`** — typed problem: function, initial conditions, time span, parameters, optional Jacobian. *Renamed from D27's earlier `OdeSystem`*: in the SciML ecosystem `ODESystem` is the symbolic MTK abstraction; `ODEProblem` is the concrete solvable thing — `OdeSystem` would collide with MTK semantics once the Symbolics/MTK institution is wired up.
+- **`OdeSolution`** — relates `(problem, parameters, initial_conditions, time_span, integrator, trajectory)`. The trajectory is content-addressed; the integrator records algorithm, abstol, reltol, step strategy.
+- **`ReproducibleIntegration`** — relates `(solution, algorithm, abstol, reltol, trajectory_hash)`. *Renamed from `IntegrationCertificate`*: DiffEq's adaptive tolerances are heuristic local-truncation bounds, not rigorous global enclosures. "Certificate" oversells what the institution can deliver. Auto-validated by re-solving with the same `(alg, abstol, reltol)` against a host with matching `numerical_metadata` and confirming the trajectory hash matches. The `IntegrationCertificate` / `ValidatedIntegration` IRIs stay reserved for a future TaylorModels-backed institution that produces actual interval-rigorous enclosures.
+- **`BoundedError`** — *removed from this institution*: not native to DiffEq's vocabulary; rigorous norm bounds belong to the IntervalArithmetic / TaylorModels institutions. The `sol.errors` field DiffEq exposes is only populated when the problem carries an analytic solution (`u_analytic`), which is a niche case.
+- **`ParameterFit`** — *moved to the JuMP / Optimization institution scope*: in 2026 SciML, parameter fitting is `Optimization.jl` building a loss from `solve(remake(prob; p=θ))` rather than `DiffEqParamEstim` (stagnant). The ontology class lives at the cross-institution boundary; DiffEq exports the `OdeProblem` and consumes back fitted parameters via comorphism.
+
+**Verified API note (OrdinaryDiffEq 6.111 / SciMLBase 2.155, 2026-05-03)**: `ODEProblem`, `ODESolution`, `SteadyStateProblem`, `EnsembleProblem`, `remake`, `successful_retcode` are in SciMLBase. `Tsit5`, `Vern9`, `Rosenbrock23`, `Rodas5`, `Rodas5P`, `QNDF`, `FBDF`, `AutoTsit5`, `AutoVern9` are in OrdinaryDiffEq. **`ReturnCode.Success` is the success enum** — the full set is `(Default, Success, Failure, Terminated, MaxIters, DtNaN, MaxNumSub, DtLessThanMin, Unstable, InitialFailure, ConvergenceFailure, ExactSolutionLeft, ExactSolutionRight, FloatingPointLimit, Infeasible, MaxTime, InternalLineSearchFailed, ShrinkThresholdExceeded, Stalled, StalledSuccess, InternalLinearSolveFailed, APosterioriSafetyFailure)`. `ODESolution` fields: `(:u, :u_analytic, :errors, :t, :k, :discretes, :prob, :alg, :interp, :dense, :tslocation, :stats, :alg_choice, :retcode, :resid, :original, :saved_subsystem)`. **For trajectory content-addressing**, hash `(t, u, k, alg, alg_choice)` together — `k` is the per-segment interpolation coefficients; hashing only `(t,u)` loses dense-output reproducibility. The institution should `using OrdinaryDiffEq` (or specific sub-packages like `OrdinaryDiffEqTsit5`), NOT the heavier `using DifferentialEquations` umbrella.
 
 #### 4.5.2 ExportFormats / ImportFormats
 
@@ -559,29 +615,29 @@ Depends on D14 milestones M1–M7 ([D14 §13.4](d14-institution-realisation.md))
 
 **Scope:** Medium.
 
-### Phase E — Second institution: `JuMP`
+### Phase E — Second institution: `IntervalArithmetic` + numerical hardening
+
+`eigenius-julia-intervals`. *Reordered ahead of JuMP* — no solver-dependency surface, kinase CI columns map directly onto `BoundedBy`, and the Decidable role is the most novel piece of D14 runtime mechanics, so we want it exercised early. Strict-determinism mode (BLAS pinning, FMA off, refusal to run on non-conforming hosts). Cross-host reproducibility verification tooling.
+
+**Scope:** Open-ended, driven by deployment needs.
+
+### Phase F — Third institution: `JuMP`
 
 `eigenius-julia-jump` (per-solver registrations: HiGHS, GLPK, Ipopt). The §4.2 D14 declarations land. Solver-choice is realised by separate `Institution` resources sharing the worker infrastructure. Demo: a constrained design problem, declared in Eigon as an `OptimisationProblem`, solved by the institution via an `OnDemand` `qc_jump_solve` query, optimum committed as an `OptimisesTo` resource that the AutoOnLoad `qc_jump_validate_optimum` re-checks before admission.
 
 **Scope:** Medium.
 
-### Phase F — Third institution: `IntervalArithmetic` + numerical hardening
+### Phase G — Fourth institution: `DifferentialEquations.jl` — ODEs only
 
-`eigenius-julia-intervals`. Strict-determinism mode (BLAS pinning, FMA off, refusal to run on non-conforming hosts). Cross-host reproducibility verification tooling.
+`eigenius-julia-diffeq`. *Reordered ahead of Catalyst* — Catalyst's `qc_to_ode` Comorphism has nowhere to land if DiffEq isn't ready first; with this ordering, 19g ships using hand-written compartmental ODEs (PK two-compartment is well-defined without Catalyst). **v1 scope: ODEs only**; SDEs / DAEs / jump processes are deferred follow-ons. Declarations from §4.5 (verified note): `OdeProblem` (renamed from `OdeSystem` to avoid MTK collision), `OdeSolution`, `OdeSteadyState`, plus `ReproducibleIntegration` framing for AutoOnLoad re-validation; `IntegrationCertificate` / `BoundedError` IRIs reserved for a future TaylorModels-backed institution. Comorphism out to Phase E (DiffEq → IntervalArithmetic) for operationally-verified bounds. Demo: a one-compartment PK clearance model integrated, validated on commit, optionally bounded via interval extension.
 
-**Scope:** Open-ended, driven by deployment needs.
+**Scope:** Medium-to-Large.
 
-### Phase G — Fourth institution: `Catalyst`
+### Phase H — Fifth institution: `Catalyst`
 
-`eigenius-julia-catalyst`. Promoted to a first-class reference institution because life-science PK / signaling pathways / metabolic networks lean on reaction-network modelling heavily. Declarations from §4.4: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, mass-action / jump-process markers, `DeficiencyZero` / `DeficiencyOne`. AutoOnLoad QueryClasses validate conservation laws and steady states on commit. Comorphism into Symbolics/MTK lands as a typed D14 Comorphism resource so the cross-fibre move is tracked. Demo: a notebook that declares a reaction network, derives conservation laws via `qc_cat_extract_invariants`, computes a steady state, validates it on commit, and hands off to Phase H for time-domain integration.
+`eigenius-julia-catalyst`. Promoted to a first-class reference institution because life-science PK / signaling pathways / metabolic networks lean on reaction-network modelling heavily. Declarations from §4.4: `ReactionNetwork`, `ConservationLaw`, `SteadyState`, `DeficiencyZero` / `DeficiencyOne`, `WeaklyReversible` / `ComplexBalanced`. AutoOnLoad QueryClasses validate conservation laws and steady states on commit. The Catalyst → DiffEq Comorphism — the load-bearing handoff — lands here using the symbolic-keyed map form `ODEProblem(rn, [sp => v, ...], tspan, [p => v, ...])` (the Catalyst-ODE probe verified this is the working entry point in Catalyst 16.1.1; the older `convert(ODESystem, rn)` is broken). Demo: a notebook that declares a reaction network, derives conservation laws via `qc_cat_extract_invariants`, computes a steady state, validates it on commit, and hands off to the DiffEq institution (already shipped in Phase G) for time-domain integration.
 
 **Scope:** Medium.
-
-### Phase H — Fifth institution: `DifferentialEquations.jl` — ODEs only
-
-`eigenius-julia-diffeq`. **v1 scope: ODEs only**; SDEs / DAEs / jump processes are deferred follow-ons. Declarations from §4.5: `OdeSystem`, `OdeSolution`, `IntegrationCertificate`, `BoundedError`, `ParameterFit`. AutoOnLoad QueryClasses validate solutions and certificates by re-integration. Comorphisms in from Phase D (MTK → DiffEq) and Phase G (Catalyst → DiffEq); comorphism out to Phase F (DiffEq → IntervalArithmetic) for operationally-verified bounds. Demo: a two-compartment PK model declared as a Catalyst reaction network, compiled to an `OdeSystem`, integrated to produce an `OdeSolution`, validated on commit, optionally bounded via interval extension.
-
-**Scope:** Medium-to-Large. The integration-certificate machinery and the comorphism plumbing both land here; the worked life-science demos in Phase 21 (implementation plan) lean on this milestone.
 
 ### Phase I — Lean / Julia bridge
 
@@ -606,6 +662,8 @@ The substrate's open questions (substrate doc §14) apply directly. Julia-specif
 6. **Error preservation for Symbolics expressions.** When `SimplificationDiverged` fires (the rewrite system entered a cycle or didn't terminate), what does the institution return? The intermediate expression after a configurable step limit, the original expression with a flag, or a structured error? Affects how downstream consumers handle partial simplification.
 
 7. **Interval-arithmetic determinism.** Different rounding modes can produce different bounds (still rigorous, but tighter or looser). The substrate's image pin captures the rounding mode by pinning the Julia + library versions, but this is worth documenting explicitly so users don't expect bit-identical bounds across IntervalArithmetic library versions.
+
+8. **Comorphism transformation as Mini-TT term** *(resolved per pre-existing design guidance — captured in D14 §4.5 + §5)*. The transformation slot in a Comorphism resource is a *Mini-TT expression* (typed term), not an opaque `program:Component` IRI. The natural shape is `program:Lambda` whose body is a typed expression — pure transformations bottom at composed primitive forms (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius, fully transparent); institution-runtime transformations bottom at a `program:Component` reference (Component-as-expression-form, dispatched through the substrate to the institution's worker). Kernel evaluation handles both via the existing Component-evaluation path. The Julia comorphism declarations in [`ontologies/julia/comorphisms/comorphisms.json`](../../ontologies/julia/comorphisms/comorphisms.json) follow this pattern: `transform_catalyst_to_ode_problem` and `transform_diffeq_to_interval_bound` are `program:Lambda` resources whose bodies Apply institution-routed Components (`compile_to_ode_problem`, `bound_trajectory`) to the bound parameter. **Cleanup TODO**: [`ontologies/examples/d14-dock-assay/dock-assay.json`](../../ontologies/examples/d14-dock-assay/dock-assay.json) still declares `cm_arrhenius` as `is_a program:Component` — the Arrhenius transformation is a *Lambda* (`λ Δg. exp(-Δg / RT) * 1e9`), not an opaque Component, and the demo file should be rewritten accordingly. Same for any other examples that drift from the Mini-TT-term shape. The kernel-side enforcement (rejecting Comorphism resources whose `transformation` is `is_a program:Component` rather than an expression form) is a structural-validation rule that lands as the institution-ontology property declaration tightens.
 
 ---
 

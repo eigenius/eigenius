@@ -49,7 +49,6 @@ const PREDICTED_IC50_PROP: &str = "urn:eigenius:demo:d14:predicted_ic50";
 const TARGET_IC50_PROP: &str = "urn:eigenius:demo:d14:target_ic50";
 const TOLERANCE_PROP: &str = "urn:eigenius:demo:d14:tolerance";
 const CANDIDATE_PROP: &str = "urn:eigenius:demo:d14:candidate";
-const DECIDE_ARGS_PROP: &str = "urn:eigenius:institution:decide_args";
 
 const REIFY_IC50_PROC: &str = "urn:eigenius:demo:d14:proc:reify_ic50";
 const WITHIN_TOLERANCE_PROC: &str = "urn:eigenius:demo:d14:proc:within_tolerance";
@@ -97,29 +96,17 @@ fn assay_prediction_verdict(input: &Resource) -> &'static str {
 }
 
 fn within_tolerance_verdict(input: &Resource) -> &'static str {
-    // Decidable QueryClass dispatch (D14 §9.2): the kernel synthesises
-    // a `decide_args` array with positional arguments. Fall back to
-    // named-property shape (used when reachable via FIBER instead).
-    let from_args = input.get(DECIDE_ARGS_PROP).and_then(|v| {
-        let items = v.as_array()?;
-        if items.len() != 3 {
-            return None;
-        }
-        let arg_float = |idx: usize| match &items[idx] {
-            Value::Float(f) => Some(*f),
-            Value::Integer(n) => Some(*n as f64),
-            Value::Embedded(r) => first_float_property(r),
-            _ => None,
-        };
-        Some((arg_float(0), arg_float(1), arg_float(2)))
-    });
-    let (predicted, target, tolerance) = from_args.unwrap_or_else(|| {
-        (
-            extract_float(input.get(PREDICTED_IC50_PROP)),
-            extract_float(input.get(TARGET_IC50_PROP)),
-            extract_float(input.get(TOLERANCE_PROP)),
-        )
-    });
+    // Decidable QueryClass dispatch (D14 §9.2): the kernel populates
+    // the input class's typed required properties from positional
+    // ESL args in `requires` declaration order (Phase 19d.7). For
+    // `WithinToleranceInput` the kernel sets `predicted_ic50`,
+    // `target_ic50`, `tolerance` from `decide(predicted, target,
+    // tol)`. Args arrive as wrapper resources (the kernel marshals
+    // `Val::ResourceVal` as `Value::Embedded`), so `extract_float`
+    // digs through the wrapper.
+    let predicted = extract_float(input.get(PREDICTED_IC50_PROP));
+    let target = extract_float(input.get(TARGET_IC50_PROP));
+    let tolerance = extract_float(input.get(TOLERANCE_PROP));
     match (predicted, target, tolerance) {
         (Some(p), Some(t), Some(tol)) if tol >= 0.0 => {
             if (p - t).abs() <= tol {

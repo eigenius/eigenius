@@ -227,10 +227,23 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // formulas: layer (Phase 19d.0.d / D32 §4-5) — declares
+    // FormulaTerm (the shared symbol-algebra term language across
+    // every numerical institution) and the v1 operator catalog
+    // (arithmetic, unary numeric, comparisons, derivative). Sits
+    // above runtime since `Operator.operator_signature` uses the
+    // `core:inductive` data type added in 19d.0.b.
+    let formulas = load_layer(
+        "formulas",
+        include_str!("../../../ontologies/formulas/formulas-ontology.json"),
+        Some(runtime),
+        storage.clone(),
+    )?;
+
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(runtime),
+        Some(formulas),
         storage.clone(),
     )?;
 
@@ -431,7 +444,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 6] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 7] {
     [
         (
             "core",
@@ -452,6 +465,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 6] {
         (
             "runtime",
             include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
+        ),
+        (
+            "formulas",
+            include_str!("../../../ontologies/formulas/formulas-ontology.json"),
         ),
         (
             "notebook",
@@ -595,9 +612,14 @@ mod tests {
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
         // Head is the notebook layer
-        // (on top of runtime → institution → reflection → program → core)
+        // (on top of formulas → runtime → institution → reflection → program → core).
+        // formulas inserted at Phase 19d.0.d / D32 §4 so FormulaTerm
+        // and the operator catalog ride above the runtime substrate
+        // ontology.
         assert!(!ctx.head().is_root());
-        let runtime = ctx.head().parent().unwrap();
+        let formulas = ctx.head().parent().unwrap();
+        assert!(!formulas.is_root());
+        let runtime = formulas.parent().unwrap();
         assert!(!runtime.is_root());
         let institution = runtime.parent().unwrap();
         assert!(!institution.is_root());
@@ -605,7 +627,7 @@ mod tests {
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
-        // Core layer (parent of program) should be root
+        // Core layer (parent of program) should be root.
         assert!(program.parent().unwrap().is_root());
     }
 

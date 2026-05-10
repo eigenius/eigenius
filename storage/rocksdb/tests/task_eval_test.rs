@@ -148,6 +148,7 @@ fn make_io_ctx(
         registry,
         trace_store,
         dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+        produced_resources: Arc::new(Mutex::new(Vec::new())),
         task_context,
         institution_index: None,
         institution_runtime: None,

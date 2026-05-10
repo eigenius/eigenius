@@ -1,0 +1,38 @@
+name = "EigeniusCatalyst"
+uuid = "7e6a5b4c-3d2e-4f1a-9b8c-1d2e3f4a5b6c"
+authors = ["The Eigenius Authors"]
+version = "0.1.0"
+
+[deps]
+# Catalyst.jl — the chemical-reaction-network DSL this institution
+# wraps. Pinned at the verified API surface from D27 §4.4
+# (Catalyst 16.1.1 / MTK 11.24.1, 2026-05-03): @reaction_network,
+# species, parameters, reactions, conservationlaws, netstoichmat,
+# oderatelaw, deficiency, isweaklyreversible, iscomplexbalanced.
+Catalyst = "479239e8-5488-4da2-87a7-35f2df7eef83"
+
+# LinearAlgebra (stdlib) — for the row-span rank check in
+# `validate_conservation_law`.
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+# SymbolicUtils.jl — for the `Symbolics.Num → FormulaTerm`
+# translator (`num_to_formula` in this module). Used by the
+# `compile_to_ode` handler that backs the `Catalyst → DiffEq`
+# comorphism. Catalyst depends on SymbolicUtils transitively;
+# pinning explicitly keeps the version visible in the lockfile.
+SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
+
+# Symbolics.jl — for the `Num` type and the `simplify` /
+# `arguments` helpers used in the FormulaTerm encoder.
+Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
+
+# Generated mirror module. Same UUID as the other Eigenius mirror
+# consumers — the substrate's mirror generator emits `EigeniusMirror`
+# per Phase 19a.3.
+EigeniusMirror = "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+
+[compat]
+julia = "1.10"
+Catalyst = "16"
+Symbolics = "7"
+SymbolicUtils = "4"

@@ -419,7 +419,7 @@ Each language's faithful-translation specification is a finite document mapping 
 | `data_type: integer` / `float` / `boolean` / `string` | Language primitives |
 | Format constraints | Constructor-level validation that raises on violation |
 
-Per-language docs flesh this out for their own translation.
+Per-language docs flesh this out for their own translation. Julia: [D29](d29-eigon-julia-mirror-spec.md). Lean: D30 (planned alongside `eigon-ffi-gen`).
 
 ### 7.5 The boundary check
 
@@ -473,25 +473,27 @@ pub trait JobSpawner: Send + Sync {
     fn attach_uds(&self, handle: &WorkerHandle) -> Result<UnixStream, SpawnError>;
 }
 
-/// Long-lived service: get-or-start a worker pool for an env, lease
-/// individual handles for dispatches, drain on shutdown. Drives
+/// Long-lived service: get-or-start a service for an env, attach a
+/// connection per dispatch, drain on shutdown. Drives
 /// `CallRuntimeMethod` and `RunRuntimeScript` against
 /// `lifecycle: Service` envs.
 pub trait ServiceSpawner: Send + Sync {
     /// Get-or-start the service backing an env. Idempotent: repeated
     /// calls for the same `image_digest` return the same service.
     fn ensure_service(&self, spec: WorkerSpec) -> Result<ServiceHandle, SpawnError>;
-    /// Lease a worker from the service for the duration of one
-    /// dispatch. The pool above this trait caches and reuses leases.
-    fn lease_worker(&self, service: &ServiceHandle) -> Result<WorkerHandle, SpawnError>;
-    /// Return a leased worker to the service.
-    fn release_worker(&self, service: &ServiceHandle, handle: WorkerHandle);
-    /// Graceful drain of the service: stop accepting new leases,
-    /// wait for in-flight, then tear down.
+    /// Open a CBOR RPC connection to the service for one dispatch.
+    /// The connection is short-lived; the service is long-lived.
+    /// Future K8s / ACA backends will route through their platform's
+    /// service endpoint; the dev-side Local / Docker backends use a
+    /// UDS path.
+    fn attach_uds(&self, service: &ServiceHandle) -> Result<UnixStream, SpawnError>;
+    /// Graceful tear-down of the service. Used at orchestrator
+    /// shutdown and env retirement.
     fn drain(&self, service: &ServiceHandle) -> Result<(), SpawnError>;
-    fn attach_uds(&self, handle: &WorkerHandle) -> Result<UnixStream, SpawnError>;
 }
 ```
+
+**Pooling deferred.** Production-target backends (`K8sDeploymentSpawner`, `AzureContainerAppsSpawner`) handle scaling, max-replica enforcement, idle eviction, and liveness/readiness probing at the platform level (HPA / KEDA / ACA scale rules). A substrate-side pool would duplicate and potentially conflict with the platform's decisions. Dev-side backends (`LocalServiceSpawner`, `DockerServiceSpawner`) keep one long-lived worker per env; concurrent dispatches share it via the worker's accept loop. The trait shape above generalises cleanly to all four backends — none of them lease/release.
 
 `WorkerSpec` carries the `image_digest`, the per-invocation tempdir host path, the runtime-depot mount, env vars (including the cross-check digest, §9.3), resource limits, and the seccomp profile. Per-language `LanguageRuntime::spawn_worker` impls call into whichever spawner matches the env's `lifecycle` indirectly — they don't see backend specifics.
 
@@ -507,9 +509,7 @@ Backends:
 | `K8sDeploymentSpawner` | `ServiceSpawner` | Cloud — k8s Deployment + Service per env, with HPA / KEDA. Deferred. |
 | `PodmanJobSpawner` / `PodmanServiceSpawner` | both | Rootless, no-daemon alternatives to the Docker backends. Deferred. |
 
-A backend may realise both traits where it makes sense (the `Local*` and `Docker*` variants share lower-level spawn logic). Service backends own pool / lease bookkeeping internally; the substrate's `LanguageRuntime` consumers see one consistent dispatch surface regardless.
-
-**Pool layering for Service backends.** A `WorkerPool` wraps a `dyn ServiceSpawner` and tracks lease state, idle timeout, max size, and health checks. The pool is *above* the trait, not inside it — replaceable independently of which backend is in use.
+A backend may realise both traits where it makes sense (the `Local*` and `Docker*` variants share lower-level spawn logic). The substrate's `LanguageRuntime` consumers see one consistent dispatch surface regardless of backend.
 
 ### 8.3 Sandboxing
 

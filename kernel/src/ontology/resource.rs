@@ -86,6 +86,27 @@ impl Value {
         }
     }
 
+    /// Read the value as an IRI reference, accepting both
+    /// `ResourceRef` (the canonical post-`canonicalise_resource_refs`
+    /// shape) and `String` (the parse-time shape from
+    /// schema-agnostic Eigon-JSON parsing). Returns `None` when the
+    /// value is neither, or when a `String` value can't be parsed
+    /// as a valid IRI.
+    ///
+    /// Use this from any reader that needs an IRI off a
+    /// resource-typed property and may run against either
+    /// freshly-parsed or chain-canonicalised resources (RPC
+    /// payloads, in-flight intermediates, FIBER-synthesised
+    /// resources). Returns `Cow`-style — owned `Iri` for `String`
+    /// (it had to be parsed), borrowed slice for `ResourceRef`.
+    pub fn as_iri(&self) -> Option<Iri> {
+        match self {
+            Value::ResourceRef(iri) => Some(iri.clone()),
+            Value::String(s) => Iri::parse(s).ok(),
+            _ => None,
+        }
+    }
+
     /// Returns the value as an embedded resource, if it is one.
     pub fn as_embedded(&self) -> Option<&Resource> {
         match self {
@@ -159,6 +180,13 @@ impl Resource {
     /// Returns the resource's IRI identity, or `None` for embedded resources.
     pub fn id(&self) -> Option<&Iri> {
         self.id.as_ref()
+    }
+
+    /// Promote an embedded resource to a top-level resource by
+    /// assigning an `@id`, or rebrand an existing top-level resource.
+    /// Pass `None` to demote a top-level resource to embedded.
+    pub fn set_id(&mut self, id: Option<Iri>) {
+        self.id = id;
     }
 
     /// Returns true if this is a top-level resource (has an `@id`).

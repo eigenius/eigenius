@@ -20,6 +20,7 @@
 //!
 //! See design document D12 (capability hosting) and D14 (institutions).
 
+pub mod external_institution;
 pub mod registration;
 pub mod wasm_component;
 pub mod wasm_institution_d14;

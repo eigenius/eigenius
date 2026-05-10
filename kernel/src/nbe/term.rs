@@ -208,8 +208,16 @@ pub enum Exp {
     /// the [`InstitutionIndex`]; `source` is the expression producing
     /// the source-institution resource to translate. Evaluation runs
     /// the four-step pipeline — extract → transformation Component →
-    /// reify — and wraps the resulting target-class resource as
-    /// `Val::ResourceVal`.
+    /// reify — and the produced target-class resource is committed to
+    /// the chain (D14 §9.3 step 4) before being wrapped as
+    /// `Val::ResourceVal` for downstream evaluation.
+    ///
+    /// `target_iri` carries an optional explicit IRI override for the
+    /// produced resource. `None` (the ESL default) instructs the kernel
+    /// to assign a deterministic content-hash IRI of the form
+    /// `urn:eigenius:comorphism-output:<comorphism-tail>:<hex>`. `Some`
+    /// (set by EigenQL's `INTO` clause) commits the produced resource
+    /// at the caller-named IRI.
     ///
     /// Without a D14 institution index/runtime attached (bare
     /// `EvalCtx::Pure` used at type-check time), the expression
@@ -221,6 +229,7 @@ pub enum Exp {
     InstitutionInvoke {
         comorphism_iri: Iri,
         source: Box<Exp>,
+        target_iri: Option<Iri>,
     },
 
     /// Bounded size Π-type: `Π {i < upper}. body` — the function

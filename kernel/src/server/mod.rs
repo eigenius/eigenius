@@ -763,15 +763,27 @@ impl EigeniusService {
     }
 
     /// Parse resources from CBOR, JSON, or ESL based on content_type.
+    ///
+    /// For ESL inputs, the kernel's live `InstitutionIndex` is threaded
+    /// into the compiler so function-call IRIs can be classified as
+    /// Comorphism / Decidable QueryClass / OnDemand QueryClass per
+    /// D14 §9.5. Without the index, qualified-name function calls
+    /// fall through to plain `Apply(Var, ...)` and the comorphism
+    /// dispatch path is silently bypassed at runtime.
     #[allow(clippy::result_large_err)]
-    fn parse_resources(data: &[u8], content_type: &str) -> Result<Vec<Resource>, Status> {
+    async fn parse_resources(
+        &self,
+        data: &[u8],
+        content_type: &str,
+    ) -> Result<Vec<Resource>, Status> {
         if content_type.contains("cbor") {
             eigon_cbor::parse_document(data)
                 .map_err(|e| Status::invalid_argument(format!("CBOR parse error: {e}")))
         } else if content_type.contains("esl") {
             let source = std::str::from_utf8(data)
                 .map_err(|e| Status::invalid_argument(format!("invalid UTF-8: {e}")))?;
-            crate::esl::compile(source).map_err(|errors| {
+            let index = Arc::clone(&*self.institution_index.read().await);
+            crate::esl::compile_with_institutions(source, index).map_err(|errors| {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
                 Status::invalid_argument(format!("ESL compile error: {}", msgs.join("; ")))
             })
@@ -836,17 +848,45 @@ impl EigeniusService {
                 "institution-index parse error"
             );
         }
-        *self.institution_index.write().await = Arc::new(idx);
+        let idx_arc = Arc::new(idx);
+        *self.institution_index.write().await = Arc::clone(&idx_arc);
 
-        // Rebuild the runtime from chain-declared WASM institutions.
-        let (runtime, report) =
+        // Rebuild the runtime from chain-declared WASM institutions,
+        // then layer in any external-runtime institutions (D31 §5).
+        let (mut runtime, mut report) =
             crate::capability::registration::build_wasm_institution_runtime(layer);
+        if let Some(client) = self.orchestrator_client.as_ref() {
+            crate::capability::registration::register_external_institutions(
+                layer,
+                idx_arc.as_ref(),
+                &mut runtime,
+                Arc::clone(client),
+                &mut report,
+            );
+        } else {
+            // No orchestrator wired — external institutions cannot
+            // dispatch. Surface this once per rebuild rather than per
+            // institution so the operator sees it.
+            let has_external = idx_arc.institutions().any(|e| {
+                matches!(
+                    e.runtime,
+                    Some(crate::institution::registry::RuntimeKind::External)
+                )
+            });
+            if has_external {
+                tracing::warn!(
+                    { field::OPERATION } = operation::INSTITUTION_REGISTER,
+                    "chain declares `runtime: external` institutions but the kernel was started \
+                     without --orchestrator; their dispatch will fail"
+                );
+            }
+        }
         for err in &report.errors {
             tracing::warn!(
                 { field::OPERATION } = operation::INSTITUTION_REGISTER,
                 resource_iri = %err.resource_iri,
                 { field::ERROR_MESSAGE } = %err.message,
-                "WASM institution registration error"
+                "institution registration error"
             );
         }
         for inst_iri in &report.institutions_registered {
@@ -854,7 +894,7 @@ impl EigeniusService {
                 { field::OPERATION } = operation::INSTITUTION_REGISTER,
                 { field::INSTITUTION_IRI } = %inst_iri,
                 host = "kernel",
-                "registered WASM institution"
+                "registered institution"
             );
         }
         *self.institution_runtime.write().await = Arc::new(runtime);
@@ -1194,6 +1234,7 @@ impl EigeniusService {
                         }],
                         trace_iri: String::new(),
                         task_id: task_id_str.clone(),
+                        output_resource_iris: Vec::new(),
                     }));
                 }
             }
@@ -1202,6 +1243,7 @@ impl EigeniusService {
         let completed_at_ms = now_millis();
         let mut output = exec_result.output;
         let dispatched_traces = exec_result.dispatched_traces;
+        let produced_resources = exec_result.produced_resources;
         let root_trace = exec_result.root_trace;
 
         // Compute metrics from the tree-structured trace (preferred) or
@@ -1281,9 +1323,32 @@ impl EigeniusService {
             crate::ontology::resource::Value::Integer(0),
         );
 
-        // Auto-commit trace layer: ProgramTrace + all IO ComponentTraces
+        // Auto-commit program-run layer: produced domain resources
+        // (comorphism reify outputs, program-final output) +
+        // ProgramTrace + all IO ComponentTraces. The commit goes
+        // through `commit_with_validation` so AutoOnLoad QueryClasses
+        // bound to the produced resources' classes fire on chain
+        // entry (D14 §9.3 step 5).
+        let output_resource_iris: Vec<String> = produced_resources
+            .iter()
+            .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect();
         let result_layer_head = {
             let mut ctx = ctx_arc.write().await;
+            // Add domain resources produced by the run (chain-resident
+            // outputs of comorphism reify and the program's final
+            // Resource value).
+            for r in &produced_resources {
+                if let Err(e) = ctx.add_resource(r.clone()) {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::PROGRAM_RUN,
+                        { field::ERROR_KIND } = "produced_add_failed",
+                        { field::ERROR_MESSAGE } = %e,
+                        resource_iri = ?r.id(),
+                        "failed to add produced resource to program-run layer"
+                    );
+                }
+            }
             // Add ProgramTrace
             if let Err(e) = ctx.add_resource(trace_resource) {
                 tracing::warn!(
@@ -1300,28 +1365,50 @@ impl EigeniusService {
                 );
                 let _ = ctx.add_resource(ct_resource);
             }
-            match ctx.commit("trace") {
-                Ok(layer) => {
-                    // Best-effort persist of the trace layer. A failure here
-                    // logs but doesn't fail the RunProgram call — the output
-                    // is still valid, the trace just isn't durable.
-                    if let Some(err) = self.persist_layer_if_backend(branch, &layer) {
+            let index = Arc::clone(&*self.institution_index.read().await);
+            let runtime = Arc::clone(&*self.institution_runtime.read().await);
+            match ctx.commit_with_validation("program-run", &index, &runtime) {
+                Ok(outcome) => {
+                    // Persist user layer; provenance layer (when
+                    // present, from Holds/Undecidable AutoOnLoad
+                    // verdicts) follows. A failure to persist either
+                    // logs but doesn't fail RunProgram — the eval
+                    // output is still valid; the chain just isn't
+                    // durable.
+                    if let Some(err) = self.persist_layer_if_backend(branch, &outcome.user_layer) {
                         tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
-                            { field::ERROR_KIND } = "trace_persist_failed",
-                            { field::LAYER_ID } = %layer.id(),
+                            { field::ERROR_KIND } = "program_run_persist_failed",
+                            { field::LAYER_ID } = %outcome.user_layer.id(),
                             { field::ERROR_MESSAGE } = %err.message,
-                            "failed to persist trace layer (output still returned)"
+                            "failed to persist program-run layer (output still returned)"
                         );
                     }
-                    Some(layer.id().clone())
+                    if let Some(prov) = outcome.provenance_layer.as_ref() {
+                        if let Some(err) = self.persist_layer_if_backend(branch, prov) {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::LAYER_COMMIT,
+                                { field::ERROR_KIND } = "program_run_provenance_persist_failed",
+                                { field::LAYER_ID } = %prov.id(),
+                                { field::ERROR_MESSAGE } = %err.message,
+                                "failed to persist program-run provenance layer"
+                            );
+                        }
+                    }
+                    Some(
+                        outcome
+                            .provenance_layer
+                            .as_ref()
+                            .map(|l| l.id().clone())
+                            .unwrap_or_else(|| outcome.user_layer.id().clone()),
+                    )
                 }
                 Err(e) => {
                     tracing::warn!(
                         { field::OPERATION } = operation::LAYER_COMMIT,
-                        { field::ERROR_KIND } = "trace_commit_failed",
+                        { field::ERROR_KIND } = "program_run_commit_failed",
                         { field::ERROR_MESSAGE } = %e,
-                        "trace layer commit failed (output still returned)"
+                        "program-run layer commit failed (output still returned)"
                     );
                     None
                 }
@@ -1355,6 +1442,7 @@ impl EigeniusService {
             errors: Vec::new(),
             trace_iri: trace_iri_str,
             task_id: task_id_str,
+            output_resource_iris,
         }))
     }
 }
@@ -1373,7 +1461,9 @@ impl EigeniusKernel for EigeniusService {
             branch = %branch,
             "load payload"
         );
-        let resources = Self::parse_resources(&req.resources, &req.content_type)?;
+        let resources = self
+            .parse_resources(&req.resources, &req.content_type)
+            .await?;
         let count = resources.len() as u32;
 
         let ctx_arc = self.get_branch_context(&branch).await?;
@@ -1396,7 +1486,8 @@ impl EigeniusKernel for EigeniusService {
             let index_snapshot = Arc::clone(&*self.institution_index.read().await);
             let runtime_snapshot = Arc::clone(&*self.institution_runtime.read().await);
             match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
-                Ok(layer) => {
+                Ok(outcome) => {
+                    let layer = outcome.user_layer;
                     layer_id = layer.id().to_string();
                     tracing::info!(
                         { field::OPERATION } = operation::LAYER_COMMIT,
@@ -1408,6 +1499,21 @@ impl EigeniusKernel for EigeniusService {
                     drop(ctx);
                     if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
                         errors.push(err);
+                    }
+                    // Persist the AutoOnLoad provenance layer too if
+                    // one was produced (D31 §6.3 Holds/Undecidable
+                    // path). The kernel's commit pipeline advances
+                    // `ctx.head` to the provenance layer, so failing
+                    // to persist it leaves `ctx.head` pointing at a
+                    // backend-unknown layer — the next commit's CAS
+                    // would surface as "merge during update_branch:
+                    // no common ancestor" when the LCA walk hit the
+                    // ghost.
+                    if let Some(prov) = outcome.provenance_layer {
+                        if let Some(err) = self.persist_layer_if_backend(&branch, &prov) {
+                            errors.push(err);
+                        }
+                        self.rebuild_institution_index(&prov).await;
                     }
                     // Rebuild the D14 institution index from the new
                     // chain so subsequent commits see the just-loaded
@@ -1459,7 +1565,22 @@ impl EigeniusKernel for EigeniusService {
                         }
                     }
                 }
-                Err(crate::context::ContextError::ValidationFailed(verrs)) => {
+                Err(crate::context::ContextError::ValidationFailed {
+                    errors: verrs,
+                    provenance_layer,
+                }) => {
+                    // Per D31 §6.3: a Fails AutoOnLoad commits Verdict
+                    // + RuntimeInvocation as a separate provenance
+                    // layer even though the gated resource was
+                    // rejected. Persist that layer so the audit
+                    // anchor lives on the chain. The Load itself
+                    // still surfaces as a failure to the caller.
+                    if let Some(layer) = provenance_layer {
+                        if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
+                            errors.push(err);
+                        }
+                        self.rebuild_institution_index(&layer).await;
+                    }
                     // Per-error logging — each rule violation gets its
                     // own warn-level event so dashboards can group on
                     // `error_kind` (the rule's debug label) without
@@ -1569,44 +1690,116 @@ impl EigeniusKernel for EigeniusService {
         let layer = self.resolve_read_layer(&req.at_layer, &req.branch).await?;
         let branch_name = resolve_branch_name(&req.branch).to_string();
         let ctx_arc = self.get_branch_context(&branch_name).await?;
-        let ctx = ctx_arc.read().await;
         let index = Arc::clone(&*self.institution_index.read().await);
         let inst_runtime = Arc::clone(&*self.institution_runtime.read().await);
         let components = Arc::clone(&*self.components.read().await);
 
-        let runtime = query::evaluate::FiberRuntime {
-            index: Some(&index),
-            runtime: Some(&inst_runtime),
-            components: Some(&components),
-            overlay: None,
-            ctx: Some(&ctx),
+        let outcome = {
+            let ctx = ctx_arc.read().await;
+            let runtime = query::evaluate::FiberRuntime {
+                index: Some(&index),
+                runtime: Some(&inst_runtime),
+                components: Some(&components),
+                overlay: None,
+                ctx: Some(&ctx),
+            };
+
+            match query::execute_with_into(&req.eigenql, &layer, runtime) {
+                Ok(o) => o,
+                Err(errors) => {
+                    let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
+                    guard.fail("query_failed");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::QUERY_EVALUATE,
+                        { field::COUNT } = errors.len(),
+                        { field::ERROR_MESSAGE } = %msgs.join("; "),
+                        "query failed"
+                    );
+                    return Ok(Response::new(QueryResponse {
+                        success: false,
+                        document: Vec::new(),
+                        content_type: String::new(),
+                        error: format!("query error: {}", msgs.join("; ")),
+                        output_resource_iris: Vec::new(),
+                    }));
+                }
+            }
         };
 
-        let document = match query::execute_with(&req.eigenql, &layer, runtime) {
-            Ok(doc) => doc,
-            Err(errors) => {
-                let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
-                guard.fail("query_failed");
-                tracing::warn!(
-                    { field::OPERATION } = operation::QUERY_EVALUATE,
-                    { field::COUNT } = errors.len(),
-                    { field::ERROR_MESSAGE } = %msgs.join("; "),
-                    "query failed"
-                );
-                return Ok(Response::new(QueryResponse {
-                    success: false,
-                    document: Vec::new(),
-                    content_type: String::new(),
-                    error: format!("query error: {}", msgs.join("; ")),
-                }));
+        // FIBER ... INTO produced chain-bound resources — commit them
+        // through `commit_with_validation` so AutoOnLoad QueryClasses
+        // bound to their classes fire on chain entry (D14 §9.3 step 5
+        // chain-reinsertion via EigenQL).
+        let output_resource_iris: Vec<String> = if outcome.into_resources.is_empty() {
+            Vec::new()
+        } else {
+            let iris: Vec<String> = outcome
+                .into_resources
+                .iter()
+                .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+                .collect();
+            let mut ctx = ctx_arc.write().await;
+            for r in &outcome.into_resources {
+                if let Err(e) = ctx.add_resource(r.clone()) {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::RPC_QUERY,
+                        { field::ERROR_KIND } = "fiber_into_add_failed",
+                        { field::ERROR_MESSAGE } = %e,
+                        resource_iri = ?r.id(),
+                        "failed to add FIBER INTO resource to chain layer"
+                    );
+                }
             }
+            match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
+                Ok(co) => {
+                    if let Some(err) = self.persist_layer_if_backend(&branch_name, &co.user_layer) {
+                        tracing::warn!(
+                            { field::OPERATION } = operation::LAYER_COMMIT,
+                            { field::ERROR_KIND } = "eigenql_into_persist_failed",
+                            { field::LAYER_ID } = %co.user_layer.id(),
+                            { field::ERROR_MESSAGE } = %err.message,
+                            "failed to persist eigenql-into layer (query result still returned)"
+                        );
+                    }
+                    if let Some(prov) = co.provenance_layer.as_ref() {
+                        if let Some(err) = self.persist_layer_if_backend(&branch_name, prov) {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::LAYER_COMMIT,
+                                { field::ERROR_KIND } = "eigenql_into_provenance_persist_failed",
+                                { field::LAYER_ID } = %prov.id(),
+                                { field::ERROR_MESSAGE } = %err.message,
+                                "failed to persist eigenql-into provenance layer"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    guard.fail("eigenql_into_commit_failed");
+                    let msg = format!("{e}");
+                    tracing::warn!(
+                        { field::OPERATION } = operation::LAYER_COMMIT,
+                        { field::ERROR_KIND } = "eigenql_into_commit_failed",
+                        { field::ERROR_MESSAGE } = %msg,
+                        "FIBER INTO commit failed; surfacing error to caller"
+                    );
+                    return Ok(Response::new(QueryResponse {
+                        success: false,
+                        document: Vec::new(),
+                        content_type: String::new(),
+                        error: format!("FIBER INTO commit failed: {msg}"),
+                        output_resource_iris: Vec::new(),
+                    }));
+                }
+            }
+            iris
         };
 
         Ok(Response::new(QueryResponse {
             success: true,
-            document: eigon_cbor::serialize_document(&document),
+            document: eigon_cbor::serialize_document(&outcome.document),
             content_type: "application/cbor".to_string(),
             error: String::new(),
+            output_resource_iris,
         }))
     }
 
@@ -1616,7 +1809,9 @@ impl EigeniusKernel for EigeniusService {
     ) -> Result<Response<ValidateProgramResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_VALIDATE_PROGRAM);
         let req = request.into_inner();
-        let resources = Self::parse_resources(&req.program, &req.content_type)?;
+        let resources = self
+            .parse_resources(&req.program, &req.content_type)
+            .await?;
         let program = resources
             .into_iter()
             .next()
@@ -1730,13 +1925,15 @@ impl EigeniusKernel for EigeniusService {
             { field::CONTENT_TYPE } = %req.content_type,
             "run_program payload"
         );
-        let program_resources = Self::parse_resources(&req.program, &req.content_type)?;
+        let program_resources = self
+            .parse_resources(&req.program, &req.content_type)
+            .await?;
         let program = program_resources
             .into_iter()
             .next()
             .ok_or_else(|| Status::invalid_argument("no program resource"))?;
 
-        let input_resources = Self::parse_resources(&req.input, &req.content_type)?;
+        let input_resources = self.parse_resources(&req.input, &req.content_type).await?;
         let input = input_resources
             .into_iter()
             .next()
@@ -1794,7 +1991,7 @@ impl EigeniusKernel for EigeniusService {
     ) -> Result<Response<ReflectResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_REFLECT);
         let req = request.into_inner();
-        let resources = Self::parse_resources(&req.trace, &req.content_type)?;
+        let resources = self.parse_resources(&req.trace, &req.content_type).await?;
 
         if resources.is_empty() {
             return Ok(Response::new(ReflectResponse {

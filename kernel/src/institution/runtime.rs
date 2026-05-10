@@ -37,6 +37,46 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use std::collections::BTreeMap;
 
+/// Outcome of an `Institution::query` dispatch.
+///
+/// Carries the result Resource the institution produced plus an
+/// optional substrate-captured `partial_invocation` Resource describing
+/// the dispatch (D26 §5.5 — language, image_digest, started_at,
+/// completed_at, numerical_metadata, dispatched_to). The kernel's
+/// commit pipeline folds the partial into a full `RuntimeInvocation`
+/// resource by stamping the IRIs only the kernel knows (`script` ←
+/// signature_iri, `environment` ← env_iri, `inputs` ← gated resource
+/// IRI, `output` ← Verdict IRI) and commits all three resources
+/// (gated subject + Verdict + RuntimeInvocation) in the same kernel
+/// transaction per [D31 §6.3](../../docs/design/d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
+///
+/// Only external-runtime institutions populate the partial; in-process
+/// and WASM institutions return `partial_invocation: None` because
+/// their dispatch happens entirely inside the kernel/host process and
+/// the kernel records its own trace via the program-level trace store
+/// rather than as a chain-committed `RuntimeInvocation`.
+#[derive(Debug, Clone)]
+pub struct QueryOutcome {
+    /// The institution-side dispatch result (e.g. a Verdict for an
+    /// AutoOnLoad / Decidable QueryClass).
+    pub output: Resource,
+    /// Substrate-captured provenance fields, ready to be folded into a
+    /// full `RuntimeInvocation` by the kernel commit pipeline. Always
+    /// `None` from non-external runtimes.
+    pub partial_invocation: Option<Resource>,
+}
+
+impl QueryOutcome {
+    /// Plain `output`-only outcome — what every non-external
+    /// institution returns. Keeps the call site short.
+    pub fn from_output(output: Resource) -> Self {
+        Self {
+            output,
+            partial_invocation: None,
+        }
+    }
+}
+
 /// The interface an institution implements at runtime. Three methods,
 /// of which only the two boundary methods are mandatory.
 ///
@@ -91,6 +131,13 @@ pub trait Institution: Send + Sync {
     /// trichotomy; the dispatch role is determined by the QueryClass
     /// resource, not the trait method.
     ///
+    /// Returns a [`QueryOutcome`] bundling the result Resource with an
+    /// optional substrate-captured `partial_invocation`. External-
+    /// runtime institutions populate the partial so the kernel's
+    /// commit pipeline can fold it into a full `RuntimeInvocation`
+    /// resource (D31 §6.3); in-process and WASM institutions return
+    /// `partial_invocation: None`.
+    ///
     /// Default impl: return `NotImplemented`. Institutions whose
     /// QueryClasses are all Component-implemented need not override.
     fn query(
@@ -98,7 +145,7 @@ pub trait Institution: Send + Sync {
         procedure_iri: &Iri,
         input: &Resource,
         ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
+    ) -> Result<QueryOutcome, InstitutionError> {
         let _ = (input, ctx);
         Err(InstitutionError::NotImplemented(format!(
             "institution `{}` has no runtime query handler for `{procedure_iri}`",

@@ -33,14 +33,17 @@ import {
   ComponentExecutor,
   ComponentMetricsSchema,
   ComponentResponseSchema,
+  DispatchExternalResponseSchema,
   RegisterWasmComponentResponseSchema,
 } from "../gen/eigenius_pb.ts";
 import type {
   ComponentRequest,
   ComponentResponse,
+  DispatchExternalRequest,
+  DispatchExternalResponse,
   RegisterWasmComponentRequest,
 } from "../gen/eigenius_pb.ts";
-import { ComponentRegistry } from "../components/registry.ts";
+import type { ComponentRegistry } from "../components/registry.ts";
 import type { WasmComponentRegistry } from "../wasm/registry.ts";
 import {
   createWasmComponentHandler,
@@ -48,6 +51,7 @@ import {
 } from "../wasm/hostBridge.ts";
 import type { WasmAddon } from "../wasm/loadAddon.ts";
 import { decodeResource, encodeResource } from "../wasm/cbor.ts";
+import type { RuntimeSubstrateAddon } from "../runtime/loadAddon.ts";
 import * as log from "../observability/mod.ts";
 import {
   type FailMark,
@@ -72,6 +76,11 @@ export interface ComponentExecutorDeps {
     wasmRegistry: WasmComponentRegistry;
     bridge: HostBridge;
   };
+  /** Optional substrate-addon handle for D31 §6.2 `DispatchExternal`
+   * routing. Absent when the runtime-substrate native addon failed to
+   * load — in that case `DispatchExternal` returns a typed error so
+   * the kernel surfaces the misconfiguration cleanly. */
+  substrate?: RuntimeSubstrateAddon;
 }
 
 /**
@@ -157,13 +166,104 @@ export async function executeComponentRequest(
 }
 
 /**
+ * Per-request dispatcher for `DispatchExternal` (D31 §6.2). The
+ * orchestrator routes the kernel's structured request fields into the
+ * substrate addon's `dispatchExternalInstitution` entry point, which
+ * synthesises an env + signature internally and dispatches through
+ * the registered `LanguageRuntime`. Returns the substrate's output
+ * Resource bytes plus the partial RuntimeInvocation provenance bytes
+ * — the kernel folds the latter into a full RuntimeInvocation when
+ * 19a.6 lands the trait-shape change.
+ *
+ * Extracted from `registerComponentExecutor` so callers can unit-
+ * test the addon-routing logic without a real Connect server.
+ */
+export async function executeDispatchExternalRequest(
+  req: DispatchExternalRequest,
+  substrate: RuntimeSubstrateAddon | undefined,
+  mark: FailMark,
+): Promise<DispatchExternalResponse> {
+  if (!substrate) {
+    mark.fail("substrate_disabled");
+    throw new Error(
+      "DispatchExternal received but the orchestrator's runtime substrate " +
+        "addon is not loaded (build orchestration/runtime-substrate-native)",
+    );
+  }
+  if (!req.language) {
+    mark.fail("missing_language");
+    throw new Error("DispatchExternal: `language` field is required");
+  }
+  if (!req.envIri) {
+    mark.fail("missing_env_iri");
+    throw new Error("DispatchExternal: `env_iri` field is required");
+  }
+  if (!req.imageDigest) {
+    mark.fail("missing_image_digest");
+    throw new Error("DispatchExternal: `image_digest` field is required");
+  }
+  if (!req.methodName) {
+    mark.fail("missing_method_name");
+    throw new Error("DispatchExternal: `method_name` field is required");
+  }
+  if (!req.signatureIri) {
+    mark.fail("missing_signature_iri");
+    throw new Error("DispatchExternal: `signature_iri` field is required");
+  }
+
+  log.debug(operation.COMPONENT_DISPATCH, "DispatchExternal dispatching", {
+    institution_iri: req.institutionIri,
+    env_iri: req.envIri,
+    image_digest: req.imageDigest,
+    method_name: req.methodName,
+    language: req.language,
+    input_count: req.inputResourceCbors.length,
+  });
+
+  let outcome: { output: Uint8Array; partialInvocation: Uint8Array };
+  try {
+    outcome = await substrate.dispatchExternalInstitution(
+      req.language,
+      req.envIri,
+      req.imageDigest,
+      req.methodName,
+      req.signatureIri,
+      req.inputResourceCbors,
+    );
+  } catch (e) {
+    mark.fail("substrate_dispatch_failed");
+    log.warn(
+      operation.COMPONENT_DISPATCH,
+      "DispatchExternal substrate dispatch failed",
+      {
+        institution_iri: req.institutionIri,
+        error_kind: "substrate_dispatch_failed",
+        error_message: e instanceof Error ? e.message : String(e),
+      },
+    );
+    throw e;
+  }
+
+  log.info(operation.COMPONENT_DISPATCH, "DispatchExternal completed", {
+    institution_iri: req.institutionIri,
+    output_bytes: outcome.output.byteLength,
+    partial_invocation_bytes: outcome.partialInvocation.byteLength,
+  });
+
+  return create(DispatchExternalResponseSchema, {
+    outputResourceCbor: outcome.output,
+    runtimeInvocationPartialCbor: outcome.partialInvocation,
+  });
+}
+
+/**
  * Register the ComponentExecutor service implementation on a Connect router.
  */
 export function registerComponentExecutor(
   router: ConnectRouter,
   deps: ComponentExecutorDeps,
 ): void {
-  const { registry, wasm } = deps;
+  const { registry, wasm, substrate } = deps;
 
   router.service(ComponentExecutor, {
     execute(req: ComponentRequest) {
@@ -237,6 +337,13 @@ export function registerComponentExecutor(
           });
         }
       });
+    },
+
+    dispatchExternal(req: DispatchExternalRequest) {
+      return withRpcGuard(
+        operation.EXTERNAL_DISPATCH,
+        (mark) => executeDispatchExternalRequest(req, substrate, mark),
+      );
     },
   });
 }

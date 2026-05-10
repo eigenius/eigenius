@@ -1,60 +1,74 @@
 # Platform user guide
 
-How to install, run, manage, and extend the Eigenius platform. This guide is the practical companion to the surface-language guides — it covers everything *around* writing ESL or EigenQL: the CLI, the kernel server, the orchestrator, persistence, WASM extensions, and deployment.
+How to install, run, manage, and extend the Eigenius platform. This guide is the practical companion to the surface-language guides — it covers everything *around* writing ESL, EigenQL, or formula values: the CLI, the kernel server, the orchestrator, persistence, WASM and substrate extensions, and deployment.
 
-The guide is grounded in the implementation in [`cli/`](../../../cli/), [`kernel/src/server/`](../../../kernel/src/server/), [`orchestration/`](../../../orchestration/), [`storage/rocksdb/`](../../../storage/rocksdb/), [`examples/wasm-*`](../../../examples/), and [`deploy/`](../../../deploy/). Every command shape, env var, and config detail links to the source.
+The guide is grounded in the implementation in [`cli/`](../../../cli/), [`kernel/src/server/`](../../../kernel/src/server/), [`orchestration/`](../../../orchestration/), [`storage/rocksdb/`](../../../storage/rocksdb/), [`crates/runtime-substrate/`](../../../crates/runtime-substrate/), [`examples/wasm-*`](../../../examples/), [`julia/`](../../../julia/), and [`deploy/`](../../../deploy/). Every command shape, env var, and config detail links to the source.
 
 ## How to read this guide
 
-If you're new: read chapters 1–5 sequentially, then jump to **[chapter 13 — Notebook](13-notebook.md)** for the most accessible UX. After that, the guide is a reference — jump to the chapter for the question you have.
+If you're new: read chapters 1–5 sequentially, then jump to **[chapter 14 — Notebook](14-notebook.md)** for the most accessible UX. After that, the guide is a reference — jump to the chapter for the question you have.
 
 The most-used reference chapters are:
 
-- **[13. Notebook](13-notebook.md)** — the React notebook UX, served by the orchestrator at `http://localhost:8080/notebooks/`
-- **[14. TypeScript SDK](14-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
+- **[14. Notebook](14-notebook.md)** — the React notebook UX, served by the orchestrator at `http://localhost:8080/notebooks/`
+- **[15. TypeScript SDK](15-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
 - **[4. CLI reference](04-cli-reference.md)** — every `eigenius` subcommand
 - **[6. Database management](06-database-management.md)** — durable mode, exports, backups
-- **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the extension surface
+- **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the sandboxed extension surface
+- **[11. Runtime substrate](11-runtime-substrate.md)** — the language-runtime extension surface (Julia in v1)
+- **[`julia-institutions/`](julia-institutions/)** — slow-walk tutorials for each of the v1 Julia institutions
 
 ## Chapters
 
-1. **[Introduction](01-introduction.md)** — what this guide is for, system topology at a glance, the four ways to interact with the platform.
+1. **[Introduction](01-introduction.md)** — what this guide is for, system topology at a glance, the seven ways to interact with the platform.
 
 2. **[Installation and prerequisites](02-installation.md)** — Rust 1.95+, Deno, system packages, optional `just` and `cargo-component`. WSL 2 notes for Windows users.
 
 3. **[Building and testing](03-building-and-testing.md)** — `just build`, `just test`, `just check`. What `just build` does that plain `cargo build` does not.
 
-4. **[CLI reference](04-cli-reference.md)** — every `eigenius` subcommand, grouped by purpose: file commands, knowledge-graph commands, program commands, server, database, capability, tasks.
+4. **[CLI reference](04-cli-reference.md)** — every `eigenius` subcommand, grouped by purpose: file commands, knowledge-graph commands, program commands, server, database, branch, mirror, env, institution, capability, tasks.
 
 5. **[Running the platform locally](05-running-locally.md)** — three-terminal model (orchestrator + kernel + CLI), Docker Compose, what state survives restarts.
 
 6. **[Database management](06-database-management.md)** — `serve --db <path>`, RocksDB persistence, drift refusal, `db stats`/`compact`/`export`, backup strategy.
 
-7. **[The orchestrator](07-orchestrator.md)** — what it does (IO component dispatch + LLM adapter + MCP server), real vs. mock LLM mode, the built-in `CompleteText` and `CompleteJson` components, when you don't need it.
+7. **[The orchestrator](07-orchestrator.md)** — what it does (IO component dispatch + LLM adapter + MCP server + substrate addon), real vs. mock LLM mode, the built-in `CompleteText` and `CompleteJson` components, when you don't need it.
 
-8. **[Worked demos](08-demos.md)** — step-throughs of `demo/run.sh`, `demo/patent/run.sh`, and `demo/wasm/run.sh`.
+8. **[Worked demos](08-demos.md)** — step-throughs of `demo/run.sh`, `demo/patent/run.sh`, `demo/wasm/run.sh`, and the multi-institution kinase-institutions notebook.
 
 9. **[Building WASM components](09-wasm-components.md)** — pure / read-capability / IO components via `wasm-cbor-echo`, `wasm-doc-validator`, `wasm-read-query-probe`, `wasm-http-shout`. Build with `cargo-component`, install with `eigenius capability install`.
 
-10. **[Building WASM institutions](10-wasm-institutions.md)** — D14 `Institution` trait implementations against the `eigenius-institution-d14` WIT world (`extract-typed` / `reify` / `query`). Auto-registration of WASM institutions from chain scan via `runtime: wasm` + inline `wasm_binary`. Walked through with the M8 dock-assay worked example. In-process institution alternative for non-sandboxed cases.
+10. **[Building WASM institutions](10-wasm-institutions.md)** — D14 `Institution` trait implementations against the `eigenius-institution-d14` WIT world (`extract-typed` / `reify` / `query`). Auto-registration from chain scan via `runtime: wasm` + inline `wasm_binary`. Walked through with the M8 dock-assay worked example.
 
-11. **[Deployment](11-deployment.md)** — Docker Compose (production-quality today), Azure ContainerApps via Bicep (preliminary; templates exist but haven't been deployed end-to-end yet), embedding the kernel as a library.
+11. **[Runtime substrate](11-runtime-substrate.md)** — the orchestrator-spawned, container-hosted runtime layer for institutions backed by full language ecosystems (Julia in v1, Python and others tracked). The `mirror create → env build → env create → institution install` lifecycle. WASM vs. substrate trade-off table. Cross-links to [`julia-institutions/`](julia-institutions/).
 
-12. **[Troubleshooting and FAQ](12-troubleshooting.md)** — common build / runtime / connection issues.
+12. **[Deployment](12-deployment.md)** — Docker Compose (production-quality today), Azure ContainerApps via Bicep (preliminary; templates exist but haven't been deployed end-to-end yet), embedding the kernel as a library.
 
-13. **[Notebook](13-notebook.md)** — the React SPA the orchestrator serves at `/notebooks/`. Cell types (markdown / esl / eigenql / typescript / program-run / chart), the file format, publish-to-layer, the patent-analysis and kinase-screening demos, where the source lives.
+13. **[Troubleshooting and FAQ](13-troubleshooting.md)** — common build / runtime / connection issues.
 
-14. **[TypeScript SDK](14-typescript-sdk.md)** — `@eigenius/client` and the `Eigen` class. The SDK that powers the notebook, also usable from your own code. Five-line examples for inspect / query / load / runProgramByIri / layerTopology / publishNotebook.
+14. **[Notebook](14-notebook.md)** — the React SPA the orchestrator serves at `/notebooks/`. Cell types (markdown / esl / eigenql / typescript / program-run / chart), the file format, publish-to-layer, the patent-analysis and kinase-institutions demos, KaTeX math rendering.
 
-15. **[Appendix](15-appendix.md)** — environment variables, file locations, source index, related documents.
+15. **[TypeScript SDK](15-typescript-sdk.md)** — `@eigenius/client` and the `Eigen` class. The SDK that powers the notebook, also usable from your own code. Five-line examples for inspect / query / load / runProgramByIri / layerTopology / publishNotebook.
+
+16. **[Appendix](16-appendix.md)** — environment variables, file locations, source index, related documents.
+
+## Julia institution tutorials
+
+Slow-walk tutorials for the five v1 Julia institutions live in
+[`julia-institutions/`](julia-institutions/). Read the
+[intervals tutorial](julia-institutions/intervals-institution-tutorial.md)
+first for the substrate plumbing slow-walk; then the others go domain-specific.
 
 ## Related documents
 
 - [**ESL user guide**](../esl/README.md) — surface syntax for ontologies and programs
 - [**EigenQL user guide**](../eigenql/README.md) — surface syntax for queries
+- [**Formula language guide**](../formula/README.md) — chain-mirrored Mini-TT fragment, shared by every numerical institution
 - [**D13 Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec
 - [**D12 WASM extensibility**](../../design/d12-wasm-extensibility.md) — capability levels and host imports
-- [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10), the protocol contract for chapter 10
+- [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10), the protocol contract for chapters 10 and 11
+- [**D26 Runtime substrate**](../../design/d26-runtime-substrate.md), [**D29 Mirror generator**](../../design/d29-runtime-mirror-generator.md), [**D31 Institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate specs
+- [**D32 Chain-mirrored Mini-TT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec
 - [**D6 Execution architecture**](../../design/d6-execution-architecture.md) — kernel ↔ orchestrator boundary
 
 The full design-document set lives in [`docs/design/`](../../design/).

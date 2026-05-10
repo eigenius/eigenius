@@ -125,7 +125,7 @@ The frequent culprits, in rough order of frequency:
 - **WASM target not installed** — `rustup target add wasm32-unknown-unknown`.
 - **Deno cache stale** — `deno cache --reload orchestration/src/main.ts`.
 
-For ongoing build issues, [chapter 12](12-troubleshooting.md) collects them by symptom.
+For ongoing build issues, [chapter 13](13-troubleshooting.md) collects them by symptom.
 
 ---
 

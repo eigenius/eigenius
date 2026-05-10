@@ -48,8 +48,10 @@
 
 pub mod client;
 pub mod codec;
+pub mod method;
 pub mod protocol;
 
 pub use client::{ClientError, WorkerRpcClient};
 pub use codec::{decode_frame, encode_frame, FrameError, MAX_FRAME_SIZE_DEFAULT};
-pub use protocol::{HealthInfo, NumericalMetadata, Request, Response};
+pub use method::MethodInvocation;
+pub use protocol::{HealthInfo, NumericalMetadata, Request, Response, TargetKind};

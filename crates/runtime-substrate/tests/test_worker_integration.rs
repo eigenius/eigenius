@@ -34,7 +34,7 @@
 #![cfg(feature = "test-runtime")]
 
 use eigenius_runtime_substrate::cross_check::{self, prepare_substrate_side, ProvenanceDirAction};
-use eigenius_runtime_substrate::rpc::protocol::{Request, Response};
+use eigenius_runtime_substrate::rpc::protocol::{Request, Response, TargetKind};
 use eigenius_runtime_substrate::spawner::{LocalSpawner, WorkerSpawner};
 use eigenius_runtime_substrate::types::{ImageDigest, WorkerHandle, WorkerSpec};
 use eigenius_runtime_substrate::WorkerRpcClient;
@@ -206,6 +206,7 @@ fn full_rpc_round_trip_via_local_spawner() {
     let resp = client
         .call(&Request::DispatchMethod {
             invocation_id: "inv-1".to_string(),
+            target_kind: TargetKind::Script,
             target: ByteBuf::from(target_cbor),
             inputs: vec![],
         })
@@ -242,6 +243,7 @@ fn dispatch_returns_dispatch_failed_when_bash_exits_nonzero() {
     let resp = client
         .call(&Request::DispatchMethod {
             invocation_id: "inv-fail".to_string(),
+            target_kind: TargetKind::Script,
             target: ByteBuf::from(target_cbor),
             inputs: vec![],
         })
@@ -355,6 +357,7 @@ fn malformed_target_yields_method_signature_mismatch() {
     let resp = client
         .call(&Request::DispatchMethod {
             invocation_id: "inv-mal".to_string(),
+            target_kind: TargetKind::Script,
             target: ByteBuf::from(vec![0xff]),
             inputs: vec![],
         })

@@ -8,7 +8,7 @@ This guide is written against the implementation in [`kernel/src/esl/`](../../..
 
 The chapters are ordered for sequential reading: each builds on concepts introduced earlier. If you already know a typed functional language and a typed knowledge graph (RDF/SHACL/OWL), you can skim chapters 1–3, internalise [chapter 6 (Resources, types, and the layer)](06-resources-types-and-the-layer.md), and then dip into the per-construct references in chapters 4 and 5.
 
-The single most important chapter for understanding *how Eigenius differs from a standalone type-theory or a standalone knowledge graph* is **[chapter 6](06-resources-types-and-the-layer.md)** — the bridge between the resource graph and the type system. Several patterns in chapters 4, 5, 8, and 9 only make sense once that bridge is internalised.
+The single most important chapter for understanding *how Eigenius differs from a standalone type-theory or a standalone knowledge graph* is **[Chapter 6](06-resources-types-and-the-layer.md)** — the bridge between the resource graph and the type system. Several patterns in chapters 4, 5, 8, and 9 only make sense once that bridge is internalised.
 
 ## Chapters
 
@@ -46,7 +46,7 @@ The single most important chapter for understanding *how Eigenius differs from a
 
 ## Source index
 
-All implementation referenced in this guide lives in [`kernel/src/esl/`](../../../kernel/src/esl/), [`kernel/src/program/`](../../../kernel/src/program/), and [`kernel/src/nbe/`](../../../kernel/src/nbe/). See [§11 appendix](11-appendix.md) for the complete file-by-file list.
+All implementation referenced in this guide lives in [`kernel/src/esl/`](../../../kernel/src/esl/), [`kernel/src/program/`](../../../kernel/src/program/), and [`kernel/src/nbe/`](../../../kernel/src/nbe/). See [§12 appendix](11-appendix.md) for the complete file-by-file list.
 
 ---
 

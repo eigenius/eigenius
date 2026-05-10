@@ -49,12 +49,16 @@
 
 #![deny(clippy::all)]
 
+use eigenius_config::Loader as ConfigLoader;
+use eigenius_julia::JuliaLanguageRuntime;
 use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
+use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
+use eigenius_runtime_substrate::spawner::DockerSpawnerConfig;
 use eigenius_runtime_substrate::test_runtime::TestLanguageRuntime;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Mirror of [`eigenius_runtime_substrate::facade::DispatchOutcome`] on
 /// the napi boundary. Phase 18c.5 split: dispatchers now return both
@@ -113,6 +117,47 @@ pub fn register_test_language_runtime(worker_binary_path: String) -> Result<()> 
     .map_err(into_napi_err)
 }
 
+/// Register the [`JuliaLanguageRuntime`] under language_id="julia".
+/// Idempotent within a process — calling twice surfaces an explicit
+/// `RegistryError::AlreadyRegistered`.
+///
+/// `worker_project_dir` points at `julia/runtime-worker/` (the directory
+/// containing `Project.toml`, `Manifest.toml`, and `src/JuliaWorker.jl`)
+/// — copied into the orchestrator image at build time. `base_image_ref`
+/// is the digest-pinned Julia base image. `depot_path` is the shared
+/// host/container path used for substrate artifacts and worker UDS
+/// sockets — must match the orchestrator's bind-mount in
+/// `docker-compose.yml` so DooD-spawned worker containers see the same
+/// path the orchestrator wrote (D26 §9.5).
+#[napi]
+pub fn register_julia_language_runtime(
+    worker_project_dir: String,
+    base_image_ref: String,
+    depot_path: String,
+) -> Result<()> {
+    // Load substrate config so daemon-socket / registry overrides
+    // declared in `eigenius.toml` (or `EIGENIUS_DOCKER_DAEMON_SOCKET`)
+    // flow through to the spawner without code edits.
+    let config = ConfigLoader::new()
+        .load()
+        .map_err(|e| into_napi_err(format!("eigenius-config load: {e}")))?;
+
+    let depot = PathBuf::from(&depot_path);
+    let spawner_config =
+        DockerSpawnerConfig::from_substrate_config(depot.clone(), &config.substrate);
+    let spawner = DockerServiceSpawner::new(spawner_config)
+        .map_err(|e| into_napi_err(format!("DockerServiceSpawner::new: {e}")))?;
+    let runtime = JuliaLanguageRuntime::new(
+        PathBuf::from(worker_project_dir),
+        base_image_ref,
+        Arc::new(spawner),
+        depot,
+    );
+    let mut d = dispatcher().lock().map_err(lock_err)?;
+    d.register_language_runtime(Box::new(runtime))
+        .map_err(into_napi_err)
+}
+
 /// Dispatch a `RunRuntimeScript` invocation. Async to avoid blocking
 /// the napi-rs tokio runtime on spawn / RPC; the inner work runs in a
 /// `spawn_blocking` task.
@@ -160,6 +205,50 @@ pub async fn dispatch_call_runtime_method(
         Error::new(
             Status::GenericFailure,
             format!("dispatch_call_runtime_method join failed: {e}"),
+        )
+    })?
+    .map(JsDispatchOutcome::from)
+}
+
+/// Dispatch an external-institution invocation (D31 §6.2 / Phase
+/// 19a.5.c). Same `JsDispatchOutcome` shape as the script / method
+/// dispatchers above, but the kernel's gRPC handler sends structured
+/// metadata fields rather than a single argument Resource — so this
+/// entry point takes them as direct parameters and packs them into
+/// the substrate's synthesised signature inside
+/// `SubstrateDispatcher::dispatch_external_institution`.
+///
+/// `input_cbors` carries the multi-input list (D31 §6.5). For an
+/// AutoOnLoad / Decidable QueryClass dispatch it is a single-element
+/// list; for OnDemand / `CallRuntimeMethod` surfaces it can be longer.
+#[napi]
+#[allow(clippy::too_many_arguments)]
+pub async fn dispatch_external_institution(
+    language: String,
+    env_iri: String,
+    image_digest: String,
+    method_name: String,
+    signature_iri: String,
+    input_cbors: Vec<Buffer>,
+) -> Result<JsDispatchOutcome> {
+    let inputs: Vec<Vec<u8>> = input_cbors.into_iter().map(|b| b.to_vec()).collect();
+    tokio::task::spawn_blocking(move || -> Result<DispatchOutcome> {
+        let d = dispatcher().lock().map_err(lock_err)?;
+        d.dispatch_external_institution(
+            &language,
+            &env_iri,
+            &image_digest,
+            &method_name,
+            &signature_iri,
+            &inputs,
+        )
+        .map_err(into_napi_err)
+    })
+    .await
+    .map_err(|e| {
+        Error::new(
+            Status::GenericFailure,
+            format!("dispatch_external_institution join failed: {e}"),
         )
     })?
     .map(JsDispatchOutcome::from)

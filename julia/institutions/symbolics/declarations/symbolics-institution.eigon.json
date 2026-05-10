@@ -1,0 +1,214 @@
+[
+  {
+    "@id": "urn:eigenius:institutions:symbolics",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:core:short_name": "Symbolics",
+    "urn:eigenius:core:description": "Symbolic-algebra institution backed by Symbolics.jl. v1 scope: validates `SimplifiesTo` claims by re-running Symbolics' simplifier and checking the claimed simplified form. Builds on the shared `formulas:FormulaTerm` language committed in Phase 19d.0 — every SymbolicExpression carries its term as a typed FormulaTerm, decoded into Symbolics.Num via the generated mirror. See D27 §4.1.",
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:institutions:symbolics",
+    "urn:eigenius:institution:institution_name": "Symbolics",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:institution:requires_environment": "urn:eigenius:symbolics:env:v1"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:validate_simplifies_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_simplifies_to",
+    "urn:eigenius:core:description": "Julia entry point that takes a `SimplifiesTo` mirror struct and returns a `Verdict`. The handler decodes both `expr` and `simplified` into Symbolics.Num via `decode_FormulaTerm`, runs `Symbolics.simplify` on the source, and compares against the claimed simplified form via `isequal`. `Holds` when both reduce to the same term; `Undecidable` otherwise — Symbolics' simplifier is heuristic, so non-equality of representations does not imply algebraic non-equivalence.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_simplifies_to",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SimplifiesTo"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:simplify_expression",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "simplify_expression",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_symb_simplify` OnDemand QueryClass. Takes a `SimplifyRequest` mirror struct and returns a fresh `SymbolicExpression` whose `term` is the institution's pinned simplification of the input. The handler decodes `req.expr.term` into a `Symbolics.Num`, runs `Symbolics.simplify`, and re-encodes the result back into a chain-shaped `FormulaTerm`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "simplify_expression",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SimplifyRequest"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:symbolics:SymbolicExpression"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:signatures:check_equivalence",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "check_equivalence",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_symb_check_equivalence` Decidable QueryClass. Takes an `EquivalenceCheck` mirror struct and returns a `Verdict`: `Holds` when `simplify(lhs) == simplify(rhs)` structurally, `Undecidable` otherwise. Decidable role means `Exp::NativeDecide` reduces user programs by calling this handler; on `Holds` the constraint reduces to `Refl`, on `Fails` it produces a failing neutral, on `Undecidable` it stays a passthrough.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "check_equivalence",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:EquivalenceCheck"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:qc_symb_simplify",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_symb_simplify",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `SimplifyRequest(expr)`, returns the simplified `SymbolicExpression`. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5) — not fired on Load, so it doesn't gate commits. The OnDemand counterpart of the AutoOnLoad `simplifies_to_validity` gate: rather than verifying a user-supplied claim, it produces the institution's canonical simplification on demand.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SimplifyRequest",
+    "urn:eigenius:institution:result_class": "urn:eigenius:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:simplify_expression",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:signatures:validate_symbolically_reduces_to",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_symbolically_reduces_to",
+    "urn:eigenius:core:description": "Julia entry point for the `symbolically_reduces_to_validity` AutoOnLoad gate. Takes a `SymbolicallyReducesTo` mirror struct, dispatches on the strategy ctor (`ReductionStrategy_Simplify` → `Symbolics.simplify`, `ReductionStrategy_Expand` → `Symbolics.expand`), applies the selected operation to the source, and compares structurally against the claimed result. Holds on `isequal` match (after symmetric `simplify` to absorb non-canonical authoring), Undecidable otherwise.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_symbolically_reduces_to",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SymbolicallyReducesTo"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:symbolically_reduces_to_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "symbolically_reduces_to_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `SymbolicallyReducesTo` resource. Re-runs the named strategy and produces the canonical D14 Verdict tri-state. The strategy parameter generalises `simplifies_to_validity`'s implicit `Symbolics.simplify` to a chain-typed parameter — the strategy IRI rides on every Verdict's provenance via the runtime invocation, so audit queries can answer `which strategy gave Holds?` without re-resolving the dispatch path.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SymbolicallyReducesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_symbolically_reduces_to",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:validate_substitutes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_substitutes",
+    "urn:eigenius:core:description": "Julia entry point for the `substitutes_validity` AutoOnLoad gate. Takes a `Substitutes` mirror struct, runs `Symbolics.substitute(target, var => replacement)`, simplifies the actual and claimed results, and returns Holds on structural match, Undecidable otherwise.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_substitutes",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:Substitutes"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:substitutes_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "substitutes_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `Substitutes` resource. Re-runs Symbolics' substitute + simplify and produces the canonical D14 Verdict tri-state. `Fails` reserved for a future strict-decision path.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:Substitutes",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_substitutes",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:validate_satisfies_equation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_satisfies_equation",
+    "urn:eigenius:core:description": "Julia entry point for the `satisfies_equation_validity` AutoOnLoad gate. Takes a `SatisfiesEquation` mirror struct, builds a Symbolics substitution dict from `bindings`, applies it to both sides of the equation, simplifies the residue `lhs_subbed - rhs_subbed`, and returns Holds when the residue is `iszero`, Undecidable otherwise.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_satisfies_equation",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SatisfiesEquation"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:satisfies_equation_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "satisfies_equation_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `SatisfiesEquation` resource. Verifies the substitution-and-simplify residue is zero and produces the canonical D14 Verdict tri-state. Per D27 §4.1.1, `Symbolics.simplify` is heuristic — `Fails` is reserved for a future strict-decision path that can refute satisfaction on restricted fragments; the typical mismatch surfaces as `Undecidable`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SatisfiesEquation",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_satisfies_equation",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:qc_symb_check_equivalence",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_symb_check_equivalence",
+    "urn:eigenius:core:description": "Decidable QueryClass: given an `EquivalenceCheck(lhs, rhs)`, returns a `Verdict` — Holds when both sides simplify to the same form, Undecidable otherwise. Wired for `Exp::NativeDecide` so user programs can write `cap:qc_symb_check_equivalence(lhs, rhs)` predicates whose results reduce inline at type-check time. `Fails` is reserved for a future strict-equivalence path (groebner-basis / polynomial canonicalisation) per D27 §4.1.1.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:EquivalenceCheck",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:check_equivalence",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:extract_term",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "extract_term",
+    "urn:eigenius:core:description": "Julia entry point for the source-side extract of the `Symbolics → IntervalArithmetic` Comorphism (D14 §9.3 step 2). Pulls the `term` field off a `SymbolicExpression`, surfacing the chain-typed FormulaTerm as the typed payload that flows through the comorphism's identity middle and into the IntervalArithmetic-side reify. Identity-on-FormulaTerm — both ends speak the same flat formula language (D32 §6 generalised), so the extraction is just the field accessor; the function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism extract calls through the substrate uniformly with `query` and `reify`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "extract_term",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SymbolicExpression"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:formulas:FormulaTerm"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:formats:ef_symb_expr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_symb_expr",
+    "urn:eigenius:core:description": "Typed outbound view of `SymbolicExpression`: extracts the `term` field as a `formulas:FormulaTerm` payload (D14 §4.2). Source side of the identity Comorphism Symbolics → IntervalArithmetic — every other numerical institution that consumes FormulaTerm reuses this same export. Anchored on the `extract_term` Julia handler.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:symbolics:SymbolicExpression",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:formulas:FormulaTerm",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:signatures:extract_term"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:simplifies_to_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "simplifies_to_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `SimplifiesTo` resource. The gate re-runs Symbolics' simplifier and produces the canonical D14 Verdict tri-state. Per D27 §4.1.1, `Symbolics.simplify` is heuristic; `Fails` is reserved for the strict-equality path (claim is `x*0` and the simplifier gives `0` exactly), and the typical mismatch surfaces as `Undecidable`.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SimplifiesTo",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:validate_simplifies_to",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+
+  {
+    "@id": "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "frame_as_optimisation_problem",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_symb_to_jump` OnDemand QueryClass + the operational backing of the `Symbolics → JuMP` comorphism. Takes a `SymbolicsToJuMPInput` (objective: SymbolicExpression + variable_names + optional bounds + sense + constraints) and returns a `jump:OptimisationProblem` whose `objective` is the FormulaTerm extracted from `input.objective.term` (identity on FormulaTerm — D32 §6) and whose remaining fields are forwarded from the input's framing unchanged. Internally: the handler decodes the SymbolicExpression mirror struct, pulls its `term` field, and packs `OptimisationProblem(input.variable_names, input.framing_variable_bounds, input.objective.term, input.sense, input.framing_constraints)`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "frame_as_optimisation_problem",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:symbolics:SymbolicsToJuMPInput"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:jump:OptimisationProblem"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:query_classes:qc_symb_to_jump",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_symb_to_jump",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `SymbolicsToJuMPInput`, frame the underlying SymbolicExpression as a `jump:OptimisationProblem`. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5). The operational backing for the `Symbolics → JuMP` comorphism — the typed Comorphism resource at `julia/comorphisms/symbolics-to-jump.eigon.json` is the declarative contract; this QueryClass is what users call today (until D14's M5 evaluator wires up the four-step extract→m→reify pipeline as a single FIBER param coercion).",
+    "urn:eigenius:institution:query_class": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics"
+  },
+  {
+    "@id": "urn:eigenius:symbolics:formats:ef_symb_to_jump_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_symb_to_jump_input",
+    "urn:eigenius:core:description": "Typed outbound view of `SymbolicsToJuMPInput`: extracts a chain-typed `jump:OptimisationProblem` via `frame_as_optimisation_problem`. Source side of the `Symbolics → JuMP` Comorphism. The payload type is `OptimisationProblem` because both ends of the comorphism speak the same shape on the JuMP side — the typed middle is the identity Lambda on OptimisationProblem.",
+    "urn:eigenius:institution:from_class": "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:jump:OptimisationProblem",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:symbolics",
+    "urn:eigenius:institution:procedure": "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem"
+  }
+]

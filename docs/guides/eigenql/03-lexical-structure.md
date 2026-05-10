@@ -59,7 +59,7 @@ These identifiers are reserved as keywords because the parser dispatches on them
 
 **Aggregate**: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`
 
-Behaviour details are in [chapter 6 §6.7](06-expressions.md) and [chapter 12](12-appendix.md).
+Behaviour details are in [chapter 6 §6.7](06-expressions.md) and [chapter 13](12-appendix.md).
 
 ## 3.3. Identifiers and qualified names
 

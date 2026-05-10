@@ -1,0 +1,84 @@
+[
+  {
+    "@id": "urn:eigenius:institutions:intervals",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:core:short_name": "IntervalArithmetic",
+    "urn:eigenius:core:description": "Verifies scalar interval-membership claims (`BoundedBy`) by dispatching `IntervalArithmetic.jl` through a Julia worker. The minimal D31 institution: one resource class, one AutoOnLoad QueryClass, no outgoing Comorphisms (defer §6.6 until a second institution exists). See D27 §4.0.2.",
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:institutions:intervals",
+    "urn:eigenius:institution:institution_name": "IntervalArithmetic",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:external",
+    "urn:eigenius:institution:requires_environment": "urn:eigenius:intervals:env:v1"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:signatures:validate_bounded_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "validate_bounded_by",
+    "urn:eigenius:core:description": "Julia entry point that takes a `BoundedBy` mirror struct and returns a `Verdict`. The handler runs `value in interval(lower, upper)` rigorously via `IntervalArithmetic.jl`: rounding-respecting interval inclusion, so a `Holds` answer is a proof of containment, not a heuristic.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "validate_bounded_by",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:intervals:BoundedBy"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:institution:Verdict"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:signatures:compute_bounds_for_request",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "compute_bounds_for_request",
+    "urn:eigenius:core:description": "Julia entry point for the `qc_compute_bounds` OnDemand QueryClass. Takes a `BoundsRequest` mirror struct (carrying a SymbolicExpression and a BoundedBy domain) and returns a `BoundedBy` whose `[lower, upper]` interval rigorously encloses the function's range over the domain. The handler destructures the composite, evaluates the FormulaTerm under interval-arithmetic semantics with `x` bound to `interval(domain.lower, domain.upper)`, and packs the resulting interval into a fresh BoundedBy.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "compute_bounds_for_request",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:intervals:BoundsRequest"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:intervals:BoundedBy"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:query_classes:qc_compute_bounds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_compute_bounds",
+    "urn:eigenius:core:description": "OnDemand QueryClass: given a `BoundsRequest(expr, domain)`, returns a `BoundedBy` enclosing `expr` over the `[domain.lower, domain.upper]` range. Dispatched explicitly via EigenQL FIBER (D2 v2 §3.5) — not fired on Load. The first OnDemand external-runtime QueryClass to land on the chain; turns the cross-institution probe's substrate-level dispatch into an EigenQL-addressable surface.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:intervals:BoundsRequest",
+    "urn:eigenius:institution:result_class": "urn:eigenius:intervals:BoundedBy",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:intervals:signatures:compute_bounds_for_request",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:signatures:reify_function",
+    "urn:eigenius:core:is_a": ["urn:eigenius:runtime:RuntimeMethodSignature"],
+    "urn:eigenius:core:short_name": "reify_function",
+    "urn:eigenius:core:description": "Julia entry point for the target-side reify of the `Symbolics → IntervalArithmetic` Comorphism (D14 §9.3 step 4). Wraps a chain-typed FormulaTerm payload in a fresh `IntervalFunction(term)` resource — the typed inbound constructor for the IntervalArithmetic side of the bridge. Symmetric to the source side's `extract_term`: that pulls the FormulaTerm out of a SymbolicExpression; this puts it into an IntervalFunction. The function exists so the kernel's `Exp::InstitutionInvoke` dispatch can route comorphism reify calls through the substrate uniformly with `query` and `extract_typed`.",
+    "urn:eigenius:runtime:language": "julia",
+    "urn:eigenius:runtime:method_name": "reify_function",
+    "urn:eigenius:runtime:input_types": ["urn:eigenius:formulas:FormulaTerm"],
+    "urn:eigenius:runtime:output_type": "urn:eigenius:intervals:IntervalFunction"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:formats:if_intv_function",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:core:short_name": "if_intv_function",
+    "urn:eigenius:core:description": "Typed inbound constructor for `IntervalFunction`: reifies a `formulas:FormulaTerm` payload as the `term` field of a fresh IntervalFunction (D14 §4.3). Target side of the identity Comorphism Symbolics → IntervalArithmetic — every other institution producing FormulaTerm payloads reuses this same import. Anchored on the `reify_function` Julia handler.",
+    "urn:eigenius:institution:to_class": "urn:eigenius:intervals:IntervalFunction",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:formulas:FormulaTerm",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals",
+    "urn:eigenius:institution:procedure": "urn:eigenius:intervals:signatures:reify_function"
+  },
+
+  {
+    "@id": "urn:eigenius:intervals:query_classes:bounded_by_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "bounded_by_validity",
+    "urn:eigenius:core:description": "AutoOnLoad gate fired against every newly committed `BoundedBy` resource. Verdict shape is the canonical D14 tri-state (`Holds`, `Fails`, `Undecidable`); a `Fails` verdict rejects the gated commit per D31 §6.3 and lands a Verdict + RuntimeInvocation as the audit anchor explaining the rejection.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:intervals:BoundedBy",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:intervals:signatures:validate_bounded_by",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:institutions:intervals"
+  }
+]

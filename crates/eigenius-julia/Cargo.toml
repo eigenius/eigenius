@@ -1,0 +1,24 @@
+[package]
+name = "eigenius-julia"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Production Julia language runtime for the Eigenius substrate. Implements LanguageRuntime; bakes JuliaWorker.jl + the env's Project/Manifest into a deterministic OCI image. See D27, Phase 19a."
+
+[features]
+# 19a.1 only ships the Docker-backed per-invocation path (matching the
+# 18d capstone). 19a.2 introduces ServiceSpawner with both Local and
+# Docker backends; until then, the Docker path is the only path and the
+# substrate dep enables `docker-spawner` unconditionally.
+default = []
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }
+serde.workspace = true
+serde_bytes = "0.11"
+serde_json.workspace = true
+ciborium = "0.2"
+sha2 = "0.10"
+thiserror.workspace = true

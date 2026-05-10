@@ -59,6 +59,26 @@ down:
 demo:
     ./demo/run.sh
 
+# Run the IntervalArithmetic institution end-to-end demo (D31)
+demo-intervals:
+    ./demo/intervals/run.sh
+
+# Run the Symbolics institution end-to-end demo (D27 §4.1 / Phase 19d)
+demo-symbolics:
+    ./demo/symbolics/run.sh
+
+# Run the Catalyst institution end-to-end demo (D27 §4.4 / Phase 19h)
+demo-catalyst:
+    ./demo/catalyst/run.sh
+
+# Run the DiffEq institution end-to-end demo (D27 §4.5 / Phase 19g)
+demo-diffeq:
+    ./demo/diffeq/run.sh
+
+# Run the JuMP-HiGHS institution end-to-end demo (D27 §4.2 / Phase 19f)
+demo-jump-highs:
+    ./demo/jump-highs/run.sh
+
 # Start orchestrator locally (mock LLM)
 orchestrator-mock:
     cd orchestration && EIGENIUS_MOCK_LLM=true deno run --allow-net --allow-env --allow-sys=hostname src/main.ts

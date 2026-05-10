@@ -90,6 +90,13 @@ pub enum EvalCtx {
         trace_store: Option<Arc<dyn TraceStore>>,
         /// ComponentTraces produced during this evaluation (for trace layer commits).
         dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
+        /// Top-level resources produced during this evaluation that
+        /// must be committed to the chain at the run-boundary
+        /// (D14 §9.3 step 4 — comorphism reify outputs). Each entry
+        /// has a deterministic content-hash IRI assigned at the
+        /// reify boundary; the run-boundary commits them as part of
+        /// the program-run layer.
+        produced_resources: Arc<Mutex<Vec<crate::ontology::resource::Resource>>>,
         /// Optional task context. When present, IO dispatches route
         /// through per-task positional trace keys (D21 §3.2) instead
         /// of the cross-task content-address cache. Synchronous
@@ -338,6 +345,7 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::InstitutionInvoke {
             comorphism_iri,
             source,
+            target_iri,
         } => {
             let source_val = ev(source)?;
             if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
@@ -346,7 +354,8 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                     format!("__institution_invoke_no_registry:{comorphism_iri}"),
                 )));
             }
-            match try_d14_institution_invoke(comorphism_iri, &source_val, ctx)? {
+            match try_d14_institution_invoke(comorphism_iri, &source_val, target_iri.as_ref(), ctx)?
+            {
                 Some(translated) => Ok(translated),
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
@@ -963,6 +972,65 @@ pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<T
             }
         }
 
+        // --- InstitutionInvoke: comorphism dispatch (D14 §9.3) ---
+        //
+        // The four-step pipeline (extract → m → reify) lives in
+        // `try_d14_institution_invoke`; here we wrap the source
+        // expression in `eval_traced` to nest its trace, drive the
+        // pipeline through `eval_ctx`, and synthesise a
+        // `Trace::Comorphism` node from the produced
+        // `Val::ResourceVal`'s `@id` and class. Pure-mode passthrough
+        // (no D14 backing attached) and downstream errors propagate
+        // unchanged.
+        Exp::InstitutionInvoke {
+            comorphism_iri,
+            source,
+            target_iri,
+        } => {
+            let (source_val, source_trace) = eval_traced(source, rho, ctx)?;
+            if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
+                return Ok((
+                    Val::Nt(Neut::Gen(
+                        usize::MAX,
+                        format!("__institution_invoke_no_registry:{comorphism_iri}"),
+                    )),
+                    None,
+                ));
+            }
+            let translated = match try_d14_institution_invoke(
+                comorphism_iri,
+                &source_val,
+                target_iri.as_ref(),
+                ctx,
+            )? {
+                Some(v) => v,
+                None => {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                            "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
+                        )));
+                }
+            };
+            let (target_iri_str, target_class_str) = match &translated {
+                Val::ResourceVal(r) => {
+                    let id = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
+                    let class = r
+                        .is_a()
+                        .first()
+                        .map(|i| i.as_str().to_string())
+                        .unwrap_or_default();
+                    (id, class)
+                }
+                _ => (String::new(), String::new()),
+            };
+            let trace = Trace::Comorphism {
+                comorphism_iri: comorphism_iri.as_str().to_string(),
+                source_trace: source_trace.map(Box::new),
+                target_iri: target_iri_str,
+                target_class: target_class_str,
+            };
+            Ok((translated, Some(trace)))
+        }
+
         // --- All other forms: structural, no trace ---
         _ => Ok((eval_ctx(exp, rho, ctx)?, None)),
     }
@@ -1220,6 +1288,35 @@ fn build_recursor_ih(
     }
 }
 
+/// Compute a deterministic content-hash IRI for a resource produced
+/// during program execution (D14 §9.3 step 4 — comorphism reify
+/// outputs; the program-run final output).
+///
+/// Shape: `urn:eigenius:<namespace>:<origin-tail>:<hex>` where
+/// `<hex>` is the first 16 hex chars of SHA-256 over the canonical
+/// Eigon-CBOR of the resource with `@id` cleared. Two calls that
+/// produce identical resource content collide on the same IRI —
+/// that is the dedup we want.
+pub(crate) fn deterministic_run_output_iri(
+    namespace: &str,
+    origin_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Iri {
+    use sha2::{Digest, Sha256};
+    let mut for_hashing = resource.clone();
+    for_hashing.set_id(None);
+    let cbor = crate::ontology::eigon_cbor::canonicalize(&for_hashing);
+    let digest = Sha256::digest(&cbor);
+    let hex = digest
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let tail = origin_iri.as_str().rsplit(':').next().unwrap_or("anon");
+    Iri::parse(format!("urn:eigenius:{namespace}:{tail}:{hex}").as_str())
+        .expect("deterministic run-output IRI is well-formed")
+}
+
 /// D14 four-step InstitutionInvoke pipeline.
 ///
 /// Returns:
@@ -1236,6 +1333,7 @@ fn build_recursor_ih(
 fn try_d14_institution_invoke(
     comorphism_iri: &Iri,
     source_val: &Val,
+    target_iri: Option<&Iri>,
     ctx: &EvalCtx,
 ) -> Result<Option<Val>, EvalError> {
     let (Some(index), Some(runtime)) = (ctx.institution_index(), ctx.institution_runtime()) else {
@@ -1283,11 +1381,29 @@ fn try_d14_institution_invoke(
         )
     });
     let exec_ctx = crate::context::ExecutionContext::new(
-        head,
+        Arc::clone(&head),
         "__invoke__",
         crate::context::ExecutionMode::ReadOnly,
         storage,
     );
+
+    // The chain stores resource-typed properties as IRI references
+    // (post `canonicalise_resource_refs`). Substrate-runtime decoders
+    // expect each nested chain resource embedded — a bare IRI string
+    // hits no decoder and surfaces as `MethodError(decode_X, ("urn:...",))`
+    // at the boundary. Walk the source resource and dereference every
+    // resource-typed IRI to its embedded form before handing off.
+    // Same fix the FIBER path applies (`embed_typed_resource_param`)
+    // and the AutoOnLoad path applies (D14 §9.1 dispatch).
+    let source_resource =
+        crate::institution::marshal::embed_typed_resource_refs_recursively(source_resource, &head)
+            .map_err(|e| {
+                EvalError::InvalidCaseTarget(format!(
+                    "comorphism `{comorphism_iri}`: source-resource embedding failed before \
+                     extract_typed via `{}`: {e}",
+                    export.procedure
+                ))
+            })?;
 
     // Step 2: extract typed payload from source-side resource.
     let typed_source = source_inst
@@ -1334,7 +1450,7 @@ fn try_d14_institution_invoke(
             import.institution_ref
         ))
     })?;
-    let target_resource = target_inst
+    let mut target_resource = target_inst
         .reify(&import.procedure, &transformed, &exec_ctx)
         .map_err(|e| {
             EvalError::InvalidCaseTarget(format!(
@@ -1342,6 +1458,17 @@ fn try_d14_institution_invoke(
                 import.procedure
             ))
         })?;
+
+    // D14 §9.3 step 4: assign a chain-resident IRI to the produced
+    // target-class resource. Caller-supplied `target_iri` (e.g. from
+    // EigenQL `INTO`) overrides; otherwise the kernel mints a
+    // deterministic content-hash IRI so identical reify outputs
+    // dedupe naturally on commit.
+    let assigned_iri = match target_iri {
+        Some(iri) => iri.clone(),
+        None => deterministic_run_output_iri("comorphism-output", comorphism_iri, &target_resource),
+    };
+    target_resource.set_id(Some(assigned_iri));
 
     // Step 5 (D14 §9.3): post-translation validation invariant. Run
     // any AutoOnLoad QueryClasses bound to the produced target
@@ -1354,7 +1481,8 @@ fn try_d14_institution_invoke(
         index,
         runtime,
         &exec_ctx,
-    );
+    )
+    .flatten_to_errors();
     if !post_errors.is_empty() {
         let reasons = post_errors
             .iter()
@@ -1365,6 +1493,19 @@ fn try_d14_institution_invoke(
             "comorphism `{comorphism_iri}`: post-translation validation rejected the \
              reified resource: {reasons}"
         )));
+    }
+
+    // Push the IRI'd resource into the run-boundary collector so the
+    // server's RunProgram path commits it to the chain alongside
+    // ProgramTrace + ComponentTrace observability resources.
+    if let EvalCtx::IO {
+        produced_resources, ..
+    } = ctx
+    {
+        produced_resources
+            .lock()
+            .expect("produced_resources mutex poisoned")
+            .push(target_resource.clone());
     }
 
     Ok(Some(Val::ResourceVal(Box::new(target_resource))))
@@ -1878,25 +2019,30 @@ fn try_d14_decide(
         )));
     };
 
-    // Marshal args into a synthetic input resource of the declared
-    // input class. Args ride on a single `decide_args` array property
-    // — the institution handler pulls them positionally.
+    // Marshal args into a synthetic input resource via the shared
+    // `institution::marshal::marshal_decidable_input` helper. Same
+    // logic as the EigenQL-side `query::evaluate::try_dispatch_decidable`
+    // — input class typed required properties get populated in
+    // `requires` declaration order, IRI-shaped values targeting
+    // `core:resource` properties dereference to embedded resources.
     let arg_values: Result<Vec<_>, EvalError> = args
         .iter()
         .map(|a| eval_ctx(a, rho, ctx).map(|v| val_to_resource_value(&v)))
         .collect();
     let arg_values = arg_values?;
-    let mut input = crate::ontology::resource::Resource::new_embedded();
-    input.set(
-        Iri::parse(crate::ontology::well_known::IS_A).expect("well-known IRI"),
-        crate::ontology::resource::Value::Array(vec![crate::ontology::resource::Value::String(
-            query_class.query_class.as_str().into(),
-        )]),
-    );
-    input.set(
-        Iri::parse("urn:eigenius:institution:decide_args").expect("well-known IRI"),
-        crate::ontology::resource::Value::Array(arg_values),
-    );
+    let layer = ctx.layer().ok_or_else(|| {
+        EvalError::InvalidCaseTarget(format!(
+            "QueryClass `{iri}` Decidable call: no layer attached to EvalCtx — cannot \
+             resolve input class `{}` for typed-property marshaling",
+            query_class.query_class
+        ))
+    })?;
+    let input = crate::institution::marshal::marshal_decidable_input(
+        &query_class.query_class,
+        &arg_values,
+        layer,
+    )
+    .map_err(|e| EvalError::InvalidCaseTarget(format!("QueryClass `{iri}` Decidable call: {e}")))?;
 
     let head = ctx.layer().cloned().unwrap_or_else(|| {
         Arc::new(
@@ -1916,7 +2062,7 @@ fn try_d14_decide(
     // → reify; institution-runtime ones land in `Institution::query`.
     // M6 wires the institution-runtime path; the Component path lands
     // alongside Component-driven AutoOnLoad in M7.
-    let result = institution
+    let outcome = institution
         .query(&query_class.query_handler, &input, &exec_ctx)
         .map_err(|e| {
             EvalError::InvalidCaseTarget(format!(
@@ -1927,8 +2073,11 @@ fn try_d14_decide(
 
     // Read off the Verdict from the result resource. The result must
     // be (or wrap) a `Verdict` inductive value with one of the three
-    // constructor names — `Holds`, `Fails`, `Undecidable`.
-    Ok(Some(parse_verdict(&result).map_err(|e| {
+    // constructor names — `Holds`, `Fails`, `Undecidable`. Decidable
+    // dispatch is type-check-time and produces no chain-side
+    // RuntimeInvocation commit, so the partial provenance (if any) is
+    // intentionally dropped here.
+    Ok(Some(parse_verdict(&outcome.output).map_err(|e| {
         EvalError::InvalidCaseTarget(format!(
             "QueryClass `{iri}` Decidable handler returned a non-Verdict result: {e}"
         ))
@@ -2249,6 +2398,7 @@ mod tests {
             registry: std::sync::Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            produced_resources: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             task_context: None,
             institution_index: None,
             institution_runtime: None,
@@ -3205,6 +3355,7 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:marker_cm").unwrap(),
             source: Box::new(source),
+            target_iri: None,
         };
         let v = eval(&exp, &Rho::Nil).expect("eval");
         match v {
@@ -3430,6 +3581,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::clone(&idx)),
             institution_runtime: Some(Arc::new(runtime)),
@@ -3448,6 +3600,7 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:d14_pipe:cm").unwrap(),
             source: Box::new(source),
+            target_iri: None,
         };
         let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("D14 pipeline eval");
         let result = match v {
@@ -3545,6 +3698,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::new(new_idx)),
             institution_runtime: Some(Arc::new(runtime)),
@@ -3557,6 +3711,7 @@ mod tests {
                     Iri::parse("urn:eigenius:test:src").unwrap(),
                 ),
             ))),
+            target_iri: None,
         };
         let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
         let msg = format!("{err}");
@@ -3605,12 +3760,18 @@ mod tests {
             _procedure_iri: &Iri,
             input: &crate::ontology::resource::Resource,
             _ctx: &crate::context::ExecutionContext,
-        ) -> Result<crate::ontology::resource::Resource, crate::institution::error::InstitutionError>
-        {
-            // Confirm the kernel marshalled args via the convention.
+        ) -> Result<
+            crate::institution::runtime::QueryOutcome,
+            crate::institution::error::InstitutionError,
+        > {
+            // Confirm the kernel stamped `is_a` to the input class IRI
+            // (Phase 19d.7: positional args ride on typed required
+            // properties, not on a `decide_args` array; the
+            // structural marker we can rely on regardless of arity is
+            // the auto-stamped is_a).
             let _ = input
-                .get(&Iri::parse("urn:eigenius:institution:decide_args").unwrap())
-                .expect("kernel must marshal decide_args onto the input resource");
+                .get(&Iri::parse(crate::ontology::well_known::IS_A).unwrap())
+                .expect("kernel must stamp is_a onto the synthetic input resource");
             let mut verdict = crate::ontology::resource::Resource::new_embedded();
             verdict.set(
                 Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
@@ -3618,45 +3779,75 @@ mod tests {
                     crate::ontology::resource::Value::String(self.verdict_class.into()),
                 ]),
             );
-            Ok(verdict)
+            Ok(crate::institution::runtime::QueryOutcome::from_output(
+                verdict,
+            ))
         }
     }
 
-    fn build_d14_decide_ctx(verdict_class: &'static str) -> EvalCtx {
+    fn build_d14_decide_ctx(verdict_class: &'static str, arg_count: usize) -> EvalCtx {
+        use crate::ontology::well_known as wk;
         let mut b = crate::layer::LayerBuilder::new("test", None);
 
         let inst_iri = "urn:eigenius:test:d14_decide:inst";
         let constraint_iri = "urn:eigenius:test:d14_decide:has_property";
         let input_class = "urn:eigenius:test:d14_decide:Subject";
 
+        // Phase 19d.7: the input class must declare typed required
+        // properties for the kernel's typed-property marshaling to
+        // populate. Each arg slot is its own Property resource named
+        // `arg_N`, listed in `requires` in declaration order.
+        let mut requires = Vec::with_capacity(arg_count);
+        for n in 0..arg_count {
+            let prop_iri = format!("{input_class}:arg_{n}");
+            let mut p = crate::ontology::resource::Resource::new(Iri::parse(&prop_iri).unwrap());
+            p.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                crate::ontology::resource::Value::Array(vec![
+                    crate::ontology::resource::Value::String(wk::PROPERTY.into()),
+                ]),
+            );
+            b.add_resource(p).unwrap();
+            requires.push(crate::ontology::resource::Value::String(prop_iri));
+        }
+        let mut input_class_res =
+            crate::ontology::resource::Resource::new(Iri::parse(input_class).unwrap());
+        input_class_res.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(wk::CLASS.into()),
+            ]),
+        );
+        input_class_res.set(
+            Iri::parse(wk::REQUIRES).unwrap(),
+            crate::ontology::resource::Value::Array(requires),
+        );
+        b.add_resource(input_class_res).unwrap();
+
         // QueryClass declaring Decidable role for `constraint_iri`.
         let mut qc = crate::ontology::resource::Resource::new(Iri::parse(constraint_iri).unwrap());
         qc.set(
-            Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+            Iri::parse(wk::IS_A).unwrap(),
             crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    crate::ontology::well_known::QUERY_CLASS_CLASS.into(),
-                ),
+                crate::ontology::resource::Value::String(wk::QUERY_CLASS_CLASS.into()),
             ]),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::QUERY_CLASS).unwrap(),
+            Iri::parse(wk::QUERY_CLASS).unwrap(),
             crate::ontology::resource::Value::String(input_class.into()),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::RESULT_CLASS).unwrap(),
-            crate::ontology::resource::Value::String(crate::ontology::well_known::VERDICT.into()),
+            Iri::parse(wk::RESULT_CLASS).unwrap(),
+            crate::ontology::resource::Value::String(wk::VERDICT.into()),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::DISPATCH_ROLE).unwrap(),
+            Iri::parse(wk::DISPATCH_ROLE).unwrap(),
             crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    crate::ontology::well_known::DISPATCH_DECIDABLE.into(),
-                ),
+                crate::ontology::resource::Value::String(wk::DISPATCH_DECIDABLE.into()),
             ]),
         );
         qc.set(
-            Iri::parse(crate::ontology::well_known::QUERY_HANDLER).unwrap(),
+            Iri::parse(wk::QUERY_HANDLER).unwrap(),
             crate::ontology::resource::Value::String(
                 "urn:eigenius:test:d14_decide:proc:check".into(),
             ),
@@ -3684,6 +3875,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::new(idx)),
             institution_runtime: Some(Arc::new(runtime)),
@@ -3692,7 +3884,7 @@ mod tests {
 
     #[test]
     fn native_decide_d14_holds_reduces_to_refl() {
-        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:holds");
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:holds", 1);
         let constraint = crate::nbe::term::Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
             args: vec![Exp::Unit],
@@ -3707,7 +3899,7 @@ mod tests {
 
     #[test]
     fn native_decide_d14_fails_produces_failing_neutral() {
-        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:fails");
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:fails", 0);
         let constraint = crate::nbe::term::Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
             args: vec![],
@@ -3722,7 +3914,7 @@ mod tests {
 
     #[test]
     fn native_decide_d14_undecidable_produces_passthrough_neutral() {
-        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:undecidable");
+        let ctx = build_d14_decide_ctx("urn:eigenius:institution:verdicts:undecidable", 0);
         let constraint = crate::nbe::term::Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:d14_decide:has_property").unwrap(),
             args: vec![],
@@ -3750,6 +3942,7 @@ mod tests {
             registry: Arc::new(ComponentRegistry::default()),
             trace_store: None,
             dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
             task_context: None,
             institution_index: Some(Arc::new(idx)),
             institution_runtime: Some(Arc::new(InstitutionRuntime::new())),

@@ -29,9 +29,9 @@
   {
     "@id": "urn:eigenius:reflection:DerivedResource",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A resource produced by a typed program from other resources. Its derivation trace records the complete computation.",
+    "urn:eigenius:core:description": "A resource produced by a typed program from other resources. The epistemic category is asserted by `is_a`; the audit trail (a `derivation` pointer to the chain-resident `ProgramTrace`) is recorded when the kernel can produce one. RunProgram outputs and AutoOnLoad-fired Verdicts always carry a trace. EigenQL `FIBER ... INTO` commits and post-translation comorphism reify outputs are still derived by construction (the substrate produced them) but may not have a kernel-generated trace yet — `derivation` is recommended rather than required so those still validate cleanly.",
     "urn:eigenius:core:short_name": "DerivedResource",
-    "urn:eigenius:core:requires": [
+    "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:derivation"
     ]
   },
@@ -108,6 +108,20 @@
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:component",
       "urn:eigenius:reflection:output"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ComorphismTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Trace of a comorphism dispatch (D14 §9.3 four-step pipeline). Records which Comorphism the program ran (`comorphism`), the chain IRI of the produced target-class resource (`target_iri`, `target_class` — D14 §9.3 step 4 chain reinsertion), and the trace of the source-expression evaluation (`source_trace`). Substrate-side per-step provenance for extract / reify lives in the chain-resident `RuntimeInvocation` (D31 §6.2), reachable from the produced resource's `derivation` link.",
+    "urn:eigenius:core:short_name": "ComorphismTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:comorphism",
+      "urn:eigenius:reflection:target_iri",
+      "urn:eigenius:reflection:target_class"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:source_trace"
     ]
   },
   {
@@ -445,10 +459,40 @@
   {
     "@id": "urn:eigenius:reflection:source_trace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Trace of the source resource in a ProjectTrace.",
+    "urn:eigenius:core:description": "Trace of the source resource in a ProjectTrace, or of the source-expression eval in a ComorphismTrace.",
     "urn:eigenius:core:short_name": "source_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ProjectTrace",
+      "urn:eigenius:reflection:ComorphismTrace"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:reflection:comorphism",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the Comorphism dispatched by a ComorphismTrace.",
+    "urn:eigenius:core:short_name": "comorphism",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ComorphismTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:target_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Chain IRI of the target-class resource the comorphism produced (D14 §9.3 step 4 chain reinsertion).",
+    "urn:eigenius:core:short_name": "target_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ComorphismTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:target_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the target-class the comorphism's reified output is an instance of.",
+    "urn:eigenius:core:short_name": "target_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ComorphismTrace"]
   },
   {
     "@id": "urn:eigenius:reflection:property",

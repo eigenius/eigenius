@@ -233,10 +233,12 @@ fn generate_property_schema(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let dt_str = prop_def
+    // `data_type` canonicalises to `ResourceRef`; `as_iri` accepts
+    // both that and the pre-canonical `String` shape.
+    let dt_iri_owned = prop_def
         .get(&Iri::parse(wk::DATA_TYPE_PROP).unwrap())
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+        .and_then(|v| v.as_iri());
+    let dt_str = dt_iri_owned.as_ref().map(|i| i.as_str()).unwrap_or("");
 
     let mut schema = match dt_str {
         wk::STRING | wk::TEMPLATE => serde_json::json!({"type": "string"}),
@@ -328,7 +330,8 @@ fn generate_property_schema(
         }
         wk::VALUE_ARRAY => {
             let et_iri = Iri::parse(wk::ELEMENT_TYPE).unwrap();
-            let item_type = match prop_def.get(&et_iri).and_then(|v| v.as_str()) {
+            let element_iri = prop_def.get(&et_iri).and_then(|v| v.as_iri());
+            let item_type = match element_iri.as_ref().map(|i| i.as_str()) {
                 Some(wk::STRING) => serde_json::json!({"type": "string"}),
                 Some(wk::INTEGER) => serde_json::json!({"type": "integer"}),
                 Some(wk::FLOAT) => serde_json::json!({"type": "number"}),
@@ -524,11 +527,13 @@ pub fn validate_component_templates(
     let mut template_refs: BTreeSet<Iri> = BTreeSet::new();
 
     for (prop_iri, value) in component_arg.properties() {
-        // Check if this property has data_type: template
+        // Check if this property has data_type: template. `data_type`
+        // canonicalises to `ResourceRef`; `as_iri` accepts both
+        // shapes for resilience against pre-canonical inputs.
         if let Some(prop_def) = layer.resolve(prop_iri) {
             let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
-            if let Some(Value::String(dt)) = prop_def.get(&dt_iri) {
-                if dt == wk::TEMPLATE {
+            if let Some(dt) = prop_def.get(&dt_iri).and_then(|v| v.as_iri()) {
+                if dt.as_str() == wk::TEMPLATE {
                     // This is a template property — extract references
                     if let Value::String(template_str) = value {
                         for ref_str in parse_template_references(template_str) {
@@ -590,13 +595,14 @@ fn validate_output_schemas_walk(
     let output_schema_prop =
         Iri::parse("urn:eigenius:program:components:completion:output_schema").unwrap();
 
-    // Check if this node has a component_argument with output_schema
+    // Check if this node has a component_argument with output_schema.
+    // `output_schema` is `data_type: resource` (the class IRI), which
+    // canonicalises to `ResourceRef`; `as_iri` keeps the legacy
+    // `String` shape working too.
     if let Some(Value::Embedded(comp_arg)) = resource.get(&comp_arg_prop) {
-        if let Some(Value::String(class_iri_str)) = comp_arg.get(&output_schema_prop) {
-            if let Ok(class_iri) = Iri::parse(class_iri_str) {
-                if let Err(e) = schema_for_class(&class_iri, layer) {
-                    errors.push(e);
-                }
+        if let Some(class_iri) = comp_arg.get(&output_schema_prop).and_then(|v| v.as_iri()) {
+            if let Err(e) = schema_for_class(&class_iri, layer) {
+                errors.push(e);
             }
         }
     }

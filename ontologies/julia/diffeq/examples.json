@@ -1,0 +1,29 @@
+[
+  {
+    "@id": "urn:eigenius:demo:assay:eig0042_pk_decay",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:diffeq:OdeProblem"],
+    "urn:eigenius:core:short_name": "eig0042_pk_decay",
+    "urn:eigenius:core:description": "One-compartment pharmacokinetic clearance model for the EIG_0042 inhibitor: `dC/dt = -k_elim * C`. Initial dose 100 nM, elimination rate 0.5 / hour, integrated over 1 hour. Mirrors the ODE probe in api-survey.md (the simplest decay shape) so the example doubles as a regression check.",
+    "urn:eigenius:julia:diffeq:function_source": "function f!(du, u, p, t)\n    du[1] = -p[1] * u[1]\nend\n",
+    "urn:eigenius:julia:diffeq:u0": [100.0],
+    "urn:eigenius:julia:diffeq:tspan_start": 0.0,
+    "urn:eigenius:julia:diffeq:tspan_end": 1.0,
+    "urn:eigenius:julia:diffeq:state_names": ["compound_concentration"],
+    "urn:eigenius:julia:diffeq:parameters_kv": {"k_elim": 0.5}
+  },
+
+  {
+    "@id": "urn:eigenius:demo:assay:eig0042_pk_decay_solution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:julia:diffeq:OdeSolution"],
+    "urn:eigenius:core:short_name": "eig0042_pk_decay_solution",
+    "urn:eigenius:core:description": "Tsit5 solution to the EIG_0042 PK decay problem. Closed-form check: u(1) = 100 * exp(-0.5) ≈ 60.6531. AutoOnLoad re-solves and confirms the trajectory hash.\n\nNB: `trajectory_hash` is a placeholder in this example — populated by the institution at extract time on a real run. The `trajectory_t` and `trajectory_u` here are illustrative (5 saved points for readability); the institution may save more or fewer points depending on `saveat` configuration.",
+    "urn:eigenius:julia:diffeq:problem": "urn:eigenius:demo:assay:eig0042_pk_decay",
+    "urn:eigenius:julia:diffeq:algorithm": "Tsit5",
+    "urn:eigenius:julia:diffeq:abstol": 1e-8,
+    "urn:eigenius:julia:diffeq:reltol": 1e-8,
+    "urn:eigenius:julia:diffeq:trajectory_t": [0.0, 0.25, 0.5, 0.75, 1.0],
+    "urn:eigenius:julia:diffeq:trajectory_u": [[100.0], [88.2497], [77.8801], [68.7289], [60.6531]],
+    "urn:eigenius:julia:diffeq:retcode": "Success",
+    "urn:eigenius:julia:diffeq:trajectory_hash": "PLACEHOLDER_populated_at_extract_time"
+  }
+]

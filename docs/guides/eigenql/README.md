@@ -49,7 +49,7 @@ As a reference, the most useful chapters are:
 
 ## Source index
 
-All implementation referenced in this guide lives in [`kernel/src/query/`](../../../kernel/src/query/) and [`kernel/src/institution/`](../../../kernel/src/institution/). See [§12.9](12-appendix.md#129-source-index) for the complete file-by-file list.
+All implementation referenced in this guide lives in [`kernel/src/query/`](../../../kernel/src/query/) and [`kernel/src/institution/`](../../../kernel/src/institution/). See [§13.9](12-appendix.md#129-source-index) for the complete file-by-file list.
 
 ---
 

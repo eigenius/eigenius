@@ -31,7 +31,7 @@ import {
   type LayerTopologyResponse,
   NotebookService,
 } from "../gen/eigenius_pb.ts";
-import { KernelClient } from "../client/kernel_client.ts";
+import type { KernelClient } from "../client/kernel_client.ts";
 import { operation, withRpcGuard } from "../observability/mod.ts";
 
 export interface NotebookServiceDeps {

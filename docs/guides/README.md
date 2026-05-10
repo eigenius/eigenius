@@ -34,26 +34,26 @@ For most users, the notebook is the most accessible way to use the platform. A R
   <img src="assets/eigenius_notebook_ux.png" alt="The Eigenius notebook — top of the patent-analysis demo" width="900">
 </p>
 
-→ **[Platform guide chapter 13 — Notebook](platform/13-notebook.md)** for the full reference.
-→ **[Platform guide chapter 14 — TypeScript SDK](platform/14-typescript-sdk.md)** if you want to drive the kernel programmatically with the same `Eigen` class the notebook uses.
+→ **[Platform guide chapter 14 — Notebook](platform/14-notebook.md)** for the full reference.
+→ **[Platform guide chapter 15 — TypeScript SDK](platform/15-typescript-sdk.md)** if you want to drive the kernel programmatically with the same `Eigen` class the notebook uses.
 
 ## User guides
 
-Three task-first guides, grounded in the implementation. Every claim links to the kernel module, CLI command, example crate, or test that implements it.
+Four task-first guides, grounded in the implementation. Every claim links to the kernel module, CLI command, example crate, or test that implements it.
 
 ### [Platform user guide →](platform/README.md)
 
-How to install, run, manage, and extend the platform: the CLI, the kernel server, the orchestrator, RocksDB persistence, WASM components and institutions, deployment via Docker Compose or Azure ContainerApps, the notebook UX, the TypeScript SDK.
+How to install, run, manage, and extend the platform: the CLI, the kernel server, the orchestrator, RocksDB persistence, WASM components and institutions, the runtime substrate (Julia v1), deployment via Docker Compose or Azure ContainerApps, the notebook UX, the TypeScript SDK.
 
-**Fifteen chapters covering**: installation, build/test workflow, CLI reference (every `eigenius` subcommand), running locally (three-terminal model + Docker Compose), database management (`serve --db`, drift refusal, exports), the orchestrator (LLM dispatch + MCP server), three end-to-end demo walkthroughs, building WASM components (pure / read / IO levels), building WASM institutions, deployment, troubleshooting, environment-variable and source-file index, the React notebook (cell types + file format + publish-to-layer + the patent demo), the TypeScript SDK (`@eigenius/client` API + worked examples).
+**Sixteen chapters covering**: installation, build/test workflow, CLI reference (every `eigenius` subcommand), running locally (three-terminal model + Docker Compose), database management (`serve --db`, drift refusal, exports), the orchestrator (LLM dispatch + MCP server + substrate addon), four end-to-end demo walkthroughs, building WASM components (pure / read / IO levels), building WASM institutions, the runtime substrate (`mirror create → env build → env create → institution install` flow), deployment, troubleshooting, environment-variable and source-file index, the React notebook (cell types + file format + publish-to-layer + patent and kinase-institutions demos + KaTeX), the TypeScript SDK (`@eigenius/client` API + worked examples). Plus per-Julia-institution slow-walk tutorials under [`platform/julia-institutions/`](platform/julia-institutions/).
 
-Most important chapters: **[13. Notebook](platform/13-notebook.md)** + **[14. TypeScript SDK](platform/14-typescript-sdk.md)** for the typical first-touch UX, **[4. CLI reference](platform/04-cli-reference.md)** for everyday CLI operations, and **[9. Building WASM components](platform/09-wasm-components.md)** + **[10. Building WASM institutions](platform/10-wasm-institutions.md)** for extending the kernel.
+Most important chapters: **[14. Notebook](platform/14-notebook.md)** + **[15. TypeScript SDK](platform/15-typescript-sdk.md)** for the typical first-touch UX, **[4. CLI reference](platform/04-cli-reference.md)** for everyday CLI operations, **[9. Building WASM components](platform/09-wasm-components.md)** + **[10. Building WASM institutions](platform/10-wasm-institutions.md)** for sandboxed extensions, and **[11. Runtime substrate](platform/11-runtime-substrate.md)** for language-runtime-hosted institutions.
 
 ### [ESL — Eigenius Surface Language →](esl/README.md)
 
 The surface syntax for declaring ontologies, defining typed programs, and constructing resource instances. Compiles to Eigon-JSON resources that the Mini-TT kernel type-checks and evaluates.
 
-**Eleven chapters covering**: HCL-style declarations (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`); the ML-style expression sublanguage (`let`, lambdas, pattern match, constructor application, projection, `corecord`, etc.); the bridge between the resource graph and the kernel's type theory; the four capability modes (`Pure`/`Read`/`Check`/`IO`); institution-dispatched decide predicates and comorphisms; common error messages.
+**Eleven chapters covering**: HCL-style declarations (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`); the ML-style expression sublanguage (`let`, lambdas, pattern match, constructor application, projection, `corecord`, etc.); the bridge between the resource graph and the kernel's type theory; the four capability modes (`Pure`/`Read`/`Check`/`IO`); institution-dispatched decide predicates and comorphism program-invocations; common error messages.
 
 Most important chapter for understanding *how Eigenius differs from a standalone type-theory or a standalone knowledge graph*: **[chapter 6 — Resources, types, and the layer](esl/06-resources-types-and-the-layer.md)**.
 
@@ -61,7 +61,13 @@ Most important chapter for understanding *how Eigenius differs from a standalone
 
 The read-only query language over the layered Eigon knowledge graph. Pattern matching with `MATCH`, derived relations with `DEFINE`, institution dispatch via `FIBER` clauses and qualified-name function calls.
 
-**Twelve chapters covering**: lexical structure; clause-by-clause program structure (`USING`, `MATCH`, `WHERE`, `FIBER`, `RETURN`, `GROUP BY`, etc.); pattern matching against typed and untyped resources; the expression sublanguage; FIBER clauses (institution dispatch with transient overlay); decide predicates and comorphisms in expression position; stratification rules for recursion + negation; the result-document format; error messages.
+**Twelve chapters covering**: lexical structure; clause-by-clause program structure (`USING`, `MATCH`, `WHERE`, `FIBER`, `RETURN`, `GROUP BY`, etc.); pattern matching against typed and untyped resources; the expression sublanguage; FIBER clauses (institution dispatch with transient overlay or `INTO`-pinned chain reinsertion); decide predicates and comorphism coercion; stratification rules for recursion + negation; the result-document format; error messages.
+
+### [Formula language →](formula/README.md)
+
+The chain-mirrored Mini-TT fragment shared by every numerical institution on the platform. A small typed expression-tree language at `urn:eigenius:formulas:` that Symbolics, IntervalArithmetic, Catalyst, DiffEq, and JuMP-HiGHS all consume directly.
+
+**Eight chapters covering**: the three-surface mental model (Mini-TT fragment / Eigon-JSON encoding / ESL `formula(...)` sublanguage); the six constructors and why two are binders; the tagged-dict embedding and validator's inductive-value rule; the operator catalog and signature-driven arity check; the Pratt-parsed `formula(...)` ESL sublanguage; identity-comorphism collapse when both endpoints share FormulaTerm; common failure modes; appendix.
 
 ### [References →](references/README.md)
 
@@ -71,11 +77,11 @@ A consolidated bibliography for the platform — what we cite, what we depend on
 
 ## How the guides relate
 
-The **platform** guide is operational — it covers everything *around* writing ESL/EigenQL: installing, running, managing data, deploying, building WASM extensions. The **ESL** and **EigenQL** guides are surface-language references — they cover what you write *into* the system.
+The **platform** guide is operational — it covers everything *around* writing ESL / EigenQL / formulas: installing, running, managing data, deploying, building WASM and substrate extensions. The **ESL**, **EigenQL**, and **formula** guides are surface-language references — they cover what you write *into* the system.
 
-ESL **computes**; EigenQL **retrieves and filters**. They share the same kernel primitives — most importantly the [`InstitutionIndex`](../../kernel/src/institution/registry.rs) classification (D14 §9.5), which means the same qualified-name IRI dispatches identically from both languages ([ESL §9.8](esl/09-institutions.md), [EigenQL §8](eigenql/08-institutions.md)).
+ESL **computes**; EigenQL **retrieves and filters**; formula **expresses typed expression trees** consumed by every numerical institution. The three share the same kernel primitives — most importantly the [`InstitutionIndex`](../../kernel/src/institution/registry.rs) classification (D14 §9.5), which means the same qualified-name IRI dispatches identically from ESL and EigenQL ([ESL §9.8](esl/09-institutions.md), [EigenQL §8](eigenql/08-institutions.md)); and the chain-resident `formulas:FormulaTerm` shape is the payload language every numerical institution speaks ([formula §1](formula/01-introduction.md)).
 
-If you're new to the platform: start with [platform chapter 13](platform/13-notebook.md) (the notebook UX) — it's the lowest-friction first touch. Then read [platform chapters 1, 2, 5](platform/01-introduction.md) for orientation, install, and the kernel/orchestrator topology under the notebook, and dip into [ESL chapters 1, 6](esl/01-introduction.md) + [EigenQL chapters 1, 2](eigenql/01-introduction.md) when you want to write your own ontologies, programs, and queries.
+If you're new to the platform: start with [platform chapter 14](platform/14-notebook.md) (the notebook UX) — it's the lowest-friction first touch. Then read [platform chapters 1, 2, 5](platform/01-introduction.md) for orientation, install, and the kernel/orchestrator topology under the notebook, and dip into [ESL chapters 1, 6](esl/01-introduction.md) + [EigenQL chapters 1, 2](eigenql/01-introduction.md) + [formula chapter 1](formula/01-introduction.md) when you want to write your own ontologies, programs, queries, and typed expression trees.
 
 ## Beyond the guides
 
@@ -84,10 +90,13 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D7 ESL surface syntax](../design/d7-esl-surface-syntax.md) — authoritative grammar, complementary to the ESL guide
 - [D2 EigenQL specification](../design/d2-eigenql-specification.md) — authoritative grammar and semantics, complementary to the EigenQL guide
 - [D18 Ontology-as-types resolution](../design/d18-ontology-as-types-resolution.md) — the bridge mechanism explained in ESL chapter 6
-- [D19 Inductive and sized types](../design/d19-inductive-types.md) — type theory underpinning ESL `data`/`codata` declarations
-- [D14 Institution Realisation](../design/d14-institution-realisation.md) — institution mechanism dispatched in both guides (supersedes D10)
-- [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 13 + 14
+- [D19 Inductive and sized types](../design/d19-inductive-types.md) — type theory underpinning ESL `data`/`codata` declarations and chain-resident inductives
+- [D14 Institution Realisation](../design/d14-institution-realisation.md) — institution mechanism dispatched in three guides (ESL, EigenQL, platform); supersedes D10. §9.3 covers comorphism chain reinsertion.
+- [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 14 + 15
+- [D26 Runtime Substrate](../design/d26-runtime-substrate.md), [D29 Mirror Generator](../design/d29-runtime-mirror-generator.md), [D31 Institution Lifecycle](../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate hosting layer and lifecycle, complementary to platform chapter 11
+- [D27 Julia Institutions](../design/d27-julia-institutions.md) — the v1 Julia institution suite, complementary to the per-institution tutorials under [`platform/julia-institutions/`](platform/julia-institutions/)
+- [D32 Chain-mirrored Mini-TT inductives](../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec, complementary to the formula guide
 
-The full set (D1–D28 — including [D26 Runtime Substrate](../design/d26-runtime-substrate.md), [D27 Julia Institutions](../design/d27-julia-institutions.md), and [D28 Lean 4 as Verification Institution](../design/d28-lean-4-as-institution.md) — plus standalone notes) lives at [`docs/design/`](../design/).
+The full set (plus standalone notes including [D28 Lean 4 as Verification Institution](../design/d28-lean-4-as-institution.md)) lives at [`docs/design/`](../design/).
 
 Source code: [github.com/eigenius/eigenius](https://github.com/eigenius/eigenius).

@@ -101,6 +101,23 @@ impl DockerSpawnerConfig {
         }
     }
 
+    /// Construct from an [`eigenius_config::SubstrateConfig`], reading
+    /// the Docker daemon socket from the config layer. Use this in
+    /// production callers (orchestrator startup, CLI commands) so
+    /// rootless / macOS Docker setups don't need code edits — the
+    /// socket override is config-driven.
+    pub fn from_substrate_config(
+        depot_path: impl Into<PathBuf>,
+        cfg: &eigenius_config::SubstrateConfig,
+    ) -> Self {
+        Self {
+            depot_path: depot_path.into(),
+            docker_socket: Some(cfg.docker.daemon_socket.clone()),
+            pull_policy: PullPolicy::IfMissing,
+            default_network_mode: NetworkMode::None,
+        }
+    }
+
     /// Resolve the configured Docker socket path, falling back to the
     /// default.
     pub fn resolved_docker_socket(&self) -> PathBuf {
@@ -133,5 +150,19 @@ mod tests {
             NetworkMode::Named("private-net".to_string()).as_docker_string(),
             "private-net"
         );
+    }
+
+    #[test]
+    fn from_substrate_config_picks_up_daemon_socket_override() {
+        let mut sub = eigenius_config::SubstrateConfig::default();
+        sub.docker.daemon_socket = PathBuf::from("/run/user/1000/docker.sock");
+        let cfg = DockerSpawnerConfig::from_substrate_config("/var/lib/eigenius-runtime", &sub);
+        assert_eq!(
+            cfg.resolved_docker_socket(),
+            PathBuf::from("/run/user/1000/docker.sock")
+        );
+        // Other defaults unchanged.
+        assert_eq!(cfg.pull_policy, PullPolicy::IfMissing);
+        assert!(matches!(cfg.default_network_mode, NetworkMode::None));
     }
 }

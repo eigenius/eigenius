@@ -1,0 +1,99 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Chain-validation test for the Symbolics → JuMP Comorphism
+//! (D27 §4.2 / D32 §6 / Phase 19f.1). Loads the four declaration
+//! files (jump + symbolics ontologies and institution descriptors)
+//! plus the comorphism declaration, commits them onto a bootstrapped
+//! chain, and asserts that the whole layer validates without errors
+//! and the new resources resolve.
+
+use eigenius_kernel::bootstrap::bootstrap;
+use eigenius_kernel::ontology::eigon_json;
+use eigenius_kernel::ontology::iri::Iri;
+
+const JUMP_ONTOLOGY_JSON: &str =
+    include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
+const JUMP_HIGHS_INSTITUTION_JSON: &str =
+    include_str!("../../../julia/institutions/jump/declarations/jump-highs-institution.eigon.json");
+const SYMBOLICS_ONTOLOGY_JSON: &str = include_str!(
+    "../../../julia/institutions/symbolics/declarations/symbolics-ontology.eigon.json"
+);
+const SYMBOLICS_INSTITUTION_JSON: &str = include_str!(
+    "../../../julia/institutions/symbolics/declarations/symbolics-institution.eigon.json"
+);
+const COMORPHISM_JSON: &str =
+    include_str!("../../../julia/comorphisms/symbolics-to-jump.eigon.json");
+
+fn iri(s: &str) -> Iri {
+    Iri::parse(s).expect("static IRI must parse")
+}
+
+#[test]
+fn symbolics_to_jump_comorphism_validates_cleanly() {
+    let mut ctx = bootstrap().expect("bootstrap");
+
+    // Commit order: JuMP ontology first because Symbolics's
+    // SymbolicsToJuMPInput references jump:VariableBound /
+    // jump:Constraint (in framing properties) and jump:OptimisationProblem
+    // (in qc_symb_to_jump's result_class + ef_symb_to_jump_input's
+    // payload_type), so those resolve at commit time.
+    for (label, json) in [
+        ("jump_ontology", JUMP_ONTOLOGY_JSON),
+        ("jump_highs_institution", JUMP_HIGHS_INSTITUTION_JSON),
+        ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON),
+        ("symbolics_institution", SYMBOLICS_INSTITUTION_JSON),
+        ("comorphism", COMORPHISM_JSON),
+    ] {
+        for r in eigon_json::parse_document(json).expect("parse") {
+            ctx.add_resource(r).expect("add_resource");
+        }
+        ctx.commit(label).expect("commit");
+    }
+
+    for required in [
+        // Symbolics-side composite + properties + signature + QC + ExportFormat.
+        "urn:eigenius:symbolics:SymbolicsToJuMPInput",
+        "urn:eigenius:symbolics:objective",
+        "urn:eigenius:symbolics:variable_names",
+        "urn:eigenius:symbolics:framing_variable_bounds",
+        "urn:eigenius:symbolics:sense",
+        "urn:eigenius:symbolics:framing_constraints",
+        "urn:eigenius:symbolics:signatures:frame_as_optimisation_problem",
+        "urn:eigenius:symbolics:query_classes:qc_symb_to_jump",
+        "urn:eigenius:symbolics:formats:ef_symb_to_jump_input",
+        // JuMP-side ImportFormat.
+        "urn:eigenius:jump_highs:formats:if_jump_optimisation_problem",
+        // Comorphism triple.
+        "urn:eigenius:comorphisms:symbolics_to_jump:m_id_optimisation_problem",
+        "urn:eigenius:comorphisms:symbolics_to_jump",
+    ] {
+        assert!(
+            ctx.head().resolve(&iri(required)).is_some(),
+            "required resource {required} must resolve on head layer"
+        );
+    }
+
+    let validator = eigenius_kernel::validation::Validator::new(ctx.head());
+    let errors = validator.validate();
+    assert!(
+        errors.is_empty(),
+        "chain must validate cleanly; got errors:\n{}",
+        errors
+            .iter()
+            .map(|e| format!("  [{:?}] {} on {:?}", e.rule, e.message, e.resource_id))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}

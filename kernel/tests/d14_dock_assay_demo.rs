@@ -217,7 +217,7 @@ impl Institution for DockInstitution {
         procedure_iri: &Iri,
         _input: &Resource,
         _ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
+    ) -> Result<eigenius_kernel::institution::runtime::QueryOutcome, InstitutionError> {
         Err(InstitutionError::NotImplemented(format!(
             "dock institution does not implement query (`{procedure_iri}`)"
         )))
@@ -239,31 +239,25 @@ impl AssayInstitution {
 
     fn within_tolerance_verdict(input: &Resource) -> &'static str {
         // Decidable QueryClass dispatch (D14 §9.2): the kernel
-        // synthesises an input resource carrying a positional
-        // `decide_args` array. Unpack predicted/target/tolerance from
-        // that array. As a fall-back, also accept the named-property
-        // shape (used when the same handler is reachable via FIBER
-        // with explicit parameters).
-        let decide_args_iri = iri("urn:eigenius:institution:decide_args");
-        let from_args = match input.get(&decide_args_iri) {
-            Some(Value::Array(items)) if items.len() == 3 => {
-                let arg_float = |idx: usize| match &items[idx] {
-                    Value::Float(f) => Some(*f),
-                    Value::Integer(n) => Some(*n as f64),
-                    Value::Embedded(r) => first_float_property(r),
-                    _ => None,
-                };
-                Some((arg_float(0), arg_float(1), arg_float(2)))
+        // populates the input class's typed required properties from
+        // positional ESL args in `requires` declaration order
+        // (Phase 19d.7). For `WithinToleranceInput` the kernel sets
+        // `predicted_ic50`, `target_ic50`, `tolerance` from
+        // `decide(predicted, target, tol)`. Each is set as a wrapper
+        // resource (the kernel marshals `Val::ResourceVal` as
+        // `Value::Embedded`), so dig through with
+        // `first_float_property`.
+        let extract = |prop_iri: &str| -> Option<f64> {
+            match input.get(&iri(prop_iri))? {
+                Value::Float(f) => Some(*f),
+                Value::Integer(n) => Some(*n as f64),
+                Value::Embedded(r) => first_float_property(r),
+                _ => None,
             }
-            _ => None,
         };
-        let (predicted, target, tolerance) = from_args.unwrap_or_else(|| {
-            (
-                as_float(input.get(&iri(PREDICTED_IC50_PROP))),
-                as_float(input.get(&iri(TARGET_IC50_PROP))),
-                as_float(input.get(&iri(TOLERANCE_PROP))),
-            )
-        });
+        let predicted = extract(PREDICTED_IC50_PROP);
+        let target = extract(TARGET_IC50_PROP);
+        let tolerance = extract(TOLERANCE_PROP);
         match (predicted, target, tolerance) {
             (Some(p), Some(t), Some(tol)) if tol >= 0.0 => {
                 if (p - t).abs() <= tol {
@@ -351,15 +345,15 @@ impl Institution for AssayInstitution {
         procedure_iri: &Iri,
         input: &Resource,
         _ctx: &ExecutionContext,
-    ) -> Result<Resource, InstitutionError> {
-        match procedure_iri.as_str() {
+    ) -> Result<eigenius_kernel::institution::runtime::QueryOutcome, InstitutionError> {
+        let result = match procedure_iri.as_str() {
             WITHIN_TOLERANCE_PROC => {
                 let ctor = Self::within_tolerance_verdict(input);
-                Ok(Self::verdict_resource(ctor))
+                Self::verdict_resource(ctor)
             }
             CHECK_ASSAY_PREDICTION_PROC => {
                 let ctor = Self::assay_prediction_verdict(input);
-                Ok(Self::verdict_resource(ctor))
+                Self::verdict_resource(ctor)
             }
             VALIDATE_PREDICTION_PROC => {
                 // OnDemand QueryClass: input carries `candidate` →
@@ -380,12 +374,15 @@ impl Institution for AssayInstitution {
                     }
                 };
                 let ctor = Self::assay_prediction_verdict(candidate);
-                Ok(Self::verdict_resource(ctor))
+                Self::verdict_resource(ctor)
             }
-            _ => Err(InstitutionError::UnknownType(format!(
-                "assay institution does not implement procedure `{procedure_iri}`"
-            ))),
-        }
+            _ => {
+                return Err(InstitutionError::UnknownType(format!(
+                    "assay institution does not implement procedure `{procedure_iri}`"
+                )))
+            }
+        };
+        Ok(eigenius_kernel::institution::runtime::QueryOutcome::from_output(result))
     }
 }
 
@@ -486,6 +483,106 @@ fn comorphism_translates_dock_to_assay() {
         is_a.iter().any(|i| i.as_str() == ASSAY_PREDICTION_CLASS),
         "translated resource should be an AssayPrediction; got is_a={is_a:?}"
     );
+
+    // D14 §9.3 step 4: the output Resource itself (which the
+    // RunProgram RPC serializes into the response payload) must
+    // carry the deterministic @id so clients can resolve it
+    // against the chain.
+    let output_iri = result
+        .output
+        .id()
+        .expect("output Resource carries a chain-resident @id");
+    assert!(
+        output_iri
+            .as_str()
+            .starts_with("urn:eigenius:comorphism-output:dock_to_assay:"),
+        "expected output @id under comorphism-output: namespace, got {output_iri}"
+    );
+
+    // The eval_traced wrapper produces a `Trace::Comorphism` node
+    // for `Exp::InstitutionInvoke`. Without it, comorphism-only
+    // programs would have `root_trace = None` and the run-boundary's
+    // ProgramTrace commit would fail validation on missing
+    // `trace_tree`. The trace records the dispatched comorphism IRI
+    // and the produced resource's chain IRI + class — the structural
+    // audit anchor for "this program ran this comorphism".
+    let root_trace = result
+        .root_trace
+        .as_ref()
+        .expect("comorphism dispatch produces a non-empty root trace");
+    match root_trace {
+        eigenius_kernel::program::trace::Trace::Comorphism {
+            comorphism_iri,
+            target_iri: trace_target_iri,
+            target_class,
+            ..
+        } => {
+            assert_eq!(
+                comorphism_iri, "urn:eigenius:demo:d14:dock_to_assay",
+                "trace records the dispatched comorphism IRI"
+            );
+            assert_eq!(
+                trace_target_iri,
+                output_iri.as_str(),
+                "trace's target_iri matches the output Resource @id"
+            );
+            assert_eq!(
+                target_class, ASSAY_PREDICTION_CLASS,
+                "trace records the produced resource's class"
+            );
+        }
+        other => panic!("expected Trace::Comorphism root, got {other:?}"),
+    }
+
+    // D14 §9.3 step 4: the reified target-class resource must enter
+    // the chain. The reify boundary stamps a deterministic
+    // `urn:eigenius:comorphism-output:<tail>:<hex>` IRI and pushes
+    // the resource into the run-boundary collector; here we assert
+    // the collector saw it.
+    assert_eq!(
+        result.produced_resources.len(),
+        1,
+        "expected exactly one produced resource (the reified AssayPrediction)"
+    );
+    let produced = &result.produced_resources[0];
+    let produced_iri = produced
+        .id()
+        .expect("produced resource has chain-resident @id");
+    assert!(
+        produced_iri
+            .as_str()
+            .starts_with("urn:eigenius:comorphism-output:dock_to_assay:"),
+        "expected deterministic comorphism-output IRI, got {produced_iri}"
+    );
+    let produced_ic50 =
+        as_float(produced.get(&iri(IC50_PROP))).expect("produced AssayPrediction.ic50");
+    assert!(
+        (produced_ic50 - expected).abs() < expected * 1e-9,
+        "produced resource should carry the same IC50 payload"
+    );
+
+    // Determinism: re-running with identical input produces the
+    // identical content-hash IRI. This is the chain-dedup property
+    // that makes "two paths arriving at the same sentence" land at
+    // the same resource.
+    let result2 = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions_d14(
+        &program,
+        &input,
+        Arc::clone(&program_layer),
+        build_demo_components(),
+        Some(build_demo_index(&program_layer)),
+        Some(build_demo_runtime()),
+        None,
+        None,
+    )
+    .expect("second comorphism dispatch");
+    let produced2_iri = result2.produced_resources[0]
+        .id()
+        .expect("re-run produced resource has @id");
+    assert_eq!(
+        produced_iri, produced2_iri,
+        "re-running with identical input must mint the same deterministic IRI"
+    );
 }
 
 // ─── 2. Decidable QueryClass dispatch (D14 §9.2) ───────────────────────
@@ -509,6 +606,7 @@ fn run_within_tolerance(predicted: f64, target: f64, tolerance: f64) -> Val {
         registry: components,
         trace_store: None,
         dispatched_traces,
+        produced_resources: Arc::new(Mutex::new(Vec::new())),
         task_context: None,
         institution_index: Some(index),
         institution_runtime: Some(runtime),
@@ -582,7 +680,8 @@ fn auto_on_load_fires_on_assay_prediction() {
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
     );
     good.set(iri(IC50_PROP), Value::Float(250.0));
-    let errs = dispatch_auto_on_load_for_resource(&good, &index, &runtime, &exec_ctx);
+    let errs =
+        dispatch_auto_on_load_for_resource(&good, &index, &runtime, &exec_ctx).flatten_to_errors();
     assert!(
         errs.is_empty(),
         "Holds should produce no AutoOnLoad errors; got {errs:?}"
@@ -596,7 +695,8 @@ fn auto_on_load_fires_on_assay_prediction() {
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
     );
     bad.set(iri(IC50_PROP), Value::Float(-1.0));
-    let errs = dispatch_auto_on_load_for_resource(&bad, &index, &runtime, &exec_ctx);
+    let errs =
+        dispatch_auto_on_load_for_resource(&bad, &index, &runtime, &exec_ctx).flatten_to_errors();
     assert_eq!(errs.len(), 1, "expected one Fails error; got {errs:?}");
     assert!(
         errs[0].message.contains("returned Fails"),
@@ -826,6 +926,74 @@ fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
         _ => panic!("ResultSet missing row_count"),
     };
     assert_eq!(row_count, 1, "expected one row, got {row_count}");
+}
+
+/// EigenQL FIBER + INTO (D14 §9.3 chain-reinsertion via EigenQL —
+/// Phase 19i Phase 2). With `INTO "<iri>"`, the FIBER's response
+/// resource is committed to the regular chain at the named IRI as
+/// part of the query's outcome rather than disappearing with the
+/// per-query overlay. The QueryOutcome carries the to-be-committed
+/// resources so the server's Query RPC can lift them via
+/// `commit_with_validation`.
+#[test]
+fn eigenql_fiber_into_collects_response_for_chain_commit() {
+    use eigenius_kernel::query;
+
+    let (data, storage) = build_demo_data_layer();
+    let index = build_demo_index(&data);
+    let runtime_inst = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&data), storage);
+
+    let runtime = query::evaluate::FiberRuntime {
+        index: Some(&index),
+        runtime: Some(&runtime_inst),
+        components: Some(&components),
+        overlay: None,
+        ctx: Some(&exec_ctx),
+    };
+
+    let target = "urn:eigenius:demo:d14:my_validation_verdict";
+    let source = format!(
+        r#"
+        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+
+        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {{
+            "urn:eigenius:demo:d14:delta_g": ?dg
+        }}
+        FIBER assay:validate_prediction {{
+            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+        }} AS ?v INTO "{target}"
+        RETURN [] {{ d: ?d, v: ?v }}
+        "#
+    );
+
+    let outcome =
+        query::execute_with_into(&source, &data, runtime).expect("query executes with INTO");
+    assert_eq!(
+        outcome.into_resources.len(),
+        1,
+        "FIBER ... INTO should produce exactly one chain-bound resource"
+    );
+    let committed = &outcome.into_resources[0];
+    assert_eq!(
+        committed.id().map(|i| i.as_str()),
+        Some(target),
+        "committed resource carries the user-named INTO IRI"
+    );
+    // The response is a Verdict resource — verify the institution-
+    // returned content survived stamping (ctor name + verdict_subject).
+    let ctor = committed
+        .get(&iri("urn:eigenius:core:ctor_name"))
+        .and_then(|v| match v {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .expect("ctor_name present on FIBER INTO Verdict");
+    assert!(
+        ctor == "Holds" || ctor == "Fails",
+        "expected Holds or Fails ctor; got {ctor}"
+    );
 }
 
 /// `WHERE ?v FAILS` filters the same setup the other way: ΔG=-8.5

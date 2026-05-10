@@ -35,11 +35,9 @@
 //!   arrives in 18b/c.
 
 use crate::error::RunError;
-use crate::invocation::DispatchTrace;
+use crate::invocation::{DispatchTrace, RunOutcome};
 use crate::language_runtime::LanguageRuntime;
 use crate::registry::{LanguageRuntimeRegistry, RegistryError};
-use crate::rpc::NumericalMetadata;
-use crate::types::WorkerHandle;
 use eigenius_kernel::ontology::eigon_cbor::{self, CborError};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -47,6 +45,8 @@ use thiserror::Error;
 
 const PROP_LANGUAGE: &str = "urn:eigenius:runtime:language";
 const PROP_REQUIRES_ENVIRONMENT: &str = "urn:eigenius:runtime:requires_environment";
+const PROP_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+const PROP_METHOD_NAME: &str = "urn:eigenius:runtime:method_name";
 
 /// Failure modes for [`SubstrateDispatcher::dispatch_run_runtime_script`]
 /// and `dispatch_call_runtime_method`. Wraps lower-level errors with
@@ -146,21 +146,8 @@ impl SubstrateDispatcher {
         // boundary check + full chain resolution land in 18b/c.
         let script = &argument;
 
-        let worker = runtime.spawn_worker(&env, None).map_err(|e| {
-            FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
-        })?;
-        let (numerical_metadata, image_digest) = capture_health(runtime, &worker);
-        let started_at = DispatchTrace::now_rfc3339();
-        let output = runtime.run_script(&worker, script, &[input])?;
-        let completed_at = DispatchTrace::now_rfc3339();
-        Ok(build_outcome(
-            &output,
-            &language,
-            image_digest,
-            started_at,
-            completed_at,
-            numerical_metadata,
-        ))
+        let outcome = runtime.run_script(&env, script, &[input])?;
+        Ok(build_outcome(outcome, &language))
     }
 
     /// Dispatch a `CallRuntimeMethod` invocation. Same pattern as
@@ -183,73 +170,128 @@ impl SubstrateDispatcher {
         let env = synthesize_env(&language, &argument);
         let signature = &argument;
 
-        let worker = runtime.spawn_worker(&env, None).map_err(|e| {
-            FacadeError::Run(RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))
-        })?;
-        let (numerical_metadata, image_digest) = capture_health(runtime, &worker);
-        let started_at = DispatchTrace::now_rfc3339();
-        let output = runtime.call_method(&worker, signature, &[input])?;
-        let completed_at = DispatchTrace::now_rfc3339();
-        Ok(build_outcome(
-            &output,
-            &language,
-            image_digest,
-            started_at,
-            completed_at,
-            numerical_metadata,
-        ))
+        let outcome = runtime.call_method(&env, signature, &[input])?;
+        Ok(build_outcome(outcome, &language))
+    }
+
+    /// Dispatch an external-institution invocation (D31 §6.2 /
+    /// Phase 19a.5.c). Same dispatch shape as
+    /// [`Self::dispatch_call_runtime_method`] but reached through the
+    /// kernel's `DispatchExternal` gRPC path: the kernel sends the
+    /// dispatch metadata as structured proto fields rather than as
+    /// properties on a chain-resolved `RuntimeMethodSignature`. We
+    /// synthesize the env + signature resources here so the
+    /// `LanguageRuntime::call_method` boundary stays uniform — the
+    /// runtime never has to know which surface the call came from.
+    ///
+    /// `input_cbors` is the multi-input list per D31 §6.5; for an
+    /// AutoOnLoad / Decidable QueryClass dispatch this is exactly one
+    /// element (the gated subject). Each element is parsed
+    /// independently via [`eigon_cbor::parse_resource_lenient`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_external_institution(
+        &self,
+        language: &str,
+        env_iri: &str,
+        image_digest: &str,
+        method_name: &str,
+        signature_iri: &str,
+        input_cbors: &[Vec<u8>],
+    ) -> Result<DispatchOutcome, FacadeError> {
+        let runtime = self
+            .registry
+            .get(language)
+            .ok_or_else(|| FacadeError::UnknownLanguage(language.to_string()))?;
+
+        let mut inputs = Vec::with_capacity(input_cbors.len());
+        for bytes in input_cbors {
+            inputs.push(parse_resource(bytes)?);
+        }
+
+        let signature =
+            synthesize_signature(language, env_iri, image_digest, method_name, signature_iri);
+        let env = synthesize_env(language, &signature);
+
+        let outcome = runtime.call_method(&env, &signature, &inputs)?;
+        Ok(build_outcome(outcome, language))
     }
 }
 
-/// Best-effort `Health` round-trip. Returns the substrate-relevant
-/// fields from `HealthInfo`: the worker's reported `numerical_metadata`
-/// and the in-image image digest (`env_digest_in_image`). A failure
-/// here logs to stderr and yields empty fields rather than failing the
-/// dispatch — trace integrity is best-effort, the dispatch contract is
-/// not. Phase 18c.5 / D26 §5.5.
-fn capture_health(
-    runtime: &dyn LanguageRuntime,
-    worker: &WorkerHandle,
-) -> (NumericalMetadata, Option<crate::types::ImageDigest>) {
-    match runtime.query_health(worker) {
-        Ok(info) => {
-            let digest = info
-                .env_digest_in_image
-                .as_deref()
-                .and_then(|s| crate::types::ImageDigest::parse(s).ok());
-            (info.numerical_metadata, digest)
-        }
-        Err(e) => {
-            eprintln!(
-                "eigenius-runtime-substrate: query_health failed for worker {} ({}): {e}; \
-                 dispatch will continue with empty trace fields",
-                worker.id, worker.backend
-            );
-            (NumericalMetadata::default(), None)
-        }
-    }
-}
-
-fn build_outcome(
-    output: &Resource,
-    language: &str,
-    image_digest: Option<crate::types::ImageDigest>,
-    started_at: String,
-    completed_at: String,
-    numerical_metadata: NumericalMetadata,
-) -> DispatchOutcome {
+/// Build a `DispatchOutcome` from the runtime's [`RunOutcome`] plus
+/// the language tag the facade resolved from the dispatch argument.
+///
+/// Path-3 trait shape: the runtime owns spawn/dispatch/cleanup and
+/// hands back the trace fields (timestamps, numerical_metadata,
+/// image_digest). The facade only contributes the language tag and
+/// the partial-invocation packaging.
+fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
+    let RunOutcome {
+        mut output,
+        image_digest,
+        started_at,
+        completed_at,
+        numerical_metadata,
+        dispatched_to,
+    } = outcome;
+    // Epistemic category stamp: every resource produced by a runtime
+    // is, by construction, derived (it was computed from inputs by a
+    // typed program). The reflection-ontology pins this as
+    // `DerivedResource` (D29 §8.4 cross-link, see the reflection
+    // ontology). The mirror codec stamps only the structural class on
+    // `is_a`; the substrate's commit pipeline owns the epistemic
+    // categorization — applied here before the orchestrator commits.
+    stamp_derived_epistemic_category(&mut output);
     let trace = DispatchTrace {
         language: language.to_string(),
         image_digest,
         started_at,
         completed_at,
         numerical_metadata,
+        dispatched_to,
     };
     let partial = trace.into_partial_invocation();
     DispatchOutcome {
-        output_cbor: eigon_cbor::serialize_resource(output),
+        output_cbor: eigon_cbor::serialize_resource(&output),
         partial_invocation_cbor: eigon_cbor::serialize_resource(&partial),
     }
+}
+
+/// IRI of the reflection ontology's class for resources produced by
+/// computation. Stamped onto every runtime-substrate output's
+/// `is_a` list so the chain auditor can distinguish runtime-produced
+/// resources from declared / observed / verified ones (reflection
+/// ontology §`DerivedResource`).
+const PROP_IS_A: &str = "urn:eigenius:core:is_a";
+const CLASS_DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
+
+/// Append `urn:eigenius:reflection:DerivedResource` to the output's
+/// `is_a` list, preserving any structural class the mirror codec
+/// stamped. Idempotent: a second call is a no-op. Resources without
+/// any prior `is_a` (a primitive output, or a worker that didn't
+/// stamp) get a single-element list.
+fn stamp_derived_epistemic_category(output: &mut Resource) {
+    let is_a_iri = Iri::parse(PROP_IS_A).expect("static IRI");
+    let derived_iri = Iri::parse(CLASS_DERIVED_RESOURCE).expect("static IRI");
+
+    let mut entries: Vec<Value> = match output.get(&is_a_iri) {
+        Some(Value::Array(arr)) => arr.clone(),
+        Some(other) => {
+            // Defensive: an unexpected shape (single ResourceRef or
+            // String). Promote into an array so the rule "is_a is a
+            // list" is preserved post-stamp.
+            vec![other.clone()]
+        }
+        None => Vec::new(),
+    };
+    let already_present = entries.iter().any(|v| match v {
+        Value::ResourceRef(i) => i == &derived_iri,
+        Value::String(s) => s == derived_iri.as_str(),
+        _ => false,
+    });
+    if !already_present {
+        entries.push(Value::ResourceRef(derived_iri));
+    }
+    output.set(is_a_iri, Value::Array(entries));
 }
 
 /// Empty input is treated as an embedded Resource with no properties
@@ -288,9 +330,62 @@ fn leak_property_name(prop_iri: &str) -> &'static str {
     }
 }
 
+/// Synthesize a `RuntimeMethodSignature` resource for the
+/// `dispatch_external_institution` path. The kernel sends D31 §6.2's
+/// structured fields (env_iri, image_digest, method_name,
+/// signature_iri, language) — we wrap them in a Resource so the
+/// existing `LanguageRuntime::call_method` boundary keeps its single
+/// shape. The synthesised signature carries `@id = signature_iri` so
+/// per-language runtimes that record the resolved signature IRI keep
+/// matching against the kernel's chain-side resource.
+fn synthesize_signature(
+    language: &str,
+    env_iri: &str,
+    image_digest: &str,
+    method_name: &str,
+    signature_iri: &str,
+) -> Resource {
+    let mut sig = match Iri::parse(signature_iri) {
+        Ok(iri) => Resource::new(iri),
+        // Defensive fallback: a malformed signature IRI from the wire
+        // is a kernel-side bug, but we still need a usable Resource so
+        // the caller surfaces an UnknownLanguage / RunError rather
+        // than panicking on IRI parse.
+        Err(_) => Resource::new_embedded(),
+    };
+    sig.set(
+        Iri::parse(PROP_LANGUAGE).expect("static IRI"),
+        Value::String(language.to_string()),
+    );
+    sig.set(
+        Iri::parse(PROP_METHOD_NAME).expect("static IRI"),
+        Value::String(method_name.to_string()),
+    );
+    sig.set(
+        Iri::parse(PROP_IMAGE_DIGEST).expect("static IRI"),
+        Value::String(image_digest.to_string()),
+    );
+    if let Ok(env) = Iri::parse(env_iri) {
+        sig.set(
+            Iri::parse(PROP_REQUIRES_ENVIRONMENT).expect("static IRI"),
+            Value::ResourceRef(env),
+        );
+    }
+    sig
+}
+
 /// Synthesize an environment Resource for v1's spawn-per-invocation
 /// model. The TestLanguageRuntime ignores it; per-language runtimes
 /// (Phase 19+) will replace this with a chain-resolved env.
+///
+/// The env carries `image_digest` when the argument has one — that
+/// is, when the dispatch came through `dispatch_external_institution`
+/// (whose synthesised signature pins the digest the kernel sent in
+/// the `DispatchExternal` request). Per-language runtimes
+/// (`JuliaLanguageRuntime` in particular) read the env's digest at
+/// dispatch time so a single runtime instance can serve multiple
+/// envs concurrently — no per-runtime cached digest, one
+/// `ServiceHandle` keyed per digest.
 fn synthesize_env(language: &str, argument: &Resource) -> Resource {
     let mut env = Resource::new_embedded();
     env.set(
@@ -303,6 +398,15 @@ fn synthesize_env(language: &str, argument: &Resource) -> Resource {
     let env_prop = Iri::parse(PROP_REQUIRES_ENVIRONMENT).expect("static IRI");
     if let Some(v) = argument.get(&env_prop) {
         env.set(env_prop, v.clone());
+    }
+    // Forward the image digest if the argument carries one. The
+    // synthesised RuntimeMethodSignature for the external-dispatch
+    // path always sets it; `RunRuntimeScript` and
+    // `CallRuntimeMethod` arguments don't, and those callers fall
+    // back to the runtime's lazy `ensure_image` path.
+    let digest_prop = Iri::parse(PROP_IMAGE_DIGEST).expect("static IRI");
+    if let Some(v) = argument.get(&digest_prop) {
+        env.set(digest_prop, v.clone());
     }
     env
 }
@@ -358,5 +462,58 @@ mod tests {
             .dispatch_run_runtime_script(&[], &[0xff])
             .expect_err("should fail on malformed CBOR");
         assert!(matches!(err, FacadeError::InvalidCbor(_)), "got {err:?}");
+    }
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    #[test]
+    fn stamp_appends_derived_resource_to_empty_is_a() {
+        let mut r = Resource::new_embedded();
+        stamp_derived_epistemic_category(&mut r);
+        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
+        assert_eq!(is_a, vec![iri(CLASS_DERIVED_RESOURCE)]);
+    }
+
+    #[test]
+    fn stamp_preserves_existing_is_a_classes() {
+        // Output came from a mirror codec carrying its own structural
+        // class — the stamp must not drop that.
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri(PROP_IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Demo"))]),
+        );
+        stamp_derived_epistemic_category(&mut r);
+        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
+        assert!(is_a.contains(&iri("urn:eigenius:test:Demo")));
+        assert!(is_a.contains(&iri(CLASS_DERIVED_RESOURCE)));
+    }
+
+    #[test]
+    fn stamp_is_idempotent() {
+        let mut r = Resource::new_embedded();
+        stamp_derived_epistemic_category(&mut r);
+        stamp_derived_epistemic_category(&mut r);
+        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
+        // Exactly one entry — no duplicates from the second stamp.
+        assert_eq!(is_a, vec![iri(CLASS_DERIVED_RESOURCE)]);
+    }
+
+    #[test]
+    fn stamp_promotes_non_array_is_a_to_array() {
+        // Defensive: some workers might emit a single ResourceRef
+        // rather than a list (older codec shapes). Stamp must still
+        // produce a valid is_a list.
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri(PROP_IS_A),
+            Value::ResourceRef(iri("urn:eigenius:test:OldShape")),
+        );
+        stamp_derived_epistemic_category(&mut r);
+        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
+        assert!(is_a.contains(&iri("urn:eigenius:test:OldShape")));
+        assert!(is_a.contains(&iri(CLASS_DERIVED_RESOURCE)));
     }
 }

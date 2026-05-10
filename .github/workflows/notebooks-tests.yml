@@ -41,15 +41,52 @@ jobs:
         working-directory: notebooks
         run: npx playwright install --with-deps chromium
 
+      # Build the kernel + orchestrator images via buildx with GHA cache.
+      # Each cache scope is per-image so the kernel build and orchestration
+      # build don't fight over a single cache. mode=max also caches
+      # intermediate layers (not just the final manifest), which matters for
+      # the Rust dep build that dominates compile time.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build kernel image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.kernel
+          # Tag must match the `image:` directive in docker-compose.yml.
+          tags: eigenius-kernel:local
+          load: true
+          # `ci` profile skips LTO and ups codegen-units to 256 — ~3-5x
+          # faster than `release` for a functionally identical binary.
+          # See [profile.ci] in Cargo.toml.
+          build-args: |
+            CARGO_PROFILE=ci
+          cache-from: type=gha,scope=eigenius-kernel
+          cache-to: type=gha,scope=eigenius-kernel,mode=max
+
+      - name: Build orchestrator image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.orchestration
+          tags: eigenius-orchestrator:local
+          load: true
+          cache-from: type=gha,scope=eigenius-orchestrator
+          cache-to: type=gha,scope=eigenius-orchestrator,mode=max
+
       # Bring the stack up with the notebook SPA bundled into the
       # orchestrator image. EIGENIUS_MOCK_LLM=true means CompleteText /
       # CompleteJson dispatches return canned responses — keeps the
       # golden flow deterministic and free of API-key requirements.
+      # `--no-build` makes compose use the locally-loaded images we just
+      # built via buildx (which docker-compose.yml's `image:` directive
+      # references), instead of running `docker build` again.
       - name: Start docker stack
         env:
           EIGENIUS_MOCK_LLM: "true"
         run: |
-          docker compose up -d --build kernel orchestrator
+          docker compose up -d --no-build kernel orchestrator
           # Wait for the orchestrator to be healthy + serving notebook SPA.
           for i in $(seq 1 60); do
             if curl -sf http://localhost:8080/health >/dev/null \

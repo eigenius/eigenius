@@ -100,16 +100,33 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
 }
 
 /// Phase 11e: `function(source)` where `function` is a registered
-/// Comorphism — emits `Exp::InstitutionInvoke { iri, source }`.
+/// Comorphism — emits
+/// `Exp::InstitutionInvoke { iri, source, target_iri }`.
+///
+/// `target_iri` is the optional explicit IRI override that surface
+/// languages may set (EigenQL `INTO` clause). When absent the kernel
+/// assigns a deterministic content-hash IRI at evaluation time.
 fn parse_comorphism_invoke_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let func_str = get_string(resource, "urn:eigenius:program:function")?;
     let comorphism_iri = Iri::parse(&func_str)
         .map_err(|e| format!("ComorphismInvokeApply function `{func_str}` invalid IRI: {e}"))?;
     let source_resource = get_embedded(resource, "urn:eigenius:program:source")?;
     let source_exp = parse_expression(&source_resource, layer)?;
+    let target_iri_prop = Iri::parse("urn:eigenius:program:target_iri").unwrap();
+    let target_iri = match resource.get(&target_iri_prop) {
+        Some(Value::String(s)) => Some(
+            Iri::parse(s)
+                .map_err(|e| format!("ComorphismInvokeApply target_iri `{s}` invalid IRI: {e}"))?,
+        ),
+        Some(_) => {
+            return Err("ComorphismInvokeApply target_iri must be a string IRI".to_string());
+        }
+        None => None,
+    };
     Ok(Exp::InstitutionInvoke {
         comorphism_iri,
         source: Box::new(source_exp),
+        target_iri,
     })
 }
 
@@ -220,20 +237,20 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let func_prop = Iri::parse("urn:eigenius:program:function").unwrap();
 
     let func_exp = match resource.get(&func_prop) {
-        Some(Value::String(s)) => {
-            // Component reference — treat as a variable
-            Exp::Var(s.clone())
-        }
+        // Resource references in function/argument positions are
+        // typed as `data_type: resource`, so the canonical shape is
+        // `ResourceRef`; `String` survives for pre-canonicalisation
+        // intermediates (RPC payloads, FIBER-synthesised programs).
+        Some(Value::ResourceRef(i)) => Exp::Var(i.as_str().to_string()),
+        Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => return Err("Apply: missing 'function' property".to_string()),
     };
 
     let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
     let arg_exp = match resource.get(&arg_prop) {
-        Some(Value::String(s)) => {
-            // Literal string or resource reference
-            Exp::Var(s.clone())
-        }
+        Some(Value::ResourceRef(i)) => Exp::Var(i.as_str().to_string()),
+        Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => Exp::Unit, // No argument
     };
@@ -713,8 +730,11 @@ fn parse_reduce(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 fn parse_literal(resource: &Resource) -> Result<Exp, String> {
     let val_prop = Iri::parse("urn:eigenius:program:value").unwrap();
     match resource.get(&val_prop) {
+        // Canonical IRI reference shape after `canonicalise_resource_refs`.
+        Some(Value::ResourceRef(i)) => Ok(Exp::Var(i.as_str().to_string())),
         Some(Value::String(s)) => {
-            // Check if it's an IRI reference
+            // Pre-canonicalisation: a string literal that *might* be
+            // an IRI reference (heuristic on `urn:` / `http`).
             if Iri::parse(s).is_ok() && (s.starts_with("urn:") || s.starts_with("http")) {
                 return Ok(Exp::Var(s.clone())); // Resource reference
             }
@@ -738,8 +758,14 @@ fn get_string(resource: &Resource, prop: &str) -> Result<String, String> {
 }
 
 fn get_iri(resource: &Resource, prop: &str) -> Result<Iri, String> {
-    let s = get_string(resource, prop)?;
-    Iri::parse(&s).map_err(|e| format!("invalid IRI in '{prop}': {e}"))
+    let prop_iri = Iri::parse(prop).unwrap();
+    // IRI-typed property values canonicalise to `ResourceRef`;
+    // `as_iri` accepts both that and the pre-canonical `String`
+    // shape from intermediate (uncommitted) resources.
+    resource
+        .get(&prop_iri)
+        .and_then(|v| v.as_iri())
+        .ok_or_else(|| format!("missing IRI property '{prop}'"))
 }
 
 fn get_embedded(resource: &Resource, prop: &str) -> Result<Resource, String> {

@@ -252,7 +252,161 @@ By default, the kernel refuses to prune a branch whose head matches an active ta
 eigenius --endpoint http://localhost:50051 branch delete feature-x --force
 ```
 
-## 4.7. Capability commands
+## 4.7. Mirror commands (require `--endpoint`)
+
+The `mirror` subcommand group operates on `RuntimePackageMirror` resources — auto-generated, language-specific source code that mirrors a slice of the chain into typed structs that a substrate-hosted worker can decode and dispatch on. Used as the first step of the substrate-institution install flow ([chapter 11](11-runtime-substrate.md)).
+
+### `mirror create [--filter <EIGENQL> | --filter-file <FILE>] [--institution-file <FILE>] --layer <IRI> --language <LANG> --output <DIR>`
+
+Generate a mirror against a layer; commit a `RuntimePackageMirror` resource and write the source files locally.
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror create \
+    --layer "$(eigenius branch show main | awk '{print "urn:eigenius:layer:"$2}')" \
+    --filter 'MATCH "urn:eigenius:core:Class"(?iri) {
+                "urn:eigenius:core:short_name": ?name
+              }
+              WHERE ?name IN ["BoundedBy", "BoundsRequest", "IntervalFunction"]
+              RETURN [] { iri: ?iri }' \
+    --institution-file julia/institutions/intervals/declarations/intervals-institution.eigon.json \
+    --language julia \
+    --output /tmp/intervals-mirror \
+    --json
+```
+
+| Flag | Use |
+|---|---|
+| `--layer <IRI>` | Layer the mirror anchors to (committed under `runtime:source_layer`). Pin to the head of the branch you'll install against. |
+| `--filter <EIGENQL>` | Inline EigenQL query selecting seed class IRIs. Mutually exclusive with `--filter-file`. The query must `RETURN [] { iri: ?iri }`. |
+| `--filter-file <FILE>` | Path to a file containing the filter query. |
+| `--institution-file <FILE>` | Optional path to the institution declaration file (the same file passed to `institution install`). When set, the seed is augmented with every class referenced by the file's `RuntimeMethodSignature.input_types` / `output_type` — closes the gap the closure walker can't reach (cross-institution return classes). The flag reads the file rather than querying the chain because the institution declaration commits *after* `mirror create` in the canonical install order. |
+| `--language <LANG>` | Target language. v1 supports `julia`; others tracked in [issue #41](https://github.com/eigenius/eigenius/issues/41). |
+| `--output <DIR>` | Directory the source files are written to (commits to the chain regardless). |
+| `--json` | JSON-formatted output (mirror IRI, file count, output dir). |
+
+**The closure walker.** From the seed classes, the mirror generator follows every `requires`, `class_types`, and inductive-type-ctor reference, recursively. `--institution-file` augments that closure with classes mentioned in the institution's typed method contracts — needed because cross-institution return classes (e.g. an `OptimisationProblem` returned from a Symbolics handler) aren't reachable by class-property walking from a Symbolics-rooted seed.
+
+### `mirror get --iri <MIRROR_IRI> --output <DIR>`
+
+Fetch a previously-committed mirror's source files. No commit.
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror get \
+    --iri urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c \
+    --output /tmp/mirror-extract
+```
+
+### `mirror list [--language <LANG>]`
+
+List committed mirrors.
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror list --language julia
+```
+
+### `mirror inspect <MIRROR_IRI>`
+
+Inspect a mirror's metadata (source layer, seed classes, file count, language, source hash).
+
+```bash
+eigenius --endpoint http://localhost:50051 mirror inspect \
+    urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c
+```
+
+## 4.8. Env commands (require `--endpoint`)
+
+The `env` subcommand group manages `RuntimeEnvironment` resources — pinned worker-image identities (image digest + runtime version + lockfile + lifecycle). Used as the second step of the substrate-institution install flow.
+
+### `env build --language <LANG> --mirror <MIRROR_IRI> [--package-path <DIR>] [--base-image <REF>] [--worker-source-dir <DIR>] [--depot <DIR>]`
+
+Build a worker container image from a handler package + a previously-committed mirror. Runs `buildah` on the host, then `docker load`s the result so the orchestrator's daemon can run it. Prints the resulting image digest and the runtime version captured from the built image. Does **not** commit a chain resource — pass the printed digest to `env create` for that.
+
+```bash
+eigenius --endpoint http://localhost:50051 env build \
+    --language julia \
+    --package-path julia/institutions/intervals/EigeniusIntervals \
+    --mirror urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c \
+    --base-image docker.io/library/julia:1.12-bookworm \
+    --json
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--language <LANG>` | `julia` | Target language. |
+| `--package-path <DIR>` | cwd | Handler package directory (must contain `Project.toml` and `src/`). |
+| `--mirror <MIRROR_IRI>` | — | A previously-committed `RuntimePackageMirror` to bake in. |
+| `--base-image <REF>` | `julia:1.12-bookworm` | Override the language's default base image. Pin by digest in production. |
+| `--worker-source-dir <DIR>` | `julia/runtime-worker/` resolved against `$EIGENIUS_HOME` | Path to the language-runtime worker source. |
+| `--depot <DIR>` | fresh temp dir | Build context / depot path the buildah build reads from. |
+| `--json` | — | JSON output: `{image_digest, runtime_version, package_name, mirror_iri}`. |
+
+Cold builds take 30–90 seconds (most of it `Pkg.precompile`); subsequent rebuilds without input changes hit buildah's layer cache.
+
+### `env create --language <LANG> --handler-package <DIR> --mirror <MIRROR_IRI> --as-iri <ENV_IRI> --image-digest <DIGEST> --runtime-version <VERSION> [--include-package <DIR> ...] [--base-image <REF>]`
+
+Commit a `RuntimeEnvironment` resource pinning the env image identity. Pass the digest and runtime version that `env build` printed.
+
+```bash
+eigenius --endpoint http://localhost:50051 env create \
+    --language julia \
+    --handler-package julia/institutions/intervals/EigeniusIntervals \
+    --mirror urn:eigenius:runtime:mirror:julia:6b15cd5c3e289a8c \
+    --as-iri urn:eigenius:intervals:env:v1 \
+    --image-digest sha256:1234... \
+    --runtime-version 1.12.6
+```
+
+| Flag | Use |
+|---|---|
+| `--as-iri <ENV_IRI>` | IRI to commit the `RuntimeEnvironment` under. |
+| `--image-digest <DIGEST>` | `sha256:` prefix; the digest `env build` printed. |
+| `--runtime-version <VERSION>` | Exact runtime version (e.g. `1.12.6`). Required by the chain ontology. |
+| `--include-package <DIR>` | Repeatable. Extra package directories to bake in as path-deps. |
+| `--base-image <REF>` | Override the language's default base image. |
+
+### `env list [--language <LANG>]`
+
+```bash
+eigenius --endpoint http://localhost:50051 env list --language julia
+```
+
+### `env inspect <ENV_IRI>`
+
+```bash
+eigenius --endpoint http://localhost:50051 env inspect urn:eigenius:intervals:env:v1
+```
+
+## 4.9. Institution commands (require `--endpoint`)
+
+Install and inspect institution declarations. Used as the third step of the substrate-institution install flow.
+
+`eigenius institution install` is the substrate-flow analogue of `eigenius capability install --kind institution` (which targets WASM-hosted institutions). For substrate-hosted institutions whose declaration includes `Institution { runtime: external, requires_environment: ... }`, use `institution install`; for WASM-hosted institutions whose declaration carries `runtime: wasm` + inline `wasm_binary`, use `capability install` (§4.10).
+
+### `institution install --definition <FILE>`
+
+Submit an institution definition (Eigon-JSON or ESL) to the chain via `Load`. The file typically commits 5–10 resources in one shot — `Institution` + `RuntimeMethodSignature × N` + `QueryClass × N` + `ExportFormat` / `ImportFormat`.
+
+```bash
+eigenius --endpoint http://localhost:50051 institution install \
+    --definition julia/institutions/intervals/declarations/intervals-institution.eigon.json
+```
+
+### `institution list`
+
+```bash
+eigenius --endpoint http://localhost:50051 institution list
+```
+
+### `institution inspect <IRI>`
+
+Print an installed institution's full surface — `Institution` resource plus the QueryClasses, ExportFormats, ImportFormats, and signatures anchored on it.
+
+```bash
+eigenius --endpoint http://localhost:50051 institution inspect \
+    urn:eigenius:institutions:intervals
+```
+
+## 4.10. Capability commands
 
 WASM components and institutions are managed through the `capability` subcommand. All require `--endpoint`.
 
@@ -320,7 +474,7 @@ eigenius --endpoint http://localhost:50051 capability test \
 
 For institutions, `--mode query` (default) dispatches a fiber query; `--mode discover` dispatches `discover-morphisms`.
 
-## 4.8. Task commands (require `--endpoint`)
+## 4.11. Task commands (require `--endpoint`)
 
 Inspect and control persisted tasks (D21).
 
@@ -348,7 +502,7 @@ eigenius --endpoint http://localhost:50051 tasks cancel <uuid>
 
 Request cooperative cancellation. The task transitions to `Cancelled` at its next checkpoint.
 
-## 4.9. Other commands
+## 4.12. Other commands
 
 ### `list-institutions` (requires `--endpoint`)
 
@@ -382,7 +536,7 @@ eigenius version
 
 Print the build version and metadata.
 
-## 4.10. Output formatting
+## 4.13. Output formatting
 
 The global `--json` flag switches output from human-formatted prose to a machine-readable JSON envelope, suitable for piping into `jq` or scripting:
 
@@ -392,7 +546,7 @@ eigenius --json query 'MATCH ?x {} RETURN [] { x: ?x }' | jq '.results[0]'
 
 Without `--json`, output is colourised plain text intended for terminal display.
 
-## 4.11. Exit codes
+## 4.14. Exit codes
 
 The CLI uses standard exit codes:
 
