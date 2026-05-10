@@ -25,9 +25,11 @@
  * the natural regression target. Parts B and C of that notebook
  * require the Julia institutions setup (`kinase-institutions-setup.sh`)
  * and are intentionally not exercised here — CI doesn't install the
- * Julia stack. We open the notebook, then run the **Part A cells
- * individually** rather than clicking Run all so the institutions
- * cells never fire.
+ * Julia stack. We use the notebook's per-cell **"Run to here…"**
+ * affordance on cell 13 to run cells 2-13 in source order via the
+ * notebook's own scheduler (which serialises cell execution against
+ * the kernel-side commit pipeline, avoiding the data races a
+ * per-cell click loop with fixed delays would hit).
  *
  * The categorical-x → numeric-index → tickText mapping for line/area
  * is the most fragile path (Fluent's LineChart/AreaChart only support
@@ -44,13 +46,12 @@ const KINASE_PATH = path.resolve(
   "../examples/kinase-institutions.json",
 );
 
-// Part A is small (3 ESL cells + 2 EigenQL cells + 6 chart cells +
-// 1 topology cell — 12 runnable cells total). Each cell click waits
-// for completion before the next runs. The 120s budget covers cold
-// kernel boot + the ESL commits + the chart queries.
+// "Run to here" on cell 13 fires 12 runnable cells (3 ESL + 2 EigenQL
+// + 6 charts + 1 topology TS cell) in sequence. Cold kernel boot + ESL
+// commits + chart queries comfortably fit in 120s.
 test.setTimeout(120_000);
 
-test("kinase-institutions Part A: open → run cells 1-13 → six chart cells render", async ({
+test("kinase-institutions Part A: open → run to cell 13 → six chart cells render", async ({
   page,
 }) => {
   await page.goto("/notebooks/");
@@ -65,60 +66,59 @@ test("kinase-institutions Part A: open → run cells 1-13 → six chart cells re
   //    hidden file input wired to the toolbar's "Import…" button.
   await page.locator('input[type="file"]').setInputFiles(KINASE_PATH);
 
-  // 3. Title swaps — confirms the file was parsed and loaded. The
-  //    consolidated notebook's title starts with "Kinase Inhibitor
-  //    Screening — From Flat Data to Typed Institutions".
+  // 3. Title swaps — confirms the file was parsed and loaded.
   await expect(
     page.getByRole("heading", { name: /Kinase Inhibitor Screening/i }),
   ).toBeVisible({ timeout: 10_000 });
 
   // 4. Seven chart-cell type badges visible — Part A has six (cells
   //    7-12: grouped-bar, donut, vertical-bar, horizontal-bar, line,
-  //    area); Part B's Verdict donut adds a seventh that we don't
-  //    run. The badge's DOM text is "Chart"; CSS uppercases it
+  //    area); Part B's Verdict donut (cell 28) adds a seventh that we
+  //    don't run. The badge's DOM text is "Chart"; CSS uppercases it
   //    visually.
   await expect(page.getByText("Chart", { exact: true })).toHaveCount(7);
 
-  // 5. Run only Part A's cells (1-13) by clicking each cell's per-cell
-  //    Run button. Cells 1, 14, 15, 19, 20, 25, 28 are markdown — no
-  //    Run button on those. Cell 13 is the topology graph TS cell;
-  //    cells 14+ would invoke the Julia institutions and fail without
-  //    the setup script having run, so we stop after cell 13.
-  //
-  //    The notebook UI exposes a Run button per runnable cell; we
-  //    click them in order to mirror "Run all but only up to cell 13"
-  //    semantics without a built-in Run-to-here helper.
-  const runButtons = page.locator('[aria-label="Run cell"], button:has-text("Run")').filter({
-    hasNot: page.locator('button:has-text("Run all")'),
-  });
+  // 5. Use cell 13's per-cell SplitButton menu to invoke "Run to
+  //    here…", which runs cells 2-13 in source order through the
+  //    notebook's own scheduler. The index pill on every cell carries
+  //    `aria-label="Cell N"`; the SplitButton's menu trigger
+  //    (a chevron next to the primary "Run" button) sits in the same
+  //    toolbar row and is identifiable by `aria-haspopup="menu"`.
+  const cell13Toolbar = page
+    .getByLabel("Cell 13", { exact: true })
+    .locator("xpath=ancestor::div[1]");
+  await cell13Toolbar.locator('[aria-haspopup="menu"]').click();
+  await page
+    .getByRole("menuitem", { name: /Run to here/i })
+    .click();
 
-  // The runnable cells in Part A: 2, 3, 4 (ESL), 5, 6 (EigenQL),
-  // 7-12 (charts), 13 (TypeScript) = 12 cells.
-  const PART_A_RUNNABLE_CELLS = 12;
+  // 6. The "Run all" toolbar button is disabled while *any* cell is
+  //    running — re-enabled when none are. Wait for it to leave and
+  //    then re-enter the enabled state, which brackets the entire
+  //    cells-2-through-13 sweep without us having to track per-cell
+  //    completions.
+  const runAll = page.getByRole("button", { name: "Run all", exact: true });
+  // Confirm the run actually started (button entered disabled state).
+  await expect(runAll).toBeDisabled({ timeout: 10_000 });
+  // Then wait for the entire sweep to finish.
+  await expect(runAll).toBeEnabled({ timeout: 90_000 });
 
-  for (let i = 0; i < PART_A_RUNNABLE_CELLS; i += 1) {
-    await runButtons.nth(i).click();
-    // Brief settle so the next click doesn't race the previous run's
-    // pending state. The actual completion assertions follow below.
-    await page.waitForTimeout(200);
-  }
-
-  // 6. ESL load completes (matches Cell 2/3/4). The kinase ontology
+  // 7. ESL load completes (matches Cell 2/3/4). The kinase ontology
   //    has many resources; the data cells have ~24.
   await expect(
     page.getByText(/Loaded \d+ resources?/).first(),
-  ).toBeVisible({ timeout: 30_000 });
+  ).toBeVisible({ timeout: 5_000 });
 
-  // 7. EigenQL DataGrid shows at least one cell with a kinase
+  // 8. EigenQL DataGrid shows at least one cell with a kinase
   //    compound ID — confirms the kernel returned rows and the
   //    result table mounted. The kinase queries RETURN plain values
   //    (compound_id, target_name, ic50_nm), not IRIs, so we match on
   //    the EIG_NNNN compound-id format.
   await expect(
     page.getByRole("gridcell", { name: /^EIG_\d{4}$/ }).first(),
-  ).toBeVisible({ timeout: 30_000 });
+  ).toBeVisible({ timeout: 5_000 });
 
-  // 8. Chart cells produce SVGs. Fluent splits its chart family
+  // 9. Chart cells produce SVGs. Fluent splits its chart family
   //    across three className roots:
   //      - `.fui-cart__root`  — cartesian family (4 of ours:
   //        grouped-bar, vertical-bar, line, area)
@@ -126,15 +126,14 @@ test("kinase-institutions Part A: open → run cells 1-13 → six chart cells re
   //      - `.fui-donut__root` — donut (non-cartesian)
   //    Asserting each per-class count catches a silent mis-mapping
   //    in renderChart's switch. Only Part A's charts run; Part B's
-  //    Verdict donut (cell 24) is not exercised here.
-  await expect(page.locator(".fui-cart__root")).toHaveCount(4, {
-    timeout: 60_000,
-  });
+  //    Verdict donut (cell 28) is not exercised here.
+  await expect(page.locator(".fui-cart__root")).toHaveCount(4);
   await expect(page.locator(".fui-hbc__root")).toHaveCount(1);
   await expect(page.locator(".fui-donut__root")).toHaveCount(1);
 
-  // 9. No chart (or any other) cell surfaced an error message bar.
-  //    This catches: malformed EigenQL, missing columns, render
-  //    exceptions (e.g. the categorical-x line/area regression).
+  // 10. No cell surfaced an error message bar. This catches: malformed
+  //     EigenQL, missing columns, render exceptions (e.g. the
+  //     categorical-x line/area regression), and ESL-validation
+  //     failures from cells 2-4.
   await expect(page.getByText("Cell failed")).toHaveCount(0);
 });
