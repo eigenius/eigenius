@@ -492,6 +492,31 @@ A long-running Phase 9b task may pin layers across the consolidation window. The
 
 Phase 14g's `eigenius db prune <branch>` removes a branch from the topology; reachable layers become unreachable. Consolidation operates on the chain reachable from a specific branch's head. If a consolidation completes and a subsequent prune removes the branch, the consolidated layer becomes unreachable along with the original layers. This is correct — both fall to GC — but worth confirming with a regression test.
 
+### 12.8 Forward pointers — consolidating below the branch head
+
+v1 requires `to = current_branch_head` (enforced as `BranchAdvancedConcurrently` when it isn't). The motivation is structural: layer ids are content-addressed and fold their parent ids into the hash, so changing the parent of any layer above `to` would cascade re-ids through every descendant up to head. Rather than rewrite that tail, v1 simply forbids the case.
+
+A cleaner v2 resolution is a *resolve redirect* (forward pointer) installed on `to`:
+
+- Topology stays unchanged. Layers above `to` keep their existing parent pointers and their existing `LayerId`s.
+- A new metadata entry — call it `redirect:<to> → <L_c>` — sits next to the topology entry. It is *not* part of any layer's identity hash; only the resolve walk consults it.
+- When `Layer::resolve` walks head→root and reaches `to`, it follows the redirect to `L_c` and continues the walk through `L_c`'s ancestor closure (i.e., `parent(from)` and below). The collapsed content stays accessible via `L_c`; the original layers in `(parent(from), to]` are GC-eligible once the redirect is in place.
+
+Two structural properties make this work:
+
+1. **Resolve-equivalence is preserved.** The redirect short-circuits the walk at `to` to go through `L_c`. Since `L_c` contains the top-of-stack value for every IRI in `[from..to]`, and `L_c.parent = parent(from)`, the walk returns the same values it returned before consolidation — for every IRI, from any head-rooted starting point above `to`.
+2. **No id cascade.** Because the redirect lives outside the hash domain, no layer needs to be re-ided. Branch refs, trace pins, task-record `layer_head` values, and external system keys that name layers by id all stay valid.
+
+Trade-offs and open questions for v2:
+
+- **Storage shape.** A dedicated `redirect:<position>` column family (or a field on `LayerHandle` populated when a redirect is installed). The redirect is one entry per consolidation operation; storage cost is negligible. Atomicity bundles into the existing single-`WriteBatch` per D23 §6.3.
+- **Resolve cost.** One extra hop at the redirect site. The bloom-skip pattern (D23 §5.2.2) still applies on both sides of the redirect. For deep chains the savings from collapsing dominate the one-hop cost.
+- **Redirect chaining.** Consolidating a range whose `to` is already a redirect target needs a policy. Two natural choices: (a) refuse — operator must `from = parent(existing_redirect_target)` instead; (b) collapse the chain of redirects into one. (b) is structurally cleaner; (a) is simpler.
+- **GC interaction.** When the redirect is installed, the layers in `(parent(from), to]` become unreachable from head-rooted resolves. They stay reachable for time-travel reads against intermediate layer ids until GC reclaims them — same lifecycle as the `to = head` case today.
+- **Time-travel reads against `to`.** A `at_layer = to` read still resolves the redirect (because the resolve walk starts at `to` and the redirect points to `L_c`). For an audit-style "what did the chain look like before consolidation?" view, the redirect needs a bypass mode, or the operator consults `db consolidate-summary` (D25 §10.1) to find the pre-consolidation history. v2 to decide.
+
+The redirect mechanism is largely orthogonal to the rest of D25's machinery and can ship as its own milestone (call it 17f) once a workload demands it. v1's `to = head` restriction is sufficient for the notebook-session-squash and rolling-window-consolidation patterns that motivated Phase 17; the redirect is the natural next step when operators want to consolidate older history while preserving newer commits.
+
 ## 13. Related work
 
 **Git rebase / squash.** The closest user-facing analog. `git rebase -i` lets a user squash a contiguous range of commits into one. The operations are not fully analogous: Git's squash modifies history by producing a new commit chain that doesn't share ancestry with the original; Eigenius's consolidation is content-addressed and the consolidated layer's `LayerId` is determined by content, so two independent squashes by different operators against the same range produce the same layer. Git's squash is also not atomic (it's a sequence of operations the user can interrupt mid-rebase); Eigenius's consolidation is a single `WriteBatch` per D23 §6.3.

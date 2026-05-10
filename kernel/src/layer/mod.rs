@@ -41,7 +41,8 @@ pub use cache::{
     MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
 };
 pub use consolidate::{
-    consolidate_chain, ConsolidateError, ConsolidateOpts, ConsolidationOutcome, TracePinPolicy,
+    consolidate_chain, estimate_consolidation, ConsolidateError, ConsolidateOpts,
+    ConsolidationEstimate, ConsolidationOutcome, TracePinPolicy,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{

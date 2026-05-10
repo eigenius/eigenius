@@ -28,7 +28,7 @@
 //! - 17a — top-of-stack algorithm + branch CAS for `to = head`. ✅
 //! - 17b — range validation: ancestral / merge-free / pin-free. ✅
 //! - 17c — bloom-cache eviction for collapsed layers. ✅
-//! - 17d — cost estimation gate + dry-run surface. *pending*
+//! - 17d — cost estimation gate + `estimate_consolidation` dry-run. ✅
 //! - 17e — CLI (`db consolidate`) + gRPC (`ConsolidateChain`) surfaces. *pending*
 //!
 //! The `ConsolidateError` enum ships with every final variant so
@@ -50,11 +50,11 @@ pub struct ConsolidateOpts {
     /// before computing. Default: `5_000_000`; deployment-tunable via
     /// `EIGENIUS_CONSOLIDATE_MAX_WALK_ENTRIES`.
     ///
-    /// **Milestone note.** The cost-estimation gate ships in 17d; the
-    /// current builds do not enforce this cap (the field is wired but
-    /// unused). The default sits on the conservative side for
-    /// hand-constructed test ranges (typical workspace chains are
-    /// well under this).
+    /// Predicted walk size is the upper bound
+    /// `sum(handle.resource_count for handle in range)` — counted
+    /// before the dedup pass, so ranges with heavy rewrites can trip
+    /// the cap even when the actual dedup'd walk would be modest
+    /// (D25 §12.5).
     pub max_walk_entries: u64,
     /// Trace-pin handling. v1 ships `Refuse` — the only supported
     /// policy. The variant exists on the API for forward compatibility
@@ -113,12 +113,14 @@ pub struct ConsolidationOutcome {
     /// `L_c` replaces them).
     pub collapsed_layer_count: u64,
     /// Crude upper bound on the bytes that the next GC pass will be
-    /// able to reclaim. v1 reports `0` — accurate sizing ships
-    /// alongside the cost-estimation surface in 17d.
+    /// able to reclaim. v1 reports `0` — operators using
+    /// `db consolidate-summary` (17e) can read the pre-/post-
+    /// consolidation chain size for the same effect at lower wire
+    /// cost. Accurate per-call sizing is a v2 nice-to-have.
     pub reclaimable_bytes_estimate: u64,
     /// `true` if the branch's head moved as part of the operation.
-    /// Always `true` in 17a (the only supported case); future
-    /// no-op consolidations may return `false`.
+    /// Always `true` in the current build (the only supported case);
+    /// future no-op consolidations may return `false`.
     pub head_advanced: bool,
 }
 
@@ -262,11 +264,167 @@ fn consolidate_chain_locked(
     storage: LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<ConsolidationOutcome, ConsolidateError> {
-    // Verify the branch's current head matches `to` — the consolidation
-    // contract is only meaningful when collapsing onto the current
-    // tip. (Operating against an older `to` would leave layers above
-    // `to` orphaned from the consolidated layer; that case isn't
-    // supported in v1.)
+    // Capture an Arc to the bloom cache before `storage` is consumed
+    // by the prep helper; we evict the collapsed layers' bloom
+    // entries at the tail of the operation (D25 §9). Cloning is
+    // cheap — the bundle holds Arcs internally.
+    let bloom_cache = Arc::clone(&storage.bloom_cache);
+
+    let prep = prepare_consolidation(branch, from, to, &opts, storage, backend)?;
+    let Prepared {
+        consolidated_layer,
+        range_layers,
+        collapsed_layer_count,
+        ..
+    } = prep;
+
+    // Persist the consolidated layer. `store_layer` writes the topo
+    // entry, bloom, content-hash index, resources, and chain pointer
+    // in one atomic WriteBatch per D23 §6.3. The fresh bloom for
+    // `consolidated_layer` is pre-populated in the cache by
+    // `LayerBuilder::build` — no separate insert needed.
+    backend
+        .store_layer(&consolidated_layer)
+        .map_err(ConsolidateError::WriteFailed)?;
+
+    // Advance the branch ref. Inside the branch lock so a concurrent
+    // `update_branch` can't interleave between the head check above
+    // and the put here.
+    backend
+        .put_branch(branch, consolidated_layer.id())
+        .map_err(ConsolidateError::WriteFailed)?;
+
+    // Bloom-cache eviction for the collapsed range (D25 §9). After
+    // the branch CAS, head-rooted resolves no longer reach these
+    // layers; their bloom entries are dead weight in the cache.
+    // GC reuses the same `evict_layer` hook when it actually deletes
+    // the layers; consolidation is an early trigger for bloom-side
+    // eviction. (The resource cache and triple index entries stay
+    // until GC actually removes the layers — they're keyed by
+    // `LayerId` and won't be queried after the branch advances, so
+    // the cost is bounded.)
+    for layer in &range_layers {
+        bloom_cache.evict_layer(layer.id());
+    }
+
+    Ok(ConsolidationOutcome {
+        consolidated_layer: consolidated_layer.id().clone(),
+        collapsed_layer_count,
+        reclaimable_bytes_estimate: 0,
+        head_advanced: true,
+    })
+}
+
+/// Non-mutating cost preview for a `consolidate_chain` call.
+///
+/// Runs the same validation, range walk, and top-of-stack build that
+/// `consolidate_chain` runs — and returns the predicted
+/// [`LayerId`] of the would-be consolidated layer — but does *not*
+/// persist the layer or advance the branch ref. The same typed errors
+/// (`RangeNotAncestral`, `RangeContainsMergeNode`,
+/// `RangeContainsTracePin`, `CostExceedsCap`, …) surface here too.
+///
+/// Backs the [`ConsolidateChain` `--dry-run`](D25 §5.3) CLI flag and
+/// the `EstimateConsolidation` gRPC (D25 §5.2). The operator pipes the
+/// estimate's `predicted_consolidated_layer` into a follow-up real
+/// `consolidate_chain` call to confirm the operation is doing what
+/// they expect.
+///
+/// **Cache footprint.** The estimate path builds the consolidated
+/// layer through `LayerBuilder::build`, which pre-populates the local
+/// storage bundle's bloom and resource caches. The layer is *not*
+/// persisted, so a subsequent `consolidate_chain` against the same
+/// range will produce the same `LayerId` and write it idempotently;
+/// the cached state survives and is reused.
+pub fn estimate_consolidation(
+    branch: &str,
+    from: LayerId,
+    to: LayerId,
+    opts: ConsolidateOpts,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<ConsolidationEstimate, ConsolidateError> {
+    crate::lattice::with_branch_lock(|| {
+        let prep = prepare_consolidation(branch, from, to, &opts, storage, backend)?;
+        Ok(ConsolidationEstimate {
+            predicted_consolidated_layer: prep.consolidated_layer.id().clone(),
+            collapsed_layer_count: prep.collapsed_layer_count,
+            predicted_walk_entries: prep.predicted_walk_entries,
+            actual_walk_entries: prep.actual_walk_entries,
+        })
+    })
+}
+
+/// Cost preview returned by [`estimate_consolidation`].
+#[derive(Debug, Clone)]
+pub struct ConsolidationEstimate {
+    /// The `LayerId` the consolidated layer would have if
+    /// `consolidate_chain` were invoked with the same inputs.
+    /// Content-addressed: the same range against the same parent
+    /// produces the same id across runs.
+    pub predicted_consolidated_layer: LayerId,
+    /// Number of layers in `[from..to]` that would be collapsed.
+    pub collapsed_layer_count: u64,
+    /// Upper-bound prediction of the top-of-stack walk size. Computed
+    /// as `sum(handle.resource_count for handle in range)`. This is
+    /// the value the cost cap (`ConsolidateOpts.max_walk_entries`) is
+    /// checked against — it's an upper bound because the walk skips
+    /// IRIs already seen in topper layers (D25 §12.5).
+    pub predicted_walk_entries: u64,
+    /// Actual deduplicated walk size after top-of-stack. Equals the
+    /// number of distinct IRIs across the range. Always
+    /// `≤ predicted_walk_entries`; the gap is the dedup savings (large
+    /// when the range contains heavy rewrites of the same IRI).
+    pub actual_walk_entries: u64,
+}
+
+/// Internal state that `consolidate_chain` and `estimate_consolidation`
+/// both produce — the result of validation + range walk + top-of-stack
+/// build. The persist + branch CAS + bloom-evict steps live only on
+/// the mutating path.
+struct Prepared {
+    consolidated_layer: Arc<Layer>,
+    /// Layers in `[from..to]` in head→root order. Carried out for
+    /// bloom-cache eviction on the mutating path; unused by the
+    /// estimate path.
+    range_layers: Vec<Arc<Layer>>,
+    collapsed_layer_count: u64,
+    predicted_walk_entries: u64,
+    actual_walk_entries: u64,
+}
+
+/// Shared prep: verify the branch head, validate the range against
+/// the typed checks, evaluate the cost cap, run the top-of-stack
+/// walk, and build the consolidated layer. Both `consolidate_chain`
+/// and `estimate_consolidation` lower to this function; the persist +
+/// CAS steps are layered on top by the former.
+///
+/// Must be called from inside the branch lock.
+fn prepare_consolidation(
+    branch: &str,
+    from: LayerId,
+    to: LayerId,
+    opts: &ConsolidateOpts,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<Prepared, ConsolidateError> {
+    // Verify the branch's current head matches `to`. v1 collapses
+    // onto the tip only: any layers above `to` would still encode
+    // `to` (or its ancestors) in their position hashes, so changing
+    // their parent to `L_c` would cascade re-ids through head.
+    //
+    // **v2 relaxation (forward pointers).** The cascade can be
+    // avoided by introducing a *resolve redirect* on `to` —
+    // metadata that says "walk through `L_c` instead of my content"
+    // — without touching the topology hashes. Layers above `to`
+    // keep their parent pointers; only the resolve walk
+    // short-circuits. The redirect lives next to the topo entry,
+    // not inside the hash domain. Captured in D25 §12.8.
+    //
+    // For v1 the `to = head` restriction is enough for the
+    // "notebook session squash" pattern, which is the primary
+    // workload. The forward-pointer machinery lands when an
+    // operator-facing requirement justifies it.
     let observed_head = backend
         .get_branch(branch)
         .map_err(ConsolidateError::WriteFailed)?;
@@ -277,41 +435,31 @@ fn consolidate_chain_locked(
         });
     }
 
-    // Load the chain from `to` and rebuild the in-memory layer tree.
-    // We need actual `Layer`s (not just handles) so we can call
-    // `get_resource` for the top-of-stack copy. `build_chain` is the
-    // standard reader path used by `bootstrap_persistent`'s resume.
+    // Load the chain from `to`. The handles retain authoritative
+    // multi-parent topology (`build_chain` would collapse it to
+    // `parents.first()` for single-parent Layer reconstruction), so
+    // we validate against handles before the chain is rebuilt.
     let info = backend
         .load_chain_from(&to)
         .map_err(ConsolidateError::WriteFailed)?
         .ok_or_else(|| ConsolidateError::Internal(format!("chain absent for head {to}")))?;
 
     // Validate the range against the on-disk handles. `info.handles`
-    // is in root→head order and retains the authoritative multi-parent
-    // topology; we walk it reversed (head→root) for the validation
-    // and bail on the first reject. We do this *before* reconstructing
-    // the Layer chain because `build_chain` collapses multi-parent
-    // handles to their canonical first parent — running the merge
-    // check against the rebuilt Layer would always see one parent.
+    // is in root→head order; we walk it reversed (head→root) for the
+    // validation and bail on the first reject. The cost-cap predicate
+    // is computed during the same walk from `handle.resource_count`
+    // (the recorded `defined_iris.len()` per layer) — predicted
+    // walk-entry count is an upper bound on the actual top-of-stack
+    // pass (D25 §12.5).
     let mut range_ids: Vec<LayerId> = Vec::new();
+    let mut predicted_walk_entries: u64 = 0;
     let mut found_from = false;
     for handle in info.handles.iter().rev() {
-        // Merge-node check: v1 refuses to consolidate across a layer
-        // with multiple topological parents. D25 §8.1's resolution-
-        // decision invariant requires the merge node and its
-        // `consolidated_resolutions` cascade-acks to stay on the
-        // chain. v2 multi-parent consolidation (§8.2) lifts this.
         if handle.parents.len() > 1 {
             return Err(ConsolidateError::RangeContainsMergeNode {
                 merge_layer: handle.id.clone(),
             });
         }
-        // Trace-pin check: if the caller-supplied `pinned_layers`
-        // table reports any pins for this layer, refuse per
-        // `TracePinPolicy::Refuse` (the only v1 policy). The error
-        // carries the pin count so the operator can surface how
-        // busy the layer is — useful when deciding whether to wait
-        // for traces to drain vs. prune them.
         if opts.trace_pin_policy == TracePinPolicy::Refuse {
             if let Some(&trace_count) = opts.pinned_layers.get(&handle.id) {
                 if trace_count > 0 {
@@ -322,6 +470,7 @@ fn consolidate_chain_locked(
                 }
             }
         }
+        predicted_walk_entries = predicted_walk_entries.saturating_add(handle.resource_count);
         range_ids.push(handle.id.clone());
         if handle.id == from {
             found_from = true;
@@ -330,6 +479,19 @@ fn consolidate_chain_locked(
     }
     if !found_from {
         return Err(ConsolidateError::RangeNotAncestral { from, to });
+    }
+
+    // Cost-cap gate (D25 §6). The cap is checked *before* the
+    // expensive top-of-stack walk so we fail fast on pathological
+    // ranges. The bound is conservative — `predicted_walk_entries`
+    // counts every (layer, defined_iri) pair before dedup, so a
+    // range that *would* dedup heavily under the actual walk can
+    // still trip the cap. v1 accepts this; v2 may invest in a tighter
+    // estimate (§12.5).
+    if predicted_walk_entries > opts.max_walk_entries {
+        return Err(ConsolidateError::CostExceedsCap {
+            predicted_entries: predicted_walk_entries,
+        });
     }
 
     // Validation passed — reconstruct the chain so the top-of-stack
@@ -373,6 +535,7 @@ fn consolidate_chain_locked(
     }
 
     let collapsed_layer_count = range_layers.len() as u64;
+    let actual_walk_entries = seen_iris.len() as u64;
 
     // Build the consolidated layer. Name carries the range as a
     // diagnostic hint (it's metadata-only, not in any hash) so log
@@ -390,47 +553,14 @@ fn consolidate_chain_locked(
             ConsolidateError::Internal(format!("consolidated layer rejected resource: {e}"))
         })?;
     }
-    // Capture an Arc to the bloom cache before `storage` is consumed
-    // by `builder.build`; we evict the collapsed layers' bloom entries
-    // at the tail of the operation (D25 §9). Cloning is cheap — the
-    // bundle holds Arcs internally.
-    let bloom_cache = Arc::clone(&storage.bloom_cache);
-    let consolidated_layer = builder.build(storage);
+    let consolidated_layer = Arc::new(builder.build(storage));
 
-    // Persist the consolidated layer. `store_layer` writes the topo
-    // entry, bloom, content-hash index, resources, and chain pointer
-    // in one atomic WriteBatch per D23 §6.3. The fresh bloom for
-    // `consolidated_layer` is pre-populated in the cache by
-    // `LayerBuilder::build` — no separate insert needed.
-    backend
-        .store_layer(&consolidated_layer)
-        .map_err(ConsolidateError::WriteFailed)?;
-
-    // Advance the branch ref. Inside the branch lock so a concurrent
-    // `update_branch` can't interleave between the head check above
-    // and the put here.
-    backend
-        .put_branch(branch, consolidated_layer.id())
-        .map_err(ConsolidateError::WriteFailed)?;
-
-    // Bloom-cache eviction for the collapsed range (D25 §9). After
-    // the branch CAS, head-rooted resolves no longer reach these
-    // layers; their bloom entries are dead weight in the cache.
-    // GC reuses the same `evict_layer` hook when it actually deletes
-    // the layers; consolidation is an early trigger for bloom-side
-    // eviction. (The resource cache and triple index entries stay
-    // until GC actually removes the layers — they're keyed by
-    // `LayerId` and won't be queried after the branch advances, so
-    // the cost is bounded.)
-    for layer in &range_layers {
-        bloom_cache.evict_layer(layer.id());
-    }
-
-    Ok(ConsolidationOutcome {
-        consolidated_layer: consolidated_layer.id().clone(),
+    Ok(Prepared {
+        consolidated_layer,
+        range_layers,
         collapsed_layer_count,
-        reclaimable_bytes_estimate: 0,
-        head_advanced: true,
+        predicted_walk_entries,
+        actual_walk_entries,
     })
 }
 
@@ -823,8 +953,6 @@ mod tests {
     /// path immediately, without probing dead bloom entries.
     #[test]
     fn bloom_cache_drops_collapsed_layers_and_caches_consolidated_layer() {
-        use crate::layer::BloomCache;
-
         let backend = MemoryPersistentBackend::new();
         let (head, layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
@@ -902,5 +1030,188 @@ mod tests {
         let outcome = consolidate_chain("main", from, head.id().clone(), opts, storage, &backend)
             .expect("consolidation succeeds when no pins inside the range have nonzero counts");
         assert!(outcome.head_advanced);
+    }
+
+    // ─── 17d cost estimation + dry-run ───────────────────────────────────
+
+    /// Cost cap fires before the top-of-stack walk runs. Each chain
+    /// layer in `build_chain_of` defines a single resource, so a
+    /// 10-layer range carries `predicted_walk_entries = 10`. Setting
+    /// the cap to a value below that should return `CostExceedsCap`
+    /// with the predicted count surfaced for the operator.
+    #[test]
+    fn cost_cap_rejects_oversized_range() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(10, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        let opts = ConsolidateOpts {
+            max_walk_entries: 5,
+            ..ConsolidateOpts::default()
+        };
+        let err = consolidate_chain(
+            "main",
+            layers[1].id().clone(),
+            head.id().clone(),
+            opts,
+            storage,
+            &backend,
+        )
+        .unwrap_err();
+        match err {
+            ConsolidateError::CostExceedsCap { predicted_entries } => {
+                // 10 single-resource layers in the range → predicted = 10.
+                assert_eq!(
+                    predicted_entries, 10,
+                    "predicted count must equal sum of handle.resource_count over the range"
+                );
+            }
+            other => panic!("expected CostExceedsCap, got {other:?}"),
+        }
+    }
+
+    /// `estimate_consolidation` returns the predicted `LayerId` and
+    /// cost without persisting or advancing the branch. Subsequent
+    /// real consolidation produces the *same* `LayerId` — that's the
+    /// content-addressed identity guarantee, surfaced through the
+    /// dry-run flow.
+    #[test]
+    fn estimate_predicts_actual_consolidated_layer_id() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(8, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+        let head_before_estimate = backend.get_branch("main").unwrap();
+
+        let from = layers[2].id().clone();
+        let estimate = estimate_consolidation(
+            "main",
+            from.clone(),
+            head.id().clone(),
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("estimate succeeds");
+
+        // No persistence: the branch head is unchanged and the
+        // predicted layer hasn't been committed as a topology entry.
+        assert_eq!(
+            backend.get_branch("main").unwrap(),
+            head_before_estimate,
+            "estimate must not advance the branch ref"
+        );
+        assert!(
+            backend
+                .load_chain_from(&estimate.predicted_consolidated_layer)
+                .unwrap()
+                .is_none(),
+            "estimate must not persist the predicted layer to the backend"
+        );
+
+        // Counts: predicted is the upper-bound sum; actual is the
+        // dedup'd top-of-stack. Each chain layer defines exactly one
+        // distinct IRI, so the two are equal here.
+        assert_eq!(estimate.collapsed_layer_count, 7);
+        assert_eq!(estimate.predicted_walk_entries, 7);
+        assert_eq!(estimate.actual_walk_entries, 7);
+
+        // Real consolidation against the same range produces the same id.
+        let outcome = consolidate_chain(
+            "main",
+            from,
+            head.id().clone(),
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
+        .expect("real consolidation succeeds");
+        assert_eq!(
+            outcome.consolidated_layer, estimate.predicted_consolidated_layer,
+            "the estimate's predicted LayerId must equal what consolidate_chain produces"
+        );
+    }
+
+    /// Estimate surfaces the same typed validation errors as
+    /// `consolidate_chain` — a bad range is rejected at the estimate
+    /// stage, no need to wait for the real operation.
+    #[test]
+    fn estimate_surfaces_validation_errors() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, _layers, storage) = build_chain_of(5, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        let bogus_from = LayerId([0xff; 32]);
+        let err = estimate_consolidation(
+            "main",
+            bogus_from.clone(),
+            head.id().clone(),
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
+        .unwrap_err();
+        match err {
+            ConsolidateError::RangeNotAncestral { from, .. } => assert_eq!(from, bogus_from),
+            other => panic!("expected RangeNotAncestral from estimate, got {other:?}"),
+        }
+    }
+
+    /// Dedup savings show up as `actual_walk_entries <
+    /// predicted_walk_entries` when the range contains layers that
+    /// redefine the same IRI. The upper-bound prediction is the sum
+    /// over `resource_count`; the actual walk counts distinct IRIs
+    /// (D25 §12.5). Same-IRI redefinitions are the canonical
+    /// notebook-cell-edit pattern.
+    #[test]
+    fn estimate_reports_dedup_savings_for_rewrite_ranges() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
+            .unwrap();
+        rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        // Three layers, each redefining the *same* demo:X resource.
+        // Predicted walk = 3 (one per handle); actual = 1 (one distinct
+        // IRI after dedup).
+        let mut current = Arc::clone(&root);
+        let mut layers = Vec::new();
+        for i in 0..3 {
+            let mut b = LayerBuilder::new(&format!("L{i}"), Some(Arc::clone(&current)));
+            b.add_resource(make_resource(
+                "urn:eigenius:demo:X",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String(format!("v{i}")),
+                )],
+            ))
+            .unwrap();
+            let layer = Arc::new(b.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            layers.push(Arc::clone(&layer));
+            current = layer;
+        }
+        let head = Arc::clone(&current);
+        backend.put_branch("main", head.id()).unwrap();
+
+        let estimate = estimate_consolidation(
+            "main",
+            layers[0].id().clone(),
+            head.id().clone(),
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
+        .expect("estimate succeeds");
+
+        assert_eq!(estimate.predicted_walk_entries, 3);
+        assert_eq!(
+            estimate.actual_walk_entries, 1,
+            "three layers redefining the same IRI dedup to one distinct entry"
+        );
     }
 }
