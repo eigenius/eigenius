@@ -29,6 +29,7 @@
 
 mod bloom;
 mod cache;
+mod consolidate;
 mod handle;
 mod index;
 mod storage;
@@ -38,6 +39,9 @@ pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{
     BloomCache, BoundedResourceCache, CacheStats, CacheTier, MemoryBloomCache,
     MemoryResourceBackend, MemoryResourceCache, ResourceCache, ResourceKey,
+};
+pub use consolidate::{
+    consolidate_chain, ConsolidateError, ConsolidateOpts, ConsolidationOutcome, TracePinPolicy,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{
