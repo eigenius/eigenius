@@ -24,19 +24,22 @@
 //! the resolve-equivalence invariant and [§6](../../../docs/design/d25-chain-consolidation.md)
 //! for the top-of-stack walk algorithm.
 //!
-//! **17a scope.** Implements the core algorithm + branch CAS for the
-//! `to = current_branch_head` case. Range validation against merge
-//! nodes and trace-pins (17b), bloom-cache eviction (17c), cost
-//! estimation + dry-run (17d), and CLI / gRPC surfaces (17e) are
-//! sequenced separately. The `ConsolidateError` enum is shipped with
-//! all final variants so downstream code can match exhaustively even
-//! before the corresponding validations are wired in.
+//! **Milestone status (D25 §11.1):**
+//! - 17a — top-of-stack algorithm + branch CAS for `to = head`. ✅
+//! - 17b — range validation: ancestral / merge-free / pin-free. ✅
+//! - 17c — bloom-cache eviction for collapsed layers. *pending*
+//! - 17d — cost estimation gate + dry-run surface. *pending*
+//! - 17e — CLI (`db consolidate`) + gRPC (`ConsolidateChain`) surfaces. *pending*
+//!
+//! The `ConsolidateError` enum ships with every final variant so
+//! downstream code can match exhaustively even before later milestones
+//! land their corresponding validations.
 
 use crate::layer::{Layer, LayerBuilder, LayerId, LayerStorage};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use crate::storage::{PersistentBackend, StorageError};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 /// Options governing a `consolidate_chain` call.
@@ -47,18 +50,31 @@ pub struct ConsolidateOpts {
     /// before computing. Default: `5_000_000`; deployment-tunable via
     /// `EIGENIUS_CONSOLIDATE_MAX_WALK_ENTRIES`.
     ///
-    /// **17a note.** The cost-estimation gate ships in 17d; 17a does
-    /// not enforce this cap (the field is wired but unused). The
-    /// default sits on the conservative side for hand-constructed
-    /// test ranges (typical workspace chains are well under this).
+    /// **Milestone note.** The cost-estimation gate ships in 17d; the
+    /// current builds do not enforce this cap (the field is wired but
+    /// unused). The default sits on the conservative side for
+    /// hand-constructed test ranges (typical workspace chains are
+    /// well under this).
     pub max_walk_entries: u64,
     /// Trace-pin handling. v1 ships `Refuse` — the only supported
     /// policy. The variant exists on the API for forward compatibility
     /// with v2 re-pointing / invalidation policies (D25 §7.2).
-    ///
-    /// **17a note.** The trace-pin check ships in 17b; 17a always
-    /// proceeds regardless of the field value.
     pub trace_pin_policy: TracePinPolicy,
+    /// Layers pinned by external state — typically `TaskRecord.layer_head`
+    /// values across active sessions (D21). Caller-supplied because the
+    /// kernel doesn't enumerate sessions; the same pattern GC uses via
+    /// `GcRoots.task_pins`.
+    ///
+    /// Map value is the pin count for that layer. v1 surfaces this in
+    /// the typed error so the operator can tell whether a single stale
+    /// task is blocking consolidation versus a busy workload genuinely
+    /// using the range.
+    ///
+    /// Empty (the default) means "no pins known to the caller" —
+    /// equivalent to skipping the pin check. Production callers should
+    /// populate this from the task store before invoking; the CLI / gRPC
+    /// surfaces in 17e make this a first-class concern.
+    pub pinned_layers: BTreeMap<LayerId, u64>,
 }
 
 impl Default for ConsolidateOpts {
@@ -66,6 +82,7 @@ impl Default for ConsolidateOpts {
         Self {
             max_walk_entries: 5_000_000,
             trace_pin_policy: TracePinPolicy::Refuse,
+            pinned_layers: BTreeMap::new(),
         }
     }
 }
@@ -221,7 +238,7 @@ pub fn consolidate_chain(
     branch: &str,
     from: LayerId,
     to: LayerId,
-    _opts: ConsolidateOpts,
+    opts: ConsolidateOpts,
     storage: LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<ConsolidationOutcome, ConsolidateError> {
@@ -233,7 +250,7 @@ pub fn consolidate_chain(
     // CAS pair stays consistent via the lock, the same pattern
     // `update_branch` uses today).
     crate::lattice::with_branch_lock(|| {
-        consolidate_chain_locked(branch, from, to, storage, backend)
+        consolidate_chain_locked(branch, from, to, opts, storage, backend)
     })
 }
 
@@ -241,6 +258,7 @@ fn consolidate_chain_locked(
     branch: &str,
     from: LayerId,
     to: LayerId,
+    opts: ConsolidateOpts,
     storage: LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<ConsolidationOutcome, ConsolidateError> {
@@ -267,28 +285,72 @@ fn consolidate_chain_locked(
         .load_chain_from(&to)
         .map_err(ConsolidateError::WriteFailed)?
         .ok_or_else(|| ConsolidateError::Internal(format!("chain absent for head {to}")))?;
-    let head = crate::layer::build_chain(info, storage.clone());
 
-    // Walk head→root, collecting layers in the range and the parent
-    // of `from`. The walk stops at `from` (inclusive); anything below
-    // is left unchanged.
+    // Validate the range against the on-disk handles. `info.handles`
+    // is in root→head order and retains the authoritative multi-parent
+    // topology; we walk it reversed (head→root) for the validation
+    // and bail on the first reject. We do this *before* reconstructing
+    // the Layer chain because `build_chain` collapses multi-parent
+    // handles to their canonical first parent — running the merge
+    // check against the rebuilt Layer would always see one parent.
+    let mut range_ids: Vec<LayerId> = Vec::new();
+    let mut found_from = false;
+    for handle in info.handles.iter().rev() {
+        // Merge-node check: v1 refuses to consolidate across a layer
+        // with multiple topological parents. D25 §8.1's resolution-
+        // decision invariant requires the merge node and its
+        // `consolidated_resolutions` cascade-acks to stay on the
+        // chain. v2 multi-parent consolidation (§8.2) lifts this.
+        if handle.parents.len() > 1 {
+            return Err(ConsolidateError::RangeContainsMergeNode {
+                merge_layer: handle.id.clone(),
+            });
+        }
+        // Trace-pin check: if the caller-supplied `pinned_layers`
+        // table reports any pins for this layer, refuse per
+        // `TracePinPolicy::Refuse` (the only v1 policy). The error
+        // carries the pin count so the operator can surface how
+        // busy the layer is — useful when deciding whether to wait
+        // for traces to drain vs. prune them.
+        if opts.trace_pin_policy == TracePinPolicy::Refuse {
+            if let Some(&trace_count) = opts.pinned_layers.get(&handle.id) {
+                if trace_count > 0 {
+                    return Err(ConsolidateError::RangeContainsTracePin {
+                        pinned_layer: handle.id.clone(),
+                        trace_count,
+                    });
+                }
+            }
+        }
+        range_ids.push(handle.id.clone());
+        if handle.id == from {
+            found_from = true;
+            break;
+        }
+    }
+    if !found_from {
+        return Err(ConsolidateError::RangeNotAncestral { from, to });
+    }
+
+    // Validation passed — reconstruct the chain so the top-of-stack
+    // walk can call `get_resource`. The merge case is already
+    // rejected above, so every layer we visit here is single-parent.
+    let head = crate::layer::build_chain(info, storage.clone());
+    let range_id_set: BTreeSet<&LayerId> = range_ids.iter().collect();
     let mut range_layers: Vec<Arc<Layer>> = Vec::new();
     let mut parent_of_from: Option<Arc<Layer>> = None;
-    let mut found_from = false;
     let mut current: Option<Arc<Layer>> = Some(head);
     while let Some(layer) = current {
         let is_from = layer.id() == &from;
         let next = layer.parent().cloned();
-        range_layers.push(Arc::clone(&layer));
+        if range_id_set.contains(layer.id()) {
+            range_layers.push(Arc::clone(&layer));
+        }
         if is_from {
             parent_of_from = next.clone();
-            found_from = true;
             break;
         }
         current = next;
-    }
-    if !found_from {
-        return Err(ConsolidateError::RangeNotAncestral { from, to });
     }
 
     // Top-of-stack: walk the range head→root (already the walk order
@@ -620,5 +682,144 @@ mod tests {
             }
             other => panic!("expected RangeNotAncestral, got {other:?}"),
         }
+    }
+
+    // ─── 17b range validation ──────────────────────────────────────────
+
+    /// Range crossing a merge node is refused per D25 §8.1. Build a
+    /// fork at A with two children B1, B2; combine into merge M with
+    /// `parents = [B1, B2]`; commit C on top of M. Asking to
+    /// consolidate everything down to A trips the merge check and
+    /// returns `RangeContainsMergeNode { merge_layer: M }` — the
+    /// resolution decisions M encodes can't survive collapse in v1.
+    #[test]
+    fn refuses_consolidation_when_range_crosses_merge_node() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+
+        // Root carries the core declarations every descendant references.
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
+            .unwrap();
+        rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        // A — single shared ancestor of the fork.
+        let mut ab = LayerBuilder::new("A", Some(Arc::clone(&root)));
+        ab.add_resource(make_resource("urn:eigenius:demo:A_marker", vec![]))
+            .unwrap();
+        let a = Arc::new(ab.build(storage.clone()));
+        backend.store_layer(&a).unwrap();
+
+        // Two children of A with disjoint IRIs.
+        let mut b1b = LayerBuilder::new("B1", Some(Arc::clone(&a)));
+        b1b.add_resource(make_resource("urn:eigenius:demo:B1_marker", vec![]))
+            .unwrap();
+        let b1 = Arc::new(b1b.build(storage.clone()));
+        backend.store_layer(&b1).unwrap();
+
+        let mut b2b = LayerBuilder::new("B2", Some(Arc::clone(&a)));
+        b2b.add_resource(make_resource("urn:eigenius:demo:B2_marker", vec![]))
+            .unwrap();
+        let b2 = Arc::new(b2b.build(storage.clone()));
+        backend.store_layer(&b2).unwrap();
+
+        // Trivial merge layer M with parents [B1, B2]. Empty content;
+        // its load-bearing trait is `parents().len() == 2`.
+        let mb = LayerBuilder::with_parents("M", vec![Arc::clone(&b1), Arc::clone(&b2)]);
+        let m = Arc::new(mb.build(storage.clone()));
+        assert_eq!(m.parents().len(), 2);
+        backend.store_layer(&m).unwrap();
+
+        // C — child of M; becomes the branch head we'll point at.
+        let mut cb = LayerBuilder::new("C", Some(Arc::clone(&m)));
+        cb.add_resource(make_resource("urn:eigenius:demo:C_marker", vec![]))
+            .unwrap();
+        let c = Arc::new(cb.build(storage.clone()));
+        backend.store_layer(&c).unwrap();
+
+        backend.put_branch("main", c.id()).unwrap();
+
+        // Attempt to consolidate [A..C]. The walk hits C (single-parent),
+        // then M (two parents) — the check fires there.
+        let err = consolidate_chain(
+            "main",
+            a.id().clone(),
+            c.id().clone(),
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
+        .unwrap_err();
+        match err {
+            ConsolidateError::RangeContainsMergeNode { merge_layer } => {
+                assert_eq!(&merge_layer, m.id());
+            }
+            other => panic!("expected RangeContainsMergeNode, got {other:?}"),
+        }
+    }
+
+    /// Range containing a layer the caller has flagged as pinned is
+    /// refused per `TracePinPolicy::Refuse`. The error carries the
+    /// pin count so the operator can tell whether one stale task is
+    /// blocking or whether the layer is genuinely busy.
+    #[test]
+    fn refuses_consolidation_when_range_layer_is_pinned() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(5, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        // Pin one layer in the middle of the chain.
+        let pinned = layers[3].id().clone();
+        let mut opts = ConsolidateOpts::default();
+        opts.pinned_layers.insert(pinned.clone(), 3);
+
+        let err = consolidate_chain(
+            "main",
+            layers[1].id().clone(),
+            head.id().clone(),
+            opts,
+            storage,
+            &backend,
+        )
+        .unwrap_err();
+        match err {
+            ConsolidateError::RangeContainsTracePin {
+                pinned_layer,
+                trace_count,
+            } => {
+                assert_eq!(pinned_layer, pinned);
+                assert_eq!(trace_count, 3);
+            }
+            other => panic!("expected RangeContainsTracePin, got {other:?}"),
+        }
+    }
+
+    /// Pins on layers *outside* the consolidation range do not block
+    /// the operation. Pins below `from` (older history that survives
+    /// consolidation unchanged) and pins recorded with a zero count
+    /// (a stale entry) should both be ignored.
+    #[test]
+    fn pins_outside_range_do_not_block_consolidation() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(5, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        let from = layers[3].id().clone();
+        let outside_below = layers[1].id().clone();
+        assert_ne!(outside_below, from);
+
+        let mut opts = ConsolidateOpts::default();
+        // A pin on a layer below `from` (outside the range) — must be ignored.
+        opts.pinned_layers.insert(outside_below, 5);
+        // A zero-count entry on a layer inside the range — must be ignored
+        // (the entry exists but the pin's been drained).
+        opts.pinned_layers.insert(from.clone(), 0);
+
+        let outcome = consolidate_chain("main", from, head.id().clone(), opts, storage, &backend)
+            .expect("consolidation succeeds when no pins inside the range have nonzero counts");
+        assert!(outcome.head_advanced);
     }
 }
