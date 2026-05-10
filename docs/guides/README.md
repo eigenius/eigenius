@@ -39,7 +39,7 @@ For most users, the notebook is the most accessible way to use the platform. A R
 
 ## User guides
 
-Four task-first guides, grounded in the implementation. Every claim links to the kernel module, CLI command, example crate, or test that implements it.
+Five task-first guides, grounded in the implementation. Every claim links to the kernel module, CLI command, example crate, or test that implements it.
 
 ### [Platform user guide →](platform/README.md)
 
@@ -69,6 +69,12 @@ The chain-mirrored Mini-TT fragment shared by every numerical institution on the
 
 **Eight chapters covering**: the three-surface mental model (Mini-TT fragment / Eigon-JSON encoding / ESL `formula(...)` sublanguage); the six constructors and why two are binders; the tagged-dict embedding and validator's inductive-value rule; the operator catalog and signature-driven arity check; the Pratt-parsed `formula(...)` ESL sublanguage; identity-comorphism collapse when both endpoints share FormulaTerm; common failure modes; appendix.
 
+### [Composing institutions →](composition/README.md)
+
+The cross-cutting story none of the per-host chapters tell on their own — what happens when *several institutions* cooperate over a shared payload through declared comorphisms. The kinase-institutions notebook is the running example: five Julia institutions, three cross-institution comorphisms, two storylines, and the [D14 §9.3](../design/d14-institution-realisation.md) chain-reinsertion contract closed through both ESL `Exp::InstitutionInvoke` and EigenQL `FIBER ... INTO`.
+
+**Nine chapters covering**: the three layers of composition (shared payload / declared comorphisms / coordinated dispatch roles); shared payload languages and identity-comorphism collapse; the triadic structure of comorphisms with the four-step dispatch pipeline; the three dispatch roles (AutoOnLoad / OnDemand / Decidable) in concert; chain reinsertion of comorphism outputs through both surfaces; an end-to-end walkthrough of the kinase notebook; composition patterns and anti-patterns; cross-composition failure modes; appendix with a research-direction note on translating institution theory from set + model theory into constructive type theory.
+
 ### [References →](references/README.md)
 
 A consolidated bibliography for the platform — what we cite, what we depend on, what came before us, and what we share contemporary ground with. Generated from the BibTeX files in [`docs/references/`](../references/) by `scripts/bib-to-md.py`.
@@ -77,7 +83,7 @@ A consolidated bibliography for the platform — what we cite, what we depend on
 
 ## How the guides relate
 
-The **platform** guide is operational — it covers everything *around* writing ESL / EigenQL / formulas: installing, running, managing data, deploying, building WASM and substrate extensions. The **ESL**, **EigenQL**, and **formula** guides are surface-language references — they cover what you write *into* the system.
+The **platform** guide is operational — it covers everything *around* writing ESL / EigenQL / formulas: installing, running, managing data, deploying, building WASM and substrate extensions. The **ESL**, **EigenQL**, and **formula** guides are surface-language references — they cover what you write *into* the system. The **composition** guide is the cross-cutting story — what happens when multiple institutions cooperate, the topic neither the per-host platform chapters nor the surface-language guides can cover cleanly on their own.
 
 ESL **computes**; EigenQL **retrieves and filters**; formula **expresses typed expression trees** consumed by every numerical institution. The three share the same kernel primitives — most importantly the [`InstitutionIndex`](../../kernel/src/institution/registry.rs) classification (D14 §9.5), which means the same qualified-name IRI dispatches identically from ESL and EigenQL ([ESL §9.8](esl/09-institutions.md), [EigenQL §8](eigenql/08-institutions.md)); and the chain-resident `formulas:FormulaTerm` shape is the payload language every numerical institution speaks ([formula §1](formula/01-introduction.md)).
 
