@@ -20,7 +20,7 @@ The single most important chapter for understanding *how Eigenius differs from a
 
 4. **[Declarations](04-declarations.md)** — per-form reference: `namespace`, `class`, `property`, `resource`, `data` (inductive types with bounded binders), `codata` (coinductive types), `program`. Syntax + emitted resource shape + kernel mapping for each.
 
-5. **[Expressions](05-expressions.md)** — per-construct reference for the program-body sublanguage: `let`, `Apply`, `Lambda`, `Case`, `Match`, `Construct`, `Project`, `MapExpr`, `ReduceExpr`, `CoRecord`, `Pair`, `Literal`, `Var`. For each: syntax, kernel `Exp` it compiles to, type-check rule, evaluation rule, capability-mode notes.
+5. **[Expressions](05-expressions.md)** — per-construct reference for the program-body sublanguage: `let`, `Apply`, `Lambda`, `Case`, `Match`, `Construct`, `Project`, `MapExpr`, `ReduceExpr`, `CoRecord`, `Pair`, `Literal`, `Var`, plus the `formula(...)` Pratt-parsed math sublanguage that lowers to chain-resident `formulas:FormulaTerm` values (full reference in the [formula language guide](../formula/README.md)). For each: syntax, kernel `Exp` it compiles to, type-check rule, evaluation rule, capability-mode notes.
 
 6. **[Resources, types, and the layer](06-resources-types-and-the-layer.md)** — *the bridge chapter*. How a single IRI is simultaneously a resource you can query and a type you can ascribe. Ontology-as-types resolution. The mappings table (declaration ↔ resource shape ↔ kernel term/type). When and how the kernel calls back into the layer.
 

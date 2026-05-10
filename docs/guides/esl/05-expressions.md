@@ -272,7 +272,34 @@ Compile to `program:Literal` carrying the value with its data type. Kernel form 
 
 **Evaluation.** Identity — the literal is its own value.
 
-## 5.14. Capability modes — quick reference
+## 5.14. `formula(...)` — typed expression-tree literals
+
+A `formula(...)` block opens a Pratt-parsed math sublanguage *inside* an ESL expression. It compiles to a chain-resident `formulas:FormulaTerm` value — the typed expression-tree language every numerical institution speaks (Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS).
+
+```esl
+namespace symbolics = "urn:eigenius:symbolics";
+namespace nb        = "urn:eigenius:notebook:kinase_demo";
+
+resource nb:rhs_A : diffeq:RhsComponent {
+    diffeq:term = formula(-1 * A * k);  // dA/dt = -k·A
+}
+
+resource nb:sse_expr : symbolics:SymbolicExpression {
+    symbolics:term = formula((34 - 2*Ki)^2 + (68 - 4*Ki)^2 + (170 - 10*Ki)^2);
+}
+```
+
+Inside the parens you can write `+ - * / ^`, function calls (`sin(x)`, `pow(a, b)`), parens, unary minus, `Var`-shaped identifiers, and float literals. Standard math precedence; `^` is right-associative. Function names lower to the chain operator catalog at `urn:eigenius:formulas:ops:<name>`; unknown operators are accepted by the parser but rejected by the chain validator at commit time.
+
+**Compile target.** A `Value::CtorApp` literal mirroring the FormulaTerm tree (`App`, `OpRef`, `Var`, `LitFloat`, …). The kernel emits the canonical Eigon-JSON tagged-dict shape `{"ctor": "App", "args": [head, arg]}` recursively, which the validator type-checks against `formulas:FormulaTerm`'s ctor schema and against each operator's declared `Pi`-spine arity (`OperatorArityMismatch` if the spine is wider than the signature).
+
+**Lexer note (Phase 19f.3).** A bare `-` no longer folds into a numeric literal at lex time, so `formula(x - 2)` lexes correctly as `Minus IntLit(2)` (binary subtraction) rather than `Minus IntLit(-2)`. Outside `formula(...)`, the legacy `ex:value = -1.5;` shape (unary minus on a numeric literal) is handled by `parse_value` and still works.
+
+**Where this is allowed.** Any expression position. The most common shapes are property values inside `resource` declarations (as above) and `let` bindings.
+
+This is the entry point for the platform's typed numerical surface. The full reference — six constructors, operator catalog, validator rule, Eigon-JSON encoding, identity-comorphism collapse across institutions — lives in the [formula language guide](../formula/README.md), specifically [§5 ESL `formula(...)` sublanguage](../formula/05-esl-sublanguage.md).
+
+## 5.15. Capability modes — quick reference
 
 [Chapter 8](08-capability-modes.md) covers this in detail. The short version:
 
