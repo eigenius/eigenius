@@ -382,19 +382,74 @@ impl BranchContextCache {
 }
 
 /// Outcome of [`EigeniusService::persist_layer_if_backend`] — the
-/// canonical `LayerId` for the committed content paired with a flag
-/// indicating whether the durable branch ref actually moved.
+/// canonical `LayerId` for the committed content paired with the
+/// merge outcome and a derived `branch_advanced` flag.
 ///
-/// `branch_advanced` is `false` only on a **different-position**
-/// anchored-commit cache hit (D33 §6), where the canonical layer
-/// already lives elsewhere in the DAG and `update_branch` is skipped,
-/// or when no persistent backend is configured. Every other path —
-/// cache miss and same-position cache hit — runs `update_branch` and
-/// reports `true`.
+/// **`branch_advanced` semantics** (D33 §6 + D23 §5.4):
+///
+/// - `true` — the durable branch ref moved as a result of this
+///   persist. Holds for cache misses, same-position cache hits, and
+///   both `FastForward` / `TrivialMerge` CAS outcomes.
+/// - `false` — the branch ref did **not** move. Holds for: no
+///   persistent backend, different-position cache hit, and the
+///   `NeedsWitnessedMerge` CAS outcome (the layer is stored but
+///   unreachable from any branch ref).
+///
+/// `merge_outcome` is `Some(...)` whenever a CAS attempt actually ran
+/// (cache miss or same-position cache hit). It is `None` for the
+/// no-backend path and for different-position cache hits — in both
+/// cases there is no merge taxonomy because no CAS happened. The
+/// proto boundary maps `None` to [`proto::MergeOutcome::Unspecified`].
 #[derive(Debug, Clone)]
 struct PersistedLayerInfo {
     layer_id: crate::layer::LayerId,
     branch_advanced: bool,
+    merge_outcome: Option<crate::lattice::UpdateOutcome>,
+}
+
+/// Convert a lattice-level [`UpdateOutcome`](crate::lattice::UpdateOutcome)
+/// (or its absence — `None` when no CAS was attempted) into the
+/// wire-format [`proto::MergeInfo`] used by every commit response.
+///
+/// `None` maps to `MERGE_OUTCOME_UNSPECIFIED` with all other fields
+/// default — matches the proto3 zero-value semantics so omitting the
+/// `merge` field on the wire is indistinguishable from "no CAS ran"
+/// (which is the truth for the no-backend and different-position-
+/// cache-hit paths).
+fn merge_info_from_outcome(outcome: Option<&crate::lattice::UpdateOutcome>) -> proto::MergeInfo {
+    use crate::lattice::UpdateOutcome;
+    match outcome {
+        None => proto::MergeInfo {
+            outcome: proto::MergeOutcome::Unspecified as i32,
+            merge_layer_id: String::new(),
+            conflicting_iris: Vec::new(),
+            current_head: String::new(),
+        },
+        Some(UpdateOutcome::FastForward) => proto::MergeInfo {
+            outcome: proto::MergeOutcome::FastForward as i32,
+            merge_layer_id: String::new(),
+            conflicting_iris: Vec::new(),
+            current_head: String::new(),
+        },
+        Some(UpdateOutcome::TrivialMerge { merge_layer }) => proto::MergeInfo {
+            outcome: proto::MergeOutcome::TrivialMerge as i32,
+            merge_layer_id: merge_layer.to_string(),
+            conflicting_iris: Vec::new(),
+            current_head: String::new(),
+        },
+        Some(UpdateOutcome::NeedsWitnessedMerge {
+            current_head,
+            conflicting_iris,
+        }) => proto::MergeInfo {
+            outcome: proto::MergeOutcome::NeedsWitnessedMerge as i32,
+            merge_layer_id: String::new(),
+            conflicting_iris: conflicting_iris
+                .iter()
+                .map(|iri| iri.as_str().to_string())
+                .collect(),
+            current_head: current_head.to_string(),
+        },
+    }
 }
 
 pub struct EigeniusService {
@@ -751,10 +806,12 @@ impl EigeniusService {
     ) -> Result<PersistedLayerInfo, ValidationError> {
         let Some(backend) = self.backend.as_ref() else {
             // No persistent backend — the layer lives in-memory only.
-            // There is no durable branch ref to advance.
+            // There is no durable branch ref to advance, and no CAS
+            // attempted (merge_outcome = None).
             return Ok(PersistedLayerInfo {
                 layer_id: layer.id().clone(),
                 branch_advanced: false,
+                merge_outcome: None,
             });
         };
 
@@ -767,9 +824,11 @@ impl EigeniusService {
         if let Some(cached_id) = cache_hit {
             if cached_id == *layer.id() {
                 // Same-position cache hit — the layer is already on
-                // disk. Skip `store_layer`; still advance the branch
-                // (the caller wanted to publish on top of the current
-                // head, which is the layer's parent).
+                // disk. Skip `store_layer`; still attempt the branch
+                // CAS (the caller wanted to publish on top of the
+                // current head, which is the layer's parent). The CAS
+                // may still race or conflict, so the outcome is the
+                // full taxonomy.
                 tracing::debug!(
                     { field::OPERATION } = operation::LAYER_COMMIT,
                     { field::LAYER_ID } = %layer.id(),
@@ -777,17 +836,22 @@ impl EigeniusService {
                     cache = "hit_same_position",
                     "anchored-commit cache hit (same position) — skipping store_layer"
                 );
-                self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+                let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+                let branch_advanced = !matches!(
+                    outcome,
+                    crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
+                );
                 return Ok(PersistedLayerInfo {
                     layer_id: layer.id().clone(),
-                    branch_advanced: true,
+                    branch_advanced,
+                    merge_outcome: Some(outcome),
                 });
             }
             // Different-position cache hit — the canonical layer is
             // elsewhere. Skip both `store_layer` and `update_branch`;
             // the branch stays where it is (D33 §6 supporting-
-            // equivalent context). Return the cached id so the caller
-            // can report it back to the user.
+            // equivalent context). No CAS attempted, so merge_outcome
+            // is None.
             tracing::debug!(
                 { field::OPERATION } = operation::LAYER_COMMIT,
                 { field::LAYER_ID } = %layer.id(),
@@ -799,6 +863,7 @@ impl EigeniusService {
             return Ok(PersistedLayerInfo {
                 layer_id: cached_id,
                 branch_advanced: false,
+                merge_outcome: None,
             });
         }
 
@@ -826,10 +891,19 @@ impl EigeniusService {
         // the cache and the topology.
         self.put_anchored_commit_for_layer(backend.as_ref(), layer);
 
-        self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+        // Attempt the CAS. On `NeedsWitnessedMerge` the layer is on
+        // disk but not reachable from any branch ref — the fix for
+        // D34 §G.1's silent-success bug is reporting branch_advanced
+        // = false here so clients know to recover.
+        let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+        let branch_advanced = !matches!(
+            outcome,
+            crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
+        );
         Ok(PersistedLayerInfo {
             layer_id: layer.id().clone(),
-            branch_advanced: true,
+            branch_advanced,
+            merge_outcome: Some(outcome),
         })
     }
 
@@ -889,12 +963,26 @@ impl EigeniusService {
     /// Carved out of `persist_layer_if_backend` so both the
     /// cache-miss path and the same-position cache-hit path can
     /// share the logic.
+    ///
+    /// Returns the lattice's [`UpdateOutcome`](crate::lattice::UpdateOutcome)
+    /// verbatim so the caller can:
+    ///
+    /// - distinguish `FastForward` (clean CAS) from `TrivialMerge`
+    ///   (concurrent disjoint-IRI contributions; kernel produced a
+    ///   merge layer) from `NeedsWitnessedMerge` (concurrent
+    ///   conflicting contributions; branch unchanged);
+    /// - correctly compute `branch_advanced` — in particular,
+    ///   `NeedsWitnessedMerge` means the branch did **not** advance
+    ///   (the layer is stored but unreachable from any branch ref).
+    ///
+    /// Pre-D34 §G.1 this method swallowed all `Ok` variants as
+    /// `Ok(())`, masking the `NeedsWitnessedMerge` failure as success.
     fn advance_branch_for_layer(
         &self,
         branch: &str,
         layer: &crate::layer::Layer,
         backend: &dyn crate::storage::PersistentBackend,
-    ) -> Result<(), ValidationError> {
+    ) -> Result<crate::lattice::UpdateOutcome, ValidationError> {
         let expected_old = layer.parent().map(|p| p.id().clone());
         let storage = LayerStorage::with_persistent(
             self.backend
@@ -910,15 +998,15 @@ impl EigeniusService {
             storage,
             backend,
         ) {
-            Ok(_) => {
+            Ok(outcome) => {
                 tracing::debug!(
                     { field::OPERATION } = operation::LAYER_COMMIT,
                     { field::LAYER_ID } = %layer.id(),
                     branch = branch,
-                    persisted = true,
-                    "layer persisted to backend and branch advanced"
+                    outcome = ?outcome,
+                    "branch CAS attempted"
                 );
-                Ok(())
+                Ok(outcome)
             }
             Err(e) => {
                 tracing::warn!(
@@ -1414,6 +1502,7 @@ impl EigeniusService {
                         task_id: task_id_str.clone(),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
+                        merge: Some(merge_info_from_outcome(None)),
                     }));
                 }
             }
@@ -1517,7 +1606,13 @@ impl EigeniusService {
         // of the user-layer and provenance-layer persists: a fresh
         // commit or same-position cache hit advances the branch;
         // a different-position cache hit (D33 §6) does not.
+        //
+        // `merge_outcome` carries the user-layer's CAS outcome only —
+        // surfacing both user-layer and provenance outcomes would
+        // conflate two distinct events. See proto comment on
+        // `RunProgramResponse.merge` for the rationale.
         let mut branch_advanced = false;
+        let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
         let result_layer_head = {
             let mut ctx = ctx_arc.write().await;
             // Add domain resources produced by the run (chain-resident
@@ -1561,7 +1656,10 @@ impl EigeniusService {
                     // output is still valid; the chain just isn't
                     // durable.
                     match self.persist_layer_if_backend(branch, &outcome.user_layer) {
-                        Ok(info) => branch_advanced |= info.branch_advanced,
+                        Ok(info) => {
+                            branch_advanced |= info.branch_advanced;
+                            merge_outcome = info.merge_outcome;
+                        }
                         Err(err) => tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "program_run_persist_failed",
@@ -1631,6 +1729,7 @@ impl EigeniusService {
             task_id: task_id_str,
             output_resource_iris,
             branch_advanced,
+            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
         }))
     }
 }
@@ -1663,6 +1762,12 @@ impl EigeniusKernel for EigeniusService {
 
         let mut layer_id = String::new();
         let mut branch_advanced = false;
+        // The CAS outcome from the user-layer persist — the user-
+        // facing one. Any follow-up persists (AutoOnLoad provenance,
+        // institution_classes) log on failure but their outcomes are
+        // not surfaced in the response; see proto comment on
+        // `RunProgramResponse.merge` for the design rationale.
+        let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
         let mut errors = Vec::new();
 
         if req.auto_commit {
@@ -1701,9 +1806,12 @@ impl EigeniusKernel for EigeniusService {
                             // `branch_advanced` distinguishes a fresh
                             // commit / same-position hit (branch moved)
                             // from a different-position hit (branch
-                            // stayed put).
+                            // stayed put). `merge_outcome` carries the
+                            // CAS taxonomy (FastForward / TrivialMerge /
+                            // NeedsWitnessedMerge) when a CAS ran.
                             layer_id = info.layer_id.to_string();
                             branch_advanced = info.branch_advanced;
+                            merge_outcome = info.merge_outcome;
                         }
                         Err(err) => errors.push(err),
                     }
@@ -1844,6 +1952,7 @@ impl EigeniusKernel for EigeniusService {
             resource_count: count,
             branch,
             branch_advanced,
+            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
         };
         if !response.success {
             guard.fail("validation_failed");
@@ -1929,6 +2038,7 @@ impl EigeniusKernel for EigeniusService {
                         error: format!("query error: {}", msgs.join("; ")),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
+                        merge: Some(merge_info_from_outcome(None)),
                     }));
                 }
             }
@@ -1939,6 +2049,7 @@ impl EigeniusKernel for EigeniusService {
         // bound to their classes fire on chain entry (D14 §9.3 step 5
         // chain-reinsertion via EigenQL).
         let mut branch_advanced = false;
+        let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
         let output_resource_iris: Vec<String> = if outcome.into_resources.is_empty() {
             Vec::new()
         } else {
@@ -1962,7 +2073,10 @@ impl EigeniusKernel for EigeniusService {
             match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
                 Ok(co) => {
                     match self.persist_layer_if_backend(&branch_name, &co.user_layer) {
-                        Ok(info) => branch_advanced |= info.branch_advanced,
+                        Ok(info) => {
+                            branch_advanced |= info.branch_advanced;
+                            merge_outcome = info.merge_outcome;
+                        }
                         Err(err) => tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "eigenql_into_persist_failed",
@@ -2000,6 +2114,7 @@ impl EigeniusKernel for EigeniusService {
                         error: format!("FIBER INTO commit failed: {msg}"),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
+                        merge: Some(merge_info_from_outcome(None)),
                     }));
                 }
             }
@@ -2013,6 +2128,7 @@ impl EigeniusKernel for EigeniusService {
             error: String::new(),
             output_resource_iris,
             branch_advanced,
+            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
         }))
     }
 
@@ -2211,6 +2327,7 @@ impl EigeniusKernel for EigeniusService {
                 success: false,
                 trace_iri: String::new(),
                 branch_advanced: false,
+                merge: Some(merge_info_from_outcome(None)),
             }));
         }
 
@@ -2233,20 +2350,15 @@ impl EigeniusKernel for EigeniusService {
             .commit("reflect")
             .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
         drop(ctx);
-        let branch_advanced = match self.persist_layer_if_backend(&branch, &layer) {
-            Ok(info) => info.branch_advanced,
-            Err(err) => {
-                return Err(Status::internal(format!(
-                    "reflect persist failed: {}",
-                    err.message
-                )));
-            }
-        };
+        let info = self
+            .persist_layer_if_backend(&branch, &layer)
+            .map_err(|err| Status::internal(format!("reflect persist failed: {}", err.message)))?;
 
         Ok(Response::new(ReflectResponse {
             success: true,
             trace_iri,
-            branch_advanced,
+            branch_advanced: info.branch_advanced,
+            merge: Some(merge_info_from_outcome(info.merge_outcome.as_ref())),
         }))
     }
 
@@ -3080,5 +3192,76 @@ impl TraceStore for BackendTraceStore {
         self.backend
             .as_trace_store()
             .put_component_trace(key, trace);
+    }
+}
+
+#[cfg(test)]
+mod merge_info_tests {
+    //! Unit tests for [`merge_info_from_outcome`]. The lattice tests
+    //! already pin the three [`UpdateOutcome`] variants on the
+    //! production side; these tests pin the **conversion** to the
+    //! proto wire format — making sure each outcome maps to the
+    //! correct enum value with the right side fields populated.
+    //!
+    //! Combined with the e2e tests in `storage/rocksdb/tests/`, this
+    //! gives us defense in depth against regressions of D34 §G.1's
+    //! silent-`NeedsWitnessedMerge` bug.
+    use super::*;
+    use crate::lattice::UpdateOutcome;
+    use crate::layer::LayerId;
+    use crate::ontology::iri::Iri;
+    use hex::encode as hex_encode;
+    use proto::MergeOutcome;
+    fn lid(byte: u8) -> LayerId {
+        LayerId([byte; 32])
+    }
+    #[test]
+    fn none_maps_to_unspecified_with_empty_fields() {
+        let info = merge_info_from_outcome(None);
+        assert_eq!(info.outcome, MergeOutcome::Unspecified as i32);
+        assert!(info.merge_layer_id.is_empty());
+        assert!(info.conflicting_iris.is_empty());
+        assert!(info.current_head.is_empty());
+    }
+    #[test]
+    fn fast_forward_maps_with_empty_side_fields() {
+        let info = merge_info_from_outcome(Some(&UpdateOutcome::FastForward));
+        assert_eq!(info.outcome, MergeOutcome::FastForward as i32);
+        assert!(info.merge_layer_id.is_empty());
+        assert!(info.conflicting_iris.is_empty());
+        assert!(info.current_head.is_empty());
+    }
+    #[test]
+    fn trivial_merge_carries_merge_layer_id_as_hex() {
+        let merge_layer = lid(0xAB);
+        let info = merge_info_from_outcome(Some(&UpdateOutcome::TrivialMerge {
+            merge_layer: merge_layer.clone(),
+        }));
+        assert_eq!(info.outcome, MergeOutcome::TrivialMerge as i32);
+        assert_eq!(info.merge_layer_id, hex_encode(merge_layer.0));
+        assert!(info.conflicting_iris.is_empty());
+        assert!(info.current_head.is_empty());
+    }
+    #[test]
+    fn needs_witnessed_merge_carries_head_and_iris() {
+        let current_head = lid(0xCD);
+        let conflicting_iris = vec![
+            Iri::parse("urn:eigenius:demo:A").unwrap(),
+            Iri::parse("urn:eigenius:demo:B").unwrap(),
+        ];
+        let info = merge_info_from_outcome(Some(&UpdateOutcome::NeedsWitnessedMerge {
+            current_head: current_head.clone(),
+            conflicting_iris: conflicting_iris.clone(),
+        }));
+        assert_eq!(info.outcome, MergeOutcome::NeedsWitnessedMerge as i32);
+        assert!(info.merge_layer_id.is_empty());
+        assert_eq!(info.current_head, hex_encode(current_head.0));
+        assert_eq!(
+            info.conflicting_iris,
+            vec![
+                "urn:eigenius:demo:A".to_string(),
+                "urn:eigenius:demo:B".to_string()
+            ]
+        );
     }
 }

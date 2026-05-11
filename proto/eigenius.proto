@@ -155,13 +155,61 @@ message LoadResponse {
   //  hit, same position) — either way, the branch ref now points
   //  at `layer_id`.
   // - `false`: the anchored-commit cache returned a canonical layer
-  //  living elsewhere in the DAG (cache hit, different position).
+  //  living elsewhere in the DAG (cache hit, different position), or
+  //  the CAS resolved to `NEEDS_WITNESSED_MERGE` (see `merge`).
   //  `layer_id` identifies that canonical layer; the branch ref did
   //  not advance to it.
   //
   // Clients that pin to a branch (notebook cells, watchers) read
   // this flag to decide whether to refresh their view.
   bool branch_advanced = 6;
+  // D23 §5.4.3 / D34 §G.1: the outcome of the branch-ref CAS that
+  // backed this commit. Defaults to `MERGE_OUTCOME_UNSPECIFIED` when
+  // no CAS was attempted (no persistent backend, or a different-
+  // position anchored-commit cache hit short-circuited the persist).
+  MergeInfo merge = 7;
+}
+
+// --- Branch merge outcomes (D23 §5.4 / D34 §6) ---
+
+// The result of a `update_branch(AllowTrivial)` CAS attempt that
+// backs a layer-committing RPC. Reported on every response that
+// commits to a branch (Load, RunProgram, Reflect, Query INTO).
+enum MergeOutcome {
+  // No CAS happened (no persistent backend, or different-position
+  // anchored-commit cache hit short-circuited the persist).
+  MERGE_OUTCOME_UNSPECIFIED = 0;
+  // Clean append — `expected_old` matched the branch's current head
+  // and the branch advanced to the caller's `new_head`.
+  MERGE_OUTCOME_FAST_FORWARD = 1;
+  // Disjoint-IRI auto-reconciliation: concurrent activity moved the
+  // branch under the caller, but the two contributions modify
+  // non-overlapping resource sets since their LCA. The kernel
+  // produced a merge layer with both heads as parents and advanced
+  // the branch to it. `merge_layer_id` is the merge layer's id.
+  MERGE_OUTCOME_TRIVIAL_MERGE = 2;
+  // Real divergence: concurrent contributions touch the same IRIs.
+  // The branch was **not** advanced; the caller's layer exists in
+  // the DAG but isn't pointed at by any branch ref (and will become
+  // GC-eligible unless the caller saves it as a sibling branch).
+  // Pre-Phase-15, the caller must resolve manually (sibling branch /
+  // rebase / discard).
+  MERGE_OUTCOME_NEEDS_WITNESSED_MERGE = 3;
+}
+
+message MergeInfo {
+  MergeOutcome outcome = 1;
+  // Set when outcome = TRIVIAL_MERGE: hex-encoded id of the merge
+  // layer the kernel produced. The branch ref points here.
+  string merge_layer_id = 2;
+  // Set when outcome = NEEDS_WITNESSED_MERGE: the IRIs that both
+  // contributing chains defined since their LCA — the actual
+  // conflict set. Useful for the user-facing recovery dialog.
+  repeated string conflicting_iris = 3;
+  // Set when outcome = NEEDS_WITNESSED_MERGE: hex-encoded id of the
+  // branch's current head (i.e., what the caller raced against and
+  // lost to).
+  string current_head = 4;
 }
 
 // --- Inspect ---
@@ -214,6 +262,11 @@ message QueryResponse {
   // full semantics. Always `false` for queries with no INTO clauses
   // (nothing committed → no branch motion to report).
   bool branch_advanced = 6;
+  // D23 §5.4.3 / D34 §G.1: outcome of the FIBER INTO commit's branch
+  // CAS, if one ran. `MERGE_OUTCOME_UNSPECIFIED` for queries that
+  // produced no INTO commit (nothing to merge against) or for
+  // different-position cache hits.
+  MergeInfo merge = 7;
 }
 
 // --- ValidateProgram ---
@@ -259,6 +312,12 @@ message RunProgramResponse {
   // idempotent re-run against the same supporting context hits the
   // anchored-commit cache and reports `false`.
   bool branch_advanced = 7;
+  // D23 §5.4.3 / D34 §G.1: outcome of the program-run user-layer's
+  // branch CAS. The (optional) AutoOnLoad provenance layer's CAS
+  // outcome is not surfaced here — it'd be a follow-up CAS chained
+  // on top, and surfacing both would conflate two distinct events.
+  // See [`LoadResponse.merge`] for the per-outcome semantics.
+  MergeInfo merge = 8;
 }
 
 // --- RunProgramByIri ---
@@ -291,6 +350,9 @@ message ReflectResponse {
   // semantics. Reflecting an already-reflected trace hits the
   // anchored-commit cache and reports `false`.
   bool branch_advanced = 3;
+  // D23 §5.4.3 / D34 §G.1: outcome of the reflect commit's branch
+  // CAS. See [`LoadResponse.merge`] for the per-outcome semantics.
+  MergeInfo merge = 4;
 }
 
 // --- Health ---

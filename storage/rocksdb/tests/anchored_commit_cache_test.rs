@@ -97,6 +97,16 @@ async fn load_twice_with_identical_content_hits_anchored_commit_cache() {
         first.branch_advanced,
         "cache miss must report branch_advanced = true"
     );
+    // Cache-miss path runs a fresh CAS against an unchallenged branch
+    // → FAST_FORWARD. The conflicting/merge-layer fields are empty.
+    let first_merge = first.merge.as_ref().expect("merge info present");
+    assert_eq!(
+        first_merge.outcome,
+        eigenius_kernel::server::proto::MergeOutcome::FastForward as i32,
+        "cache miss must report MergeOutcome::FastForward"
+    );
+    assert!(first_merge.merge_layer_id.is_empty());
+    assert!(first_merge.conflicting_iris.is_empty());
     let first_layer_id = first.layer_id.clone();
 
     let head_after_first = service
@@ -146,6 +156,15 @@ async fn load_twice_with_identical_content_hits_anchored_commit_cache() {
     assert!(
         !second.branch_advanced,
         "different-position cache hit must report branch_advanced = false"
+    );
+    // No CAS was attempted (the persist short-circuited) → the
+    // MergeInfo is the proto3 zero value: outcome = UNSPECIFIED with
+    // all other fields empty.
+    let second_merge = second.merge.as_ref().expect("merge info present");
+    assert_eq!(
+        second_merge.outcome,
+        eigenius_kernel::server::proto::MergeOutcome::Unspecified as i32,
+        "different-position cache hit must report MergeOutcome::Unspecified (no CAS happened)"
     );
 
     // Branch is still at the same head — no second advance happened.
