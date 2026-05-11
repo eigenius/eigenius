@@ -48,7 +48,7 @@ use std::collections::BTreeMap;
 ///
 /// **Two-hash identity (D25 §11.0 / D33 §5.1).** Handles carry both the
 /// position-addressed `id` and the content-only `content_hash`. Content
-/// hash duplicates across positions are expected (cell-output cache,
+/// hash duplicates across positions are expected (anchored-commit cache,
 /// content-hash dedup); position hashes are globally unique.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayerHandle {

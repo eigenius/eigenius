@@ -88,6 +88,28 @@ pub struct ChainInfo {
         std::collections::BTreeMap<LayerId, std::collections::BTreeSet<Iri>>,
 }
 
+/// One row of the anchored-commit cache (D33 §6 / Phase 20c).
+///
+/// The cache memoizes `commit(content, supporting_layer) → LayerId`,
+/// keyed on `(content_hash, supporting_content_hash)`. A hit means
+/// the same content has previously been committed against a
+/// supporting layer with the same content — the cached `LayerId` is
+/// the canonical representative for that combination. Used by:
+/// notebook cell re-runs, institution ontology reload, mirror
+/// regeneration, and any deterministic content generator whose
+/// supporting context (per `compute_supporting_layer`) is the
+/// dependency anchor.
+///
+/// Carries the cache key + value for
+/// [`PersistentBackend::list_anchored_commits`] (diagnostic
+/// enumeration) and for tests that assert cache state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchoredCommitEntry {
+    pub content_hash: crate::layer::ContentHash,
+    pub supporting_content_hash: crate::layer::ContentHash,
+    pub layer_id: LayerId,
+}
+
 /// Errors from storage operations.
 #[derive(Debug)]
 pub enum StorageError {
@@ -178,6 +200,19 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// pre-Phase-14 kernel must be re-built from source files. Returns an
     /// empty topology for an empty DB.
     fn load_topology(&self) -> Result<LayerTopology, StorageError>;
+
+    /// Load a single `LayerHandle` by id. Returns `Ok(None)` when the
+    /// layer is unknown to the store. Cheaper than `load_topology` for
+    /// the common "I have a `LayerId`, I just want its handle" path —
+    /// no full-topology scan, no allocation of a `LayerTopology` map.
+    ///
+    /// Used by the anchored-commit cache (D33 §6) to look up the supporting
+    /// layer's `content_hash` at commit time, and by future diagnostic
+    /// surfaces that want to inspect a single layer's metadata.
+    fn load_handle(
+        &self,
+        layer_id: &LayerId,
+    ) -> Result<Option<crate::layer::LayerHandle>, StorageError>;
 
     /// Generic metadata key-value store. Used for the seed manifest
     /// (D13 §4.2) and for future configuration that shouldn't live in
@@ -334,6 +369,61 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// order is unspecified; callers that care should sort.
     fn list_redirects(&self) -> Result<Vec<crate::layer::RedirectEntry>, StorageError>;
 
+    // --- Anchored-commit cache (D33 §6 / Phase 20c) ---
+    //
+    // Memoizes `commit(content, supporting_layer) → LayerId`, keyed on
+    // `(new layer's content_hash, supporting layer's content_hash)`.
+    // A hit returns the canonical existing layer for that combination
+    // — no re-validation, no re-store. The "supporting layer's
+    // content_hash" — not its position hash — is what makes
+    // structurally-equivalent supporting contexts hit the same cache
+    // entry even when their parent linearizations differ (D33 §6
+    // "supporting-equivalent context").
+    //
+    // **Use cases.** The cache generalizes across notebook cell
+    // re-runs, institution ontology reload, mirror regeneration, and
+    // any deterministic content generator that anchors to a supporting
+    // layer. "Anchored" — the supporting layer is the content's
+    // dependency anchor — is the structural framing; cell-output
+    // reuse is one application.
+
+    /// Look up a previously-cached layer id for `(content_hash,
+    /// supporting_content_hash)`. `Ok(None)` for a cache miss; the
+    /// caller falls through to the standard commit path.
+    fn lookup_anchored_commit(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+        supporting_content_hash: &crate::layer::ContentHash,
+    ) -> Result<Option<LayerId>, StorageError>;
+
+    /// Record `(content_hash, supporting_content_hash) → layer_id` in
+    /// the cache. Idempotent by the (content, supporting) pair —
+    /// overwriting an existing entry is permitted (later commits of
+    /// the same content + supporting context might choose a different
+    /// representative position, e.g. after preserve-history
+    /// consolidation).
+    fn put_anchored_commit(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+        supporting_content_hash: &crate::layer::ContentHash,
+        layer_id: &LayerId,
+    ) -> Result<(), StorageError>;
+
+    /// Remove a single cache entry. Used by future cache-management
+    /// surfaces; v1 doesn't expose this on the CLI but the primitive
+    /// is needed by tests and by GC paths that prune entries pointing
+    /// at swept layers.
+    fn delete_anchored_commit(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+        supporting_content_hash: &crate::layer::ContentHash,
+    ) -> Result<(), StorageError>;
+
+    /// Enumerate every anchored-commit cache entry. Used by
+    /// diagnostic surfaces and by cross-cutting tests that assert
+    /// cache contents. Result order is unspecified.
+    fn list_anchored_commits(&self) -> Result<Vec<AnchoredCommitEntry>, StorageError>;
+
     /// Look up every layer whose content matches `content_hash`.
     ///
     /// Returns the set of position hashes (layer ids) currently in
@@ -350,9 +440,9 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     ///   layer, check whether identical content already exists at a
     ///   compatible position to skip the redundant commit.
     /// - [D33 §6](../../docs/design/d33-partial-order-chains.md)
-    ///   cell-output cache (joined with supporting-layer lookup on the
-    ///   consumer side to form the `(content_hash, supporting_layer)`
-    ///   cache key).
+    ///   anchored-commit cache (joined with supporting-layer lookup
+    ///   on the consumer side to form the `(content_hash,
+    ///   supporting_content_hash)` cache key).
     /// - [D25 §12.1](../../docs/design/d25-chain-consolidation.md)
     ///   tag-target resolution: `chain:tag_target_content` resolves to
     ///   every position carrying that content.

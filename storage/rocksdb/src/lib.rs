@@ -62,6 +62,16 @@ const CONTENT_INDEX_PREFIX: &str = "content:";
 /// manufacture the in-memory synthetic tombstone (D25 §12.8.1(d))
 /// even after the original handle has been reclaimed.
 const REDIRECT_PREFIX: &str = "redirect:";
+/// Anchored-commit cache storage (D33 §6 / Phase 20c).
+///
+/// Keys: `anchored:<content_hex>:<supporting_content_hex>` → 32 bytes
+/// of position-hash. Probed at commit time so any deterministic
+/// content generator (notebook cells, institution ontology reload,
+/// mirror regeneration) that anchors to a supporting layer reuses
+/// the existing layer's id when content + supporting context are
+/// byte-equivalent to a previous commit (no re-execution, no new
+/// chain commit).
+const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
 fn now_millis() -> i64 {
     SystemTime::now()
@@ -683,6 +693,33 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         Ok(topology)
     }
 
+    fn load_handle(&self, layer_id: &LayerId) -> Result<Option<LayerHandle>, StorageError> {
+        // Real handle: read `topo:<id>` directly.
+        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
+        match self.db.get(topo_key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let handle = ciborium::from_reader(bytes.as_slice())
+                    .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+                return Ok(Some(handle));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return Err(StorageError::Internal(format!(
+                    "failed to load topo entry: {e}"
+                )))
+            }
+        }
+        // Synthetic tombstone via the redirect CF (D25 §12.8.1(d)) —
+        // matches `load_topology`'s view for any redirect source whose
+        // original on-disk handle has been reclaimed.
+        if let Some(entry) =
+            eigenius_kernel::storage::PersistentBackend::lookup_redirect(self, layer_id)?
+        {
+            return Ok(Some(eigenius_kernel::layer::manufacture_tombstone(&entry)));
+        }
+        Ok(None)
+    }
+
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         let db_key = format!("meta:{key}");
         self.db
@@ -960,6 +997,120 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         }
         Ok(out)
     }
+
+    fn lookup_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<Option<LayerId>, StorageError> {
+        let key = format!(
+            "{ANCHORED_COMMIT_PREFIX}{}:{}",
+            hex::encode(content_hash.0),
+            hex::encode(supporting_content_hash.0)
+        );
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                if bytes.len() != 32 {
+                    return Err(StorageError::Internal(format!(
+                        "anchored_commit value has length {}, expected 32",
+                        bytes.len()
+                    )));
+                }
+                let mut id = [0u8; 32];
+                id.copy_from_slice(&bytes);
+                Ok(Some(LayerId(id)))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get anchored_commit: {e}"))),
+        }
+    }
+
+    fn put_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+        layer_id: &LayerId,
+    ) -> Result<(), StorageError> {
+        let key = format!(
+            "{ANCHORED_COMMIT_PREFIX}{}:{}",
+            hex::encode(content_hash.0),
+            hex::encode(supporting_content_hash.0)
+        );
+        self.db
+            .put(key.as_bytes(), layer_id.0)
+            .map_err(|e| StorageError::Internal(format!("put anchored_commit: {e}")))
+    }
+
+    fn delete_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<(), StorageError> {
+        let key = format!(
+            "{ANCHORED_COMMIT_PREFIX}{}:{}",
+            hex::encode(content_hash.0),
+            hex::encode(supporting_content_hash.0)
+        );
+        self.db
+            .delete(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete anchored_commit: {e}")))
+    }
+
+    fn list_anchored_commits(
+        &self,
+    ) -> Result<Vec<eigenius_kernel::storage::AnchoredCommitEntry>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(ANCHORED_COMMIT_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) = item
+                .map_err(|e| StorageError::Internal(format!("list_anchored_commit iter: {e}")))?;
+            if !k.starts_with(ANCHORED_COMMIT_PREFIX.as_bytes()) {
+                break;
+            }
+            let key_str = std::str::from_utf8(&k).map_err(|e| {
+                StorageError::Internal(format!("non-utf8 anchored_commit key: {e}"))
+            })?;
+            // Parse `cell:<content_hex>:<supporting_content_hex>`.
+            let rest = &key_str[ANCHORED_COMMIT_PREFIX.len()..];
+            let mut parts = rest.splitn(2, ':');
+            let content_hex = parts.next().ok_or_else(|| {
+                StorageError::Internal("malformed anchored_commit key".to_string())
+            })?;
+            let supporting_hex = parts.next().ok_or_else(|| {
+                StorageError::Internal("malformed anchored_commit key (no supporting)".to_string())
+            })?;
+            let content_hash = hex_to_content_hash(content_hex)?;
+            let supporting_content_hash = hex_to_content_hash(supporting_hex)?;
+            if v.len() != 32 {
+                return Err(StorageError::Internal(format!(
+                    "anchored_commit value has length {}, expected 32",
+                    v.len()
+                )));
+            }
+            let mut id = [0u8; 32];
+            id.copy_from_slice(&v);
+            out.push(eigenius_kernel::storage::AnchoredCommitEntry {
+                content_hash,
+                supporting_content_hash,
+                layer_id: LayerId(id),
+            });
+        }
+        Ok(out)
+    }
+}
+
+fn hex_to_content_hash(s: &str) -> Result<ContentHash, StorageError> {
+    let bytes =
+        hex::decode(s).map_err(|e| StorageError::Internal(format!("bad content_hash hex: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(StorageError::Internal(format!(
+            "content_hash hex must be 32 bytes, got {}",
+            bytes.len()
+        )));
+    }
+    let mut h = [0u8; 32];
+    h.copy_from_slice(&bytes);
+    Ok(ContentHash(h))
 }
 
 #[cfg(test)]
@@ -1141,6 +1292,77 @@ mod tests {
         assert_eq!(rebuilt.id(), &expected_position);
         assert_eq!(rebuilt.content_hash(), &expected_content);
         assert_eq!(rebuilt.supporting_layer(), expected_supporting.as_ref());
+    }
+
+    /// Phase 20c: anchored-commit cache round-trip on the RocksDB
+    /// backend, including persistence across store reopen — the
+    /// cache is on-disk state, not just an in-memory map.
+    #[test]
+    fn anchored_commit_cache_round_trip_rocksdb() {
+        use eigenius_kernel::layer::{ContentHash, LayerId};
+        use eigenius_kernel::storage::PersistentBackend;
+
+        let dir = TempDir::new().unwrap();
+        let content_a = ContentHash([1u8; 32]);
+        let support_x = ContentHash([3u8; 32]);
+        let layer_one = LayerId([0x10; 32]);
+        let content_b = ContentHash([2u8; 32]);
+        let support_y = ContentHash([4u8; 32]);
+        let layer_two = LayerId([0x20; 32]);
+
+        // Write: insert two entries.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            store
+                .put_anchored_commit(&content_a, &support_x, &layer_one)
+                .unwrap();
+            store
+                .put_anchored_commit(&content_b, &support_y, &layer_two)
+                .unwrap();
+        }
+
+        // Reopen: both entries persist; list returns them.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let hit = store
+                .lookup_anchored_commit(&content_a, &support_x)
+                .unwrap()
+                .expect("cache entry survives reopen");
+            assert_eq!(hit, layer_one);
+
+            let mut entries = store.list_anchored_commits().unwrap();
+            entries.sort_by_key(|e| e.content_hash.0);
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].layer_id, layer_one);
+            assert_eq!(entries[1].layer_id, layer_two);
+
+            // Different content + different supporting → miss.
+            assert!(store
+                .lookup_anchored_commit(&content_b, &support_x)
+                .unwrap()
+                .is_none());
+            assert!(store
+                .lookup_anchored_commit(&content_a, &support_y)
+                .unwrap()
+                .is_none());
+
+            // Delete one entry; the other remains.
+            store
+                .delete_anchored_commit(&content_a, &support_x)
+                .unwrap();
+        }
+
+        // Reopen once more: the deletion persisted.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            assert!(store
+                .lookup_anchored_commit(&content_a, &support_x)
+                .unwrap()
+                .is_none());
+            let remaining = store.list_anchored_commits().unwrap();
+            assert_eq!(remaining.len(), 1);
+            assert_eq!(remaining[0].layer_id, layer_two);
+        }
     }
 
     /// Phase 17f-A: redirect entries round-trip through RocksDB and

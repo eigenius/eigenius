@@ -82,6 +82,14 @@ struct MemoryState {
     /// the redirect *source* layer id. One entry per consolidation
     /// where `to` was below the branch head.
     redirects: BTreeMap<LayerId, RedirectEntry>,
+    /// Anchored-commit cache (D33 §6 / Phase 20c). Keyed by
+    /// `(content_hash, supporting_content_hash)` → cached layer id.
+    /// Memoizes `commit(content, supporting_layer) → LayerId`, so
+    /// any deterministic content generator anchored to a supporting
+    /// layer (notebook cells, institution ontology reload, mirror
+    /// regeneration) can reuse the existing layer without
+    /// re-committing.
+    anchored_commits: BTreeMap<(ContentHash, ContentHash), LayerId>,
 }
 
 impl MemoryPersistentBackend {
@@ -96,6 +104,7 @@ impl MemoryPersistentBackend {
                 branches: BTreeMap::new(),
                 content_index: BTreeMap::new(),
                 redirects: BTreeMap::new(),
+                anchored_commits: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
             triple_index: Arc::new(MemoryTripleIndex::new()),
@@ -248,6 +257,20 @@ impl PersistentBackend for MemoryPersistentBackend {
         let entries: Vec<RedirectEntry> = state.redirects.values().cloned().collect();
         crate::layer::augment_topology_with_redirects(&mut topology, &entries);
         Ok(topology)
+    }
+
+    fn load_handle(&self, layer_id: &LayerId) -> Result<Option<LayerHandle>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        // Real handle, if present on disk.
+        if let Some(handle) = state.topology.get(layer_id) {
+            return Ok(Some(handle.clone()));
+        }
+        // Synthetic tombstone, if a redirect references this layer
+        // (D25 §12.8.1(d)). Matches `load_topology`'s view.
+        if let Some(entry) = state.redirects.get(layer_id) {
+            return Ok(Some(crate::layer::manufacture_tombstone(entry)));
+        }
+        Ok(None)
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
@@ -415,6 +438,61 @@ impl PersistentBackend for MemoryPersistentBackend {
     fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
         let state = self.inner.read().expect("poisoned");
         Ok(state.redirects.values().cloned().collect())
+    }
+
+    fn lookup_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<Option<LayerId>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state
+            .anchored_commits
+            .get(&(content_hash.clone(), supporting_content_hash.clone()))
+            .cloned())
+    }
+
+    fn put_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+        layer_id: &LayerId,
+    ) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.anchored_commits.insert(
+            (content_hash.clone(), supporting_content_hash.clone()),
+            layer_id.clone(),
+        );
+        Ok(())
+    }
+
+    fn delete_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state
+            .anchored_commits
+            .remove(&(content_hash.clone(), supporting_content_hash.clone()));
+        Ok(())
+    }
+
+    fn list_anchored_commits(
+        &self,
+    ) -> Result<Vec<crate::storage::AnchoredCommitEntry>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state
+            .anchored_commits
+            .iter()
+            .map(
+                |((content, supporting), id)| crate::storage::AnchoredCommitEntry {
+                    content_hash: content.clone(),
+                    supporting_content_hash: supporting.clone(),
+                    layer_id: id.clone(),
+                },
+            )
+            .collect())
     }
 }
 
@@ -630,6 +708,84 @@ mod tests {
         backend.delete_redirect(source.id()).unwrap();
         let topo_final = backend.load_topology().unwrap();
         assert!(topo_final.get_layer(source.id()).is_none());
+    }
+
+    /// Phase 20c: anchored-commit cache round-trip through the four
+    /// trait methods. Hit on byte-equal key; miss on either-key
+    /// change; list reports all entries; delete removes a single entry.
+    #[test]
+    fn anchored_commit_cache_round_trip() {
+        let backend = MemoryPersistentBackend::new();
+
+        let content_a = ContentHash([1u8; 32]);
+        let content_b = ContentHash([2u8; 32]);
+        let support_x = ContentHash([3u8; 32]);
+        let support_y = ContentHash([4u8; 32]);
+        let layer_one = LayerId([0x10; 32]);
+        let layer_two = LayerId([0x20; 32]);
+
+        // Pre-condition: empty.
+        assert!(backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .is_none());
+        assert!(backend.list_anchored_commits().unwrap().is_empty());
+
+        // Insert one entry; round-trip via lookup.
+        backend
+            .put_anchored_commit(&content_a, &support_x, &layer_one)
+            .unwrap();
+        let hit = backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .expect("cache hit on byte-equal key");
+        assert_eq!(hit, layer_one);
+
+        // Different content → miss. Different supporting → miss.
+        assert!(backend
+            .lookup_anchored_commit(&content_b, &support_x)
+            .unwrap()
+            .is_none());
+        assert!(backend
+            .lookup_anchored_commit(&content_a, &support_y)
+            .unwrap()
+            .is_none());
+
+        // Insert a second entry; list reports both.
+        backend
+            .put_anchored_commit(&content_b, &support_y, &layer_two)
+            .unwrap();
+        let mut entries = backend.list_anchored_commits().unwrap();
+        entries.sort_by_key(|e| e.content_hash.0);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].content_hash, content_a);
+        assert_eq!(entries[0].supporting_content_hash, support_x);
+        assert_eq!(entries[0].layer_id, layer_one);
+        assert_eq!(entries[1].content_hash, content_b);
+        assert_eq!(entries[1].supporting_content_hash, support_y);
+        assert_eq!(entries[1].layer_id, layer_two);
+
+        // Overwriting an existing entry replaces the layer.
+        let layer_one_v2 = LayerId([0x11; 32]);
+        backend
+            .put_anchored_commit(&content_a, &support_x, &layer_one_v2)
+            .unwrap();
+        let hit2 = backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .expect("cache hit after overwrite");
+        assert_eq!(hit2, layer_one_v2);
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 2);
+
+        // Delete one entry; the other remains.
+        backend
+            .delete_anchored_commit(&content_a, &support_x)
+            .unwrap();
+        assert!(backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .is_none());
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 1);
     }
 
     #[test]

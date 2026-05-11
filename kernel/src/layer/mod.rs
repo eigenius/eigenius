@@ -169,7 +169,7 @@ pub type PositionHash = LayerId;
 /// Distinct from [`PositionHash`]: two layers committed at different
 /// positions in the DAG with the same resources share a `ContentHash`
 /// but have different `PositionHash`es. Used by content-hash dedup
-/// (D25 §11.0), tag targets (D25 §12.1), cell-output cache keys
+/// (D25 §11.0), tag targets (D25 §12.1), anchored-commit cache keys
 /// (D33 §6), and commutativity-equivalence checks (D33 §5.2) — all of
 /// which need a stable identity for chain *content* that's independent
 /// of where in the DAG the content was first committed.
@@ -226,7 +226,7 @@ pub struct Layer {
     id: LayerId,
     /// Content-only hash of this layer's resources, independent of position.
     /// Two layers with identical resources at different DAG positions share
-    /// this hash. Used by content-hash dedup (D25 §11.0), cell-output cache
+    /// this hash. Used by content-hash dedup (D25 §11.0), anchored-commit cache
     /// keys (D33 §6), and tag targets (D25 §12.1).
     content_hash: ContentHash,
     /// Supporting layer per D33 §4.3 — the youngest ancestor this
@@ -1232,7 +1232,7 @@ mod tests {
     /// Same resources + same parents must yield the same content hash
     /// AND the same position hash. Strengthens `deterministic_layer_id`
     /// (which only pins the position hash) and is the minimum
-    /// reproducibility property for cell-output cache hits (D33 §6).
+    /// reproducibility property for anchored-commit cache hits (D33 §6).
     #[test]
     fn deterministic_two_hashes() {
         let build = || {
@@ -1409,7 +1409,7 @@ mod tests {
 
     /// Layer name is metadata-only: two layers with the same resources
     /// + parents but different names must share both hashes. Pins that
-    /// the `name` field is *not* in the content hash (cell-output
+    /// the `name` field is *not* in the content hash (anchored-commit
     /// cache must hit across cosmetic renames).
     #[test]
     fn name_is_not_in_content_or_position_hash() {

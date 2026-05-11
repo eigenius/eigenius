@@ -315,6 +315,117 @@ pub fn commit_layer(
     Ok(layer)
 }
 
+/// Outcome of [`commit_layer_with_cache`] (D33 §6 / Phase 20c).
+///
+/// `Hit` means an existing layer with byte-equal content and
+/// byte-equal supporting-layer content was already in storage; no new
+/// commit was performed. `Miss` means the standard commit path ran
+/// and the cache was updated.
+#[derive(Debug)]
+pub enum AnchoredCommitOutcome {
+    /// A previously-committed layer with byte-equal content and
+    /// supporting-context content was found in the anchored-commit
+    /// cache. The cached `LayerId` is returned; the caller can
+    /// reconstruct an `Arc<Layer>` via
+    /// [`PersistentBackend::load_chain_from`] +
+    /// [`crate::layer::build_chain`] if they need one.
+    Hit {
+        cached_layer_id: crate::layer::LayerId,
+    },
+    /// No cache hit. The layer was built, validated, stored, and the
+    /// cache was updated. Returns the freshly-committed `Arc<Layer>`.
+    Miss { layer: Arc<Layer> },
+}
+
+/// Commit a layer with anchored-commit-cache lookup (D33 §6 / Phase 20c).
+///
+/// The notebook-style commit path: before persisting, probe the
+/// cache keyed on `(content_hash, supporting_layer_content_hash)`. A
+/// hit returns the cached `LayerId` without committing — the cell's
+/// output is structurally identical to a previous run against an
+/// equivalent supporting context, so the existing layer is the
+/// canonical record.
+///
+/// **Why validation is skipped on cache hits.** The cache key
+/// covers both the content and the supporting context. Two layers
+/// with byte-equal content and supporting layers whose content
+/// hashes match resolve every reference through the same ancestor
+/// closure: if the cached commit passed validation, so does this
+/// one. Skipping the validator on hit saves the work entirely.
+///
+/// **Layers with no supporting layer** (pure root-content commits,
+/// fully self-referential layers) bypass the cache: there's no
+/// supporting context to key on. Such commits go through the
+/// standard commit path and return `Miss`.
+///
+/// The wrapper does not advance any branch ref — the caller invokes
+/// [`update_branch`] separately, with the cached or fresh
+/// `LayerId`, exactly as they would for `commit_layer`.
+pub fn commit_layer_with_cache(
+    builder: LayerBuilder,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<AnchoredCommitOutcome, CommitError> {
+    let layer = Arc::new(builder.build(storage));
+
+    // No supporting layer → no cache check (cache key requires both
+    // the content and the supporting context).
+    let Some(supporting_id) = layer.supporting_layer().cloned() else {
+        return commit_without_cache(layer, backend);
+    };
+
+    // Resolve the supporting layer's content_hash via the backend's
+    // single-handle lookup. Cheap — one O(1) probe, no full-topology
+    // load.
+    let supporting_handle = backend
+        .load_handle(&supporting_id)
+        .map_err(CommitError::Storage)?
+        .ok_or_else(|| {
+            CommitError::Storage(crate::storage::StorageError::Internal(format!(
+                "supporting layer {supporting_id} absent from topology at commit time"
+            )))
+        })?;
+    let supporting_content = supporting_handle.content_hash;
+
+    // Cache probe.
+    if let Some(cached_id) = backend
+        .lookup_anchored_commit(layer.content_hash(), &supporting_content)
+        .map_err(CommitError::Storage)?
+    {
+        return Ok(AnchoredCommitOutcome::Hit {
+            cached_layer_id: cached_id,
+        });
+    }
+
+    // Cache miss: standard validate + store, then insert.
+    let validator = Validator::new(&layer);
+    let errors = validator.validate();
+    if !errors.is_empty() {
+        return Err(CommitError::Validation(errors));
+    }
+    backend.store_layer(&layer).map_err(CommitError::Storage)?;
+    backend
+        .put_anchored_commit(layer.content_hash(), &supporting_content, layer.id())
+        .map_err(CommitError::Storage)?;
+    Ok(AnchoredCommitOutcome::Miss { layer })
+}
+
+/// Helper for the "no supporting layer" branch of
+/// `commit_layer_with_cache`. Mirrors `commit_layer` but returns
+/// the wrapped `AnchoredCommitOutcome::Miss`.
+fn commit_without_cache(
+    layer: Arc<Layer>,
+    backend: &dyn PersistentBackend,
+) -> Result<AnchoredCommitOutcome, CommitError> {
+    let validator = Validator::new(&layer);
+    let errors = validator.validate();
+    if !errors.is_empty() {
+        return Err(CommitError::Validation(errors));
+    }
+    backend.store_layer(&layer).map_err(CommitError::Storage)?;
+    Ok(AnchoredCommitOutcome::Miss { layer })
+}
+
 /// Advance `branch` from `expected_old_head` to `new_head` via CAS.
 ///
 /// `expected_old_head = None` creates a new branch (fails if one
@@ -1729,5 +1840,241 @@ mod tests {
         let mut b = LayerBuilder::new(name, Some(parent));
         b.add_resource(make_resource(iri_str)).unwrap();
         commit_layer(b, storage.clone(), backend).unwrap()
+    }
+
+    // ─── 20c anchored-commit cache wrapper ─────────────────────────────────
+
+    /// Commit a root layer that declares `urn:eigenius:core:description`
+    /// so cell layers (which use that property) have a real supporting
+    /// layer in their chain — without this, `compute_supporting_layer`
+    /// returns `None` and the cache is bypassed.
+    fn commit_root_with_description(
+        backend: &dyn PersistentBackend,
+        name: &str,
+        storage: &LayerStorage,
+    ) -> Arc<Layer> {
+        let mut b = LayerBuilder::new(name, None);
+        b.add_resource(make_resource("urn:eigenius:core:description"))
+            .unwrap();
+        commit_layer(b, storage.clone(), backend).unwrap()
+    }
+
+    /// Build a cell-style layer (parent + one demo resource that
+    /// references a property defined in the parent's chain → forces
+    /// the layer to have a non-None supporting_layer).
+    fn build_test_child_layer(
+        parent: Arc<Layer>,
+        cell_iri: &str,
+        cell_value: &str,
+    ) -> LayerBuilder {
+        let mut b = LayerBuilder::new("cell", Some(parent));
+        let mut r = Resource::new(iri(cell_iri));
+        r.set(
+            iri("urn:eigenius:core:description"),
+            Value::String(cell_value.into()),
+        );
+        b.add_resource(r).unwrap();
+        b
+    }
+
+    /// Phase 20c: a re-run of a cell with byte-identical content
+    /// against an identical supporting context returns
+    /// `AnchoredCommitOutcome::Hit` with the previously-committed layer's
+    /// id. The second commit doesn't persist a new layer; the cache
+    /// holds exactly one entry.
+    #[test]
+    fn anchored_commit_hit_on_identical_run() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root_with_description(&backend, "root", &storage);
+
+        // First commit: cache miss. A new layer is stored.
+        let first = commit_layer_with_cache(
+            build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v1"),
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+        let first_id = match first {
+            AnchoredCommitOutcome::Miss { layer } => layer.id().clone(),
+            AnchoredCommitOutcome::Hit { .. } => panic!("first commit must miss"),
+        };
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 1);
+
+        // Second commit: byte-identical content + same supporting
+        // context → cache hit; no new layer stored.
+        let second = commit_layer_with_cache(
+            build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v1"),
+            storage,
+            &backend,
+        )
+        .unwrap();
+        match second {
+            AnchoredCommitOutcome::Hit { cached_layer_id } => {
+                assert_eq!(cached_layer_id, first_id);
+            }
+            AnchoredCommitOutcome::Miss { .. } => panic!("second commit must hit"),
+        }
+        // Cache still holds exactly one entry — the hit didn't add a
+        // new row.
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 1);
+    }
+
+    /// Phase 20c: changing the cell's content (different value)
+    /// misses the cache. A new layer is stored; the cache grows by
+    /// one entry.
+    #[test]
+    fn anchored_commit_miss_on_content_change() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root_with_description(&backend, "root", &storage);
+
+        commit_layer_with_cache(
+            build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v1"),
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+        let second = commit_layer_with_cache(
+            build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v2"),
+            storage,
+            &backend,
+        )
+        .unwrap();
+        match second {
+            AnchoredCommitOutcome::Miss { .. } => {}
+            AnchoredCommitOutcome::Hit { .. } => panic!("different content must miss"),
+        }
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 2);
+    }
+
+    /// Phase 20c (the load-bearing property): two structurally-
+    /// equivalent supporting contexts hash to the same cache key.
+    /// Build two parallel chains whose head layers have byte-equal
+    /// content (so their `content_hash`es match) but different
+    /// position hashes (different deeper ancestors). A cell layer
+    /// committed against the first chain's head can be re-derived
+    /// from the second chain's head and the cache hits.
+    #[test]
+    fn anchored_commit_hit_on_supporting_equivalent_context() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+
+        // Build two structurally-equivalent supporting layers `s1`
+        // and `s2`. They share content (the same resource declaring
+        // `demo:Marker`) but live above different distinct roots,
+        // so their position hashes differ while their content hashes
+        // match. The roots themselves need distinct content
+        // (otherwise they'd collapse to one layer per content
+        // addressing), so we give each a unique marker resource in
+        // addition to `core:description`.
+        let mut rb_a = LayerBuilder::new("root_a", None);
+        rb_a.add_resource(make_resource("urn:eigenius:core:description"))
+            .unwrap();
+        rb_a.add_resource(make_resource("urn:eigenius:demo:a_marker"))
+            .unwrap();
+        let root_a = commit_layer(rb_a, storage.clone(), &backend).unwrap();
+
+        let mut rb_b = LayerBuilder::new("root_b", None);
+        rb_b.add_resource(make_resource("urn:eigenius:core:description"))
+            .unwrap();
+        rb_b.add_resource(make_resource("urn:eigenius:demo:b_marker"))
+            .unwrap();
+        let root_b = commit_layer(rb_b, storage.clone(), &backend).unwrap();
+        assert_ne!(root_a.id(), root_b.id());
+
+        let mut sb_a = LayerBuilder::new("support", Some(Arc::clone(&root_a)));
+        sb_a.add_resource(make_resource("urn:eigenius:demo:Marker"))
+            .unwrap();
+        let support_a = commit_layer(sb_a, storage.clone(), &backend).unwrap();
+
+        let mut sb_b = LayerBuilder::new("support", Some(Arc::clone(&root_b)));
+        sb_b.add_resource(make_resource("urn:eigenius:demo:Marker"))
+            .unwrap();
+        let support_b = commit_layer(sb_b, storage.clone(), &backend).unwrap();
+
+        // Pre-condition: same content_hash, different position
+        // (different parent chains).
+        assert_eq!(support_a.content_hash(), support_b.content_hash());
+        assert_ne!(support_a.id(), support_b.id());
+
+        // Commit the same cell content against each supporting layer.
+        // The cell references `demo:Marker` as a property key —
+        // since the support layer is the youngest layer that
+        // defines `demo:Marker`, the cell's supporting layer
+        // resolves there. Both supports have the same content hash,
+        // so both cell commits should produce the same cache key.
+        let build_marker_cell = |parent: Arc<Layer>| {
+            let mut b = LayerBuilder::new("cell", Some(parent));
+            let mut r = Resource::new(iri("urn:eigenius:demo:cell"));
+            r.set(
+                iri("urn:eigenius:demo:Marker"),
+                Value::String("attached".into()),
+            );
+            r.set(
+                iri("urn:eigenius:core:description"),
+                Value::String("v1".into()),
+            );
+            b.add_resource(r).unwrap();
+            b
+        };
+
+        let first = commit_layer_with_cache(
+            build_marker_cell(Arc::clone(&support_a)),
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+        let first_id = match first {
+            AnchoredCommitOutcome::Miss { layer } => {
+                // Confirm the supporting layer is support_a, not root_a
+                // — that's the property we're testing.
+                assert_eq!(layer.supporting_layer(), Some(support_a.id()));
+                layer.id().clone()
+            }
+            AnchoredCommitOutcome::Hit { .. } => panic!("first commit must miss"),
+        };
+
+        let second =
+            commit_layer_with_cache(build_marker_cell(Arc::clone(&support_b)), storage, &backend)
+                .unwrap();
+        match second {
+            AnchoredCommitOutcome::Hit { cached_layer_id } => {
+                assert_eq!(
+                    cached_layer_id, first_id,
+                    "supporting-equivalent context must hit the same cache entry"
+                );
+            }
+            AnchoredCommitOutcome::Miss { .. } => {
+                panic!("supporting-equivalent context must hit the cache (D33 §6)")
+            }
+        }
+        // Cache still has exactly one entry — both runs share it.
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 1);
+    }
+
+    /// Phase 20c: a layer with no supporting layer (its only IRI
+    /// references are to itself) bypasses the cache entirely. The
+    /// commit goes through the standard path; no cache entry is
+    /// produced.
+    #[test]
+    fn anchored_commit_bypassed_when_no_supporting_layer() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+
+        // A root layer is self-contained — no external references,
+        // no supporting layer.
+        let mut rb = LayerBuilder::new("self-contained", None);
+        rb.add_resource(make_resource("urn:eigenius:core:r"))
+            .unwrap();
+        let outcome = commit_layer_with_cache(rb, storage, &backend).unwrap();
+        match outcome {
+            AnchoredCommitOutcome::Miss { layer } => {
+                assert!(layer.supporting_layer().is_none());
+            }
+            AnchoredCommitOutcome::Hit { .. } => panic!("no supporting → must not cache hit"),
+        }
+        // No cache entry was written.
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 0);
     }
 }

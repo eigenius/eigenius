@@ -7,7 +7,7 @@
 
 ## 1. Summary
 
-The chain is structurally a **partial order of layers**, not a sequence. The linearization the system stores today is *one valid choice* among potentially many. Most operations that currently treat the chain as a sequence — resolve, branch refs, trace pins, merge, consolidation, garbage collection — produce identical externally-observable behaviour under any valid linearization. Making the partial-order structure explicit unlocks: notebook cell-output cache reuse, storage dedup keyed on content rather than position, forward compatibility with distributed execution across multiple kernels, and an honest audit story for replay.
+The chain is structurally a **partial order of layers**, not a sequence. The linearization the system stores today is *one valid choice* among potentially many. Most operations that currently treat the chain as a sequence — resolve, branch refs, trace pins, merge, consolidation, garbage collection — produce identical externally-observable behaviour under any valid linearization. Making the partial-order structure explicit unlocks: notebook anchored-commit cache reuse, storage dedup keyed on content rather than position, forward compatibility with distributed execution across multiple kernels, and an honest audit story for replay.
 
 The shift rests on three structural commitments:
 
@@ -102,7 +102,7 @@ If L has no references (a pure top-level definition layer), `supporting(L) = ⊥
 
 1. **Position freedom.** L can be placed at any chain position L' such that `supporting(L) ◁ L'` without breaking references. This is the structural width of L's freedom in the partial order.
 2. **Computable in one pass.** Given the reference graph, computing `supporting(L)` is a single walk from the head down to the lowest layer whose ancestor-closure covers `references(L)`. With a per-IRI "topmost-defining-layer" index (D23 §5.2.2 already maintains a related structure for resolve), computation is O(|references(L)|) lookups.
-3. **Indexable.** Storing `supporting(L)` as a property on every committed layer enables O(1) lookups for downstream operations (consolidation precondition checks, partial-order linearization checks, cell-output cache invalidation).
+3. **Indexable.** Storing `supporting(L)` as a property on every committed layer enables O(1) lookups for downstream operations (consolidation precondition checks, partial-order linearization checks, anchored-commit cache invalidation).
 
 ### 4.4 Partial-conflict taxonomy
 
@@ -151,7 +151,7 @@ content_hash  = SHA256(canonical_eigon_cbor(defined_iris ∪ resources ∪ commi
 position_hash = SHA256(content_hash || sorted(parent_position_hashes))
 ```
 
-D33 builds on this. The supporting-layer index is keyed on `position_hash` (locating a specific instance in the chain); cell-output cache lookups are keyed on `content_hash` (matching content regardless of position); commutativity decisions use `position_hash` for the supporting-layer comparison and `content_hash` for the equality check.
+D33 builds on this. The supporting-layer index is keyed on `position_hash` (locating a specific instance in the chain); anchored-commit cache lookups are keyed on `content_hash` (matching content regardless of position); commutativity decisions use `position_hash` for the supporting-layer comparison and `content_hash` for the equality check.
 
 This phase does not modify D25's identity model. It uses both hashes for distinct purposes that D25's surface already exposes.
 
@@ -171,44 +171,54 @@ A new chain-resident property records the result of commutativity decisions:
 }
 ```
 
-These are *cached decisions* — the kernel computes commutativity at commit time for every newly-committed pair (or lazily on first query) and stores the result. Subsequent operations (cell-output cache, partial-order operations in v2) consume the cached decisions rather than re-deriving.
+These are *cached decisions* — the kernel computes commutativity at commit time for every newly-committed pair (or lazily on first query) and stores the result. Subsequent operations (anchored-commit cache, partial-order operations in v2) consume the cached decisions rather than re-deriving.
 
 The `chain:basis` property records *why* the kernel decided commutativity. This matters for audit (reviewer can verify the basis) and for invalidation (if the chain ontology changes such that a `DefinedIrisDisjoint` decision becomes wrong, the cache entry can be selectively invalidated based on basis).
 
-## 6. Cell-output reuse
+## 6. Anchored-commit cache (cell-output reuse and beyond)
 
-The user-facing v1 deliverable. A notebook cell that produces a chain commit goes through the standard layer-build pipeline, but before committing the kernel checks the cell-output cache:
+The user-facing v1 deliverable. Any commit path that produces deterministic content anchored to a supporting layer can route through the kernel's *anchored-commit cache* and get content-addressed reuse for free. The mechanism is general; "cell-output reuse" is the canonical application but not the only one. Concrete use cases:
+
+- **Notebook cell re-runs.** A cell that produces byte-identical resources against an unchanged supporting context returns the existing layer's id without re-executing.
+- **Institution ontology reload.** Re-loading the same ontology against the same core layer hits the cache; no new chain commit.
+- **Mirror regeneration.** A deterministic mirror generator (e.g., Julia, Lean) re-runs against the same institution layer and produces the same output content → cache hit.
+- **Any deterministic content generator whose supporting layer is its dependency anchor.**
+
+The mechanism is a single `commit(content, supporting_layer) → LayerId` memoization, keyed on the content hash and the supporting layer's *content hash* (not its position hash — that's the load-bearing detail). The kernel checks the cache before committing:
 
 ```
-cache_key = (content_hash, supporting_layer_hash)
+cache_key = (content_hash, supporting_content_hash)
 
-if cache_key in cell_output_cache:
+if cache_key in anchored_commit_cache:
     return cached_layer_id  # no commit; reuse existing
 
 else:
     L_new = build_and_commit_layer(content, supporting=supporting_layer)
-    cell_output_cache[cache_key] = L_new.position_hash
+    anchored_commit_cache[cache_key] = L_new.position_hash
     return L_new
 ```
 
-Three cases:
+Three cases (notebook-cell flavor):
 
 - **Cache hit, identical context.** The cell's content is byte-equal to a previous run, and its supporting layer is also unchanged. Re-running returns the existing layer's `position_hash` immediately; no chain commit; no re-execution of the cell's preceding work.
-- **Cache hit, supporting-equivalent context.** Same content, different parent chain, but the supporting layer is the same content (different parent linearizations of the same supporting context). Same outcome as the above — the cache key matches.
-- **Cache miss.** Either the content has changed or the supporting layer has changed. Standard commit path; the new layer is added; the cache is updated.
+- **Cache hit, supporting-equivalent context.** Same content, different parent chain, but the supporting layer is the same content (different parent linearizations of the same supporting context). Same outcome as the above — the cache key matches because supporting *content* is what's keyed on, not supporting *position*.
+- **Cache miss.** Either the content has changed or the supporting layer's content has changed. Standard commit path; the new layer is added; the cache is updated.
 
-**What the cache buys.** Three concrete things:
+**What the cache buys.** Four concrete things (the first three are the notebook flavor, the fourth is the generalization):
 
 1. Re-executing a cell whose content is unchanged is free (no chain commit, no re-execution of expensive operations like LLM calls or comorphism dispatches that produced the cell's content).
 2. Cells that don't depend on each other can be re-run in any order without producing different chain identities.
 3. Two notebooks (or two users) running structurally-equivalent cells against equivalent supporting contexts dedup their commits — the chain has one canonical record of "this content was produced from this support."
+4. **Operational no-ops.** Re-loading an institution ontology against an unchanged core is a no-op. Regenerating a deterministic mirror against an unchanged source institution is a no-op. Bootstrap-style "reload everything" workflows become idempotent at the commit level (not just at the `store_layer` level, which the position-hash content-addressing already covered for roots).
 
 **What the cache does not do.** Two non-features worth flagging:
 
 1. The cache doesn't replay side effects. If the cached cell originally dispatched an LLM call, the cache hit returns the chain layer — not the LLM's response. The chain layer *is* the response (it's what the cell committed); but if downstream code needs to re-trigger the LLM's effects, the cache won't do that.
-2. The cache doesn't provide replay against an arbitrary historical chain state. If the user wants "re-run the cell as if today's chain didn't have last week's commits," that's a separate operation (the kernel would need to compute the cell's output against a hypothetical chain state). Cell-output reuse is for the common case where the user wants the cell's output against the actual current chain.
+2. The cache doesn't provide replay against an arbitrary historical chain state. If the user wants "re-run the cell as if today's chain didn't have last week's commits," that's a separate operation (the kernel would need to compute the cell's output against a hypothetical chain state). Anchored-commit reuse is for the common case where the user wants the cell's output against the actual current chain.
 
-**Implementation footprint.** A new `cell_output_cache` column family in RocksDB keyed on `(content_hash, supporting_layer_hash) → position_hash`. Insertions are atomic with the layer commit (single `WriteBatch` per D23 §6.3). Lookups are O(1) hash probes. Eviction is unnecessary in v1 — the cache is small (one entry per distinct cell content × supporting context); pruning can be added later if deployment data shows growth.
+**Implementation footprint.** A new `anchored:<content_hex>:<supporting_content_hex>` column family in RocksDB → position-hash value. Insertions are atomic with the layer commit (single `WriteBatch` per D23 §6.3). Lookups are O(1) hash probes. Eviction is unnecessary in v1 — the cache is small (one entry per distinct content × supporting context); pruning can be added later if deployment data shows growth. The kernel-side surface lives behind four `PersistentBackend` trait methods (`lookup_anchored_commit`, `put_anchored_commit`, `delete_anchored_commit`, `list_anchored_commits`) and a high-level `commit_layer_with_cache` wrapper in `lattice.rs`.
+
+**The structural framing: "anchored."** The supporting layer is the content's *dependency anchor* in the chain — the youngest ancestor that any of the content's references resolve through. The cache keys commits on `(content, anchor's content)` exactly because two commits with the same content + the same anchor are structurally indistinguishable. The framing is intentionally broader than "cell output" so that v2 use cases (mirror regeneration, ontology reload, etc.) inherit the property without separate plumbing.
 
 ## 7. What changes for existing surfaces
 
@@ -275,7 +285,7 @@ v2 could add the same `retroactive_scan` opt-in.
 - Two-hash identity from D25 §X (prerequisite).
 - Supporting-layer computation and indexed property on every committed layer.
 - Commutativity decisions for pure-addition layer pairs (§4.5 conditions (1) and (2)); cached as `Commutativity` resources.
-- Cell-output cache keyed on `(content_hash, supporting_layer_hash)`.
+- Anchored-commit cache keyed on `(content_hash, supporting_layer_hash)`.
 - Forward-only semantics for AutoOnLoad gates and constraint additions, made explicit in documentation and the chain commit messages.
 - Consolidation gains the supporting-layer precondition (§7.5).
 - Merge gains the partial-conflict taxonomy classification (§7.4); D20's resolution surface is unchanged.
@@ -352,7 +362,7 @@ A speculative shape: a Lean-4 institution (D28) emits a verified proof that two 
 
 §9.2's `canonicalize_chain(branch)` operator and similar chain-rewriting tools (e.g., `compress_partial_order`, `reorder_for_dedup`) sit between v1 and v2. They're individually small operators that benefit from D33's foundational concepts; their UX shape (CLI, gRPC, dry-run semantics) deserves its own decision pass.
 
-### 10.7 Cell-output cache eviction
+### 10.7 Anchored-commit cache eviction
 
 §6's cache is intentionally unbounded in v1 because each entry is small and cardinality is bounded by distinct cell content × supporting context. In long-lived production deployments with many notebooks, this may grow. Eviction strategies (LRU, TTL, content-hash-popularity-weighted) deserve a v2 decision based on observed cardinality.
 
@@ -360,7 +370,7 @@ A speculative shape: a Lean-4 institution (D28) emits a verified proof that two 
 
 ### 11.0 Shared foundation with D25
 
-Milestone 20a (two-hash identity split, supporting-layer computation, supporting-layer index, content-hash dedup index) is shared with D25 (chain consolidation) and lands as a single prerequisite PR per [D25 §11.0](d25-chain-consolidation.md). The remaining D33 milestones (20b–20e) and D25's milestones (17a–17e) build on that foundation independently and can land in any order against it. Recommended ordering reflects user-facing value: D25 v1 first (consolidation lands operator-facing capability), then D33's cell-output cache (20c — notebook UX win), then D33's commutativity and partial-conflict work (20b, 20d, 20e).
+Milestone 20a (two-hash identity split, supporting-layer computation, supporting-layer index, content-hash dedup index) is shared with D25 (chain consolidation) and lands as a single prerequisite PR per [D25 §11.0](d25-chain-consolidation.md). The remaining D33 milestones (20b–20e) and D25's milestones (17a–17e) build on that foundation independently and can land in any order against it. Recommended ordering reflects user-facing value: D25 v1 first (consolidation lands operator-facing capability), then D33's anchored-commit cache (20c — notebook UX win), then D33's commutativity and partial-conflict work (20b, 20d, 20e).
 
 ### 11.1 D33 milestones
 
@@ -370,7 +380,7 @@ PR 0 — shared foundation (delivered as 20a; see D25 §11.0)
                               ▼
                               ├─→ 20b commutativity decisions for pure-addition pairs
                               │
-                              ├─→ 20c cell-output cache
+                              ├─→ 20c anchored-commit cache
                               │
                               ├─→ 20d partial-conflict taxonomy as commit metadata
                               │
@@ -381,9 +391,9 @@ PR 0 — shared foundation (delivered as 20a; see D25 §11.0)
 |---|---|---|
 | 20a | Supporting-layer computation; index storage; lazy back-fill. | Computed `supporting` matches an oracle (independently-computed reference); back-fill is idempotent; concurrent computations yield identical results. |
 | 20b | Commutativity decisions for pure-addition pairs. | Hand-constructed pairs with disjoint defined_iris and supporting-layer ordering are decided commutative; pairs with overlap or interleaved supporting are decided non-commutative; cached `Commutativity` resources match. |
-| 20c | Cell-output cache: hit, miss, supporting-equivalent context. | Re-running an unchanged cell returns the cached `position_hash` without re-executing; supporting-context shifts that don't change the supporting layer also hit; genuine content or support changes miss. |
+| 20c | Anchored-commit cache: hit, miss, supporting-equivalent context. | Re-running an unchanged cell returns the cached `position_hash` without re-executing; supporting-context shifts that don't change the supporting layer also hit; genuine content or support changes miss. |
 | 20d | Partial-conflict taxonomy: each class detected at commit time and surfaced as commit metadata. | Each of §4.4's four classes produces the expected commit-metadata classification; pure-addition layers are correctly classified as such. |
-| 20e | CLI surfaces (`eigenius layer supporting <iri>`, `eigenius chain commutativity <a> <b>`, cell-output cache stats); gRPC parallels; documentation in platform guide. | End-to-end smoke: a notebook re-runs with cell-output reuse working; CLI commands return correct values; docs cover the v1 contract. |
+| 20e | CLI surfaces (`eigenius layer supporting <iri>`, `eigenius chain commutativity <a> <b>`, anchored-commit cache stats); gRPC parallels; documentation in platform guide. | End-to-end smoke: a notebook re-runs with cell-output reuse working; CLI commands return correct values; docs cover the v1 contract. |
 
 Cross-cutting tests:
 
@@ -409,7 +419,7 @@ Source code touchpoints (entering Phase 20):
 
 - `kernel/src/layer/supporting.rs` (new) — supporting-layer computation
 - `kernel/src/layer/handle.rs` — `LayerHandle` extends with `supporting_layer` accessor
-- `kernel/src/layer/cache.rs` — supporting-layer index storage; cell-output cache
+- `kernel/src/layer/cache.rs` — supporting-layer index storage; anchored-commit cache
 - `kernel/src/storage/mod.rs` — `Storage` trait extension for supporting-layer index lookups
 - `storage/memory/src/lib.rs`, `storage/rocksdb/src/lib.rs` — backend implementations
 - `kernel/src/validation/mod.rs` — partial-conflict taxonomy classification at commit time
