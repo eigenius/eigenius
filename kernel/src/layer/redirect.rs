@@ -25,6 +25,8 @@
 //! consistent DAG (D25 §12.8.1(d)).
 
 use crate::layer::{LayerHandle, LayerId};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 /// Persistent record of one resolve redirect installed by
 /// `consolidate_chain` when `to` is below the branch head.
@@ -91,4 +93,119 @@ pub fn augment_topology_with_redirects(
     // redirect in storage; the original handle wins. The redirect
     // still drives the resolve-walk short-circuit (handled in
     // `Layer::redirect_target`); only the topology slot is shared.
+}
+
+/// In-memory cache of installed resolve redirects (`source → target`).
+///
+/// Sits on the [`LayerStorage`](crate::layer::LayerStorage) bundle
+/// alongside `bloom_cache`. Loaded from the persistent backend at
+/// `LayerStorage::with_persistent` construction time and kept in sync
+/// by the consolidation algorithm: every `put_redirect` call to the
+/// backend is mirrored by a `put` here.
+///
+/// `Layer::resolve` does not consult this directly. Instead,
+/// `build_chain` pre-resolves redirects per layer: when a layer's id
+/// is a redirect source, the target's full chain is built and stored
+/// inline as [`Layer::redirect_target`](crate::layer::Layer::redirect_target).
+/// The resolve walk's hot path is then a single inline branch with no
+/// map probe.
+pub trait RedirectMap: Send + Sync {
+    /// Returns the redirect target for `source`, or `None` if the
+    /// layer isn't a redirect source.
+    fn lookup(&self, source: &LayerId) -> Option<LayerId>;
+
+    /// Insert or update a redirect entry.
+    fn put(&self, source: LayerId, target: LayerId);
+
+    /// Remove a redirect entry.
+    fn remove(&self, source: &LayerId);
+
+    /// Total number of installed redirects.
+    fn len(&self) -> usize;
+}
+
+/// Unbounded in-memory `RedirectMap`. The expected entry count is
+/// "one per consolidation operator-invoked over the chain's lifetime,"
+/// which is small in absolute terms — no eviction policy needed.
+#[derive(Default)]
+pub struct MemoryRedirectMap {
+    inner: RwLock<HashMap<LayerId, LayerId>>,
+}
+
+impl MemoryRedirectMap {
+    /// Empty map. Used by `LayerStorage::in_memory` and by tests that
+    /// don't exercise redirects.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pre-populate from a slice of `RedirectEntry` (typically the
+    /// result of `PersistentBackend::list_redirects` at startup).
+    pub fn from_entries(entries: &[RedirectEntry]) -> Self {
+        let map = Self::new();
+        for entry in entries {
+            map.put(entry.source().clone(), entry.target.clone());
+        }
+        map
+    }
+}
+
+impl RedirectMap for MemoryRedirectMap {
+    fn lookup(&self, source: &LayerId) -> Option<LayerId> {
+        self.inner
+            .read()
+            .expect("MemoryRedirectMap poisoned")
+            .get(source)
+            .cloned()
+    }
+
+    fn put(&self, source: LayerId, target: LayerId) {
+        self.inner
+            .write()
+            .expect("MemoryRedirectMap poisoned")
+            .insert(source, target);
+    }
+
+    fn remove(&self, source: &LayerId) {
+        self.inner
+            .write()
+            .expect("MemoryRedirectMap poisoned")
+            .remove(source);
+    }
+
+    fn len(&self) -> usize {
+        self.inner.read().expect("MemoryRedirectMap poisoned").len()
+    }
+}
+
+/// Empty `RedirectMap` used by `LayerStorage::in_memory` when no
+/// redirects can be installed. Cheaper than `MemoryRedirectMap::new`
+/// for the common no-redirect case because lookups never take a lock.
+pub struct NoRedirects;
+
+impl RedirectMap for NoRedirects {
+    fn lookup(&self, _source: &LayerId) -> Option<LayerId> {
+        None
+    }
+
+    fn put(&self, _source: LayerId, _target: LayerId) {
+        // No-op. Callers that want a mutable redirect map use
+        // `MemoryRedirectMap` explicitly via `LayerStorage::with_persistent`.
+    }
+
+    fn remove(&self, _source: &LayerId) {}
+
+    fn len(&self) -> usize {
+        0
+    }
+}
+
+/// Convenience: an `Arc<dyn RedirectMap>` pre-populated from a backend.
+pub(crate) fn redirect_map_from_backend(
+    backend: &dyn crate::storage::PersistentBackend,
+) -> Arc<dyn RedirectMap> {
+    match backend.list_redirects() {
+        Ok(entries) => Arc::new(MemoryRedirectMap::from_entries(&entries)),
+        Err(_) => Arc::new(NoRedirects),
+    }
 }

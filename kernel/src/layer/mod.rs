@@ -50,7 +50,10 @@ pub use index::{
     collect_ancestors, extract_indexable_triples, index_keys, is_indexable_predicate, is_shadowed,
     scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
-pub use redirect::{augment_topology_with_redirects, manufacture_tombstone, RedirectEntry};
+pub use redirect::{
+    augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,
+    RedirectEntry, RedirectMap,
+};
 pub use storage::LayerStorage;
 pub use supporting::compute_supporting_layer;
 
@@ -75,9 +78,46 @@ pub fn build_chain(
             .cloned()
             .unwrap_or_default();
         let layer = Layer::from_handle(handle, parent.clone(), defined, storage.clone());
-        parent = Some(std::sync::Arc::new(layer));
+        let mut arc = std::sync::Arc::new(layer);
+        // D25 §12.8 / Phase 17f: if this layer is a redirect source,
+        // pre-resolve the target chain and stash the head Arc inline.
+        // `Layer::resolve` (and the other walk APIs) then short-circuit
+        // through the inline pointer with no `RedirectMap` probe.
+        attach_redirect_target(&mut arc, &storage);
+        parent = Some(arc);
     }
     parent.expect("ChainInfo must have at least one handle")
+}
+
+/// Populate `Layer::redirect_target` if `layer.id()` is a redirect
+/// source. Recursively builds the target's chain via
+/// `PersistentBackend::load_chain_from` + `build_chain`; the inline
+/// pointer then survives for the entire lifetime of the head Arc.
+///
+/// No-op when the storage bundle has no `persistent_backend` (the
+/// in-memory case never has redirects installed) or when the layer
+/// isn't a redirect source.
+fn attach_redirect_target(layer: &mut std::sync::Arc<Layer>, storage: &LayerStorage) {
+    let target_id = match storage.redirect_map.lookup(layer.id()) {
+        Some(id) => id,
+        None => return,
+    };
+    let pb = match storage.persistent_backend.as_ref() {
+        Some(pb) => pb,
+        None => return,
+    };
+    let target_info = match pb.load_chain_from(&target_id) {
+        Ok(Some(info)) => info,
+        // Target absent or storage error: leave `redirect_target = None`.
+        // The walk falls through to the source's own content, which in
+        // reclaim mode has been cleared (`get_resource` returns None
+        // for every IRI) — head-rooted resolves see the same as
+        // before-consolidation only in preserve mode. v1 ships the
+        // refusal at consolidate-time to prevent this state.
+        _ => return,
+    };
+    let target_head = build_chain(target_info, storage.clone());
+    Layer::set_redirect_target(layer, target_head);
 }
 
 use crate::ontology::iri::Iri;
@@ -215,6 +255,16 @@ pub struct Layer {
     /// index in 14h) is a one-line change to `LayerStorage`; no call-site
     /// churn.
     storage: LayerStorage,
+    /// Inline resolve-redirect cache (D25 §12.8 / Phase 17f). When the
+    /// layer is a redirect *source* — its id is in
+    /// `LayerStorage.redirect_map` — `build_chain` pre-resolves the
+    /// target's chain and stores the head Arc here. `Layer::resolve`,
+    /// `resolve_all`, and `iter_all_resources` consult this inline
+    /// before processing the layer's own content + parent chain. The
+    /// inline shape keeps the resolve hot path at one branch per
+    /// visited layer (no `RedirectMap` probe). Most layers have
+    /// `None`; redirects are sparse.
+    redirect_target: Option<Arc<Layer>>,
 }
 
 impl fmt::Debug for Layer {
@@ -255,6 +305,7 @@ impl Layer {
             parents: parent.into_iter().collect(),
             defined_iris,
             storage,
+            redirect_target: None,
         }
     }
 
@@ -277,6 +328,7 @@ impl Layer {
             parents,
             defined_iris,
             storage,
+            redirect_target: None,
         }
     }
 
@@ -306,6 +358,26 @@ impl Layer {
     /// resource set, use [`compute_supporting_layer`] directly.
     pub fn supporting_layer(&self) -> Option<&LayerId> {
         self.supporting_layer.as_ref()
+    }
+
+    /// Inline-cached resolve-redirect target if this layer is a
+    /// redirect source (D25 §12.8 / Phase 17f). `None` for ordinary
+    /// layers. When `Some(target)`, every head-rooted resolve walk
+    /// reaching this layer short-circuits to `target` and continues
+    /// from there — the layer's own content + parent chain is
+    /// skipped.
+    pub fn redirect_target(&self) -> Option<&Arc<Layer>> {
+        self.redirect_target.as_ref()
+    }
+
+    /// Crate-internal setter used by `build_chain` to install the
+    /// inline redirect target post-construction. `Arc::get_mut` is
+    /// guaranteed to succeed because the just-constructed Arc has
+    /// no other holders yet.
+    pub(crate) fn set_redirect_target(this: &mut Arc<Layer>, target: Arc<Layer>) {
+        if let Some(layer) = Arc::get_mut(this) {
+            layer.redirect_target = Some(target);
+        }
     }
 
     /// Returns the human-readable name of this layer.
@@ -405,7 +477,21 @@ impl Layer {
     /// layer).
     pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
         let mut current: Option<&Layer> = Some(self);
+        let mut visited: BTreeSet<LayerId> = BTreeSet::new();
         while let Some(layer) = current {
+            // D25 §12.8 / Phase 17f: if this layer is a redirect source,
+            // short-circuit to the target's chain. The original layer's
+            // content + parent chain is skipped; head-rooted reads
+            // consume L_c's content (which holds the top-of-stack of
+            // the consolidated range). The `visited` set defends
+            // against pathological cycles even though v1's
+            // refuse-chaining policy prevents installation of any.
+            if let Some(target) = layer.redirect_target.as_ref() {
+                if visited.insert(layer.id.clone()) {
+                    current = Some(target.as_ref());
+                    continue;
+                }
+            }
             let maybe_present = match layer.storage.bloom_cache.get_or_load(&layer.id) {
                 Ok(Some(bloom)) => bloom.might_contain(iri),
                 _ => true,
@@ -422,7 +508,14 @@ impl Layer {
 
     /// Collect all resources at this IRI across the entire chain (top to
     /// bottom). Top layer's value comes first.
+    ///
+    /// Redirect-aware: on encountering a redirect source, the walk
+    /// continues through the redirect target's chain (D25 §12.8). The
+    /// source layer's own content + parents are skipped.
     pub fn resolve_all(&self, iri: &Iri) -> Vec<Arc<Resource>> {
+        if let Some(target) = self.redirect_target.as_ref() {
+            return target.resolve_all(iri);
+        }
         let mut results = Vec::new();
         if let Some(r) = self.get_resource(iri) {
             results.push(r);
@@ -448,8 +541,16 @@ impl Layer {
     pub fn iter_all_resources(&self) -> impl Iterator<Item = (Iri, Arc<Resource>)> {
         let mut seen = BTreeSet::<Iri>::new();
         let mut buf: BTreeMap<Iri, Arc<Resource>> = BTreeMap::new();
+        let mut visited_redirects: BTreeSet<LayerId> = BTreeSet::new();
         let mut current: Option<&Layer> = Some(self);
         while let Some(layer) = current {
+            // D25 §12.8: redirect source short-circuits to the target.
+            if let Some(target) = layer.redirect_target.as_ref() {
+                if visited_redirects.insert(layer.id.clone()) {
+                    current = Some(target.as_ref());
+                    continue;
+                }
+            }
             for iri in &layer.defined_iris {
                 if seen.insert(iri.clone()) {
                     if let Some(res) = layer.get_resource(iri) {
@@ -620,6 +721,11 @@ impl LayerBuilder {
             parents: self.parents,
             defined_iris,
             storage,
+            // Freshly-built layers can't be their own redirect source —
+            // a redirect is only installed by `consolidate_chain` on
+            // an *existing* layer. `build_chain` is the path that
+            // populates this field for reloaded chains.
+            redirect_target: None,
         };
         // Phase 14h: pre-populate the triple index from the layer's
         // indexable triples. `extract_indexable_triples` consults each

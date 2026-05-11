@@ -1188,6 +1188,114 @@ mod tests {
         }
     }
 
+    /// Phase 17f-B: resolve walk follows an installed redirect.
+    /// Set up an alternate-content target layer, install a redirect
+    /// from a source layer to that target, rebuild the chain, and
+    /// verify head-rooted reads now return the *target's* content
+    /// for IRIs defined only there. The redirect short-circuit is
+    /// the only path that could change the answer — the source
+    /// layer's own content is unchanged.
+    #[test]
+    fn resolve_walk_follows_installed_redirect() {
+        use eigenius_kernel::storage::PersistentBackend;
+        let dir = TempDir::new().unwrap();
+        let store_arc: Arc<dyn PersistentBackend> = Arc::new(RocksStore::open(dir.path()).unwrap());
+
+        // Root holds the property declarations the chain references.
+        let storage_for_build = eigenius_kernel::layer::LayerStorage::in_memory();
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
+            .unwrap();
+        rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage_for_build.clone()));
+        store_arc.store_layer(&root).unwrap();
+
+        // Source layer claims `demo:X` with value "from-source".
+        let mut sb = LayerBuilder::new("source", Some(Arc::clone(&root)));
+        sb.add_resource(make_resource(
+            "urn:eigenius:demo:X",
+            vec![(
+                "urn:eigenius:core:description",
+                Value::String("from-source".into()),
+            )],
+        ))
+        .unwrap();
+        let source = Arc::new(sb.build(storage_for_build.clone()));
+        store_arc.store_layer(&source).unwrap();
+
+        // Target layer (the would-be consolidated layer) claims
+        // `demo:X` with a different value "from-target". Parent is
+        // root, just like `source`.
+        let mut tb = LayerBuilder::new("target", Some(Arc::clone(&root)));
+        tb.add_resource(make_resource(
+            "urn:eigenius:demo:X",
+            vec![(
+                "urn:eigenius:core:description",
+                Value::String("from-target".into()),
+            )],
+        ))
+        .unwrap();
+        let target = Arc::new(tb.build(storage_for_build.clone()));
+        store_arc.store_layer(&target).unwrap();
+
+        // Pre-condition: rebuilding `source`'s chain via a
+        // persistent-backed `LayerStorage` (no redirect installed yet)
+        // resolves `demo:X` to "from-source".
+        let info_pre = store_arc.load_chain_from(source.id()).unwrap().unwrap();
+        let pre_storage =
+            eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store_arc));
+        let pre_head = eigenius_kernel::layer::build_chain(info_pre, pre_storage);
+        let pre = pre_head
+            .resolve(&iri("urn:eigenius:demo:X"))
+            .expect("demo:X resolves before redirect");
+        assert_eq!(
+            pre.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from-source")
+        );
+        assert!(
+            pre_head.redirect_target().is_none(),
+            "pre-condition: no redirect installed yet"
+        );
+
+        // Install the redirect: source → target. Topology entry for
+        // `source` stays in place (reclaim happens in a later phase).
+        let source_handle = store_arc
+            .load_topology()
+            .unwrap()
+            .get_layer(source.id())
+            .unwrap()
+            .clone();
+        let entry = eigenius_kernel::layer::RedirectEntry {
+            target: target.id().clone(),
+            source_handle,
+        };
+        store_arc.put_redirect(&entry).unwrap();
+
+        // Post-condition: a freshly-built chain sees the redirect.
+        // `build_chain` reads `redirect_map` (which `with_persistent`
+        // populated at construction time, so we need a *fresh*
+        // `LayerStorage` to pick up the new redirect).
+        let info_post = store_arc.load_chain_from(source.id()).unwrap().unwrap();
+        let post_storage =
+            eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store_arc));
+        let post_head = eigenius_kernel::layer::build_chain(info_post, post_storage);
+        assert!(
+            post_head.redirect_target().is_some(),
+            "build_chain should populate redirect_target for redirect-source layers"
+        );
+        let post = post_head
+            .resolve(&iri("urn:eigenius:demo:X"))
+            .expect("demo:X resolves through the redirect");
+        assert_eq!(
+            post.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from-target"),
+            "resolve must follow the redirect and return the target's value"
+        );
+    }
+
     /// Two layers with identical resources committed against different
     /// parents share a `ContentHash` but get distinct `PositionHash`es;
     /// `lookup_by_content_hash` returns both, and `delete_layer` prunes
