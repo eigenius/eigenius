@@ -76,8 +76,12 @@ export function commitMetaFrom(
 export type CommitStatus =
   /** Default success — clean append, no surprise. No badge. */
   | { kind: "fast-forward" }
-  /** Anchored-commit cache hit at a different position; branch unchanged. */
-  | { kind: "cached" }
+  /**
+   * Anchored-commit cache hit at a different chain position; branch
+   * unchanged. `cachedLayerId` carries the canonical layer's id so the
+   * tooltip can point at it.
+   */
+  | { kind: "cached"; cachedLayerId?: string }
   /** Concurrent disjoint commit auto-merged; branch advanced to the merge. */
   | { kind: "trivial-merge"; mergeLayerId?: string }
   /** Conflict — branch unchanged; user must recover (Phase 5 dialog). */
@@ -97,14 +101,17 @@ export function classifyCommit(meta: CommitMeta): CommitStatus {
       };
     case MergeOutcome.TRIVIAL_MERGE:
       return { kind: "trivial-merge", mergeLayerId: meta.mergeLayerId };
+    case MergeOutcome.CACHED_DIFFERENT_POSITION:
+      // Anchored-commit cache hit at a different chain position
+      // (D33 §6). The branch ref did not advance; the cached
+      // canonical layer's id is in `mergeLayerId` for the tooltip.
+      return { kind: "cached", cachedLayerId: meta.mergeLayerId };
     case MergeOutcome.UNSPECIFIED:
-      // No CAS ran. In practice this is either: no persistent backend
-      // (nothing to report) or a different-position anchored-commit
-      // cache hit (the interesting case — show "cached").
-      // `branchAdvanced` distinguishes these: false for the cache hit,
-      // also false for no-backend. Both render as "cached" today; if
-      // we ever want to distinguish them we'd need an extra wire field.
-      return meta.branchAdvanced ? { kind: "fast-forward" } : { kind: "cached" };
+      // No CAS happened — no persistent backend, or the commit
+      // didn't reach the persist step (eval errored, validation
+      // rejected the resources). No badge: we have nothing
+      // commit-shape-related to surface to the user.
+      return { kind: "fast-forward" };
     case MergeOutcome.FAST_FORWARD:
     default:
       return { kind: "fast-forward" };

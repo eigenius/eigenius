@@ -157,14 +157,20 @@ async fn load_twice_with_identical_content_hits_anchored_commit_cache() {
         !second.branch_advanced,
         "different-position cache hit must report branch_advanced = false"
     );
-    // No CAS was attempted (the persist short-circuited) → the
-    // MergeInfo is the proto3 zero value: outcome = UNSPECIFIED with
-    // all other fields empty.
+    // No CAS was attempted (the persist short-circuited), but the
+    // anchored-commit cache was hit at a different chain position —
+    // surface `CACHED_DIFFERENT_POSITION` with the cached layer's id
+    // in `merge_layer_id` so consumers can distinguish a cache hit
+    // from the no-backend / no-commit `UNSPECIFIED` shape.
     let second_merge = second.merge.as_ref().expect("merge info present");
     assert_eq!(
         second_merge.outcome,
-        eigenius_kernel::server::proto::MergeOutcome::Unspecified as i32,
-        "different-position cache hit must report MergeOutcome::Unspecified (no CAS happened)"
+        eigenius_kernel::server::proto::MergeOutcome::CachedDifferentPosition as i32,
+        "different-position cache hit must report MergeOutcome::CachedDifferentPosition"
+    );
+    assert_eq!(
+        second_merge.merge_layer_id, first_layer_id,
+        "cache-hit merge_layer_id must be the canonical (cached) layer id"
     );
 
     // Branch is still at the same head — no second advance happened.

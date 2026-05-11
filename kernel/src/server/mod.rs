@@ -405,20 +405,53 @@ struct PersistedLayerInfo {
     layer_id: crate::layer::LayerId,
     branch_advanced: bool,
     merge_outcome: Option<crate::lattice::UpdateOutcome>,
+    /// `true` iff the persist short-circuited because the
+    /// anchored-commit cache (D33 §6) found a content-equivalent layer
+    /// at a different chain position. `layer_id` in that case is the
+    /// cached layer's id, not the freshly-built one. Distinguished
+    /// from the no-backend / no-CAS case (where `merge_outcome` is
+    /// also `None` and `branch_advanced` is also `false`) so the
+    /// response can carry a `MERGE_OUTCOME_CACHED_DIFFERENT_POSITION`
+    /// signal that consumers can render distinctly from "no commit
+    /// shape information available".
+    cache_hit_different_position: bool,
 }
 
-/// Convert a lattice-level [`UpdateOutcome`](crate::lattice::UpdateOutcome)
-/// (or its absence — `None` when no CAS was attempted) into the
-/// wire-format [`proto::MergeInfo`] used by every commit response.
+/// Build a wire-format [`proto::MergeInfo`] from an optional
+/// [`PersistedLayerInfo`].
 ///
-/// `None` maps to `MERGE_OUTCOME_UNSPECIFIED` with all other fields
-/// default — matches the proto3 zero-value semantics so omitting the
-/// `merge` field on the wire is indistinguishable from "no CAS ran"
-/// (which is the truth for the no-backend and different-position-
-/// cache-hit paths).
-fn merge_info_from_outcome(outcome: Option<&crate::lattice::UpdateOutcome>) -> proto::MergeInfo {
+/// Resolves all post-persist states callers care about into the
+/// proto's [`proto::MergeOutcome`] taxonomy:
+///
+/// - `None`: persist didn't run at all (commit attempted but errored
+///   before reaching `persist_layer_if_backend`, e.g. backend I/O
+///   error captured as a `ValidationError`). Emit `UNSPECIFIED`.
+/// - **Different-position cache hit** (`info.cache_hit_different_position`):
+///   `CACHED_DIFFERENT_POSITION` with `merge_layer_id = info.layer_id`
+///   (the cached canonical layer's id). Branch did not advance.
+/// - **Lattice CAS ran** (`info.merge_outcome = Some(_)`): map by
+///   variant — FastForward / TrivialMerge / NeedsWitnessedMerge.
+/// - **CAS skipped, no cache hit** (`info.merge_outcome = None`,
+///   `!cache_hit_…`): the no-backend path. Emit `UNSPECIFIED`.
+fn merge_info_from_persist_info(info: Option<&PersistedLayerInfo>) -> proto::MergeInfo {
     use crate::lattice::UpdateOutcome;
-    match outcome {
+    let Some(info) = info else {
+        return proto::MergeInfo {
+            outcome: proto::MergeOutcome::Unspecified as i32,
+            merge_layer_id: String::new(),
+            conflicting_iris: Vec::new(),
+            current_head: String::new(),
+        };
+    };
+    if info.cache_hit_different_position {
+        return proto::MergeInfo {
+            outcome: proto::MergeOutcome::CachedDifferentPosition as i32,
+            merge_layer_id: info.layer_id.to_string(),
+            conflicting_iris: Vec::new(),
+            current_head: String::new(),
+        };
+    }
+    match info.merge_outcome.as_ref() {
         None => proto::MergeInfo {
             outcome: proto::MergeOutcome::Unspecified as i32,
             merge_layer_id: String::new(),
@@ -812,6 +845,7 @@ impl EigeniusService {
                 layer_id: layer.id().clone(),
                 branch_advanced: false,
                 merge_outcome: None,
+                cache_hit_different_position: false,
             });
         };
 
@@ -845,6 +879,7 @@ impl EigeniusService {
                     layer_id: layer.id().clone(),
                     branch_advanced,
                     merge_outcome: Some(outcome),
+                    cache_hit_different_position: false,
                 });
             }
             // Different-position cache hit — the canonical layer is
@@ -864,6 +899,7 @@ impl EigeniusService {
                 layer_id: cached_id,
                 branch_advanced: false,
                 merge_outcome: None,
+                cache_hit_different_position: true,
             });
         }
 
@@ -904,6 +940,7 @@ impl EigeniusService {
             layer_id: layer.id().clone(),
             branch_advanced,
             merge_outcome: Some(outcome),
+            cache_hit_different_position: false,
         })
     }
 
@@ -1632,7 +1669,11 @@ impl EigeniusService {
         // leaving the caller holding a `trace_iri` that pointed at a
         // layer the chain never accepted).
         let mut branch_advanced = false;
-        let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
+        // The user-layer's persist info. We stash the full struct so
+        // the response can disambiguate `CACHED_DIFFERENT_POSITION`
+        // from `UNSPECIFIED` via `info.cache_hit_different_position`;
+        // surfacing only `merge_outcome` would conflate them.
+        let mut user_persist_info: Option<PersistedLayerInfo> = None;
         // True iff we reached `persist_layer_if_backend` for any layer.
         // Distinguishes "the run committed (or tried to) — report the
         // outcome" from "we never got to the commit step — say nothing
@@ -1711,8 +1752,8 @@ impl EigeniusService {
                         match self.persist_layer_if_backend(branch, &outcome.user_layer) {
                             Ok(info) => {
                                 branch_advanced |= info.branch_advanced;
-                                merge_outcome = info.merge_outcome;
                                 user_advanced = info.branch_advanced;
+                                user_persist_info = Some(info);
                             }
                             Err(err) => {
                                 tracing::warn!(
@@ -1929,7 +1970,7 @@ impl EigeniusService {
             // resource, eval error) sends `merge=None` so the notebook
             // doesn't render a misleading badge.
             merge: if commit_attempted {
-                Some(merge_info_from_outcome(merge_outcome.as_ref()))
+                Some(merge_info_from_persist_info(user_persist_info.as_ref()))
             } else {
                 None
             },
@@ -1965,12 +2006,14 @@ impl EigeniusKernel for EigeniusService {
 
         let mut layer_id = String::new();
         let mut branch_advanced = false;
-        // The CAS outcome from the user-layer persist — the user-
-        // facing one. Any follow-up persists (AutoOnLoad provenance,
-        // institution_classes) log on failure but their outcomes are
-        // not surfaced in the response; see proto comment on
-        // `RunProgramResponse.merge` for the design rationale.
-        let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
+        // The user-layer's persist info — the user-facing one. Any
+        // follow-up persists (AutoOnLoad provenance, institution_classes)
+        // log on failure but their outcomes are not surfaced in the
+        // response; see proto comment on `RunProgramResponse.merge`
+        // for the design rationale. Stashed as the full struct so the
+        // response can disambiguate `CACHED_DIFFERENT_POSITION` from
+        // `UNSPECIFIED` via `info.cache_hit_different_position`.
+        let mut user_persist_info: Option<PersistedLayerInfo> = None;
         let mut errors = Vec::new();
 
         if req.auto_commit {
@@ -2022,8 +2065,8 @@ impl EigeniusKernel for EigeniusService {
                             // NeedsWitnessedMerge) when a CAS ran.
                             layer_id = info.layer_id.to_string();
                             branch_advanced = info.branch_advanced;
-                            merge_outcome = info.merge_outcome;
                             user_advanced = info.branch_advanced;
+                            user_persist_info = Some(info);
                         }
                         Err(err) => errors.push(err),
                     }
@@ -2047,7 +2090,7 @@ impl EigeniusKernel for EigeniusService {
                             resource_count: count,
                             branch,
                             branch_advanced,
-                            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
+                            merge: Some(merge_info_from_persist_info(user_persist_info.as_ref())),
                         };
                         if !response.success {
                             guard.fail("validation_failed");
@@ -2236,7 +2279,7 @@ impl EigeniusKernel for EigeniusService {
             branch,
             branch_advanced,
             merge: if req.auto_commit {
-                Some(merge_info_from_outcome(merge_outcome.as_ref()))
+                Some(merge_info_from_persist_info(user_persist_info.as_ref()))
             } else {
                 None
             },
@@ -2345,7 +2388,7 @@ impl EigeniusKernel for EigeniusService {
         // every transient read would render as a misleading `cached`
         // badge in the notebook.
         let mut branch_advanced = false;
-        let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
+        let mut user_persist_info: Option<PersistedLayerInfo> = None;
         let mut commit_attempted = false;
         let output_resource_iris: Vec<String> = if outcome.into_resources.is_empty() {
             Vec::new()
@@ -2374,8 +2417,8 @@ impl EigeniusKernel for EigeniusService {
                     match self.persist_layer_if_backend(&branch_name, &co.user_layer) {
                         Ok(info) => {
                             branch_advanced |= info.branch_advanced;
-                            merge_outcome = info.merge_outcome;
                             user_advanced = info.branch_advanced;
+                            user_persist_info = Some(info);
                         }
                         Err(err) => tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
@@ -2460,7 +2503,7 @@ impl EigeniusKernel for EigeniusService {
             output_resource_iris,
             branch_advanced,
             merge: if commit_attempted {
-                Some(merge_info_from_outcome(merge_outcome.as_ref()))
+                Some(merge_info_from_persist_info(user_persist_info.as_ref()))
             } else {
                 None
             },
@@ -2710,7 +2753,7 @@ impl EigeniusKernel for EigeniusService {
             success: true,
             trace_iri,
             branch_advanced: info.branch_advanced,
-            merge: Some(merge_info_from_outcome(info.merge_outcome.as_ref())),
+            merge: Some(merge_info_from_persist_info(Some(&info))),
         }))
     }
 
@@ -3549,15 +3592,16 @@ impl TraceStore for BackendTraceStore {
 
 #[cfg(test)]
 mod merge_info_tests {
-    //! Unit tests for [`merge_info_from_outcome`]. The lattice tests
-    //! already pin the three [`UpdateOutcome`] variants on the
+    //! Unit tests for [`merge_info_from_persist_info`]. The lattice
+    //! tests already pin the three [`UpdateOutcome`] variants on the
     //! production side; these tests pin the **conversion** to the
-    //! proto wire format — making sure each outcome maps to the
-    //! correct enum value with the right side fields populated.
+    //! proto wire format — making sure each persist-info shape maps
+    //! to the correct enum value with the right side fields populated.
     //!
     //! Combined with the e2e tests in `storage/rocksdb/tests/`, this
     //! gives us defense in depth against regressions of D34 §G.1's
-    //! silent-`NeedsWitnessedMerge` bug.
+    //! silent-`NeedsWitnessedMerge` bug and the cache-hit conflation
+    //! the `CachedDifferentPosition` variant resolves.
     use super::*;
     use crate::lattice::UpdateOutcome;
     use crate::layer::LayerId;
@@ -3567,17 +3611,40 @@ mod merge_info_tests {
     fn lid(byte: u8) -> LayerId {
         LayerId([byte; 32])
     }
+    fn pli(
+        layer_id: LayerId,
+        branch_advanced: bool,
+        merge_outcome: Option<UpdateOutcome>,
+        cache_hit_different_position: bool,
+    ) -> PersistedLayerInfo {
+        PersistedLayerInfo {
+            layer_id,
+            branch_advanced,
+            merge_outcome,
+            cache_hit_different_position,
+        }
+    }
     #[test]
-    fn none_maps_to_unspecified_with_empty_fields() {
-        let info = merge_info_from_outcome(None);
+    fn no_persist_info_maps_to_unspecified_with_empty_fields() {
+        let info = merge_info_from_persist_info(None);
         assert_eq!(info.outcome, MergeOutcome::Unspecified as i32);
         assert!(info.merge_layer_id.is_empty());
         assert!(info.conflicting_iris.is_empty());
         assert!(info.current_head.is_empty());
     }
     #[test]
+    fn no_cas_with_no_cache_hit_maps_to_unspecified() {
+        // The no-backend path: persist ran, returned no merge_outcome,
+        // and didn't hit the anchored-commit cache.
+        let pi = pli(lid(0xFF), false, None, false);
+        let info = merge_info_from_persist_info(Some(&pi));
+        assert_eq!(info.outcome, MergeOutcome::Unspecified as i32);
+        assert!(info.merge_layer_id.is_empty());
+    }
+    #[test]
     fn fast_forward_maps_with_empty_side_fields() {
-        let info = merge_info_from_outcome(Some(&UpdateOutcome::FastForward));
+        let pi = pli(lid(0x01), true, Some(UpdateOutcome::FastForward), false);
+        let info = merge_info_from_persist_info(Some(&pi));
         assert_eq!(info.outcome, MergeOutcome::FastForward as i32);
         assert!(info.merge_layer_id.is_empty());
         assert!(info.conflicting_iris.is_empty());
@@ -3586,9 +3653,15 @@ mod merge_info_tests {
     #[test]
     fn trivial_merge_carries_merge_layer_id_as_hex() {
         let merge_layer = lid(0xAB);
-        let info = merge_info_from_outcome(Some(&UpdateOutcome::TrivialMerge {
-            merge_layer: merge_layer.clone(),
-        }));
+        let pi = pli(
+            lid(0x01),
+            true,
+            Some(UpdateOutcome::TrivialMerge {
+                merge_layer: merge_layer.clone(),
+            }),
+            false,
+        );
+        let info = merge_info_from_persist_info(Some(&pi));
         assert_eq!(info.outcome, MergeOutcome::TrivialMerge as i32);
         assert_eq!(info.merge_layer_id, hex_encode(merge_layer.0));
         assert!(info.conflicting_iris.is_empty());
@@ -3601,10 +3674,16 @@ mod merge_info_tests {
             Iri::parse("urn:eigenius:demo:A").unwrap(),
             Iri::parse("urn:eigenius:demo:B").unwrap(),
         ];
-        let info = merge_info_from_outcome(Some(&UpdateOutcome::NeedsWitnessedMerge {
-            current_head: current_head.clone(),
-            conflicting_iris: conflicting_iris.clone(),
-        }));
+        let pi = pli(
+            lid(0x01),
+            false,
+            Some(UpdateOutcome::NeedsWitnessedMerge {
+                current_head: current_head.clone(),
+                conflicting_iris: conflicting_iris.clone(),
+            }),
+            false,
+        );
+        let info = merge_info_from_persist_info(Some(&pi));
         assert_eq!(info.outcome, MergeOutcome::NeedsWitnessedMerge as i32);
         assert!(info.merge_layer_id.is_empty());
         assert_eq!(info.current_head, hex_encode(current_head.0));
@@ -3615,5 +3694,36 @@ mod merge_info_tests {
                 "urn:eigenius:demo:B".to_string()
             ]
         );
+    }
+    #[test]
+    fn cache_hit_different_position_maps_with_cached_layer_id() {
+        // Distinct from `UNSPECIFIED`: the persist short-circuited
+        // because the content is canonical at the carried layer_id,
+        // and the branch ref did **not** advance.
+        let cached = lid(0x77);
+        let pi = pli(cached.clone(), false, None, true);
+        let info = merge_info_from_persist_info(Some(&pi));
+        assert_eq!(info.outcome, MergeOutcome::CachedDifferentPosition as i32);
+        assert_eq!(info.merge_layer_id, hex_encode(cached.0));
+        assert!(info.conflicting_iris.is_empty());
+        assert!(info.current_head.is_empty());
+    }
+    #[test]
+    fn cache_hit_flag_dominates_over_any_merge_outcome() {
+        // Defensive: if a caller ever sets both `cache_hit_different_position`
+        // and `merge_outcome=Some(...)`, the cache-hit signal wins.
+        // `persist_layer_if_backend` doesn't actually produce that
+        // combination today, but pinning the precedence keeps the
+        // mapping unambiguous.
+        let cached = lid(0x55);
+        let pi = pli(
+            cached.clone(),
+            false,
+            Some(UpdateOutcome::FastForward),
+            true,
+        );
+        let info = merge_info_from_persist_info(Some(&pi));
+        assert_eq!(info.outcome, MergeOutcome::CachedDifferentPosition as i32);
+        assert_eq!(info.merge_layer_id, hex_encode(cached.0));
     }
 }

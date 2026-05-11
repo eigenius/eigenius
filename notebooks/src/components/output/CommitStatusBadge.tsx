@@ -74,7 +74,11 @@ export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
       return (
         <Tooltip
           relationship="description"
-          content="This content is already canonical at the layer shown above; the branch ref did not move."
+          content={
+            status.cachedLayerId
+              ? `Content already canonical at layer ${status.cachedLayerId}; branch ref did not move.`
+              : "This content is already canonical at the layer shown above; the branch ref did not move."
+          }
           withArrow
         >
           <Badge
