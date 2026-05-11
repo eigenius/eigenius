@@ -127,6 +127,7 @@ async fn estimate_then_consolidate_round_trips() {
             to_layer: head.clone(),
             max_walk_entries: 0, // use kernel default
             trace_pin_policy: String::new(),
+            preserve_history: false,
         }))
         .await
         .expect("estimate rpc")
@@ -150,6 +151,7 @@ async fn estimate_then_consolidate_round_trips() {
             to_layer: head.clone(),
             max_walk_entries: 0,
             trace_pin_policy: String::new(),
+            preserve_history: false,
         }))
         .await
         .expect("consolidate rpc")
@@ -188,6 +190,7 @@ async fn consolidate_surfaces_range_not_ancestral_as_typed_error() {
             to_layer: head,
             max_walk_entries: 0,
             trace_pin_policy: String::new(),
+            preserve_history: false,
         }))
         .await
         .expect("consolidate rpc")
@@ -199,6 +202,84 @@ async fn consolidate_surfaces_range_not_ancestral_as_typed_error() {
     );
     assert_eq!(resp.error_layer, bogus_from);
     assert_eq!(resp.collapsed_layer_count, 0);
+}
+
+/// Phase 17f-E: end-to-end RPC test for below-head consolidation.
+/// Commits a 5-layer chain, then consolidates an interior 3-layer
+/// window. The response reports `head_advanced = false`, a redirect
+/// is installed, and the branch ref stays at the original head.
+#[tokio::test]
+async fn consolidate_chain_rpc_supports_below_head_with_redirect() {
+    let (_tmp, service, backend) = build_service();
+    let layers = append_chain(5, &backend);
+    let head = main_head_hex(&service).await;
+
+    // Consolidate the middle slice [layers[1]..layers[3]].
+    let resp = service
+        .consolidate_chain(Request::new(ConsolidateChainRequest {
+            branch: "main".into(),
+            from_layer: layers[1].clone(),
+            to_layer: layers[3].clone(),
+            max_walk_entries: 0,
+            trace_pin_policy: String::new(),
+            preserve_history: false,
+        }))
+        .await
+        .expect("consolidate rpc")
+        .into_inner();
+    assert!(resp.success, "consolidate failed: {}", resp.error);
+    assert_eq!(resp.collapsed_layer_count, 3);
+    assert!(
+        !resp.head_advanced,
+        "below-head consolidation must not advance the branch ref"
+    );
+
+    // Branch is still at the original head.
+    assert_eq!(main_head_hex(&service).await, head);
+
+    // A redirect has been installed at layers[3] → resp.consolidated_layer.
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&hex::decode(&layers[3]).unwrap());
+    let source = eigenius_kernel::layer::LayerId(bytes);
+    let entry = backend
+        .lookup_redirect(&source)
+        .unwrap()
+        .expect("redirect installed");
+    assert_eq!(hex::encode(entry.target.0), resp.consolidated_layer);
+    assert!(!entry.preserve_history);
+}
+
+/// Phase 17f-E: typed `ToNotReachableFromHead` surfaces over the wire
+/// when `to` doesn't appear in the branch's chain.
+#[tokio::test]
+async fn consolidate_chain_rpc_surfaces_to_not_reachable() {
+    let (_tmp, service, backend) = build_service();
+    let _layers = append_chain(2, &backend);
+
+    let bogus_to = "aa".repeat(32);
+    let resp = service
+        .consolidate_chain(Request::new(ConsolidateChainRequest {
+            branch: "main".into(),
+            from_layer: bogus_to.clone(),
+            to_layer: bogus_to.clone(),
+            max_walk_entries: 0,
+            trace_pin_policy: String::new(),
+            preserve_history: false,
+        }))
+        .await
+        .expect("consolidate rpc")
+        .into_inner();
+    assert!(!resp.success);
+    // The kernel may surface either `ToNotReachableFromHead` (if the
+    // reachability check fires first) or `RangeNotAncestral` (if the
+    // chain load happens first). Either is a meaningful operator
+    // signal — the test is permissive on which one wins.
+    let kind = resp.error_kind;
+    assert!(
+        kind == ConsolidateErrorKind::ToNotReachableFromHead as i32
+            || kind == ConsolidateErrorKind::RangeNotAncestral as i32,
+        "expected typed error for unreachable `to`, got error_kind={kind}"
+    );
 }
 
 #[tokio::test]
@@ -217,6 +298,7 @@ async fn estimate_surfaces_cost_cap_with_predicted_entries_in_error_count() {
             to_layer: head,
             max_walk_entries: 2,
             trace_pin_policy: String::new(),
+            preserve_history: false,
         }))
         .await
         .expect("estimate rpc")

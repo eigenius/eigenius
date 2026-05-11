@@ -553,8 +553,13 @@ enum DbCommands {
     ///
     /// Requires `--endpoint` — consolidation serialises with branch
     /// updates via the running kernel's branch lock, so it must be
-    /// invoked against the live server holding the same DB. `to` must
-    /// equal the branch's current head (v1 restriction).
+    /// invoked against the live server holding the same DB.
+    ///
+    /// When `to` equals the branch's current head, the consolidation
+    /// advances the branch ref to the new layer (the 17a "at-head"
+    /// path). When `to` is strictly below the head, a resolve
+    /// redirect is installed at `to` (D25 §12.8 / Phase 17f) and the
+    /// branch stays put.
     Consolidate {
         /// `<from-hex>..<to-hex>` — the inclusive consolidation range,
         /// matching the spec language in D25 §5.3.
@@ -572,6 +577,13 @@ enum DbCommands {
         /// id without committing.
         #[arg(long)]
         dry_run: bool,
+        /// Below-head consolidation only: keep the pre-consolidation
+        /// history alive (GC won't reclaim the source range).
+        /// Time-travel reads against intermediate layers in the range
+        /// continue to resolve. Default reclaim mode is the
+        /// at-head-equivalent contract. See D25 §12.8.1(b).
+        #[arg(long)]
+        preserve_history: bool,
     },
 }
 
@@ -655,6 +667,7 @@ async fn main() {
                     branch,
                     max_walk_entries,
                     dry_run,
+                    preserve_history,
                 } => {
                     remote_db_consolidate(
                         endpoint,
@@ -662,6 +675,7 @@ async fn main() {
                         &branch,
                         max_walk_entries,
                         dry_run,
+                        preserve_history,
                         cli.json,
                     )
                     .await
@@ -1882,6 +1896,7 @@ async fn remote_db_consolidate(
     branch: &str,
     max_walk_entries: Option<u64>,
     dry_run: bool,
+    preserve_history: bool,
     json_output: bool,
 ) {
     let (from_layer, to_layer) = match parse_consolidate_range(range) {
@@ -1901,6 +1916,7 @@ async fn remote_db_consolidate(
             to_layer,
             max_walk_entries,
             trace_pin_policy: String::new(),
+            preserve_history,
         };
         match client.estimate_consolidation(req).await {
             Ok(response) => {
@@ -1949,6 +1965,7 @@ async fn remote_db_consolidate(
             to_layer,
             max_walk_entries,
             trace_pin_policy: String::new(),
+            preserve_history,
         };
         match client.consolidate_chain(req).await {
             Ok(response) => {
@@ -1966,10 +1983,25 @@ async fn remote_db_consolidate(
                     });
                     println!("{}", serde_json::to_string_pretty(&j).unwrap());
                 } else if resp.success {
-                    println!(
-                        "Consolidated {} layers on {branch} → {}",
-                        resp.collapsed_layer_count, resp.consolidated_layer
-                    );
+                    if resp.head_advanced {
+                        println!(
+                            "Consolidated {} layers on {branch}; branch advanced to {}",
+                            resp.collapsed_layer_count, resp.consolidated_layer
+                        );
+                    } else {
+                        // Below-head: redirect installed; branch ref unchanged.
+                        println!(
+                            "Consolidated {} layers below the head of {branch}; \
+                             redirect installed at the range tip → {}{}",
+                            resp.collapsed_layer_count,
+                            resp.consolidated_layer,
+                            if preserve_history {
+                                " (preserve_history mode — source range stays alive)"
+                            } else {
+                                ""
+                            }
+                        );
+                    }
                 } else {
                     eprintln!("Consolidation refused: {}", resp.error);
                     std::process::exit(1);

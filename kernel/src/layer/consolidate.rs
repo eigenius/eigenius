@@ -36,7 +36,9 @@
 //! - 17f-C — below-head consolidation installs redirects;
 //!   chain-cross refusal; `preserve_history` option. ✅
 //! - 17f-D — GC reachability through redirects. ✅
-//! - 17f-E — RPC + CLI surfaces for below-head consolidation. *pending*
+//! - 17f-E — RPC + CLI surfaces for below-head consolidation
+//!   (`preserve_history` flag, typed `ToNotReachableFromHead` +
+//!   `RangeCrossesExistingRedirect` error variants). ✅
 //! - 17f-F — cross-cutting tests. *pending*
 //!
 //! Deferred from Phase 17: `db consolidate-summary` (the diagnostic

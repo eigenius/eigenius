@@ -2472,7 +2472,8 @@ impl EigeniusKernel for EigeniusService {
         let to = parse_layer_id(&req.to_layer, "to_layer")?;
 
         let storage = LayerStorage::with_persistent(Arc::clone(backend));
-        let opts = build_consolidate_opts(&req.max_walk_entries, &self).await?;
+        let opts =
+            build_consolidate_opts(&req.max_walk_entries, req.preserve_history, &self).await?;
 
         match crate::layer::consolidate_chain(branch, from, to, opts, storage, backend.as_ref()) {
             Ok(outcome) => Ok(Response::new(ConsolidateChainResponse {
@@ -2508,7 +2509,8 @@ impl EigeniusKernel for EigeniusService {
         let to = parse_layer_id(&req.to_layer, "to_layer")?;
 
         let storage = LayerStorage::with_persistent(Arc::clone(backend));
-        let opts = build_consolidate_opts(&req.max_walk_entries, &self).await?;
+        let opts =
+            build_consolidate_opts(&req.max_walk_entries, req.preserve_history, &self).await?;
 
         match crate::layer::estimate_consolidation(
             branch,
@@ -2554,12 +2556,14 @@ fn parse_layer_id(hex_str: &str, field: &str) -> Result<crate::layer::LayerId, S
 /// pattern). A `max_walk_entries` of 0 means "use the kernel default."
 async fn build_consolidate_opts(
     max_walk_entries: &u64,
+    preserve_history: bool,
     service: &EigeniusService,
 ) -> Result<crate::layer::ConsolidateOpts, Status> {
     let mut opts = crate::layer::ConsolidateOpts::default();
     if *max_walk_entries > 0 {
         opts.max_walk_entries = *max_walk_entries;
     }
+    opts.preserve_history = preserve_history;
     if let Some(store) = service.task_store.as_ref() {
         let session_id = service.session.read().await.session_id;
         match store.list_tasks(&session_id) {
@@ -2648,17 +2652,13 @@ fn consolidate_error_parts(
             String::new(),
             *predicted_entries,
         ),
-        // 17f below-head consolidation errors. Phase E adds dedicated
-        // wire variants for these; for now they collapse to the
-        // closest existing kinds — `BranchAdvanced` for the
-        // unreachable-`to` case, `Internal` for the chaining refusal.
         E::ToNotReachableFromHead { observed_head, .. } => (
-            ConsolidateErrorKind::BranchAdvanced,
+            ConsolidateErrorKind::ToNotReachableFromHead,
             hex::encode(observed_head.0),
             0,
         ),
         E::RangeCrossesExistingRedirect { offending_layer } => (
-            ConsolidateErrorKind::Internal,
+            ConsolidateErrorKind::RangeCrossesExistingRedirect,
             hex::encode(offending_layer.0),
             0,
         ),

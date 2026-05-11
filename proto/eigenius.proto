@@ -638,17 +638,28 @@ enum ConsolidateErrorKind {
   COST_EXCEEDS_CAP = 5;
   // Underlying storage write failure or other internal fault.
   INTERNAL = 6;
+  // `to` exists in storage but isn't on the chain `branch` currently
+  // points at — a redirect installed at `to` would be unreachable.
+  // Phase 17f below-head consolidation only.
+  TO_NOT_REACHABLE_FROM_HEAD = 7;
+  // The consolidation range crosses an existing resolve redirect
+  // (D25 §12.8.1(a)). v1 refuses; the future compose policy (issue
+  // #49) will lift this.
+  RANGE_CROSSES_EXISTING_REDIRECT = 8;
 }
 
 message ConsolidateChainRequest {
-  // Branch to consolidate. The branch's current head must equal `to`;
-  // an empty string defaults to "main" (matches LoadRequest's
-  // convention).
+  // Branch to consolidate. An empty string defaults to "main"
+  // (matches LoadRequest's convention).
   string branch = 1;
   // Hex-encoded LayerId where the consolidation range starts (oldest).
   string from_layer = 2;
   // Hex-encoded LayerId where the consolidation range ends (newest).
-  // Must equal the branch's current head in v1.
+  // When equal to the branch's current head: at-head consolidation
+  // advances the branch ref to the consolidated layer. When strictly
+  // below the head: below-head consolidation installs a resolve
+  // redirect at `to` (D25 §12.8 / Phase 17f) and leaves the branch
+  // unchanged.
   string to_layer = 3;
   // Cost cap: refuse if `sum(handle.resource_count for handle in range)`
   // exceeds this. Pass 0 to use the kernel default
@@ -657,6 +668,13 @@ message ConsolidateChainRequest {
   // Reserved for v2 trace-pin policies. v1 ignores this field; the
   // kernel always uses `TracePinPolicy::Refuse`.
   string trace_pin_policy = 5;
+  // Preserve the pre-consolidation history of the source range
+  // (D25 §12.8.1(b)). When `true` and the consolidation is below-head,
+  // GC's mark phase will keep the source-side chain alive so
+  // time-travel reads against intermediate layers continue to
+  // resolve. Default `false` (reclaim mode — the consolidated range
+  // becomes eligible for sweep). Ignored for at-head consolidations.
+  bool preserve_history = 6;
 }
 
 message ConsolidateChainResponse {
@@ -685,6 +703,7 @@ message EstimateConsolidationRequest {
   string to_layer = 3;
   uint64 max_walk_entries = 4;
   string trace_pin_policy = 5;
+  bool preserve_history = 6;
 }
 
 message EstimateConsolidationResponse {
