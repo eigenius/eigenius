@@ -31,7 +31,7 @@ use async_trait::async_trait;
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
 use eigenius_kernel::layer::{
-    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology,
+    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, RedirectEntry,
 };
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
@@ -53,6 +53,15 @@ const BRANCH_PREFIX: &str = "branch:";
 /// the content hash hex inside the key so the scan returns positions
 /// in lexicographic order without a secondary lookup.
 const CONTENT_INDEX_PREFIX: &str = "content:";
+/// Resolve-redirect storage (D25 §12.8 / Phase 17f).
+///
+/// Keys: `redirect:<source_layer_hex>` → CBOR-encoded
+/// [`eigenius_kernel::layer::RedirectEntry`]. One entry per
+/// consolidation where `to` was below the branch head. Carries the
+/// source layer's `LayerHandle` snapshot so `load_topology` can
+/// manufacture the in-memory synthetic tombstone (D25 §12.8.1(d))
+/// even after the original handle has been reclaimed.
+const REDIRECT_PREFIX: &str = "redirect:";
 
 fn now_millis() -> i64 {
     SystemTime::now()
@@ -342,6 +351,7 @@ impl LayerStore for RocksStore {
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
+            is_redirect_source: false,
         };
         self.put_topology_entry(&handle)?;
         // Content-hash dedup index (D25 §11.0). Idempotent by
@@ -587,6 +597,7 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
+            is_redirect_source: false,
         };
         let bloom = BloomFilter::for_iris(layer.defined_iris());
 
@@ -645,7 +656,12 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn load_topology(&self) -> Result<LayerTopology, StorageError> {
-        self.read_topology_entries()
+        let mut topology = self.read_topology_entries()?;
+        // D25 §12.8.1(d): manufacture synthetic tombstones for every
+        // redirect source whose original handle was reclaimed.
+        let entries = eigenius_kernel::storage::PersistentBackend::list_redirects(self)?;
+        eigenius_kernel::layer::augment_topology_with_redirects(&mut topology, &entries);
+        Ok(topology)
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
@@ -878,6 +894,53 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         }
         Ok(out)
     }
+
+    fn put_redirect(&self, entry: &RedirectEntry) -> Result<(), StorageError> {
+        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(entry.source().0));
+        let mut bytes = Vec::new();
+        ciborium::into_writer(entry, &mut bytes)
+            .map_err(|e| StorageError::Internal(format!("encode RedirectEntry: {e}")))?;
+        self.db
+            .put(key.as_bytes(), bytes)
+            .map_err(|e| StorageError::Internal(format!("put redirect: {e}")))
+    }
+
+    fn lookup_redirect(&self, source: &LayerId) -> Result<Option<RedirectEntry>, StorageError> {
+        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let entry: RedirectEntry = ciborium::from_reader(bytes.as_slice())
+                    .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
+                Ok(Some(entry))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get redirect: {e}"))),
+        }
+    }
+
+    fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError> {
+        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
+        self.db
+            .delete(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete redirect: {e}")))
+    }
+
+    fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(REDIRECT_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) =
+                item.map_err(|e| StorageError::Internal(format!("list_redirects iter: {e}")))?;
+            // Prefix iterator may overshoot — trim.
+            if !k.starts_with(REDIRECT_PREFIX.as_bytes()) {
+                break;
+            }
+            let entry: RedirectEntry = ciborium::from_reader(v.as_ref())
+                .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
+            out.push(entry);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -1059,6 +1122,70 @@ mod tests {
         assert_eq!(rebuilt.id(), &expected_position);
         assert_eq!(rebuilt.content_hash(), &expected_content);
         assert_eq!(rebuilt.supporting_layer(), expected_supporting.as_ref());
+    }
+
+    /// Phase 17f-A: redirect entries round-trip through RocksDB and
+    /// survive a store reopen. After deleting the redirect-source's
+    /// topology entry, `load_topology` manufactures a synthetic
+    /// tombstone with `is_redirect_source = true` from the redirect
+    /// CF — matches the in-memory backend's behavior in
+    /// `redirect_round_trip_and_synthetic_tombstone`.
+    #[test]
+    fn redirect_round_trip_persists_across_reopen() {
+        use eigenius_kernel::storage::PersistentBackend;
+        let dir = TempDir::new().unwrap();
+        let target_id = eigenius_kernel::layer::LayerId([0xab; 32]);
+
+        let source_id;
+        let source_name;
+
+        // Write: store a layer, install a redirect against it, reclaim
+        // the original topology entry.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let mut sb = LayerBuilder::new("redirect-source", None);
+            sb.add_resource(make_resource("urn:eigenius:core:r", vec![]))
+                .unwrap();
+            let source =
+                std::sync::Arc::new(sb.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            PersistentBackend::store_layer(&store, &source).unwrap();
+            source_id = source.id().clone();
+
+            let topo = PersistentBackend::load_topology(&store).unwrap();
+            source_name = topo.get_layer(&source_id).unwrap().name.clone();
+            let source_handle = topo.get_layer(&source_id).unwrap().clone();
+            let entry = eigenius_kernel::layer::RedirectEntry {
+                target: target_id.clone(),
+                source_handle,
+            };
+            PersistentBackend::put_redirect(&store, &entry).unwrap();
+            PersistentBackend::delete_layer(&store, &source_id).unwrap();
+        }
+
+        // Reopen: redirect persists; load_topology manufactures the
+        // synthetic tombstone with the original metadata preserved.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let entry = PersistentBackend::lookup_redirect(&store, &source_id)
+                .unwrap()
+                .expect("redirect persisted");
+            assert_eq!(entry.target, target_id);
+            assert_eq!(entry.source(), &source_id);
+            assert_eq!(entry.source_handle.name, source_name);
+
+            let topo = PersistentBackend::load_topology(&store).unwrap();
+            let tombstone = topo
+                .get_layer(&source_id)
+                .expect("synthetic tombstone manufactured");
+            assert!(tombstone.is_redirect_source);
+            assert_eq!(tombstone.id, source_id);
+            assert_eq!(tombstone.name, source_name);
+
+            // list_redirects returns the same entry.
+            let listed = PersistentBackend::list_redirects(&store).unwrap();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].target, target_id);
+        }
     }
 
     /// Two layers with identical resources committed against different

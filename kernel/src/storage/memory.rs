@@ -32,7 +32,7 @@
 
 use crate::layer::{
     BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex,
-    TripleIndex,
+    RedirectEntry, TripleIndex,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
@@ -78,6 +78,10 @@ struct MemoryState {
     /// different parent chains); the index makes
     /// `lookup_by_content_hash` O(log n).
     content_index: BTreeMap<ContentHash, BTreeSet<LayerId>>,
+    /// Installed resolve redirects (D25 §12.8 / Phase 17f). Keyed by
+    /// the redirect *source* layer id. One entry per consolidation
+    /// where `to` was below the branch head.
+    redirects: BTreeMap<LayerId, RedirectEntry>,
 }
 
 impl MemoryPersistentBackend {
@@ -91,6 +95,7 @@ impl MemoryPersistentBackend {
                 blooms: BTreeMap::new(),
                 branches: BTreeMap::new(),
                 content_index: BTreeMap::new(),
+                redirects: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
             triple_index: Arc::new(MemoryTripleIndex::new()),
@@ -191,6 +196,7 @@ impl PersistentBackend for MemoryPersistentBackend {
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
             created_at: now_millis(),
+            is_redirect_source: false,
         };
         // Build the bloom outside the lock (it's a hash-heavy loop) and
         // insert it together with the rest of the layer's state.
@@ -221,6 +227,12 @@ impl PersistentBackend for MemoryPersistentBackend {
         for handle in state.topology.values() {
             topology.insert_layer(handle.clone());
         }
+        // D25 §12.8.1(d): manufacture synthetic tombstones for every
+        // redirect source whose original handle has been reclaimed.
+        // The redirects map is cheap to iterate (one entry per
+        // consolidation, not per layer).
+        let entries: Vec<RedirectEntry> = state.redirects.values().cloned().collect();
+        crate::layer::augment_topology_with_redirects(&mut topology, &entries);
         Ok(topology)
     }
 
@@ -366,6 +378,30 @@ impl PersistentBackend for MemoryPersistentBackend {
             .map(|set| set.iter().cloned().collect())
             .unwrap_or_default())
     }
+
+    fn put_redirect(&self, entry: &RedirectEntry) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state
+            .redirects
+            .insert(entry.source().clone(), entry.clone());
+        Ok(())
+    }
+
+    fn lookup_redirect(&self, source: &LayerId) -> Result<Option<RedirectEntry>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state.redirects.get(source).cloned())
+    }
+
+    fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.redirects.remove(source);
+        Ok(())
+    }
+
+    fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state.redirects.values().cloned().collect())
+    }
 }
 
 #[cfg(test)]
@@ -506,6 +542,79 @@ mod tests {
             .lookup_by_content_hash(child_a.content_hash())
             .unwrap();
         assert!(empty.is_empty());
+    }
+
+    /// Phase 17f-A: redirects round-trip through the storage layer and
+    /// `load_topology` manufactures a synthetic tombstone for a redirect
+    /// whose source has been reclaimed from the topology.
+    #[test]
+    fn redirect_round_trip_and_synthetic_tombstone() {
+        let backend = MemoryPersistentBackend::new();
+
+        // Build a root + child layer; the child will become the
+        // "source" of a redirect (the to-be-consolidated layer).
+        let storage = crate::layer::LayerStorage::in_memory();
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:R", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        let mut sb = LayerBuilder::new("source", Some(Arc::clone(&root)));
+        sb.add_resource(make_resource("urn:eigenius:demo:original", vec![]))
+            .unwrap();
+        let source = Arc::new(sb.build(storage.clone()));
+        backend.store_layer(&source).unwrap();
+
+        // Hypothetical L_c — we don't actually build the chain, just
+        // need a target id for the redirect to point at.
+        let target_id = crate::layer::LayerId([0xab; 32]);
+
+        // Pre-condition: no redirects, no tombstones.
+        assert!(backend.list_redirects().unwrap().is_empty());
+        let topo_before = backend.load_topology().unwrap();
+        assert!(
+            !topo_before
+                .get_layer(source.id())
+                .unwrap()
+                .is_redirect_source
+        );
+
+        // Install the redirect. The entry carries the source's full
+        // LayerHandle so `load_topology` can manufacture a tombstone
+        // after `delete_layer` reclaims the original.
+        let source_handle = topo_before.get_layer(source.id()).unwrap().clone();
+        let redirect = crate::layer::RedirectEntry {
+            target: target_id.clone(),
+            source_handle,
+        };
+        backend.put_redirect(&redirect).unwrap();
+
+        // Round-trip: lookup returns the entry; list returns it once.
+        let looked_up = backend
+            .lookup_redirect(source.id())
+            .unwrap()
+            .expect("redirect present");
+        assert_eq!(looked_up.target, target_id);
+        assert_eq!(looked_up.source(), source.id());
+        assert_eq!(backend.list_redirects().unwrap().len(), 1);
+
+        // Reclaim `source` from the topology. `load_topology` should
+        // now manufacture a tombstone with `is_redirect_source = true`
+        // and the original handle's metadata.
+        backend.delete_layer(source.id()).unwrap();
+        let topo_after = backend.load_topology().unwrap();
+        let tombstone = topo_after
+            .get_layer(source.id())
+            .expect("tombstone present");
+        assert!(tombstone.is_redirect_source);
+        assert_eq!(tombstone.id, *source.id());
+        assert_eq!(tombstone.name, "source"); // preserved from original handle
+
+        // Delete the redirect. The tombstone goes away with it.
+        backend.delete_redirect(source.id()).unwrap();
+        let topo_final = backend.load_topology().unwrap();
+        assert!(topo_final.get_layer(source.id()).is_none());
     }
 
     #[test]

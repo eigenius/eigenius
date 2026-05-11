@@ -87,6 +87,17 @@ pub struct LayerHandle {
     /// Milliseconds since Unix epoch — when the layer was committed. Matches
     /// the convention used by D21's `TaskRecord`.
     pub created_at: i64,
+
+    /// True for *synthetic tombstones* manufactured by `load_topology`
+    /// from a [`RedirectEntry`](crate::layer::RedirectEntry). The flag
+    /// lets diagnostic surfaces (`db log`, `inspect`, the notebook
+    /// topology renderer) display "consolidated into <target>" rather
+    /// than rendering an ordinary-looking handle whose on-disk content
+    /// has been reclaimed.
+    ///
+    /// **Always `false`** on handles written to disk by `store_layer`
+    /// — the flag is an in-memory signal only.
+    pub is_redirect_source: bool,
 }
 
 impl LayerHandle {
@@ -188,6 +199,7 @@ mod tests {
             name: format!("layer-{byte}"),
             resource_count: 0,
             created_at: 0,
+            is_redirect_source: false,
         }
     }
 

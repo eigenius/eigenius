@@ -517,6 +517,45 @@ Trade-offs and open questions for v2:
 
 The redirect mechanism is largely orthogonal to the rest of D25's machinery and can ship as its own milestone (call it 17f) once a workload demands it. v1's `to = head` restriction is sufficient for the notebook-session-squash and rolling-window-consolidation patterns that motivated Phase 17; the redirect is the natural next step when operators want to consolidate older history while preserving newer commits.
 
+#### 12.8.1 v1 design decisions
+
+Four decisions captured from Phase 17 wrap-up so that when 17f lands, the design call is recorded rather than re-derived. Each ships an explicit reversal path (none of these locks us in).
+
+**(a) Redirect chaining policy — refuse for v1.**
+First consolidation installs `redirect: B → L_c1`. A second consolidation whose range touches `B`, `L_c1`, or anything in between is rejected with a typed error (working name `RangeCrossesExistingRedirect`). The operator works around by consolidating above the existing redirect, or by structuring one larger range upfront. Reverse-out is a future `RedirectChainPolicy::Replace` opt-in that absorbs the previous redirect's target into a new `L_c2` (one-hop walks, old `L_c1` becomes GC-eligible). The *chain* alternative — keep multiple redirects and walk N hops — is rejected on the grounds of unbounded resolve-hot-path cost; only one-hop *replace* is the future direction. Tracked separately as [issue #49](https://github.com/eigenius/eigenius/issues/49).
+
+**(b) Time-travel reads — reclaim by default, opt-in preserve.**
+GC's reachability mark, by default, does not exempt the consolidated range from reclaim. Storage shrinks; time-travel reads against intermediate layers fail with the standard missing-layer error once GC has run. This matches the effective behavior of the 17a–17e `to = head` consolidation, so operators have one consistent mental model: "consolidation is destructive."
+
+`ConsolidateOpts.preserve_history: bool` (default `false`) flips the contract: GC's mark phase follows redirect *sources*, not just targets, keeping the consolidated range alive. The redirect becomes a pure resolve-optimization rather than a storage-savings mechanism. The preserve mode is for compliance / regulatory workloads where the pre-consolidation history must remain queryable; everyday rolling consolidation uses the default. Both modes coexist in a single chain on a per-call basis.
+
+Note that 12.8.1(a)'s future *replace* compose policy is feasible only against `preserve_history = true` redirects — composing across a reclaimed range has no original content to re-run top-of-stack over. The typed error for compose-against-reclaim is part of (a)'s eventual surface.
+
+**(c) Redirect storage — dedicated CF on disk, inline cache on `Layer`.**
+The hot path matters: `Layer::resolve` probes for a redirect at every visited layer. A pure HashMap lookup costs ~20–50 ns per step (hash + bucket access + comparison); an inline `Option` check costs ~1 ns (branch-predictable, mostly `None`). For a 1000-step resolve walk on a chain with no redirects, that's the difference between ~1 µs and ~30 µs of pure-probe overhead — non-trivial on hot EigenQL paths that resolve repeatedly.
+
+The v1 shape gets inline-speed reads with dedicated-CF storage:
+
+- **On disk.** A new `redirect:<layer_hex>` column family on RocksDB; an equivalent `BTreeMap<LayerId, LayerId>` on the memory backend. Sparse (one entry per consolidation, not per layer), atomically installed via the existing single-`WriteBatch` per D23 §6.3, prefix-scannable for enumeration. `LayerHandle` CBOR is **unchanged** — no per-handle bloat, no rewrite amplification on install.
+- **In memory.** `LayerStorage` gains an `Arc<dyn RedirectMap>` alongside `bloom_cache` and `triple_index`, loaded once at startup from the CF into a `HashMap<LayerId, LayerId>`.
+- **`Layer` enrichment.** `Layer` gains an inline `redirect_target: Option<Arc<Layer>>` field. `build_chain` populates it: for every constructed layer, consult the in-memory redirect map; if the layer is a redirect source, also build the target's chain and store its head Arc in `redirect_target`.
+- **`Layer::resolve` (and `resolve_all`, `iter_all_resources`) gain one line.** Before consulting the layer's bloom and content, check `if let Some(t) = layer.redirect_target.as_ref() { … }` — a single branch with no map probe. The follow itself is a pointer indirection through the pre-resolved Arc.
+
+The result: storage shape stays sparse and easy to enumerate; hot-path read stays inline and cheap. Considered and rejected: embedding `redirect_to: Option<LayerId>` on `LayerHandle` itself. That grows the on-disk handle by ~33 bytes per layer (mostly `None`), rewrites the handle CBOR on every install, and forces a topology-wide scan for enumeration — none of which the hybrid suffers.
+
+**(d) `to`'s topology entry — synthetic tombstone (full reclaim on disk + manufacture on load).**
+A topology-walk audit (gc mark/sweep, `lattice::find_lca`, the trivial-merge IRI-source resolver, `merge_independent_heads` head validation, `LayerTopology::walk_chain`) identified six in-kernel sites that follow `LayerHandle.parents` purely structurally. Each one terminates its walk at the first `topology.get_layer(id) == None` — under naive full-reclaim of `to`, GC's mark phase would terminate at `to.id`, leaving `L_c`'s ancestor subtree unmarked and exposing it to sweep. Catastrophic for correctness.
+
+Three shapes were considered:
+
+1. **Persistent tombstone on disk.** Keep `to`'s `LayerHandle` stored after consolidation. ~150 bytes per consolidation; no walker changes; never reclaims.
+2. **Full reclaim + redirect-aware walkers.** Each of the six call sites learns to consult the redirect map on a topology miss. Spreads the redirect concern across `gc`, three `lattice` functions, `walk_chain`, and the storage backends' `load_chain_from` impls.
+3. **Synthetic tombstone — full reclaim on disk, manufacture on load.** The redirect CF is the source of truth. `PersistentBackend::load_topology` joins the redirect CF with the topology CF: for every redirect source that's been reclaimed from disk, it manufactures a tombstone-shaped `LayerHandle` (id, parents-recorded-at-install-time, empty name, `is_redirect_source = true`) in the in-memory `LayerTopology` only. Disk reclaims; in-memory looks consistent; no walker change required.
+
+Shape 3 is the v1 choice. The redirect CF needs to store enough metadata at install time to manufacture the tombstone — minimally `(redirect_source, redirect_target, source_parents: Vec<LayerId>, source_supporting_layer: Option<LayerId>)`. One CF write per consolidation; one extra prefix scan in `load_topology` at startup (bounded by the redirect count, which is small in absolute terms). All six Category-1 walkers see a valid handle and need no awareness of redirects.
+
+Reverse-out: if a deployment ever wants the persistent tombstone (shape 1) — e.g., to avoid the `load_topology` join entirely — the synthetic tombstone can be materialized to disk lazily on first read. The two shapes coexist cleanly; the synthetic version is just an optimization that reclaims more aggressively.
+
 ## 13. Related work
 
 **Git rebase / squash.** The closest user-facing analog. `git rebase -i` lets a user squash a contiguous range of commits into one. The operations are not fully analogous: Git's squash modifies history by producing a new commit chain that doesn't share ancestry with the original; Eigenius's consolidation is content-addressed and the consolidated layer's `LayerId` is determined by content, so two independent squashes by different operators against the same range produce the same layer. Git's squash is also not atomic (it's a sequence of operations the user can interrupt mid-rebase); Eigenius's consolidation is a single `WriteBatch` per D23 §6.3.

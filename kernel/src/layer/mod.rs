@@ -32,6 +32,7 @@ mod cache;
 mod consolidate;
 mod handle;
 mod index;
+mod redirect;
 mod storage;
 mod supporting;
 
@@ -49,6 +50,7 @@ pub use index::{
     collect_ancestors, extract_indexable_triples, index_keys, is_indexable_predicate, is_shadowed,
     scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
+pub use redirect::{augment_topology_with_redirects, manufacture_tombstone, RedirectEntry};
 pub use storage::LayerStorage;
 pub use supporting::compute_supporting_layer;
 

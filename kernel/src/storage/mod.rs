@@ -296,6 +296,44 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// during a re-run of GC against the same id).
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError>;
 
+    // --- Resolve redirects (D25 §12.8 / Phase 17f) ---
+    //
+    // Forward pointers installed by `consolidate_chain` when `to` is
+    // below the branch head. See `RedirectEntry` for the on-disk shape
+    // and [`augment_topology_with_redirects`] for the
+    // synthetic-tombstone integration with `load_topology`.
+
+    /// Install a redirect. Idempotent by `entry.source()` —
+    /// overwriting an existing entry is permitted only when the
+    /// consolidation algorithm explicitly asks for it (e.g., a
+    /// future compose policy); the v1 chaining refusal at the
+    /// algorithm level keeps this from happening accidentally.
+    ///
+    /// Atomic within the backend's commit primitive — RocksDB lands
+    /// it in the same `WriteBatch` as the consolidated layer's
+    /// `store_layer` writes; the memory backend serializes through
+    /// its single `RwLock`.
+    fn put_redirect(&self, entry: &crate::layer::RedirectEntry) -> Result<(), StorageError>;
+
+    /// Resolve a redirect by source `LayerId`. `None` if the layer
+    /// isn't a redirect source.
+    fn lookup_redirect(
+        &self,
+        source: &LayerId,
+    ) -> Result<Option<crate::layer::RedirectEntry>, StorageError>;
+
+    /// Remove a redirect. Used by the (future) compose policy to
+    /// replace an existing redirect with a new one; v1 doesn't call
+    /// this on the consolidation path but exposes it for symmetry +
+    /// future use.
+    fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError>;
+
+    /// Enumerate every installed redirect. Used by `load_topology`
+    /// to build the synthetic-tombstone view at startup, and by
+    /// diagnostic surfaces (future `db consolidate-summary`). Result
+    /// order is unspecified; callers that care should sort.
+    fn list_redirects(&self) -> Result<Vec<crate::layer::RedirectEntry>, StorageError>;
+
     /// Look up every layer whose content matches `content_hash`.
     ///
     /// Returns the set of position hashes (layer ids) currently in
