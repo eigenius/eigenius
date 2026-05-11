@@ -131,6 +131,13 @@ pub trait RedirectMap: Send + Sync {
 
     /// Total number of installed redirects.
     fn len(&self) -> usize;
+
+    /// True when no redirects are installed. Lets callers short-circuit
+    /// before paying for a full `len()` probe in implementations that
+    /// might otherwise walk an underlying store.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Unbounded in-memory `RedirectMap`. The expected entry count is

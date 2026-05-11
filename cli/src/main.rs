@@ -1479,13 +1479,25 @@ async fn remote_load(endpoint: &str, file: &str, branch: Option<&str>, json_outp
             if resp.success {
                 if json_output {
                     println!(
-                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\"}}",
-                        resp.resource_count, resp.layer_id, resp.branch
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\",\"branch_advanced\":{}}}",
+                        resp.resource_count,
+                        resp.layer_id,
+                        resp.branch,
+                        resp.branch_advanced
                     );
-                } else {
+                } else if resp.branch_advanced {
                     println!(
                         "Loaded {} resource(s) into branch {}. Layer: {}",
                         resp.resource_count, resp.branch, resp.layer_id
+                    );
+                } else {
+                    // Anchored-commit cache hit at a different
+                    // position — the canonical layer for this content
+                    // already lives elsewhere in the DAG; the branch
+                    // ref did not move.
+                    println!(
+                        "Cached: {} resource(s) already canonical at layer {} (branch {} unchanged)",
+                        resp.resource_count, resp.layer_id, resp.branch
                     );
                 }
             } else {

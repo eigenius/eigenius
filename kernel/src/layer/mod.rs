@@ -1408,9 +1408,9 @@ mod tests {
     }
 
     /// Layer name is metadata-only: two layers with the same resources
-    /// + parents but different names must share both hashes. Pins that
-    /// the `name` field is *not* in the content hash (anchored-commit
-    /// cache must hit across cosmetic renames).
+    /// and parents but different names must share both hashes. Pins
+    /// that the `name` field is *not* in the content hash (anchored-
+    /// commit cache must hit across cosmetic renames).
     #[test]
     fn name_is_not_in_content_or_position_hash() {
         let storage = test_storage();

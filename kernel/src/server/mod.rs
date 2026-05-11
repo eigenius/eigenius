@@ -381,6 +381,22 @@ impl BranchContextCache {
     }
 }
 
+/// Outcome of [`EigeniusService::persist_layer_if_backend`] — the
+/// canonical `LayerId` for the committed content paired with a flag
+/// indicating whether the durable branch ref actually moved.
+///
+/// `branch_advanced` is `false` only on a **different-position**
+/// anchored-commit cache hit (D33 §6), where the canonical layer
+/// already lives elsewhere in the DAG and `update_branch` is skipped,
+/// or when no persistent backend is configured. Every other path —
+/// cache miss and same-position cache hit — runs `update_branch` and
+/// reports `true`.
+#[derive(Debug, Clone)]
+struct PersistedLayerInfo {
+    layer_id: crate::layer::LayerId,
+    branch_advanced: bool,
+}
+
 pub struct EigeniusService {
     /// Per-branch ExecutionContext cache. `"main"` is always present.
     branch_contexts: Arc<BranchContextCache>,
@@ -696,12 +712,97 @@ impl EigeniusService {
         }
     }
 
+    /// Persist a built `Layer` and advance `branch` to it — or
+    /// short-circuit through the anchored-commit cache (D33 §6).
+    ///
+    /// Returns a [`PersistedLayerInfo`] carrying the **canonical**
+    /// `LayerId` for the committed content together with a
+    /// `branch_advanced` flag that signals whether this call moved
+    /// the branch ref:
+    ///
+    /// - **Cache miss:** the fresh layer is stored, the branch advances
+    ///   to it, the cache is updated. `layer_id` = fresh id,
+    ///   `branch_advanced` = `true`.
+    /// - **Cache hit at the same position** (cached id == fresh id):
+    ///   `store_layer` is skipped (the layer is already on disk); the
+    ///   branch still advances (the caller meant to publish on top of
+    ///   the current head, and the cached layer occupies that
+    ///   position). `layer_id` = fresh id, `branch_advanced` = `true`.
+    /// - **Cache hit at a different position:** the content lives
+    ///   canonically at the cached layer's id, which is in a different
+    ///   chain context. `store_layer` and `update_branch` are both
+    ///   skipped — the branch stays put. `layer_id` = cached id,
+    ///   `branch_advanced` = `false`.
+    ///
+    /// The third case is the structural payoff: callers report
+    /// "your content is already canonical at X" while the branch
+    /// tracker sees no movement. Notebook cell-output reuse, mirror
+    /// regeneration against shifted parent chains, and any content
+    /// generator anchored to a supporting layer benefit transparently.
+    ///
+    /// When no persistent backend is configured, returns the fresh
+    /// layer's id with `branch_advanced` = `false` (the in-memory
+    /// chain may have changed, but there is no durable branch ref to
+    /// move).
     fn persist_layer_if_backend(
         &self,
         branch: &str,
         layer: &crate::layer::Layer,
-    ) -> Option<ValidationError> {
-        let backend = self.backend.as_ref()?;
+    ) -> Result<PersistedLayerInfo, ValidationError> {
+        let Some(backend) = self.backend.as_ref() else {
+            // No persistent backend — the layer lives in-memory only.
+            // There is no durable branch ref to advance.
+            return Ok(PersistedLayerInfo {
+                layer_id: layer.id().clone(),
+                branch_advanced: false,
+            });
+        };
+
+        // Cache probe. The cache key is the layer's content_hash and
+        // the supporting layer's content_hash. Layers with no
+        // supporting layer (roots, pure self-referential commits) can't
+        // be keyed and fall through to the standard persist path.
+        let cache_hit = self.probe_anchored_commit(backend.as_ref(), layer);
+
+        if let Some(cached_id) = cache_hit {
+            if cached_id == *layer.id() {
+                // Same-position cache hit — the layer is already on
+                // disk. Skip `store_layer`; still advance the branch
+                // (the caller wanted to publish on top of the current
+                // head, which is the layer's parent).
+                tracing::debug!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::LAYER_ID } = %layer.id(),
+                    branch = branch,
+                    cache = "hit_same_position",
+                    "anchored-commit cache hit (same position) — skipping store_layer"
+                );
+                self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+                return Ok(PersistedLayerInfo {
+                    layer_id: layer.id().clone(),
+                    branch_advanced: true,
+                });
+            }
+            // Different-position cache hit — the canonical layer is
+            // elsewhere. Skip both `store_layer` and `update_branch`;
+            // the branch stays where it is (D33 §6 supporting-
+            // equivalent context). Return the cached id so the caller
+            // can report it back to the user.
+            tracing::debug!(
+                { field::OPERATION } = operation::LAYER_COMMIT,
+                { field::LAYER_ID } = %layer.id(),
+                cached_layer = %cached_id,
+                branch = branch,
+                cache = "hit_different_position",
+                "anchored-commit cache hit (different position) — branch unchanged"
+            );
+            return Ok(PersistedLayerInfo {
+                layer_id: cached_id,
+                branch_advanced: false,
+            });
+        }
+
+        // Cache miss — standard persist path.
         if let Err(e) = backend.store_layer(layer) {
             tracing::warn!(
                 { field::OPERATION } = operation::LAYER_COMMIT,
@@ -710,7 +811,7 @@ impl EigeniusService {
                 { field::ERROR_MESSAGE } = %e,
                 "failed to persist layer to backend"
             );
-            return Some(ValidationError {
+            return Err(ValidationError {
                 resource_iri: String::new(),
                 property_iri: String::new(),
                 rule: "persist_layer".to_string(),
@@ -718,19 +819,96 @@ impl EigeniusService {
                 severity: "error".to_string(),
             });
         }
-        // Phase 14g/14g-ii: advance the request's branch to the new
-        // layer via the lattice's CAS primitive. The expected old head
-        // is the new layer's parent (we just committed a child of the
-        // previous branch head).
+
+        // Insert into the anchored-commit cache for future short-circuit
+        // (D33 §6). Best-effort: a failure here doesn't fail the
+        // commit, but we log it so chain audits can spot drift between
+        // the cache and the topology.
+        self.put_anchored_commit_for_layer(backend.as_ref(), layer);
+
+        self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+        Ok(PersistedLayerInfo {
+            layer_id: layer.id().clone(),
+            branch_advanced: true,
+        })
+    }
+
+    /// Compute the anchored-commit cache key for `layer` and probe the
+    /// backend. Returns `None` when the layer has no supporting layer
+    /// (root / self-referential) or when no cache entry exists.
+    /// Verifies the cached layer is still in storage before returning
+    /// — a stale entry (cached layer was reclaimed by GC) is treated
+    /// as a cache miss.
+    fn probe_anchored_commit(
+        &self,
+        backend: &dyn crate::storage::PersistentBackend,
+        layer: &crate::layer::Layer,
+    ) -> Option<crate::layer::LayerId> {
+        let supporting_id = layer.supporting_layer()?;
+        let supporting_handle = backend.load_handle(supporting_id).ok().flatten()?;
+        let cached_id = backend
+            .lookup_anchored_commit(layer.content_hash(), &supporting_handle.content_hash)
+            .ok()
+            .flatten()?;
+        // Verify the cached layer still exists. If GC has reclaimed
+        // it (or it was never persisted for some reason), treat as a
+        // miss so the caller re-persists.
+        backend.load_handle(&cached_id).ok().flatten()?;
+        Some(cached_id)
+    }
+
+    /// Insert the freshly-committed layer into the anchored-commit
+    /// cache. Best-effort — failures log a warning but don't propagate.
+    fn put_anchored_commit_for_layer(
+        &self,
+        backend: &dyn crate::storage::PersistentBackend,
+        layer: &crate::layer::Layer,
+    ) {
+        let Some(supporting_id) = layer.supporting_layer() else {
+            return;
+        };
+        let Some(supporting_handle) = backend.load_handle(supporting_id).ok().flatten() else {
+            return;
+        };
+        if let Err(e) = backend.put_anchored_commit(
+            layer.content_hash(),
+            &supporting_handle.content_hash,
+            layer.id(),
+        ) {
+            tracing::warn!(
+                { field::OPERATION } = operation::LAYER_COMMIT,
+                { field::ERROR_KIND } = "anchored_commit_cache_put_failed",
+                { field::LAYER_ID } = %layer.id(),
+                { field::ERROR_MESSAGE } = %e,
+                "failed to update anchored-commit cache (commit succeeded)"
+            );
+        }
+    }
+
+    /// Advance `branch` to `layer` via the lattice's CAS primitive.
+    /// Carved out of `persist_layer_if_backend` so both the
+    /// cache-miss path and the same-position cache-hit path can
+    /// share the logic.
+    fn advance_branch_for_layer(
+        &self,
+        branch: &str,
+        layer: &crate::layer::Layer,
+        backend: &dyn crate::storage::PersistentBackend,
+    ) -> Result<(), ValidationError> {
         let expected_old = layer.parent().map(|p| p.id().clone());
-        let storage = LayerStorage::with_persistent(Arc::clone(backend));
+        let storage = LayerStorage::with_persistent(
+            self.backend
+                .as_ref()
+                .expect("advance_branch_for_layer called only when backend is Some")
+                .clone(),
+        );
         match crate::lattice::update_branch(
             branch,
             expected_old,
             layer.id().clone(),
             crate::lattice::ConflictPolicy::AllowTrivial,
             storage,
-            backend.as_ref(),
+            backend,
         ) {
             Ok(_) => {
                 tracing::debug!(
@@ -740,7 +918,7 @@ impl EigeniusService {
                     persisted = true,
                     "layer persisted to backend and branch advanced"
                 );
-                None
+                Ok(())
             }
             Err(e) => {
                 tracing::warn!(
@@ -751,7 +929,7 @@ impl EigeniusService {
                     { field::ERROR_MESSAGE } = %e,
                     "failed to advance branch"
                 );
-                Some(ValidationError {
+                Err(ValidationError {
                     resource_iri: String::new(),
                     property_iri: String::new(),
                     rule: "advance_branch".to_string(),
@@ -1375,7 +1553,7 @@ impl EigeniusService {
                     // logs but doesn't fail RunProgram — the eval
                     // output is still valid; the chain just isn't
                     // durable.
-                    if let Some(err) = self.persist_layer_if_backend(branch, &outcome.user_layer) {
+                    if let Err(err) = self.persist_layer_if_backend(branch, &outcome.user_layer) {
                         tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "program_run_persist_failed",
@@ -1385,7 +1563,7 @@ impl EigeniusService {
                         );
                     }
                     if let Some(prov) = outcome.provenance_layer.as_ref() {
-                        if let Some(err) = self.persist_layer_if_backend(branch, prov) {
+                        if let Err(err) = self.persist_layer_if_backend(branch, prov) {
                             tracing::warn!(
                                 { field::OPERATION } = operation::LAYER_COMMIT,
                                 { field::ERROR_KIND } = "program_run_provenance_persist_failed",
@@ -1474,6 +1652,7 @@ impl EigeniusKernel for EigeniusService {
         }
 
         let mut layer_id = String::new();
+        let mut branch_advanced = false;
         let mut errors = Vec::new();
 
         if req.auto_commit {
@@ -1488,6 +1667,11 @@ impl EigeniusKernel for EigeniusService {
             match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
                 Ok(outcome) => {
                     let layer = outcome.user_layer;
+                    // Default to the freshly-built layer's id; the
+                    // persist step below may substitute the canonical
+                    // id from the anchored-commit cache (D33 §6) if
+                    // this exact content + supporting context was
+                    // committed before.
                     layer_id = layer.id().to_string();
                     tracing::info!(
                         { field::OPERATION } = operation::LAYER_COMMIT,
@@ -1497,8 +1681,21 @@ impl EigeniusKernel for EigeniusService {
                         "layer committed"
                     );
                     drop(ctx);
-                    if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
-                        errors.push(err);
+                    match self.persist_layer_if_backend(&branch, &layer) {
+                        Ok(info) => {
+                            // On a cache hit at a different position
+                            // the canonical id differs from the
+                            // freshly-built one — surface that to the
+                            // caller so they see the chain's canonical
+                            // representative for this content.
+                            // `branch_advanced` distinguishes a fresh
+                            // commit / same-position hit (branch moved)
+                            // from a different-position hit (branch
+                            // stayed put).
+                            layer_id = info.layer_id.to_string();
+                            branch_advanced = info.branch_advanced;
+                        }
+                        Err(err) => errors.push(err),
                     }
                     // Persist the AutoOnLoad provenance layer too if
                     // one was produced (D31 §6.3 Holds/Undecidable
@@ -1510,7 +1707,7 @@ impl EigeniusKernel for EigeniusService {
                     // no common ancestor" when the LCA walk hit the
                     // ghost.
                     if let Some(prov) = outcome.provenance_layer {
-                        if let Some(err) = self.persist_layer_if_backend(&branch, &prov) {
+                        if let Err(err) = self.persist_layer_if_backend(&branch, &prov) {
                             errors.push(err);
                         }
                         self.rebuild_institution_index(&prov).await;
@@ -1545,8 +1742,7 @@ impl EigeniusKernel for EigeniusService {
                             match ctx.commit("institution_classes") {
                                 Ok(extra) => {
                                     drop(ctx);
-                                    if let Some(err) =
-                                        self.persist_layer_if_backend(&branch, &extra)
+                                    if let Err(err) = self.persist_layer_if_backend(&branch, &extra)
                                     {
                                         errors.push(err);
                                     }
@@ -1576,7 +1772,7 @@ impl EigeniusKernel for EigeniusService {
                     // anchor lives on the chain. The Load itself
                     // still surfaces as a failure to the caller.
                     if let Some(layer) = provenance_layer {
-                        if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
+                        if let Err(err) = self.persist_layer_if_backend(&branch, &layer) {
                             errors.push(err);
                         }
                         self.rebuild_institution_index(&layer).await;
@@ -1637,6 +1833,7 @@ impl EigeniusKernel for EigeniusService {
             layer_id,
             resource_count: count,
             branch,
+            branch_advanced,
         };
         if !response.success {
             guard.fail("validation_failed");
@@ -1752,7 +1949,7 @@ impl EigeniusKernel for EigeniusService {
             }
             match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
                 Ok(co) => {
-                    if let Some(err) = self.persist_layer_if_backend(&branch_name, &co.user_layer) {
+                    if let Err(err) = self.persist_layer_if_backend(&branch_name, &co.user_layer) {
                         tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "eigenql_into_persist_failed",
@@ -1762,7 +1959,7 @@ impl EigeniusKernel for EigeniusService {
                         );
                     }
                     if let Some(prov) = co.provenance_layer.as_ref() {
-                        if let Some(err) = self.persist_layer_if_backend(&branch_name, prov) {
+                        if let Err(err) = self.persist_layer_if_backend(&branch_name, prov) {
                             tracing::warn!(
                                 { field::OPERATION } = operation::LAYER_COMMIT,
                                 { field::ERROR_KIND } = "eigenql_into_provenance_persist_failed",
@@ -2019,7 +2216,7 @@ impl EigeniusKernel for EigeniusService {
             .commit("reflect")
             .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
         drop(ctx);
-        if let Some(err) = self.persist_layer_if_backend(&branch, &layer) {
+        if let Err(err) = self.persist_layer_if_backend(&branch, &layer) {
             return Err(Status::internal(format!(
                 "reflect persist failed: {}",
                 err.message
@@ -2538,6 +2735,7 @@ impl EigeniusKernel for EigeniusService {
 
 /// Parse a hex-encoded LayerId from the wire, returning a typed
 /// `Status::invalid_argument` on malformed input.
+#[allow(clippy::result_large_err)]
 fn parse_layer_id(hex_str: &str, field: &str) -> Result<crate::layer::LayerId, Status> {
     let bytes = hex::decode(hex_str)
         .map_err(|e| Status::invalid_argument(format!("{field} not valid hex: {e}")))?;

@@ -1545,8 +1545,10 @@ mod tests {
         let from = layers[2].id().clone();
         let to = layers[4].id().clone();
         let storage = LayerStorage::with_persistent(Arc::clone(&backend));
-        let mut opts = ConsolidateOpts::default();
-        opts.preserve_history = true;
+        let opts = ConsolidateOpts {
+            preserve_history: true,
+            ..ConsolidateOpts::default()
+        };
         consolidate_chain("main", from, to, opts, storage, backend.as_ref())
             .expect("consolidation succeeds");
 

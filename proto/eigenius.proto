@@ -148,6 +148,20 @@ message LoadResponse {
   uint32 resource_count = 4;
   // Echoes the branch this Load committed to (defaults to "main").
   string branch = 5;
+  // D33 §6 / Phase 20c: did this Load actually move the branch ref?
+  //
+  // - `true`: the freshly-built layer was stored (cache miss) or the
+  //  canonical layer at the same position was re-confirmed (cache
+  //  hit, same position) — either way, the branch ref now points
+  //  at `layer_id`.
+  // - `false`: the anchored-commit cache returned a canonical layer
+  //  living elsewhere in the DAG (cache hit, different position).
+  //  `layer_id` identifies that canonical layer; the branch ref did
+  //  not advance to it.
+  //
+  // Clients that pin to a branch (notebook cells, watchers) read
+  // this flag to decide whether to refresh their view.
+  bool branch_advanced = 6;
 }
 
 // --- Inspect ---
