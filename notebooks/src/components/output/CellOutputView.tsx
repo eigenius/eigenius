@@ -26,6 +26,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import type { CellOutput } from "../../runtime/notebookStore";
+import { CommitStatusBadge } from "./CommitStatusBadge";
 import { LayerStackPanel } from "./LayerStackPanel";
 import { ProgramRunOutputView } from "./ProgramRunOutputView";
 import { ResourceInspector } from "./ResourceInspector";
@@ -95,6 +96,7 @@ function renderBody(
             {output.warnings.length > 0 && (
               <Caption1>{output.warnings.length} warning(s)</Caption1>
             )}
+            {output.commit && <CommitStatusBadge commit={output.commit} />}
           </div>
           <Accordion collapsible className={styles.stackAccordion}>
             <AccordionItem value="stack">
@@ -125,14 +127,22 @@ function renderBody(
       );
 
     case "resultset":
-      return <ResultTable document={output.document} />;
+      return (
+        <>
+          <ResultTable document={output.document} />
+          {output.commit && <CommitStatusBadge commit={output.commit} />}
+        </>
+      );
 
     case "resource":
       return (
-        <ResourceInspector
-          resource={output.resource}
-          traceIri={output.traceIri}
-        />
+        <>
+          <ResourceInspector
+            resource={output.resource}
+            traceIri={output.traceIri}
+          />
+          {output.commit && <CommitStatusBadge commit={output.commit} />}
+        </>
       );
 
     case "value":

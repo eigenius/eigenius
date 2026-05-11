@@ -43,7 +43,10 @@ import type {
   NotebookMetaJson,
 } from "../persistence/notebook-format";
 import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
+import { type CommitMeta, commitMetaFrom } from "./commitMeta";
 import { decodeResultDocument } from "./resultDocument";
+
+export type { CommitMeta };
 
 /**
  * Curated chart namespace exposed to TS-cell sandboxes (Phase 5a).
@@ -103,6 +106,13 @@ export type CellOutput =
     resourceCount: number;
     /** Validation errors are non-fatal warnings here — load succeeded. */
     warnings: readonly string[];
+    /**
+     * D34 §6 commit / merge / cache outcome. Absent when the kernel
+     * didn't attempt a commit (e.g., validate-only Load with
+     * `auto_commit: false`); also absent on the no-backend
+     * in-memory path until the kernel disambiguates that case.
+     */
+    commit?: CommitMeta;
   }
   | {
     kind: "validate";
@@ -114,6 +124,12 @@ export type CellOutput =
     kind: "resultset";
     /** Eigon-CBOR document containing the ResultSet + row resources. */
     document: Uint8Array;
+    /**
+     * D34 §6 commit / merge / cache outcome — only present when the
+     * query had a `FIBER ... INTO` clause that committed. Plain reads
+     * leave this undefined.
+     */
+    commit?: CommitMeta;
   }
   | {
     kind: "resource";
@@ -121,6 +137,8 @@ export type CellOutput =
     resource: Uint8Array;
     /** Optional trace IRI when the kernel has a trace store configured. */
     traceIri?: string;
+    /** D34 §6 commit / merge / cache outcome for the trace-layer commit. */
+    commit?: CommitMeta;
   }
   | {
     /**
@@ -154,6 +172,12 @@ export interface ProgramRunResult {
   output?: Uint8Array;
   traceIri?: string;
   errorMessage?: string;
+  /**
+   * D34 §6 commit / merge / cache outcome for this run's trace-layer
+   * commit. Absent on failure (success=false) and when the kernel has
+   * no persistent backend (no commit happened).
+   */
+  commit?: CommitMeta;
 }
 
 export interface NotebookState {
@@ -565,6 +589,10 @@ async function executeCell(
         layerId: resp.layerId,
         resourceCount: resp.resourceCount,
         warnings: [],
+        // `merge === undefined` is the kernel's "no commit attempted"
+        // signal (validate-only Load, no-backend mode). Skip the
+        // CommitMeta so the cell footer doesn't render a stale badge.
+        commit: resp.merge !== undefined ? commitMetaFrom(resp) : undefined,
       };
     }
     case "eigenql": {
@@ -575,7 +603,11 @@ async function executeCell(
           message: resp.error || "query failed (no error message)",
         };
       }
-      return { kind: "resultset", document: resp.document };
+      // The query may have included a FIBER INTO clause that committed.
+      // If `merge` is present and not UNSPECIFIED, surface the commit
+      // info; otherwise leave it undefined (this was a pure read).
+      const commit = resp.merge !== undefined ? commitMetaFrom(resp) : undefined;
+      return { kind: "resultset", document: resp.document, commit };
     }
     case "typescript":
       return executeTypeScriptCell(eigen, cell.source, previousOutputs);
@@ -627,6 +659,7 @@ async function executeProgramRunCell(
           success: true,
           output: resp.output,
           traceIri: resp.traceIri || undefined,
+          commit: commitMetaFrom(resp),
         });
       }
     } catch (err) {

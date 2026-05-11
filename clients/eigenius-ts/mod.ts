@@ -27,10 +27,15 @@ export {
   type InspectOptions,
   type LayerTopologyOptions,
   type LoadOptions,
+  type LoadResponse,
+  type MergeInfo,
+  MergeOutcome,
   type QueryOptions,
+  type QueryResponse,
   type ReflectResponse,
   type RunProgramByIriOptions,
   type RunProgramOptions,
+  type RunProgramResponse,
   type SourceContentType,
 } from "./src/client.ts";
 

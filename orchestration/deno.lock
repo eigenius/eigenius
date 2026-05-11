@@ -10,6 +10,7 @@
     "npm:@bufbuild/protobuf@2": "2.11.0",
     "npm:@bufbuild/protoc-gen-es@^2.11.0": "2.11.0_@bufbuild+protobuf@2.11.0",
     "npm:@connectrpc/connect-node@2": "2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0",
+    "npm:@connectrpc/connect-web@2": "2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0",
     "npm:@connectrpc/connect@2": "2.1.1_@bufbuild+protobuf@2.11.0",
     "npm:@modelcontextprotocol/sdk@latest": "1.29.0_zod@3.25.76",
     "npm:ai@latest": "6.0.158_zod@3.25.76",
@@ -126,6 +127,13 @@
     },
     "@connectrpc/connect-node@2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0": {
       "integrity": "sha512-s3TfsI1XF+n+1z6MBS9rTnFsxxR4Rw5wmdEnkQINli81ESGxcsfaEet8duzq8LVuuCupmhUsgpRo0Nv9pZkufg==",
+      "dependencies": [
+        "@bufbuild/protobuf",
+        "@connectrpc/connect"
+      ]
+    },
+    "@connectrpc/connect-web@2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0": {
+      "integrity": "sha512-J8317Q2MaFRCT1jzVR1o06bZhDIBmU0UAzWx6xOIXzOq8+k71/+k7MUF7AwcBUX+34WIvbm5syRgC5HXQA8fOg==",
       "dependencies": [
         "@bufbuild/protobuf",
         "@connectrpc/connect"
@@ -724,6 +732,7 @@
       "npm:@bufbuild/protobuf@2",
       "npm:@bufbuild/protoc-gen-es@^2.11.0",
       "npm:@connectrpc/connect-node@2",
+      "npm:@connectrpc/connect-web@2",
       "npm:@connectrpc/connect@2",
       "npm:@modelcontextprotocol/sdk@latest",
       "npm:ai@latest",

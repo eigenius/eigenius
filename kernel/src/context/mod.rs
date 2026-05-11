@@ -50,9 +50,19 @@ pub enum ContextError {
     /// the audit-anchor `Verdict` + `RuntimeInvocation` resources still
     /// landed on a separate provenance-only layer. `None` for the plain
     /// structural-validation failure path where nothing committed.
+    ///
+    /// `prior_head` is `Some` whenever `ctx.head` was advanced before
+    /// the validation step rejected the commit — callers need it to
+    /// revert `ctx.head` if the subsequent provenance-layer persist
+    /// short-circuits (different-position cache hit per D33 §6). It's
+    /// `None` for failure paths that bail out before any head-advance
+    /// (structural validation, missing institution, handler errors)
+    /// because there's nothing to revert. See `CommitOutcome::prior_head`
+    /// for the analogous Ok-path field and the rationale.
     ValidationFailed {
         errors: Vec<crate::validation::ValidationError>,
         provenance_layer: Option<Arc<Layer>>,
+        prior_head: Option<Arc<Layer>>,
     },
     /// Head has moved since this context was created (conflict).
     StaleHead { expected: LayerId, actual: LayerId },
@@ -63,9 +73,14 @@ impl ContextError {
     /// provenance committed" case — the structural / installer /
     /// handler-error paths.
     pub fn validation_failed(errors: Vec<crate::validation::ValidationError>) -> Self {
+        // `prior_head: None` — this constructor is for failures that
+        // bail before ctx.head advances (structural validation,
+        // missing institution, handler errors), so there's nothing
+        // to revert.
         Self::ValidationFailed {
             errors,
             provenance_layer: None,
+            prior_head: None,
         }
     }
 }
@@ -96,6 +111,15 @@ pub struct CommitOutcome {
     /// { provenance_layer, .. }` shape so the caller's persist logic
     /// is identical across both branches.
     pub provenance_layer: Option<Arc<Layer>>,
+    /// The context's head from immediately before this commit. Callers
+    /// keep this around so they can revert `ctx.head` back to it when
+    /// the corresponding `persist_layer_if_backend` reports the
+    /// branch ref did *not* advance (different-position cache hit per
+    /// D33 §6, NeedsWitnessedMerge per D34 §G.1). Without the revert,
+    /// `ctx.head` advances to an in-memory-only layer whose parent
+    /// isn't in storage — the next commit's `update_branch` LCA walk
+    /// then fails with "merge during update_branch: no common ancestor".
+    pub prior_head: Arc<Layer>,
 }
 
 impl fmt::Display for ContextError {
@@ -218,6 +242,19 @@ impl ExecutionContext {
     /// Returns true if the working layer has any resources.
     pub fn has_changes(&self) -> bool {
         !self.working.resources().is_empty()
+    }
+
+    /// Restore `head` to a prior layer and reset the working builder
+    /// to attach to it. Callers use this when a commit returned a
+    /// [`CommitOutcome`] but the subsequent persist short-circuited
+    /// (different-position cache hit per D33 §6) or lost the CAS
+    /// (NeedsWitnessedMerge per D34 §G.1) — the in-memory `head`
+    /// would otherwise point at a layer not present in storage,
+    /// poisoning every later commit's LCA walk with
+    /// "merge during update_branch: no common ancestor".
+    pub fn revert_head(&mut self, prior_head: Arc<Layer>, name: &str) {
+        self.head = prior_head;
+        self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
     }
 
     /// Commit the working layer.
@@ -400,7 +437,7 @@ impl ExecutionContext {
             // the audit anchor explaining the rejection. Revert head
             // (drops the gated layer) and commit a fresh
             // provenance-only layer in its place.
-            self.head = prior_head;
+            self.head = Arc::clone(&prior_head);
             self.working = LayerBuilder::new("verdict_provenance", Some(Arc::clone(&self.head)));
             for r in provenance {
                 self.working.add_resource(r).map_err(ContextError::Layer)?;
@@ -420,6 +457,7 @@ impl ExecutionContext {
             return Err(ContextError::ValidationFailed {
                 errors: fail_errors,
                 provenance_layer,
+                prior_head: Some(prior_head),
             });
         }
 
@@ -455,6 +493,7 @@ impl ExecutionContext {
         Ok(CommitOutcome {
             user_layer: new_layer,
             provenance_layer,
+            prior_head,
         })
     }
 }
@@ -951,6 +990,7 @@ mod tests {
             ContextError::ValidationFailed {
                 errors,
                 provenance_layer,
+                prior_head: _,
             } => {
                 assert!(errors.iter().any(|e| e.message.contains("returned Fails")));
                 // Per D31 §6.3: gated resource is rejected, but the

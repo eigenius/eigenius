@@ -45,6 +45,8 @@ import {
   ListInstitutionsRequestSchema,
   LoadRequestSchema,
   type LoadResponse,
+  type MergeInfo,
+  MergeOutcome,
   NotebookService,
   QueryRequestSchema,
   type QueryResponse,
@@ -69,12 +71,17 @@ export type {
   InstitutionInfo,
   LayerTopologyResponse,
   LoadResponse,
+  MergeInfo,
   QueryResponse,
   ReflectResponse,
   RunProgramResponse,
   ValidateProgramResponse,
   ValidationError,
 };
+
+// `MergeOutcome` is a value-level enum (consumers compare against it),
+// so re-export as a value, not just a type.
+export { MergeOutcome };
 
 const TEXT_ENCODER = new TextEncoder();
 

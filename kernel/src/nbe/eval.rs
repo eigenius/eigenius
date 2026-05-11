@@ -43,6 +43,17 @@ pub enum EvalError {
     /// Used while incrementally landing larger features (e.g. the
     /// inductive recursor stub during Phase 11b).
     NotImplemented(String),
+    /// An IO or deterministic component dispatch errored out.
+    /// `dispatch_component` previously masked these by returning an
+    /// empty embedded resource, which then flowed silently into
+    /// downstream `Construct` fields and surfaced (at best) as a
+    /// chain-validation error with no link back to the actual dispatch
+    /// failure. Propagating the original error gives the user a
+    /// useful diagnostic.
+    ComponentDispatchFailed {
+        component_iri: String,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for EvalError {
@@ -57,6 +68,10 @@ impl std::fmt::Display for EvalError {
             Self::ObservationNotFound(s) => write!(f, "observation not found: {s}"),
             Self::ModeError(s) => write!(f, "mode error: {s}"),
             Self::NotImplemented(s) => write!(f, "not yet implemented: {s}"),
+            Self::ComponentDispatchFailed {
+                component_iri,
+                message,
+            } => write!(f, "component '{component_iri}' failed: {message}"),
         }
     }
 }
@@ -1686,12 +1701,22 @@ fn dispatch_component(
                     { field::ERROR_KIND } = "dispatch_failed",
                     { field::COMPONENT_IRI } = %component_iri,
                     { field::ERROR_MESSAGE } = %e,
-                    "IO component dispatch failed; returning empty resource"
+                    "IO component dispatch failed"
                 );
-                // Return empty resource instead of panicking
-                Ok(Val::ResourceVal(Box::new(
-                    crate::ontology::resource::Resource::new_embedded(),
-                )))
+                // Propagate the failure rather than masking it with an
+                // empty resource. The pre-fix behaviour fed a
+                // properties-less, is_a-less embedded resource into
+                // downstream `Construct` fields and let the chain
+                // validator catch it later — but the validator can
+                // only say "is_a [] doesn't match class_types"; the
+                // user has no way to trace that back to the dispatch
+                // failure that produced the empty resource. With the
+                // error propagated, `execute_program` surfaces the
+                // original component error directly.
+                Err(EvalError::ComponentDispatchFailed {
+                    component_iri: component_iri.to_string(),
+                    message: e,
+                })
             }
         }
     } else {
@@ -1730,11 +1755,12 @@ fn dispatch_component(
                     { field::ERROR_KIND } = "pure_dispatch_failed",
                     { field::COMPONENT_IRI } = %component_iri,
                     { field::ERROR_MESSAGE } = %e,
-                    "pure component dispatch failed; returning empty resource"
+                    "pure component dispatch failed"
                 );
-                Ok(Val::ResourceVal(Box::new(
-                    crate::ontology::resource::Resource::new_embedded(),
-                )))
+                Err(EvalError::ComponentDispatchFailed {
+                    component_iri: component_iri.to_string(),
+                    message: e,
+                })
             }
         }
     }
@@ -1789,7 +1815,14 @@ fn resolve_component_schemas(
 
     // Get the argument_type class
     let arg_type_prop = Iri::parse("urn:eigenius:program:component:argument_type").ok()?;
-    let arg_type_str = comp_def.get(&arg_type_prop)?.as_str()?;
+    // `component:argument_type` is a `data_type: resource` property —
+    // canonicalised to `ResourceRef` at LayerBuilder::build time, so
+    // read via `as_iri_str` (which handles both String and ResourceRef).
+    // `as_str` here used to silently return None for canonicalised
+    // component definitions, which short-circuited the entire schema
+    // resolution and surfaced as "CompleteJson requires output_schema
+    // in component argument" at the orchestrator handler.
+    let arg_type_str = comp_def.get(&arg_type_prop)?.as_iri_str()?;
     let arg_type_iri = Iri::parse(arg_type_str).ok()?;
     let arg_type_def = layer.resolve(&arg_type_iri)?;
 
@@ -1823,16 +1856,28 @@ fn resolve_component_schemas(
             false
         };
 
-        // Check if the data_type is 'resource' (not 'template' or 'string')
+        // Check if the data_type is 'resource' (not 'template' or 'string').
+        // `data_type` is itself `data_type: resource` (references a
+        // DataType class), so post-canonicalisation it's `ResourceRef`,
+        // not `String`. Read via `as_iri_str`.
         let is_resource = prop_def
             .get(&data_type_iri)
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_iri_str())
             .is_some_and(|s| s == "urn:eigenius:core:resource");
 
         if is_class_ref && is_resource {
-            // This property references a Class — check if the actual argument has a value
-            if let Some(crate::ontology::resource::Value::String(class_iri_str)) = arg.get(prop_iri)
-            {
+            // This property references a Class — check if the actual
+            // argument has a value. Read via `as_iri_str` so we
+            // accept both `Value::String` (pre-canonicalisation
+            // shape, e.g. FIBER-synthesised programs or RPC payloads
+            // that bypass `LayerBuilder::build`) and `Value::ResourceRef`
+            // (post-canonicalisation, the common production shape).
+            // Matching only `Value::String` here caused CompleteJson
+            // to receive a raw class IRI instead of the generated
+            // JSON Schema, which surfaced as the orchestrator's
+            // "CompleteJson requires output_schema in component argument"
+            // error.
+            if let Some(class_iri_str) = arg.get(prop_iri).and_then(|v| v.as_iri_str()) {
                 if let Ok(schema_class_iri) = Iri::parse(class_iri_str) {
                     // Generate JSON Schema from this class
                     match crate::program::schema::schema_for_class(&schema_class_iri, layer) {

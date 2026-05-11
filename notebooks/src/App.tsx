@@ -15,8 +15,13 @@
 import { useEffect } from "react";
 import {
   FluentProvider,
+  Toaster,
   webLightTheme,
 } from "@fluentui/react-components";
+import {
+  MergeEventToaster,
+  TOASTER_ID,
+} from "./components/MergeEventToaster";
 import { Notebook } from "./components/Notebook";
 import { parseNotebook } from "./persistence/notebook-format";
 import { EigenProvider } from "./runtime/EigenProvider";
@@ -47,6 +52,14 @@ export function App() {
     <FluentProvider theme={webLightTheme}>
       <EigenProvider>
         <Notebook />
+        {/*
+         * D34 §6.1 trivial-merge toast surface. `Toaster` mounts the
+         * portal at the root; `MergeEventToaster` watches cell outputs
+         * and dispatches into it. Both live inside FluentProvider so
+         * they pick up the active theme.
+         */}
+        <Toaster toasterId={TOASTER_ID} position="top-end" />
+        <MergeEventToaster />
       </EigenProvider>
     </FluentProvider>
   );

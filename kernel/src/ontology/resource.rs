@@ -86,6 +86,26 @@ impl Value {
         }
     }
 
+    /// Read the IRI text from any value that could represent an IRI:
+    /// `Value::ResourceRef(iri)` (the canonical post-
+    /// `canonicalise_resource_refs` shape) or `Value::String(s)` (the
+    /// freshly-parsed pre-canonicalisation shape). Returns `None` for
+    /// anything else.
+    ///
+    /// Use this — not `as_str` — from any reader that walks
+    /// resource-typed property values (`is_a`, `subclass_of`,
+    /// `requires`, `class_types`, etc.). `as_str` silently drops
+    /// `ResourceRef` values because they aren't strings, which
+    /// produced an entirely-empty topology graph for canonicalised
+    /// chains until this method was added.
+    pub fn as_iri_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s),
+            Value::ResourceRef(iri) => Some(iri.as_str()),
+            _ => None,
+        }
+    }
+
     /// Read the value as an IRI reference, accepting both
     /// `ResourceRef` (the canonical post-`canonicalise_resource_refs`
     /// shape) and `String` (the parse-time shape from

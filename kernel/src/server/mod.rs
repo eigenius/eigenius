@@ -1488,6 +1488,10 @@ impl EigeniusService {
                             let _ = store.put_task(&rec);
                         }
                     }
+                    // Eval errored before the commit attempt — no CAS
+                    // happened, so `merge` stays None. (Sending an
+                    // `UNSPECIFIED` MergeInfo here would render as a
+                    // misleading `cached` badge in notebook UIs.)
                     return Ok(Response::new(RunProgramResponse {
                         success: false,
                         output: Vec::new(),
@@ -1502,7 +1506,7 @@ impl EigeniusService {
                         task_id: task_id_str.clone(),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
-                        merge: Some(merge_info_from_outcome(None)),
+                        merge: None,
                     }));
                 }
             }
@@ -1611,102 +1615,276 @@ impl EigeniusService {
         // surfacing both user-layer and provenance outcomes would
         // conflate two distinct events. See proto comment on
         // `RunProgramResponse.merge` for the rationale.
+        // `branch_advanced` reports whether the durable branch ref moved
+        // as a result of this run's commits. We OR the user-layer and
+        // provenance-layer persists: a fresh commit or same-position
+        // cache hit advances the branch; a different-position cache hit
+        // (D33 §6) does not.
+        //
+        // `merge_outcome` carries the user-layer's CAS outcome only —
+        // surfacing both user-layer and provenance outcomes would
+        // conflate two distinct events. See proto comment on
+        // `RunProgramResponse.merge` for the rationale.
+        //
+        // `errors` accumulates every failure that should turn this
+        // response into a `success=false` (D34 §6 trace-not-found bug
+        // — previously these were `warn!`'d and silently discarded,
+        // leaving the caller holding a `trace_iri` that pointed at a
+        // layer the chain never accepted).
         let mut branch_advanced = false;
         let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
+        // True iff we reached `persist_layer_if_backend` for any layer.
+        // Distinguishes "the run committed (or tried to) — report the
+        // outcome" from "we never got to the commit step — say nothing
+        // about merge state." The notebook UI keys its cell-footer
+        // badges on this distinction (D34 §6.1).
+        let mut commit_attempted = false;
+        let mut errors: Vec<ValidationError> = Vec::new();
         let result_layer_head = {
             let mut ctx = ctx_arc.write().await;
+
             // Add domain resources produced by the run (chain-resident
             // outputs of comorphism reify and the program's final
-            // Resource value).
+            // Resource value). Every resource added here is
+            // kernel-generated — a failure to add one is an internal
+            // bug (malformed IRI, conflicting type, etc.) and must
+            // surface as a kernel-internal error, not be swallowed.
             for r in &produced_resources {
                 if let Err(e) = ctx.add_resource(r.clone()) {
-                    tracing::warn!(
-                        { field::OPERATION } = operation::PROGRAM_RUN,
-                        { field::ERROR_KIND } = "produced_add_failed",
-                        { field::ERROR_MESSAGE } = %e,
-                        resource_iri = ?r.id(),
-                        "failed to add produced resource to program-run layer"
-                    );
+                    errors.push(ValidationError {
+                        resource_iri: r.id().map(|i| i.as_str().to_string()).unwrap_or_default(),
+                        property_iri: String::new(),
+                        rule: "internal".to_string(),
+                        message: format!("failed to add produced resource: {e}"),
+                        severity: "error".to_string(),
+                    });
                 }
             }
-            // Add ProgramTrace
+            // Capture the trace IRI before moving the resource — needed
+            // for the failure path's error message (trace_iri_str is
+            // semantically the same value, but reading it off the
+            // resource ties the error to the actual object that
+            // failed).
+            let trace_iri_for_err = trace_resource
+                .id()
+                .map(|i| i.as_str().to_string())
+                .unwrap_or_default();
             if let Err(e) = ctx.add_resource(trace_resource) {
-                tracing::warn!(
-                    { field::OPERATION } = operation::PROGRAM_RUN,
-                    { field::ERROR_KIND } = "trace_add_failed",
-                    { field::ERROR_MESSAGE } = %e,
-                    "failed to add ProgramTrace resource to layer"
-                );
+                errors.push(ValidationError {
+                    resource_iri: trace_iri_for_err,
+                    property_iri: String::new(),
+                    rule: "internal".to_string(),
+                    message: format!("failed to add ProgramTrace: {e}"),
+                    severity: "error".to_string(),
+                });
             }
-            // Add each IO ComponentTrace as a resource
-            for ct in &dispatched_traces {
-                let ct_resource = crate::program::trace::trace_to_resource(
-                    &crate::program::trace::Trace::Component(ct.clone()),
-                );
-                let _ = ctx.add_resource(ct_resource);
-            }
-            let index = Arc::clone(&*self.institution_index.read().await);
-            let runtime = Arc::clone(&*self.institution_runtime.read().await);
-            match ctx.commit_with_validation("program-run", &index, &runtime) {
-                Ok(outcome) => {
-                    // Persist user layer; provenance layer (when
-                    // present, from Holds/Undecidable AutoOnLoad
-                    // verdicts) follows. A failure to persist either
-                    // logs but doesn't fail RunProgram — the eval
-                    // output is still valid; the chain just isn't
-                    // durable.
-                    match self.persist_layer_if_backend(branch, &outcome.user_layer) {
-                        Ok(info) => {
-                            branch_advanced |= info.branch_advanced;
-                            merge_outcome = info.merge_outcome;
+            // ComponentTraces are designed to be embedded inside the
+            // ProgramTrace's `trace_tree` (see `Resource::new_embedded`
+            // in `trace_to_resource`), not added as standalone chain
+            // resources — they have no `@id`. The flat `dispatched_traces`
+            // list is purely for metrics aggregation (see
+            // `ProgramMetrics::from_trace` above); the audit-anchor copy
+            // lives in `trace_tree` via `root_trace`. Suppress the
+            // `dispatched_traces` variable to make the intent explicit.
+            let _ = &dispatched_traces;
+
+            if !errors.is_empty() {
+                // Don't attempt the commit if any kernel-generated
+                // resource failed to add — the layer would be missing
+                // the trace or an output and the response would be
+                // structurally inconsistent.
+                None
+            } else {
+                let index = Arc::clone(&*self.institution_index.read().await);
+                let runtime = Arc::clone(&*self.institution_runtime.read().await);
+                match ctx.commit_with_validation("program-run", &index, &runtime) {
+                    Ok(outcome) => {
+                        // Persist user layer; provenance layer (when
+                        // present, from Holds/Undecidable AutoOnLoad
+                        // verdicts) follows. A failure to persist
+                        // either is a backend I/O issue, distinct from
+                        // a chain rejection — log it and surface as an
+                        // error so the caller doesn't see a dangling
+                        // trace_iri.
+                        commit_attempted = true;
+                        let mut user_advanced = false;
+                        match self.persist_layer_if_backend(branch, &outcome.user_layer) {
+                            Ok(info) => {
+                                branch_advanced |= info.branch_advanced;
+                                merge_outcome = info.merge_outcome;
+                                user_advanced = info.branch_advanced;
+                            }
+                            Err(err) => {
+                                tracing::warn!(
+                                    { field::OPERATION } = operation::LAYER_COMMIT,
+                                    { field::ERROR_KIND } = "program_run_persist_failed",
+                                    { field::LAYER_ID } = %outcome.user_layer.id(),
+                                    { field::ERROR_MESSAGE } = %err.message,
+                                    "failed to persist program-run layer"
+                                );
+                                errors.push(err);
+                            }
                         }
-                        Err(err) => tracing::warn!(
+                        // If the user layer didn't make it onto the
+                        // durable branch — different-position cache
+                        // hit, NeedsWitnessedMerge, or a backend I/O
+                        // error — `ctx.head` was advanced to an
+                        // in-memory-only layer. Revert so the next
+                        // RPC's commit doesn't fail with
+                        // "merge during update_branch: no common
+                        // ancestor" when its LCA walk hits the ghost.
+                        // Skip the provenance persist (its parent is
+                        // the never-stored user_layer).
+                        if !user_advanced && self.backend.is_some() {
+                            ctx.revert_head(outcome.prior_head, "program-run");
+                            None
+                        } else {
+                            if let Some(prov) = outcome.provenance_layer.as_ref() {
+                                let mut prov_advanced = false;
+                                match self.persist_layer_if_backend(branch, prov) {
+                                    Ok(info) => {
+                                        branch_advanced |= info.branch_advanced;
+                                        prov_advanced = info.branch_advanced;
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!(
+                                            { field::OPERATION } = operation::LAYER_COMMIT,
+                                            { field::ERROR_KIND } = "program_run_provenance_persist_failed",
+                                            { field::LAYER_ID } = %prov.id(),
+                                            { field::ERROR_MESSAGE } = %err.message,
+                                            "failed to persist program-run provenance layer"
+                                        );
+                                        errors.push(err);
+                                    }
+                                }
+                                if !prov_advanced && self.backend.is_some() {
+                                    // Provenance didn't go in. The
+                                    // user_layer did — leave ctx.head
+                                    // on user_layer (revert from
+                                    // provenance to user_layer).
+                                    ctx.revert_head(Arc::clone(&outcome.user_layer), "program-run");
+                                }
+                            }
+                            Some(
+                                outcome
+                                    .provenance_layer
+                                    .as_ref()
+                                    .map(|l| l.id().clone())
+                                    .unwrap_or_else(|| outcome.user_layer.id().clone()),
+                            )
+                        }
+                    }
+                    Err(crate::context::ContextError::ValidationFailed {
+                        errors: verrs,
+                        provenance_layer,
+                        prior_head,
+                    }) => {
+                        // The chain refused the run's output (AutoOnLoad
+                        // `Fails`, structural validation error, etc.).
+                        // Per D31 §6.3 the provenance layer recording
+                        // the rejection is still persisted as the audit
+                        // anchor; the run itself is surfaced as a
+                        // failure to the caller.
+                        for ve in &verrs {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::VALIDATE_RESOURCE,
+                                { field::ERROR_KIND } = ?ve.rule,
+                                { field::RESOURCE_IRI } = ve.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                                { field::PROPERTY_IRI } = ve.property.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                                { field::ERROR_MESSAGE } = %ve.message,
+                                "program-run validation error"
+                            );
+                        }
+                        for ve in verrs {
+                            errors.push(ValidationError {
+                                resource_iri: ve
+                                    .resource_id
+                                    .as_ref()
+                                    .map(|i| i.as_str().to_string())
+                                    .unwrap_or_default(),
+                                property_iri: ve
+                                    .property
+                                    .as_ref()
+                                    .map(|i| i.as_str().to_string())
+                                    .unwrap_or_default(),
+                                rule: format!("{:?}", ve.rule),
+                                message: ve.message,
+                                severity: "error".to_string(),
+                            });
+                        }
+                        commit_attempted = true;
+                        let mut prov_advanced = false;
+                        if let Some(prov) = provenance_layer.as_ref() {
+                            match self.persist_layer_if_backend(branch, prov) {
+                                Ok(info) => {
+                                    branch_advanced |= info.branch_advanced;
+                                    prov_advanced = info.branch_advanced;
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        { field::OPERATION } = operation::LAYER_COMMIT,
+                                        { field::ERROR_KIND } = "program_run_provenance_persist_failed",
+                                        { field::LAYER_ID } = %prov.id(),
+                                        { field::ERROR_MESSAGE } = %err.message,
+                                        "failed to persist program-run failure provenance layer"
+                                    );
+                                    errors.push(err);
+                                }
+                            }
+                        }
+                        // If the provenance didn't go through (or
+                        // there was no provenance to commit), revert
+                        // ctx.head to the original head. The Fails arm
+                        // of `commit_with_validation` had already
+                        // advanced ctx.head to the provenance layer
+                        // (or left it at prior_head if there was no
+                        // provenance to commit) — but if persist
+                        // cache-hits we need to revert to keep
+                        // ctx.head in storage.
+                        if !prov_advanced && self.backend.is_some() {
+                            if let Some(ph) = prior_head {
+                                ctx.revert_head(ph, "program-run");
+                            }
+                        }
+                        // Return the provenance layer's id so the task
+                        // record can point at the audit anchor for the
+                        // failed run.
+                        provenance_layer.map(|l| l.id().clone())
+                    }
+                    Err(e) => {
+                        tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
-                            { field::ERROR_KIND } = "program_run_persist_failed",
-                            { field::LAYER_ID } = %outcome.user_layer.id(),
-                            { field::ERROR_MESSAGE } = %err.message,
-                            "failed to persist program-run layer (output still returned)"
-                        ),
+                            { field::ERROR_KIND } = "program_run_commit_failed",
+                            { field::ERROR_MESSAGE } = %e,
+                            "program-run layer commit failed"
+                        );
+                        errors.push(ValidationError {
+                            resource_iri: String::new(),
+                            property_iri: String::new(),
+                            rule: "commit".to_string(),
+                            message: format!("{e}"),
+                            severity: "error".to_string(),
+                        });
+                        None
                     }
-                    if let Some(prov) = outcome.provenance_layer.as_ref() {
-                        match self.persist_layer_if_backend(branch, prov) {
-                            Ok(info) => branch_advanced |= info.branch_advanced,
-                            Err(err) => tracing::warn!(
-                                { field::OPERATION } = operation::LAYER_COMMIT,
-                                { field::ERROR_KIND } = "program_run_provenance_persist_failed",
-                                { field::LAYER_ID } = %prov.id(),
-                                { field::ERROR_MESSAGE } = %err.message,
-                                "failed to persist program-run provenance layer"
-                            ),
-                        }
-                    }
-                    Some(
-                        outcome
-                            .provenance_layer
-                            .as_ref()
-                            .map(|l| l.id().clone())
-                            .unwrap_or_else(|| outcome.user_layer.id().clone()),
-                    )
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        { field::OPERATION } = operation::LAYER_COMMIT,
-                        { field::ERROR_KIND } = "program_run_commit_failed",
-                        { field::ERROR_MESSAGE } = %e,
-                        "program-run layer commit failed (output still returned)"
-                    );
-                    None
                 }
             }
         };
 
-        // Mark the task Completed and record its result_layer_head so
-        // clients that polled via GetTaskStatus can resolve it (D21
-        // §3.7). `result_layer_head` is the trace layer committed
-        // above — the program's observable outputs.
+        let success = errors.is_empty();
+
+        // Record the task's final state. A successful run records the
+        // result layer id so clients that polled via GetTaskStatus can
+        // resolve it (D21 §3.7); a failed run records `Failed` and the
+        // provenance layer id (if any) so the failure audit is also
+        // discoverable through the same path.
         if let (Some(store), Some(tc)) = (&self.task_store, task_context.as_ref()) {
             if let Ok(Some(mut rec)) = store.get_task(&tc.session_id, &tc.task_id) {
-                rec.status = crate::task::TaskStatus::Completed;
+                rec.status = if success {
+                    crate::task::TaskStatus::Completed
+                } else {
+                    crate::task::TaskStatus::Failed
+                };
                 rec.result_layer_head = result_layer_head;
                 rec.updated_at = now_millis();
                 if let Err(e) = store.put_task(&rec) {
@@ -1721,15 +1899,40 @@ impl EigeniusService {
             }
         }
 
+        // On failure, blank the response's `output` / `trace_iri` /
+        // `output_resource_iris` — those IRIs reference resources the
+        // chain didn't accept, so returning them gives clients a
+        // dangling pointer (the exact bug this fix closes).
         Ok(Response::new(RunProgramResponse {
-            success: true,
-            output: Self::serialize_resource(&output),
-            errors: Vec::new(),
-            trace_iri: trace_iri_str,
+            success,
+            output: if success {
+                Self::serialize_resource(&output)
+            } else {
+                Vec::new()
+            },
+            errors,
+            trace_iri: if success {
+                trace_iri_str
+            } else {
+                String::new()
+            },
             task_id: task_id_str,
-            output_resource_iris,
+            output_resource_iris: if success {
+                output_resource_iris
+            } else {
+                Vec::new()
+            },
             branch_advanced,
-            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
+            // Only populate `merge` when persist actually ran — see
+            // `commit_attempted`'s declaration. A failure that aborts
+            // before persist (add_resource on a kernel-generated
+            // resource, eval error) sends `merge=None` so the notebook
+            // doesn't render a misleading badge.
+            merge: if commit_attempted {
+                Some(merge_info_from_outcome(merge_outcome.as_ref()))
+            } else {
+                None
+            },
         }))
     }
 }
@@ -1782,6 +1985,8 @@ impl EigeniusKernel for EigeniusService {
             match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
                 Ok(outcome) => {
                     let layer = outcome.user_layer;
+                    let prior_head = outcome.prior_head;
+                    let provenance = outcome.provenance_layer;
                     // Default to the freshly-built layer's id; the
                     // persist step below may substitute the canonical
                     // id from the anchored-commit cache (D33 §6) if
@@ -1796,6 +2001,12 @@ impl EigeniusKernel for EigeniusService {
                         "layer committed"
                     );
                     drop(ctx);
+                    // `user_advanced`: did the durable branch ref move
+                    // to (or through) the user layer? Drives whether we
+                    // can safely build on it for the provenance commit,
+                    // and whether the in-memory `ctx.head` is allowed
+                    // to stay where `commit_with_validation` advanced it.
+                    let mut user_advanced = false;
                     match self.persist_layer_if_backend(&branch, &layer) {
                         Ok(info) => {
                             // On a cache hit at a different position
@@ -1812,8 +2023,36 @@ impl EigeniusKernel for EigeniusService {
                             layer_id = info.layer_id.to_string();
                             branch_advanced = info.branch_advanced;
                             merge_outcome = info.merge_outcome;
+                            user_advanced = info.branch_advanced;
                         }
                         Err(err) => errors.push(err),
+                    }
+                    // If the user layer didn't go into the durable
+                    // chain — different-position cache hit or
+                    // NeedsWitnessedMerge — `ctx.head` was advanced to
+                    // an in-memory-only layer whose parent isn't in
+                    // storage. Revert so subsequent commits build on
+                    // the same head the durable branch ref points at;
+                    // skip the provenance persist (whose parent is
+                    // the never-stored user_layer) and the
+                    // institution-class follow-up commit (same reason).
+                    if !user_advanced && self.backend.is_some() {
+                        let mut ctx_w = ctx_arc.write().await;
+                        ctx_w.revert_head(prior_head, "loaded");
+                        drop(ctx_w);
+                        let response = LoadResponse {
+                            success: errors.is_empty(),
+                            errors,
+                            layer_id,
+                            resource_count: count,
+                            branch,
+                            branch_advanced,
+                            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
+                        };
+                        if !response.success {
+                            guard.fail("validation_failed");
+                        }
+                        return Ok(Response::new(response));
                     }
                     // Persist the AutoOnLoad provenance layer too if
                     // one was produced (D31 §6.3 Holds/Undecidable
@@ -1824,11 +2063,20 @@ impl EigeniusKernel for EigeniusService {
                     // would surface as "merge during update_branch:
                     // no common ancestor" when the LCA walk hit the
                     // ghost.
-                    if let Some(prov) = outcome.provenance_layer {
-                        if let Err(err) = self.persist_layer_if_backend(&branch, &prov) {
-                            errors.push(err);
+                    if let Some(prov) = provenance {
+                        let mut prov_advanced = false;
+                        match self.persist_layer_if_backend(&branch, &prov) {
+                            Ok(info) => prov_advanced = info.branch_advanced,
+                            Err(err) => errors.push(err),
                         }
-                        self.rebuild_institution_index(&prov).await;
+                        if !prov_advanced && self.backend.is_some() {
+                            // Revert ctx.head to the user_layer — the
+                            // provenance layer didn't make it through.
+                            let mut ctx_w = ctx_arc.write().await;
+                            ctx_w.revert_head(Arc::clone(&layer), "loaded");
+                        } else {
+                            self.rebuild_institution_index(&prov).await;
+                        }
                     }
                     // Rebuild the D14 institution index from the new
                     // chain so subsequent commits see the just-loaded
@@ -1857,15 +2105,29 @@ impl EigeniusKernel for EigeniusService {
                             }
                         }
                         if ctx.has_changes() {
+                            // Save the pre-commit head so we can
+                            // revert if the institution_classes
+                            // persist short-circuits (different-position
+                            // cache hit). Same invariant as the
+                            // user-layer + provenance handling above.
+                            let inst_prior_head = Arc::clone(ctx.head());
                             match ctx.commit("institution_classes") {
-                                Ok(extra) => {
-                                    drop(ctx);
-                                    if let Err(err) = self.persist_layer_if_backend(&branch, &extra)
-                                    {
-                                        errors.push(err);
+                                Ok(extra) => match self.persist_layer_if_backend(&branch, &extra) {
+                                    Ok(info) => {
+                                        if info.branch_advanced {
+                                            drop(ctx);
+                                            self.rebuild_institution_index(&extra).await;
+                                        } else if self.backend.is_some() {
+                                            ctx.revert_head(inst_prior_head, "loaded");
+                                        }
                                     }
-                                    self.rebuild_institution_index(&extra).await;
-                                }
+                                    Err(err) => {
+                                        errors.push(err);
+                                        if self.backend.is_some() {
+                                            ctx.revert_head(inst_prior_head, "loaded");
+                                        }
+                                    }
+                                },
                                 Err(e) => {
                                     errors.push(ValidationError {
                                         resource_iri: String::new(),
@@ -1882,6 +2144,7 @@ impl EigeniusKernel for EigeniusService {
                 Err(crate::context::ContextError::ValidationFailed {
                     errors: verrs,
                     provenance_layer,
+                    prior_head,
                 }) => {
                     // Per D31 §6.3: a Fails AutoOnLoad commits Verdict
                     // + RuntimeInvocation as a separate provenance
@@ -1889,11 +2152,26 @@ impl EigeniusKernel for EigeniusService {
                     // rejected. Persist that layer so the audit
                     // anchor lives on the chain. The Load itself
                     // still surfaces as a failure to the caller.
+                    let mut prov_advanced = false;
                     if let Some(layer) = provenance_layer {
-                        if let Err(err) = self.persist_layer_if_backend(&branch, &layer) {
-                            errors.push(err);
+                        match self.persist_layer_if_backend(&branch, &layer) {
+                            Ok(info) => prov_advanced = info.branch_advanced,
+                            Err(err) => errors.push(err),
                         }
-                        self.rebuild_institution_index(&layer).await;
+                        if prov_advanced {
+                            self.rebuild_institution_index(&layer).await;
+                        }
+                    }
+                    // If the provenance layer didn't make it onto the
+                    // durable branch (cache hit / I/O error) and
+                    // commit_with_validation had advanced ctx.head to
+                    // it, revert to the saved prior_head so the next
+                    // commit's LCA walk doesn't fall off the chain.
+                    if !prov_advanced && self.backend.is_some() {
+                        if let Some(ph) = prior_head {
+                            let mut ctx_w = ctx_arc.write().await;
+                            ctx_w.revert_head(ph, "loaded");
+                        }
                     }
                     // Per-error logging — each rule violation gets its
                     // own warn-level event so dashboards can group on
@@ -1945,6 +2223,11 @@ impl EigeniusKernel for EigeniusService {
             }
         }
 
+        // `merge` is populated only when a commit was actually
+        // attempted. `auto_commit=false` (validate-only Load) skips the
+        // entire commit block above, so no CAS happened; sending an
+        // `UNSPECIFIED` MergeInfo in that case would render as a
+        // misleading `cached` badge in notebook UIs.
         let response = LoadResponse {
             success: errors.is_empty(),
             errors,
@@ -1952,7 +2235,11 @@ impl EigeniusKernel for EigeniusService {
             resource_count: count,
             branch,
             branch_advanced,
-            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
+            merge: if req.auto_commit {
+                Some(merge_info_from_outcome(merge_outcome.as_ref()))
+            } else {
+                None
+            },
         };
         if !response.success {
             guard.fail("validation_failed");
@@ -2031,6 +2318,9 @@ impl EigeniusKernel for EigeniusService {
                         { field::ERROR_MESSAGE } = %msgs.join("; "),
                         "query failed"
                     );
+                    // Query parse/eval errored before any FIBER INTO
+                    // commit could run — `merge` stays None (no CAS
+                    // happened).
                     return Ok(Response::new(QueryResponse {
                         success: false,
                         document: Vec::new(),
@@ -2038,7 +2328,7 @@ impl EigeniusKernel for EigeniusService {
                         error: format!("query error: {}", msgs.join("; ")),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
-                        merge: Some(merge_info_from_outcome(None)),
+                        merge: None,
                     }));
                 }
             }
@@ -2048,8 +2338,15 @@ impl EigeniusKernel for EigeniusService {
         // through `commit_with_validation` so AutoOnLoad QueryClasses
         // bound to their classes fire on chain entry (D14 §9.3 step 5
         // chain-reinsertion via EigenQL).
+        //
+        // `commit_attempted` distinguishes "this query just read"
+        // (`merge` should be None) from "this query attempted a
+        // FIBER INTO" (`merge` reports the CAS outcome). Without it,
+        // every transient read would render as a misleading `cached`
+        // badge in the notebook.
         let mut branch_advanced = false;
         let mut merge_outcome: Option<crate::lattice::UpdateOutcome> = None;
+        let mut commit_attempted = false;
         let output_resource_iris: Vec<String> = if outcome.into_resources.is_empty() {
             Vec::new()
         } else {
@@ -2072,10 +2369,13 @@ impl EigeniusKernel for EigeniusService {
             }
             match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
                 Ok(co) => {
+                    commit_attempted = true;
+                    let mut user_advanced = false;
                     match self.persist_layer_if_backend(&branch_name, &co.user_layer) {
                         Ok(info) => {
                             branch_advanced |= info.branch_advanced;
                             merge_outcome = info.merge_outcome;
+                            user_advanced = info.branch_advanced;
                         }
                         Err(err) => tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
@@ -2085,9 +2385,18 @@ impl EigeniusKernel for EigeniusService {
                             "failed to persist eigenql-into layer (query result still returned)"
                         ),
                     }
-                    if let Some(prov) = co.provenance_layer.as_ref() {
+                    if !user_advanced && self.backend.is_some() {
+                        // FIBER INTO's user layer didn't go through —
+                        // revert ctx.head to keep it on the durable
+                        // chain. See D34 §6.1 / the trace-not-found fix.
+                        ctx.revert_head(co.prior_head, "eigenql-into");
+                    } else if let Some(prov) = co.provenance_layer.as_ref() {
+                        let mut prov_advanced = false;
                         match self.persist_layer_if_backend(&branch_name, prov) {
-                            Ok(info) => branch_advanced |= info.branch_advanced,
+                            Ok(info) => {
+                                branch_advanced |= info.branch_advanced;
+                                prov_advanced = info.branch_advanced;
+                            }
                             Err(err) => tracing::warn!(
                                 { field::OPERATION } = operation::LAYER_COMMIT,
                                 { field::ERROR_KIND } = "eigenql_into_provenance_persist_failed",
@@ -2095,6 +2404,9 @@ impl EigeniusKernel for EigeniusService {
                                 { field::ERROR_MESSAGE } = %err.message,
                                 "failed to persist eigenql-into provenance layer"
                             ),
+                        }
+                        if !prov_advanced && self.backend.is_some() {
+                            ctx.revert_head(Arc::clone(&co.user_layer), "eigenql-into");
                         }
                     }
                 }
@@ -2107,6 +2419,25 @@ impl EigeniusKernel for EigeniusService {
                         { field::ERROR_MESSAGE } = %msg,
                         "FIBER INTO commit failed; surfacing error to caller"
                     );
+                    // If the failure was a Fails-verdict
+                    // ValidationFailed, ctx.head was advanced to a
+                    // verdict_provenance layer that we didn't persist.
+                    // Revert to the carried prior_head so ctx.head
+                    // matches the durable branch state.
+                    if let crate::context::ContextError::ValidationFailed {
+                        prior_head: Some(ph),
+                        ..
+                    } = &e
+                    {
+                        if self.backend.is_some() {
+                            ctx.revert_head(Arc::clone(ph), "eigenql-into");
+                        }
+                    }
+                    // commit_with_validation rejected the FIBER INTO
+                    // resources — no CAS reached `persist_layer_if_backend`.
+                    // Send `merge=None` so the notebook surfaces this
+                    // as the (already-populated) error rather than as
+                    // a misleading cache/merge badge.
                     return Ok(Response::new(QueryResponse {
                         success: false,
                         document: Vec::new(),
@@ -2114,7 +2445,7 @@ impl EigeniusKernel for EigeniusService {
                         error: format!("FIBER INTO commit failed: {msg}"),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
-                        merge: Some(merge_info_from_outcome(None)),
+                        merge: None,
                     }));
                 }
             }
@@ -2128,7 +2459,11 @@ impl EigeniusKernel for EigeniusService {
             error: String::new(),
             output_resource_iris,
             branch_advanced,
-            merge: Some(merge_info_from_outcome(merge_outcome.as_ref())),
+            merge: if commit_attempted {
+                Some(merge_info_from_outcome(merge_outcome.as_ref()))
+            } else {
+                None
+            },
         }))
     }
 
@@ -2155,11 +2490,17 @@ impl EigeniusKernel for EigeniusService {
                 let mut template_errors = Vec::new();
                 let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
                 let input_type_prop = Iri::parse("urn:eigenius:program:input_type").unwrap();
+                // `program:input_type` is `data_type: resource`; after
+                // canonicalisation the value is `ResourceRef`. Match
+                // both shapes via `as_iri_str` so template validation
+                // actually runs on production-shaped programs.
                 if let (
-                    Some(crate::ontology::resource::Value::String(input_type_str)),
+                    Some(input_type_str),
                     Some(crate::ontology::resource::Value::Embedded(body)),
-                ) = (program.get(&input_type_prop), program.get(&body_prop))
-                {
+                ) = (
+                    program.get(&input_type_prop).and_then(|v| v.as_iri_str()),
+                    program.get(&body_prop),
+                ) {
                     if let Ok(input_type_iri) = Iri::parse(input_type_str) {
                         let comp_arg_prop =
                             Iri::parse("urn:eigenius:program:component_argument").unwrap();
@@ -2323,11 +2664,12 @@ impl EigeniusKernel for EigeniusService {
         let resources = self.parse_resources(&req.trace, &req.content_type).await?;
 
         if resources.is_empty() {
+            // No resources to commit — `merge` stays None (no CAS).
             return Ok(Response::new(ReflectResponse {
                 success: false,
                 trace_iri: String::new(),
                 branch_advanced: false,
-                merge: Some(merge_info_from_outcome(None)),
+                merge: None,
             }));
         }
 
@@ -2342,6 +2684,13 @@ impl EigeniusKernel for EigeniusService {
         let branch = resolve_branch_name(&req.branch).to_string();
         let ctx_arc = self.get_branch_context(&branch).await?;
         let mut ctx = ctx_arc.write().await;
+        // Capture the pre-commit head so we can revert ctx.head if the
+        // persist short-circuits (different-position cache hit /
+        // NeedsWitnessedMerge). `ctx.commit()` advances head to the
+        // freshly-built layer; if that layer doesn't make it onto the
+        // durable branch, leaving ctx.head there poisons the next
+        // commit's LCA walk.
+        let prior_head = Arc::clone(ctx.head());
         for resource in resources {
             ctx.add_resource(resource)
                 .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
@@ -2349,10 +2698,13 @@ impl EigeniusKernel for EigeniusService {
         let layer = ctx
             .commit("reflect")
             .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
-        drop(ctx);
         let info = self
             .persist_layer_if_backend(&branch, &layer)
             .map_err(|err| Status::internal(format!("reflect persist failed: {}", err.message)))?;
+        if !info.branch_advanced && self.backend.is_some() {
+            ctx.revert_head(prior_head, "reflect");
+        }
+        drop(ctx);
 
         Ok(Response::new(ReflectResponse {
             success: true,

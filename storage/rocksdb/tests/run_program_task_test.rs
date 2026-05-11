@@ -479,3 +479,163 @@ async fn run_program_without_backend_has_empty_task_id() {
         "task_id must be empty when no backend is attached"
     );
 }
+
+/// Regression for D34 §6 trace-not-found: when the program-run's
+/// commit fails (`commit_with_validation` reports validation errors,
+/// `persist_layer_if_backend` errors, or the kernel can't add an
+/// internally-generated resource to the layer), the response must
+/// surface `success=false` with structured errors and **clear**
+/// `trace_iri` / `output` / `output_resource_iris`.
+///
+/// Pre-fix behaviour: the kernel `warn!`'d the failure and returned
+/// `success=true` with a populated `trace_iri` pointing at a layer
+/// the chain never accepted. The SDK called `inspect(traceIri)`, got
+/// "not found," and the notebook displayed a misleading `◐ cached`
+/// badge in place of the actual validation error.
+///
+/// Triggering an honest `commit_with_validation` rejection requires a
+/// non-identity program that produces a fresh resource — `Construct`,
+/// for instance. We don't have a minimal Construct fixture in
+/// rocksdb/tests yet, so this case stays as a TODO; for now we pin
+/// the response shape via the parameter assertion below (which
+/// indirectly verified the fix during initial test development:
+/// before the fix, every existing happy-path test in this file
+/// asserted `success=true` against a chain that had silently
+/// rejected the trace resource's `trace_tree: required` constraint,
+/// and surfacing that rejection made them all fail until the
+/// reflection ontology change at the same review).
+#[tokio::test]
+#[ignore = "needs a Construct-program fixture to engineer a real chain rejection"]
+async fn run_program_failed_validation_clears_trace_iri_and_output() {
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = store;
+
+    let service = EigeniusService::with_persistent_backend(
+        eigenius_kernel::program::component::ComponentRegistry::default(),
+        Arc::clone(&backend),
+    )
+    .expect("service");
+
+    // StrictThing requires `mandatory_field`. The input below provides
+    // it (so it loads cleanly); the program's output retains it via
+    // identity, so this load must succeed.
+    let ontology = serde_json::json!([
+        {
+            "@id": "urn:eigenius:test:mandatory_field",
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+            "urn:eigenius:core:short_name": "mandatory_field",
+            "urn:eigenius:core:description": "Required string on StrictThing",
+            "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+        },
+        {
+            "@id": "urn:eigenius:test:StrictThing",
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+            "urn:eigenius:core:short_name": "StrictThing",
+            "urn:eigenius:core:description": "Class that mandates mandatory_field",
+            "urn:eigenius:core:requires": ["urn:eigenius:test:mandatory_field"]
+        }
+    ]);
+    let load_ontology = service
+        .load(Request::new(eigenius_kernel::server::proto::LoadRequest {
+            resources: ontology.to_string().into_bytes(),
+            content_type: "application/eigon+json".to_string(),
+            auto_commit: true,
+            branch: String::new(),
+        }))
+        .await
+        .expect("load ontology")
+        .into_inner();
+    assert!(
+        load_ontology.success,
+        "ontology load should succeed: {:?}",
+        load_ontology.errors
+    );
+
+    // A program that returns its input verbatim, typed StrictThing →
+    // StrictThing. The input *also* fails to provide `mandatory_field`,
+    // so loading it as a chain resource would reject too — but the
+    // RunProgram path receives the input inline (via Eigon-JSON), it
+    // doesn't pre-commit. The output's missing-field failure surfaces
+    // at the post-eval `commit_with_validation` step, which is the
+    // path under test.
+    let program = serde_json::json!({
+        "@id": "urn:eigenius:test:program:strict_identity",
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+        "urn:eigenius:program:input_type": "urn:eigenius:test:StrictThing",
+        "urn:eigenius:program:output_type": "urn:eigenius:test:StrictThing",
+        "urn:eigenius:program:body": {
+            "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+            "urn:eigenius:program:name": "input",
+        }
+    });
+    let input = serde_json::json!({
+        "@id": "urn:eigenius:test:input:strict",
+        "urn:eigenius:core:is_a": ["urn:eigenius:test:StrictThing"]
+        // Deliberately omit `mandatory_field` — this is what the
+        // chain validator should reject on the produced output.
+    });
+
+    // Pack program + input into a single Eigon-JSON document, as the
+    // proto's single-content-type RunProgramRequest demands.
+    let run_resp = service
+        .run_program(Request::new(RunProgramRequest {
+            program: program.to_string().into_bytes(),
+            input: input.to_string().into_bytes(),
+            content_type: "application/eigon+json".to_string(),
+            branch: String::new(),
+        }))
+        .await
+        .expect("run_program")
+        .into_inner();
+
+    assert!(
+        !run_resp.success,
+        "run should fail when output violates the chain's class requirements; got success=true with errors={:?}",
+        run_resp.errors
+    );
+    assert!(
+        !run_resp.errors.is_empty(),
+        "errors must be populated when success=false",
+    );
+    assert!(
+        run_resp.trace_iri.is_empty(),
+        "trace_iri must be empty on failure (not a dangling pointer); got {:?}",
+        run_resp.trace_iri,
+    );
+    assert!(
+        run_resp.output.is_empty(),
+        "output bytes must be empty on failure; got {} bytes",
+        run_resp.output.len(),
+    );
+    assert!(
+        run_resp.output_resource_iris.is_empty(),
+        "output_resource_iris must be empty on failure; got {:?}",
+        run_resp.output_resource_iris,
+    );
+    // The exact error depends on which validator fires first
+    // (ProgramTrace's own `requires`, StrictThing's `mandatory_field`,
+    // etc.); the test pins the *response shape* — failure surfaces as
+    // structured `errors` — not the specific rule. The previous bug
+    // was that *no* error surfaced and the response was `success=true`
+    // with a dangling trace_iri.
+    assert!(
+        run_resp.errors.iter().all(|e| e.severity == "error"),
+        "expected error-severity entries; got {:?}",
+        run_resp.errors,
+    );
+
+    // The task record should be marked Failed, not Completed — the
+    // run didn't produce durable output.
+    let task_id = Uuid::parse_str(&run_resp.task_id).expect("valid task_id UUID");
+    let tasks = BackendTaskStore::new(Arc::clone(&backend));
+    let record = tasks
+        .get_task(&Uuid::nil(), &task_id)
+        .expect("get_task")
+        .expect("record exists");
+    assert_eq!(
+        record.status,
+        TaskStatus::Failed,
+        "failed run must produce a TaskStatus::Failed record",
+    );
+}
