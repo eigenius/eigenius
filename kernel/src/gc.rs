@@ -66,9 +66,9 @@
 //!   the default and only mode in 14f-i; aggressive compaction
 //!   follows when there's a workload to justify it.
 
-use crate::layer::{BloomCache, LayerId, LayerTopology, ResourceCache};
+use crate::layer::{BloomCache, LayerId, LayerTopology, RedirectEntry, ResourceCache};
 use crate::storage::{PersistentBackend, StorageError};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
 /// Roots from which reachability is computed. Anything transitively
@@ -163,13 +163,21 @@ pub fn collect(
     bloom_cache: &dyn BloomCache,
     backend: &dyn PersistentBackend,
 ) -> Result<SweepStats, StorageError> {
-    // Step 1: snapshot under the branch lock. Topology is loaded here
-    // too so the (branches + topology) pair is mutually consistent —
-    // every branch head exists in the topology snapshot.
-    let topology: LayerTopology = crate::lattice::with_branch_lock(|| backend.load_topology())?;
+    // Step 1: snapshot under the branch lock. Topology + redirects
+    // are loaded together so the (branches + topology + redirects)
+    // triple is mutually consistent — every branch head exists in
+    // the topology snapshot and every redirect's source layer is
+    // present in (or manufacturable from) the topology.
+    let (topology, redirects): (LayerTopology, Vec<RedirectEntry>) =
+        crate::lattice::with_branch_lock(|| {
+            let topo = backend.load_topology()?;
+            let redirects = backend.list_redirects()?;
+            Ok::<_, StorageError>((topo, redirects))
+        })?;
 
-    // Step 2: mark phase. BFS from roots through topology.parents.
-    let reachable = mark_reachable(&roots, &topology);
+    // Step 2: mark phase. BFS from roots through topology.parents
+    // with redirect-following per D25 §12.8.1(d).
+    let reachable = mark_reachable(&roots, &topology, &redirects);
 
     // Step 3: sweep phase. Iterate every layer in the topology; if
     // not in reachable and old enough, delete. Counters tally what
@@ -207,8 +215,39 @@ pub fn collect(
     Ok(stats)
 }
 
-/// BFS reachability over `LayerHandle.parents`.
-fn mark_reachable(roots: &GcRoots, topology: &LayerTopology) -> BTreeSet<LayerId> {
+/// BFS reachability over `LayerHandle.parents`, augmented for
+/// D25 §12.8 forward-pointer consolidation.
+///
+/// When the walk encounters a layer that's a redirect *source*, the
+/// behavior depends on the redirect's `preserve_history` flag:
+///
+/// - `false` (default reclaim mode): mark the redirect's target
+///   (and follow ITS parents transitively) so `L_c`'s ancestor
+///   closure stays alive, but *skip* the source's own
+///   `LayerHandle.parents`. The consolidated source-side chain
+///   becomes unreachable from head-rooted marks and is eligible
+///   for sweep on this pass.
+///
+/// - `true` (preserve-history mode): mark the redirect's target
+///   *and* walk the source's parents. Both the consolidated layer
+///   and the original source chain stay alive — time-travel reads
+///   against intermediate layers in the range continue to resolve.
+///
+/// Either way, the redirect entry itself persists in storage and the
+/// in-memory topology continues to manufacture a synthetic tombstone
+/// for the source (D25 §12.8.1(d)) so future load_topology calls see
+/// the consistent DAG.
+fn mark_reachable(
+    roots: &GcRoots,
+    topology: &LayerTopology,
+    redirects: &[RedirectEntry],
+) -> BTreeSet<LayerId> {
+    // Index redirects by source for O(1) probe during the walk.
+    let redirect_index: BTreeMap<LayerId, &RedirectEntry> = redirects
+        .iter()
+        .map(|entry| (entry.source().clone(), entry))
+        .collect();
+
     let mut reachable: BTreeSet<LayerId> = BTreeSet::new();
     let mut queue: VecDeque<LayerId> = VecDeque::new();
     for r in roots.iter() {
@@ -218,6 +257,19 @@ fn mark_reachable(roots: &GcRoots, topology: &LayerTopology) -> BTreeSet<LayerId
         if !reachable.insert(id.clone()) {
             continue;
         }
+
+        // Redirect-aware fork: if this layer is a redirect source,
+        // mark the target chain unconditionally, and skip the source's
+        // own parents unless preserve_history was set at install time.
+        if let Some(entry) = redirect_index.get(&id) {
+            if !reachable.contains(&entry.target) {
+                queue.push_back(entry.target.clone());
+            }
+            if !entry.preserve_history {
+                continue;
+            }
+        }
+
         if let Some(handle) = topology.get_layer(&id) {
             for parent in &handle.parents {
                 if !reachable.contains(parent) {
@@ -548,5 +600,271 @@ mod tests {
         .unwrap();
         assert_eq!(stats2.layers_swept, 0);
         assert_eq!(stats2.layers_unreachable, 0);
+    }
+
+    // ─── 17f-D redirect-aware mark phase ────────────────────────────────
+
+    /// Build the standard redirect test scaffold:
+    ///
+    /// `root → mid → tip` (the branch's actual chain) plus a separate
+    /// `target` layer also rooted at `root`. Returns
+    /// `(root, mid, tip, target)`. The branch `main` is set to `tip`.
+    fn build_redirect_scaffold(
+        backend: &dyn PersistentBackend,
+        storage: &LayerStorage,
+    ) -> (
+        Arc<crate::layer::Layer>,
+        Arc<crate::layer::Layer>,
+        Arc<crate::layer::Layer>,
+        Arc<crate::layer::Layer>,
+    ) {
+        let root = commit_root(backend, storage);
+        let mid = commit_child(
+            backend,
+            storage,
+            Arc::clone(&root),
+            "mid",
+            "urn:eigenius:test:mid",
+        );
+        let tip = commit_child(
+            backend,
+            storage,
+            Arc::clone(&mid),
+            "tip",
+            "urn:eigenius:test:tip",
+        );
+        let target = commit_child(
+            backend,
+            storage,
+            Arc::clone(&root),
+            "target",
+            "urn:eigenius:test:target",
+        );
+
+        update_branch(
+            "main",
+            None,
+            tip.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            backend,
+        )
+        .unwrap();
+
+        (root, mid, tip, target)
+    }
+
+    /// Default (`preserve_history = false`) reclaim mode: with a
+    /// redirect installed at `mid → target`, GC marks `tip` (branch
+    /// head), `mid` (redirect source), `target` and its ancestors
+    /// (followed through the redirect), and `root` (target's parent).
+    /// `mid`'s own parent chain is NOT followed — but `mid → root`
+    /// shares `root` with `target → root`, so `root` stays alive via
+    /// the target side. The original mid-side intermediate (between
+    /// mid and root, if any) would be reclaimed; here the chain is
+    /// short so nothing distinct is reclaimable. Verify the mark set
+    /// includes exactly the expected layers.
+    #[test]
+    fn reclaim_mode_marks_target_chain_skips_source_parents() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let (root, mid, tip, target) = build_redirect_scaffold(&backend, &storage);
+
+        // Install a redirect mid → target (reclaim mode).
+        let mid_handle = backend
+            .load_topology()
+            .unwrap()
+            .get_layer(mid.id())
+            .unwrap()
+            .clone();
+        backend
+            .put_redirect(&crate::layer::RedirectEntry {
+                target: target.id().clone(),
+                source_handle: mid_handle,
+                preserve_history: false,
+            })
+            .unwrap();
+
+        let topology = backend.load_topology().unwrap();
+        let redirects = backend.list_redirects().unwrap();
+        let roots = GcRoots {
+            branch_heads: vec![tip.id().clone()],
+            task_pins: vec![],
+        };
+        let reachable = mark_reachable(&roots, &topology, &redirects);
+
+        assert!(reachable.contains(tip.id()), "branch head must be marked");
+        assert!(reachable.contains(mid.id()), "redirect source visited");
+        assert!(
+            reachable.contains(target.id()),
+            "redirect target must be marked (followed through redirect)"
+        );
+        assert!(
+            reachable.contains(root.id()),
+            "root must be marked via target's parent chain"
+        );
+    }
+
+    /// Preserve-history mode: same scaffold, but `preserve_history =
+    /// true`. The mark phase walks BOTH `target → root` (via the
+    /// redirect) AND `mid → root` (via the source's own parents).
+    /// Indistinguishable from reclaim mode in this 3-layer scaffold
+    /// since both walks share `root`; the test asserts the
+    /// source-parent walk is enabled by checking an intermediate
+    /// layer on the source side.
+    #[test]
+    fn preserve_history_marks_source_chain_too() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        // Build a longer source chain so we can distinguish:
+        // root → mid_below → mid → tip,  and target → root.
+        let root = commit_root(&backend, &storage);
+        let mid_below = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&root),
+            "mid_below",
+            "urn:eigenius:test:mid_below",
+        );
+        let mid = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&mid_below),
+            "mid",
+            "urn:eigenius:test:mid",
+        );
+        let tip = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&mid),
+            "tip",
+            "urn:eigenius:test:tip",
+        );
+        let target = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&root),
+            "target",
+            "urn:eigenius:test:target",
+        );
+
+        let mid_handle = backend
+            .load_topology()
+            .unwrap()
+            .get_layer(mid.id())
+            .unwrap()
+            .clone();
+
+        // Preserve mode: walking from tip → mid → (redirect AND
+        // mid.parents) → mid_below → root. So mid_below stays alive.
+        backend
+            .put_redirect(&crate::layer::RedirectEntry {
+                target: target.id().clone(),
+                source_handle: mid_handle,
+                preserve_history: true,
+            })
+            .unwrap();
+
+        let topology = backend.load_topology().unwrap();
+        let redirects = backend.list_redirects().unwrap();
+        let roots = GcRoots {
+            branch_heads: vec![tip.id().clone()],
+            task_pins: vec![],
+        };
+        let reachable = mark_reachable(&roots, &topology, &redirects);
+
+        assert!(reachable.contains(tip.id()));
+        assert!(reachable.contains(mid.id()));
+        assert!(
+            reachable.contains(mid_below.id()),
+            "preserve_history must keep the source-side parent chain alive"
+        );
+        assert!(reachable.contains(target.id()));
+        assert!(reachable.contains(root.id()));
+    }
+
+    /// Reclaim mode, this time with a distinguishable intermediate on
+    /// the source side: `mid_below` is the source's parent and
+    /// nothing else references it. Under `preserve_history = false`
+    /// it becomes unreachable after the redirect is installed → GC
+    /// sweeps it.
+    #[test]
+    fn reclaim_mode_sweeps_source_side_intermediate() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, &storage);
+        let mid_below = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&root),
+            "mid_below",
+            "urn:eigenius:test:mid_below",
+        );
+        let mid = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&mid_below),
+            "mid",
+            "urn:eigenius:test:mid",
+        );
+        let tip = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&mid),
+            "tip",
+            "urn:eigenius:test:tip",
+        );
+        let target = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&root),
+            "target",
+            "urn:eigenius:test:target",
+        );
+
+        update_branch(
+            "main",
+            None,
+            tip.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        let mid_handle = backend
+            .load_topology()
+            .unwrap()
+            .get_layer(mid.id())
+            .unwrap()
+            .clone();
+        backend
+            .put_redirect(&crate::layer::RedirectEntry {
+                target: target.id().clone(),
+                source_handle: mid_handle,
+                preserve_history: false,
+            })
+            .unwrap();
+
+        let stats = collect(
+            GcRoots::from_branches(&backend).unwrap(),
+            &no_age_config(),
+            storage.cache.as_ref(),
+            storage.bloom_cache.as_ref(),
+            &backend,
+        )
+        .unwrap();
+
+        // Expected reachable: tip, mid (visited but parents skipped),
+        // target, root. mid_below is unreachable → swept.
+        assert_eq!(stats.layers_marked, 4);
+        assert!(stats.layers_swept >= 1, "mid_below should be swept");
+
+        // mid_below's handle is gone from the topology.
+        assert!(backend
+            .load_topology()
+            .unwrap()
+            .get_layer(mid_below.id())
+            .is_none());
     }
 }

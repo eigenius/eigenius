@@ -35,7 +35,7 @@
 //! - 17f-B — resolve walk follows installed redirects. ✅
 //! - 17f-C — below-head consolidation installs redirects;
 //!   chain-cross refusal; `preserve_history` option. ✅
-//! - 17f-D — GC reachability through redirects. *pending*
+//! - 17f-D — GC reachability through redirects. ✅
 //! - 17f-E — RPC + CLI surfaces for below-head consolidation. *pending*
 //! - 17f-F — cross-cutting tests. *pending*
 //!
