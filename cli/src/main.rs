@@ -1398,6 +1398,16 @@ async fn remote_query(
                     println!("{}", serde_json::to_string_pretty(&json).unwrap());
                 }
             }
+            // Only meaningful when the query committed something via
+            // FIBER ... INTO. A query without INTO clauses reports
+            // branch_advanced=false because nothing was committed, not
+            // because of a cache hit — so we gate the note on
+            // `output_resource_iris` being non-empty.
+            if !resp.branch_advanced && !resp.output_resource_iris.is_empty() {
+                eprintln!(
+                    "Note: FIBER INTO results reused from anchored-commit cache (branch unchanged)."
+                );
+            }
         }
         Err(e) => {
             eprintln!("gRPC error: {e}");
@@ -1441,6 +1451,16 @@ async fn remote_run(
                     println!("{}", serde_json::to_string(&json).unwrap());
                 } else {
                     println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                }
+                if !resp.branch_advanced {
+                    // Anchored-commit cache hit (D33 §6) — the trace
+                    // layer for this run already exists canonically
+                    // elsewhere in the DAG; the branch ref did not
+                    // move. Note on stderr so the data output stays
+                    // pipe-clean.
+                    eprintln!(
+                        "Note: trace layer reused from anchored-commit cache (branch unchanged)."
+                    );
                 }
             } else {
                 eprintln!("Program execution failed:");
@@ -1531,9 +1551,17 @@ async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
             let resp = response.into_inner();
             if resp.success {
                 if json_output {
-                    println!("{{\"success\":true,\"trace_iri\":\"{}\"}}", resp.trace_iri);
-                } else {
+                    println!(
+                        "{{\"success\":true,\"trace_iri\":\"{}\",\"branch_advanced\":{}}}",
+                        resp.trace_iri, resp.branch_advanced
+                    );
+                } else if resp.branch_advanced {
                     println!("Recorded trace: {}", resp.trace_iri);
+                } else {
+                    println!(
+                        "Trace already canonical: {} (anchored-commit cache hit, branch unchanged)",
+                        resp.trace_iri
+                    );
                 }
             } else {
                 eprintln!("Reflect failed");

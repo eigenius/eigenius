@@ -1413,6 +1413,7 @@ impl EigeniusService {
                         trace_iri: String::new(),
                         task_id: task_id_str.clone(),
                         output_resource_iris: Vec::new(),
+                        branch_advanced: false,
                     }));
                 }
             }
@@ -1511,6 +1512,12 @@ impl EigeniusService {
             .iter()
             .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
             .collect();
+        // `branch_advanced` reports whether the durable branch ref
+        // moved as a result of this run's commits. We OR the outcomes
+        // of the user-layer and provenance-layer persists: a fresh
+        // commit or same-position cache hit advances the branch;
+        // a different-position cache hit (D33 §6) does not.
+        let mut branch_advanced = false;
         let result_layer_head = {
             let mut ctx = ctx_arc.write().await;
             // Add domain resources produced by the run (chain-resident
@@ -1553,24 +1560,26 @@ impl EigeniusService {
                     // logs but doesn't fail RunProgram — the eval
                     // output is still valid; the chain just isn't
                     // durable.
-                    if let Err(err) = self.persist_layer_if_backend(branch, &outcome.user_layer) {
-                        tracing::warn!(
+                    match self.persist_layer_if_backend(branch, &outcome.user_layer) {
+                        Ok(info) => branch_advanced |= info.branch_advanced,
+                        Err(err) => tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "program_run_persist_failed",
                             { field::LAYER_ID } = %outcome.user_layer.id(),
                             { field::ERROR_MESSAGE } = %err.message,
                             "failed to persist program-run layer (output still returned)"
-                        );
+                        ),
                     }
                     if let Some(prov) = outcome.provenance_layer.as_ref() {
-                        if let Err(err) = self.persist_layer_if_backend(branch, prov) {
-                            tracing::warn!(
+                        match self.persist_layer_if_backend(branch, prov) {
+                            Ok(info) => branch_advanced |= info.branch_advanced,
+                            Err(err) => tracing::warn!(
                                 { field::OPERATION } = operation::LAYER_COMMIT,
                                 { field::ERROR_KIND } = "program_run_provenance_persist_failed",
                                 { field::LAYER_ID } = %prov.id(),
                                 { field::ERROR_MESSAGE } = %err.message,
                                 "failed to persist program-run provenance layer"
-                            );
+                            ),
                         }
                     }
                     Some(
@@ -1621,6 +1630,7 @@ impl EigeniusService {
             trace_iri: trace_iri_str,
             task_id: task_id_str,
             output_resource_iris,
+            branch_advanced,
         }))
     }
 }
@@ -1918,6 +1928,7 @@ impl EigeniusKernel for EigeniusService {
                         content_type: String::new(),
                         error: format!("query error: {}", msgs.join("; ")),
                         output_resource_iris: Vec::new(),
+                        branch_advanced: false,
                     }));
                 }
             }
@@ -1927,6 +1938,7 @@ impl EigeniusKernel for EigeniusService {
         // through `commit_with_validation` so AutoOnLoad QueryClasses
         // bound to their classes fire on chain entry (D14 §9.3 step 5
         // chain-reinsertion via EigenQL).
+        let mut branch_advanced = false;
         let output_resource_iris: Vec<String> = if outcome.into_resources.is_empty() {
             Vec::new()
         } else {
@@ -1949,24 +1961,26 @@ impl EigeniusKernel for EigeniusService {
             }
             match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
                 Ok(co) => {
-                    if let Err(err) = self.persist_layer_if_backend(&branch_name, &co.user_layer) {
-                        tracing::warn!(
+                    match self.persist_layer_if_backend(&branch_name, &co.user_layer) {
+                        Ok(info) => branch_advanced |= info.branch_advanced,
+                        Err(err) => tracing::warn!(
                             { field::OPERATION } = operation::LAYER_COMMIT,
                             { field::ERROR_KIND } = "eigenql_into_persist_failed",
                             { field::LAYER_ID } = %co.user_layer.id(),
                             { field::ERROR_MESSAGE } = %err.message,
                             "failed to persist eigenql-into layer (query result still returned)"
-                        );
+                        ),
                     }
                     if let Some(prov) = co.provenance_layer.as_ref() {
-                        if let Err(err) = self.persist_layer_if_backend(&branch_name, prov) {
-                            tracing::warn!(
+                        match self.persist_layer_if_backend(&branch_name, prov) {
+                            Ok(info) => branch_advanced |= info.branch_advanced,
+                            Err(err) => tracing::warn!(
                                 { field::OPERATION } = operation::LAYER_COMMIT,
                                 { field::ERROR_KIND } = "eigenql_into_provenance_persist_failed",
                                 { field::LAYER_ID } = %prov.id(),
                                 { field::ERROR_MESSAGE } = %err.message,
                                 "failed to persist eigenql-into provenance layer"
-                            );
+                            ),
                         }
                     }
                 }
@@ -1985,6 +1999,7 @@ impl EigeniusKernel for EigeniusService {
                         content_type: String::new(),
                         error: format!("FIBER INTO commit failed: {msg}"),
                         output_resource_iris: Vec::new(),
+                        branch_advanced: false,
                     }));
                 }
             }
@@ -1997,6 +2012,7 @@ impl EigeniusKernel for EigeniusService {
             content_type: "application/cbor".to_string(),
             error: String::new(),
             output_resource_iris,
+            branch_advanced,
         }))
     }
 
@@ -2194,6 +2210,7 @@ impl EigeniusKernel for EigeniusService {
             return Ok(Response::new(ReflectResponse {
                 success: false,
                 trace_iri: String::new(),
+                branch_advanced: false,
             }));
         }
 
@@ -2216,16 +2233,20 @@ impl EigeniusKernel for EigeniusService {
             .commit("reflect")
             .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
         drop(ctx);
-        if let Err(err) = self.persist_layer_if_backend(&branch, &layer) {
-            return Err(Status::internal(format!(
-                "reflect persist failed: {}",
-                err.message
-            )));
-        }
+        let branch_advanced = match self.persist_layer_if_backend(&branch, &layer) {
+            Ok(info) => info.branch_advanced,
+            Err(err) => {
+                return Err(Status::internal(format!(
+                    "reflect persist failed: {}",
+                    err.message
+                )));
+            }
+        };
 
         Ok(Response::new(ReflectResponse {
             success: true,
             trace_iri,
+            branch_advanced,
         }))
     }
 

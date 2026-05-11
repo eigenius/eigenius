@@ -209,6 +209,11 @@ message QueryResponse {
   // exactly one chain-resident response resource the query just
   // produced. Clients can resolve them via Inspect or follow-on queries.
   repeated string output_resource_iris = 5;
+  // D33 §6 / Phase 20c: did the FIBER ... INTO commit (if any) actually
+  // move the branch ref? See `LoadResponse.branch_advanced` for the
+  // full semantics. Always `false` for queries with no INTO clauses
+  // (nothing committed → no branch motion to report).
+  bool branch_advanced = 6;
 }
 
 // --- ValidateProgram ---
@@ -247,6 +252,13 @@ message RunProgramResponse {
   // assigned a deterministic content-hash IRI. Clients can resolve these
   // against the chain to get the chain-resident copies.
   repeated string output_resource_iris = 6;
+  // D33 §6 / Phase 20c: did this run's trace-layer commit actually move
+  // the branch ref? See `LoadResponse.branch_advanced` for the full
+  // semantics. `true` iff at least one of the program-run layer or the
+  // (optional) AutoOnLoad provenance layer advanced the branch. An
+  // idempotent re-run against the same supporting context hits the
+  // anchored-commit cache and reports `false`.
+  bool branch_advanced = 7;
 }
 
 // --- RunProgramByIri ---
@@ -274,6 +286,11 @@ message ReflectRequest {
 message ReflectResponse {
   bool success = 1;
   string trace_iri = 2;
+  // D33 §6 / Phase 20c: did the reflect commit actually move the
+  // branch ref? See `LoadResponse.branch_advanced` for the full
+  // semantics. Reflecting an already-reflected trace hits the
+  // anchored-commit cache and reports `false`.
+  bool branch_advanced = 3;
 }
 
 // --- Health ---
