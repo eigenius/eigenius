@@ -2452,6 +2452,204 @@ impl EigeniusKernel for EigeniusService {
             }
         }
     }
+
+    async fn consolidate_chain(
+        &self,
+        request: Request<ConsolidateChainRequest>,
+    ) -> Result<Response<ConsolidateChainResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_CONSOLIDATE_CHAIN);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("consolidation requires a persistent backend")
+        })?;
+
+        let branch = if req.branch.is_empty() {
+            "main"
+        } else {
+            req.branch.as_str()
+        };
+        let from = parse_layer_id(&req.from_layer, "from_layer")?;
+        let to = parse_layer_id(&req.to_layer, "to_layer")?;
+
+        let storage = LayerStorage::with_persistent(Arc::clone(backend));
+        let opts = build_consolidate_opts(&req.max_walk_entries, &self).await?;
+
+        match crate::layer::consolidate_chain(branch, from, to, opts, storage, backend.as_ref()) {
+            Ok(outcome) => Ok(Response::new(ConsolidateChainResponse {
+                success: true,
+                consolidated_layer: hex::encode(outcome.consolidated_layer.0),
+                collapsed_layer_count: outcome.collapsed_layer_count,
+                head_advanced: outcome.head_advanced,
+                error_kind: ConsolidateErrorKind::None as i32,
+                error: String::new(),
+                error_layer: String::new(),
+                error_count: 0,
+            })),
+            Err(err) => Ok(Response::new(consolidate_error_to_response(err))),
+        }
+    }
+
+    async fn estimate_consolidation(
+        &self,
+        request: Request<EstimateConsolidationRequest>,
+    ) -> Result<Response<EstimateConsolidationResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_ESTIMATE_CONSOLIDATION);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("consolidation requires a persistent backend")
+        })?;
+
+        let branch = if req.branch.is_empty() {
+            "main"
+        } else {
+            req.branch.as_str()
+        };
+        let from = parse_layer_id(&req.from_layer, "from_layer")?;
+        let to = parse_layer_id(&req.to_layer, "to_layer")?;
+
+        let storage = LayerStorage::with_persistent(Arc::clone(backend));
+        let opts = build_consolidate_opts(&req.max_walk_entries, &self).await?;
+
+        match crate::layer::estimate_consolidation(
+            branch,
+            from,
+            to,
+            opts,
+            storage,
+            backend.as_ref(),
+        ) {
+            Ok(estimate) => Ok(Response::new(EstimateConsolidationResponse {
+                success: true,
+                predicted_consolidated_layer: hex::encode(estimate.predicted_consolidated_layer.0),
+                collapsed_layer_count: estimate.collapsed_layer_count,
+                predicted_walk_entries: estimate.predicted_walk_entries,
+                actual_walk_entries: estimate.actual_walk_entries,
+                error_kind: ConsolidateErrorKind::None as i32,
+                error: String::new(),
+                error_layer: String::new(),
+                error_count: 0,
+            })),
+            Err(err) => Ok(Response::new(estimate_error_to_response(err))),
+        }
+    }
+}
+
+/// Parse a hex-encoded LayerId from the wire, returning a typed
+/// `Status::invalid_argument` on malformed input.
+fn parse_layer_id(hex_str: &str, field: &str) -> Result<crate::layer::LayerId, Status> {
+    let bytes = hex::decode(hex_str)
+        .map_err(|e| Status::invalid_argument(format!("{field} not valid hex: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(Status::invalid_argument(format!(
+            "{field} must be a 32-byte SHA-256 (64 hex chars)"
+        )));
+    }
+    let mut id = [0u8; 32];
+    id.copy_from_slice(&bytes);
+    Ok(crate::layer::LayerId(id))
+}
+
+/// Build a `ConsolidateOpts` from the wire request. Pulls active task
+/// pins from the session's task store (matches `delete_branch`'s
+/// pattern). A `max_walk_entries` of 0 means "use the kernel default."
+async fn build_consolidate_opts(
+    max_walk_entries: &u64,
+    service: &EigeniusService,
+) -> Result<crate::layer::ConsolidateOpts, Status> {
+    let mut opts = crate::layer::ConsolidateOpts::default();
+    if *max_walk_entries > 0 {
+        opts.max_walk_entries = *max_walk_entries;
+    }
+    if let Some(store) = service.task_store.as_ref() {
+        let session_id = service.session.read().await.session_id;
+        match store.list_tasks(&session_id) {
+            Ok(records) => {
+                for record in records {
+                    if record.status.is_terminal() {
+                        continue;
+                    }
+                    *opts.pinned_layers.entry(record.layer_head).or_insert(0) += 1;
+                }
+            }
+            Err(e) => return Err(Status::internal(format!("list_tasks failed: {e}"))),
+        }
+    }
+    Ok(opts)
+}
+
+/// Convert a `ConsolidateError` into the wire response. Both
+/// `ConsolidateChain` and `EstimateConsolidation` use the same kind
+/// enum + offending-layer/count fields; the two helpers differ only
+/// in response shape (success-path fields are zeroed).
+fn consolidate_error_to_response(err: crate::layer::ConsolidateError) -> ConsolidateChainResponse {
+    let (kind, error_layer, error_count) = consolidate_error_parts(&err);
+    ConsolidateChainResponse {
+        success: false,
+        consolidated_layer: String::new(),
+        collapsed_layer_count: 0,
+        head_advanced: false,
+        error_kind: kind as i32,
+        error: err.to_string(),
+        error_layer,
+        error_count,
+    }
+}
+
+fn estimate_error_to_response(
+    err: crate::layer::ConsolidateError,
+) -> EstimateConsolidationResponse {
+    let (kind, error_layer, error_count) = consolidate_error_parts(&err);
+    EstimateConsolidationResponse {
+        success: false,
+        predicted_consolidated_layer: String::new(),
+        collapsed_layer_count: 0,
+        predicted_walk_entries: 0,
+        actual_walk_entries: 0,
+        error_kind: kind as i32,
+        error: err.to_string(),
+        error_layer,
+        error_count,
+    }
+}
+
+fn consolidate_error_parts(
+    err: &crate::layer::ConsolidateError,
+) -> (ConsolidateErrorKind, String, u64) {
+    use crate::layer::ConsolidateError as E;
+    match err {
+        E::RangeNotAncestral { from, .. } => (
+            ConsolidateErrorKind::RangeNotAncestral,
+            hex::encode(from.0),
+            0,
+        ),
+        E::BranchAdvancedConcurrently { observed_head, .. } => (
+            ConsolidateErrorKind::BranchAdvanced,
+            observed_head
+                .as_ref()
+                .map(|h| hex::encode(h.0))
+                .unwrap_or_default(),
+            0,
+        ),
+        E::RangeContainsMergeNode { merge_layer } => (
+            ConsolidateErrorKind::RangeContainsMergeNode,
+            hex::encode(merge_layer.0),
+            0,
+        ),
+        E::RangeContainsTracePin {
+            pinned_layer,
+            trace_count,
+        } => (
+            ConsolidateErrorKind::RangeContainsTracePin,
+            hex::encode(pinned_layer.0),
+            *trace_count,
+        ),
+        E::CostExceedsCap { predicted_entries } => (
+            ConsolidateErrorKind::CostExceedsCap,
+            String::new(),
+            *predicted_entries,
+        ),
+        E::WriteFailed(_) | E::Internal(_) => (ConsolidateErrorKind::Internal, String::new(), 0),
+    }
 }
 
 // `NotebookService` is defined in the proto and generates Rust server

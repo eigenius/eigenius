@@ -107,6 +107,27 @@ service EigeniusKernel {
   // gone immediately. With `force=false`, refuses to prune a branch
   // whose head matches an active task pin.
   rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
+
+  // --- Chain consolidation (D25) ---
+
+  // Collapse `[from..to]` on `branch` into a single resolve-equivalent
+  // consolidated layer whose parent is `parent(from)`. `to` must equal
+  // the branch's current head (v1 restriction; see D25 §12.8 for the
+  // v2 forward-pointer relaxation). Trace pins are auto-enumerated
+  // from the task store and supplied to the kernel.
+  //
+  // Returns the consolidated `LayerId`, the number of collapsed
+  // layers, and a structured error variant (`error_kind`) when the
+  // operation can't proceed. See D25 §5.1 for the typed errors.
+  rpc ConsolidateChain(ConsolidateChainRequest) returns (ConsolidateChainResponse);
+
+  // Non-mutating dry-run of `ConsolidateChain`. Same validation, same
+  // typed errors, no persist and no branch advance. Returns the
+  // predicted consolidated `LayerId`, the collapsed-layer count, and
+  // both the predicted (upper-bound) and actual (dedup'd) top-of-stack
+  // walk-entry counts. The operator pipes the predicted LayerId into
+  // a follow-up real `ConsolidateChain` to confirm intent.
+  rpc EstimateConsolidation(EstimateConsolidationRequest) returns (EstimateConsolidationResponse);
 }
 
 // --- Load ---
@@ -587,6 +608,100 @@ message DeleteBranchResponse {
   // deleted=true); empty otherwise.
   string previous_head = 3;
   string error = 4;
+}
+
+// --- Chain consolidation (D25) ---
+
+// Typed error variants surfaced by the consolidation RPCs. Mirrors
+// `crate::layer::ConsolidateError`; lets the CLI dispatch on the
+// kind instead of regex-matching the human-readable `error`
+// string.
+//
+// Variants are intentionally short (no `CONSOLIDATE_ERROR_` prefix)
+// because prost retains proto prefixes when generating Rust enum
+// variants — duplicating the enum name in each variant would produce
+// awkward `ConsolidateErrorKind::ConsolidateErrorNone` callsites.
+enum ConsolidateErrorKind {
+  // No error / unset. Successful responses leave this at the default.
+  NONE = 0;
+  // `from` is not an ancestor of `to`.
+  RANGE_NOT_ANCESTRAL = 1;
+  // The branch ref didn't match the expected head (concurrent advance,
+  // or the operator passed a stale `to`).
+  BRANCH_ADVANCED = 2;
+  // The range contains a multi-parent merge layer (D25 §8.1).
+  RANGE_CONTAINS_MERGE_NODE = 3;
+  // The range contains a layer pinned by an active task trace
+  // (TracePinPolicy::Refuse).
+  RANGE_CONTAINS_TRACE_PIN = 4;
+  // Predicted walk size exceeds `max_walk_entries`.
+  COST_EXCEEDS_CAP = 5;
+  // Underlying storage write failure or other internal fault.
+  INTERNAL = 6;
+}
+
+message ConsolidateChainRequest {
+  // Branch to consolidate. The branch's current head must equal `to`;
+  // an empty string defaults to "main" (matches LoadRequest's
+  // convention).
+  string branch = 1;
+  // Hex-encoded LayerId where the consolidation range starts (oldest).
+  string from_layer = 2;
+  // Hex-encoded LayerId where the consolidation range ends (newest).
+  // Must equal the branch's current head in v1.
+  string to_layer = 3;
+  // Cost cap: refuse if `sum(handle.resource_count for handle in range)`
+  // exceeds this. Pass 0 to use the kernel default
+  // (`ConsolidateOpts::default`).
+  uint64 max_walk_entries = 4;
+  // Reserved for v2 trace-pin policies. v1 ignores this field; the
+  // kernel always uses `TracePinPolicy::Refuse`.
+  string trace_pin_policy = 5;
+}
+
+message ConsolidateChainResponse {
+  bool success = 1;
+  // Hex-encoded LayerId of the consolidated layer; empty on failure.
+  string consolidated_layer = 2;
+  // Number of layers in the original range that were collapsed.
+  uint64 collapsed_layer_count = 3;
+  // True when the branch's head moved (always true on success in v1).
+  bool head_advanced = 4;
+  // Typed error kind. CONSOLIDATE_ERROR_NONE on success.
+  ConsolidateErrorKind error_kind = 5;
+  // Human-readable error text; empty on success.
+  string error = 6;
+  // Echo of the offending layer id for kind=MERGE_NODE / TRACE_PIN
+  // / BRANCH_ADVANCED. Empty otherwise.
+  string error_layer = 7;
+  // Echo of the trace count for kind=TRACE_PIN; the predicted entry
+  // count for kind=COST_EXCEEDS_CAP. Zero otherwise.
+  uint64 error_count = 8;
+}
+
+message EstimateConsolidationRequest {
+  string branch = 1;
+  string from_layer = 2;
+  string to_layer = 3;
+  uint64 max_walk_entries = 4;
+  string trace_pin_policy = 5;
+}
+
+message EstimateConsolidationResponse {
+  bool success = 1;
+  // Hex-encoded LayerId the consolidated layer would have if
+  // ConsolidateChain were invoked with the same inputs.
+  string predicted_consolidated_layer = 2;
+  uint64 collapsed_layer_count = 3;
+  // Upper-bound prediction (counted before dedup).
+  uint64 predicted_walk_entries = 4;
+  // Actual deduplicated walk size (≤ predicted; the gap is the
+  // dedup savings).
+  uint64 actual_walk_entries = 5;
+  ConsolidateErrorKind error_kind = 6;
+  string error = 7;
+  string error_layer = 8;
+  uint64 error_count = 9;
 }
 
 // --- NotebookService (D22 §3.2) ---

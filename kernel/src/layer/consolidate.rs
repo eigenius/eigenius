@@ -29,7 +29,16 @@
 //! - 17b — range validation: ancestral / merge-free / pin-free. ✅
 //! - 17c — bloom-cache eviction for collapsed layers. ✅
 //! - 17d — cost estimation gate + `estimate_consolidation` dry-run. ✅
-//! - 17e — CLI (`db consolidate`) + gRPC (`ConsolidateChain`) surfaces. *pending*
+//! - 17e — CLI (`db consolidate`) + gRPC
+//!   (`ConsolidateChain` / `EstimateConsolidation`) surfaces. ✅
+//!
+//! Deferred from Phase 17: `db consolidate-summary` (the diagnostic
+//! enumeration of past consolidations). It needs a separate
+//! consolidation-record storage shape — D25 §6 sketches an embedded
+//! property, but that would carry a timestamp into the content hash
+//! and break the determinism property 17a / 17d tests pin. A
+//! dedicated CF keyed by the consolidated layer id is the natural
+//! resolution; tracked as a follow-up rather than blocking 17e.
 //!
 //! The `ConsolidateError` enum ships with every final variant so
 //! downstream code can match exhaustively even before later milestones

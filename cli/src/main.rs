@@ -549,6 +549,30 @@ enum DbCommands {
         #[arg(value_name = "OUTPUT_PATH")]
         output_path: String,
     },
+    /// Collapse `[from..to]` on a branch into one resolve-equivalent layer (D25).
+    ///
+    /// Requires `--endpoint` — consolidation serialises with branch
+    /// updates via the running kernel's branch lock, so it must be
+    /// invoked against the live server holding the same DB. `to` must
+    /// equal the branch's current head (v1 restriction).
+    Consolidate {
+        /// `<from-hex>..<to-hex>` — the inclusive consolidation range,
+        /// matching the spec language in D25 §5.3.
+        #[arg(value_name = "FROM..TO")]
+        range: String,
+        /// Branch to consolidate. Defaults to `main`.
+        #[arg(long, default_value = "main")]
+        branch: String,
+        /// Override the cost cap. Defaults to the kernel value
+        /// (`5_000_000`).
+        #[arg(long)]
+        max_walk_entries: Option<u64>,
+        /// Run `EstimateConsolidation` instead of `ConsolidateChain` —
+        /// reports the cost and the predicted consolidated layer's
+        /// id without committing.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[tokio::main]
@@ -625,6 +649,31 @@ async fn main() {
             }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
             Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
+            Commands::Db { command } => match command {
+                DbCommands::Consolidate {
+                    range,
+                    branch,
+                    max_walk_entries,
+                    dry_run,
+                } => {
+                    remote_db_consolidate(
+                        endpoint,
+                        &range,
+                        &branch,
+                        max_walk_entries,
+                        dry_run,
+                        cli.json,
+                    )
+                    .await
+                }
+                _ => {
+                    eprintln!(
+                        "this 'db' subcommand is a local-only operation; drop --endpoint and pass \
+                         the DB path directly"
+                    );
+                    std::process::exit(1);
+                }
+            },
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -1155,6 +1204,14 @@ fn cmd_db(command: DbCommands) {
                     file_path.display()
                 );
             }
+        }
+        DbCommands::Consolidate { .. } => {
+            eprintln!(
+                "'db consolidate' requires --endpoint — consolidation must run against the live \
+                 kernel server holding the same DB so the branch lock serialises with concurrent \
+                 commits"
+            );
+            std::process::exit(1);
         }
     }
 }
@@ -1799,6 +1856,129 @@ async fn remote_branch_delete(endpoint: &str, name: &str, force: bool, json_outp
         Err(e) => {
             eprintln!("gRPC error: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// Parse a `<from-hex>..<to-hex>` range argument into its two LayerId hex strings.
+/// Lightweight — we forward the strings to the server which does
+/// authoritative validation.
+fn parse_consolidate_range(range: &str) -> Result<(String, String), String> {
+    let mut iter = range.splitn(2, "..");
+    let from = iter
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "range must be '<from-hex>..<to-hex>'".to_string())?;
+    let to = iter
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "range must be '<from-hex>..<to-hex>'".to_string())?;
+    Ok((from.to_string(), to.to_string()))
+}
+
+async fn remote_db_consolidate(
+    endpoint: &str,
+    range: &str,
+    branch: &str,
+    max_walk_entries: Option<u64>,
+    dry_run: bool,
+    json_output: bool,
+) {
+    let (from_layer, to_layer) = match parse_consolidate_range(range) {
+        Ok(parts) => parts,
+        Err(e) => {
+            eprintln!("Invalid range: {e}");
+            std::process::exit(1);
+        }
+    };
+    let max_walk_entries = max_walk_entries.unwrap_or(0);
+    let mut client = connect_client(endpoint).await;
+
+    if dry_run {
+        let req = eigenius_kernel::server::proto::EstimateConsolidationRequest {
+            branch: branch.to_string(),
+            from_layer,
+            to_layer,
+            max_walk_entries,
+            trace_pin_policy: String::new(),
+        };
+        match client.estimate_consolidation(req).await {
+            Ok(response) => {
+                let resp = response.into_inner();
+                if json_output {
+                    let j = serde_json::json!({
+                        "success": resp.success,
+                        "dry_run": true,
+                        "predicted_consolidated_layer": resp.predicted_consolidated_layer,
+                        "collapsed_layer_count": resp.collapsed_layer_count,
+                        "predicted_walk_entries": resp.predicted_walk_entries,
+                        "actual_walk_entries": resp.actual_walk_entries,
+                        "error_kind": resp.error_kind,
+                        "error": resp.error,
+                        "error_layer": resp.error_layer,
+                        "error_count": resp.error_count,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&j).unwrap());
+                } else if resp.success {
+                    println!(
+                        "Dry-run: would consolidate {} layers on {branch}",
+                        resp.collapsed_layer_count
+                    );
+                    println!(
+                        "  Predicted walk entries: {} (actual {} after dedup)",
+                        resp.predicted_walk_entries, resp.actual_walk_entries
+                    );
+                    println!(
+                        "  Predicted consolidated layer: {}",
+                        resp.predicted_consolidated_layer
+                    );
+                } else {
+                    eprintln!("Consolidation refused: {}", resp.error);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let req = eigenius_kernel::server::proto::ConsolidateChainRequest {
+            branch: branch.to_string(),
+            from_layer,
+            to_layer,
+            max_walk_entries,
+            trace_pin_policy: String::new(),
+        };
+        match client.consolidate_chain(req).await {
+            Ok(response) => {
+                let resp = response.into_inner();
+                if json_output {
+                    let j = serde_json::json!({
+                        "success": resp.success,
+                        "consolidated_layer": resp.consolidated_layer,
+                        "collapsed_layer_count": resp.collapsed_layer_count,
+                        "head_advanced": resp.head_advanced,
+                        "error_kind": resp.error_kind,
+                        "error": resp.error,
+                        "error_layer": resp.error_layer,
+                        "error_count": resp.error_count,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&j).unwrap());
+                } else if resp.success {
+                    println!(
+                        "Consolidated {} layers on {branch} → {}",
+                        resp.collapsed_layer_count, resp.consolidated_layer
+                    );
+                } else {
+                    eprintln!("Consolidation refused: {}", resp.error);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }
