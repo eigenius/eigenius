@@ -48,6 +48,15 @@ pub struct RedirectEntry {
     /// topology DAG (D25 §12.8.1(d)). The `id` field on this handle
     /// is the redirect source.
     pub source_handle: LayerHandle,
+    /// Whether GC should keep the consolidated range alive
+    /// (D25 §12.8.1(b)). `false` is the default — GC's mark phase
+    /// follows the redirect target only, so the source-side chain
+    /// becomes unreachable from head-rooted marks and is eligible
+    /// for sweep. `true` (operator opt-in via
+    /// `ConsolidateOpts.preserve_history`) makes GC also mark the
+    /// source-side chain, preserving pre-consolidation history for
+    /// time-travel reads against intermediate layers in the range.
+    pub preserve_history: bool,
 }
 
 impl RedirectEntry {

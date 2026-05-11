@@ -587,6 +587,7 @@ mod tests {
         let redirect = crate::layer::RedirectEntry {
             target: target_id.clone(),
             source_handle,
+            preserve_history: false,
         };
         backend.put_redirect(&redirect).unwrap();
 

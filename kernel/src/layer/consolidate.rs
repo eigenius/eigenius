@@ -24,13 +24,20 @@
 //! the resolve-equivalence invariant and [§6](../../../docs/design/d25-chain-consolidation.md)
 //! for the top-of-stack walk algorithm.
 //!
-//! **Milestone status (D25 §11.1):**
+//! **Milestone status (D25 §11.1 / §12.8):**
 //! - 17a — top-of-stack algorithm + branch CAS for `to = head`. ✅
 //! - 17b — range validation: ancestral / merge-free / pin-free. ✅
 //! - 17c — bloom-cache eviction for collapsed layers. ✅
 //! - 17d — cost estimation gate + `estimate_consolidation` dry-run. ✅
 //! - 17e — CLI (`db consolidate`) + gRPC
 //!   (`ConsolidateChain` / `EstimateConsolidation`) surfaces. ✅
+//! - 17f-A — redirect storage primitive (D25 §12.8). ✅
+//! - 17f-B — resolve walk follows installed redirects. ✅
+//! - 17f-C — below-head consolidation installs redirects;
+//!   chain-cross refusal; `preserve_history` option. ✅
+//! - 17f-D — GC reachability through redirects. *pending*
+//! - 17f-E — RPC + CLI surfaces for below-head consolidation. *pending*
+//! - 17f-F — cross-cutting tests. *pending*
 //!
 //! Deferred from Phase 17: `db consolidate-summary` (the diagnostic
 //! enumeration of past consolidations). It needs a separate
@@ -84,6 +91,16 @@ pub struct ConsolidateOpts {
     /// populate this from the task store before invoking; the CLI / gRPC
     /// surfaces in 17e make this a first-class concern.
     pub pinned_layers: BTreeMap<LayerId, u64>,
+    /// Preserve the pre-consolidation history of the source range
+    /// (D25 §12.8.1(b)). Default `false`: GC reclaims the consolidated
+    /// layers on its next pass (matches the at-head behavior). `true`:
+    /// the redirect is installed with `preserve_history = true`, and
+    /// GC's mark phase will keep the source-side chain alive so
+    /// time-travel reads against intermediate layers continue to
+    /// resolve. Only meaningful for below-head consolidations — at-head
+    /// consolidations advance the branch and have no redirect to
+    /// preserve through.
+    pub preserve_history: bool,
 }
 
 impl Default for ConsolidateOpts {
@@ -92,6 +109,7 @@ impl Default for ConsolidateOpts {
             max_walk_entries: 5_000_000,
             trace_pin_policy: TracePinPolicy::Refuse,
             pinned_layers: BTreeMap::new(),
+            preserve_history: false,
         }
     }
 }
@@ -127,9 +145,10 @@ pub struct ConsolidationOutcome {
     /// consolidation chain size for the same effect at lower wire
     /// cost. Accurate per-call sizing is a v2 nice-to-have.
     pub reclaimable_bytes_estimate: u64,
-    /// `true` if the branch's head moved as part of the operation.
-    /// Always `true` in the current build (the only supported case);
-    /// future no-op consolidations may return `false`.
+    /// `true` if the branch's head moved as part of the operation
+    /// (at-head consolidation). `false` for below-head consolidations
+    /// that installed a resolve redirect instead of advancing the
+    /// branch (D25 §12.8 / Phase 17f).
     pub head_advanced: bool,
 }
 
@@ -162,6 +181,18 @@ pub enum ConsolidateError {
     },
     /// Predicted walk exceeds `opts.max_walk_entries`. Surfaced in 17d.
     CostExceedsCap { predicted_entries: u64 },
+    /// `to` exists in storage but isn't an ancestor of the branch's
+    /// current head — head-rooted resolves wouldn't pass through the
+    /// would-be redirect, so installing one is pointless. Surfaced in
+    /// 17f's below-head consolidation path. (At-head consolidations
+    /// surface `BranchAdvancedConcurrently` instead, since the head
+    /// genuinely is wrong.)
+    ToNotReachableFromHead { to: LayerId, observed_head: LayerId },
+    /// The consolidation range touches an existing resolve redirect —
+    /// either `to` is already a redirect source, or some layer in the
+    /// range is. v1 refuses to compose redirects (D25 §12.8.1(a)); the
+    /// future `RedirectChainPolicy::Replace` (issue #49) will lift this.
+    RangeCrossesExistingRedirect { offending_layer: LayerId },
     /// Underlying storage write failure.
     WriteFailed(StorageError),
     /// A referenced layer or resource was absent from storage. Usually
@@ -199,6 +230,14 @@ impl std::fmt::Display for ConsolidateError {
             ConsolidateError::CostExceedsCap { predicted_entries } => write!(
                 f,
                 "consolidation walk would exceed cost cap: {predicted_entries} predicted entries"
+            ),
+            ConsolidateError::ToNotReachableFromHead { to, observed_head } => write!(
+                f,
+                "to {to} is not reachable from branch head {observed_head}"
+            ),
+            ConsolidateError::RangeCrossesExistingRedirect { offending_layer } => write!(
+                f,
+                "consolidation range crosses existing redirect at {offending_layer}; v1 refuses (see issue #49)"
             ),
             ConsolidateError::WriteFailed(e) => write!(f, "consolidation write failed: {e}"),
             ConsolidateError::Internal(msg) => write!(f, "consolidation internal error: {msg}"),
@@ -273,17 +312,20 @@ fn consolidate_chain_locked(
     storage: LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<ConsolidationOutcome, ConsolidateError> {
-    // Capture an Arc to the bloom cache before `storage` is consumed
-    // by the prep helper; we evict the collapsed layers' bloom
-    // entries at the tail of the operation (D25 §9). Cloning is
-    // cheap — the bundle holds Arcs internally.
+    // Capture an Arc to the bloom cache and the in-memory redirect
+    // map before `storage` is consumed by the prep helper. Both are
+    // used in the post-commit tail (bloom eviction + in-memory
+    // redirect-map update for below-head consolidations).
     let bloom_cache = Arc::clone(&storage.bloom_cache);
+    let redirect_map = Arc::clone(&storage.redirect_map);
 
-    let prep = prepare_consolidation(branch, from, to, &opts, storage, backend)?;
+    let prep = prepare_consolidation(branch, from, to.clone(), &opts, storage, backend)?;
     let Prepared {
         consolidated_layer,
         range_layers,
         collapsed_layer_count,
+        to_handle,
+        is_below_head,
         ..
     } = prep;
 
@@ -296,12 +338,32 @@ fn consolidate_chain_locked(
         .store_layer(&consolidated_layer)
         .map_err(ConsolidateError::WriteFailed)?;
 
-    // Advance the branch ref. Inside the branch lock so a concurrent
-    // `update_branch` can't interleave between the head check above
-    // and the put here.
-    backend
-        .put_branch(branch, consolidated_layer.id())
-        .map_err(ConsolidateError::WriteFailed)?;
+    if is_below_head {
+        // Below-head consolidation (D25 §12.8). Install a resolve
+        // redirect; do *not* touch the branch ref. Head-rooted walks
+        // pick up the redirect at `to` and short-circuit through
+        // `L_c`'s ancestor closure. The in-memory redirect map is
+        // updated alongside the persistent CF so the next
+        // `build_chain` against this `LayerStorage` populates the
+        // inline `Layer::redirect_target` (Phase B).
+        let entry = crate::layer::RedirectEntry {
+            target: consolidated_layer.id().clone(),
+            source_handle: to_handle,
+            preserve_history: opts.preserve_history,
+        };
+        backend
+            .put_redirect(&entry)
+            .map_err(ConsolidateError::WriteFailed)?;
+        redirect_map.put(to.clone(), consolidated_layer.id().clone());
+    } else {
+        // At-head consolidation (the existing 17a path). Advance the
+        // branch ref to the consolidated layer. Inside the branch
+        // lock so a concurrent `update_branch` can't interleave
+        // between the head check above and the put here.
+        backend
+            .put_branch(branch, consolidated_layer.id())
+            .map_err(ConsolidateError::WriteFailed)?;
+    }
 
     // Bloom-cache eviction for the collapsed range (D25 §9). After
     // the branch CAS, head-rooted resolves no longer reach these
@@ -320,7 +382,10 @@ fn consolidate_chain_locked(
         consolidated_layer: consolidated_layer.id().clone(),
         collapsed_layer_count,
         reclaimable_bytes_estimate: 0,
-        head_advanced: true,
+        // At-head: the branch ref moved to `L_c`. Below-head: the
+        // branch ref stays at the same head; the redirect routes
+        // resolves through `L_c` without changing the chain tip.
+        head_advanced: !is_below_head,
     })
 }
 
@@ -400,6 +465,14 @@ struct Prepared {
     collapsed_layer_count: u64,
     predicted_walk_entries: u64,
     actual_walk_entries: u64,
+    /// Snapshot of `to`'s `LayerHandle` at validation time. Used by
+    /// `consolidate_chain_locked` to populate the `RedirectEntry`
+    /// when the consolidation is below-head (D25 §12.8).
+    to_handle: crate::layer::LayerHandle,
+    /// `true` iff `to` is strictly below the branch's current head.
+    /// Drives the choice between advancing the branch ref (false) and
+    /// installing a resolve redirect (true).
+    is_below_head: bool,
 }
 
 /// Shared prep: verify the branch head, validate the range against
@@ -417,32 +490,58 @@ fn prepare_consolidation(
     storage: LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<Prepared, ConsolidateError> {
-    // Verify the branch's current head matches `to`. v1 collapses
-    // onto the tip only: any layers above `to` would still encode
-    // `to` (or its ancestors) in their position hashes, so changing
-    // their parent to `L_c` would cascade re-ids through head.
+    // Resolve the branch head + determine whether this is an at-head
+    // or below-head consolidation. v1 supports both:
     //
-    // **v2 relaxation (forward pointers).** The cascade can be
-    // avoided by introducing a *resolve redirect* on `to` —
-    // metadata that says "walk through `L_c` instead of my content"
-    // — without touching the topology hashes. Layers above `to`
-    // keep their parent pointers; only the resolve walk
-    // short-circuits. The redirect lives next to the topo entry,
-    // not inside the hash domain. Captured in D25 §12.8.
+    // - **At-head** (`to == head`): collapses the range and advances
+    //   the branch ref to `L_c`. The chain shortens by `len(range)`
+    //   layers; the old range becomes unreachable from head-rooted
+    //   walks and is eligible for GC.
     //
-    // For v1 the `to = head` restriction is enough for the
-    // "notebook session squash" pattern, which is the primary
-    // workload. The forward-pointer machinery lands when an
-    // operator-facing requirement justifies it.
-    let observed_head = backend
+    // - **Below-head** (D25 §12.8 / Phase 17f): installs a resolve
+    //   redirect on `to` pointing at `L_c`. The branch ref is
+    //   unchanged; head-rooted walks short-circuit through the
+    //   redirect at `to` and pick up `L_c`'s ancestor closure. Layers
+    //   above `to` keep their existing parent pointers and `LayerId`s
+    //   — no cascade re-id.
+    let observed_head_opt = backend
         .get_branch(branch)
         .map_err(ConsolidateError::WriteFailed)?;
-    if observed_head.as_ref() != Some(&to) {
-        return Err(ConsolidateError::BranchAdvancedConcurrently {
-            observed_head,
-            expected_head: to,
-        });
+    let observed_head =
+        observed_head_opt.ok_or_else(|| ConsolidateError::BranchAdvancedConcurrently {
+            observed_head: None,
+            expected_head: to.clone(),
+        })?;
+
+    let is_below_head = observed_head != to;
+
+    // For below-head consolidation, verify `to` is actually on
+    // `head`'s parent chain. A stale `to` (one that belongs to a
+    // different branch or to a sibling head) would install a
+    // redirect that no head-rooted walk would ever reach.
+    if is_below_head {
+        let head_chain = backend
+            .load_chain_from(&observed_head)
+            .map_err(ConsolidateError::WriteFailed)?
+            .ok_or_else(|| {
+                ConsolidateError::Internal(format!("chain absent for head {observed_head}"))
+            })?;
+        let reachable = head_chain.handles.iter().any(|h| h.id == to);
+        if !reachable {
+            return Err(ConsolidateError::ToNotReachableFromHead { to, observed_head });
+        }
     }
+
+    // Load existing redirects for the chaining-refusal check
+    // (D25 §12.8.1(a)). Refuse any consolidation whose range touches
+    // a layer that's already a redirect source — compose semantics
+    // are an opt-in v2 addition tracked in issue #49.
+    let existing_redirect_sources: BTreeSet<LayerId> = backend
+        .list_redirects()
+        .map_err(ConsolidateError::WriteFailed)?
+        .iter()
+        .map(|e| e.source().clone())
+        .collect();
 
     // Load the chain from `to`. The handles retain authoritative
     // multi-parent topology (`build_chain` would collapse it to
@@ -451,7 +550,7 @@ fn prepare_consolidation(
     let info = backend
         .load_chain_from(&to)
         .map_err(ConsolidateError::WriteFailed)?
-        .ok_or_else(|| ConsolidateError::Internal(format!("chain absent for head {to}")))?;
+        .ok_or_else(|| ConsolidateError::Internal(format!("chain absent for to {to}")))?;
 
     // Validate the range against the on-disk handles. `info.handles`
     // is in root→head order; we walk it reversed (head→root) for the
@@ -463,6 +562,7 @@ fn prepare_consolidation(
     let mut range_ids: Vec<LayerId> = Vec::new();
     let mut predicted_walk_entries: u64 = 0;
     let mut found_from = false;
+    let mut to_handle: Option<crate::layer::LayerHandle> = None;
     for handle in info.handles.iter().rev() {
         if handle.parents.len() > 1 {
             return Err(ConsolidateError::RangeContainsMergeNode {
@@ -479,7 +579,15 @@ fn prepare_consolidation(
                 }
             }
         }
+        if existing_redirect_sources.contains(&handle.id) {
+            return Err(ConsolidateError::RangeCrossesExistingRedirect {
+                offending_layer: handle.id.clone(),
+            });
+        }
         predicted_walk_entries = predicted_walk_entries.saturating_add(handle.resource_count);
+        if handle.id == to {
+            to_handle = Some(handle.clone());
+        }
         range_ids.push(handle.id.clone());
         if handle.id == from {
             found_from = true;
@@ -489,6 +597,11 @@ fn prepare_consolidation(
     if !found_from {
         return Err(ConsolidateError::RangeNotAncestral { from, to });
     }
+    let to_handle = to_handle.ok_or_else(|| {
+        ConsolidateError::Internal(
+            "to_handle not captured during validation walk (storage inconsistency?)".to_string(),
+        )
+    })?;
 
     // Cost-cap gate (D25 §6). The cap is checked *before* the
     // expensive top-of-stack walk so we fail fast on pathological
@@ -570,6 +683,8 @@ fn prepare_consolidation(
         collapsed_layer_count,
         predicted_walk_entries,
         actual_walk_entries,
+        to_handle,
+        is_below_head,
     })
 }
 
@@ -782,11 +897,14 @@ mod tests {
         );
     }
 
-    /// Consolidating against a stale `to` (one that's not the
-    /// branch's current head) returns the typed
-    /// `BranchAdvancedConcurrently` error.
+    /// 17f-C: consolidating against a `to` below the branch head
+    /// installs a resolve redirect and leaves the branch ref
+    /// unchanged. Replaces the pre-17f version of this test, which
+    /// expected `BranchAdvancedConcurrently` — that's now reserved
+    /// for the "branch doesn't exist" case, and below-head ranges
+    /// are a first-class flow.
     #[test]
-    fn refuses_consolidation_when_to_is_not_branch_head() {
+    fn below_head_consolidation_installs_redirect_and_leaves_branch_unchanged() {
         let backend = MemoryPersistentBackend::new();
         let (head, layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
@@ -794,7 +912,7 @@ mod tests {
         // Aim at L2 (an interior layer), not the head L4.
         let to_interior = layers[3].id().clone();
         let from = layers[1].id().clone();
-        let err = consolidate_chain(
+        let outcome = consolidate_chain(
             "main",
             from,
             to_interior.clone(),
@@ -802,16 +920,98 @@ mod tests {
             storage,
             &backend,
         )
+        .expect("below-head consolidation succeeds");
+        // Below-head: branch ref does NOT move.
+        assert!(!outcome.head_advanced);
+        assert_eq!(
+            backend.get_branch("main").unwrap().as_ref(),
+            Some(head.id()),
+            "branch ref must stay at the original head after below-head consolidation"
+        );
+        // A redirect was installed pointing the interior `to` at the
+        // freshly-built consolidated layer.
+        let entry = backend
+            .lookup_redirect(&to_interior)
+            .unwrap()
+            .expect("redirect installed at the interior `to`");
+        assert_eq!(entry.target, outcome.consolidated_layer);
+        assert!(!entry.preserve_history); // default
+    }
+
+    /// 17f-C: a second consolidation whose range crosses an
+    /// existing redirect source is refused with
+    /// `RangeCrossesExistingRedirect`. v1 doesn't support compose
+    /// (issue #49); the refusal protects the redirect's invariants.
+    #[test]
+    fn refuses_consolidation_that_crosses_existing_redirect() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(6, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        // First consolidation: collapse layers[1..=3] into a redirect
+        // on layers[3]. Branch stays put.
+        let first = consolidate_chain(
+            "main",
+            layers[1].id().clone(),
+            layers[3].id().clone(),
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("first below-head consolidation succeeds");
+        assert!(!first.head_advanced);
+
+        // Second consolidation: range [layers[2]..head] would cross
+        // the existing redirect installed on layers[3]. Refuse.
+        let err = consolidate_chain(
+            "main",
+            layers[2].id().clone(),
+            head.id().clone(),
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
         .unwrap_err();
         match err {
-            ConsolidateError::BranchAdvancedConcurrently {
-                observed_head,
-                expected_head,
-            } => {
-                assert_eq!(observed_head.as_ref(), Some(head.id()));
-                assert_eq!(expected_head, to_interior);
+            ConsolidateError::RangeCrossesExistingRedirect { offending_layer } => {
+                assert_eq!(&offending_layer, layers[3].id());
             }
-            other => panic!("expected BranchAdvancedConcurrently, got {other:?}"),
+            other => panic!("expected RangeCrossesExistingRedirect, got {other:?}"),
+        }
+    }
+
+    /// 17f-C: passing a `to` that doesn't appear in the branch's
+    /// chain returns `ToNotReachableFromHead` — the redirect would
+    /// be unreachable, so the operation is rejected.
+    #[test]
+    fn refuses_below_head_when_to_is_not_on_the_branch_chain() {
+        let backend = MemoryPersistentBackend::new();
+        let (head, _layers, storage) = build_chain_of(5, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        // Bogus `to` that's not in the branch's chain at all.
+        let stray_to = LayerId([0xaa; 32]);
+        let err = consolidate_chain(
+            "main",
+            stray_to.clone(),
+            stray_to.clone(),
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
+        .unwrap_err();
+        match err {
+            ConsolidateError::ToNotReachableFromHead { to, observed_head } => {
+                assert_eq!(to, stray_to);
+                assert_eq!(&observed_head, head.id());
+            }
+            ConsolidateError::RangeNotAncestral { .. } => {
+                // Also acceptable: if the chain load happens before
+                // the reachability check fires, we surface this
+                // instead. Either way the operator gets a clear
+                // typed error.
+            }
+            other => panic!("expected ToNotReachableFromHead, got {other:?}"),
         }
     }
 

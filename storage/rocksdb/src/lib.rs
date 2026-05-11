@@ -1157,6 +1157,7 @@ mod tests {
             let entry = eigenius_kernel::layer::RedirectEntry {
                 target: target_id.clone(),
                 source_handle,
+                preserve_history: false,
             };
             PersistentBackend::put_redirect(&store, &entry).unwrap();
             PersistentBackend::delete_layer(&store, &source_id).unwrap();
@@ -1270,6 +1271,7 @@ mod tests {
         let entry = eigenius_kernel::layer::RedirectEntry {
             target: target.id().clone(),
             source_handle,
+            preserve_history: false,
         };
         store_arc.put_redirect(&entry).unwrap();
 

@@ -2648,6 +2648,20 @@ fn consolidate_error_parts(
             String::new(),
             *predicted_entries,
         ),
+        // 17f below-head consolidation errors. Phase E adds dedicated
+        // wire variants for these; for now they collapse to the
+        // closest existing kinds — `BranchAdvanced` for the
+        // unreachable-`to` case, `Internal` for the chaining refusal.
+        E::ToNotReachableFromHead { observed_head, .. } => (
+            ConsolidateErrorKind::BranchAdvanced,
+            hex::encode(observed_head.0),
+            0,
+        ),
+        E::RangeCrossesExistingRedirect { offending_layer } => (
+            ConsolidateErrorKind::Internal,
+            hex::encode(offending_layer.0),
+            0,
+        ),
         E::WriteFailed(_) | E::Internal(_) => (ConsolidateErrorKind::Internal, String::new(), 0),
     }
 }
