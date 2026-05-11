@@ -146,12 +146,31 @@ impl RocksStore {
         &self,
         head: &LayerId,
     ) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
-        // Walk parent pointers head → root, then reverse for build order.
+        // Walk parent pointers head → root, redirect-aware (D25 §12.8
+        // / Phase 17f-F). When the walk reaches a layer that's a
+        // redirect source, switch to walking the target's chain
+        // instead of continuing through the (potentially reclaimed)
+        // original parent pointer. v1's refuse-chaining policy
+        // guarantees a single hop is enough — no cycles.
         let mut chain_ids = vec![head.clone()];
         let mut current = head.clone();
-        while let Some(parent_id) = self.get_chain(&current)? {
-            chain_ids.push(parent_id.clone());
-            current = parent_id;
+        loop {
+            if let Some(redirect_entry) =
+                <Self as eigenius_kernel::storage::PersistentBackend>::lookup_redirect(
+                    self, &current,
+                )?
+            {
+                chain_ids.push(redirect_entry.target.clone());
+                current = redirect_entry.target;
+                continue;
+            }
+            match self.get_chain(&current)? {
+                Some(parent_id) => {
+                    chain_ids.push(parent_id.clone());
+                    current = parent_id;
+                }
+                None => break,
+            }
         }
         chain_ids.reverse();
 

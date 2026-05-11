@@ -145,12 +145,26 @@ impl PersistentBackend for MemoryPersistentBackend {
             return Ok(None);
         }
 
-        // Walk parents head → root, then reverse.
+        // Walk parents head → root, redirect-aware. When the walk
+        // reaches a layer that's a redirect source, switch to walking
+        // the target's chain instead of continuing through the
+        // (potentially reclaimed) original parent. v1's refuse-chaining
+        // policy guarantees a single hop is enough — no cycles.
         let mut chain_ids = vec![head_id.clone()];
         let mut current = head_id.clone();
-        while let Some(Some(parent)) = state.chain.get(&current).cloned() {
-            chain_ids.push(parent.clone());
-            current = parent;
+        loop {
+            if let Some(entry) = state.redirects.get(&current) {
+                chain_ids.push(entry.target.clone());
+                current = entry.target.clone();
+                continue;
+            }
+            match state.chain.get(&current).cloned() {
+                Some(Some(parent)) => {
+                    chain_ids.push(parent.clone());
+                    current = parent;
+                }
+                _ => break,
+            }
         }
         chain_ids.reverse();
 

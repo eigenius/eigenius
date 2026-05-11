@@ -39,7 +39,9 @@
 //! - 17f-E — RPC + CLI surfaces for below-head consolidation
 //!   (`preserve_history` flag, typed `ToNotReachableFromHead` +
 //!   `RangeCrossesExistingRedirect` error variants). ✅
-//! - 17f-F — cross-cutting tests. *pending*
+//! - 17f-F — cross-cutting end-to-end tests
+//!   (resolve-equivalence with redirect installed; preserve vs.
+//!   reclaim through real GC; redirect-aware `load_chain_from`). ✅
 //!
 //! Deferred from Phase 17: `db consolidate-summary` (the diagnostic
 //! enumeration of past consolidations). It needs a separate
@@ -1423,6 +1425,245 @@ mod tests {
         assert_eq!(
             estimate.actual_walk_entries, 1,
             "three layers redefining the same IRI dedup to one distinct entry"
+        );
+    }
+
+    // ─── 17f-F cross-cutting end-to-end ────────────────────────────────────
+
+    /// Build a chain of `n` layers on top of `root`, exactly like
+    /// `build_chain_of`, but on a shared `Arc<dyn PersistentBackend>`
+    /// so callers can pass the same Arc to both `consolidate_chain`
+    /// (which takes `&dyn`) and `LayerStorage::with_persistent`
+    /// (which takes `Arc<dyn>`). Returns the head layer plus the
+    /// chain of intermediate layers (oldest first).
+    fn build_chain_of_arc(
+        n: usize,
+        backend: Arc<dyn PersistentBackend>,
+    ) -> (Arc<Layer>, Vec<Arc<Layer>>) {
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
+            .unwrap();
+        rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        let mut all = vec![Arc::clone(&root)];
+        let mut current = Arc::clone(&root);
+        for i in 0..n {
+            let mut b = LayerBuilder::new(&format!("L{i}"), Some(Arc::clone(&current)));
+            b.add_resource(make_resource(
+                &format!("urn:eigenius:demo:layer_{i}"),
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String(format!("v{i}")),
+                )],
+            ))
+            .unwrap();
+            let layer = Arc::new(b.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            all.push(Arc::clone(&layer));
+            current = layer;
+        }
+        (current, all)
+    }
+
+    /// Build a fresh `LayerStorage` against the backend, load the
+    /// chain from `head`, and snapshot every IRI's value. The fresh
+    /// storage forces `redirect_map` to be re-read from the backend's
+    /// redirect CF — captures any redirects installed since the last
+    /// snapshot.
+    fn snapshot_via_fresh_storage(
+        backend: Arc<dyn PersistentBackend>,
+        head: &LayerId,
+    ) -> Vec<(Iri, String)> {
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let info = backend.load_chain_from(head).unwrap().unwrap();
+        let head_layer = crate::layer::build_chain(info, storage);
+        snapshot_chain(&head_layer)
+    }
+
+    /// Load-bearing 17f-F regression: a below-head consolidation must
+    /// preserve head-rooted resolves for every IRI. Build a chain,
+    /// snapshot before consolidate, consolidate an interior range
+    /// below the head, snapshot after, assert equality.
+    #[test]
+    fn below_head_consolidate_preserves_head_rooted_resolves() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let (head, layers) = build_chain_of_arc(6, Arc::clone(&backend));
+        backend.put_branch("main", head.id()).unwrap();
+
+        // Snapshot before. layers[0] is root; layers[1..=6] are L0..L5;
+        // head == layers[6].
+        let before = snapshot_via_fresh_storage(Arc::clone(&backend), head.id());
+        assert!(
+            before.iter().any(|(_, v)| v == "v0"),
+            "pre-snapshot must contain values from L0..L5"
+        );
+
+        // Consolidate [L1..L4] — strictly below the head L5.
+        let from = layers[2].id().clone(); // L1
+        let to = layers[5].id().clone(); // L4
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let outcome = consolidate_chain(
+            "main",
+            from,
+            to,
+            ConsolidateOpts::default(),
+            storage,
+            backend.as_ref(),
+        )
+        .expect("below-head consolidation succeeds");
+        assert!(
+            !outcome.head_advanced,
+            "below-head must not advance the branch"
+        );
+        assert_eq!(outcome.collapsed_layer_count, 4);
+
+        // Snapshot after. Must be byte-equal to before.
+        let after = snapshot_via_fresh_storage(Arc::clone(&backend), head.id());
+        assert_eq!(
+            before, after,
+            "below-head consolidation must preserve head-rooted resolves for every IRI"
+        );
+    }
+
+    /// Preserve-history end-to-end: consolidate below-head with
+    /// `preserve_history = true`, then run GC. The source-side
+    /// intermediate layer (interior of the consolidated range) stays
+    /// alive — time-travel reads against it still resolve.
+    #[test]
+    fn preserve_history_keeps_source_interior_alive_through_gc() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let (head, layers) = build_chain_of_arc(5, Arc::clone(&backend));
+        backend.put_branch("main", head.id()).unwrap();
+
+        // Consolidate [L1..L3] below head with preserve_history=true.
+        let interior_iri = crate::ontology::iri::Iri::parse("urn:eigenius:demo:layer_1").unwrap();
+        let interior_layer_id = layers[2].id().clone(); // L1, the interior
+        let from = layers[2].id().clone();
+        let to = layers[4].id().clone();
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let mut opts = ConsolidateOpts::default();
+        opts.preserve_history = true;
+        consolidate_chain("main", from, to, opts, storage, backend.as_ref())
+            .expect("consolidation succeeds");
+
+        // Run GC. Preserve mode keeps the source-side chain alive.
+        let gc_storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let stats = crate::gc::collect(
+            crate::gc::GcRoots::from_branches(backend.as_ref()).unwrap(),
+            &crate::gc::GcConfig {
+                min_age: std::time::Duration::from_secs(0),
+            },
+            gc_storage.cache.as_ref(),
+            gc_storage.bloom_cache.as_ref(),
+            backend.as_ref(),
+        )
+        .expect("gc collect");
+        assert_eq!(
+            stats.layers_swept, 0,
+            "preserve_history mode must not sweep any layers in this scenario"
+        );
+
+        // The interior layer's topology entry survives.
+        assert!(
+            backend
+                .load_topology()
+                .unwrap()
+                .get_layer(&interior_layer_id)
+                .is_some(),
+            "interior layer must survive GC in preserve_history mode"
+        );
+
+        // Time-travel read against the interior still works.
+        let info = backend
+            .load_chain_from(&interior_layer_id)
+            .unwrap()
+            .unwrap();
+        let storage_for_walk = LayerStorage::with_persistent(Arc::clone(&backend));
+        let interior_head = crate::layer::build_chain(info, storage_for_walk);
+        let resource = interior_head
+            .resolve(&interior_iri)
+            .expect("interior IRI resolves");
+        assert_eq!(
+            resource
+                .get(&crate::ontology::iri::Iri::parse("urn:eigenius:core:description").unwrap())
+                .and_then(|v| v.as_str()),
+            Some("v1")
+        );
+    }
+
+    /// Reclaim end-to-end: consolidate below-head with default
+    /// `preserve_history = false`, then run GC. The interior of the
+    /// consolidated range is swept; the redirect source itself stays
+    /// as a tombstone-on-disk (shape 1 per D25 §12.8.1(d)), and
+    /// head-rooted resolves still produce correct values through the
+    /// redirect.
+    #[test]
+    fn reclaim_mode_sweeps_interior_but_preserves_head_resolves_through_gc() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let (head, layers) = build_chain_of_arc(5, Arc::clone(&backend));
+        backend.put_branch("main", head.id()).unwrap();
+
+        let interior_layer_id = layers[2].id().clone(); // L1 — will be reclaimed
+        let to_layer_id = layers[4].id().clone(); // L3 — will become a tombstone
+
+        // Pre-snapshot for the resolve-equivalence assertion.
+        let before = snapshot_via_fresh_storage(Arc::clone(&backend), head.id());
+
+        // Consolidate [L1..L3] below head with reclaim semantics.
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        consolidate_chain(
+            "main",
+            layers[2].id().clone(),
+            layers[4].id().clone(),
+            ConsolidateOpts::default(),
+            storage,
+            backend.as_ref(),
+        )
+        .expect("consolidation succeeds");
+
+        // GC pass — reclaim mode should sweep the interior.
+        let gc_storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let stats = crate::gc::collect(
+            crate::gc::GcRoots::from_branches(backend.as_ref()).unwrap(),
+            &crate::gc::GcConfig {
+                min_age: std::time::Duration::from_secs(0),
+            },
+            gc_storage.cache.as_ref(),
+            gc_storage.bloom_cache.as_ref(),
+            backend.as_ref(),
+        )
+        .expect("gc collect");
+        assert!(
+            stats.layers_swept >= 1,
+            "reclaim mode should sweep at least one interior layer"
+        );
+
+        // The interior is gone from the topology.
+        let topo = backend.load_topology().unwrap();
+        assert!(
+            topo.get_layer(&interior_layer_id).is_none(),
+            "interior of consolidated range must be swept in reclaim mode"
+        );
+        // The redirect source (the `to` layer) survives as a
+        // tombstone-on-disk: its on-disk topology entry remains so
+        // layers above it can chain-walk through it; the redirect
+        // routes resolves to L_c (D25 §12.8.1(d) shape 1).
+        assert!(
+            topo.get_layer(&to_layer_id).is_some(),
+            "redirect source must stay alive after reclaim GC (shape 1 tombstone)"
+        );
+
+        // Head-rooted resolves still produce identical values for
+        // every IRI — the redirect makes the interior content
+        // available via L_c.
+        let after = snapshot_via_fresh_storage(Arc::clone(&backend), head.id());
+        assert_eq!(
+            before, after,
+            "head-rooted resolves must survive reclaim GC unchanged via the redirect"
         );
     }
 }
