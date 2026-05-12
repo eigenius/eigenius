@@ -169,6 +169,9 @@ export function BranchesPanel() {
   const refreshBranches = useNotebookStore((s) => s.refreshBranches);
   const switchBranch = useNotebookStore((s) => s.switchBranch);
   const setDestination = useNotebookStore((s) => s.setDestination);
+  const setPendingMergeSource = useNotebookStore(
+    (s) => s.setPendingMergeSource,
+  );
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -218,6 +221,15 @@ export function BranchesPanel() {
     setDestination("history");
   };
 
+  // "Merge into…" jumps to the Merge destination with the row's
+  // branch pre-filled as the source. The Merge panel consumes the
+  // hint on mount and clears it — a later visit defaults to the
+  // active branch instead of a stale source.
+  const onMergeFrom = (b: BranchInfo) => {
+    setPendingMergeSource(b.name);
+    setDestination("merge");
+  };
+
   return (
     <div className={styles.root}>
       <div className={styles.header}>
@@ -260,6 +272,7 @@ export function BranchesPanel() {
               styles={styles}
               onSwitch={onSwitch}
               onViewHistory={onViewHistory}
+              onMergeFrom={onMergeFrom}
               onDelete={(b) => setDeleteTarget(b)}
             />
           )}
@@ -306,6 +319,7 @@ interface BranchesTableProps {
   styles: ReturnType<typeof useStyles>;
   onSwitch: (b: BranchInfo) => void;
   onViewHistory: (b: BranchInfo) => void;
+  onMergeFrom: (b: BranchInfo) => void;
   onDelete: (b: BranchInfo) => void;
 }
 
@@ -315,6 +329,7 @@ function BranchesTable({
   styles,
   onSwitch,
   onViewHistory,
+  onMergeFrom,
   onDelete,
 }: BranchesTableProps) {
   return (
@@ -382,11 +397,19 @@ function BranchesTable({
                     icon={<Stack16Regular />}
                     phase={6}
                   />
-                  <ComingSoonAction
-                    label="Merge into…"
-                    icon={<Merge16Regular />}
-                    phase={5}
-                  />
+                  <Tooltip
+                    content="Open the Merge panel with this branch pre-filled as the source."
+                    relationship="description"
+                  >
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<Merge16Regular />}
+                      onClick={() => onMergeFrom(b)}
+                    >
+                      Merge into…
+                    </Button>
+                  </Tooltip>
                   <Tooltip
                     content={isProtected
                       ? "main is protected — the kernel rejects DeleteBranch for the default branch."

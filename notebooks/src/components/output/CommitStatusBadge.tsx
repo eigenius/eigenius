@@ -29,17 +29,21 @@
  *   `MessageBar` listing the conflicting IRIs. Recovery dialog (save
  *   as sibling / rebase / discard) lands in Phase 5.
  */
+import { useState } from "react";
 import {
   Badge,
+  Button,
   Caption1,
   makeStyles,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Tooltip,
   tokens,
 } from "@fluentui/react-components";
 import { classifyCommit, type CommitMeta } from "../../runtime/commitMeta";
+import { WitnessedMergeRecoveryDialog } from "../dialogs/WitnessedMergeRecoveryDialog";
 
 const useStyles = makeStyles({
   badge: {
@@ -62,6 +66,7 @@ export interface CommitStatusBadgeProps {
 
 export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
   const styles = useStyles();
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const status = classifyCommit(commit);
 
   switch (status.kind) {
@@ -116,29 +121,58 @@ export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
 
     case "needs-witnessed-merge":
       return (
-        <MessageBar intent="error" className={styles.badge}>
-          <MessageBarBody>
-            <MessageBarTitle>
-              Conflict — branch did not advance
-            </MessageBarTitle>
-            <Caption1>
-              Another commit reached this branch between when you read its
-              head and when you saved. The two commits modify the same
-              resources and cannot be merged automatically (Phase 15
-              witnessed-merge resolution is not yet available).
-            </Caption1>
-            {status.conflictingIris.length > 0 && (
-              <ul className={styles.conflictList}>
-                {status.conflictingIris.map((iri) => <li key={iri}>{iri}</li>)}
-              </ul>
-            )}
-            {status.currentHead && (
+        <>
+          <MessageBar intent="error" className={styles.badge}>
+            <MessageBarBody>
+              <MessageBarTitle>
+                Conflict — branch did not advance
+              </MessageBarTitle>
               <Caption1>
-                Branch's current head: <code>{status.currentHead}</code>
+                Another commit reached this branch between when you read its
+                head and when you saved. The two commits modify the same
+                resources and cannot be merged automatically (Phase 15
+                witnessed-merge resolution is not yet available).
               </Caption1>
+              {status.conflictingIris.length > 0 && (
+                <ul className={styles.conflictList}>
+                  {status.conflictingIris.map((iri) => (
+                    <li key={iri}>{iri}</li>
+                  ))}
+                </ul>
+              )}
+              {status.currentHead && (
+                <Caption1>
+                  Branch's current head: <code>{status.currentHead}</code>
+                </Caption1>
+              )}
+            </MessageBarBody>
+            {/* "Recover…" opens the §6.2 dialog. Disabled if the
+                kernel didn't surface an orphan id — without it the
+                "save as sibling" path can't run, and the other two
+                paths would partially-recover state. Older kernel
+                builds without the §G.1+ field set would land here. */}
+            {status.orphanLayerId && (
+              <MessageBarActions>
+                <Button
+                  size="small"
+                  appearance="primary"
+                  onClick={() => setRecoveryOpen(true)}
+                >
+                  Recover…
+                </Button>
+              </MessageBarActions>
             )}
-          </MessageBarBody>
-        </MessageBar>
+          </MessageBar>
+          {status.orphanLayerId && (
+            <WitnessedMergeRecoveryDialog
+              open={recoveryOpen}
+              onClose={() => setRecoveryOpen(false)}
+              orphanLayerId={status.orphanLayerId}
+              currentHead={status.currentHead}
+              conflictingIris={status.conflictingIris}
+            />
+          )}
+        </>
       );
   }
 }

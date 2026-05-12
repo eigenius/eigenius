@@ -154,6 +154,22 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.deleteBranch,
         req,
       ),
+    // Merge UX (D34 §6.3 / Phase 5). MergeBranches mutates a branch
+    // ref through update_branch(AllowTrivial); PreviewMerge is a
+    // side-effect-free LCA + IRI-disjointness walk used by the
+    // Merge panel's preview pane.
+    mergeBranches: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_MERGE_BRANCHES,
+        kernel.raw.mergeBranches,
+        req,
+      ),
+    previewMerge: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_PREVIEW_MERGE,
+        kernel.raw.previewMerge,
+        req,
+      ),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path

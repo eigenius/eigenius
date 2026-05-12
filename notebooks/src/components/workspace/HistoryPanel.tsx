@@ -26,9 +26,12 @@
  * Per-row data (all from the topology's LAYER `attrs`):
  * - `name` — the layer's display label.
  * - `created_at_ms` — commit timestamp.
- * - `resource_count` — total resources defined directly *in this layer*.
- *   The "+N" delta in the row is computed by diffing this layer's
- *   count from its parent's.
+ * - `resource_count` — instance resources defined directly *in this layer*
+ *   (the kernel buckets Class/Property/Institution separately; this is
+ *   the leftover "plain instance" count). Rendered verbatim — there's
+ *   no meaningful delta to compute from this attribute alone, since the
+ *   parent's `resource_count` is *its own* per-layer count, not a
+ *   running total.
  *
  * Glyph (D34 §5.2):
  * - `◆` multi-parent merge (`parent_layer` edges >= 2 from this row).
@@ -191,12 +194,9 @@ interface HistoryRow {
   layerId: string;
   name: string;
   createdAtMs: number;
+  /** Instance-resource count for this layer alone (per-layer addition). */
   resourceCount: number;
   parentCount: number;
-  /** Number of resources added by this layer relative to its parent.
-   *  Negative is possible for consolidation layers that fold many
-   *  parents into one — rendered as a less-prominent label. */
-  delta: number;
   /** Glyph chosen from D34 §5.2. */
   glyph: "●" | "◆" | "⬚";
 }
@@ -391,12 +391,7 @@ function HistoryRowView({
       </span>
       <span className={styles.rowTime}>{formatRelative(row.createdAtMs)}</span>
       <span className={styles.rowDelta}>
-        {row.delta === 0 ? "" : row.delta > 0 ? `+${row.delta}` : `${row.delta}`}
-        {row.delta !== 0 && (row.delta === 1 || row.delta === -1)
-          ? " resource"
-          : row.delta !== 0
-          ? " resources"
-          : ""}
+        {row.resourceCount} {row.resourceCount === 1 ? "resource" : "resources"}
       </span>
     </div>
   );
@@ -443,9 +438,7 @@ function DetailPanel({
 
         <Caption1 className={styles.detailLabel}>Resources</Caption1>
         <span>
-          {row.resourceCount} total
-          {row.delta !== 0 &&
-            ` (${row.delta > 0 ? "+" : ""}${row.delta} this layer)`}
+          {row.resourceCount} this layer
         </span>
 
         <Caption1 className={styles.detailLabel}>Parents</Caption1>
@@ -534,16 +527,6 @@ function buildHistoryRows(
     const parents: string[] = parentsBySource.get(cursor) ?? [];
     const resourceCount = parseInt(node.attrs.resource_count ?? "0", 10);
     const createdAtMs = parseInt(node.attrs.created_at_ms ?? "0", 10);
-    // Delta against first parent's resource_count. For the root,
-    // `delta = resourceCount` (everything in the root is "added").
-    let delta = resourceCount;
-    if (parents.length > 0) {
-      const parent = layerNodes.get(parents[0]);
-      const parentCount = parent
-        ? parseInt(parent.attrs.resource_count ?? "0", 10)
-        : 0;
-      delta = resourceCount - parentCount;
-    }
     const glyph: HistoryRow["glyph"] = parents.length === 0
       ? "⬚"
       : parents.length >= 2
@@ -555,7 +538,6 @@ function buildHistoryRows(
       createdAtMs,
       resourceCount,
       parentCount: parents.length,
-      delta,
       glyph,
     });
     cursor = parents[0] ?? null;

@@ -108,6 +108,22 @@ service EigeniusKernel {
   // whose head matches an active task pin.
   rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
 
+  // Explicit merge of `source` into `target` (D34 §6.3). Wraps an
+  // `update_branch(target, target_tip, source_tip, AllowTrivial)`
+  // call: a fast-forward when source is ahead of target, a trivial
+  // merge when their contributions since the LCA touch disjoint
+  // IRIs, or `NeedsWitnessedMerge` when they conflict. The latter
+  // populates `merge.conflicting_iris` + `merge.orphan_layer_id`
+  // (= source_tip) so the caller can offer "save as sibling".
+  rpc MergeBranches(MergeBranchesRequest) returns (MergeBranchesResponse);
+
+  // Non-mutating dry-run of `MergeBranches`. Returns the predicted
+  // `MergeOutcome` without building a merge layer or moving any
+  // branch ref. Powers the explicit Merge dialog's preview pane
+  // (D34 §6.3). Cost: same LCA + IRI-disjointness walk as the real
+  // merge, minus the layer build + persist.
+  rpc PreviewMerge(PreviewMergeRequest) returns (PreviewMergeResponse);
+
   // --- Chain consolidation (D25) ---
 
   // Collapse `[from..to]` on `branch` into a single resolve-equivalent
@@ -226,6 +242,14 @@ message MergeInfo {
   // branch's current head (i.e., what the caller raced against and
   // lost to).
   string current_head = 4;
+  // Set when outcome = NEEDS_WITNESSED_MERGE: hex-encoded id of the
+  // *orphan* layer — the layer the caller built that wasn't merged
+  // onto the branch. It's still on disk but only reachable by id.
+  // The notebook's witnessed-merge recovery dialog (D34 §6.2) uses
+  // it to offer "Save my work as a sibling branch", which calls
+  // `CreateBranch(name, orphan_layer_id)` to keep it reachable.
+  // Without saving, the layer becomes GC-eligible.
+  string orphan_layer_id = 5;
 }
 
 // --- Inspect ---
@@ -731,6 +755,55 @@ message DeleteBranchResponse {
   // deleted=true); empty otherwise.
   string previous_head = 3;
   string error = 4;
+}
+
+message MergeBranchesRequest {
+  // Branch to fold into `target`. Read at request-time to get its
+  // current head. Must exist; the kernel rejects unknown names with
+  // `failed_precondition`.
+  string source = 1;
+  // Branch to receive the merge. Read at request-time to get its
+  // current head; mutated by the `update_branch` CAS the handler
+  // dispatches.
+  string target = 2;
+}
+
+message MergeBranchesResponse {
+  bool success = 1;
+  // Error message when `success=false`. Empty otherwise.
+  string error = 2;
+  // Outcome of the CAS — same shape as commit responses. Populated
+  // when the merge attempt reached the lattice's `update_branch`.
+  MergeInfo merge = 3;
+  // Target branch's new tip on success. Equals the source's tip on
+  // fast-forward, the merge layer's id on trivial merge, or the
+  // target's unchanged tip on `NEEDS_WITNESSED_MERGE`. Empty on
+  // error before the merge attempt.
+  string target_tip = 4;
+}
+
+message PreviewMergeRequest {
+  string source = 1;
+  string target = 2;
+}
+
+message PreviewMergeResponse {
+  bool success = 1;
+  // Error message when `success=false`. Empty otherwise.
+  string error = 2;
+  // Predicted outcome. `success=true` always; the predicted
+  // `MergeOutcome` enum (FAST_FORWARD / TRIVIAL_MERGE /
+  // NEEDS_WITNESSED_MERGE) signals what would happen on a real
+  // merge. Side fields (`merge_layer_id`, `current_head`,
+  // `orphan_layer_id`) are NOT populated in preview — those refer
+  // to layers the kernel hasn't built yet. `conflicting_iris` IS
+  // populated when the prediction is `NEEDS_WITNESSED_MERGE` (no
+  // build cost, just the disjointness check).
+  MergeInfo merge = 3;
+  // Number of IRIs the merge layer would carry (union of per-head
+  // contributions). 0 for fast-forward / conflict. Useful for the
+  // dialog's preview line.
+  uint32 predicted_iri_count = 4;
 }
 
 // --- Chain consolidation (D25) ---

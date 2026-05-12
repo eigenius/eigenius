@@ -441,6 +441,7 @@ fn merge_info_from_persist_info(info: Option<&PersistedLayerInfo>) -> proto::Mer
             merge_layer_id: String::new(),
             conflicting_iris: Vec::new(),
             current_head: String::new(),
+            orphan_layer_id: String::new(),
         };
     };
     if info.cache_hit_different_position {
@@ -449,6 +450,7 @@ fn merge_info_from_persist_info(info: Option<&PersistedLayerInfo>) -> proto::Mer
             merge_layer_id: info.layer_id.to_string(),
             conflicting_iris: Vec::new(),
             current_head: String::new(),
+            orphan_layer_id: String::new(),
         };
     }
     match info.merge_outcome.as_ref() {
@@ -457,22 +459,26 @@ fn merge_info_from_persist_info(info: Option<&PersistedLayerInfo>) -> proto::Mer
             merge_layer_id: String::new(),
             conflicting_iris: Vec::new(),
             current_head: String::new(),
+            orphan_layer_id: String::new(),
         },
         Some(UpdateOutcome::FastForward) => proto::MergeInfo {
             outcome: proto::MergeOutcome::FastForward as i32,
             merge_layer_id: String::new(),
             conflicting_iris: Vec::new(),
             current_head: String::new(),
+            orphan_layer_id: String::new(),
         },
         Some(UpdateOutcome::TrivialMerge { merge_layer }) => proto::MergeInfo {
             outcome: proto::MergeOutcome::TrivialMerge as i32,
             merge_layer_id: merge_layer.to_string(),
             conflicting_iris: Vec::new(),
             current_head: String::new(),
+            orphan_layer_id: String::new(),
         },
         Some(UpdateOutcome::NeedsWitnessedMerge {
             current_head,
             conflicting_iris,
+            orphan_head,
         }) => proto::MergeInfo {
             outcome: proto::MergeOutcome::NeedsWitnessedMerge as i32,
             merge_layer_id: String::new(),
@@ -481,6 +487,7 @@ fn merge_info_from_persist_info(info: Option<&PersistedLayerInfo>) -> proto::Mer
                 .map(|iri| iri.as_str().to_string())
                 .collect(),
             current_head: current_head.to_string(),
+            orphan_layer_id: orphan_head.to_string(),
         },
     }
 }
@@ -3205,6 +3212,192 @@ impl EigeniusKernel for EigeniusService {
         }
     }
 
+    async fn merge_branches(
+        &self,
+        request: Request<MergeBranchesRequest>,
+    ) -> Result<Response<MergeBranchesResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_MERGE_BRANCHES);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        // Resolve both tips up front. The kernel returns
+        // `failed_precondition` rather than `not_found` to match the
+        // shape `create_branch` / `delete_branch` use — branches that
+        // don't exist are a caller bug, not a missing resource.
+        let source_tip = backend
+            .get_branch(&req.source)
+            .map_err(|e| Status::internal(format!("get_branch source failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("source branch {:?} not found", req.source))
+            })?;
+        let target_tip = backend
+            .get_branch(&req.target)
+            .map_err(|e| Status::internal(format!("get_branch target failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("target branch {:?} not found", req.target))
+            })?;
+
+        // Trivial: source and target already match — no-op, surface
+        // as FastForward without invoking the CAS.
+        if source_tip == target_tip {
+            let info = PersistedLayerInfo {
+                layer_id: target_tip.clone(),
+                branch_advanced: false,
+                merge_outcome: Some(crate::lattice::UpdateOutcome::FastForward),
+                cache_hit_different_position: false,
+            };
+            return Ok(Response::new(MergeBranchesResponse {
+                success: true,
+                error: String::new(),
+                merge: Some(merge_info_from_persist_info(Some(&info))),
+                target_tip: hex::encode(target_tip.0),
+            }));
+        }
+
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        let outcome = crate::lattice::update_branch(
+            &req.target,
+            Some(target_tip.clone()),
+            source_tip.clone(),
+            crate::lattice::ConflictPolicy::AllowTrivial,
+            storage,
+            backend.as_ref(),
+        );
+        match outcome {
+            Ok(update) => {
+                // New tip depends on the outcome — fast-forward is at
+                // the source's tip; trivial merge is at the merge
+                // layer's id; needs-witnessed-merge leaves the target
+                // unchanged.
+                let new_tip = match &update {
+                    crate::lattice::UpdateOutcome::FastForward => source_tip.clone(),
+                    crate::lattice::UpdateOutcome::TrivialMerge { merge_layer } => {
+                        merge_layer.clone()
+                    }
+                    crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. } => target_tip,
+                };
+                let info = PersistedLayerInfo {
+                    layer_id: new_tip.clone(),
+                    branch_advanced: !matches!(
+                        update,
+                        crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
+                    ),
+                    merge_outcome: Some(update),
+                    cache_hit_different_position: false,
+                };
+                Ok(Response::new(MergeBranchesResponse {
+                    success: true,
+                    error: String::new(),
+                    merge: Some(merge_info_from_persist_info(Some(&info))),
+                    target_tip: hex::encode(new_tip.0),
+                }))
+            }
+            Err(e) => Ok(Response::new(MergeBranchesResponse {
+                success: false,
+                error: format!("{e}"),
+                merge: None,
+                target_tip: String::new(),
+            })),
+        }
+    }
+
+    async fn preview_merge(
+        &self,
+        request: Request<PreviewMergeRequest>,
+    ) -> Result<Response<PreviewMergeResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_PREVIEW_MERGE);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        let source_tip = backend
+            .get_branch(&req.source)
+            .map_err(|e| Status::internal(format!("get_branch source failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("source branch {:?} not found", req.source))
+            })?;
+        let target_tip = backend
+            .get_branch(&req.target)
+            .map_err(|e| Status::internal(format!("get_branch target failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("target branch {:?} not found", req.target))
+            })?;
+
+        // Same trivial-case short-circuit as `MergeBranches`: if the
+        // two tips already match, the predicted outcome is
+        // FastForward without invoking any lattice work.
+        if source_tip == target_tip {
+            return Ok(Response::new(PreviewMergeResponse {
+                success: true,
+                error: String::new(),
+                merge: Some(proto::MergeInfo {
+                    outcome: proto::MergeOutcome::FastForward as i32,
+                    ..Default::default()
+                }),
+                predicted_iri_count: 0,
+            }));
+        }
+
+        match crate::lattice::preview_merge_independent_heads(
+            vec![target_tip.clone(), source_tip.clone()],
+            backend.as_ref(),
+        ) {
+            Ok(crate::lattice::MergePreview::FastForward) => {
+                Ok(Response::new(PreviewMergeResponse {
+                    success: true,
+                    error: String::new(),
+                    merge: Some(proto::MergeInfo {
+                        outcome: proto::MergeOutcome::FastForward as i32,
+                        ..Default::default()
+                    }),
+                    predicted_iri_count: 0,
+                }))
+            }
+            Ok(crate::lattice::MergePreview::Disjoint { iri_count }) => {
+                Ok(Response::new(PreviewMergeResponse {
+                    success: true,
+                    error: String::new(),
+                    merge: Some(proto::MergeInfo {
+                        outcome: proto::MergeOutcome::TrivialMerge as i32,
+                        ..Default::default()
+                    }),
+                    predicted_iri_count: iri_count.min(u32::MAX as usize) as u32,
+                }))
+            }
+            Ok(crate::lattice::MergePreview::Conflict { conflicting_iris }) => {
+                Ok(Response::new(PreviewMergeResponse {
+                    success: true,
+                    error: String::new(),
+                    merge: Some(proto::MergeInfo {
+                        outcome: proto::MergeOutcome::NeedsWitnessedMerge as i32,
+                        merge_layer_id: String::new(),
+                        conflicting_iris: conflicting_iris
+                            .iter()
+                            .map(|iri| iri.as_str().to_string())
+                            .collect(),
+                        current_head: hex::encode(target_tip.0),
+                        // Preview doesn't have an orphan — no layer has
+                        // been built. The dialog uses this preview to
+                        // decide whether to attempt the merge at all;
+                        // an actual `MergeBranches` is what materialises
+                        // the orphan-on-conflict.
+                        orphan_layer_id: String::new(),
+                    }),
+                    predicted_iri_count: 0,
+                }))
+            }
+            Err(e) => Ok(Response::new(PreviewMergeResponse {
+                success: false,
+                error: format!("{e}"),
+                merge: None,
+                predicted_iri_count: 0,
+            })),
+        }
+    }
+
     async fn consolidate_chain(
         &self,
         request: Request<ConsolidateChainRequest>,
@@ -3701,12 +3894,14 @@ mod merge_info_tests {
             Iri::parse("urn:eigenius:demo:A").unwrap(),
             Iri::parse("urn:eigenius:demo:B").unwrap(),
         ];
+        let orphan = lid(0xEF);
         let pi = pli(
             lid(0x01),
             false,
             Some(UpdateOutcome::NeedsWitnessedMerge {
                 current_head: current_head.clone(),
                 conflicting_iris: conflicting_iris.clone(),
+                orphan_head: orphan.clone(),
             }),
             false,
         );
@@ -3714,6 +3909,7 @@ mod merge_info_tests {
         assert_eq!(info.outcome, MergeOutcome::NeedsWitnessedMerge as i32);
         assert!(info.merge_layer_id.is_empty());
         assert_eq!(info.current_head, hex_encode(current_head.0));
+        assert_eq!(info.orphan_layer_id, hex_encode(orphan.0));
         assert_eq!(
             info.conflicting_iris,
             vec![

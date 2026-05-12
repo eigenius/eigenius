@@ -92,6 +92,7 @@ import { Notebook } from "../Notebook";
 import { BranchesPanel } from "./BranchesPanel";
 import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
 import { HistoryPanel } from "./HistoryPanel";
+import { MergePanel } from "./MergePanel";
 
 /**
  * Destination keys driving the active main-pane content. Strings
@@ -459,13 +460,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "history":
       return <HistoryPanel />;
     case "merge":
-      return (
-        <ComingSoonPlaceholder
-          destination="Merge"
-          phase={5}
-          description="Explicit MergeBranches dialog and witnessed-merge recovery."
-        />
-      );
+      return <MergePanel />;
     case "compaction":
       return (
         <ComingSoonPlaceholder

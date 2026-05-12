@@ -44,6 +44,13 @@ export interface CommitMeta {
   readonly currentHead?: string;
   /** Non-empty when `mergeOutcome === NEEDS_WITNESSED_MERGE`. */
   readonly conflictingIris: readonly string[];
+  /**
+   * Set when `mergeOutcome === NEEDS_WITNESSED_MERGE`: hex-encoded
+   * id of the orphan layer the caller built. The witnessed-merge
+   * recovery dialog (D34 §6.2) feeds this into a `CreateBranch`
+   * call when the user picks "save as sibling branch".
+   */
+  readonly orphanLayerId?: string;
 }
 
 /** Build a `CommitMeta` from any commit-producing response. */
@@ -64,6 +71,9 @@ export function commitMetaFrom(
     mergeLayerId: merge.mergeLayerId.length > 0 ? merge.mergeLayerId : undefined,
     currentHead: merge.currentHead.length > 0 ? merge.currentHead : undefined,
     conflictingIris: merge.conflictingIris,
+    orphanLayerId: merge.orphanLayerId.length > 0
+      ? merge.orphanLayerId
+      : undefined,
   };
 }
 
@@ -84,11 +94,12 @@ export type CommitStatus =
   | { kind: "cached"; cachedLayerId?: string }
   /** Concurrent disjoint commit auto-merged; branch advanced to the merge. */
   | { kind: "trivial-merge"; mergeLayerId?: string }
-  /** Conflict — branch unchanged; user must recover (Phase 5 dialog). */
+  /** Conflict — branch unchanged; user must recover (D34 §6.2 dialog). */
   | {
     kind: "needs-witnessed-merge";
     conflictingIris: readonly string[];
     currentHead?: string;
+    orphanLayerId?: string;
   };
 
 export function classifyCommit(meta: CommitMeta): CommitStatus {
@@ -98,6 +109,7 @@ export function classifyCommit(meta: CommitMeta): CommitStatus {
         kind: "needs-witnessed-merge",
         conflictingIris: meta.conflictingIris,
         currentHead: meta.currentHead,
+        orphanLayerId: meta.orphanLayerId,
       };
     case MergeOutcome.TRIVIAL_MERGE:
       return { kind: "trivial-merge", mergeLayerId: meta.mergeLayerId };

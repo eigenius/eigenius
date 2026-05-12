@@ -259,6 +259,13 @@ export interface NotebookState {
    */
   destination: WorkspaceDestination;
   /**
+   * Hint that pre-fills the Merge panel's source dropdown. Set by
+   * the BranchesPanel's "Merge into…" action before it navigates;
+   * read + cleared by the Merge panel on mount. `null` = no hint;
+   * Merge defaults to the active branch as the source.
+   */
+  pendingMergeSource: string | null;
+  /**
    * Cached `listBranches` result for the branch picker menu. Refreshed
    * lazily on picker open and explicitly after `createBranch`.
    * `null` means "never fetched" (distinct from "fetched, zero
@@ -328,6 +335,12 @@ export interface NotebookState {
   setReadPin: (layerId: string | null) => void;
   /** Switch the workspace rail to a different destination. */
   setDestination: (d: WorkspaceDestination) => void;
+  /**
+   * Set / clear the pre-fill source for the Merge panel. Called by
+   * the BranchesPanel before navigating to Merge; cleared by the
+   * Merge panel after reading it.
+   */
+  setPendingMergeSource: (name: string | null) => void;
 
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
@@ -397,6 +410,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   activeBranch: "main",
   readPinLayerId: null,
   destination: "notebook",
+  pendingMergeSource: null,
   branches: null,
   dirty: false,
 
@@ -544,6 +558,10 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
   setDestination(d) {
     set({ destination: d });
+  },
+
+  setPendingMergeSource(name) {
+    set({ pendingMergeSource: name });
   },
 
   toggleCellCollapsed(cellId) {

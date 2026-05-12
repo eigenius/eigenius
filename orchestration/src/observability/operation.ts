@@ -86,3 +86,7 @@ export const KERNEL_PASSTHROUGH_CREATE_BRANCH =
   "orchestrator.kernel.create_branch";
 export const KERNEL_PASSTHROUGH_DELETE_BRANCH =
   "orchestrator.kernel.delete_branch";
+export const KERNEL_PASSTHROUGH_MERGE_BRANCHES =
+  "orchestrator.kernel.merge_branches";
+export const KERNEL_PASSTHROUGH_PREVIEW_MERGE =
+  "orchestrator.kernel.preview_merge";

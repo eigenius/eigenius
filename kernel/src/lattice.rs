@@ -111,9 +111,19 @@ pub enum UpdateOutcome {
     ///
     /// `conflicting_iris` is empty in 14d (see module docs) and
     /// populated in 14e once the divergence-set computation lands.
+    ///
+    /// `orphan_head` is the `new_head` the caller passed in — the layer
+    /// they built that didn't make it onto the branch. The notebook's
+    /// witnessed-merge recovery dialog (D34 §6.2) uses it to offer
+    /// "Save my work as a sibling branch": `CreateBranch(name,
+    /// orphan_head)` keeps the layer reachable until the user decides
+    /// what to do with it. Without this, the orphan would only be
+    /// findable by hash and would become GC-eligible the moment
+    /// nothing referenced it.
     NeedsWitnessedMerge {
         current_head: LayerId,
         conflicting_iris: Vec<Iri>,
+        orphan_head: LayerId,
     },
 }
 
@@ -479,6 +489,12 @@ pub fn update_branch(
             actual,
         }),
         ConflictPolicy::AllowTrivial => {
+            // Stash a copy of the caller's `new_head` so we can
+            // surface it as `orphan_head` if the merge attempt
+            // doesn't put it on a branch. `merge_independent_heads`
+            // consumes its input vec, so this clone has to happen
+            // before we hand it over.
+            let orphan_head = new_head.clone();
             // If the branch was deleted (actual is None), trivial
             // merge has nothing to merge against — surface as a
             // witnessed-merge requirement.
@@ -488,6 +504,7 @@ pub fn update_branch(
                     return Ok(UpdateOutcome::NeedsWitnessedMerge {
                         current_head: LayerId([0u8; 32]),
                         conflicting_iris: Vec::new(),
+                        orphan_head,
                     });
                 }
             };
@@ -507,6 +524,7 @@ pub fn update_branch(
                     Ok(UpdateOutcome::NeedsWitnessedMerge {
                         current_head: actual_head,
                         conflicting_iris,
+                        orphan_head,
                     })
                 }
                 Err(MergeError::Storage(e)) => Err(BranchUpdateError::Storage(e)),
@@ -720,6 +738,30 @@ pub enum MergeOutcome {
     Conflict { conflicting_iris: Vec<Iri> },
 }
 
+/// Side-effect-free verdict of a merge attempt. Returned by
+/// [`preview_merge_independent_heads`]; mirrors the [`MergeOutcome`]
+/// shape but doesn't carry the materialised merge layer (none is
+/// built). The notebook's explicit Merge dialog (D34 §6.3) renders
+/// this as the "Estimated outcome" line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergePreview {
+    /// Heads' contributions since their LCA are pairwise disjoint —
+    /// a real merge would produce a [`MergeOutcome::Merged`].
+    /// `iri_count` is the total number of resources the merge layer
+    /// would contain (union of per-head contributions), useful for
+    /// the preview's "12 layers ahead, 4 behind" / "0 IRIs overlap"
+    /// summary line.
+    Disjoint { iri_count: usize },
+    /// Heads conflict on `conflicting_iris`. A real merge would
+    /// return [`MergeOutcome::Conflict`] with the same IRIs.
+    Conflict { conflicting_iris: Vec<Iri> },
+    /// One head is an ancestor of the other (or they're equal) — no
+    /// merge is needed at all. The CAS would short-circuit as
+    /// `FastForward`. Reported separately so the dialog can say so
+    /// honestly instead of pretending a trivial merge would happen.
+    FastForward,
+}
+
 /// Errors from `merge_independent_heads`.
 #[derive(Debug)]
 pub enum MergeError {
@@ -777,13 +819,38 @@ impl std::error::Error for MergeError {}
 /// **Layer construction.** Uses `commit_layer` internally so the merge
 /// layer is validated and persisted through the same atomic write
 /// batch as any other commit.
-pub fn merge_independent_heads(
+/// Materials produced by [`compute_merge_check`] when the heads
+/// merge cleanly. Carries through what the build step needs (sorted
+/// heads, per-head IRI source maps) so it doesn't recompute.
+struct MergeCompute {
     heads: Vec<LayerId>,
-    storage: LayerStorage,
-    backend: &dyn PersistentBackend,
-) -> Result<MergeOutcome, MergeError> {
-    use crate::storage::ResourceBackend;
+    per_head_sources: Vec<std::collections::BTreeMap<Iri, LayerId>>,
+}
 
+/// Result of the side-effect-free portion of a merge attempt.
+/// Used internally by both [`merge_independent_heads`] (which
+/// proceeds to build + commit when this returns `Disjoint`) and
+/// [`preview_merge_independent_heads`] (which stops here).
+enum MergeCheck {
+    /// One-head input. The caller can reuse the existing head as
+    /// the "merge" with no new commit.
+    SingleHead { head: LayerId },
+    /// Heads diverge on the same IRIs. A real merge would fail.
+    Conflict { conflicting_iris: Vec<Iri> },
+    /// Heads can be merged without conflict. The caller has the
+    /// materials to build the merge layer.
+    Disjoint(MergeCompute),
+}
+
+/// Run the side-effect-free disjointness check. No writes touch the
+/// backend; on a conflict the function returns immediately without
+/// building anything. On the disjoint path it returns the precomputed
+/// `per_head_sources` so [`merge_independent_heads`] doesn't redo
+/// the LCA + ancestry walk.
+fn compute_merge_check(
+    heads: Vec<LayerId>,
+    backend: &dyn PersistentBackend,
+) -> Result<MergeCheck, MergeError> {
     if heads.is_empty() {
         return Err(MergeError::InvalidHeads("heads cannot be empty".into()));
     }
@@ -804,18 +871,11 @@ pub fn merge_independent_heads(
         }
     }
 
-    // Single-head: nothing to merge. Reconstruct the Layer and return
-    // it so callers get a uniform `Merged { merge_layer }` outcome.
+    // Single-head: nothing to merge.
     if heads.len() == 1 {
-        let head_id = &heads[0];
-        let info = backend
-            .load_chain_from(head_id)
-            .map_err(MergeError::Storage)?
-            .ok_or_else(|| {
-                MergeError::InvalidHeads(format!("could not load chain for head {head_id}"))
-            })?;
-        let layer = crate::layer::build_chain(info, storage);
-        return Ok(MergeOutcome::Merged { merge_layer: layer });
+        return Ok(MergeCheck::SingleHead {
+            head: heads.into_iter().next().expect("len == 1"),
+        });
     }
 
     // Compute LCA. Per the bootstrap-chain invariant, this should always
@@ -852,10 +912,78 @@ pub fn merge_independent_heads(
         })
         .collect();
     if !conflicts.is_empty() {
-        return Ok(MergeOutcome::Conflict {
+        return Ok(MergeCheck::Conflict {
             conflicting_iris: conflicts,
         });
     }
+
+    Ok(MergeCheck::Disjoint(MergeCompute {
+        heads,
+        per_head_sources,
+    }))
+}
+
+/// Dry-run [`merge_independent_heads`]: same LCA + IRI-disjointness
+/// computation, no merge layer built, no branch ref moved. Powers
+/// the notebook's explicit Merge dialog "preview" (D34 §6.3 — the
+/// user sees the predicted outcome before committing).
+///
+/// Single-head inputs (or heads where one is an ancestor of the
+/// others) report [`MergePreview::FastForward`] — there's nothing to
+/// merge.
+pub fn preview_merge_independent_heads(
+    heads: Vec<LayerId>,
+    backend: &dyn PersistentBackend,
+) -> Result<MergePreview, MergeError> {
+    match compute_merge_check(heads, backend)? {
+        MergeCheck::SingleHead { .. } => Ok(MergePreview::FastForward),
+        MergeCheck::Conflict { conflicting_iris } => {
+            Ok(MergePreview::Conflict { conflicting_iris })
+        }
+        MergeCheck::Disjoint(MergeCompute {
+            per_head_sources, ..
+        }) => {
+            // Count is the merge layer's `defined_iris` size — the
+            // union of per-head contributions. Since the disjoint
+            // check has run, each IRI appears in exactly one head's
+            // map, so summing sizes equals union size.
+            let iri_count = per_head_sources.iter().map(|s| s.len()).sum();
+            Ok(MergePreview::Disjoint { iri_count })
+        }
+    }
+}
+
+pub fn merge_independent_heads(
+    heads: Vec<LayerId>,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<MergeOutcome, MergeError> {
+    use crate::storage::ResourceBackend;
+
+    // Run the compute half. On conflict, return immediately — no
+    // merge layer is built. On the disjoint path we get back the
+    // sorted heads and per-head source maps and proceed to build.
+    let MergeCompute {
+        heads,
+        per_head_sources,
+    } = match compute_merge_check(heads, backend)? {
+        MergeCheck::Conflict { conflicting_iris } => {
+            return Ok(MergeOutcome::Conflict { conflicting_iris });
+        }
+        MergeCheck::SingleHead { head } => {
+            // Single-head input. Reconstruct the Layer so callers
+            // get a uniform `Merged { merge_layer }` outcome.
+            let info = backend
+                .load_chain_from(&head)
+                .map_err(MergeError::Storage)?
+                .ok_or_else(|| {
+                    MergeError::InvalidHeads(format!("could not load chain for head {head}"))
+                })?;
+            let layer = crate::layer::build_chain(info, storage);
+            return Ok(MergeOutcome::Merged { merge_layer: layer });
+        }
+        MergeCheck::Disjoint(c) => c,
+    };
 
     // Build the merge layer. Parents = sorted heads (already sorted).
     // The parent Arcs need to be loaded as Layers; reuse LayerStorage's
@@ -1091,6 +1219,7 @@ mod tests {
             UpdateOutcome::NeedsWitnessedMerge {
                 current_head,
                 conflicting_iris,
+                orphan_head: _,
             } => {
                 assert_eq!(current_head, *a.id());
                 // 14e populates the conflicts.

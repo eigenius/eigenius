@@ -45,9 +45,13 @@ import {
   ListInstitutionsRequestSchema,
   LoadRequestSchema,
   type LoadResponse,
+  MergeBranchesRequestSchema,
+  type MergeBranchesResponse,
   type MergeInfo,
   MergeOutcome,
   NotebookService,
+  PreviewMergeRequestSchema,
+  type PreviewMergeResponse,
   QueryRequestSchema,
   type QueryResponse,
   ReflectRequestSchema,
@@ -71,7 +75,9 @@ export type {
   InstitutionInfo,
   LayerTopologyResponse,
   LoadResponse,
+  MergeBranchesResponse,
   MergeInfo,
+  PreviewMergeResponse,
   QueryResponse,
   ReflectResponse,
   RunProgramResponse,
@@ -593,6 +599,38 @@ export class Eigen {
         name,
         force: options.force ?? false,
       }),
+    );
+  }
+
+  /**
+   * Fold `source` into `target` (D34 §6.3). Wraps the kernel's
+   * `update_branch(target, target_tip, source_tip, AllowTrivial)` —
+   * succeeds as fast-forward when source is ahead of target, as
+   * trivial merge when their contributions touch disjoint IRIs, or
+   * surfaces `NEEDS_WITNESSED_MERGE` with the conflict set and the
+   * orphan layer id when they conflict.
+   */
+  async mergeBranches(
+    source: string,
+    target: string,
+  ): Promise<MergeBranchesResponse> {
+    return await this.kernel.mergeBranches(
+      create(MergeBranchesRequestSchema, { source, target }),
+    );
+  }
+
+  /**
+   * Side-effect-free preview of `mergeBranches`. Same LCA + IRI
+   * disjointness walk; no merge layer built, no branch ref moved.
+   * The notebook's explicit Merge dialog uses this to show
+   * "Estimated outcome" before the user commits.
+   */
+  async previewMerge(
+    source: string,
+    target: string,
+  ): Promise<PreviewMergeResponse> {
+    return await this.kernel.previewMerge(
+      create(PreviewMergeRequestSchema, { source, target }),
     );
   }
 

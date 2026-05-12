@@ -47,6 +47,8 @@ pub const RPC_LIST_BRANCHES: &str = "kernel.rpc.list_branches";
 pub const RPC_GET_BRANCH: &str = "kernel.rpc.get_branch";
 pub const RPC_CREATE_BRANCH: &str = "kernel.rpc.create_branch";
 pub const RPC_DELETE_BRANCH: &str = "kernel.rpc.delete_branch";
+pub const RPC_MERGE_BRANCHES: &str = "kernel.rpc.merge_branches";
+pub const RPC_PREVIEW_MERGE: &str = "kernel.rpc.preview_merge";
 pub const RPC_CONSOLIDATE_CHAIN: &str = "kernel.rpc.consolidate_chain";
 pub const RPC_ESTIMATE_CONSOLIDATION: &str = "kernel.rpc.estimate_consolidation";
 
