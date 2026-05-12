@@ -669,6 +669,11 @@ enum EdgeKind {
 message BranchInfo {
   string name = 1;          // matches [A-Za-z0-9_-]+
   string head_layer = 2;    // hex-encoded LayerId
+  // Head layer's commit timestamp, in milliseconds since Unix epoch.
+  // Same semantics as `GetBranchResponse.head_committed_at_ms`. Powers
+  // the notebook's branch-picker / Branches-panel "X min ago" stamps
+  // without forcing per-row `GetBranch` fan-out.
+  int64 head_committed_at_ms = 3;
 }
 
 message ListBranchesRequest {}
@@ -685,6 +690,15 @@ message GetBranchResponse {
   bool found = 1;
   // Set when found=true; hex-encoded LayerId of the branch's current head.
   string head_layer = 2;
+  // Set when found=true; the head layer's commit timestamp, in
+  // milliseconds since the Unix epoch. Matches `Layer.created_at` /
+  // `LayerHandle.created_at` / D21's `TaskRecord.created_at`. Powers
+  // the notebook's branch-picker "X min ago" relative timestamps
+  // (D34 §3.2 / §4.2). 0 when not available (e.g., the kernel can
+  // resolve the branch ref but the head's handle was reclaimed by
+  // GC — should not happen in practice, but the wire shape
+  // tolerates it).
+  int64 head_committed_at_ms = 3;
 }
 
 message CreateBranchRequest {

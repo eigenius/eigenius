@@ -61,6 +61,10 @@ import {
 import type { BranchInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
+import {
+  formatAbsoluteIso,
+  formatRelative,
+} from "../../runtime/relativeTime";
 import { CreateBranchDialog } from "../dialogs/CreateBranchDialog";
 import { DeleteBranchDialog } from "../dialogs/DeleteBranchDialog";
 
@@ -164,6 +168,7 @@ export function BranchesPanel() {
   const branches = useNotebookStore((s) => s.branches);
   const refreshBranches = useNotebookStore((s) => s.refreshBranches);
   const switchBranch = useNotebookStore((s) => s.switchBranch);
+  const setDestination = useNotebookStore((s) => s.setDestination);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -200,6 +205,17 @@ export function BranchesPanel() {
       </Toast>,
       { intent: "info", timeout: 6000 },
     );
+  };
+
+  // "View history" jumps to the History rail destination. The
+  // History panel is branch-scoped (D34 §5), so we switch the active
+  // branch first if the row is for a different one — that keeps the
+  // workspace's read/write context consistent with the destination.
+  const onViewHistory = (b: BranchInfo) => {
+    if (b.name !== activeBranch) {
+      switchBranch(eigen, b.name);
+    }
+    setDestination("history");
   };
 
   return (
@@ -243,6 +259,7 @@ export function BranchesPanel() {
               activeBranch={activeBranch}
               styles={styles}
               onSwitch={onSwitch}
+              onViewHistory={onViewHistory}
               onDelete={(b) => setDeleteTarget(b)}
             />
           )}
@@ -288,6 +305,7 @@ interface BranchesTableProps {
   activeBranch: string;
   styles: ReturnType<typeof useStyles>;
   onSwitch: (b: BranchInfo) => void;
+  onViewHistory: (b: BranchInfo) => void;
   onDelete: (b: BranchInfo) => void;
 }
 
@@ -296,6 +314,7 @@ function BranchesTable({
   activeBranch,
   styles,
   onSwitch,
+  onViewHistory,
   onDelete,
 }: BranchesTableProps) {
   return (
@@ -304,6 +323,7 @@ function BranchesTable({
         <tr>
           <th className={styles.th}>Branch</th>
           <th className={styles.th}>Tip</th>
+          <th className={styles.th}>Last commit</th>
           <th className={styles.th}>Actions</th>
         </tr>
       </thead>
@@ -330,6 +350,9 @@ function BranchesTable({
                 <span className={styles.tip}>{shortHash(b.headLayer)}</span>
               </td>
               <td className={styles.td}>
+                <LastCommitCell ms={Number(b.headCommittedAtMs)} />
+              </td>
+              <td className={styles.td}>
                 <div className={styles.actions}>
                   <Button
                     size="small"
@@ -339,11 +362,21 @@ function BranchesTable({
                   >
                     {isActive ? "Active" : "Switch"}
                   </Button>
-                  <ComingSoonAction
-                    label="View history"
-                    icon={<History16Regular />}
-                    phase={4}
-                  />
+                  <Tooltip
+                    content={isActive
+                      ? "Open the History panel for this branch."
+                      : "Switch to this branch and open its History panel."}
+                    relationship="description"
+                  >
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<History16Regular />}
+                      onClick={() => onViewHistory(b)}
+                    >
+                      View history
+                    </Button>
+                  </Tooltip>
                   <ComingSoonAction
                     label="Compact"
                     icon={<Stack16Regular />}
@@ -407,4 +440,30 @@ function ComingSoonAction({ label, icon, phase }: ComingSoonActionProps) {
 function shortHash(hex: string): string {
   if (hex.length <= 10) return hex;
   return `${hex.slice(0, 4)}…${hex.slice(-4)}`;
+}
+
+interface LastCommitCellProps {
+  /** `0` means the kernel didn't surface a timestamp (no backend, or
+   *  the head's handle was reclaimed). Renders an em-dash in that case. */
+  ms: number;
+}
+
+/** Last-commit cell: relative time + tooltip with the absolute ISO
+ *  stamp. Same display contract as the BranchBar's tip indicator
+ *  (D34 §3.2). */
+function LastCommitCell({ ms }: LastCommitCellProps) {
+  if (ms <= 0) {
+    return (
+      <Caption1 style={{ color: "var(--colorNeutralForeground3)" }}>—</Caption1>
+    );
+  }
+  return (
+    <Tooltip
+      relationship="description"
+      content={formatAbsoluteIso(ms)}
+      withArrow
+    >
+      <span>{formatRelative(ms)}</span>
+    </Tooltip>
+  );
 }

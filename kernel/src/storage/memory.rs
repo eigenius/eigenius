@@ -40,7 +40,6 @@ use crate::program::trace::{InMemoryTraceStore, TraceStore};
 use crate::storage::{BatchOp, ChainInfo, PersistentBackend, ResourceBackend, StorageError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// In-memory `PersistentBackend` for kernel-side tests.
 ///
@@ -112,12 +111,9 @@ impl MemoryPersistentBackend {
     }
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+// `now_millis` removed — `LayerHandle.created_at` is now sourced from
+// `Layer.created_at()` (stamped at `LayerBuilder::build` time), so the
+// backend no longer generates its own timestamp.
 
 impl ResourceBackend for MemoryPersistentBackend {
     fn load_resource(&self, layer_id: &LayerId, iri: &Iri) -> Option<Resource> {
@@ -218,7 +214,11 @@ impl PersistentBackend for MemoryPersistentBackend {
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
-            created_at: now_millis(),
+            // Copy the build-time stamp instead of taking `now_millis()`
+            // here — keeps the in-memory Layer and persisted handle
+            // consistent on `created_at` (single source of truth in
+            // `LayerBuilder::build`).
+            created_at: layer.created_at(),
             is_redirect_source: false,
         };
         // Build the bloom outside the lock (it's a hash-heavy loop) and

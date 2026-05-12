@@ -39,7 +39,6 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::storage::{LayerStore, ResourceBackend, ResourceStore, StorageError};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use triple_index::RocksTripleIndex;
 
 const TOPO_PREFIX: &str = "topo:";
@@ -73,12 +72,9 @@ const REDIRECT_PREFIX: &str = "redirect:";
 /// chain commit).
 const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+// `now_millis` removed — `LayerHandle.created_at` is now sourced from
+// `Layer.created_at()` (stamped at `LayerBuilder::build` time), so the
+// backend no longer generates its own timestamp.
 
 /// RocksDB-backed storage.
 pub struct RocksStore {
@@ -379,7 +375,11 @@ impl LayerStore for RocksStore {
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
-            created_at: now_millis(),
+            // Copy the build-time stamp set by `LayerBuilder::build`
+            // rather than taking `now_millis()` here; keeps the
+            // in-memory Layer and persisted handle consistent on
+            // `created_at`.
+            created_at: layer.created_at(),
             is_redirect_source: false,
         };
         self.put_topology_entry(&handle)?;
@@ -625,7 +625,11 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
-            created_at: now_millis(),
+            // Copy the build-time stamp set by `LayerBuilder::build`
+            // rather than taking `now_millis()` here; keeps the
+            // in-memory Layer and persisted handle consistent on
+            // `created_at`.
+            created_at: layer.created_at(),
             is_redirect_source: false,
         };
         let bloom = BloomFilter::for_iris(layer.defined_iris());

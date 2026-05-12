@@ -63,6 +63,7 @@ import {
 import type { BranchInfo } from "@eigenius/client";
 import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
+import { formatAbsoluteIso, formatRelative } from "../runtime/relativeTime";
 import { CreateBranchDialog } from "./dialogs/CreateBranchDialog";
 
 const BRANCH_TOASTER_ID = "branch-bar-toaster";
@@ -122,6 +123,28 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
+  menuTime: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontFamily: tokens.fontFamilyBase,
+  },
+  // Read-pin indicator: `· reading at <hash>` next to the tip. Drawn
+  // in a warning-tint so the user notices reads aren't at the tip.
+  readPin: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorPaletteYellowForeground1,
+    fontFamily: tokens.fontFamilyMonospace,
+    fontSize: tokens.fontSizeBase200,
+    padding: `0 ${tokens.spacingHorizontalXS}`,
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  returnToTipBtn: {
+    minHeight: "auto",
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+  },
   emptyState: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     color: tokens.colorNeutralForeground3,
@@ -137,8 +160,10 @@ export function BranchBar() {
   const activeBranch = useNotebookStore((s) => s.activeBranch);
   const branches = useNotebookStore((s) => s.branches);
   const dirty = useNotebookStore((s) => s.dirty);
+  const readPinLayerId = useNotebookStore((s) => s.readPinLayerId);
   const refreshBranches = useNotebookStore((s) => s.refreshBranches);
   const switchBranch = useNotebookStore((s) => s.switchBranch);
+  const setReadPin = useNotebookStore((s) => s.setReadPin);
 
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -150,10 +175,16 @@ export function BranchBar() {
     void refreshBranches(eigen);
   }, [eigen, refreshBranches]);
 
-  const activeHead = useMemo(() => {
+  const activeInfo = useMemo(() => {
     if (!branches) return null;
-    return branches.find((b) => b.name === activeBranch)?.headLayer ?? null;
+    return branches.find((b) => b.name === activeBranch) ?? null;
   }, [branches, activeBranch]);
+  const activeHead = activeInfo?.headLayer ?? null;
+  // BigInt because the proto codec maps `int64` → bigint. Convert
+  // once so callers can pass it to plain `number`-shaped helpers.
+  const activeHeadCommittedAtMs = activeInfo
+    ? Number(activeInfo.headCommittedAtMs)
+    : 0;
 
   const onSwitch = (target: BranchInfo) => {
     if (target.name === activeBranch) return;
@@ -207,9 +238,18 @@ export function BranchBar() {
       <TipIndicator
         active={activeBranch}
         head={activeHead}
+        headCommittedAtMs={activeHeadCommittedAtMs}
         knownBranches={branches}
         styles={styles}
       />
+
+      {readPinLayerId && (
+        <ReadPinIndicator
+          layerId={readPinLayerId}
+          onReturn={() => setReadPin(null)}
+          styles={styles}
+        />
+      )}
 
       {dirty && (
         <Tooltip
@@ -305,6 +345,12 @@ function BranchMenu({
               </span>
               <span className={styles.menuTip}>
                 tip {shortHash(b.headLayer)}
+                {b.headCommittedAtMs > 0n && (
+                  <span className={styles.menuTime}>
+                    {" · "}
+                    {formatRelative(Number(b.headCommittedAtMs))}
+                  </span>
+                )}
               </span>
             </div>
           </MenuItem>
@@ -321,17 +367,28 @@ function BranchMenu({
 interface TipIndicatorProps {
   active: string;
   head: string | null;
+  /** `0` when the kernel didn't report a timestamp (no backend, or
+   *  the head's handle was reclaimed). */
+  headCommittedAtMs: number;
   knownBranches: readonly BranchInfo[] | null;
   styles: ReturnType<typeof useStyles>;
 }
 
-function TipIndicator({ active, head, knownBranches, styles }: TipIndicatorProps) {
+function TipIndicator({
+  active,
+  head,
+  headCommittedAtMs,
+  knownBranches,
+  styles,
+}: TipIndicatorProps) {
   // Three states:
   // - `knownBranches === null`: in-memory mode. No tip to show.
   // - `head === null`: branches list loaded but doesn't contain
   //   `active` (shouldn't happen in practice, but the SDK doesn't
   //   guarantee it — show a placeholder rather than crash).
-  // - `head` present: render short-hash + tooltip with full id.
+  // - `head` present: render short-hash + tooltip with full id +
+  //   commit timestamp (relative on the hover, absolute on the
+  //   second line).
   if (knownBranches === null) {
     return null;
   }
@@ -343,6 +400,8 @@ function TipIndicator({ active, head, knownBranches, styles }: TipIndicatorProps
       </span>
     );
   }
+  const relative = formatRelative(headCommittedAtMs);
+  const absolute = formatAbsoluteIso(headCommittedAtMs);
   return (
     <Tooltip
       relationship="description"
@@ -354,6 +413,11 @@ function TipIndicator({ active, head, knownBranches, styles }: TipIndicatorProps
           <div style={{ fontFamily: "monospace", fontSize: 12 }}>
             head: {head}
           </div>
+          {absolute && (
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              committed: {absolute}
+            </div>
+          )}
         </div>
       }
       withArrow
@@ -363,6 +427,52 @@ function TipIndicator({ active, head, knownBranches, styles }: TipIndicatorProps
           tip:
         </Body1>
         <span>{shortHash(head)}</span>
+        {relative && (
+          <span className={styles.tipLabel}> · {relative}</span>
+        )}
+      </span>
+    </Tooltip>
+  );
+}
+
+interface ReadPinIndicatorProps {
+  layerId: string;
+  onReturn: () => void;
+  styles: ReturnType<typeof useStyles>;
+}
+
+/** Renders the `· reading at <hash>` strip with a "Return to tip"
+ *  button when the user has time-travelled via the History panel
+ *  (D34 §5.2). The pin is per-session, not a kernel concept; "Return
+ *  to tip" just clears the local pin and re-routes reads to the
+ *  branch's current head. */
+function ReadPinIndicator({ layerId, onReturn, styles }: ReadPinIndicatorProps) {
+  return (
+    <Tooltip
+      relationship="description"
+      withArrow
+      content={
+        <div>
+          <div>
+            Reads are pinned to this layer ("Time-travel here"). Writes
+            still go to the branch tip.
+          </div>
+          <div style={{ fontFamily: "monospace", fontSize: 12, marginTop: 4 }}>
+            {layerId}
+          </div>
+        </div>
+      }
+    >
+      <span className={styles.readPin}>
+        <span>· reading at {shortHash(layerId)}</span>
+        <Button
+          size="small"
+          appearance="subtle"
+          className={styles.returnToTipBtn}
+          onClick={onReturn}
+        >
+          Return to tip
+        </Button>
       </span>
     </Tooltip>
   );

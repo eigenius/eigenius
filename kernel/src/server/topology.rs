@@ -89,6 +89,10 @@ fn walk_layer(
             "institution_count".to_string(),
             counts.institutions.to_string(),
         );
+        // Commit timestamp (D34 §5.2). Millis since Unix epoch.
+        // Consumers render this as the layer's "Last commit" timestamp;
+        // the notebook's History panel keys its row ordering on it.
+        attrs.insert("created_at_ms".to_string(), layer.created_at().to_string());
         nodes.push(proto::TopologyNode {
             id: layer_id.clone(),
             kind: proto::NodeKind::Layer as i32,

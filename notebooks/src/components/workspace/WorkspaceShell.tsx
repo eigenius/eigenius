@@ -38,6 +38,8 @@
  */
 
 import { useState } from "react";
+import { useNotebookStore } from "../../runtime/notebookStore";
+import type { WorkspaceDestination } from "../../runtime/notebookStore";
 import {
   NavCategory,
   NavCategoryItem,
@@ -89,24 +91,18 @@ import { BranchBar } from "../BranchBar";
 import { Notebook } from "../Notebook";
 import { BranchesPanel } from "./BranchesPanel";
 import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
+import { HistoryPanel } from "./HistoryPanel";
 
 /**
  * Destination keys driving the active main-pane content. Strings
  * (rather than numbers) so debugger output / route-state are
  * self-describing if we later add URL routing.
  */
-type Destination =
-  | "notebook"
-  | "branches"
-  | "history"
-  | "tags"
-  | "merge"
-  | "topology"
-  | "institutions"
-  | "tasks"
-  | "compaction"
-  | "gc"
-  | "health";
+// `Destination` is exported from the store as `WorkspaceDestination`
+// so non-shell components (panels, dialogs) can navigate by key
+// without importing this file's internals. The local alias keeps
+// this file's call sites short.
+type Destination = WorkspaceDestination;
 
 // Icon bundles for the rail. Fluent v9's `bundleIcon` pairs a filled
 // variant (selected state) with a regular variant (idle).
@@ -292,7 +288,11 @@ const RAIL_ITEMS: Array<
 
 export function WorkspaceShell() {
   const styles = useStyles();
-  const [destination, setDestination] = useState<Destination>("notebook");
+  // Destination state lives in the store (D34 §3.1 — any rail
+  // destination can navigate to any other, e.g. BranchesPanel's
+  // "View history" action jumps to History without prop-drilling).
+  const destination = useNotebookStore((s) => s.destination);
+  const setDestination = useNotebookStore((s) => s.setDestination);
   // `railCollapsed`: icon-only mode. Section headers, dividers, and
   // item labels are hidden; each icon gets a hover tooltip. Default
   // expanded so a first-time user sees the IA; subsequent toggles
@@ -457,13 +457,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "branches":
       return <BranchesPanel />;
     case "history":
-      return (
-        <ComingSoonPlaceholder
-          destination="History"
-          phase={4}
-          description="A branch-scoped linearisation of the layer DAG. Shows commits, merges, consolidations."
-        />
-      );
+      return <HistoryPanel />;
     case "merge":
       return (
         <ComingSoonPlaceholder

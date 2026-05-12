@@ -3005,9 +3005,22 @@ impl EigeniusKernel for EigeniusService {
             .map_err(|e| Status::internal(format!("list_branches failed: {e}")))?;
         let branches = branches
             .into_iter()
-            .map(|(name, head)| BranchInfo {
-                name,
-                head_layer: hex::encode(head.0),
+            .map(|(name, head)| {
+                // One `load_handle` per branch — typical chains have
+                // a small number of branches, so the fan-out cost is
+                // negligible compared to forcing the client to call
+                // `GetBranch` for each row to learn the commit time.
+                let head_committed_at_ms = backend
+                    .load_handle(&head)
+                    .ok()
+                    .flatten()
+                    .map(|h| h.created_at)
+                    .unwrap_or(0);
+                BranchInfo {
+                    name,
+                    head_layer: hex::encode(head.0),
+                    head_committed_at_ms,
+                }
             })
             .collect();
         Ok(Response::new(ListBranchesResponse { branches }))
@@ -3026,13 +3039,27 @@ impl EigeniusKernel for EigeniusService {
             .get_branch(&req.name)
             .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
         {
-            Some(head) => Ok(Response::new(GetBranchResponse {
-                found: true,
-                head_layer: hex::encode(head.0),
-            })),
+            Some(head) => {
+                // Look up the head's commit timestamp via its
+                // `LayerHandle`. Missing handle (shouldn't happen for
+                // a live branch ref, but GC corner cases exist)
+                // reports `0` — the wire shape allows it.
+                let head_committed_at_ms = backend
+                    .load_handle(&head)
+                    .ok()
+                    .flatten()
+                    .map(|h| h.created_at)
+                    .unwrap_or(0);
+                Ok(Response::new(GetBranchResponse {
+                    found: true,
+                    head_layer: hex::encode(head.0),
+                    head_committed_at_ms,
+                }))
+            }
             None => Ok(Response::new(GetBranchResponse {
                 found: false,
                 head_layer: String::new(),
+                head_committed_at_ms: 0,
             })),
         }
     }

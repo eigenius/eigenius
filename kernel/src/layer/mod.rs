@@ -127,6 +127,18 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Milliseconds since Unix epoch. The single source of truth for the
+/// `Layer.created_at` field — backends copy this value onto their
+/// `LayerHandle` rather than calling `now_millis()` themselves, so
+/// the build-time and persist-time timestamps stay consistent.
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 /// Position-addressed layer identifier (SHA-256 hash).
 ///
@@ -265,6 +277,13 @@ pub struct Layer {
     /// visited layer (no `RedirectMap` probe). Most layers have
     /// `None`; redirects are sparse.
     redirect_target: Option<Arc<Layer>>,
+    /// Milliseconds since Unix epoch — when the layer was committed.
+    /// Set by `LayerBuilder::build` so the timestamp travels with the
+    /// in-memory layer; backends copy it onto `LayerHandle` rather
+    /// than calling `now_millis()` themselves, keeping the build and
+    /// persist timestamps consistent. Matches D21's `TaskRecord`
+    /// convention (i64 millis).
+    created_at: i64,
 }
 
 impl fmt::Debug for Layer {
@@ -306,6 +325,7 @@ impl Layer {
             defined_iris,
             storage,
             redirect_target: None,
+            created_at: handle.created_at,
         }
     }
 
@@ -329,12 +349,20 @@ impl Layer {
             defined_iris,
             storage,
             redirect_target: None,
+            created_at: handle.created_at,
         }
     }
 
     /// Returns the position-addressed identifier of this layer.
     pub fn id(&self) -> &LayerId {
         &self.id
+    }
+
+    /// Milliseconds since Unix epoch — when the layer was committed.
+    /// Stamped by `LayerBuilder::build` and round-tripped through
+    /// `LayerHandle.created_at` when the layer is reloaded from disk.
+    pub fn created_at(&self) -> i64 {
+        self.created_at
     }
 
     /// Returns the content-only hash of this layer (independent of position).
@@ -726,6 +754,11 @@ impl LayerBuilder {
             // an *existing* layer. `build_chain` is the path that
             // populates this field for reloaded chains.
             redirect_target: None,
+            // Stamp the commit timestamp here, at build time, so it
+            // travels with the in-memory layer and the persist-time
+            // handle can copy it (instead of each backend calling
+            // `now_millis()` themselves and drifting from this value).
+            created_at: now_millis(),
         };
         // Phase 14h: pre-populate the triple index from the layer's
         // indexable triples. `extract_indexable_triples` consults each

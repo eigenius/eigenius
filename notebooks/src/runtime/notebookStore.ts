@@ -49,6 +49,28 @@ import { decodeResultDocument } from "./resultDocument";
 export type { CommitMeta };
 
 /**
+ * Rail destination keys (D34 §3.1). Kept as a string union so any
+ * panel can navigate by name without importing component refs, and
+ * so debugger / future URL routing output is self-describing.
+ *
+ * Add a destination here, register its rail item in `WorkspaceShell`'s
+ * `RAIL_ITEMS`, and add a `case` in `DestinationView` — that's the
+ * whole shape.
+ */
+export type WorkspaceDestination =
+  | "notebook"
+  | "branches"
+  | "history"
+  | "tags"
+  | "merge"
+  | "topology"
+  | "institutions"
+  | "tasks"
+  | "compaction"
+  | "gc"
+  | "health";
+
+/**
  * Curated chart namespace exposed to TS-cell sandboxes (Phase 5a).
  * `eigen.runProgramByIri(...)` returns data; the cell shapes it; the
  * cell returns `React.createElement(charts.GroupedVerticalBarChart, …)`
@@ -219,6 +241,24 @@ export interface NotebookState {
    */
   activeBranch: string;
   /**
+   * Active read-pin (D34 §5.2's "Time-travel here"). When set, the
+   * editor's reads (Query, RunProgramByIri) pass `atLayer` so the
+   * kernel resolves them against this layer instead of the branch
+   * tip. Writes (Load, Reflect, the trace-layer commit of RunProgram)
+   * still go to the branch — the pin is read-only and per-session,
+   * not a kernel concept. `null` = not pinned, reads follow the
+   * branch's current head.
+   */
+  readPinLayerId: string | null;
+  /**
+   * Active workspace rail destination (D34 §3.1). String key so any
+   * panel can navigate ("View history" from BranchesPanel, "Merge
+   * into…" from a future Phase, etc.) without prop-drilling
+   * callbacks. The WorkspaceShell renders the matching destination
+   * component.
+   */
+  destination: WorkspaceDestination;
+  /**
    * Cached `listBranches` result for the branch picker menu. Refreshed
    * lazily on picker open and explicitly after `createBranch`.
    * `null` means "never fetched" (distinct from "fetched, zero
@@ -279,6 +319,15 @@ export interface NotebookState {
     fromLayer: string,
     switchAfter: boolean,
   ) => Promise<{ success: boolean; error: string }>;
+  /**
+   * Pin the editor's reads to a specific layer (or clear with
+   * `null` to return to branch-tip reads). Clears `cellStates` /
+   * `cellOutputs` for the same reason `switchBranch` does — the
+   * outputs were against a different read context.
+   */
+  setReadPin: (layerId: string | null) => void;
+  /** Switch the workspace rail to a different destination. */
+  setDestination: (d: WorkspaceDestination) => void;
 
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
@@ -346,6 +395,8 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   lastRunCellId: null,
 
   activeBranch: "main",
+  readPinLayerId: null,
+  destination: "notebook",
   branches: null,
   dirty: false,
 
@@ -367,7 +418,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     try {
       // Snapshot the predecessor outputs at run time so TS cells can
       // refer to them via `previousOutputs[cellId]` (D22 §6.8).
-      const { cells, cellOutputs } = get();
+      const { cells, cellOutputs, readPinLayerId } = get();
       const cellIndex = cells.findIndex((c) => c.id === cell.id);
       const previousOutputs: Record<string, CellOutput> = {};
       if (cellIndex > 0) {
@@ -377,7 +428,12 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         }
       }
 
-      const output = await executeCell(eigen, cell, previousOutputs);
+      const output = await executeCell(
+        eigen,
+        cell,
+        previousOutputs,
+        readPinLayerId,
+      );
       setOutput(output);
       // Loads update the active layer for display purposes only — the
       // notebook does NOT pin downstream queries to this layer ID
@@ -471,6 +527,23 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       get().switchBranch(eigen, name);
     }
     return { success: true, error: "" };
+  },
+
+  setReadPin(layerId) {
+    set({
+      readPinLayerId: layerId,
+      // Outputs were against the prior read context; clear them so
+      // the user re-runs against the new pin (or, when clearing the
+      // pin, against the branch tip).
+      cellStates: new Map(),
+      cellOutputs: new Map(),
+      activeLayer: null,
+      lastRunCellId: null,
+    });
+  },
+
+  setDestination(d) {
+    set({ destination: d });
   },
 
   toggleCellCollapsed(cellId) {
@@ -688,9 +761,13 @@ async function executeCell(
   eigen: Eigen,
   cell: CellJson,
   previousOutputs: Record<string, CellOutput>,
+  readPinLayerId: string | null,
 ): Promise<CellOutput> {
   switch (cell.type) {
     case "esl": {
+      // Loads are writes — they always commit to the branch tip, not
+      // the read-pin. (D34 §5.2: "Writes still go to branch tip — the
+      // read-pin is per-session, not a kernel concept.")
       const resp = await eigen.load(cell.source, {
         contentType: "application/x-esl",
         autoCommit: true,
@@ -716,7 +793,12 @@ async function executeCell(
       };
     }
     case "eigenql": {
-      const resp = await eigen.query(cell.source);
+      // Read-pinned: query resolves against the pinned layer instead
+      // of the branch tip. A FIBER INTO inside the query still
+      // commits to the branch (the kernel's commit-vs-read split).
+      const resp = await eigen.query(cell.source, {
+        atLayer: readPinLayerId ?? undefined,
+      });
       if (!resp.success) {
         return {
           kind: "error",
@@ -732,9 +814,14 @@ async function executeCell(
     case "typescript":
       return executeTypeScriptCell(eigen, cell.source, previousOutputs);
     case "program-run":
-      return executeProgramRunCell(eigen, cell.program_iri, cell.input_iris);
+      return executeProgramRunCell(
+        eigen,
+        cell.program_iri,
+        cell.input_iris,
+        readPinLayerId,
+      );
     case "chart":
-      return executeChartCell(eigen, cell);
+      return executeChartCell(eigen, cell, readPinLayerId);
     case "markdown":
       // Should never reach here — runAll skips markdown, and the
       // per-cell Run button is hidden on markdown cells.
@@ -752,6 +839,7 @@ async function executeProgramRunCell(
   eigen: Eigen,
   programIri: string,
   inputIris: readonly string[],
+  readPinLayerId: string | null,
 ): Promise<CellOutput> {
   const trimmedProgram = programIri.trim();
   if (trimmedProgram.length === 0) {
@@ -765,7 +853,11 @@ async function executeProgramRunCell(
   const results: ProgramRunResult[] = [];
   for (const inputIri of validInputs) {
     try {
-      const resp = await eigen.runProgramByIri(trimmedProgram, inputIri);
+      // Read-pin pins the kernel's resolution of `programIri` and
+      // `inputIri`; the trace layer still commits to the branch tip.
+      const resp = await eigen.runProgramByIri(trimmedProgram, inputIri, {
+        atLayer: readPinLayerId ?? undefined,
+      });
       if (!resp.success) {
         results.push({
           inputIri,
@@ -802,6 +894,7 @@ async function executeProgramRunCell(
 async function executeChartCell(
   eigen: Eigen,
   cell: ChartCellJson,
+  readPinLayerId: string | null,
 ): Promise<CellOutput> {
   const trimmedQuery = cell.query.trim();
   if (trimmedQuery.length === 0) {
@@ -813,7 +906,9 @@ async function executeChartCell(
       message: "chart x_column and y_column are required",
     };
   }
-  const resp = await eigen.query(trimmedQuery);
+  const resp = await eigen.query(trimmedQuery, {
+    atLayer: readPinLayerId ?? undefined,
+  });
   if (!resp.success) {
     return {
       kind: "error",
