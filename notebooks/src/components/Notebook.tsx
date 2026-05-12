@@ -43,7 +43,6 @@ import {
   PlayMultiple16Regular,
 } from "@fluentui/react-icons";
 import { parseNotebook } from "../persistence/notebook-format";
-import { BranchBar } from "./BranchBar";
 import { Cell } from "./Cell";
 import { CellInsertGap } from "./CellInsertGap";
 import { EditMetadataDialog } from "./dialogs/EditMetadataDialog";
@@ -52,14 +51,20 @@ import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 
 const useStyles = makeStyles({
-  // Pinned mode (default): outer is a full-viewport flex column.
-  // The header is fixed-height at top; the cell list is the only
+  // Pinned mode (default): outer fills its parent flex column. The
+  // notebook header is fixed-height at top; the cell list is the only
   // scroll surface. Unpinned mode: outer collapses to natural height
-  // and the page body scrolls (the original Phase 4 behaviour).
+  // and the surrounding scroll surface owns scrolling (the original
+  // Phase 4 behaviour, useful when the notebook is embedded in a
+  // longer page).
+  //
+  // Pre-D34: outer was `height: 100vh`. Now the WorkspaceShell sets
+  // the viewport bound and the notebook fills its rail destination
+  // (`height: 100%`).
   rootPinned: {
     display: "flex",
     flexDirection: "column",
-    height: "100vh",
+    height: "100%",
     overflow: "hidden",
   },
   rootUnpinned: {
@@ -300,10 +305,6 @@ export function Notebook() {
               {meta.description}
             </Caption1>
           )}
-          {/* D34 §3.2 — always-visible chain context (branch picker /
-              tip / unsaved-dot) between the title row and the
-              command toolbar. */}
-          <BranchBar />
           <div className={styles.toolbar}>
             <Caption1 className={styles.meta}>
               {cells.length} cell{cells.length === 1 ? "" : "s"}

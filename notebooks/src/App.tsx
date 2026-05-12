@@ -22,7 +22,7 @@ import {
   MergeEventToaster,
   TOASTER_ID,
 } from "./components/MergeEventToaster";
-import { Notebook } from "./components/Notebook";
+import { WorkspaceShell } from "./components/workspace/WorkspaceShell";
 import { parseNotebook } from "./persistence/notebook-format";
 import { EigenProvider } from "./runtime/EigenProvider";
 import { useNotebookStore } from "./runtime/notebookStore";
@@ -51,7 +51,7 @@ export function App() {
   return (
     <FluentProvider theme={webLightTheme}>
       <EigenProvider>
-        <Notebook />
+        <WorkspaceShell />
         {/*
          * D34 §6.1 trivial-merge toast surface. `Toaster` mounts the
          * portal at the root; `MergeEventToaster` watches cell outputs

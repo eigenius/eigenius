@@ -23,6 +23,7 @@
     "@fluentui/react-charts": "^9.3.18",
     "@fluentui/react-components": "^9.55.0",
     "@fluentui/react-icons": "^2.0.325",
+    "@fluentui/react-nav": "^9.3.24",
     "@types/d3-hierarchy": "^3.1.7",
     "@uiw/react-codemirror": "^4.23.5",
     "@xyflow/react": "^12.10.2",
