@@ -33,7 +33,7 @@ import {
   LineChart,
   VerticalBarChart,
 } from "@fluentui/react-charts";
-import type { Eigen } from "@eigenius/client";
+import type { BranchInfo, Eigen } from "@eigenius/client";
 import type {
   CellJson,
   CellType,
@@ -211,6 +211,31 @@ export interface NotebookState {
    */
   lastRunCellId: string | null;
 
+  // ---- Branch state (D34 Phase 2) ----
+  /**
+   * Name of the kernel branch the editor's actions route to. Mirrors
+   * the SDK's `Eigen.getDefaultBranch()` so subscribed components
+   * re-render when the user switches branches. Defaults to `"main"`.
+   */
+  activeBranch: string;
+  /**
+   * Cached `listBranches` result for the branch picker menu. Refreshed
+   * lazily on picker open and explicitly after `createBranch`.
+   * `null` means "never fetched" (distinct from "fetched, zero
+   * branches found"). In-memory-mode kernels reject `listBranches`,
+   * so we keep `null` there and the picker degrades to a single
+   * static `main` row.
+   */
+  branches: readonly BranchInfo[] | null;
+  /**
+   * True iff the in-memory document (cells + meta) has unsaved
+   * changes relative to the last `loadNotebook` / `markSaved` call.
+   * Drives the `●` indicator in the header. Cell outputs and view
+   * preferences (collapsed) don't count — they're not part of the
+   * document.
+   */
+  dirty: boolean;
+
   // ---- Run actions ----
   runCell: (eigen: Eigen, cell: CellJson) => Promise<void>;
   runAll: (eigen: Eigen) => Promise<void>;
@@ -224,9 +249,46 @@ export interface NotebookState {
   /** Set every cell's collapsed flag to the given value. */
   setAllCellsCollapsed: (collapsed: boolean) => void;
 
+  // ---- Branch actions (D34 Phase 2) ----
+  /**
+   * Refresh the `branches` cache by calling `eigen.listBranches()`.
+   * No-op if the kernel rejects the call (in-memory mode); leaves the
+   * cache at its previous value. Returns the list returned (or the
+   * existing cache if the call failed) for callers that need to act
+   * on it immediately.
+   */
+  refreshBranches: (eigen: Eigen) => Promise<readonly BranchInfo[] | null>;
+  /**
+   * Make `name` the active branch. Updates the SDK's default branch,
+   * mirrors it on the store, and clears the session-local run state
+   * (cellStates / cellOutputs / activeLayer / lastRunCellId) — those
+   * referenced the *old* branch's chain, so they'd dangle or
+   * mislead. Cells stay; the user re-establishes state on the new
+   * branch via Run All.
+   */
+  switchBranch: (eigen: Eigen, name: string) => void;
+  /**
+   * Create a new branch through the SDK and refresh the cache.
+   * Optionally switches the workspace to it on success. Returns
+   * the SDK response so callers can surface the kernel's
+   * `error` field on rejection.
+   */
+  createBranch: (
+    eigen: Eigen,
+    name: string,
+    fromLayer: string,
+    switchAfter: boolean,
+  ) => Promise<{ success: boolean; error: string }>;
+
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
   exportNotebook: () => NotebookJson;
+  /**
+   * Mark the in-memory document as matching the last-saved version.
+   * Called from the toolbar's Save flow after the file has been
+   * written to disk. Clears `dirty`.
+   */
+  markSaved: () => void;
   updateMeta: (partial: Partial<NotebookMetaJson>) => void;
   updateCellSource: (cellId: string, source: string) => void;
   insertCell: (afterCellId: string | null, type: CellType) => string;
@@ -282,6 +344,10 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   cellCollapsed: new Map(),
   activeLayer: null,
   lastRunCellId: null,
+
+  activeBranch: "main",
+  branches: null,
+  dirty: false,
 
   // ---- Run actions ----
 
@@ -363,6 +429,50 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     });
   },
 
+  async refreshBranches(eigen) {
+    try {
+      const list = await eigen.listBranches();
+      set({ branches: list });
+      return list;
+    } catch (_err) {
+      // In-memory kernels reject `listBranches` with `failed_precondition`.
+      // That's not an error from the user's perspective — there just
+      // isn't a multi-branch surface to enumerate. Leave the cache
+      // alone and return what we already had.
+      return get().branches;
+    }
+  },
+
+  switchBranch(eigen, name) {
+    // The SDK routes future calls through `useBranch`; the store
+    // mirrors the name so subscribed components re-render. The
+    // session-local run-state cache is dropped — its `layer_id` /
+    // `trace_iri` values reference the *old* branch's chain, so
+    // they'd dangle on `inspect` and mislead the user.
+    eigen.useBranch(name);
+    set({
+      activeBranch: name,
+      cellStates: new Map(),
+      cellOutputs: new Map(),
+      activeLayer: null,
+      lastRunCellId: null,
+    });
+  },
+
+  async createBranch(eigen, name, fromLayer, switchAfter) {
+    const resp = await eigen.createBranch(name, { fromLayer });
+    if (!resp.success) {
+      return { success: false, error: resp.error };
+    }
+    // Refresh the cache so the new branch appears in the menu
+    // even if the user doesn't switch to it.
+    await get().refreshBranches(eigen);
+    if (switchAfter) {
+      get().switchBranch(eigen, name);
+    }
+    return { success: true, error: "" };
+  },
+
   toggleCellCollapsed(cellId) {
     set((prev) => {
       const next = copyMap(prev.cellCollapsed);
@@ -392,6 +502,8 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       cellCollapsed: new Map(),
       activeLayer: null,
       lastRunCellId: null,
+      // Fresh load = nothing to save yet.
+      dirty: false,
     });
   },
 
@@ -404,8 +516,12 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     };
   },
 
+  markSaved() {
+    set({ dirty: false });
+  },
+
   updateMeta(partial) {
-    set((prev) => ({ meta: { ...prev.meta, ...partial } }));
+    set((prev) => ({ meta: { ...prev.meta, ...partial }, dirty: true }));
   },
 
   updateCellSource(cellId, source) {
@@ -417,6 +533,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         }
         return { ...c, source };
       }),
+      dirty: true,
     }));
   },
 
@@ -439,16 +556,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     }
     set((prev) => {
       if (afterCellId === null) {
-        return { cells: [newCell, ...prev.cells] };
+        return { cells: [newCell, ...prev.cells], dirty: true };
       }
       const idx = prev.cells.findIndex((c) => c.id === afterCellId);
       if (idx < 0) {
         // Unknown anchor — append at the end rather than silently failing.
-        return { cells: [...prev.cells, newCell] };
+        return { cells: [...prev.cells, newCell], dirty: true };
       }
       const next = prev.cells.slice();
       next.splice(idx + 1, 0, newCell);
-      return { cells: next };
+      return { cells: next, dirty: true };
     });
     return id;
   },
@@ -459,6 +576,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         if (c.id !== cellId || c.type !== "program-run") return c;
         return { ...c, ...partial };
       }),
+      dirty: true,
     }));
   },
 
@@ -468,6 +586,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         if (c.id !== cellId || c.type !== "chart") return c;
         return { ...c, ...partial };
       }),
+      dirty: true,
     }));
   },
 
@@ -480,6 +599,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       // The stale-cascade marker no longer makes sense if the cell it
       // pointed at is gone.
       lastRunCellId: prev.lastRunCellId === cellId ? null : prev.lastRunCellId,
+      dirty: true,
     }));
   },
 
@@ -493,7 +613,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       [next[idx], next[target]] = [next[target], next[idx]];
       // Cell positions changed; the stale marker references a position
       // that may no longer reflect the user's mental model. Clear it.
-      return { cells: next, lastRunCellId: null };
+      return { cells: next, lastRunCellId: null, dirty: true };
     });
   },
 }));

@@ -43,6 +43,7 @@ import {
   PlayMultiple16Regular,
 } from "@fluentui/react-icons";
 import { parseNotebook } from "../persistence/notebook-format";
+import { BranchBar } from "./BranchBar";
 import { Cell } from "./Cell";
 import { CellInsertGap } from "./CellInsertGap";
 import { EditMetadataDialog } from "./dialogs/EditMetadataDialog";
@@ -141,6 +142,7 @@ export function Notebook() {
   const updateMeta = useNotebookStore((s) => s.updateMeta);
   const exportNotebook = useNotebookStore((s) => s.exportNotebook);
   const loadNotebook = useNotebookStore((s) => s.loadNotebook);
+  const markSaved = useNotebookStore((s) => s.markSaved);
   const runAll = useNotebookStore((s) => s.runAll);
   const resetOutputs = useNotebookStore((s) => s.resetOutputs);
   const setAllCellsCollapsed = useNotebookStore(
@@ -187,6 +189,9 @@ export function Notebook() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    // The on-disk copy now matches the in-memory state — clear the
+    // `●` unsaved-changes indicator until the next mutating edit.
+    markSaved();
   };
 
   const onOpenClick = () => {
@@ -295,6 +300,10 @@ export function Notebook() {
               {meta.description}
             </Caption1>
           )}
+          {/* D34 §3.2 — always-visible chain context (branch picker /
+              tip / unsaved-dot) between the title row and the
+              command toolbar. */}
+          <BranchBar />
           <div className={styles.toolbar}>
             <Caption1 className={styles.meta}>
               {cells.length} cell{cells.length === 1 ? "" : "s"}
