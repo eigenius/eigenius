@@ -94,6 +94,7 @@ import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
 import { CompactionPanel } from "./CompactionPanel";
 import { GcPanel } from "./GcPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { InstitutionsPanel } from "./InstitutionsPanel";
 import { MergePanel } from "./MergePanel";
 import { TagsPanel } from "./TagsPanel";
 import { TasksPanel } from "./TasksPanel";
@@ -474,13 +475,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "gc":
       return <GcPanel />;
     case "institutions":
-      return (
-        <ComingSoonPlaceholder
-          destination="Institutions"
-          phase={10}
-          description="Inspect installed institutions and their QueryClass surface."
-        />
-      );
+      return <InstitutionsPanel />;
     case "topology":
       return (
         <ComingSoonPlaceholder

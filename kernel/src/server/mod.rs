@@ -2825,23 +2825,94 @@ impl EigeniusKernel for EigeniusService {
         if !req.at_layer.is_empty() {
             let _ = self.resolve_read_layer(&req.at_layer, "").await?;
         }
-        // D14 list-from-index. Each `InstitutionInfo` carries the
-        // QueryClass input-class IRIs declared by the institution.
-        // Comorphisms / formats are not surfaced through this RPC
-        // (a future proto revision can expand the surface).
+        // D14 list-from-index, enriched per D34 §G.8 / §9.2 so the
+        // notebook's Institutions inspector renders the list-view +
+        // detail panel from a single call. Each `InstitutionInfo`
+        // carries: legacy `query_types` (kept for non-notebook
+        // clients), runtime classification, the full QueryClass
+        // declarations, and the Comorphism triads bound to this
+        // institution (source / target classes resolved through the
+        // referenced ExportFormat / ImportFormat).
         let index = Arc::clone(&*self.institution_index.read().await);
         let mut infos: Vec<proto::InstitutionInfo> = index
             .institutions()
             .map(|inst| {
-                let query_types: Vec<String> = index
+                // QueryClasses declared by this institution. Sorted by
+                // IRI so the response is deterministic.
+                let mut qcs: Vec<&crate::institution::registry::QueryClassEntry> = index
                     .query_classes()
                     .filter(|qc| qc.institution_ref == inst.iri)
+                    .collect();
+                qcs.sort_by(|a, b| a.iri.cmp(&b.iri));
+                let query_types: Vec<String> = qcs
+                    .iter()
                     .map(|qc| qc.query_class.as_str().to_string())
                     .collect();
+                let query_classes: Vec<proto::QueryClassDecl> = qcs
+                    .iter()
+                    .map(|qc| proto::QueryClassDecl {
+                        iri: qc.iri.as_str().to_string(),
+                        query_class: qc.query_class.as_str().to_string(),
+                        result_class: qc.result_class.as_str().to_string(),
+                        query_handler: qc.query_handler.as_str().to_string(),
+                        dispatch_roles: qc
+                            .dispatch_roles
+                            .iter()
+                            .map(|r| dispatch_role_to_proto(*r) as i32)
+                            .collect(),
+                    })
+                    .collect();
+
+                // Comorphisms whose source OR target institution is
+                // this one. The Comorphism resource itself doesn't
+                // name an institution directly — we follow the
+                // export_format.institution_ref / import_format.
+                // institution_ref to attribute the triad. A single
+                // comorphism that crosses institutions shows up under
+                // both ends.
+                let mut comorphisms: Vec<proto::ComorphismDecl> = index
+                    .comorphisms()
+                    .filter(|c| {
+                        let exp_inst = index
+                            .export_format(&c.export_format)
+                            .map(|f| f.institution_ref.clone());
+                        let imp_inst = index
+                            .import_format(&c.import_format)
+                            .map(|f| f.institution_ref.clone());
+                        exp_inst.as_ref() == Some(&inst.iri) || imp_inst.as_ref() == Some(&inst.iri)
+                    })
+                    .map(|c| {
+                        let from_class = index
+                            .export_format(&c.export_format)
+                            .map(|f| f.from_class.as_str().to_string())
+                            .unwrap_or_default();
+                        let to_class = index
+                            .import_format(&c.import_format)
+                            .map(|f| f.to_class.as_str().to_string())
+                            .unwrap_or_default();
+                        proto::ComorphismDecl {
+                            iri: c.iri.as_str().to_string(),
+                            from_class,
+                            to_class,
+                            transformation: c.transformation.as_str().to_string(),
+                            exact: c.exact,
+                        }
+                    })
+                    .collect();
+                comorphisms.sort_by(|a, b| a.iri.cmp(&b.iri));
+
                 proto::InstitutionInfo {
                     iri: inst.iri.as_str().to_string(),
                     name: inst.name.clone(),
                     query_types,
+                    runtime_kind: runtime_kind_to_proto(inst.runtime) as i32,
+                    requires_environment: inst
+                        .requires_environment
+                        .as_ref()
+                        .map(|i| i.as_str().to_string())
+                        .unwrap_or_default(),
+                    query_classes,
+                    comorphisms,
                 }
             })
             .collect();
@@ -3737,6 +3808,30 @@ impl EigeniusService {
     }
 }
 
+/// Map `crate::institution::registry::RuntimeKind` → proto enum.
+/// `None` (no `runtime` property on the resource) → `UNSPECIFIED`.
+fn runtime_kind_to_proto(
+    kind: Option<crate::institution::registry::RuntimeKind>,
+) -> proto::RuntimeKind {
+    use crate::institution::registry::RuntimeKind as K;
+    match kind {
+        None => proto::RuntimeKind::Unspecified,
+        Some(K::InProcess) => proto::RuntimeKind::InProcess,
+        Some(K::Wasm) => proto::RuntimeKind::Wasm,
+        Some(K::External) => proto::RuntimeKind::External,
+    }
+}
+
+/// Map `crate::institution::registry::DispatchRole` → proto enum.
+fn dispatch_role_to_proto(role: crate::institution::registry::DispatchRole) -> proto::DispatchRole {
+    use crate::institution::registry::DispatchRole as R;
+    match role {
+        R::OnDemand => proto::DispatchRole::OnDemand,
+        R::AutoOnLoad => proto::DispatchRole::AutoOnLoad,
+        R::Decidable => proto::DispatchRole::Decidable,
+    }
+}
+
 /// Parse a hex-encoded LayerId from the wire, returning a typed
 /// `Status::invalid_argument` on malformed input.
 #[allow(clippy::result_large_err)]
@@ -4204,5 +4299,54 @@ mod merge_info_tests {
         let info = merge_info_from_persist_info(Some(&pi));
         assert_eq!(info.outcome, MergeOutcome::CachedDifferentPosition as i32);
         assert_eq!(info.merge_layer_id, hex_encode(cached.0));
+    }
+}
+
+#[cfg(test)]
+mod institution_enrichment_tests {
+    //! Pin the runtime + dispatch-role enum mappings used by
+    //! `list_institutions` (D34 §G.8 / §9.2). When the registry adds a
+    //! `RuntimeKind` or `DispatchRole` variant, the matching proto
+    //! branch must follow — the exhaustive-match in
+    //! `runtime_kind_to_proto` / `dispatch_role_to_proto` catches it at
+    //! compile time, and these tests catch any drift between the proto
+    //! enum's numeric values and the kernel-side ordering.
+
+    use super::*;
+    use crate::institution::registry::{
+        DispatchRole as KernelDispatchRole, RuntimeKind as KernelRuntimeKind,
+    };
+
+    #[test]
+    fn runtime_kind_maps_every_variant() {
+        assert_eq!(runtime_kind_to_proto(None), proto::RuntimeKind::Unspecified);
+        assert_eq!(
+            runtime_kind_to_proto(Some(KernelRuntimeKind::InProcess)),
+            proto::RuntimeKind::InProcess
+        );
+        assert_eq!(
+            runtime_kind_to_proto(Some(KernelRuntimeKind::Wasm)),
+            proto::RuntimeKind::Wasm
+        );
+        assert_eq!(
+            runtime_kind_to_proto(Some(KernelRuntimeKind::External)),
+            proto::RuntimeKind::External
+        );
+    }
+
+    #[test]
+    fn dispatch_role_maps_every_variant() {
+        assert_eq!(
+            dispatch_role_to_proto(KernelDispatchRole::OnDemand),
+            proto::DispatchRole::OnDemand
+        );
+        assert_eq!(
+            dispatch_role_to_proto(KernelDispatchRole::AutoOnLoad),
+            proto::DispatchRole::AutoOnLoad
+        );
+        assert_eq!(
+            dispatch_role_to_proto(KernelDispatchRole::Decidable),
+            proto::DispatchRole::Decidable
+        );
     }
 }

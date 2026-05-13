@@ -29,6 +29,7 @@ import {
   type BranchInfo,
   CancelTaskRequestSchema,
   type CancelTaskResponse,
+  type ComorphismDecl,
   ConsolidateChainRequestSchema,
   type ConsolidateChainResponse,
   ConsolidateErrorKind,
@@ -40,6 +41,7 @@ import {
   type DeleteBranchResponse,
   DeleteTagRequestSchema,
   type DeleteTagResponse,
+  DispatchRole,
   EigeniusKernel,
   EstimateConsolidationRequestSchema,
   type EstimateConsolidationResponse,
@@ -71,12 +73,14 @@ import {
   NotebookService,
   PreviewMergeRequestSchema,
   type PreviewMergeResponse,
+  type QueryClassDecl,
   QueryRequestSchema,
   type QueryResponse,
   ReflectRequestSchema,
   type ReflectResponse,
   RunGcRequestSchema,
   type RunGcResponse,
+  RuntimeKind,
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
@@ -91,6 +95,7 @@ import {
 export type {
   BranchInfo,
   CancelTaskResponse,
+  ComorphismDecl,
   ConsolidateChainResponse,
   CreateBranchResponse,
   CreateTagResponse,
@@ -110,6 +115,7 @@ export type {
   MergeBranchesResponse,
   MergeInfo,
   PreviewMergeResponse,
+  QueryClassDecl,
   QueryResponse,
   ReflectResponse,
   RunGcResponse,
@@ -122,7 +128,7 @@ export type {
 
 // Value-level enums (consumers compare against them) re-exported as
 // values, not just types.
-export { ConsolidateErrorKind, MergeOutcome };
+export { ConsolidateErrorKind, DispatchRole, MergeOutcome, RuntimeKind };
 
 const TEXT_ENCODER = new TextEncoder();
 

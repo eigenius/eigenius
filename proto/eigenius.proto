@@ -587,7 +587,88 @@ message InstitutionInfo {
   // QueryClass input-class IRIs declared by this institution. Each
   // entry corresponds to a `QueryClass` resource whose
   // `institution_ref` points at this institution.
+  //
+  // Legacy field — `query_classes` (tag 6) carries the richer
+  // declaration the notebook inspector uses. Kept for backward
+  // compatibility with non-notebook clients.
   repeated string query_types = 3;
+  // D34 §G.8 enrichment. Drives the Institutions inspector
+  // (D34 §9.2) — surface the runtime + the declarations the
+  // operator wants to see for each institution.
+  RuntimeKind runtime_kind = 4;
+  // IRI of the `RuntimeEnvironment` for `RUNTIME_KIND_EXTERNAL`
+  // institutions (D31 §5). Empty for WASM and in-process kinds.
+  string requires_environment = 5;
+  // Every `QueryClass` resource whose `institution_ref` points at
+  // this institution. Sorted by IRI.
+  repeated QueryClassDecl query_classes = 6;
+  // Every `Comorphism` resource whose triadic chain
+  // (export_format → transformation → import_format) names this
+  // institution as the source or target. Sorted by IRI. The
+  // notebook surfaces source/target class pairs derived from the
+  // referenced ExportFormat / ImportFormat resources.
+  repeated ComorphismDecl comorphisms = 7;
+}
+
+// Runtime classification for an institution (D34 §G.8). Mirrors
+// `crate::institution::registry::RuntimeKind` on the kernel side.
+enum RuntimeKind {
+  // The institution resource has no `runtime` property. The kernel
+  // can still dispatch through ordinary EigenQL paths; the operator
+  // just doesn't see a runtime-kind label.
+  RUNTIME_KIND_UNSPECIFIED = 0;
+  // In-process Rust trait object linked into the kernel binary.
+  RUNTIME_KIND_IN_PROCESS = 1;
+  // WASM Component Model binary hosted via Wasmtime in the kernel.
+  RUNTIME_KIND_WASM = 2;
+  // External service (gRPC, LSP, etc.) routed through D31 lifecycle.
+  RUNTIME_KIND_EXTERNAL = 3;
+}
+
+// Dispatch role declared on a `QueryClass` (D14 §6). One QueryClass
+// can carry multiple roles — e.g. `[OnDemand, Decidable]`.
+enum DispatchRole {
+  DISPATCH_ROLE_UNSPECIFIED = 0;
+  // Explicit invocation — EigenQL FIBER clause (D2 v2 §3.5).
+  DISPATCH_ROLE_ON_DEMAND = 1;
+  // Fired automatically on Load when a resource of the bound input
+  // class enters the chain. Result class must be `Verdict`.
+  DISPATCH_ROLE_AUTO_ON_LOAD = 2;
+  // Fired during type-check reduction of `Exp::NativeDecide`.
+  // Result class must be `Verdict`.
+  DISPATCH_ROLE_DECIDABLE = 3;
+}
+
+message QueryClassDecl {
+  // The QueryClass resource's own IRI.
+  string iri = 1;
+  // Input class the QueryClass is bound to (its fibre).
+  string query_class = 2;
+  // Output class (typically `Verdict` for Decidable / AutoOnLoad).
+  string result_class = 3;
+  // Procedure or comorphism IRI the kernel routes to.
+  string query_handler = 4;
+  // Dispatch roles declared on this QueryClass. One or more of
+  // OnDemand / AutoOnLoad / Decidable.
+  repeated DispatchRole dispatch_roles = 5;
+}
+
+message ComorphismDecl {
+  // The Comorphism resource's own IRI.
+  string iri = 1;
+  // Source class — resolved from the referenced `ExportFormat`'s
+  // `from_class` property. Empty if the ExportFormat couldn't be
+  // resolved (malformed declaration; should not occur on a
+  // validated chain).
+  string from_class = 2;
+  // Target class — resolved from the referenced `ImportFormat`'s
+  // `to_class` property. Empty if the ImportFormat couldn't be
+  // resolved.
+  string to_class = 3;
+  // Transformation program ref (procedure IRI).
+  string transformation = 4;
+  // Comorphism's `exact` flag (D14 §5).
+  bool exact = 5;
 }
 
 // --- GetSchema ---
