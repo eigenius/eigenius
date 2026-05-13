@@ -50,8 +50,8 @@ import {
   ToastBody,
   Toaster,
   ToastTitle,
-  Tooltip,
   tokens,
+  Tooltip,
   useId,
   useToastController,
 } from "@fluentui/react-components";
@@ -427,9 +427,7 @@ function TipIndicator({
           tip:
         </Body1>
         <span>{shortHash(head)}</span>
-        {relative && (
-          <span className={styles.tipLabel}> · {relative}</span>
-        )}
+        {relative && <span className={styles.tipLabel}>· {relative}</span>}
       </span>
     </Tooltip>
   );
@@ -446,7 +444,9 @@ interface ReadPinIndicatorProps {
  *  (D34 §5.2). The pin is per-session, not a kernel concept; "Return
  *  to tip" just clears the local pin and re-routes reads to the
  *  branch's current head. */
-function ReadPinIndicator({ layerId, onReturn, styles }: ReadPinIndicatorProps) {
+function ReadPinIndicator(
+  { layerId, onReturn, styles }: ReadPinIndicatorProps,
+) {
   return (
     <Tooltip
       relationship="description"
@@ -454,8 +454,8 @@ function ReadPinIndicator({ layerId, onReturn, styles }: ReadPinIndicatorProps) 
       content={
         <div>
           <div>
-            Reads are pinned to this layer ("Time-travel here"). Writes
-            still go to the branch tip.
+            Reads are pinned to this layer ("Time-travel here"). Writes still go
+            to the branch tip.
           </div>
           <div style={{ fontFamily: "monospace", fontSize: 12, marginTop: 4 }}>
             {layerId}

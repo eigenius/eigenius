@@ -47,8 +47,8 @@ import {
   ToastBody,
   Toaster,
   ToastTitle,
-  Tooltip,
   tokens,
+  Tooltip,
   useId,
   useToastController,
 } from "@fluentui/react-components";
@@ -60,10 +60,7 @@ import {
 } from "@fluentui/react-icons";
 import type { TaskInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
-import {
-  formatAbsoluteIso,
-  formatRelative,
-} from "../../runtime/relativeTime";
+import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
 
 const TOASTER_ID = "tasks-panel-toaster";
 
@@ -229,7 +226,9 @@ export function TasksPanel() {
       dispatchToast(
         <Toast>
           <ToastTitle>Cancel failed</ToastTitle>
-          <ToastBody>{err instanceof Error ? err.message : String(err)}</ToastBody>
+          <ToastBody>
+            {err instanceof Error ? err.message : String(err)}
+          </ToastBody>
         </Toast>,
         { intent: "error", timeout: 6000 },
       );

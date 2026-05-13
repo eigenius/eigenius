@@ -45,8 +45,8 @@ import {
   ToastBody,
   Toaster,
   ToastTitle,
-  Tooltip,
   tokens,
+  Tooltip,
   useId,
   useToastController,
 } from "@fluentui/react-components";
@@ -61,10 +61,7 @@ import {
 import type { BranchInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
-import {
-  formatAbsoluteIso,
-  formatRelative,
-} from "../../runtime/relativeTime";
+import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
 import { CreateBranchDialog } from "../dialogs/CreateBranchDialog";
 import { DeleteBranchDialog } from "../dialogs/DeleteBranchDialog";
 
@@ -352,7 +349,9 @@ function BranchesTable({
               <td className={styles.td}>
                 <div className={styles.nameCell}>
                   <span
-                    className={isAuto ? styles.branchNameAuto : styles.branchName}
+                    className={isAuto
+                      ? styles.branchNameAuto
+                      : styles.branchName}
                   >
                     {b.name}
                   </span>

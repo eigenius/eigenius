@@ -31,7 +31,7 @@
  *   become `undefined` so the renderer can use `?.` short-circuiting.
  * - `conflictingIris` defaults to an empty readonly array.
  */
-import { MergeOutcome, type MergeInfo } from "@eigenius/client";
+import { type MergeInfo, MergeOutcome } from "@eigenius/client";
 
 export interface CommitMeta {
   /** Did the branch ref actually move? */
@@ -68,7 +68,9 @@ export function commitMetaFrom(
   return {
     branchAdvanced: response.branchAdvanced,
     mergeOutcome: merge.outcome,
-    mergeLayerId: merge.mergeLayerId.length > 0 ? merge.mergeLayerId : undefined,
+    mergeLayerId: merge.mergeLayerId.length > 0
+      ? merge.mergeLayerId
+      : undefined,
     currentHead: merge.currentHead.length > 0 ? merge.currentHead : undefined,
     conflictingIris: merge.conflictingIris,
     orphanLayerId: merge.orphanLayerId.length > 0

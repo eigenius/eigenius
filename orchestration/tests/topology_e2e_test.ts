@@ -33,7 +33,7 @@
  */
 
 import { assert, assertGreater } from "@std/assert";
-import { Eigen, EdgeKind, NodeKind } from "../../clients/eigenius-ts/mod.ts";
+import { EdgeKind, Eigen, NodeKind } from "../../clients/eigenius-ts/mod.ts";
 
 const REPO_ROOT = new URL("../../", import.meta.url);
 const KERNEL_BIN = new URL("./target/debug/eigenius", REPO_ROOT).pathname;

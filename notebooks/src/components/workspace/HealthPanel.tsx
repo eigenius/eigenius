@@ -43,8 +43,8 @@ import {
   MessageBarTitle,
   Spinner,
   Subtitle1,
-  Tooltip,
   tokens,
+  Tooltip,
   useId,
 } from "@fluentui/react-components";
 import {
@@ -179,9 +179,7 @@ export function HealthPanel() {
         <CheckmarkCircle20Regular />
         <Subtitle1 as="h2">Health</Subtitle1>
         <span className={styles.headerSpacer} />
-        {lastFetchLabel && (
-          <Caption1>refreshed {lastFetchLabel}</Caption1>
-        )}
+        {lastFetchLabel && <Caption1>refreshed {lastFetchLabel}</Caption1>}
         <Tooltip content="Refresh now" relationship="label">
           <Button
             size="small"

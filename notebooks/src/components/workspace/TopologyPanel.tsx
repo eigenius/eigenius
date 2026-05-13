@@ -47,10 +47,7 @@ import {
   Switch,
   tokens,
 } from "@fluentui/react-components";
-import {
-  Apps20Regular,
-  ArrowSync20Regular,
-} from "@fluentui/react-icons";
+import { Apps20Regular, ArrowSync20Regular } from "@fluentui/react-icons";
 import type { LayerTopologyResponse } from "@eigenius/client";
 import { Pin16Regular } from "@fluentui/react-icons";
 import { useEigen } from "../../runtime/EigenProvider";
@@ -234,8 +231,8 @@ export function TopologyPanel() {
           label="Include resources"
         />
         <Caption1>
-          Class, Property, Resource, and Institution nodes; off renders
-          a pure layer chain.
+          Class, Property, Resource, and Institution nodes; off renders a pure
+          layer chain.
         </Caption1>
         {readPinLayerId && (
           <div className={styles.pinNotice}>

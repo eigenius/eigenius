@@ -129,7 +129,10 @@ const TasksIcon = bundleIcon(
 );
 const CompactionIcon = bundleIcon(Stack20Filled, Stack20Regular);
 const GcIcon = bundleIcon(Archive20Filled, Archive20Regular);
-const HealthIcon = bundleIcon(CheckmarkCircle20Filled, CheckmarkCircle20Regular);
+const HealthIcon = bundleIcon(
+  CheckmarkCircle20Filled,
+  CheckmarkCircle20Regular,
+);
 
 /** Eigenius brand mark in the rail's `AppItem` slot. Pre-sized to 24px
  *  to match Fluent's nav-header iconography; rendered as a plain
@@ -260,19 +263,34 @@ const RAIL_ITEMS: Array<
   | { kind: "section"; label: string }
   | { kind: "divider" }
 > = [
-  { kind: "item", value: "notebook", label: "Notebook", icon: <NotebookIcon /> },
+  {
+    kind: "item",
+    value: "notebook",
+    label: "Notebook",
+    icon: <NotebookIcon />,
+  },
   // Divider here too so collapsed mode (which drops the "Chain"
   // section header) still visually separates Notebook from the chain
   // group below it.
   { kind: "divider" },
   { kind: "section", label: "Chain" },
-  { kind: "item", value: "branches", label: "Branches", icon: <BranchesIcon /> },
+  {
+    kind: "item",
+    value: "branches",
+    label: "Branches",
+    icon: <BranchesIcon />,
+  },
   { kind: "item", value: "history", label: "History", icon: <HistoryIcon /> },
   { kind: "item", value: "tags", label: "Tags", icon: <TagsIcon /> },
   { kind: "item", value: "merge", label: "Merge", icon: <MergeIcon /> },
   { kind: "divider" },
   { kind: "section", label: "Workspace" },
-  { kind: "item", value: "topology", label: "Topology", icon: <TopologyIcon /> },
+  {
+    kind: "item",
+    value: "topology",
+    label: "Topology",
+    icon: <TopologyIcon />,
+  },
   {
     kind: "item",
     value: "institutions",
@@ -309,9 +327,11 @@ export function WorkspaceShell() {
   return (
     <div className={styles.root}>
       <div className={styles.header}>
-        {/* App identity anchored at the top-left — the canonical
+        {
+          /* App identity anchored at the top-left — the canonical
             position. The Hamburger immediately follows it as the
-            rail-toggle control. */}
+            rail-toggle control. */
+        }
         <div className={styles.headerBrand}>
           <EigeniusLogo />
           <Body1 className={styles.headerBrandText}>Eigenius</Body1>
@@ -320,11 +340,13 @@ export function WorkspaceShell() {
           relationship="label"
           content={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {/* Stateful PanelLeft icon — Contract while expanded
+          {
+            /* Stateful PanelLeft icon — Contract while expanded
               (clicking will close), Expand while collapsed (clicking
               will open). Conveys both current state and the click's
               effect, which a static Hamburger doesn't — Hamburger
-              traditionally implies a menu, not a sidebar toggle. */}
+              traditionally implies a menu, not a sidebar toggle. */
+          }
           <Button
             appearance="subtle"
             className={styles.hamburger}
@@ -361,10 +383,12 @@ export function WorkspaceShell() {
               }}
               className={styles.drawer}
             >
-              {/* No NavDrawerHeader — brand identity lives in the
+              {
+                /* No NavDrawerHeader — brand identity lives in the
                   workspace top bar (left of Hamburger). Duplicating
                   it inside the rail would just consume space and
-                  doubt the user's sense of "where am I?". */}
+                  doubt the user's sense of "where am I?". */
+              }
               <NavDrawerBody>
                 {RAIL_ITEMS.map((entry, idx) => {
                   if (entry.kind === "section") {
@@ -418,8 +442,10 @@ interface CollapsedRailProps {
 function CollapsedRail({ destination, onSelect, styles }: CollapsedRailProps) {
   return (
     <aside className={styles.railCollapsed} aria-label="Sidebar navigation">
-      {/* No brand block — identity lives in the workspace top bar.
-          Items start directly. */}
+      {
+        /* No brand block — identity lives in the workspace top bar.
+          Items start directly. */
+      }
       {RAIL_ITEMS.map((entry, idx) => {
         if (entry.kind === "section") {
           // Section text-labels don't show in collapsed mode — the
@@ -427,9 +453,7 @@ function CollapsedRail({ destination, onSelect, styles }: CollapsedRailProps) {
           return null;
         }
         if (entry.kind === "divider") {
-          return (
-            <hr key={`divider-${idx}`} className={styles.railDivider} />
-          );
+          return <hr key={`divider-${idx}`} className={styles.railDivider} />;
         }
         const isActive = entry.value === destination;
         return (

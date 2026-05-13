@@ -62,10 +62,7 @@ import {
   ArrowSync20Regular,
   Delete20Regular,
 } from "@fluentui/react-icons";
-import type {
-  EstimateGcResponse,
-  RunGcResponse,
-} from "@eigenius/client";
+import type { EstimateGcResponse, RunGcResponse } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 
 const TOASTER_ID = "gc-panel-toaster";
@@ -267,7 +264,9 @@ function EstimateBlock({ state, styles }: EstimateBlockProps) {
   if (state.kind === "idle") {
     return (
       <div className={styles.block}>
-        <Caption1>Click <strong>Refresh estimate</strong> to begin.</Caption1>
+        <Caption1>
+          Click <strong>Refresh estimate</strong> to begin.
+        </Caption1>
       </div>
     );
   }
@@ -321,8 +320,8 @@ function EstimateBlock({ state, styles }: EstimateBlockProps) {
         <Caption1 className={styles.metricLabel}>Protected by min-age</Caption1>
         <Body1>
           {protectedByAge} layer{protectedByAge === 1 ? "" : "s"}{" "}
-          (unreachable but committed within the kernel's 60-second window —
-          will sweep on a later pass)
+          (unreachable but committed within the kernel's 60-second window — will
+          sweep on a later pass)
         </Body1>
         <Caption1 className={styles.metricLabel}>Reachability roots</Caption1>
         <Body1>
@@ -331,8 +330,8 @@ function EstimateBlock({ state, styles }: EstimateBlockProps) {
         </Body1>
       </div>
       <Caption1>
-        Eligible = unreachable from any root AND older than the kernel's
-        min-age window. Sweeping does not affect reachable layers.
+        Eligible = unreachable from any root AND older than the kernel's min-age
+        window. Sweeping does not affect reachable layers.
       </Caption1>
     </div>
   );
@@ -437,9 +436,9 @@ function ConfirmDialog({
           <DialogContent>
             <Body1>
               <strong>{eligibleCount}</strong>{" "}
-              unreachable layer{eligibleCount === 1 ? "" : "s"} will be
-              permanently removed from storage. Branch refs, tag refs, and
-              active task pins protect the rest.
+              unreachable layer{eligibleCount === 1 ? "" : "s"}{" "}
+              will be permanently removed from storage. Branch refs, tag refs,
+              and active task pins protect the rest.
             </Body1>
           </DialogContent>
           <DialogActions>

@@ -51,9 +51,7 @@ const KINASE_PATH = path.resolve(
 // commits + chart queries comfortably fit in 120s.
 test.setTimeout(120_000);
 
-test("kinase-institutions Part A: open → run to cell 13 → six chart cells render", async ({
-  page,
-}) => {
+test("kinase-institutions Part A: open → run to cell 13 → six chart cells render", async ({ page }) => {
   await page.goto("/notebooks/");
 
   // 1. SPA up; the patent demo is what App.tsx auto-loads on first

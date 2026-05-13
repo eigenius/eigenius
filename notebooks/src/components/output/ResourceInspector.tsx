@@ -87,7 +87,9 @@ function isResource(value: unknown): value is CborResource {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function ResourceInspector({ resource, traceIri }: ResourceInspectorProps) {
+export function ResourceInspector(
+  { resource, traceIri }: ResourceInspectorProps,
+) {
   const styles = useStyles();
   const decoded = useMemo(() => decodeResource(resource), [resource]);
 

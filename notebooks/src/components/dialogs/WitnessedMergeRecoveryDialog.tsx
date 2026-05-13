@@ -187,13 +187,15 @@ export function WitnessedMergeRecoveryDialog({
     >
       <DialogSurface className={styles.surface}>
         <DialogBody>
-          <DialogTitle>Conflict — branch advanced under your changes</DialogTitle>
+          <DialogTitle>
+            Conflict — branch advanced under your changes
+          </DialogTitle>
           <DialogContent className={styles.body}>
             <div>
-              Your commit raced against another commit to this branch, and
-              the two contributions modify the same resources. Eigenius
-              cannot merge automatically without witnessed-merge
-              resolution (Phase 15, not yet available).
+              Your commit raced against another commit to this branch, and the
+              two contributions modify the same resources. Eigenius cannot merge
+              automatically without witnessed-merge resolution (Phase 15, not
+              yet available).
             </div>
 
             {conflictingIris.length > 0 && (
@@ -208,12 +210,9 @@ export function WitnessedMergeRecoveryDialog({
             )}
 
             <div className={styles.ids}>
-              {currentHead && (
-                <div>Branch's current head: {currentHead}</div>
-              )}
+              {currentHead && <div>Branch's current head: {currentHead}</div>}
               <div>
-                Your unmerged work: {orphanLayerId}
-                {" "}
+                Your unmerged work: {orphanLayerId}{" "}
                 <Caption1 as="span">
                   (will be discarded if you don't save it)
                 </Caption1>
@@ -234,8 +233,8 @@ export function WitnessedMergeRecoveryDialog({
                         Save my work as a new sibling branch
                       </div>
                       <Caption1 className={styles.optionHint}>
-                        Keeps the orphan layer reachable through a fresh
-                        branch ref; you can come back to it later.
+                        Keeps the orphan layer reachable through a fresh branch
+                        ref; you can come back to it later.
                       </Caption1>
                     </div>
                   }
@@ -252,9 +251,9 @@ export function WitnessedMergeRecoveryDialog({
                       placeholder={defaultSiblingName()}
                     />
                     <Caption1>
-                      The <code>auto-</code> prefix is the D23 §5.4.4
-                      convention for "saved sibling on conflict". You can
-                      override.
+                      The <code>auto-</code>{" "}
+                      prefix is the D23 §5.4.4 convention for "saved sibling on
+                      conflict". You can override.
                     </Caption1>
                   </Field>
                 )}
@@ -267,9 +266,9 @@ export function WitnessedMergeRecoveryDialog({
                         Pin reads to the new head and re-run from the top
                       </div>
                       <Caption1 className={styles.optionHint}>
-                        Sets the read-pin to the branch's current head so
-                        you can see what beat you; cell outputs clear so
-                        you can re-run.
+                        Sets the read-pin to the branch's current head so you
+                        can see what beat you; cell outputs clear so you can
+                        re-run.
                       </Caption1>
                     </div>
                   }
@@ -283,8 +282,8 @@ export function WitnessedMergeRecoveryDialog({
                         Discard my work
                       </div>
                       <Caption1 className={styles.optionHint}>
-                        Orphan layer stays on disk until the next GC pass,
-                        then becomes irrecoverable.
+                        Orphan layer stays on disk until the next GC pass, then
+                        becomes irrecoverable.
                       </Caption1>
                     </div>
                   }

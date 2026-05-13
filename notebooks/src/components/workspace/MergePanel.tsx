@@ -60,8 +60,8 @@ import {
 } from "@fluentui/react-components";
 import { Merge20Regular, Search20Regular } from "@fluentui/react-icons";
 import {
-  MergeOutcome,
   type MergeBranchesResponse,
+  MergeOutcome,
   type PreviewMergeResponse,
 } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
@@ -355,8 +355,8 @@ function PreviewBlock({ state, onRun, canSubmit, styles }: PreviewBlockProps) {
     return (
       <div className={styles.previewBlock}>
         <Caption1>
-          Click <strong>Refresh preview</strong> to estimate the outcome
-          without committing.
+          Click <strong>Refresh preview</strong>{" "}
+          to estimate the outcome without committing.
         </Caption1>
         {!canSubmit && (
           <Caption1>Pick a source and target above first.</Caption1>
@@ -395,10 +395,13 @@ function PreviewBlock({ state, onRun, canSubmit, styles }: PreviewBlockProps) {
     return (
       <div className={styles.previewBlock}>
         <Body1>
-          <strong>Predicted: fast-forward.</strong> Target already includes
-          source's tip (or source's tip is a descendant of target's).
+          <strong>Predicted: fast-forward.</strong>{" "}
+          Target already includes source's tip (or source's tip is a descendant
+          of target's).
         </Body1>
-        <Caption1>No new merge layer — target advances to source's tip.</Caption1>
+        <Caption1>
+          No new merge layer — target advances to source's tip.
+        </Caption1>
       </div>
     );
   }
@@ -406,8 +409,9 @@ function PreviewBlock({ state, onRun, canSubmit, styles }: PreviewBlockProps) {
     return (
       <div className={styles.previewBlock}>
         <Body1>
-          <strong>Predicted: trivial merge.</strong>{" "}
-          {resp.predictedIriCount} resource
+          <strong>Predicted: trivial merge.</strong> {resp.predictedIriCount}
+          {" "}
+          resource
           {resp.predictedIriCount === 1 ? "" : "s"} in the merge layer.
         </Body1>
         <Caption1>
@@ -423,10 +427,12 @@ function PreviewBlock({ state, onRun, canSubmit, styles }: PreviewBlockProps) {
         <MessageBarBody>
           <MessageBarTitle>Predicted: conflict</MessageBarTitle>
           <div>
-            The two branches modify the same{" "}
-            {resp.merge.conflictingIris.length} resource
-            {resp.merge.conflictingIris.length === 1 ? "" : "s"} since their
-            LCA. Merging will require Phase 15 witnessed-merge resolution.
+            The two branches modify the same {resp.merge.conflictingIris.length}
+            {" "}
+            resource
+            {resp.merge.conflictingIris.length === 1 ? "" : "s"}{" "}
+            since their LCA. Merging will require Phase 15 witnessed-merge
+            resolution.
           </div>
           {resp.merge.conflictingIris.length > 0 && (
             <ul className={styles.conflictList}>
@@ -447,8 +453,8 @@ function PreviewBlock({ state, onRun, canSubmit, styles }: PreviewBlockProps) {
   return (
     <div className={styles.previewBlock}>
       <Caption1>
-        Unexpected preview outcome ({outcome}). Try refreshing or report this
-        as a bug.
+        Unexpected preview outcome ({outcome}). Try refreshing or report this as
+        a bug.
       </Caption1>
     </div>
   );
@@ -496,9 +502,9 @@ function ResultBlock({ state, styles }: ResultBlockProps) {
           <MessageBarTitle>Conflict — target unchanged</MessageBarTitle>
           <div>
             The merge would conflict on{" "}
-            {resp.merge?.conflictingIris.length ?? 0} resource(s); witnessed-
-            merge resolution isn't available yet. The target branch was
-            left at its current head.
+            {resp.merge?.conflictingIris.length ?? 0}{" "}
+            resource(s); witnessed- merge resolution isn't available yet. The
+            target branch was left at its current head.
           </div>
           {resp.merge?.orphanLayerId && (
             <Caption1>
@@ -514,9 +520,7 @@ function ResultBlock({ state, styles }: ResultBlockProps) {
     <MessageBar intent="success">
       <MessageBarBody>
         <MessageBarTitle>
-          {outcome === MergeOutcome.FAST_FORWARD
-            ? "Fast-forwarded"
-            : "Merged"}
+          {outcome === MergeOutcome.FAST_FORWARD ? "Fast-forwarded" : "Merged"}
         </MessageBarTitle>
         <div>
           Target's new tip:{" "}

@@ -138,8 +138,8 @@ export function DeleteBranchDialog({
             </div>
             <Caption1>
               The branch ref is removed immediately. Layers reachable only
-              through this branch become GC-eligible on the next pass —
-              they can't be recovered without re-importing the chain.
+              through this branch become GC-eligible on the next pass — they
+              can't be recovered without re-importing the chain.
             </Caption1>
             <Field
               label={

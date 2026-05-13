@@ -185,8 +185,9 @@ export function CreateTagDialog({
                 autoFocus
               />
               <Caption1>
-                Letters, digits, <code>-</code>, <code>_</code>. Tags are
-                immutable — pick a name you won't want to retarget.
+                Letters, digits, <code>-</code>,{" "}
+                <code>_</code>. Tags are immutable — pick a name you won't want
+                to retarget.
               </Caption1>
             </Field>
 
@@ -232,9 +233,8 @@ export function CreateTagDialog({
                       ))}
                     </Combobox>
                     <Caption1>
-                      Tagging the current head of the chosen branch. Use
-                      "Create tag" from the History panel to tag a
-                      specific older layer.
+                      Tagging the current head of the chosen branch. Use "Create
+                      tag" from the History panel to tag a specific older layer.
                     </Caption1>
                   </>
                 )}

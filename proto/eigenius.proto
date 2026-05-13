@@ -936,35 +936,38 @@ message PreviewMergeResponse {
 // kind instead of regex-matching the human-readable `error`
 // string.
 //
-// Variants are intentionally short (no `CONSOLIDATE_ERROR_` prefix)
-// because prost retains proto prefixes when generating Rust enum
-// variants — duplicating the enum name in each variant would produce
-// awkward `ConsolidateErrorKind::ConsolidateErrorNone` callsites.
+// Variants carry the `CONSOLIDATE_ERROR_KIND_` prefix to satisfy
+// buf's `ENUM_VALUE_PREFIX` lint and match the convention every
+// other enum in this proto follows (`MERGE_OUTCOME_*`,
+// `RUNTIME_KIND_*`, etc.). Both prost (Rust) and protoc-gen-es (TS)
+// strip the prefix when generating their enum types, so Rust call
+// sites stay clean (`ConsolidateErrorKind::RangeNotAncestral`) and
+// TS bindings see `ConsolidateErrorKind.RANGE_NOT_ANCESTRAL`.
 enum ConsolidateErrorKind {
   // No error / unset. Successful responses leave this at the default.
-  NONE = 0;
+  CONSOLIDATE_ERROR_KIND_UNSPECIFIED = 0;
   // `from` is not an ancestor of `to`.
-  RANGE_NOT_ANCESTRAL = 1;
+  CONSOLIDATE_ERROR_KIND_RANGE_NOT_ANCESTRAL = 1;
   // The branch ref didn't match the expected head (concurrent advance,
   // or the operator passed a stale `to`).
-  BRANCH_ADVANCED = 2;
+  CONSOLIDATE_ERROR_KIND_BRANCH_ADVANCED = 2;
   // The range contains a multi-parent merge layer (D25 §8.1).
-  RANGE_CONTAINS_MERGE_NODE = 3;
+  CONSOLIDATE_ERROR_KIND_RANGE_CONTAINS_MERGE_NODE = 3;
   // The range contains a layer pinned by an active task trace
   // (TracePinPolicy::Refuse).
-  RANGE_CONTAINS_TRACE_PIN = 4;
+  CONSOLIDATE_ERROR_KIND_RANGE_CONTAINS_TRACE_PIN = 4;
   // Predicted walk size exceeds `max_walk_entries`.
-  COST_EXCEEDS_CAP = 5;
+  CONSOLIDATE_ERROR_KIND_COST_EXCEEDS_CAP = 5;
   // Underlying storage write failure or other internal fault.
-  INTERNAL = 6;
+  CONSOLIDATE_ERROR_KIND_INTERNAL = 6;
   // `to` exists in storage but isn't on the chain `branch` currently
   // points at — a redirect installed at `to` would be unreachable.
   // Phase 17f below-head consolidation only.
-  TO_NOT_REACHABLE_FROM_HEAD = 7;
+  CONSOLIDATE_ERROR_KIND_TO_NOT_REACHABLE_FROM_HEAD = 7;
   // The consolidation range crosses an existing resolve redirect
   // (D25 §12.8.1(a)). v1 refuses; the future compose policy (issue
   // #49) will lift this.
-  RANGE_CROSSES_EXISTING_REDIRECT = 8;
+  CONSOLIDATE_ERROR_KIND_RANGE_CROSSES_EXISTING_REDIRECT = 8;
 }
 
 message ConsolidateChainRequest {

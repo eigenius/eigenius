@@ -744,7 +744,9 @@ function serializeCell(c: CellJson): CellJson {
       chart_kind: c.chart_kind,
       x_column: c.x_column,
       y_column: c.y_column,
-      ...(c.series_column !== undefined ? { series_column: c.series_column } : {}),
+      ...(c.series_column !== undefined
+        ? { series_column: c.series_column }
+        : {}),
       ...(c.title !== undefined ? { title: c.title } : {}),
     };
   }
@@ -838,7 +840,9 @@ async function executeCell(
       // The query may have included a FIBER INTO clause that committed.
       // If `merge` is present and not UNSPECIFIED, surface the commit
       // info; otherwise leave it undefined (this was a pure read).
-      const commit = resp.merge !== undefined ? commitMetaFrom(resp) : undefined;
+      const commit = resp.merge !== undefined
+        ? commitMetaFrom(resp)
+        : undefined;
       return { kind: "resultset", document: resp.document, commit };
     }
     case "typescript":
@@ -875,7 +879,9 @@ async function executeProgramRunCell(
   if (trimmedProgram.length === 0) {
     return { kind: "error", message: "program IRI is empty" };
   }
-  const validInputs = inputIris.map((s) => s.trim()).filter((s) => s.length > 0);
+  const validInputs = inputIris.map((s) => s.trim()).filter((s) =>
+    s.length > 0
+  );
   if (validInputs.length === 0) {
     return { kind: "error", message: "no input IRIs provided" };
   }
@@ -953,17 +959,19 @@ async function executeChartCell(
   if (!(cell.x_column in firstRow)) {
     return {
       kind: "error",
-      message: `x_column "${cell.x_column}" not found in query results (available: ${
-        Object.keys(firstRow).join(", ")
-      })`,
+      message:
+        `x_column "${cell.x_column}" not found in query results (available: ${
+          Object.keys(firstRow).join(", ")
+        })`,
     };
   }
   if (!(cell.y_column in firstRow)) {
     return {
       kind: "error",
-      message: `y_column "${cell.y_column}" not found in query results (available: ${
-        Object.keys(firstRow).join(", ")
-      })`,
+      message:
+        `y_column "${cell.y_column}" not found in query results (available: ${
+          Object.keys(firstRow).join(", ")
+        })`,
     };
   }
   if (
@@ -1037,11 +1045,18 @@ function renderChart(
 ): React.ReactElement {
   const title = shape.title;
   const palette = [
-    "#5b88c5", "#37a172", "#cf6f1e", "#a45fa1",
-    "#c93434", "#3aa3a8", "#b3a02f", "#7e57c2",
+    "#5b88c5",
+    "#37a172",
+    "#cf6f1e",
+    "#a45fa1",
+    "#c93434",
+    "#3aa3a8",
+    "#b3a02f",
+    "#7e57c2",
   ];
   const colorOf = (seriesKey: string, idx: number): string =>
-    palette[Math.abs(hashString(seriesKey)) % palette.length] ?? palette[idx % palette.length];
+    palette[Math.abs(hashString(seriesKey)) % palette.length] ??
+      palette[idx % palette.length];
 
   switch (kind) {
     case "donut": {
@@ -1067,7 +1082,10 @@ function renderChart(
     }
     case "grouped-bar": {
       // Group by x; series_column (if present) splits each group.
-      const grouped = new Map<string, { key: string; legend: string; data: number; color: string }[]>();
+      const grouped = new Map<
+        string,
+        { key: string; legend: string; data: number; color: string }[]
+      >();
       for (const r of rows) {
         const groupName = String(r[shape.x] ?? "");
         const seriesKey = shape.series && shape.series.length > 0
@@ -1127,7 +1145,10 @@ function renderChart(
           color: colorOf(String(r[shape.x] ?? i), i),
         }],
       }));
-      return withTitle(title, React.createElement(HorizontalBarChart, { data }));
+      return withTitle(
+        title,
+        React.createElement(HorizontalBarChart, { data }),
+      );
     }
     case "line":
     case "area": {
@@ -1245,7 +1266,8 @@ async function executeTypeScriptCell(
   const log: string[] = [];
   const capturedConsole = {
     log: (...args: unknown[]) => log.push(args.map(formatConsoleArg).join(" ")),
-    info: (...args: unknown[]) => log.push(args.map(formatConsoleArg).join(" ")),
+    info: (...args: unknown[]) =>
+      log.push(args.map(formatConsoleArg).join(" ")),
     warn: (...args: unknown[]) =>
       log.push(`[warn] ${args.map(formatConsoleArg).join(" ")}`),
     error: (...args: unknown[]) =>

@@ -15,16 +15,16 @@
 import { useCallback } from "react";
 import {
   Button,
-  Card,
   Caption1,
+  Card,
   makeStyles,
   Menu,
   MenuItem,
   MenuList,
   MenuPopover,
   MenuTrigger,
-  SplitButton,
   Spinner,
+  SplitButton,
   tokens,
   Tooltip,
 } from "@fluentui/react-components";
@@ -160,7 +160,9 @@ export function Cell({ cellId }: CellProps) {
   const anyRunning = useNotebookStore((s) =>
     Array.from(s.cellStates.values()).some((st) => st === "running")
   );
-  const collapsed = useNotebookStore((s) => s.cellCollapsed.get(cellId) ?? false);
+  const collapsed = useNotebookStore((s) =>
+    s.cellCollapsed.get(cellId) ?? false
+  );
 
   const runCell = useNotebookStore((s) => s.runCell);
   const runFromCell = useNotebookStore((s) => s.runFromCell);
@@ -210,7 +212,9 @@ export function Cell({ cellId }: CellProps) {
         >
           {cellIndex + 1}
         </span>
-        <Caption1 className={styles.typeBadge}>{TYPE_LABEL[cell.type]}</Caption1>
+        <Caption1 className={styles.typeBadge}>
+          {TYPE_LABEL[cell.type]}
+        </Caption1>
         {runnable && (
           <Menu positioning="below-start">
             <MenuTrigger disableButtonEnhancement>
@@ -218,9 +222,7 @@ export function Cell({ cellId }: CellProps) {
                 <SplitButton
                   size="small"
                   appearance="subtle"
-                  icon={isRunning
-                    ? <Spinner size="tiny" />
-                    : <Play16Regular />}
+                  icon={isRunning ? <Spinner size="tiny" /> : <Play16Regular />}
                   disabled={isRunning || anyRunning}
                   menuButton={triggerProps}
                   primaryActionButton={{
@@ -321,4 +323,3 @@ export function Cell({ cellId }: CellProps) {
     </Card>
   );
 }
-

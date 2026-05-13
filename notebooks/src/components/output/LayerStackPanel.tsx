@@ -26,7 +26,12 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Caption1, makeStyles, Spinner, tokens } from "@fluentui/react-components";
+import {
+  Caption1,
+  makeStyles,
+  Spinner,
+  tokens,
+} from "@fluentui/react-components";
 import type { LayerTopologyResponse } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";

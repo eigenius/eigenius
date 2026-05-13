@@ -52,8 +52,8 @@ import {
   MessageBarTitle,
   Spinner,
   Subtitle1,
-  Tooltip,
   tokens,
+  Tooltip,
 } from "@fluentui/react-components";
 import {
   ArrowSync20Regular,
@@ -214,7 +214,10 @@ const useStyles = makeStyles({
 
 interface InspectState {
   iri: string;
-  status: "loading" | { kind: "ready"; bytes: Uint8Array } | { kind: "error"; message: string };
+  status: "loading" | { kind: "ready"; bytes: Uint8Array } | {
+    kind: "error";
+    message: string;
+  };
 }
 
 export function InstitutionsPanel() {
@@ -503,8 +506,8 @@ function InstitutionDetail({
         )}
         <Caption1 className={styles.metricLabel}>Installed at</Caption1>
         <Caption1>
-          current head (per-layer install lineage lands with the §G.6
-          history endpoint)
+          current head (per-layer install lineage lands with the §G.6 history
+          endpoint)
         </Caption1>
       </div>
 
@@ -550,9 +553,11 @@ function InstitutionDetail({
         >
           Inspect raw resource
         </Button>
-        {/* "View install layer in history" needs §G.6 (per-layer
+        {
+          /* "View install layer in history" needs §G.6 (per-layer
             defined_iris aggregated by the history endpoint) — defer
-            with a tooltip rather than ship a broken affordance. */}
+            with a tooltip rather than ship a broken affordance. */
+        }
         <Tooltip
           relationship="description"
           content="Cross-link to History needs the §G.6 history endpoint enrichment — coming alongside the chain/log surface."
@@ -573,8 +578,7 @@ function ComorphismRow({ c, styles }: ComorphismRowProps) {
   return (
     <div className={styles.declItem}>
       <span className={styles.declHeader}>
-        {shortenIri(c.fromClass || "?")}{" "}
-        <Caption1 as="span">→</Caption1>{" "}
+        {shortenIri(c.fromClass || "?")} <Caption1 as="span">→</Caption1>{" "}
         {shortenIri(c.toClass || "?")}
         {c.exact && (
           <Badge
@@ -690,7 +694,10 @@ function InspectDialog({ state, styles, onClose }: InspectDialogProps) {
                     )
                     : (
                       <ResourceInspector
-                        resource={(state.status as { kind: "ready"; bytes: Uint8Array }).bytes}
+                        resource={(state.status as {
+                          kind: "ready";
+                          bytes: Uint8Array;
+                        }).bytes}
                       />
                     )}
                 </div>

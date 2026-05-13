@@ -208,7 +208,9 @@ function ResultRow({ result, styles }: ResultRowProps) {
             <Button
               size="small"
               appearance="subtle"
-              icon={expanded ? <ChevronDown16Regular /> : <ChevronRight16Regular />}
+              icon={expanded
+                ? <ChevronDown16Regular />
+                : <ChevronRight16Regular />}
               aria-label={expanded ? "Collapse" : "Expand"}
               onClick={() => setExpanded((v) => !v)}
             />

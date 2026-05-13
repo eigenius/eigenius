@@ -24,13 +24,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // route is added; for Phase 2 the dev server runs standalone on 5173.
 export default defineConfig({
   plugins: [react()],
-  base: "/notebooks/",                     // the eventual mount point
+  base: "/notebooks/", // the eventual mount point
   resolve: {
     alias: {
       // The TypeScript SDK lives at clients/eigenius-ts/. Aliasing it
       // for development means the notebook can `import { Eigen } from
       // "@eigenius/client"` without a JSR/npm round-trip.
-      "@eigenius/client": path.resolve(here, "..", "clients", "eigenius-ts", "mod.ts"),
+      "@eigenius/client": path.resolve(
+        here,
+        "..",
+        "clients",
+        "eigenius-ts",
+        "mod.ts",
+      ),
     },
   },
   server: {

@@ -51,8 +51,8 @@ import {
   ToastBody,
   Toaster,
   ToastTitle,
-  Tooltip,
   tokens,
+  Tooltip,
   useId,
   useToastController,
 } from "@fluentui/react-components";
@@ -65,10 +65,7 @@ import {
 import type { TagInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
-import {
-  formatAbsoluteIso,
-  formatRelative,
-} from "../../runtime/relativeTime";
+import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
 import { CreateTagDialog } from "../dialogs/CreateTagDialog";
 
 const TOASTER_ID = "tags-panel-toaster";
@@ -403,9 +400,9 @@ function DeleteTagConfirmDialog({
           <DialogTitle>Delete tag {target?.name}?</DialogTitle>
           <DialogContent>
             <Body1>
-              The tag will be removed. The layer it points at becomes
-              eligible for garbage collection if no other root (branch,
-              active task, another tag) still reaches it.
+              The tag will be removed. The layer it points at becomes eligible
+              for garbage collection if no other root (branch, active task,
+              another tag) still reaches it.
             </Body1>
           </DialogContent>
           <DialogActions>

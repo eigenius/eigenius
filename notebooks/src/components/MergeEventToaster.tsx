@@ -77,9 +77,9 @@ export function MergeEventToaster() {
         <Toast>
           <ToastTitle>Merged with concurrent work</ToastTitle>
           <ToastBody>
-            Another commit reached this branch between when you read its
-            head and when you saved. Your changes were merged
-            automatically (no conflicts).
+            Another commit reached this branch between when you read its head
+            and when you saved. Your changes were merged automatically (no
+            conflicts).
             {mergeLayer && (
               <div>
                 Merge layer:{" "}

@@ -94,19 +94,12 @@ export const KERNEL_PASSTHROUGH_CONSOLIDATE_CHAIN =
   "orchestrator.kernel.consolidate_chain";
 export const KERNEL_PASSTHROUGH_ESTIMATE_CONSOLIDATION =
   "orchestrator.kernel.estimate_consolidation";
-export const KERNEL_PASSTHROUGH_LIST_TASKS =
-  "orchestrator.kernel.list_tasks";
+export const KERNEL_PASSTHROUGH_LIST_TASKS = "orchestrator.kernel.list_tasks";
 export const KERNEL_PASSTHROUGH_GET_TASK_STATUS =
   "orchestrator.kernel.get_task_status";
-export const KERNEL_PASSTHROUGH_CANCEL_TASK =
-  "orchestrator.kernel.cancel_task";
-export const KERNEL_PASSTHROUGH_CREATE_TAG =
-  "orchestrator.kernel.create_tag";
-export const KERNEL_PASSTHROUGH_LIST_TAGS =
-  "orchestrator.kernel.list_tags";
-export const KERNEL_PASSTHROUGH_DELETE_TAG =
-  "orchestrator.kernel.delete_tag";
-export const KERNEL_PASSTHROUGH_ESTIMATE_GC =
-  "orchestrator.kernel.estimate_gc";
-export const KERNEL_PASSTHROUGH_RUN_GC =
-  "orchestrator.kernel.run_gc";
+export const KERNEL_PASSTHROUGH_CANCEL_TASK = "orchestrator.kernel.cancel_task";
+export const KERNEL_PASSTHROUGH_CREATE_TAG = "orchestrator.kernel.create_tag";
+export const KERNEL_PASSTHROUGH_LIST_TAGS = "orchestrator.kernel.list_tags";
+export const KERNEL_PASSTHROUGH_DELETE_TAG = "orchestrator.kernel.delete_tag";
+export const KERNEL_PASSTHROUGH_ESTIMATE_GC = "orchestrator.kernel.estimate_gc";
+export const KERNEL_PASSTHROUGH_RUN_GC = "orchestrator.kernel.run_gc";

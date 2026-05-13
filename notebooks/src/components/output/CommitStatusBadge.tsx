@@ -39,8 +39,8 @@ import {
   MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
-  Tooltip,
   tokens,
+  Tooltip,
 } from "@fluentui/react-components";
 import { classifyCommit, type CommitMeta } from "../../runtime/commitMeta";
 import { WitnessedMergeRecoveryDialog } from "../dialogs/WitnessedMergeRecoveryDialog";
@@ -79,11 +79,9 @@ export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
       return (
         <Tooltip
           relationship="description"
-          content={
-            status.cachedLayerId
-              ? `Content already canonical at layer ${status.cachedLayerId}; branch ref did not move.`
-              : "This content is already canonical at the layer shown above; the branch ref did not move."
-          }
+          content={status.cachedLayerId
+            ? `Content already canonical at layer ${status.cachedLayerId}; branch ref did not move.`
+            : "This content is already canonical at the layer shown above; the branch ref did not move."}
           withArrow
         >
           <Badge
@@ -101,11 +99,9 @@ export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
       return (
         <Tooltip
           relationship="description"
-          content={
-            status.mergeLayerId
-              ? `Concurrent disjoint work merged automatically. Merge layer: ${status.mergeLayerId}`
-              : "Concurrent disjoint work merged automatically."
-          }
+          content={status.mergeLayerId
+            ? `Concurrent disjoint work merged automatically. Merge layer: ${status.mergeLayerId}`
+            : "Concurrent disjoint work merged automatically."}
           withArrow
         >
           <Badge
@@ -146,11 +142,13 @@ export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
                 </Caption1>
               )}
             </MessageBarBody>
-            {/* "Recover…" opens the §6.2 dialog. Disabled if the
+            {
+              /* "Recover…" opens the §6.2 dialog. Disabled if the
                 kernel didn't surface an orphan id — without it the
                 "save as sibling" path can't run, and the other two
                 paths would partially-recover state. Older kernel
-                builds without the §G.1+ field set would land here. */}
+                builds without the §G.1+ field set would land here. */
+            }
             {status.orphanLayerId && (
               <MessageBarActions>
                 <Button

@@ -25,8 +25,8 @@ import {
   MessageBarTitle,
   Spinner,
   Subtitle1,
-  Tooltip,
   tokens,
+  Tooltip,
 } from "@fluentui/react-components";
 import {
   ArrowExport16Regular,
@@ -287,7 +287,9 @@ export function Notebook() {
               />
             </Tooltip>
             <Tooltip
-              content={pinned ? "Unpin header (whole page scrolls)" : "Pin header to top"}
+              content={pinned
+                ? "Unpin header (whole page scrolls)"
+                : "Pin header to top"}
               relationship="label"
             >
               <Button
@@ -329,7 +331,9 @@ export function Notebook() {
               Import…
             </Button>
             <Tooltip
-              content={titleEmpty ? "Set a title before exporting" : "Download the notebook as a JSON file"}
+              content={titleEmpty
+                ? "Set a title before exporting"
+                : "Download the notebook as a JSON file"}
               relationship="label"
             >
               <Button
@@ -363,13 +367,17 @@ export function Notebook() {
               Reset
             </Button>
             <Tooltip
-              content={titleEmpty ? "Set a title before publishing" : "Publish the notebook into the active layer chain"}
+              content={titleEmpty
+                ? "Set a title before publishing"
+                : "Publish the notebook into the active layer chain"}
               relationship="label"
             >
               <Button
                 size="small"
                 appearance="subtle"
-                icon={isPublishing ? <Spinner size="tiny" /> : <GlobeArrowUp20Regular />}
+                icon={isPublishing
+                  ? <Spinner size="tiny" />
+                  : <GlobeArrowUp20Regular />}
                 disabled={anyRunning || isPublishing || titleEmpty}
                 onClick={() => {
                   void onPublish();

@@ -423,7 +423,9 @@ function LayerPicker({
         value={displayValue}
         selectedOptions={value ? [value] : []}
         onOptionSelect={(_e, data) => onChange(data.optionValue ?? "")}
-        placeholder={layers.length === 0 ? "(no layers available)" : "Select a layer"}
+        placeholder={layers.length === 0
+          ? "(no layers available)"
+          : "Select a layer"}
         disabled={disabled}
       >
         {layers.map((l) => (
@@ -650,7 +652,10 @@ function validateRange(
   const fromIdx = layers.findIndex((l) => l.layerId === from);
   const toIdx = layers.findIndex((l) => l.layerId === to);
   if (fromIdx === -1 || toIdx === -1) {
-    return { ok: false, reason: "Selected layers aren't on the active branch." };
+    return {
+      ok: false,
+      reason: "Selected layers aren't on the active branch.",
+    };
   }
   if (fromIdx < toIdx) {
     return {
@@ -673,7 +678,7 @@ function kindIsCostCap(kind: ConsolidateErrorKind): boolean {
  */
 function friendlyErrorKind(kind: ConsolidateErrorKind): string | null {
   switch (kind) {
-    case ConsolidateErrorKind.NONE:
+    case ConsolidateErrorKind.UNSPECIFIED:
       return null;
     case ConsolidateErrorKind.RANGE_NOT_ANCESTRAL:
       return "“From” is not an ancestor of “To”";

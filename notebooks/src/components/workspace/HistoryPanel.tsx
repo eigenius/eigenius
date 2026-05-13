@@ -55,8 +55,8 @@ import {
   ToastBody,
   Toaster,
   ToastTitle,
-  Tooltip,
   tokens,
+  Tooltip,
   useId,
   useToastController,
 } from "@fluentui/react-components";
@@ -66,13 +66,10 @@ import {
   Pin16Regular,
 } from "@fluentui/react-icons";
 import type { LayerTopologyResponse, TopologyNode } from "@eigenius/client";
-import { NodeKind, EdgeKind } from "@eigenius/client";
+import { EdgeKind, NodeKind } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
-import {
-  formatAbsoluteIso,
-  formatRelative,
-} from "../../runtime/relativeTime";
+import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
 import { CreateTagDialog } from "../dialogs/CreateTagDialog";
 
 const TOASTER_ID = "history-panel-toaster";
@@ -282,8 +279,8 @@ export function HistoryPanel() {
       <Toast>
         <ToastTitle>Reading at {shortHash(layerId)}</ToastTitle>
         <ToastBody>
-          Writes still go to the branch tip. Click "Return to tip" in the
-          header to clear the pin.
+          Writes still go to the branch tip. Click "Return to tip" in the header
+          to clear the pin.
         </ToastBody>
       </Toast>,
       { intent: "info", timeout: 6000 },
@@ -475,11 +472,20 @@ function DetailPanel({
 
       <Divider />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-        {/* "Time-travel here" — sets the session read-pin. The actual
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          marginTop: 12,
+        }}
+      >
+        {
+          /* "Time-travel here" — sets the session read-pin. The actual
             kernel reads pick it up via `atLayer` (D34 §5.2). When the
             currently-selected row IS the pin, label the button so
-            the user can clear it from here too. */}
+            the user can clear it from here too. */
+        }
         <Tooltip
           relationship="description"
           content="Pin reads to this layer. Writes still go to the branch tip."
@@ -494,8 +500,10 @@ function DetailPanel({
           </Button>
         </Tooltip>
 
-        {/* "Create tag" — pre-fills the dialog with this row's layer id
-            so the user only has to type a name. */}
+        {
+          /* "Create tag" — pre-fills the dialog with this row's layer id
+            so the user only has to type a name. */
+        }
         <Tooltip
           relationship="description"
           content="Create an immutable named ref at this layer (also protects it from GC)."
@@ -503,11 +511,13 @@ function DetailPanel({
           <Button onClick={onCreateTag}>Create tag…</Button>
         </Tooltip>
 
-        {/* "Inspect resources" sets the read-pin to this layer and
+        {
+          /* "Inspect resources" sets the read-pin to this layer and
             navigates to the Topology destination, which honors the
             pin as the graph root. The topology view includes Class /
             Property / Resource / Institution nodes — exactly the
-            "what's defined here" lens. */}
+            "what's defined here" lens. */
+        }
         <Tooltip
           relationship="description"
           content="Open the Topology panel rooted at this layer (sets the session read-pin)."

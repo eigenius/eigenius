@@ -245,10 +245,12 @@ export function TopologyGraphView(
             />
           </DialogTrigger>
           <DialogBody className={styles.fullScreenBody}>
-            {/* action={null} suppresses Fluent's default close-button
+            {
+              /* action={null} suppresses Fluent's default close-button
                 in the title's action slot — we use the absolutely-
                 positioned X above so it stays anchored when the
-                title grows to two lines. */}
+                title grows to two lines. */
+            }
             <DialogTitle action={null}>
               <div className={styles.dialogTitle}>
                 <span>{title}</span>
@@ -259,8 +261,10 @@ export function TopologyGraphView(
             </DialogTitle>
             <DialogContent className={styles.fullScreenContent}>
               <div className={styles.fullScreenGraph}>
-                {/* Re-mount on open so xyflow's fitView recalculates
-                    against the new viewport size. */}
+                {
+                  /* Re-mount on open so xyflow's fitView recalculates
+                    against the new viewport size. */
+                }
                 {fullScreen && <Graph nodes={nodes} edges={edges} />}
               </div>
             </DialogContent>
@@ -325,7 +329,13 @@ function buildGraph(
   // Compute positions via dagre.
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 80, marginx: 20, marginy: 20 });
+  g.setGraph({
+    rankdir: "LR",
+    nodesep: 40,
+    ranksep: 80,
+    marginx: 20,
+    marginy: 20,
+  });
   for (const n of xnodes) {
     g.setNode(n.id, { width: 180, height: 48 });
   }
