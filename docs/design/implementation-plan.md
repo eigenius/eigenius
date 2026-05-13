@@ -86,13 +86,14 @@ The build is organized into phases. Each phase produces a working system that ca
 | 10 | Kernel Completeness | ✓ | Ontology-as-types resolution, universe soundness, typed errors |
 | 11 | Type Theory Extensions | 11a ✓, 11b ✓, 11c ✓, 11d ✓, 11e.1 ✓, 11e.2 ✓ | Map/Reduce, inductive types, decision procedures, Comorphism class, ESL + EigenQL institution-capability surface |
 | D22 | Notebook & TypeScript SDK | ✓ | React notebook SPA + `@eigenius/client` SDK, served by the orchestrator at `/notebooks/`; six cell types incl. form-based charts; content-addressed publish-to-layer |
+| D34 | Notebook Chain Workspace | ✓ | Rail-based workspace shell: header branch picker · Branches · History · Tags · Merge · Compaction · Tasks · Institutions · Topology · GC · Health. Tags as GC roots; anchored-commit cache invalidation on consolidation; per-layer byte accounting for GC reclaim estimates; cooperative read-pin from History → Topology drill-down |
 | 12 | D14 Institutions | M1–M8 ✓; WASM-pkg / EigenQL-surface / docs / proto-cleanup pending | D14 institution realisation replaces D10; dock→assay worked example; comorphisms via four-step pipeline; Verdict-shaped Decidable + AutoOnLoad dispatch |
 | 13 | Azure + Ops | | Production deployment, CI/CD, observability, TiKV option |
 | 14 | Out-of-Core Layer | 14a–14h ✓; 14i (notebook surface + GC triggers) pending | Topology/content split, per-layer bloom + bloom cache, two-pool ARC, DAG branching, multi-session writes, reachability GC, indexed query path |
 | 15 | Layer Reconciliation | | Six typed resolution strategies (Witness / Rename / KeepBoth / KeepOne / KeepNeither / Restructure); pushout-based merge; three-stage conflict taxonomy (schema / equation / instance); cascade impact analysis with user-ack gates |
 | 16 | Out-of-Core Query Execution | | Buffer-pool over storage, hash-join with spill, external sort, spillable group-by, per-query memory budget |
-| 17 | Chain Consolidation | | Squash a contiguous ancestral range into a resolve-equivalent layer; "git squash" for the typed knowledge graph |
-| 18 | Runtime Substrate | | `LanguageRuntime` trait + parent ontology; Service / Job lifecycle split (`JobSpawner` / `ServiceSpawner`); image-build pipeline; sandbox; CBOR + RFC 8746 wire format; CBOR consolidation across kernel ↔ orchestrator |
+| 17 | Chain Consolidation | ✓ | Squash a contiguous ancestral range into a resolve-equivalent layer; at-head + below-head modes; resolve redirects per D25 §12.8; preserve-history vs reclaim modes; GC reachability through redirects; bloom-cache eviction; cost-estimation dry-run. `db consolidate-summary` (diagnostic enumeration) tracked as a follow-up |
+| 18 | Runtime Substrate | ✓ | `LanguageRuntime` trait + parent ontology; spawn-per-invocation Job lifecycle (`JobSpawner` / `DockerJobSpawner`); image-build pipeline via `buildah`; CBOR + RFC 8746 wire format; Julia hello-world capstone (18d); CBOR consolidation across kernel ↔ orchestrator (18e). Service lifecycle shipped under 19a alongside Julia |
 | 19 | Julia Institutions | 19a ✓, 19d.0 ✓, 19d ✓, 19e ✓, 19f ✓ (HiGHS), 19f.1 ✓, 19g ✓, 19h ✓, 19h.1 ✓ | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs); Catalyst → DiffEq + Symbolics → JuMP comorphisms live |
 | 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
 | 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
@@ -719,6 +720,61 @@ The phase decomposes into two milestones that are separately reviewable:
 - [D22 — Notebook UX and TypeScript SDK](d22-notebook-and-typescript-sdk.md) — full spec including the Eigon-CBOR ↔ TypeScript marshalling rules
 - [Platform guide chapter 14 — Notebook](../guides/platform/14-notebook.md)
 - [Platform guide chapter 15 — TypeScript SDK](../guides/platform/15-typescript-sdk.md)
+
+---
+
+## Phase D34 — Notebook Chain Workspace ✓
+
+**Goal:** Turn the existing notebook (D22) into a chain-aware workspace. The single-pane notebook view becomes one rail destination inside a Fluent `NavDrawer` shell; the other destinations expose every kernel surface a working operator needs (branches, history, tags, explicit merge, compaction, tasks, institutions, topology, GC, kernel health). The workspace metaphor — *what's in your chain right now*, browsable through one rail — replaces the prior "everything lives inside cell outputs" pattern.
+
+**Status:** Complete. Tracked parallel to the main 0–15 sequence because, like D22, it's a UX/SDK track on top of kernel features that already shipped under Phase 14 (branches, GC), Phase 17 (consolidation), D33 (anchored-commit cache), and the existing institution / task surfaces. Eleven phases per [D34 §16](d34-notebook-chain-workspace.md#16-roll-out-order):
+
+- **Phase 1 — §G.1 + §G.5 ✓** — `MergeInfo` wire-up; `branch_advanced` honesty fix in `advance_branch_for_layer` (the silent `NeedsWitnessedMerge` bug); cell-footer indicator (`◆ trivial merge` / `◐ cached at different position`).
+- **Phase 2 — Header + branch picker ✓** — `BranchBar` with branch picker, tip indicator, unsaved-dot, read-pin indicator with "Return to tip".
+- **Phase 3 — Branches panel + dialogs ✓** — list + create / delete dialogs; pin-aware delete safety; collapsible rail via `PanelLeftContract` / `PanelLeftExpand`.
+- **Phase 4 — History panel ✓** — linear first-parent walk over `LayerTopology`; per-row glyphs (`●` / `◆` / `⬚`); detail panel with "Time-travel here" (read-pin), copy id, create tag, inspect resources.
+- **Phase 5 — §G.3 + Merge UX ✓** — kernel: `MergeBranches` + `PreviewMerge` RPCs over `update_branch(AllowTrivial)` + a shared LCA/IRI-disjointness walk; `MergeInfo.orphan_layer_id`. Notebook: `MergePanel` rail destination + `WitnessedMergeRecoveryDialog` (save-as-sibling / pin-and-rebase / discard).
+- **Phase 6 — Compaction wizard ✓** — three-step UI over the existing `ConsolidateChain` / `EstimateConsolidation` RPCs (range → estimate → run). Drove two structural kernel fixes uncovered while testing: (a) anchored-commit cache invalidation in `consolidate_chain_locked` per D33 §3 (`list_anchored_commits` → `delete_anchored_commit` for entries pointing into the consolidated range), and (b) `branch_contexts` cache invalidation on the consolidate RPC handler so subsequent reads see the post-consolidation chain instead of the stale in-memory head.
+- **Phase 7 — Tasks panel ✓** — table over `ListTasks` / `GetTaskStatus` / `CancelTask`. Auto-poll only while at least one task is non-terminal; status badge colours by lifecycle category. Cooperative-cancel gap filed as [#51](https://github.com/eigenius/eigenius/issues/51) — the panel's `Cancel` button flips persisted status but the live evaluator doesn't yet observe it (D21 §8 cooperative cancellation deferred).
+- **Phase 8 — §G.2 + Tags panel ✓** — kernel: new `tags` column family in both backends, four-method storage trait (`create_tag` immutable / `get_tag` / `delete_tag` idempotent / `list_tags`), three RPCs (`CreateTag` / `ListTags` / `DeleteTag`), `GcRoots.tag_targets` joins `branch_heads` + `task_pins` in reachability per D34 §8.3. Notebook: `TagsPanel` (mirrors `BranchesPanel` minus "switch to"), `CreateTagDialog` invoked from both the Tags panel header *and* the History detail panel's per-layer "Create tag" affordance.
+- **Phase 9 — §G.4 + GC panel ✓** — kernel: `EstimateGc` / `RunGc` RPCs over a new `gc::estimate` (mark-only, no sweep) helper; `SweepStats.bytes_reclaimable` accumulator. Per-layer byte accounting: `LayerHandle.byte_size` (sum of encoded resource bytes, `#[serde(default)]` for legacy on-disk handles); both `store_layer` impls pre-serialize resources once to stamp the handle and reuse the bytes for the write batch. Notebook: `GcPanel` two-screen flow (estimate → confirm + run) with reclaimable-bytes row using a 1024-based formatter.
+- **Phase 10 — §G.8 + Institutions inspector ✓** — `InstitutionInfo` enriched with `runtime_kind`, `requires_environment`, full `QueryClassDecl` and `ComorphismDecl` lists (source/target classes resolved by joining through the referenced `ExportFormat` / `ImportFormat`). New proto enums `RuntimeKind` and `DispatchRole`. Notebook: `InstitutionsPanel` with filterable list + detail card, "Inspect raw resource" via the existing `ResourceInspector` over the `Inspect` RPC.
+- **Phase 11 — Topology + Health ✓** — `TopologyPanel` wraps the existing `TopologyGraphView` as a rail destination with a branch-tip picker, "Include resources" toggle, and read-pin honoring (History's "Inspect resources" sets the pin + navigates here; the panel disables the branch combobox and labels the title with the pinned hash). `HealthPanel` surfaces `eigen.health()` (healthy badge, version, layer + resource counts, D21 resume-sweep state with 3 s auto-poll while draining). Drove fixing the hardcoded `layer_count: 2 // core + program ontology` stub left over from the pre-Phase-14 era — now reads `backend.load_topology()?.layer_count()`.
+
+### Phase D34 — Cross-cutting kernel additions
+
+- **Branch-context cache coherence.** `consolidate_chain` advances the backend's branch ref via `put_branch` but bypasses `ExecutionContext`; the `branch_contexts` in-memory cache held a stale `Layer` graph and every subsequent read RPC (LayerTopology, RunProgram, Load candidate-parent walks) saw the old chain. `BranchContextCache::invalidate` exposed and called from the consolidate handler — fixes "topology view still shows pre-compaction layers" and "cell re-run cached at orphan layer id".
+- **Anchored-commit cache invalidation on consolidation.** `gc::collect`'s bloom eviction always ran; the anchored-commit cache pointing at layers in the consolidated range was untouched. After CAS, `consolidate_chain_locked` now scans `list_anchored_commits()` and deletes entries whose `layer_id` is in `range_layers`. Per D33 §3.
+- **Tag-rooted reachability in GC.** `GcRoots` extended with `tag_targets`; `from_branches` constructor now pulls both branch and tag refs into the root set so a tagged layer (and its ancestors) is durably protected until the tag is deleted. Per D34 §8.3.
+- **Per-layer byte accounting.** `LayerHandle.byte_size` populated by both `store_layer` impls; `gc::estimate` / `collect` sum it into `SweepStats.bytes_reclaimable`; `EstimateGcResponse.reclaimable_bytes` no longer hardcoded to 0.
+
+### Phase D34 — Deliverables
+
+- `notebooks/src/components/workspace/` — `WorkspaceShell` rail + ten destination panels (`BranchesPanel`, `HistoryPanel`, `TagsPanel`, `MergePanel`, `CompactionPanel`, `TasksPanel`, `InstitutionsPanel`, `TopologyPanel`, `GcPanel`, `HealthPanel`).
+- `notebooks/src/components/dialogs/` — `CreateBranchDialog`, `DeleteBranchDialog`, `CreateTagDialog`, `WitnessedMergeRecoveryDialog`.
+- `notebooks/src/components/output/CommitStatusBadge.tsx` — cell-footer indicator for cached / trivial-merge / needs-witnessed-merge outcomes.
+- `notebooks/src/runtime/commitMeta.ts` — `CommitMeta` + `classifyCommit` translating wire `MergeOutcome` into the renderer's `CommitStatus` taxonomy.
+- Kernel: tag storage primitives + RPCs; `EstimateGc` / `RunGc`; `MergeBranches` / `PreviewMerge`; tag-rooted GC; cache-invalidation fixes for `consolidate_chain` (anchored-commit + `branch_contexts`); per-layer `byte_size` on `LayerHandle`. `InstitutionInfo` enriched per §G.8.
+- SDK: `mergeBranches`, `previewMerge`, `consolidateChain`, `estimateConsolidation`, `createTag`, `listTags`, `deleteTag`, `estimateGc`, `runGc`, `listTasks`, `getTaskStatus`, `cancelTask`. Value-level enum re-exports for `MergeOutcome`, `ConsolidateErrorKind`, `RuntimeKind`, `DispatchRole`.
+
+### Phase D34 — Deferred enrichments
+
+Acknowledged in the design doc; gated on §G.6 (cursored branch-scoped history endpoint):
+
+- Cross-branch topology overlay (active chain in colour, others grey, merge edges emphasised).
+- "Installed at <layer>" lineage + "View install layer in history" cross-link in the Institutions inspector.
+- §7.4 one-click "consolidate older half" affordance on the Branches panel (deferred until first feedback round).
+
+### Phase D34 — Open follow-ups
+
+- [#51](https://github.com/eigenius/eigenius/issues/51) — `CancelTask` doesn't propagate to the live evaluator; the persisted status flips to `Cancelling` but a Running task continues to completion.
+- [#50](https://github.com/eigenius/eigenius/issues/50) — Pre-existing `DockerSpawner` TOCTOU race surfaced during the History timeline work; `#[ignore]`'d test guards the flake.
+- `EstimateGcResponse.reclaimable_bytes` excludes per-layer bloom / topo / chain pointer / content-index / triple-index overhead — bounded per-layer overhead, dwarfed by resource bytes; a future enrichment that wants exact storage footprint would aggregate the full WriteBatch byte count at store time. Legacy on-disk `LayerHandle`s report `byte_size = 0` (via `#[serde(default)]`) until they churn through GC + recommit.
+
+### Phase D34 — References
+
+- [D34 — Notebook Chain Workspace](d34-notebook-chain-workspace.md) — full IA, rail layout, per-destination shapes, kernel gap list (§G.1–§G.8), 11-phase rollout (§16).
+- [D33 — Partial-Order Chains §6](d33-partial-order-chains.md) — anchored-commit cache the consolidation invalidation fix is grounded in.
 
 ---
 
@@ -1978,6 +2034,8 @@ The following design documents must be written and reviewed before the phase tha
 | D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
 | D31 | **External Institution Authoring & Dispatch Lifecycle** | The end-to-end lifecycle for institutions whose `runtime` is `external`: mirror generation CLI, institution registration, kernel-emits-request / orchestrator-services-IO dispatch routing. Generator-agnostic; per-language faithful-translation specs (D29 / D30 / D32) plug in independently. Implementation milestone: Phase 19a.5 (framework) + Phase 19a.6 (IntervalArithmetic, the framework's integration test). | Phase 19a.5 (v1.1 draft) | Draft v1.1 |
 | D32 | **Faithful Translation Specification — `eigon-rust-gen`** | The mapping from Eigon class structure to Rust struct / trait / impl form for WASM institution authoring. Tracked in [#41](https://github.com/eigenius/eigenius/issues/41). | TBD | Planned |
+| D33 | **Partial-Order Chains and Commutativity-Aware Semantics** | **DRAFT** — `docs/design/d33-partial-order-chains.md`. Reframes the chain as a partial order of layers rather than a sequence; two-hash identity (position vs content) generalises D25 §11.0; supporting-layer property indexes "what this layer depends on"; **anchored-commit cache** (the v1 deliverable — content-addressed commit reuse keyed on `(content_hash, supporting_content_hash)`) generalises the notebook cell-output reuse pattern to any deterministic content generator. Partial-order operations (linearization-independent reads, distributed-execution forward compatibility) sketched for v2. Anchored-commit cache shipped in support of D34 §6 cell-cache visibility; invalidation on consolidation wired in D34 Phase 6. Full v1 storage path under Phase 20. | Phase 20 | Draft |
+| D34 | **Notebook Chain Workspace** | **COMPLETED** — `docs/design/d34-notebook-chain-workspace.md`. Rail-based workspace shell on top of D22 exposing every kernel chain surface a working operator needs. Eleven phases (§16) — branch picker, branches / history / tags / merge / compaction / tasks / institutions / topology / GC / health rail destinations. Forced kernel gaps §G.1–§G.8: `MergeInfo` honesty fix, tag storage + RPCs (with tag-rooted GC), `MergeBranches` / `PreviewMerge`, `EstimateGc` / `RunGc`, `branch_advanced` consumer surface, branch-scoped cursored history (§G.6, deferred), `^auto-` prefix reservation (§G.7, deferred), enriched `InstitutionInfo` (§G.8). Cross-cutting kernel fixes uncovered during the rollout: `branch_contexts` cache invalidation on consolidation, anchored-commit cache invalidation on consolidation per D33 §3, per-layer `byte_size` on `LayerHandle` for GC reclaim estimates. | Concurrent with Phase 12+ (track parallel to D22) | Done |
 
 **Reference documents** (analysis rather than specification):
 
