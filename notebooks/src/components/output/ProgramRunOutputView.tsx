@@ -39,6 +39,7 @@ import {
   ChevronRight16Regular,
 } from "@fluentui/react-icons";
 import type { ProgramRunResult } from "../../runtime/notebookStore";
+import { CommitStatusBadge } from "./CommitStatusBadge";
 import { ResourceInspector } from "./ResourceInspector";
 import { TraceTreePanel } from "./TraceTreePanel";
 
@@ -145,6 +146,7 @@ export function ProgramRunOutputView(
                   <TraceTreePanel traceIri={r.traceIri} />
                 </div>
               )}
+              {r.commit && <CommitStatusBadge commit={r.commit} />}
             </>
           )}
       </div>
@@ -206,7 +208,9 @@ function ResultRow({ result, styles }: ResultRowProps) {
             <Button
               size="small"
               appearance="subtle"
-              icon={expanded ? <ChevronDown16Regular /> : <ChevronRight16Regular />}
+              icon={expanded
+                ? <ChevronDown16Regular />
+                : <ChevronRight16Regular />}
               aria-label={expanded ? "Collapse" : "Expand"}
               onClick={() => setExpanded((v) => !v)}
             />
@@ -250,6 +254,7 @@ function ResultRow({ result, styles }: ResultRowProps) {
                   {result.errorMessage ?? "(no error message)"}
                 </Body1>
               )}
+            {result.commit && <CommitStatusBadge commit={result.commit} />}
           </td>
         </tr>
       )}

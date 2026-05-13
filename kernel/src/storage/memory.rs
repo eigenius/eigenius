@@ -31,7 +31,8 @@
 #![cfg(test)]
 
 use crate::layer::{
-    BloomFilter, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex, TripleIndex,
+    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex,
+    RedirectEntry, TripleIndex,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
@@ -39,7 +40,6 @@ use crate::program::trace::{InMemoryTraceStore, TraceStore};
 use crate::storage::{BatchOp, ChainInfo, PersistentBackend, ResourceBackend, StorageError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// In-memory `PersistentBackend` for kernel-side tests.
 ///
@@ -71,6 +71,29 @@ struct MemoryState {
     /// only head-pointer surface — the legacy single-`head` field is
     /// gone.
     branches: BTreeMap<String, LayerId>,
+    /// Tag refs (D34 §G.2 / §8). Immutable named pointers; once a
+    /// `(name, layer_id)` lands here, `name` cannot be retargeted —
+    /// only `delete_tag` removes it. Tags are GC roots, so the
+    /// reachability walk gathers them alongside branch heads.
+    tags: BTreeMap<String, LayerId>,
+    /// `ContentHash → set of position hashes` — the content-hash dedup
+    /// index introduced by D25 §11.0 / D33 §6. Many position hashes can
+    /// share a content hash (same notebook cell committed against
+    /// different parent chains); the index makes
+    /// `lookup_by_content_hash` O(log n).
+    content_index: BTreeMap<ContentHash, BTreeSet<LayerId>>,
+    /// Installed resolve redirects (D25 §12.8 / Phase 17f). Keyed by
+    /// the redirect *source* layer id. One entry per consolidation
+    /// where `to` was below the branch head.
+    redirects: BTreeMap<LayerId, RedirectEntry>,
+    /// Anchored-commit cache (D33 §6 / Phase 20c). Keyed by
+    /// `(content_hash, supporting_content_hash)` → cached layer id.
+    /// Memoizes `commit(content, supporting_layer) → LayerId`, so
+    /// any deterministic content generator anchored to a supporting
+    /// layer (notebook cells, institution ontology reload, mirror
+    /// regeneration) can reuse the existing layer without
+    /// re-committing.
+    anchored_commits: BTreeMap<(ContentHash, ContentHash), LayerId>,
 }
 
 impl MemoryPersistentBackend {
@@ -83,6 +106,10 @@ impl MemoryPersistentBackend {
                 meta: BTreeMap::new(),
                 blooms: BTreeMap::new(),
                 branches: BTreeMap::new(),
+                tags: BTreeMap::new(),
+                content_index: BTreeMap::new(),
+                redirects: BTreeMap::new(),
+                anchored_commits: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
             triple_index: Arc::new(MemoryTripleIndex::new()),
@@ -90,12 +117,9 @@ impl MemoryPersistentBackend {
     }
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+// `now_millis` removed — `LayerHandle.created_at` is now sourced from
+// `Layer.created_at()` (stamped at `LayerBuilder::build` time), so the
+// backend no longer generates its own timestamp.
 
 impl ResourceBackend for MemoryPersistentBackend {
     fn load_resource(&self, layer_id: &LayerId, iri: &Iri) -> Option<Resource> {
@@ -132,12 +156,26 @@ impl PersistentBackend for MemoryPersistentBackend {
             return Ok(None);
         }
 
-        // Walk parents head → root, then reverse.
+        // Walk parents head → root, redirect-aware. When the walk
+        // reaches a layer that's a redirect source, switch to walking
+        // the target's chain instead of continuing through the
+        // (potentially reclaimed) original parent. v1's refuse-chaining
+        // policy guarantees a single hop is enough — no cycles.
         let mut chain_ids = vec![head_id.clone()];
         let mut current = head_id.clone();
-        while let Some(Some(parent)) = state.chain.get(&current).cloned() {
-            chain_ids.push(parent.clone());
-            current = parent;
+        loop {
+            if let Some(entry) = state.redirects.get(&current) {
+                chain_ids.push(entry.target.clone());
+                current = entry.target.clone();
+                continue;
+            }
+            match state.chain.get(&current).cloned() {
+                Some(Some(parent)) => {
+                    chain_ids.push(parent.clone());
+                    current = parent;
+                }
+                _ => break,
+            }
         }
         chain_ids.reverse();
 
@@ -175,16 +213,33 @@ impl PersistentBackend for MemoryPersistentBackend {
         // consistent with `Layer::parent()` semantics.
         let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
         let canonical_parent = all_parents.first().cloned();
+        // Match the persistent backend's `byte_size` accounting so
+        // GC estimate tests against this fixture produce the same
+        // numbers a real backend would.
+        let byte_size: u64 = layer
+            .iter_resources()
+            .map(|(_, r)| crate::ontology::eigon_cbor::serialize_resource(&r).len() as u64)
+            .sum();
         let handle = LayerHandle {
             id: id.clone(),
+            content_hash: layer.content_hash().clone(),
+            supporting_layer: layer.supporting_layer().cloned(),
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
-            created_at: now_millis(),
+            // Copy the build-time stamp instead of taking `now_millis()`
+            // here — keeps the in-memory Layer and persisted handle
+            // consistent on `created_at` (single source of truth in
+            // `LayerBuilder::build`).
+            created_at: layer.created_at(),
+            byte_size,
+            is_redirect_source: false,
         };
         // Build the bloom outside the lock (it's a hash-heavy loop) and
         // insert it together with the rest of the layer's state.
         let bloom = BloomFilter::for_iris(layer.defined_iris());
+
+        let content_hash = layer.content_hash().clone();
 
         let mut state = self.inner.write().expect("poisoned");
         state.topology.insert(id.clone(), handle);
@@ -195,6 +250,11 @@ impl PersistentBackend for MemoryPersistentBackend {
                 .insert((id.clone(), iri), (*resource).clone());
         }
         state.blooms.insert(id.clone(), bloom);
+        state
+            .content_index
+            .entry(content_hash)
+            .or_default()
+            .insert(id.clone());
         Ok(id)
     }
 
@@ -204,7 +264,27 @@ impl PersistentBackend for MemoryPersistentBackend {
         for handle in state.topology.values() {
             topology.insert_layer(handle.clone());
         }
+        // D25 §12.8.1(d): manufacture synthetic tombstones for every
+        // redirect source whose original handle has been reclaimed.
+        // The redirects map is cheap to iterate (one entry per
+        // consolidation, not per layer).
+        let entries: Vec<RedirectEntry> = state.redirects.values().cloned().collect();
+        crate::layer::augment_topology_with_redirects(&mut topology, &entries);
         Ok(topology)
+    }
+
+    fn load_handle(&self, layer_id: &LayerId) -> Result<Option<LayerHandle>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        // Real handle, if present on disk.
+        if let Some(handle) = state.topology.get(layer_id) {
+            return Ok(Some(handle.clone()));
+        }
+        // Synthetic tombstone, if a redirect references this layer
+        // (D25 §12.8.1(d)). Matches `load_topology`'s view.
+        if let Some(entry) = state.redirects.get(layer_id) {
+            return Ok(Some(crate::layer::manufacture_tombstone(entry)));
+        }
+        Ok(None)
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
@@ -314,17 +394,148 @@ impl PersistentBackend for MemoryPersistentBackend {
             .collect())
     }
 
+    fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        if state.tags.contains_key(name) {
+            return Ok(false);
+        }
+        state.tags.insert(name.to_string(), id.clone());
+        Ok(true)
+    }
+
+    fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
+        Ok(self.inner.read().expect("poisoned").tags.get(name).cloned())
+    }
+
+    fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        Ok(state.tags.remove(name).is_some())
+    }
+
+    fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
+        Ok(self
+            .inner
+            .read()
+            .expect("poisoned")
+            .tags
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
+    }
+
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
         let mut state = self.inner.write().expect("poisoned");
+        // Pull the content hash off the topology entry before we remove
+        // it so we can clean the content-hash index in the same write.
+        let content_hash = state.topology.get(layer).map(|h| h.content_hash.clone());
         state.topology.remove(layer);
         state.chain.remove(layer);
         state.blooms.remove(layer);
         state.resources.retain(|(lid, _), _| lid != layer);
+        if let Some(ch) = content_hash {
+            if let Some(set) = state.content_index.get_mut(&ch) {
+                set.remove(layer);
+                if set.is_empty() {
+                    state.content_index.remove(&ch);
+                }
+            }
+        }
         // Don't touch branches — branches pointing at deleted layers
         // would be a caller bug and we don't masquerade by silently
         // unsetting them. GC ensures branch-pointed layers stay in
         // the reachable set.
         Ok(())
+    }
+
+    fn lookup_by_content_hash(
+        &self,
+        content_hash: &ContentHash,
+    ) -> Result<Vec<LayerId>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state
+            .content_index
+            .get(content_hash)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    fn put_redirect(&self, entry: &RedirectEntry) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state
+            .redirects
+            .insert(entry.source().clone(), entry.clone());
+        Ok(())
+    }
+
+    fn lookup_redirect(&self, source: &LayerId) -> Result<Option<RedirectEntry>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state.redirects.get(source).cloned())
+    }
+
+    fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.redirects.remove(source);
+        Ok(())
+    }
+
+    fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state.redirects.values().cloned().collect())
+    }
+
+    fn lookup_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<Option<LayerId>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state
+            .anchored_commits
+            .get(&(content_hash.clone(), supporting_content_hash.clone()))
+            .cloned())
+    }
+
+    fn put_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+        layer_id: &LayerId,
+    ) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.anchored_commits.insert(
+            (content_hash.clone(), supporting_content_hash.clone()),
+            layer_id.clone(),
+        );
+        Ok(())
+    }
+
+    fn delete_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state
+            .anchored_commits
+            .remove(&(content_hash.clone(), supporting_content_hash.clone()));
+        Ok(())
+    }
+
+    fn list_anchored_commits(
+        &self,
+    ) -> Result<Vec<crate::storage::AnchoredCommitEntry>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        Ok(state
+            .anchored_commits
+            .iter()
+            .map(
+                |((content, supporting), id)| crate::storage::AnchoredCommitEntry {
+                    content_hash: content.clone(),
+                    supporting_content_hash: supporting.clone(),
+                    layer_id: id.clone(),
+                },
+            )
+            .collect())
     }
 }
 
@@ -379,6 +590,245 @@ mod tests {
 
         let topology = backend.load_topology().unwrap();
         assert_eq!(topology.layer_count(), 1);
+    }
+
+    /// Two layers with the same single resource but different parents
+    /// share a `ContentHash` (the resource set is identical) but get
+    /// distinct `PositionHash`es (parents differ). `lookup_by_content_hash`
+    /// must return both positions; deleting one cleans only its entry.
+    #[test]
+    fn content_hash_index_dedup_and_cleanup() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = crate::layer::LayerStorage::in_memory();
+
+        // Two distinct root layers (different content) so each presents
+        // a different parent to the child layers below.
+        let root_a = {
+            let mut b = LayerBuilder::new("root_a", None);
+            b.add_resource(make_resource(
+                "urn:eigenius:core:root_a_marker",
+                vec![("urn:eigenius:core:description", Value::String("a".into()))],
+            ))
+            .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        let root_b = {
+            let mut b = LayerBuilder::new("root_b", None);
+            b.add_resource(make_resource(
+                "urn:eigenius:core:root_b_marker",
+                vec![("urn:eigenius:core:description", Value::String("b".into()))],
+            ))
+            .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        backend.store_layer(&root_a).unwrap();
+        backend.store_layer(&root_b).unwrap();
+
+        // Two child layers carrying byte-identical resources but rooted
+        // at different parents. Same content hash; different position.
+        let make_child = |parent: Arc<crate::layer::Layer>| -> crate::layer::Layer {
+            let mut b = LayerBuilder::new("child", Some(parent));
+            b.add_resource(make_resource(
+                "urn:eigenius:demo:shared",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("shared".into()),
+                )],
+            ))
+            .unwrap();
+            b.build(storage.clone())
+        };
+        let child_a = make_child(Arc::clone(&root_a));
+        let child_b = make_child(Arc::clone(&root_b));
+
+        assert_eq!(
+            child_a.content_hash(),
+            child_b.content_hash(),
+            "identical resource sets must share a content hash"
+        );
+        assert_ne!(
+            child_a.id(),
+            child_b.id(),
+            "different parents must yield distinct position hashes"
+        );
+
+        backend.store_layer(&child_a).unwrap();
+        backend.store_layer(&child_b).unwrap();
+
+        let mut hits = backend
+            .lookup_by_content_hash(child_a.content_hash())
+            .unwrap();
+        hits.sort();
+        let mut expected = vec![child_a.id().clone(), child_b.id().clone()];
+        expected.sort();
+        assert_eq!(hits, expected);
+
+        // Delete one position; the other remains.
+        backend.delete_layer(child_a.id()).unwrap();
+        let remaining = backend
+            .lookup_by_content_hash(child_a.content_hash())
+            .unwrap();
+        assert_eq!(remaining, vec![child_b.id().clone()]);
+
+        // Delete the second; index is empty (not just emptied — the
+        // memory backend prunes the now-empty bucket).
+        backend.delete_layer(child_b.id()).unwrap();
+        let empty = backend
+            .lookup_by_content_hash(child_a.content_hash())
+            .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    /// Phase 17f-A: redirects round-trip through the storage layer and
+    /// `load_topology` manufactures a synthetic tombstone for a redirect
+    /// whose source has been reclaimed from the topology.
+    #[test]
+    fn redirect_round_trip_and_synthetic_tombstone() {
+        let backend = MemoryPersistentBackend::new();
+
+        // Build a root + child layer; the child will become the
+        // "source" of a redirect (the to-be-consolidated layer).
+        let storage = crate::layer::LayerStorage::in_memory();
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:R", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        let mut sb = LayerBuilder::new("source", Some(Arc::clone(&root)));
+        sb.add_resource(make_resource("urn:eigenius:demo:original", vec![]))
+            .unwrap();
+        let source = Arc::new(sb.build(storage.clone()));
+        backend.store_layer(&source).unwrap();
+
+        // Hypothetical L_c — we don't actually build the chain, just
+        // need a target id for the redirect to point at.
+        let target_id = crate::layer::LayerId([0xab; 32]);
+
+        // Pre-condition: no redirects, no tombstones.
+        assert!(backend.list_redirects().unwrap().is_empty());
+        let topo_before = backend.load_topology().unwrap();
+        assert!(
+            !topo_before
+                .get_layer(source.id())
+                .unwrap()
+                .is_redirect_source
+        );
+
+        // Install the redirect. The entry carries the source's full
+        // LayerHandle so `load_topology` can manufacture a tombstone
+        // after `delete_layer` reclaims the original.
+        let source_handle = topo_before.get_layer(source.id()).unwrap().clone();
+        let redirect = crate::layer::RedirectEntry {
+            target: target_id.clone(),
+            source_handle,
+            preserve_history: false,
+        };
+        backend.put_redirect(&redirect).unwrap();
+
+        // Round-trip: lookup returns the entry; list returns it once.
+        let looked_up = backend
+            .lookup_redirect(source.id())
+            .unwrap()
+            .expect("redirect present");
+        assert_eq!(looked_up.target, target_id);
+        assert_eq!(looked_up.source(), source.id());
+        assert_eq!(backend.list_redirects().unwrap().len(), 1);
+
+        // Reclaim `source` from the topology. `load_topology` should
+        // now manufacture a tombstone with `is_redirect_source = true`
+        // and the original handle's metadata.
+        backend.delete_layer(source.id()).unwrap();
+        let topo_after = backend.load_topology().unwrap();
+        let tombstone = topo_after
+            .get_layer(source.id())
+            .expect("tombstone present");
+        assert!(tombstone.is_redirect_source);
+        assert_eq!(tombstone.id, *source.id());
+        assert_eq!(tombstone.name, "source"); // preserved from original handle
+
+        // Delete the redirect. The tombstone goes away with it.
+        backend.delete_redirect(source.id()).unwrap();
+        let topo_final = backend.load_topology().unwrap();
+        assert!(topo_final.get_layer(source.id()).is_none());
+    }
+
+    /// Phase 20c: anchored-commit cache round-trip through the four
+    /// trait methods. Hit on byte-equal key; miss on either-key
+    /// change; list reports all entries; delete removes a single entry.
+    #[test]
+    fn anchored_commit_cache_round_trip() {
+        let backend = MemoryPersistentBackend::new();
+
+        let content_a = ContentHash([1u8; 32]);
+        let content_b = ContentHash([2u8; 32]);
+        let support_x = ContentHash([3u8; 32]);
+        let support_y = ContentHash([4u8; 32]);
+        let layer_one = LayerId([0x10; 32]);
+        let layer_two = LayerId([0x20; 32]);
+
+        // Pre-condition: empty.
+        assert!(backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .is_none());
+        assert!(backend.list_anchored_commits().unwrap().is_empty());
+
+        // Insert one entry; round-trip via lookup.
+        backend
+            .put_anchored_commit(&content_a, &support_x, &layer_one)
+            .unwrap();
+        let hit = backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .expect("cache hit on byte-equal key");
+        assert_eq!(hit, layer_one);
+
+        // Different content → miss. Different supporting → miss.
+        assert!(backend
+            .lookup_anchored_commit(&content_b, &support_x)
+            .unwrap()
+            .is_none());
+        assert!(backend
+            .lookup_anchored_commit(&content_a, &support_y)
+            .unwrap()
+            .is_none());
+
+        // Insert a second entry; list reports both.
+        backend
+            .put_anchored_commit(&content_b, &support_y, &layer_two)
+            .unwrap();
+        let mut entries = backend.list_anchored_commits().unwrap();
+        entries.sort_by_key(|e| e.content_hash.0);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].content_hash, content_a);
+        assert_eq!(entries[0].supporting_content_hash, support_x);
+        assert_eq!(entries[0].layer_id, layer_one);
+        assert_eq!(entries[1].content_hash, content_b);
+        assert_eq!(entries[1].supporting_content_hash, support_y);
+        assert_eq!(entries[1].layer_id, layer_two);
+
+        // Overwriting an existing entry replaces the layer.
+        let layer_one_v2 = LayerId([0x11; 32]);
+        backend
+            .put_anchored_commit(&content_a, &support_x, &layer_one_v2)
+            .unwrap();
+        let hit2 = backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .expect("cache hit after overwrite");
+        assert_eq!(hit2, layer_one_v2);
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 2);
+
+        // Delete one entry; the other remains.
+        backend
+            .delete_anchored_commit(&content_a, &support_x)
+            .unwrap();
+        assert!(backend
+            .lookup_anchored_commit(&content_a, &support_x)
+            .unwrap()
+            .is_none());
+        assert_eq!(backend.list_anchored_commits().unwrap().len(), 1);
     }
 
     #[test]
@@ -458,6 +908,47 @@ mod tests {
 
         // Delete on absent key is a no-op.
         backend.delete_branch("nonexistent").unwrap();
+    }
+
+    #[test]
+    fn tag_refs_round_trip() {
+        // Verifies the structural invariants of the tag primitive:
+        // immutable (re-create returns false; existing target stays),
+        // idempotent delete (false on absent), and stable sort order.
+        let backend = MemoryPersistentBackend::new();
+        assert!(backend.get_tag("release-v1").unwrap().is_none());
+        assert!(backend.list_tags().unwrap().is_empty());
+
+        let id_a = LayerId([1u8; 32]);
+        let id_b = LayerId([2u8; 32]);
+        assert!(backend.create_tag("release-v1", &id_a).unwrap());
+        assert!(backend.create_tag("baseline", &id_b).unwrap());
+
+        assert_eq!(backend.get_tag("release-v1").unwrap(), Some(id_a.clone()));
+        assert_eq!(backend.get_tag("baseline").unwrap(), Some(id_b.clone()));
+
+        // Tag immutability: re-creating an existing name returns
+        // false and the original target survives.
+        assert!(!backend.create_tag("release-v1", &id_b).unwrap());
+        assert_eq!(
+            backend.get_tag("release-v1").unwrap(),
+            Some(id_a.clone()),
+            "create_tag must NOT retarget an existing name"
+        );
+
+        // list_tags returns sorted by name.
+        let listed = backend.list_tags().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].0, "baseline");
+        assert_eq!(listed[1].0, "release-v1");
+
+        // Delete reports whether the tag existed.
+        assert!(backend.delete_tag("release-v1").unwrap());
+        assert!(backend.get_tag("release-v1").unwrap().is_none());
+        assert!(
+            !backend.delete_tag("release-v1").unwrap(),
+            "delete on absent name is idempotent — returns false, not an error"
+        );
     }
 
     #[test]

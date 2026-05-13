@@ -30,26 +30,56 @@ mod triple_index;
 use async_trait::async_trait;
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
-use eigenius_kernel::layer::{BloomFilter, Layer, LayerHandle, LayerId, LayerTopology};
+use eigenius_kernel::layer::{
+    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, RedirectEntry,
+};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::storage::{LayerStore, ResourceBackend, ResourceStore, StorageError};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use triple_index::RocksTripleIndex;
 
 const TOPO_PREFIX: &str = "topo:";
 const BLOOM_PREFIX: &str = "bloom:";
 const BRANCH_PREFIX: &str = "branch:";
+/// Tag-ref storage (D34 §G.2 / §8). Immutable named refs into the
+/// DAG. Keys: `tag:<name>` → hex-encoded `LayerId`. Tags are GC
+/// roots — `gc::collect` enumerates them alongside branches when
+/// computing reachability.
+const TAG_PREFIX: &str = "tag:";
+/// Content-hash dedup index (D25 §11.0 / D33 §6).
+///
+/// Keys: `content:<content_hash_hex>:<position_hash_hex>` → empty value.
+/// Prefix-scanning with `content:<content_hash_hex>:` yields every
+/// position sharing that content hash; the position hash hex follows
+/// the content hash hex inside the key so the scan returns positions
+/// in lexicographic order without a secondary lookup.
+const CONTENT_INDEX_PREFIX: &str = "content:";
+/// Resolve-redirect storage (D25 §12.8 / Phase 17f).
+///
+/// Keys: `redirect:<source_layer_hex>` → CBOR-encoded
+/// [`eigenius_kernel::layer::RedirectEntry`]. One entry per
+/// consolidation where `to` was below the branch head. Carries the
+/// source layer's `LayerHandle` snapshot so `load_topology` can
+/// manufacture the in-memory synthetic tombstone (D25 §12.8.1(d))
+/// even after the original handle has been reclaimed.
+const REDIRECT_PREFIX: &str = "redirect:";
+/// Anchored-commit cache storage (D33 §6 / Phase 20c).
+///
+/// Keys: `anchored:<content_hex>:<supporting_content_hex>` → 32 bytes
+/// of position-hash. Probed at commit time so any deterministic
+/// content generator (notebook cells, institution ontology reload,
+/// mirror regeneration) that anchors to a supporting layer reuses
+/// the existing layer's id when content + supporting context are
+/// byte-equivalent to a previous commit (no re-execution, no new
+/// chain commit).
+const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+// `now_millis` removed — `LayerHandle.created_at` is now sourced from
+// `Layer.created_at()` (stamped at `LayerBuilder::build` time), so the
+// backend no longer generates its own timestamp.
 
 /// RocksDB-backed storage.
 pub struct RocksStore {
@@ -127,12 +157,31 @@ impl RocksStore {
         &self,
         head: &LayerId,
     ) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
-        // Walk parent pointers head → root, then reverse for build order.
+        // Walk parent pointers head → root, redirect-aware (D25 §12.8
+        // / Phase 17f-F). When the walk reaches a layer that's a
+        // redirect source, switch to walking the target's chain
+        // instead of continuing through the (potentially reclaimed)
+        // original parent pointer. v1's refuse-chaining policy
+        // guarantees a single hop is enough — no cycles.
         let mut chain_ids = vec![head.clone()];
         let mut current = head.clone();
-        while let Some(parent_id) = self.get_chain(&current)? {
-            chain_ids.push(parent_id.clone());
-            current = parent_id;
+        loop {
+            if let Some(redirect_entry) =
+                <Self as eigenius_kernel::storage::PersistentBackend>::lookup_redirect(
+                    self, &current,
+                )?
+            {
+                chain_ids.push(redirect_entry.target.clone());
+                current = redirect_entry.target;
+                continue;
+            }
+            match self.get_chain(&current)? {
+                Some(parent_id) => {
+                    chain_ids.push(parent_id.clone());
+                    current = parent_id;
+                }
+                None => break,
+            }
         }
         chain_ids.reverse();
 
@@ -161,24 +210,20 @@ impl RocksStore {
         }))
     }
 
-    /// Load layer metadata (name + first parent) for a known layer.
+    /// Load the full `LayerHandle` for a known layer.
     ///
     /// Reads the canonical CBOR `topo:<id>` entry. There is no legacy
     /// fallback — pre-Phase-14 DBs are not supported; recovery is to drop
     /// the DB and re-load from source files.
-    fn load_layer_meta(
-        &self,
-        layer_id: &LayerId,
-    ) -> Result<(String, Option<LayerId>), StorageError> {
+    fn load_layer_handle(&self, layer_id: &LayerId) -> Result<LayerHandle, StorageError> {
         let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
         let bytes = self
             .db
             .get(topo_key.as_bytes())
             .map_err(|e| StorageError::Internal(format!("failed to load topo entry: {e}")))?
             .ok_or_else(|| StorageError::NotFound(format!("layer {}", hex::encode(layer_id.0))))?;
-        let handle: LayerHandle = ciborium::from_reader(bytes.as_slice())
-            .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
-        Ok((handle.name, handle.parents.into_iter().next()))
+        ciborium::from_reader(bytes.as_slice())
+            .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))
     }
 
     /// Write a `topo:<id>` entry containing the LayerHandle. Phase 14a-ii.
@@ -328,19 +373,48 @@ impl LayerStore for RocksStore {
         let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
         let canonical_parent = all_parents.first().cloned();
 
+        // Pre-serialize resources so we can both (a) stamp the
+        // handle's `byte_size` and (b) write the values below without
+        // re-encoding. CBOR encoding is the hot work, so doing it
+        // once per resource is the right shape regardless of
+        // byte_size.
+        let encoded: Vec<(Iri, Vec<u8>)> = layer
+            .iter_resources()
+            .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
+            .collect();
+        let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
+
         let handle = LayerHandle {
             id: id.clone(),
+            content_hash: layer.content_hash().clone(),
+            supporting_layer: layer.supporting_layer().cloned(),
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
-            created_at: now_millis(),
+            // Copy the build-time stamp set by `LayerBuilder::build`
+            // rather than taking `now_millis()` here; keeps the
+            // in-memory Layer and persisted handle consistent on
+            // `created_at`.
+            created_at: layer.created_at(),
+            byte_size,
+            is_redirect_source: false,
         };
         self.put_topology_entry(&handle)?;
+        // Content-hash dedup index (D25 §11.0). Idempotent by
+        // `(content_hash, position_hash)` — re-storing the same layer
+        // writes the same key with the same empty value.
+        let content_key = format!(
+            "{CONTENT_INDEX_PREFIX}{}:{}",
+            hex::encode(handle.content_hash.0),
+            hex::encode(id.0)
+        );
+        self.db
+            .put(content_key.as_bytes(), [])
+            .map_err(|e| StorageError::Internal(format!("put content index: {e}")))?;
 
-        // Store each resource as CBOR
-        for (iri, resource) in layer.iter_resources() {
+        // Store each resource as CBOR (already serialized above).
+        for (iri, value) in &encoded {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            let value = eigon_cbor::serialize_resource(&resource);
             self.db
                 .put(key.as_bytes(), value)
                 .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
@@ -358,7 +432,15 @@ impl LayerStore for RocksStore {
         // cache (fresh) and backend. Used by tests that exercise the older
         // `LayerStore` API in isolation; production code uses
         // `PersistentBackend::load_chain` + `build_chain` instead.
-        let (name, _parent_id) = self.load_layer_meta(id)?;
+        //
+        // The on-disk `LayerHandle` carries the layer's content hash; we
+        // reuse it directly rather than reconstructing a synthetic handle
+        // so the reconstructed `Layer.content_hash` matches what
+        // `store_layer` wrote. Parents are deliberately cleared because
+        // this code path doesn't reconstruct the parent chain (production
+        // chain reads go through `PersistentBackend::load_chain`).
+        let mut handle = self.load_layer_handle(id)?;
+        handle.parents.clear();
         let defined_iris = ResourceBackend::list_layer_iris(self, id)?;
         // Construct an in-memory storage bundle and warm both caches from
         // RocksDB so reads via the returned Layer succeed without going
@@ -366,13 +448,6 @@ impl LayerStore for RocksStore {
         // + `build_chain` instead — this path exists for the older async
         // `LayerStore` API tests.)
         let storage = eigenius_kernel::layer::LayerStorage::in_memory();
-        let handle = LayerHandle {
-            id: id.clone(),
-            parents: Vec::new(),
-            name,
-            resource_count: defined_iris.len() as u64,
-            created_at: 0,
-        };
         for iri in &defined_iris {
             if let Some(resource) = ResourceBackend::load_resource(self, id, iri) {
                 storage.cache.put(
@@ -559,12 +634,30 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
         let canonical_parent = all_parents.first().cloned();
 
+        // Pre-serialize resources so we can both stamp the handle's
+        // `byte_size` (sum of encoded resource bytes — drives GC's
+        // reclaim estimate) and write the values into the batch
+        // without re-encoding.
+        let encoded: Vec<(Iri, Vec<u8>)> = layer
+            .iter_resources()
+            .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
+            .collect();
+        let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
+
         let handle = LayerHandle {
             id: id.clone(),
+            content_hash: layer.content_hash().clone(),
+            supporting_layer: layer.supporting_layer().cloned(),
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
-            created_at: now_millis(),
+            // Copy the build-time stamp set by `LayerBuilder::build`
+            // rather than taking `now_millis()` here; keeps the
+            // in-memory Layer and persisted handle consistent on
+            // `created_at`.
+            created_at: layer.created_at(),
+            byte_size,
+            is_redirect_source: false,
         };
         let bloom = BloomFilter::for_iris(layer.defined_iris());
 
@@ -585,9 +678,8 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         let bloom_key = format!("{BLOOM_PREFIX}{}", hex::encode(id.0));
         batch.put(bloom_key.as_bytes(), &bloom_bytes);
 
-        for (iri, resource) in layer.iter_resources() {
+        for (iri, value) in &encoded {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            let value = eigon_cbor::serialize_resource(&resource);
             batch.put(key.as_bytes(), value);
         }
 
@@ -597,6 +689,18 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             None => String::new(),
         };
         batch.put(chain_key.as_bytes(), chain_value.as_bytes());
+
+        // Content-hash dedup index (D25 §11.0 / D33 §6). Each entry is a
+        // `content:<content_hex>:<position_hex>` key with an empty value;
+        // the key existence is the signal. Idempotent by
+        // `(content_hash, position_hash)` so re-storing the same layer
+        // is a structural no-op at the index's logical level.
+        let content_key = format!(
+            "{CONTENT_INDEX_PREFIX}{}:{}",
+            hex::encode(layer.content_hash().0),
+            hex::encode(id.0)
+        );
+        batch.put(content_key.as_bytes(), []);
 
         // Phase 14h: index entries are populated by `LayerBuilder::build`
         // (same precomputation pattern as the bloom). The persistent
@@ -611,7 +715,39 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn load_topology(&self) -> Result<LayerTopology, StorageError> {
-        self.read_topology_entries()
+        let mut topology = self.read_topology_entries()?;
+        // D25 §12.8.1(d): manufacture synthetic tombstones for every
+        // redirect source whose original handle was reclaimed.
+        let entries = eigenius_kernel::storage::PersistentBackend::list_redirects(self)?;
+        eigenius_kernel::layer::augment_topology_with_redirects(&mut topology, &entries);
+        Ok(topology)
+    }
+
+    fn load_handle(&self, layer_id: &LayerId) -> Result<Option<LayerHandle>, StorageError> {
+        // Real handle: read `topo:<id>` directly.
+        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
+        match self.db.get(topo_key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let handle = ciborium::from_reader(bytes.as_slice())
+                    .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+                return Ok(Some(handle));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return Err(StorageError::Internal(format!(
+                    "failed to load topo entry: {e}"
+                )))
+            }
+        }
+        // Synthetic tombstone via the redirect CF (D25 §12.8.1(d)) —
+        // matches `load_topology`'s view for any redirect source whose
+        // original on-disk handle has been reclaimed.
+        if let Some(entry) =
+            eigenius_kernel::storage::PersistentBackend::lookup_redirect(self, layer_id)?
+        {
+            return Ok(Some(eigenius_kernel::layer::manufacture_tombstone(&entry)));
+        }
+        Ok(None)
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
@@ -736,12 +872,29 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         let id_hex = hex::encode(layer.0);
         // Per D23 §6.3, layer-shape mutations land via one WriteBatch.
         // Atomic across the topology entry, bloom, chain pointer,
-        // every resource entry, and (Phase 14h) every index entry —
-        // no partial state visible after a crash mid-delete.
+        // every resource entry, the content-hash index entry, and
+        // (Phase 14h) every triple-index entry — no partial state
+        // visible after a crash mid-delete.
+
+        // Read the topology entry *before* the batch builds — we need
+        // the content hash to know which content-index key to delete.
+        // If the layer is absent, delete_layer is a no-op (idempotent
+        // contract); a `None` content hash falls through to the rest of
+        // the cleanup which is also no-op on absent keys.
+        let content_hash_hex = self
+            .load_layer_handle(layer)
+            .ok()
+            .map(|h| hex::encode(h.content_hash.0));
+
         let mut batch = rocksdb::WriteBatch::default();
 
         let topo_key = format!("{TOPO_PREFIX}{id_hex}");
         batch.delete(topo_key.as_bytes());
+
+        if let Some(ch_hex) = content_hash_hex {
+            let content_key = format!("{CONTENT_INDEX_PREFIX}{ch_hex}:{id_hex}");
+            batch.delete(content_key.as_bytes());
+        }
 
         let bloom_key = format!("{BLOOM_PREFIX}{id_hex}");
         batch.delete(bloom_key.as_bytes());
@@ -800,6 +953,267 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
     }
+
+    fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError> {
+        let key = format!("{TAG_PREFIX}{name}");
+        // Read-then-write under a single column family is safe enough
+        // for tag creation: tags are administrator-driven operations,
+        // not a hot write path, and a race between two `CreateTag`
+        // calls just means whichever lost gets `Ok(false)` — the
+        // intended "AlreadyExists" semantic. For genuine atomicity
+        // we'd need a transactional DB; v1 ships with the simpler
+        // shape.
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(_)) => Ok(false),
+            Ok(None) => {
+                self.db
+                    .put(key.as_bytes(), hex::encode(id.0))
+                    .map_err(|e| StorageError::Internal(format!("create_tag: {e}")))?;
+                Ok(true)
+            }
+            Err(e) => Err(StorageError::Internal(format!("create_tag get: {e}"))),
+        }
+    }
+
+    fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
+        let key = format!("{TAG_PREFIX}{name}");
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let hex_str = String::from_utf8(bytes)
+                    .map_err(|e| StorageError::Internal(format!("invalid tag value: {e}")))?;
+                Ok(Some(hex_to_layer_id(&hex_str)?))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get_tag: {e}"))),
+        }
+    }
+
+    fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+        let key = format!("{TAG_PREFIX}{name}");
+        // Same read-then-delete shape: tag deletion is rare and the
+        // race window is harmless (both deleters succeed; second
+        // returns `false`).
+        let existed = self
+            .db
+            .get(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete_tag get: {e}")))?
+            .is_some();
+        if existed {
+            self.db
+                .delete(key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("delete_tag: {e}")))?;
+        }
+        Ok(existed)
+    }
+
+    fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(TAG_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) =
+                item.map_err(|e| StorageError::Internal(format!("list_tags iter: {e}")))?;
+            let key_str = std::str::from_utf8(&k)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 tag key: {e}")))?;
+            if !key_str.starts_with(TAG_PREFIX) {
+                break;
+            }
+            let name = key_str[TAG_PREFIX.len()..].to_string();
+            let hex_str = std::str::from_utf8(&v)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 tag value: {e}")))?;
+            let id = hex_to_layer_id(hex_str)?;
+            out.push((name, id));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
+    fn lookup_by_content_hash(
+        &self,
+        content_hash: &ContentHash,
+    ) -> Result<Vec<LayerId>, StorageError> {
+        // Prefix-scan `content:<content_hex>:` — every key matching the
+        // prefix names a position currently in storage that shares the
+        // given content hash. The position-hash hex follows the content
+        // hash and the separator inside the key, so a substring slice
+        // recovers it without parsing.
+        let prefix = format!("{CONTENT_INDEX_PREFIX}{}:", hex::encode(content_hash.0));
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(prefix.as_bytes());
+        for item in iter {
+            let (k, _v) = item
+                .map_err(|e| StorageError::Internal(format!("lookup_by_content_hash iter: {e}")))?;
+            let key_str = std::str::from_utf8(&k)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 content-index key: {e}")))?;
+            // Prefix iterator may overshoot — trim.
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            let pos_hex = &key_str[prefix.len()..];
+            out.push(hex_to_layer_id(pos_hex)?);
+        }
+        Ok(out)
+    }
+
+    fn put_redirect(&self, entry: &RedirectEntry) -> Result<(), StorageError> {
+        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(entry.source().0));
+        let mut bytes = Vec::new();
+        ciborium::into_writer(entry, &mut bytes)
+            .map_err(|e| StorageError::Internal(format!("encode RedirectEntry: {e}")))?;
+        self.db
+            .put(key.as_bytes(), bytes)
+            .map_err(|e| StorageError::Internal(format!("put redirect: {e}")))
+    }
+
+    fn lookup_redirect(&self, source: &LayerId) -> Result<Option<RedirectEntry>, StorageError> {
+        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let entry: RedirectEntry = ciborium::from_reader(bytes.as_slice())
+                    .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
+                Ok(Some(entry))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get redirect: {e}"))),
+        }
+    }
+
+    fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError> {
+        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
+        self.db
+            .delete(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete redirect: {e}")))
+    }
+
+    fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(REDIRECT_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) =
+                item.map_err(|e| StorageError::Internal(format!("list_redirects iter: {e}")))?;
+            // Prefix iterator may overshoot — trim.
+            if !k.starts_with(REDIRECT_PREFIX.as_bytes()) {
+                break;
+            }
+            let entry: RedirectEntry = ciborium::from_reader(v.as_ref())
+                .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
+            out.push(entry);
+        }
+        Ok(out)
+    }
+
+    fn lookup_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<Option<LayerId>, StorageError> {
+        let key = format!(
+            "{ANCHORED_COMMIT_PREFIX}{}:{}",
+            hex::encode(content_hash.0),
+            hex::encode(supporting_content_hash.0)
+        );
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                if bytes.len() != 32 {
+                    return Err(StorageError::Internal(format!(
+                        "anchored_commit value has length {}, expected 32",
+                        bytes.len()
+                    )));
+                }
+                let mut id = [0u8; 32];
+                id.copy_from_slice(&bytes);
+                Ok(Some(LayerId(id)))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get anchored_commit: {e}"))),
+        }
+    }
+
+    fn put_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+        layer_id: &LayerId,
+    ) -> Result<(), StorageError> {
+        let key = format!(
+            "{ANCHORED_COMMIT_PREFIX}{}:{}",
+            hex::encode(content_hash.0),
+            hex::encode(supporting_content_hash.0)
+        );
+        self.db
+            .put(key.as_bytes(), layer_id.0)
+            .map_err(|e| StorageError::Internal(format!("put anchored_commit: {e}")))
+    }
+
+    fn delete_anchored_commit(
+        &self,
+        content_hash: &ContentHash,
+        supporting_content_hash: &ContentHash,
+    ) -> Result<(), StorageError> {
+        let key = format!(
+            "{ANCHORED_COMMIT_PREFIX}{}:{}",
+            hex::encode(content_hash.0),
+            hex::encode(supporting_content_hash.0)
+        );
+        self.db
+            .delete(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete anchored_commit: {e}")))
+    }
+
+    fn list_anchored_commits(
+        &self,
+    ) -> Result<Vec<eigenius_kernel::storage::AnchoredCommitEntry>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(ANCHORED_COMMIT_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) = item
+                .map_err(|e| StorageError::Internal(format!("list_anchored_commit iter: {e}")))?;
+            if !k.starts_with(ANCHORED_COMMIT_PREFIX.as_bytes()) {
+                break;
+            }
+            let key_str = std::str::from_utf8(&k).map_err(|e| {
+                StorageError::Internal(format!("non-utf8 anchored_commit key: {e}"))
+            })?;
+            // Parse `cell:<content_hex>:<supporting_content_hex>`.
+            let rest = &key_str[ANCHORED_COMMIT_PREFIX.len()..];
+            let mut parts = rest.splitn(2, ':');
+            let content_hex = parts.next().ok_or_else(|| {
+                StorageError::Internal("malformed anchored_commit key".to_string())
+            })?;
+            let supporting_hex = parts.next().ok_or_else(|| {
+                StorageError::Internal("malformed anchored_commit key (no supporting)".to_string())
+            })?;
+            let content_hash = hex_to_content_hash(content_hex)?;
+            let supporting_content_hash = hex_to_content_hash(supporting_hex)?;
+            if v.len() != 32 {
+                return Err(StorageError::Internal(format!(
+                    "anchored_commit value has length {}, expected 32",
+                    v.len()
+                )));
+            }
+            let mut id = [0u8; 32];
+            id.copy_from_slice(&v);
+            out.push(eigenius_kernel::storage::AnchoredCommitEntry {
+                content_hash,
+                supporting_content_hash,
+                layer_id: LayerId(id),
+            });
+        }
+        Ok(out)
+    }
+}
+
+fn hex_to_content_hash(s: &str) -> Result<ContentHash, StorageError> {
+    let bytes =
+        hex::decode(s).map_err(|e| StorageError::Internal(format!("bad content_hash hex: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(StorageError::Internal(format!(
+            "content_hash hex must be 32 bytes, got {}",
+            bytes.len()
+        )));
+    }
+    let mut h = [0u8; 32];
+    h.copy_from_slice(&bytes);
+    Ok(ContentHash(h))
 }
 
 #[cfg(test)]
@@ -927,6 +1341,373 @@ mod tests {
     // branches via `put_branch`/`get_branch` are the only head-pointer
     // surface. Branch-ref round-trip is exercised by
     // `cbor_coverage_tests::branch_refs_round_trip` below.
+
+    /// Round-trip pin for PR 0: every hash carried by a layer
+    /// (`content_hash`, `supporting_layer`, plus the position hash via
+    /// `id`) survives store + reload through the RocksDB topology
+    /// entry. Catches any drift between `LayerHandle`'s on-disk shape
+    /// and `Layer`'s constructor.
+    #[test]
+    fn pr0_two_hash_and_supporting_layer_round_trip() {
+        use eigenius_kernel::storage::PersistentBackend;
+        let (store, _dir) = open_temp_store();
+
+        // Root layer defines a class the child will reference.
+        let mut root_b = LayerBuilder::new("root", None);
+        root_b
+            .add_resource(make_resource("urn:eigenius:core:ClassA", vec![]))
+            .unwrap();
+        let root = Arc::new(root_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+        PersistentBackend::store_layer(&store, &root).unwrap();
+
+        // Child layer references the root class so its supporting
+        // layer resolves to a concrete ancestor (not `None`).
+        let mut child_b = LayerBuilder::new("child", Some(Arc::clone(&root)));
+        let mut r = Resource::new(iri("urn:eigenius:demo:X"));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+        );
+        child_b.add_resource(r).unwrap();
+        let child = child_b.build(eigenius_kernel::layer::LayerStorage::in_memory());
+        let expected_position = child.id().clone();
+        let expected_content = child.content_hash().clone();
+        let expected_supporting = child.supporting_layer().cloned();
+        assert_eq!(expected_supporting.as_ref(), Some(root.id()));
+        PersistentBackend::store_layer(&store, &child).unwrap();
+
+        // Reload the topology entry directly — this is the on-disk
+        // shape the resume path consults.
+        let handle = store.load_layer_handle(&expected_position).unwrap();
+        assert_eq!(handle.id, expected_position);
+        assert_eq!(handle.content_hash, expected_content);
+        assert_eq!(handle.supporting_layer, expected_supporting);
+
+        // Reload the full chain via the production path and confirm
+        // the reconstructed `Layer` carries the same hashes.
+        let info = PersistentBackend::load_chain_from(&store, &expected_position)
+            .unwrap()
+            .expect("chain present");
+        let rebuilt = eigenius_kernel::layer::build_chain(
+            info,
+            eigenius_kernel::layer::LayerStorage::in_memory(),
+        );
+        assert_eq!(rebuilt.id(), &expected_position);
+        assert_eq!(rebuilt.content_hash(), &expected_content);
+        assert_eq!(rebuilt.supporting_layer(), expected_supporting.as_ref());
+    }
+
+    /// Phase 20c: anchored-commit cache round-trip on the RocksDB
+    /// backend, including persistence across store reopen — the
+    /// cache is on-disk state, not just an in-memory map.
+    #[test]
+    fn anchored_commit_cache_round_trip_rocksdb() {
+        use eigenius_kernel::layer::{ContentHash, LayerId};
+        use eigenius_kernel::storage::PersistentBackend;
+
+        let dir = TempDir::new().unwrap();
+        let content_a = ContentHash([1u8; 32]);
+        let support_x = ContentHash([3u8; 32]);
+        let layer_one = LayerId([0x10; 32]);
+        let content_b = ContentHash([2u8; 32]);
+        let support_y = ContentHash([4u8; 32]);
+        let layer_two = LayerId([0x20; 32]);
+
+        // Write: insert two entries.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            store
+                .put_anchored_commit(&content_a, &support_x, &layer_one)
+                .unwrap();
+            store
+                .put_anchored_commit(&content_b, &support_y, &layer_two)
+                .unwrap();
+        }
+
+        // Reopen: both entries persist; list returns them.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let hit = store
+                .lookup_anchored_commit(&content_a, &support_x)
+                .unwrap()
+                .expect("cache entry survives reopen");
+            assert_eq!(hit, layer_one);
+
+            let mut entries = store.list_anchored_commits().unwrap();
+            entries.sort_by_key(|e| e.content_hash.0);
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].layer_id, layer_one);
+            assert_eq!(entries[1].layer_id, layer_two);
+
+            // Different content + different supporting → miss.
+            assert!(store
+                .lookup_anchored_commit(&content_b, &support_x)
+                .unwrap()
+                .is_none());
+            assert!(store
+                .lookup_anchored_commit(&content_a, &support_y)
+                .unwrap()
+                .is_none());
+
+            // Delete one entry; the other remains.
+            store
+                .delete_anchored_commit(&content_a, &support_x)
+                .unwrap();
+        }
+
+        // Reopen once more: the deletion persisted.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            assert!(store
+                .lookup_anchored_commit(&content_a, &support_x)
+                .unwrap()
+                .is_none());
+            let remaining = store.list_anchored_commits().unwrap();
+            assert_eq!(remaining.len(), 1);
+            assert_eq!(remaining[0].layer_id, layer_two);
+        }
+    }
+
+    /// Phase 17f-A: redirect entries round-trip through RocksDB and
+    /// survive a store reopen. After deleting the redirect-source's
+    /// topology entry, `load_topology` manufactures a synthetic
+    /// tombstone with `is_redirect_source = true` from the redirect
+    /// CF — matches the in-memory backend's behavior in
+    /// `redirect_round_trip_and_synthetic_tombstone`.
+    #[test]
+    fn redirect_round_trip_persists_across_reopen() {
+        use eigenius_kernel::storage::PersistentBackend;
+        let dir = TempDir::new().unwrap();
+        let target_id = eigenius_kernel::layer::LayerId([0xab; 32]);
+
+        let source_id;
+        let source_name;
+
+        // Write: store a layer, install a redirect against it, reclaim
+        // the original topology entry.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let mut sb = LayerBuilder::new("redirect-source", None);
+            sb.add_resource(make_resource("urn:eigenius:core:r", vec![]))
+                .unwrap();
+            let source =
+                std::sync::Arc::new(sb.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            PersistentBackend::store_layer(&store, &source).unwrap();
+            source_id = source.id().clone();
+
+            let topo = PersistentBackend::load_topology(&store).unwrap();
+            source_name = topo.get_layer(&source_id).unwrap().name.clone();
+            let source_handle = topo.get_layer(&source_id).unwrap().clone();
+            let entry = eigenius_kernel::layer::RedirectEntry {
+                target: target_id.clone(),
+                source_handle,
+                preserve_history: false,
+            };
+            PersistentBackend::put_redirect(&store, &entry).unwrap();
+            PersistentBackend::delete_layer(&store, &source_id).unwrap();
+        }
+
+        // Reopen: redirect persists; load_topology manufactures the
+        // synthetic tombstone with the original metadata preserved.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            let entry = PersistentBackend::lookup_redirect(&store, &source_id)
+                .unwrap()
+                .expect("redirect persisted");
+            assert_eq!(entry.target, target_id);
+            assert_eq!(entry.source(), &source_id);
+            assert_eq!(entry.source_handle.name, source_name);
+
+            let topo = PersistentBackend::load_topology(&store).unwrap();
+            let tombstone = topo
+                .get_layer(&source_id)
+                .expect("synthetic tombstone manufactured");
+            assert!(tombstone.is_redirect_source);
+            assert_eq!(tombstone.id, source_id);
+            assert_eq!(tombstone.name, source_name);
+
+            // list_redirects returns the same entry.
+            let listed = PersistentBackend::list_redirects(&store).unwrap();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].target, target_id);
+        }
+    }
+
+    /// Phase 17f-B: resolve walk follows an installed redirect.
+    /// Set up an alternate-content target layer, install a redirect
+    /// from a source layer to that target, rebuild the chain, and
+    /// verify head-rooted reads now return the *target's* content
+    /// for IRIs defined only there. The redirect short-circuit is
+    /// the only path that could change the answer — the source
+    /// layer's own content is unchanged.
+    #[test]
+    fn resolve_walk_follows_installed_redirect() {
+        use eigenius_kernel::storage::PersistentBackend;
+        let dir = TempDir::new().unwrap();
+        let store_arc: Arc<dyn PersistentBackend> = Arc::new(RocksStore::open(dir.path()).unwrap());
+
+        // Root holds the property declarations the chain references.
+        let storage_for_build = eigenius_kernel::layer::LayerStorage::in_memory();
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
+            .unwrap();
+        rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
+            .unwrap();
+        let root = Arc::new(rb.build(storage_for_build.clone()));
+        store_arc.store_layer(&root).unwrap();
+
+        // Source layer claims `demo:X` with value "from-source".
+        let mut sb = LayerBuilder::new("source", Some(Arc::clone(&root)));
+        sb.add_resource(make_resource(
+            "urn:eigenius:demo:X",
+            vec![(
+                "urn:eigenius:core:description",
+                Value::String("from-source".into()),
+            )],
+        ))
+        .unwrap();
+        let source = Arc::new(sb.build(storage_for_build.clone()));
+        store_arc.store_layer(&source).unwrap();
+
+        // Target layer (the would-be consolidated layer) claims
+        // `demo:X` with a different value "from-target". Parent is
+        // root, just like `source`.
+        let mut tb = LayerBuilder::new("target", Some(Arc::clone(&root)));
+        tb.add_resource(make_resource(
+            "urn:eigenius:demo:X",
+            vec![(
+                "urn:eigenius:core:description",
+                Value::String("from-target".into()),
+            )],
+        ))
+        .unwrap();
+        let target = Arc::new(tb.build(storage_for_build.clone()));
+        store_arc.store_layer(&target).unwrap();
+
+        // Pre-condition: rebuilding `source`'s chain via a
+        // persistent-backed `LayerStorage` (no redirect installed yet)
+        // resolves `demo:X` to "from-source".
+        let info_pre = store_arc.load_chain_from(source.id()).unwrap().unwrap();
+        let pre_storage =
+            eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store_arc));
+        let pre_head = eigenius_kernel::layer::build_chain(info_pre, pre_storage);
+        let pre = pre_head
+            .resolve(&iri("urn:eigenius:demo:X"))
+            .expect("demo:X resolves before redirect");
+        assert_eq!(
+            pre.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from-source")
+        );
+        assert!(
+            pre_head.redirect_target().is_none(),
+            "pre-condition: no redirect installed yet"
+        );
+
+        // Install the redirect: source → target. Topology entry for
+        // `source` stays in place (reclaim happens in a later phase).
+        let source_handle = store_arc
+            .load_topology()
+            .unwrap()
+            .get_layer(source.id())
+            .unwrap()
+            .clone();
+        let entry = eigenius_kernel::layer::RedirectEntry {
+            target: target.id().clone(),
+            source_handle,
+            preserve_history: false,
+        };
+        store_arc.put_redirect(&entry).unwrap();
+
+        // Post-condition: a freshly-built chain sees the redirect.
+        // `build_chain` reads `redirect_map` (which `with_persistent`
+        // populated at construction time, so we need a *fresh*
+        // `LayerStorage` to pick up the new redirect).
+        let info_post = store_arc.load_chain_from(source.id()).unwrap().unwrap();
+        let post_storage =
+            eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store_arc));
+        let post_head = eigenius_kernel::layer::build_chain(info_post, post_storage);
+        assert!(
+            post_head.redirect_target().is_some(),
+            "build_chain should populate redirect_target for redirect-source layers"
+        );
+        let post = post_head
+            .resolve(&iri("urn:eigenius:demo:X"))
+            .expect("demo:X resolves through the redirect");
+        assert_eq!(
+            post.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("from-target"),
+            "resolve must follow the redirect and return the target's value"
+        );
+    }
+
+    /// Two layers with identical resources committed against different
+    /// parents share a `ContentHash` but get distinct `PositionHash`es;
+    /// `lookup_by_content_hash` returns both, and `delete_layer` prunes
+    /// only the deleted entry. Mirrors the in-kernel memory-backend
+    /// test of the same shape (`content_hash_index_dedup_and_cleanup`)
+    /// against the persistent RocksDB index.
+    #[test]
+    fn content_hash_index_dedup_and_cleanup_rocksdb() {
+        use eigenius_kernel::storage::PersistentBackend;
+        let (store, _dir) = open_temp_store();
+
+        let mut a = LayerBuilder::new("root_a", None);
+        a.add_resource(make_resource(
+            "urn:eigenius:core:root_a_marker",
+            vec![("urn:eigenius:core:description", Value::String("a".into()))],
+        ))
+        .unwrap();
+        let root_a = Arc::new(a.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+        PersistentBackend::store_layer(&store, &root_a).unwrap();
+
+        let mut b = LayerBuilder::new("root_b", None);
+        b.add_resource(make_resource(
+            "urn:eigenius:core:root_b_marker",
+            vec![("urn:eigenius:core:description", Value::String("b".into()))],
+        ))
+        .unwrap();
+        let root_b = Arc::new(b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+        PersistentBackend::store_layer(&store, &root_b).unwrap();
+
+        let build_child = |parent: Arc<Layer>| -> Layer {
+            let mut cb = LayerBuilder::new("child", Some(parent));
+            cb.add_resource(make_resource(
+                "urn:eigenius:demo:shared",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("shared".into()),
+                )],
+            ))
+            .unwrap();
+            cb.build(eigenius_kernel::layer::LayerStorage::in_memory())
+        };
+        let child_a = build_child(Arc::clone(&root_a));
+        let child_b = build_child(Arc::clone(&root_b));
+        assert_eq!(child_a.content_hash(), child_b.content_hash());
+        assert_ne!(child_a.id(), child_b.id());
+
+        PersistentBackend::store_layer(&store, &child_a).unwrap();
+        PersistentBackend::store_layer(&store, &child_b).unwrap();
+
+        let mut hits =
+            PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
+        hits.sort();
+        let mut expected = vec![child_a.id().clone(), child_b.id().clone()];
+        expected.sort();
+        assert_eq!(hits, expected);
+
+        PersistentBackend::delete_layer(&store, child_a.id()).unwrap();
+        let remaining =
+            PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
+        assert_eq!(remaining, vec![child_b.id().clone()]);
+
+        PersistentBackend::delete_layer(&store, child_b.id()).unwrap();
+        let empty =
+            PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
+        assert!(empty.is_empty());
+    }
 
     #[tokio::test]
     async fn persistence_across_reopen() {

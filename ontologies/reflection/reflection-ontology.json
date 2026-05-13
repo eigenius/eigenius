@@ -192,11 +192,11 @@
     "urn:eigenius:core:short_name": "ProgramTrace",
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:program",
-      "urn:eigenius:reflection:trace_tree",
       "urn:eigenius:reflection:started_at",
       "urn:eigenius:reflection:completed_at"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:trace_tree",
       "urn:eigenius:reflection:input",
       "urn:eigenius:reflection:output",
       "urn:eigenius:reflection:total_tokens",

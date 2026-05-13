@@ -83,8 +83,9 @@ function isA(resource: CborResource, classIri: string): boolean {
 
 export function decodeResultDocument(bytes: Uint8Array): DecodedResultSet {
   const decoded = cborDecode(bytes) as unknown;
-  const resources: CborResource[] = (Array.isArray(decoded) ? decoded : [decoded])
-    .filter(isResource);
+  const resources: CborResource[] =
+    (Array.isArray(decoded) ? decoded : [decoded])
+      .filter(isResource);
 
   const resultSet = resources.find((r) => isA(r, RESULT_SET_CLASS));
   if (!resultSet) {
@@ -122,7 +123,9 @@ export function decodeResultDocument(bytes: Uint8Array): DecodedResultSet {
   const rowValues = asArray(resultSet[ROWS_PROP])
     .filter(isResource)
     .map((r): DecodedRow => ({
-      values: new Map(Object.entries(r).filter(([k]) => k !== ID && k !== IS_A)),
+      values: new Map(
+        Object.entries(r).filter(([k]) => k !== ID && k !== IS_A),
+      ),
     }));
 
   return { columns, rows: rowValues, rowCount, matched };

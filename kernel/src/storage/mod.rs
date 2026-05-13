@@ -88,6 +88,28 @@ pub struct ChainInfo {
         std::collections::BTreeMap<LayerId, std::collections::BTreeSet<Iri>>,
 }
 
+/// One row of the anchored-commit cache (D33 §6 / Phase 20c).
+///
+/// The cache memoizes `commit(content, supporting_layer) → LayerId`,
+/// keyed on `(content_hash, supporting_content_hash)`. A hit means
+/// the same content has previously been committed against a
+/// supporting layer with the same content — the cached `LayerId` is
+/// the canonical representative for that combination. Used by:
+/// notebook cell re-runs, institution ontology reload, mirror
+/// regeneration, and any deterministic content generator whose
+/// supporting context (per `compute_supporting_layer`) is the
+/// dependency anchor.
+///
+/// Carries the cache key + value for
+/// [`PersistentBackend::list_anchored_commits`] (diagnostic
+/// enumeration) and for tests that assert cache state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchoredCommitEntry {
+    pub content_hash: crate::layer::ContentHash,
+    pub supporting_content_hash: crate::layer::ContentHash,
+    pub layer_id: LayerId,
+}
+
 /// Errors from storage operations.
 #[derive(Debug)]
 pub enum StorageError {
@@ -178,6 +200,19 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// pre-Phase-14 kernel must be re-built from source files. Returns an
     /// empty topology for an empty DB.
     fn load_topology(&self) -> Result<LayerTopology, StorageError>;
+
+    /// Load a single `LayerHandle` by id. Returns `Ok(None)` when the
+    /// layer is unknown to the store. Cheaper than `load_topology` for
+    /// the common "I have a `LayerId`, I just want its handle" path —
+    /// no full-topology scan, no allocation of a `LayerTopology` map.
+    ///
+    /// Used by the anchored-commit cache (D33 §6) to look up the supporting
+    /// layer's `content_hash` at commit time, and by future diagnostic
+    /// surfaces that want to inspect a single layer's metadata.
+    fn load_handle(
+        &self,
+        layer_id: &LayerId,
+    ) -> Result<Option<crate::layer::LayerHandle>, StorageError>;
 
     /// Generic metadata key-value store. Used for the seed manifest
     /// (D13 §4.2) and for future configuration that shouldn't live in
@@ -280,10 +315,39 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// branch-head roots.
     fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError>;
 
+    // --- Tag refs (D34 §G.2 / §8) -----------------------------------
+    //
+    // Tags are immutable named refs into the DAG. Unlike branches, a
+    // tag's target cannot be retargeted once created — there is no
+    // `put_tag` after the first `create_tag` succeeds. Tags pin their
+    // target (and its transitive ancestors) against GC as long as
+    // they exist (§8.3 — tags are GC roots).
+
+    /// Create a new tag at `name` pointing at `id`. Returns `false`
+    /// when a tag with this name already exists (the existing target
+    /// is preserved). Use [`delete_tag`] + a fresh `create_tag` if a
+    /// retarget is genuinely intended; there is intentionally no
+    /// "update" surface.
+    fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError>;
+
+    /// Look up the target of `name`. `None` for unknown tags.
+    fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError>;
+
+    /// Remove the tag. Returns `false` when the tag didn't exist
+    /// (idempotent). The target layer becomes GC-eligible if no
+    /// other root still reaches it.
+    fn delete_tag(&self, name: &str) -> Result<bool, StorageError>;
+
+    /// Enumerate all tag refs as `(name, layer_id)` pairs, sorted by
+    /// name. Used by `ListTags` and by GC to gather tag-rooted
+    /// reachability roots.
+    fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError>;
+
     /// Atomically delete every storage entry associated with `layer`:
     /// the `topo:<id>` topology entry, the `bloom:<id>` shadowing bloom,
-    /// the `chain:<id>` parent pointer, and every `layer:<id>:res:*`
-    /// resource entry. Used by Phase 14f garbage collection (D23 §5.7)
+    /// the `chain:<id>` parent pointer, every `layer:<id>:res:*`
+    /// resource entry, and the content-hash dedup index entry for the
+    /// layer's content. Used by Phase 14f garbage collection (D23 §5.7)
     /// to reclaim storage for unreachable layers.
     ///
     /// The delete is one atomic write (per D23 §6.3) — partial deletion
@@ -294,6 +358,128 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// No-op if the layer doesn't exist (idempotent — safe to call
     /// during a re-run of GC against the same id).
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError>;
+
+    // --- Resolve redirects (D25 §12.8 / Phase 17f) ---
+    //
+    // Forward pointers installed by `consolidate_chain` when `to` is
+    // below the branch head. See `RedirectEntry` for the on-disk shape
+    // and [`augment_topology_with_redirects`] for the
+    // synthetic-tombstone integration with `load_topology`.
+
+    /// Install a redirect. Idempotent by `entry.source()` —
+    /// overwriting an existing entry is permitted only when the
+    /// consolidation algorithm explicitly asks for it (e.g., a
+    /// future compose policy); the v1 chaining refusal at the
+    /// algorithm level keeps this from happening accidentally.
+    ///
+    /// Atomic within the backend's commit primitive — RocksDB lands
+    /// it in the same `WriteBatch` as the consolidated layer's
+    /// `store_layer` writes; the memory backend serializes through
+    /// its single `RwLock`.
+    fn put_redirect(&self, entry: &crate::layer::RedirectEntry) -> Result<(), StorageError>;
+
+    /// Resolve a redirect by source `LayerId`. `None` if the layer
+    /// isn't a redirect source.
+    fn lookup_redirect(
+        &self,
+        source: &LayerId,
+    ) -> Result<Option<crate::layer::RedirectEntry>, StorageError>;
+
+    /// Remove a redirect. Used by the (future) compose policy to
+    /// replace an existing redirect with a new one; v1 doesn't call
+    /// this on the consolidation path but exposes it for symmetry +
+    /// future use.
+    fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError>;
+
+    /// Enumerate every installed redirect. Used by `load_topology`
+    /// to build the synthetic-tombstone view at startup, and by
+    /// diagnostic surfaces (future `db consolidate-summary`). Result
+    /// order is unspecified; callers that care should sort.
+    fn list_redirects(&self) -> Result<Vec<crate::layer::RedirectEntry>, StorageError>;
+
+    // --- Anchored-commit cache (D33 §6 / Phase 20c) ---
+    //
+    // Memoizes `commit(content, supporting_layer) → LayerId`, keyed on
+    // `(new layer's content_hash, supporting layer's content_hash)`.
+    // A hit returns the canonical existing layer for that combination
+    // — no re-validation, no re-store. The "supporting layer's
+    // content_hash" — not its position hash — is what makes
+    // structurally-equivalent supporting contexts hit the same cache
+    // entry even when their parent linearizations differ (D33 §6
+    // "supporting-equivalent context").
+    //
+    // **Use cases.** The cache generalizes across notebook cell
+    // re-runs, institution ontology reload, mirror regeneration, and
+    // any deterministic content generator that anchors to a supporting
+    // layer. "Anchored" — the supporting layer is the content's
+    // dependency anchor — is the structural framing; cell-output
+    // reuse is one application.
+
+    /// Look up a previously-cached layer id for `(content_hash,
+    /// supporting_content_hash)`. `Ok(None)` for a cache miss; the
+    /// caller falls through to the standard commit path.
+    fn lookup_anchored_commit(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+        supporting_content_hash: &crate::layer::ContentHash,
+    ) -> Result<Option<LayerId>, StorageError>;
+
+    /// Record `(content_hash, supporting_content_hash) → layer_id` in
+    /// the cache. Idempotent by the (content, supporting) pair —
+    /// overwriting an existing entry is permitted (later commits of
+    /// the same content + supporting context might choose a different
+    /// representative position, e.g. after preserve-history
+    /// consolidation).
+    fn put_anchored_commit(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+        supporting_content_hash: &crate::layer::ContentHash,
+        layer_id: &LayerId,
+    ) -> Result<(), StorageError>;
+
+    /// Remove a single cache entry. Used by future cache-management
+    /// surfaces; v1 doesn't expose this on the CLI but the primitive
+    /// is needed by tests and by GC paths that prune entries pointing
+    /// at swept layers.
+    fn delete_anchored_commit(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+        supporting_content_hash: &crate::layer::ContentHash,
+    ) -> Result<(), StorageError>;
+
+    /// Enumerate every anchored-commit cache entry. Used by
+    /// diagnostic surfaces and by cross-cutting tests that assert
+    /// cache contents. Result order is unspecified.
+    fn list_anchored_commits(&self) -> Result<Vec<AnchoredCommitEntry>, StorageError>;
+
+    /// Look up every layer whose content matches `content_hash`.
+    ///
+    /// Returns the set of position hashes (layer ids) currently in
+    /// storage that share the given content hash. An empty result is
+    /// normal: not every content hash that ever existed maps to a live
+    /// layer. Multiple results indicate the same content has been
+    /// committed at multiple DAG positions — e.g. the same notebook
+    /// cell run against two different parent chains, or the same
+    /// comorphism reify output produced from two different invocations.
+    ///
+    /// Used by:
+    /// - [D25 §11.0](../../docs/design/d25-chain-consolidation.md)
+    ///   consolidated-layer dedup: before producing a new consolidated
+    ///   layer, check whether identical content already exists at a
+    ///   compatible position to skip the redundant commit.
+    /// - [D33 §6](../../docs/design/d33-partial-order-chains.md)
+    ///   anchored-commit cache (joined with supporting-layer lookup
+    ///   on the consumer side to form the `(content_hash,
+    ///   supporting_content_hash)` cache key).
+    /// - [D25 §12.1](../../docs/design/d25-chain-consolidation.md)
+    ///   tag-target resolution: `chain:tag_target_content` resolves to
+    ///   every position carrying that content.
+    ///
+    /// Result order is unspecified; callers that care should sort.
+    fn lookup_by_content_hash(
+        &self,
+        content_hash: &crate::layer::ContentHash,
+    ) -> Result<Vec<LayerId>, StorageError>;
 }
 
 /// A single operation inside a `write_batch` call.

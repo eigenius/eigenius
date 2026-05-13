@@ -61,12 +61,12 @@ export interface ProgramRunCellJson {
  * the EigenQL ResultSet into the shape that component expects.
  */
 export type ChartKind =
-  | "grouped-bar"  // GroupedVerticalBarChart
+  | "grouped-bar" // GroupedVerticalBarChart
   | "vertical-bar" // VerticalBarChart
   | "horizontal-bar" // HorizontalBarChart
-  | "donut"        // DonutChart
-  | "line"         // LineChart
-  | "area";        // AreaChart
+  | "donut" // DonutChart
+  | "line" // LineChart
+  | "area"; // AreaChart
 
 /**
  * Chart cell (Phase 5d) — runs an EigenQL query and renders the
@@ -175,7 +175,10 @@ function parseCell(value: unknown, index: number): CellJson {
         `notebook: cells[${index}].program_iri must be a string`,
       );
     }
-    if (!Array.isArray(input_iris) || !input_iris.every((s) => typeof s === "string")) {
+    if (
+      !Array.isArray(input_iris) ||
+      !input_iris.every((s) => typeof s === "string")
+    ) {
       throw new Error(
         `notebook: cells[${index}].input_iris must be an array of strings`,
       );

@@ -154,11 +154,96 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.deleteBranch,
         req,
       ),
+    // Merge UX (D34 §6.3 / Phase 5). MergeBranches mutates a branch
+    // ref through update_branch(AllowTrivial); PreviewMerge is a
+    // side-effect-free LCA + IRI-disjointness walk used by the
+    // Merge panel's preview pane.
+    mergeBranches: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_MERGE_BRANCHES,
+        kernel.raw.mergeBranches,
+        req,
+      ),
+    previewMerge: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_PREVIEW_MERGE,
+        kernel.raw.previewMerge,
+        req,
+      ),
+    // Compaction wizard (D34 §7 / Phase 6). Browser drives a 3-step
+    // wizard: estimate → confirm → consolidate. Both RPCs round-trip
+    // through to the kernel verbatim.
+    consolidateChain: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CONSOLIDATE_CHAIN,
+        kernel.raw.consolidateChain,
+        req,
+      ),
+    estimateConsolidation: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_ESTIMATE_CONSOLIDATION,
+        kernel.raw.estimateConsolidation,
+        req,
+      ),
+    // Tasks panel (D34 §9.1 / Phase 7). The notebook polls listTasks
+    // for the rail destination; getTaskStatus + cancelTask back the
+    // row actions.
+    listTasks: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_LIST_TASKS,
+        kernel.raw.listTasks,
+        req,
+      ),
+    getTaskStatus: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_GET_TASK_STATUS,
+        kernel.raw.getTaskStatus,
+        req,
+      ),
+    cancelTask: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CANCEL_TASK,
+        kernel.raw.cancelTask,
+        req,
+      ),
+    // Tags panel (D34 §G.2 / §8 / Phase 8). Immutable named refs;
+    // CreateTag rejects duplicates with `already_exists`, DeleteTag
+    // is idempotent. Tags are GC roots — created tags survive across
+    // notebook sessions until explicitly deleted.
+    createTag: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CREATE_TAG,
+        kernel.raw.createTag,
+        req,
+      ),
+    listTags: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_LIST_TAGS,
+        kernel.raw.listTags,
+        req,
+      ),
+    deleteTag: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_DELETE_TAG,
+        kernel.raw.deleteTag,
+        req,
+      ),
+    // GC panel (D34 §G.4 / §9.4 / Phase 9). Two-screen flow:
+    // estimate (read-only mark walk) → confirm + run (real sweep).
+    // Destructive — the panel surfaces a confirmation dialog before
+    // calling runGc.
+    estimateGc: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_ESTIMATE_GC,
+        kernel.raw.estimateGc,
+        req,
+      ),
+    runGc: (req) =>
+      proxy(operation.KERNEL_PASSTHROUGH_RUN_GC, kernel.raw.runGc, req),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path
     //   getSchema       — Phase 5 (schema-aware visualisation)
-    //   listTasks / getTaskStatus / cancelTask — Phase 6 (task UI)
     //   layerTopology   — exposed via NotebookService instead
     //
     // FIBER queries ride on the regular Query RPC under D14 (D2 v2 §3.5),

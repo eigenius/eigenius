@@ -25,13 +25,10 @@ import {
   Field,
   Input,
   makeStyles,
-  Tooltip,
   tokens,
+  Tooltip,
 } from "@fluentui/react-components";
-import {
-  Add16Regular,
-  Delete16Regular,
-} from "@fluentui/react-icons";
+import { Add16Regular, Delete16Regular } from "@fluentui/react-icons";
 import type { ProgramRunCellJson } from "../../persistence/notebook-format";
 import { useNotebookStore } from "../../runtime/notebookStore";
 

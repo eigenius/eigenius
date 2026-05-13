@@ -17,15 +17,24 @@
  * `eigen.layerTopology()` call so the load-output accordion can show
  * the stack right there without the caller plumbing data through.
  *
- * The fetch happens once on mount; the panel remounts each time its
- * containing accordion expands, which means we re-fetch (cheap) and
- * always show the current chain rather than a stale snapshot.
+ * Refetches whenever the active branch's head moves (compaction,
+ * commit, branch switch) so the displayed chain matches what the
+ * branch actually points at. Without that, a panel mounted before a
+ * commit/compaction keeps showing its pre-event snapshot — which was
+ * the source of "layer stack still shows the consolidated layers"
+ * confusion the user hit during D34 Phase 6.
  */
 
-import { useEffect, useState } from "react";
-import { Caption1, makeStyles, Spinner, tokens } from "@fluentui/react-components";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Caption1,
+  makeStyles,
+  Spinner,
+  tokens,
+} from "@fluentui/react-components";
 import type { LayerTopologyResponse } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
+import { useNotebookStore } from "../../runtime/notebookStore";
 import { LayerStackView } from "./LayerStackView";
 
 const useStyles = makeStyles({
@@ -46,11 +55,23 @@ const useStyles = makeStyles({
 export function LayerStackPanel() {
   const styles = useStyles();
   const eigen = useEigen();
+  const activeBranch = useNotebookStore((s) => s.activeBranch);
+  const branches = useNotebookStore((s) => s.branches);
+  // Track the active branch's head so the fetch re-runs whenever the
+  // tip moves. The kernel still resolves "current head" itself when
+  // we pass no `rootLayer`; we only read this value as a dependency
+  // signal that something has changed since the last fetch.
+  const activeHead = useMemo(
+    () => branches?.find((b) => b.name === activeBranch)?.headLayer ?? null,
+    [branches, activeBranch],
+  );
   const [topology, setTopology] = useState<LayerTopologyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setTopology(null);
+    setError(null);
     eigen.layerTopology({ includeResources: false })
       .then((t) => {
         if (!cancelled) setTopology(t);
@@ -63,7 +84,7 @@ export function LayerStackPanel() {
     return () => {
       cancelled = true;
     };
-  }, [eigen]);
+  }, [eigen, activeBranch, activeHead]);
 
   if (error) {
     return <Caption1 className={styles.error}>{error}</Caption1>;

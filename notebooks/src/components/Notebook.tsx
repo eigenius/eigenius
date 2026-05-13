@@ -25,8 +25,8 @@ import {
   MessageBarTitle,
   Spinner,
   Subtitle1,
-  Tooltip,
   tokens,
+  Tooltip,
 } from "@fluentui/react-components";
 import {
   ArrowExport16Regular,
@@ -51,14 +51,20 @@ import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 
 const useStyles = makeStyles({
-  // Pinned mode (default): outer is a full-viewport flex column.
-  // The header is fixed-height at top; the cell list is the only
+  // Pinned mode (default): outer fills its parent flex column. The
+  // notebook header is fixed-height at top; the cell list is the only
   // scroll surface. Unpinned mode: outer collapses to natural height
-  // and the page body scrolls (the original Phase 4 behaviour).
+  // and the surrounding scroll surface owns scrolling (the original
+  // Phase 4 behaviour, useful when the notebook is embedded in a
+  // longer page).
+  //
+  // Pre-D34: outer was `height: 100vh`. Now the WorkspaceShell sets
+  // the viewport bound and the notebook fills its rail destination
+  // (`height: 100%`).
   rootPinned: {
     display: "flex",
     flexDirection: "column",
-    height: "100vh",
+    height: "100%",
     overflow: "hidden",
   },
   rootUnpinned: {
@@ -141,6 +147,7 @@ export function Notebook() {
   const updateMeta = useNotebookStore((s) => s.updateMeta);
   const exportNotebook = useNotebookStore((s) => s.exportNotebook);
   const loadNotebook = useNotebookStore((s) => s.loadNotebook);
+  const markSaved = useNotebookStore((s) => s.markSaved);
   const runAll = useNotebookStore((s) => s.runAll);
   const resetOutputs = useNotebookStore((s) => s.resetOutputs);
   const setAllCellsCollapsed = useNotebookStore(
@@ -187,6 +194,9 @@ export function Notebook() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    // The on-disk copy now matches the in-memory state — clear the
+    // `●` unsaved-changes indicator until the next mutating edit.
+    markSaved();
   };
 
   const onOpenClick = () => {
@@ -277,7 +287,9 @@ export function Notebook() {
               />
             </Tooltip>
             <Tooltip
-              content={pinned ? "Unpin header (whole page scrolls)" : "Pin header to top"}
+              content={pinned
+                ? "Unpin header (whole page scrolls)"
+                : "Pin header to top"}
               relationship="label"
             >
               <Button
@@ -319,7 +331,9 @@ export function Notebook() {
               Import…
             </Button>
             <Tooltip
-              content={titleEmpty ? "Set a title before exporting" : "Download the notebook as a JSON file"}
+              content={titleEmpty
+                ? "Set a title before exporting"
+                : "Download the notebook as a JSON file"}
               relationship="label"
             >
               <Button
@@ -353,13 +367,17 @@ export function Notebook() {
               Reset
             </Button>
             <Tooltip
-              content={titleEmpty ? "Set a title before publishing" : "Publish the notebook into the active layer chain"}
+              content={titleEmpty
+                ? "Set a title before publishing"
+                : "Publish the notebook into the active layer chain"}
               relationship="label"
             >
               <Button
                 size="small"
                 appearance="subtle"
-                icon={isPublishing ? <Spinner size="tiny" /> : <GlobeArrowUp20Regular />}
+                icon={isPublishing
+                  ? <Spinner size="tiny" />
+                  : <GlobeArrowUp20Regular />}
                 disabled={anyRunning || isPublishing || titleEmpty}
                 onClick={() => {
                   void onPublish();

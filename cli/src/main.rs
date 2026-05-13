@@ -549,6 +549,42 @@ enum DbCommands {
         #[arg(value_name = "OUTPUT_PATH")]
         output_path: String,
     },
+    /// Collapse `[from..to]` on a branch into one resolve-equivalent layer (D25).
+    ///
+    /// Requires `--endpoint` — consolidation serialises with branch
+    /// updates via the running kernel's branch lock, so it must be
+    /// invoked against the live server holding the same DB.
+    ///
+    /// When `to` equals the branch's current head, the consolidation
+    /// advances the branch ref to the new layer (the 17a "at-head"
+    /// path). When `to` is strictly below the head, a resolve
+    /// redirect is installed at `to` (D25 §12.8 / Phase 17f) and the
+    /// branch stays put.
+    Consolidate {
+        /// `<from-hex>..<to-hex>` — the inclusive consolidation range,
+        /// matching the spec language in D25 §5.3.
+        #[arg(value_name = "FROM..TO")]
+        range: String,
+        /// Branch to consolidate. Defaults to `main`.
+        #[arg(long, default_value = "main")]
+        branch: String,
+        /// Override the cost cap. Defaults to the kernel value
+        /// (`5_000_000`).
+        #[arg(long)]
+        max_walk_entries: Option<u64>,
+        /// Run `EstimateConsolidation` instead of `ConsolidateChain` —
+        /// reports the cost and the predicted consolidated layer's
+        /// id without committing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Below-head consolidation only: keep the pre-consolidation
+        /// history alive (GC won't reclaim the source range).
+        /// Time-travel reads against intermediate layers in the range
+        /// continue to resolve. Default reclaim mode is the
+        /// at-head-equivalent contract. See D25 §12.8.1(b).
+        #[arg(long)]
+        preserve_history: bool,
+    },
 }
 
 #[tokio::main]
@@ -625,6 +661,33 @@ async fn main() {
             }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
             Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
+            Commands::Db { command } => match command {
+                DbCommands::Consolidate {
+                    range,
+                    branch,
+                    max_walk_entries,
+                    dry_run,
+                    preserve_history,
+                } => {
+                    remote_db_consolidate(
+                        endpoint,
+                        &range,
+                        &branch,
+                        max_walk_entries,
+                        dry_run,
+                        preserve_history,
+                        cli.json,
+                    )
+                    .await
+                }
+                _ => {
+                    eprintln!(
+                        "this 'db' subcommand is a local-only operation; drop --endpoint and pass \
+                         the DB path directly"
+                    );
+                    std::process::exit(1);
+                }
+            },
             Commands::Serve { .. } => {
                 eprintln!("Cannot use --endpoint with serve");
                 std::process::exit(1);
@@ -1156,6 +1219,14 @@ fn cmd_db(command: DbCommands) {
                 );
             }
         }
+        DbCommands::Consolidate { .. } => {
+            eprintln!(
+                "'db consolidate' requires --endpoint — consolidation must run against the live \
+                 kernel server holding the same DB so the branch lock serialises with concurrent \
+                 commits"
+            );
+            std::process::exit(1);
+        }
     }
 }
 
@@ -1327,6 +1398,16 @@ async fn remote_query(
                     println!("{}", serde_json::to_string_pretty(&json).unwrap());
                 }
             }
+            // Only meaningful when the query committed something via
+            // FIBER ... INTO. A query without INTO clauses reports
+            // branch_advanced=false because nothing was committed, not
+            // because of a cache hit — so we gate the note on
+            // `output_resource_iris` being non-empty.
+            if !resp.branch_advanced && !resp.output_resource_iris.is_empty() {
+                eprintln!(
+                    "Note: FIBER INTO results reused from anchored-commit cache (branch unchanged)."
+                );
+            }
         }
         Err(e) => {
             eprintln!("gRPC error: {e}");
@@ -1371,6 +1452,16 @@ async fn remote_run(
                 } else {
                     println!("{}", serde_json::to_string_pretty(&json).unwrap());
                 }
+                if !resp.branch_advanced {
+                    // Anchored-commit cache hit (D33 §6) — the trace
+                    // layer for this run already exists canonically
+                    // elsewhere in the DAG; the branch ref did not
+                    // move. Note on stderr so the data output stays
+                    // pipe-clean.
+                    eprintln!(
+                        "Note: trace layer reused from anchored-commit cache (branch unchanged)."
+                    );
+                }
             } else {
                 eprintln!("Program execution failed:");
                 for err in &resp.errors {
@@ -1408,13 +1499,25 @@ async fn remote_load(endpoint: &str, file: &str, branch: Option<&str>, json_outp
             if resp.success {
                 if json_output {
                     println!(
-                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\"}}",
-                        resp.resource_count, resp.layer_id, resp.branch
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\",\"branch_advanced\":{}}}",
+                        resp.resource_count,
+                        resp.layer_id,
+                        resp.branch,
+                        resp.branch_advanced
                     );
-                } else {
+                } else if resp.branch_advanced {
                     println!(
                         "Loaded {} resource(s) into branch {}. Layer: {}",
                         resp.resource_count, resp.branch, resp.layer_id
+                    );
+                } else {
+                    // Anchored-commit cache hit at a different
+                    // position — the canonical layer for this content
+                    // already lives elsewhere in the DAG; the branch
+                    // ref did not move.
+                    println!(
+                        "Cached: {} resource(s) already canonical at layer {} (branch {} unchanged)",
+                        resp.resource_count, resp.layer_id, resp.branch
                     );
                 }
             } else {
@@ -1448,9 +1551,17 @@ async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
             let resp = response.into_inner();
             if resp.success {
                 if json_output {
-                    println!("{{\"success\":true,\"trace_iri\":\"{}\"}}", resp.trace_iri);
-                } else {
+                    println!(
+                        "{{\"success\":true,\"trace_iri\":\"{}\",\"branch_advanced\":{}}}",
+                        resp.trace_iri, resp.branch_advanced
+                    );
+                } else if resp.branch_advanced {
                     println!("Recorded trace: {}", resp.trace_iri);
+                } else {
+                    println!(
+                        "Trace already canonical: {} (anchored-commit cache hit, branch unchanged)",
+                        resp.trace_iri
+                    );
                 }
             } else {
                 eprintln!("Reflect failed");
@@ -1799,6 +1910,147 @@ async fn remote_branch_delete(endpoint: &str, name: &str, force: bool, json_outp
         Err(e) => {
             eprintln!("gRPC error: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// Parse a `<from-hex>..<to-hex>` range argument into its two LayerId hex strings.
+/// Lightweight — we forward the strings to the server which does
+/// authoritative validation.
+fn parse_consolidate_range(range: &str) -> Result<(String, String), String> {
+    let mut iter = range.splitn(2, "..");
+    let from = iter
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "range must be '<from-hex>..<to-hex>'".to_string())?;
+    let to = iter
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "range must be '<from-hex>..<to-hex>'".to_string())?;
+    Ok((from.to_string(), to.to_string()))
+}
+
+async fn remote_db_consolidate(
+    endpoint: &str,
+    range: &str,
+    branch: &str,
+    max_walk_entries: Option<u64>,
+    dry_run: bool,
+    preserve_history: bool,
+    json_output: bool,
+) {
+    let (from_layer, to_layer) = match parse_consolidate_range(range) {
+        Ok(parts) => parts,
+        Err(e) => {
+            eprintln!("Invalid range: {e}");
+            std::process::exit(1);
+        }
+    };
+    let max_walk_entries = max_walk_entries.unwrap_or(0);
+    let mut client = connect_client(endpoint).await;
+
+    if dry_run {
+        let req = eigenius_kernel::server::proto::EstimateConsolidationRequest {
+            branch: branch.to_string(),
+            from_layer,
+            to_layer,
+            max_walk_entries,
+            trace_pin_policy: String::new(),
+            preserve_history,
+        };
+        match client.estimate_consolidation(req).await {
+            Ok(response) => {
+                let resp = response.into_inner();
+                if json_output {
+                    let j = serde_json::json!({
+                        "success": resp.success,
+                        "dry_run": true,
+                        "predicted_consolidated_layer": resp.predicted_consolidated_layer,
+                        "collapsed_layer_count": resp.collapsed_layer_count,
+                        "predicted_walk_entries": resp.predicted_walk_entries,
+                        "actual_walk_entries": resp.actual_walk_entries,
+                        "error_kind": resp.error_kind,
+                        "error": resp.error,
+                        "error_layer": resp.error_layer,
+                        "error_count": resp.error_count,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&j).unwrap());
+                } else if resp.success {
+                    println!(
+                        "Dry-run: would consolidate {} layers on {branch}",
+                        resp.collapsed_layer_count
+                    );
+                    println!(
+                        "  Predicted walk entries: {} (actual {} after dedup)",
+                        resp.predicted_walk_entries, resp.actual_walk_entries
+                    );
+                    println!(
+                        "  Predicted consolidated layer: {}",
+                        resp.predicted_consolidated_layer
+                    );
+                } else {
+                    eprintln!("Consolidation refused: {}", resp.error);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let req = eigenius_kernel::server::proto::ConsolidateChainRequest {
+            branch: branch.to_string(),
+            from_layer,
+            to_layer,
+            max_walk_entries,
+            trace_pin_policy: String::new(),
+            preserve_history,
+        };
+        match client.consolidate_chain(req).await {
+            Ok(response) => {
+                let resp = response.into_inner();
+                if json_output {
+                    let j = serde_json::json!({
+                        "success": resp.success,
+                        "consolidated_layer": resp.consolidated_layer,
+                        "collapsed_layer_count": resp.collapsed_layer_count,
+                        "head_advanced": resp.head_advanced,
+                        "error_kind": resp.error_kind,
+                        "error": resp.error,
+                        "error_layer": resp.error_layer,
+                        "error_count": resp.error_count,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&j).unwrap());
+                } else if resp.success {
+                    if resp.head_advanced {
+                        println!(
+                            "Consolidated {} layers on {branch}; branch advanced to {}",
+                            resp.collapsed_layer_count, resp.consolidated_layer
+                        );
+                    } else {
+                        // Below-head: redirect installed; branch ref unchanged.
+                        println!(
+                            "Consolidated {} layers below the head of {branch}; \
+                             redirect installed at the range tip → {}{}",
+                            resp.collapsed_layer_count,
+                            resp.consolidated_layer,
+                            if preserve_history {
+                                " (preserve_history mode — source range stays alive)"
+                            } else {
+                                ""
+                            }
+                        );
+                    }
+                } else {
+                    eprintln!("Consolidation refused: {}", resp.error);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }
