@@ -3514,6 +3514,117 @@ impl EigeniusKernel for EigeniusService {
             Err(err) => Ok(Response::new(estimate_error_to_response(err))),
         }
     }
+
+    // --- Tags (D34 §G.2 / §8) ----------------------------------------
+
+    async fn create_tag(
+        &self,
+        request: Request<CreateTagRequest>,
+    ) -> Result<Response<CreateTagResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_CREATE_TAG);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("tag operations require a persistent backend")
+        })?;
+
+        // Validate the name matches the same lexical rules as branches
+        // — surfacing this as `invalid_argument` rather than a soft
+        // failure mirrors how `CreateBranch` rejects malformed names.
+        if !crate::lattice::is_valid_ref_name(&req.name) {
+            return Err(Status::invalid_argument(format!(
+                "invalid tag name: {:?} (must match [A-Za-z0-9_-]+, max 256 chars)",
+                req.name
+            )));
+        }
+
+        let layer_id = parse_layer_id(&req.layer_id, "layer_id")?;
+
+        // Verify the target layer exists in storage; tagging an
+        // unknown id would create a dangling ref.
+        match backend.load_handle(&layer_id) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Ok(Response::new(CreateTagResponse {
+                    success: false,
+                    error: format!("layer_id {} not in store", req.layer_id),
+                    already_exists: false,
+                }));
+            }
+            Err(e) => return Err(Status::internal(format!("load_handle failed: {e}"))),
+        }
+
+        match backend.create_tag(&req.name, &layer_id) {
+            Ok(true) => Ok(Response::new(CreateTagResponse {
+                success: true,
+                error: String::new(),
+                already_exists: false,
+            })),
+            Ok(false) => Ok(Response::new(CreateTagResponse {
+                success: false,
+                error: format!("tag {:?} already exists", req.name),
+                already_exists: true,
+            })),
+            Err(e) => Err(Status::internal(format!("create_tag failed: {e}"))),
+        }
+    }
+
+    async fn list_tags(
+        &self,
+        _request: Request<ListTagsRequest>,
+    ) -> Result<Response<ListTagsResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_LIST_TAGS);
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("tag operations require a persistent backend")
+        })?;
+        let entries = backend
+            .list_tags()
+            .map_err(|e| Status::internal(format!("list_tags failed: {e}")))?;
+        let tags = entries
+            .into_iter()
+            .map(|(name, layer_id)| {
+                // One `load_handle` per tag — typical chains have a
+                // small number of tags so the fan-out cost is
+                // negligible; matches the `ListBranches` shape.
+                let tagged_at_ms = backend
+                    .load_handle(&layer_id)
+                    .ok()
+                    .flatten()
+                    .map(|h| h.created_at)
+                    .unwrap_or(0);
+                TagInfo {
+                    name,
+                    layer_id: hex::encode(layer_id.0),
+                    tagged_at_ms,
+                }
+            })
+            .collect();
+        Ok(Response::new(ListTagsResponse { tags }))
+    }
+
+    async fn delete_tag(
+        &self,
+        request: Request<DeleteTagRequest>,
+    ) -> Result<Response<DeleteTagResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_DELETE_TAG);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("tag operations require a persistent backend")
+        })?;
+        if !crate::lattice::is_valid_ref_name(&req.name) {
+            return Err(Status::invalid_argument(format!(
+                "invalid tag name: {:?} (must match [A-Za-z0-9_-]+, max 256 chars)",
+                req.name
+            )));
+        }
+        match backend.delete_tag(&req.name) {
+            Ok(deleted) => Ok(Response::new(DeleteTagResponse {
+                success: true,
+                error: String::new(),
+                deleted,
+            })),
+            Err(e) => Err(Status::internal(format!("delete_tag failed: {e}"))),
+        }
+    }
 }
 
 /// Parse a hex-encoded LayerId from the wire, returning a typed

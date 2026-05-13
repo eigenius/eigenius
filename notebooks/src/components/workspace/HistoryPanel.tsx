@@ -73,6 +73,7 @@ import {
   formatAbsoluteIso,
   formatRelative,
 } from "../../runtime/relativeTime";
+import { CreateTagDialog } from "../dialogs/CreateTagDialog";
 
 const TOASTER_ID = "history-panel-toaster";
 
@@ -216,6 +217,7 @@ export function HistoryPanel() {
   const [topology, setTopology] = useState<LayerTopologyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [createTagFor, setCreateTagFor] = useState<string | null>(null);
 
   // Ensure the branches cache is populated so we can resolve the
   // active branch's head. Refresh on mount + when the user switches
@@ -338,10 +340,23 @@ export function HistoryPanel() {
                   { intent: "info", timeout: 2500 },
                 );
               }}
+              onCreateTag={() => setCreateTagFor(selectedRow.layerId)}
             />
           </aside>
         )}
       </div>
+      <CreateTagDialog
+        open={createTagFor !== null}
+        onClose={() => setCreateTagFor(null)}
+        defaultLayerId={createTagFor ?? undefined}
+        onCreated={(name) =>
+          dispatchToast(
+            <Toast>
+              <ToastTitle>Created tag {name}</ToastTitle>
+            </Toast>,
+            { intent: "success", timeout: 4000 },
+          )}
+      />
       <Toaster toasterId={toasterId} position="top-end" />
     </div>
   );
@@ -403,6 +418,7 @@ interface DetailPanelProps {
   styles: ReturnType<typeof useStyles>;
   onTimeTravel: () => void;
   onCopy: () => void;
+  onCreateTag: () => void;
 }
 
 function DetailPanel({
@@ -411,6 +427,7 @@ function DetailPanel({
   styles,
   onTimeTravel,
   onCopy,
+  onCreateTag,
 }: DetailPanelProps) {
   return (
     <>
@@ -470,20 +487,21 @@ function DetailPanel({
           </Button>
         </Tooltip>
 
-        {/* Disabled stubs for actions whose destinations ship later:
-            Inspect resources → Phase 11 Topology
-            Create tag → Phase 8 Tags */}
+        {/* "Create tag" — pre-fills the dialog with this row's layer id
+            so the user only has to type a name. */}
+        <Tooltip
+          relationship="description"
+          content="Create an immutable named ref at this layer (also protects it from GC)."
+        >
+          <Button onClick={onCreateTag}>Create tag…</Button>
+        </Tooltip>
+
+        {/* Disabled stub: Inspect resources → Phase 11 Topology. */}
         <Tooltip
           relationship="description"
           content="Inspect this layer's resources — coming in Phase 11."
         >
           <Button disabled>Inspect resources…</Button>
-        </Tooltip>
-        <Tooltip
-          relationship="description"
-          content="Tag this layer for GC pinning — coming in Phase 8."
-        >
-          <Button disabled>Create tag…</Button>
         </Tooltip>
       </div>
     </>

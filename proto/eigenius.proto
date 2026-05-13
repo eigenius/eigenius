@@ -144,6 +144,29 @@ service EigeniusKernel {
   // walk-entry counts. The operator pipes the predicted LayerId into
   // a follow-up real `ConsolidateChain` to confirm intent.
   rpc EstimateConsolidation(EstimateConsolidationRequest) returns (EstimateConsolidationResponse);
+
+  // --- Tags (D34 §G.2 / §8) ---
+  //
+  // Tags are *immutable named refs* into the layer DAG. Unlike
+  // branches, a tag's target cannot be retargeted once created —
+  // there is intentionally no UpdateTag. A tag pins its target
+  // (and the target's transitive ancestors) against GC for as long
+  // as it exists. Names match `[A-Za-z0-9_-]+` (same shape as
+  // branches, max 256 chars).
+
+  // Create a new tag pointing at `layer_id`. Fails with
+  // `AlreadyExists` if a tag with this name already exists; fails
+  // with `NotFound` if `layer_id` is not in storage.
+  rpc CreateTag(CreateTagRequest) returns (CreateTagResponse);
+
+  // Enumerate every tag as (name, layer_id) pairs.
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+
+  // Remove a tag ref. Idempotent: deleting a non-existent tag is a
+  // success with `deleted = false`. The target layer becomes
+  // GC-eligible if no other root (branch, active task pin, or
+  // another tag) still reaches it.
+  rpc DeleteTag(DeleteTagRequest) returns (DeleteTagResponse);
 }
 
 // --- Load ---
@@ -917,6 +940,57 @@ message EstimateConsolidationResponse {
   string error = 7;
   string error_layer = 8;
   uint64 error_count = 9;
+}
+
+// --- Tags (D34 §G.2 / §8) ---
+
+message TagInfo {
+  // Matches `[A-Za-z0-9_-]+`, max 256 chars.
+  string name = 1;
+  // Hex-encoded LayerId the tag points at.
+  string layer_id = 2;
+  // Layer's commit timestamp (millis since Unix epoch), surfaced so
+  // the notebook's Tags panel can show "tagged at <time>" without
+  // a per-row GetBranch fan-out. Zero when the layer's handle
+  // couldn't be loaded.
+  int64 tagged_at_ms = 3;
+}
+
+message CreateTagRequest {
+  string name = 1;
+  // Hex-encoded LayerId. The kernel verifies the layer exists in
+  // storage; an unknown id is rejected with `NotFound`.
+  string layer_id = 2;
+}
+
+message CreateTagResponse {
+  bool success = 1;
+  // Human-readable error text; empty on success. Populated when the
+  // tag name is invalid, the name is already in use, or `layer_id`
+  // doesn't resolve.
+  string error = 2;
+  // True when the name was already taken by an existing tag. The
+  // client distinguishes "name collision" from other failures so a
+  // retry-with-different-name UX can short-circuit.
+  bool already_exists = 3;
+}
+
+message ListTagsRequest {}
+
+message ListTagsResponse {
+  repeated TagInfo tags = 1;
+}
+
+message DeleteTagRequest {
+  string name = 1;
+}
+
+message DeleteTagResponse {
+  bool success = 1;
+  string error = 2;
+  // True when the tag existed and was removed; false when the call
+  // was idempotent (no tag by that name).
+  bool deleted = 3;
 }
 
 // --- NotebookService (D22 §3.2) ---

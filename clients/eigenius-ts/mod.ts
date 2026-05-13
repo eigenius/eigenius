@@ -23,8 +23,10 @@ export {
   type ConsolidateOptions,
   type CreateBranchOptions,
   type CreateBranchResponse,
+  type CreateTagResponse,
   type DeleteBranchOptions,
   type DeleteBranchResponse,
+  type DeleteTagResponse,
   Eigen,
   type EigenOptions,
   type EstimateConsolidationResponse,
@@ -32,6 +34,7 @@ export {
   type GetTaskStatusResponse,
   type InspectOptions,
   type LayerTopologyOptions,
+  type ListTagsResponse,
   type ListTasksResponse,
   type LoadOptions,
   type LoadResponse,
@@ -46,6 +49,7 @@ export {
   type RunProgramOptions,
   type RunProgramResponse,
   type SourceContentType,
+  type TagInfo,
   type TaskInfo,
 } from "./src/client.ts";
 

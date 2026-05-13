@@ -44,6 +44,11 @@ use triple_index::RocksTripleIndex;
 const TOPO_PREFIX: &str = "topo:";
 const BLOOM_PREFIX: &str = "bloom:";
 const BRANCH_PREFIX: &str = "branch:";
+/// Tag-ref storage (D34 §G.2 / §8). Immutable named refs into the
+/// DAG. Keys: `tag:<name>` → hex-encoded `LayerId`. Tags are GC
+/// roots — `gc::collect` enumerates them alongside branches when
+/// computing reachability.
+const TAG_PREFIX: &str = "tag:";
 /// Content-hash dedup index (D25 §11.0 / D33 §6).
 ///
 /// Keys: `content:<content_hash_hex>:<position_hash_hex>` → empty value.
@@ -924,6 +929,79 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         // BTreeMap-style sort for deterministic ordering even though
         // prefix-scan already yields sorted keys; defensive against
         // future column-family layout changes.
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
+    fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError> {
+        let key = format!("{TAG_PREFIX}{name}");
+        // Read-then-write under a single column family is safe enough
+        // for tag creation: tags are administrator-driven operations,
+        // not a hot write path, and a race between two `CreateTag`
+        // calls just means whichever lost gets `Ok(false)` — the
+        // intended "AlreadyExists" semantic. For genuine atomicity
+        // we'd need a transactional DB; v1 ships with the simpler
+        // shape.
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(_)) => Ok(false),
+            Ok(None) => {
+                self.db
+                    .put(key.as_bytes(), hex::encode(id.0))
+                    .map_err(|e| StorageError::Internal(format!("create_tag: {e}")))?;
+                Ok(true)
+            }
+            Err(e) => Err(StorageError::Internal(format!("create_tag get: {e}"))),
+        }
+    }
+
+    fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
+        let key = format!("{TAG_PREFIX}{name}");
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let hex_str = String::from_utf8(bytes)
+                    .map_err(|e| StorageError::Internal(format!("invalid tag value: {e}")))?;
+                Ok(Some(hex_to_layer_id(&hex_str)?))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Internal(format!("get_tag: {e}"))),
+        }
+    }
+
+    fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+        let key = format!("{TAG_PREFIX}{name}");
+        // Same read-then-delete shape: tag deletion is rare and the
+        // race window is harmless (both deleters succeed; second
+        // returns `false`).
+        let existed = self
+            .db
+            .get(key.as_bytes())
+            .map_err(|e| StorageError::Internal(format!("delete_tag get: {e}")))?
+            .is_some();
+        if existed {
+            self.db
+                .delete(key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("delete_tag: {e}")))?;
+        }
+        Ok(existed)
+    }
+
+    fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
+        let mut out = Vec::new();
+        let iter = self.db.prefix_iterator(TAG_PREFIX.as_bytes());
+        for item in iter {
+            let (k, v) =
+                item.map_err(|e| StorageError::Internal(format!("list_tags iter: {e}")))?;
+            let key_str = std::str::from_utf8(&k)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 tag key: {e}")))?;
+            if !key_str.starts_with(TAG_PREFIX) {
+                break;
+            }
+            let name = key_str[TAG_PREFIX.len()..].to_string();
+            let hex_str = std::str::from_utf8(&v)
+                .map_err(|e| StorageError::Internal(format!("non-utf8 tag value: {e}")))?;
+            let id = hex_to_layer_id(hex_str)?;
+            out.push((name, id));
+        }
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
     }

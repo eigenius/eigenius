@@ -315,6 +315,34 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// branch-head roots.
     fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError>;
 
+    // --- Tag refs (D34 §G.2 / §8) -----------------------------------
+    //
+    // Tags are immutable named refs into the DAG. Unlike branches, a
+    // tag's target cannot be retargeted once created — there is no
+    // `put_tag` after the first `create_tag` succeeds. Tags pin their
+    // target (and its transitive ancestors) against GC as long as
+    // they exist (§8.3 — tags are GC roots).
+
+    /// Create a new tag at `name` pointing at `id`. Returns `false`
+    /// when a tag with this name already exists (the existing target
+    /// is preserved). Use [`delete_tag`] + a fresh `create_tag` if a
+    /// retarget is genuinely intended; there is intentionally no
+    /// "update" surface.
+    fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError>;
+
+    /// Look up the target of `name`. `None` for unknown tags.
+    fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError>;
+
+    /// Remove the tag. Returns `false` when the tag didn't exist
+    /// (idempotent). The target layer becomes GC-eligible if no
+    /// other root still reaches it.
+    fn delete_tag(&self, name: &str) -> Result<bool, StorageError>;
+
+    /// Enumerate all tag refs as `(name, layer_id)` pairs, sorted by
+    /// name. Used by `ListTags` and by GC to gather tag-rooted
+    /// reachability roots.
+    fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError>;
+
     /// Atomically delete every storage entry associated with `layer`:
     /// the `topo:<id>` topology entry, the `bloom:<id>` shadowing bloom,
     /// the `chain:<id>` parent pointer, every `layer:<id>:res:*`

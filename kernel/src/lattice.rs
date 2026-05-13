@@ -46,13 +46,22 @@ use crate::validation::{ValidationError, Validator};
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-/// Branch-name validation: matches `[A-Za-z0-9_-]+` per D23 §5.5.
-fn is_valid_branch_name(name: &str) -> bool {
+/// Ref-name validation: matches `[A-Za-z0-9_-]+`, max 256 chars.
+///
+/// Shared by branches (D23 §5.5) and tags (D34 §G.2 / §8) — same
+/// lexical rules across both ref kinds so the picker, URL routing,
+/// and validation messages don't have to diverge.
+pub(crate) fn is_valid_ref_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 256
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Branch-name validation: matches `[A-Za-z0-9_-]+` per D23 §5.5.
+fn is_valid_branch_name(name: &str) -> bool {
+    is_valid_ref_name(name)
 }
 
 /// Errors from `commit_layer`.

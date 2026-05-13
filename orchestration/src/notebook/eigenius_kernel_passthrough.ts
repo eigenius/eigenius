@@ -206,6 +206,28 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.cancelTask,
         req,
       ),
+    // Tags panel (D34 §G.2 / §8 / Phase 8). Immutable named refs;
+    // CreateTag rejects duplicates with `already_exists`, DeleteTag
+    // is idempotent. Tags are GC roots — created tags survive across
+    // notebook sessions until explicitly deleted.
+    createTag: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CREATE_TAG,
+        kernel.raw.createTag,
+        req,
+      ),
+    listTags: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_LIST_TAGS,
+        kernel.raw.listTags,
+        req,
+      ),
+    deleteTag: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_DELETE_TAG,
+        kernel.raw.deleteTag,
+        req,
+      ),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path

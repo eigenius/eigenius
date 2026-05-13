@@ -71,6 +71,11 @@ struct MemoryState {
     /// only head-pointer surface — the legacy single-`head` field is
     /// gone.
     branches: BTreeMap<String, LayerId>,
+    /// Tag refs (D34 §G.2 / §8). Immutable named pointers; once a
+    /// `(name, layer_id)` lands here, `name` cannot be retargeted —
+    /// only `delete_tag` removes it. Tags are GC roots, so the
+    /// reachability walk gathers them alongside branch heads.
+    tags: BTreeMap<String, LayerId>,
     /// `ContentHash → set of position hashes` — the content-hash dedup
     /// index introduced by D25 §11.0 / D33 §6. Many position hashes can
     /// share a content hash (same notebook cell committed against
@@ -101,6 +106,7 @@ impl MemoryPersistentBackend {
                 meta: BTreeMap::new(),
                 blooms: BTreeMap::new(),
                 branches: BTreeMap::new(),
+                tags: BTreeMap::new(),
                 content_index: BTreeMap::new(),
                 redirects: BTreeMap::new(),
                 anchored_commits: BTreeMap::new(),
@@ -375,6 +381,35 @@ impl PersistentBackend for MemoryPersistentBackend {
             .read()
             .expect("poisoned")
             .branches
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
+    }
+
+    fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        if state.tags.contains_key(name) {
+            return Ok(false);
+        }
+        state.tags.insert(name.to_string(), id.clone());
+        Ok(true)
+    }
+
+    fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
+        Ok(self.inner.read().expect("poisoned").tags.get(name).cloned())
+    }
+
+    fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        Ok(state.tags.remove(name).is_some())
+    }
+
+    fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
+        Ok(self
+            .inner
+            .read()
+            .expect("poisoned")
+            .tags
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect())
@@ -865,6 +900,47 @@ mod tests {
 
         // Delete on absent key is a no-op.
         backend.delete_branch("nonexistent").unwrap();
+    }
+
+    #[test]
+    fn tag_refs_round_trip() {
+        // Verifies the structural invariants of the tag primitive:
+        // immutable (re-create returns false; existing target stays),
+        // idempotent delete (false on absent), and stable sort order.
+        let backend = MemoryPersistentBackend::new();
+        assert!(backend.get_tag("release-v1").unwrap().is_none());
+        assert!(backend.list_tags().unwrap().is_empty());
+
+        let id_a = LayerId([1u8; 32]);
+        let id_b = LayerId([2u8; 32]);
+        assert!(backend.create_tag("release-v1", &id_a).unwrap());
+        assert!(backend.create_tag("baseline", &id_b).unwrap());
+
+        assert_eq!(backend.get_tag("release-v1").unwrap(), Some(id_a.clone()));
+        assert_eq!(backend.get_tag("baseline").unwrap(), Some(id_b.clone()));
+
+        // Tag immutability: re-creating an existing name returns
+        // false and the original target survives.
+        assert!(!backend.create_tag("release-v1", &id_b).unwrap());
+        assert_eq!(
+            backend.get_tag("release-v1").unwrap(),
+            Some(id_a.clone()),
+            "create_tag must NOT retarget an existing name"
+        );
+
+        // list_tags returns sorted by name.
+        let listed = backend.list_tags().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].0, "baseline");
+        assert_eq!(listed[1].0, "release-v1");
+
+        // Delete reports whether the tag existed.
+        assert!(backend.delete_tag("release-v1").unwrap());
+        assert!(backend.get_tag("release-v1").unwrap().is_none());
+        assert!(
+            !backend.delete_tag("release-v1").unwrap(),
+            "delete on absent name is idempotent — returns false, not an error"
+        );
     }
 
     #[test]

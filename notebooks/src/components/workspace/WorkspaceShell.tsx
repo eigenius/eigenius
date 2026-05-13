@@ -94,6 +94,7 @@ import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
 import { CompactionPanel } from "./CompactionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MergePanel } from "./MergePanel";
+import { TagsPanel } from "./TagsPanel";
 import { TasksPanel } from "./TasksPanel";
 
 /**
@@ -468,13 +469,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "tasks":
       return <TasksPanel />;
     case "tags":
-      return (
-        <ComingSoonPlaceholder
-          destination="Tags"
-          phase={8}
-          description="Named pins on specific layers, doubling as GC roots."
-        />
-      );
+      return <TagsPanel />;
     case "gc":
       return (
         <ComingSoonPlaceholder

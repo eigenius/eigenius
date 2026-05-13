@@ -85,22 +85,33 @@ pub struct GcRoots {
     /// `TaskStore::list_tasks(session)`, and collects each
     /// record's `layer_head`.
     pub task_pins: Vec<LayerId>,
+    /// Tag targets (D34 §G.2 / §8.3). Tags are GC roots — protecting
+    /// their target (and its ancestors) for as long as the tag
+    /// exists is what makes "tag this state so I can come back to
+    /// it later" actually durable.
+    pub tag_targets: Vec<LayerId>,
 }
 
 impl GcRoots {
-    /// Build a roots set from the persistent backend's branch refs.
-    /// Task pins must be added separately by the caller.
+    /// Build a roots set from the persistent backend's branch refs
+    /// and tag refs. Task pins must be added separately by the
+    /// caller.
     pub fn from_branches(backend: &dyn PersistentBackend) -> Result<Self, StorageError> {
         let branches = backend.list_branches()?;
+        let tags = backend.list_tags()?;
         Ok(Self {
             branch_heads: branches.into_iter().map(|(_, id)| id).collect(),
             task_pins: Vec::new(),
+            tag_targets: tags.into_iter().map(|(_, id)| id).collect(),
         })
     }
 
     /// Iterator over every layer id that should be treated as a root.
     fn iter(&self) -> impl Iterator<Item = &LayerId> {
-        self.branch_heads.iter().chain(self.task_pins.iter())
+        self.branch_heads
+            .iter()
+            .chain(self.task_pins.iter())
+            .chain(self.tag_targets.iter())
     }
 }
 
@@ -455,6 +466,7 @@ mod tests {
         let roots = GcRoots {
             branch_heads: Vec::new(),
             task_pins: vec![pinned.id().clone()],
+            tag_targets: Vec::new(),
         };
         let stats = collect(
             roots,
@@ -471,6 +483,83 @@ mod tests {
             .unwrap()
             .get_layer(pinned.id())
             .is_some());
+    }
+
+    #[test]
+    fn tag_keeps_target_and_ancestors_alive() {
+        // D34 §8.3 invariant: a tag protects its target *and that
+        // target's transitive ancestors* from GC for as long as the
+        // tag exists. Verifies the `from_branches` constructor pulls
+        // tag refs into the root set so the mark phase sees them.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, &storage);
+        let tagged = commit_child(&backend, &storage, root, "tagged", "urn:eigenius:test:t");
+
+        // No branches; only a tag holds the chain.
+        backend.create_tag("release-v1", tagged.id()).unwrap();
+
+        let roots = GcRoots::from_branches(&backend).unwrap();
+        assert!(roots.branch_heads.is_empty(), "no branches in this test");
+        assert_eq!(roots.tag_targets.len(), 1);
+
+        let stats = collect(
+            roots,
+            &no_age_config(),
+            storage.cache.as_ref(),
+            storage.bloom_cache.as_ref(),
+            &backend,
+        )
+        .unwrap();
+        assert_eq!(
+            stats.layers_marked, 2,
+            "tagged layer + its root ancestor must both be marked"
+        );
+        assert_eq!(stats.layers_swept, 0);
+        assert!(backend
+            .load_topology()
+            .unwrap()
+            .get_layer(tagged.id())
+            .is_some());
+    }
+
+    #[test]
+    fn deleting_tag_releases_protection() {
+        // After deleting the tag, the previously-protected layer is
+        // sweep-eligible (no other root reaches it). Pairs with the
+        // "tag protects" test to confirm the protection is precisely
+        // the tag, not an incidental side effect.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, &storage);
+        let orphan = commit_child(&backend, &storage, root, "orphan", "urn:eigenius:test:o");
+
+        backend.create_tag("temp", orphan.id()).unwrap();
+        // While the tag exists the layer is protected — same shape as
+        // the previous test.
+        let stats_with_tag = collect(
+            GcRoots::from_branches(&backend).unwrap(),
+            &no_age_config(),
+            storage.cache.as_ref(),
+            storage.bloom_cache.as_ref(),
+            &backend,
+        )
+        .unwrap();
+        assert_eq!(stats_with_tag.layers_swept, 0);
+
+        // Delete the tag and re-run GC: the layer (and its root
+        // ancestor) become unreachable.
+        let deleted = backend.delete_tag("temp").unwrap();
+        assert!(deleted, "delete_tag returns true when the tag existed");
+        let stats_after = collect(
+            GcRoots::from_branches(&backend).unwrap(),
+            &no_age_config(),
+            storage.cache.as_ref(),
+            storage.bloom_cache.as_ref(),
+            &backend,
+        )
+        .unwrap();
+        assert_eq!(stats_after.layers_swept, 2, "both layers reclaimed");
     }
 
     #[test]
@@ -690,6 +779,7 @@ mod tests {
         let roots = GcRoots {
             branch_heads: vec![tip.id().clone()],
             task_pins: vec![],
+            tag_targets: vec![],
         };
         let reachable = mark_reachable(&roots, &topology, &redirects);
 
@@ -770,6 +860,7 @@ mod tests {
         let roots = GcRoots {
             branch_heads: vec![tip.id().clone()],
             task_pins: vec![],
+            tag_targets: vec![],
         };
         let reachable = mark_reachable(&roots, &topology, &redirects);
 

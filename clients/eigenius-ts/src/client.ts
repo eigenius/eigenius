@@ -34,8 +34,12 @@ import {
   ConsolidateErrorKind,
   CreateBranchRequestSchema,
   type CreateBranchResponse,
+  CreateTagRequestSchema,
+  type CreateTagResponse,
   DeleteBranchRequestSchema,
   type DeleteBranchResponse,
+  DeleteTagRequestSchema,
+  type DeleteTagResponse,
   EigeniusKernel,
   EstimateConsolidationRequestSchema,
   type EstimateConsolidationResponse,
@@ -52,6 +56,8 @@ import {
   type LayerTopologyResponse,
   ListBranchesRequestSchema,
   ListInstitutionsRequestSchema,
+  ListTagsRequestSchema,
+  type ListTagsResponse,
   ListTasksRequestSchema,
   type ListTasksResponse,
   LoadRequestSchema,
@@ -70,6 +76,7 @@ import {
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
+  type TagInfo,
   type TaskInfo,
   ValidateProgramRequestSchema,
   type ValidateProgramResponse,
@@ -82,7 +89,9 @@ export type {
   CancelTaskResponse,
   ConsolidateChainResponse,
   CreateBranchResponse,
+  CreateTagResponse,
   DeleteBranchResponse,
+  DeleteTagResponse,
   EstimateConsolidationResponse,
   GetBranchResponse,
   GetTaskStatusResponse,
@@ -90,6 +99,7 @@ export type {
   InspectResponse,
   InstitutionInfo,
   LayerTopologyResponse,
+  ListTagsResponse,
   ListTasksResponse,
   LoadResponse,
   MergeBranchesResponse,
@@ -98,6 +108,7 @@ export type {
   QueryResponse,
   ReflectResponse,
   RunProgramResponse,
+  TagInfo,
   TaskInfo,
   ValidateProgramResponse,
   ValidationError,
@@ -753,6 +764,52 @@ export class Eigen {
   async cancelTask(taskId: string): Promise<CancelTaskResponse> {
     return await this.kernel.cancelTask(
       create(CancelTaskRequestSchema, { taskId }),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Tags (D34 §G.2 / §8)
+  // ------------------------------------------------------------------
+
+  /**
+   * Create a new immutable tag pointing at `layerId`. Names match
+   * `[A-Za-z0-9_-]+`, max 256 chars. Rejects re-using an existing
+   * name with `success: false, alreadyExists: true`; rejects an
+   * unknown `layerId` with `success: false, error` populated.
+   *
+   * There is intentionally no `updateTag` — retargeting an existing
+   * tag would defeat the "tag this state so I can come back to it
+   * later" contract (D34 §8.3). Use `deleteTag` + fresh `createTag`
+   * if a retarget is genuinely intended.
+   */
+  async createTag(
+    name: string,
+    layerId: string,
+  ): Promise<CreateTagResponse> {
+    return await this.kernel.createTag(
+      create(CreateTagRequestSchema, { name, layerId }),
+    );
+  }
+
+  /**
+   * Enumerate every tag with its target and the target layer's
+   * commit timestamp.
+   */
+  async listTags(): Promise<readonly TagInfo[]> {
+    const resp = await this.kernel.listTags(
+      create(ListTagsRequestSchema, {}),
+    );
+    return resp.tags;
+  }
+
+  /**
+   * Remove the tag. Idempotent: deleting a non-existent tag returns
+   * `success: true, deleted: false`. The target layer becomes
+   * GC-eligible if no other root still reaches it.
+   */
+  async deleteTag(name: string): Promise<DeleteTagResponse> {
+    return await this.kernel.deleteTag(
+      create(DeleteTagRequestSchema, { name }),
     );
   }
 
