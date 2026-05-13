@@ -170,6 +170,21 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.previewMerge,
         req,
       ),
+    // Compaction wizard (D34 §7 / Phase 6). Browser drives a 3-step
+    // wizard: estimate → confirm → consolidate. Both RPCs round-trip
+    // through to the kernel verbatim.
+    consolidateChain: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CONSOLIDATE_CHAIN,
+        kernel.raw.consolidateChain,
+        req,
+      ),
+    estimateConsolidation: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_ESTIMATE_CONSOLIDATION,
+        kernel.raw.estimateConsolidation,
+        req,
+      ),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path

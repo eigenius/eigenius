@@ -382,6 +382,49 @@ fn consolidate_chain_locked(
         bloom_cache.evict_layer(layer.id());
     }
 
+    // Anchored-commit cache invalidation (D33 §3 — supporting-layer
+    // property enables this). Cache entries that point at a layer in
+    // the consolidated range are now misleading: head-rooted resolves
+    // no longer reach those layers, so reporting "cached at L" for
+    // L ∈ range surfaces an orphan id to the caller (cells get told
+    // their work lives at a position that no branch reaches). After
+    // re-running, the next commit re-populates the cache with the
+    // new canonical position.
+    //
+    // O(|cache|) scan — there is no reverse index by `Layer Id` today.
+    // Consolidation isn't a hot path, so the cost is acceptable; a
+    // reverse index is the natural follow-up if profiling flags it.
+    let range_id_set: BTreeSet<LayerId> = range_layers.iter().map(|l| l.id().clone()).collect();
+    match backend.list_anchored_commits() {
+        Ok(entries) => {
+            for entry in entries {
+                if !range_id_set.contains(&entry.layer_id) {
+                    continue;
+                }
+                if let Err(e) = backend
+                    .delete_anchored_commit(&entry.content_hash, &entry.supporting_content_hash)
+                {
+                    // Best-effort: the commit succeeded; leaving a
+                    // stale cache entry behind is a UX issue, not a
+                    // correctness one (the probe will surface a stale
+                    // orphan id until GC reclaims it). Logging it is
+                    // enough.
+                    tracing::warn!(
+                        layer_id = %entry.layer_id,
+                        error = %e,
+                        "failed to evict anchored-commit cache entry for consolidated layer"
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "failed to list anchored-commit cache for invalidation"
+            );
+        }
+    }
+
     Ok(ConsolidationOutcome {
         consolidated_layer: consolidated_layer.id().clone(),
         collapsed_layer_count,
@@ -816,6 +859,90 @@ mod tests {
         assert_eq!(
             before, after,
             "consolidation must preserve head-rooted resolves for every IRI"
+        );
+    }
+
+    /// Consolidation invalidates anchored-commit cache entries pointing
+    /// at layers inside the range (D33 §3). Cache entries pointing at
+    /// layers *outside* the range must survive untouched — otherwise
+    /// a single consolidation evicts the world.
+    ///
+    /// Regression: previously the cache was untouched on consolidation,
+    /// so re-running a cell whose content had been canonically
+    /// committed inside the range would return the now-orphan id and
+    /// the branch wouldn't advance. See D34 Phase 6 issue.
+    #[test]
+    fn at_head_consolidation_evicts_anchored_commit_cache_in_range() {
+        use crate::layer::ContentHash;
+        let backend = MemoryPersistentBackend::new();
+        let (head, layers, storage) = build_chain_of(9, &backend);
+        backend.put_branch("main", head.id()).unwrap();
+
+        // Pick a victim *inside* the range we'll consolidate and a
+        // bystander *outside* it. `layers[0]` is the root (outside the
+        // range), `layers[5]` is L4 (inside, deep enough to be in the
+        // middle), and the range will be `from = layers[3]` (L2) →
+        // `to = head`.
+        let victim_in_range = layers[5].id().clone();
+        let bystander_outside = layers[0].id().clone(); // root
+        let from = layers[3].id().clone();
+        let to = head.id().clone();
+
+        // Synthetic cache keys — we don't need them to match any real
+        // content/supporting hash, just to be distinct so the
+        // invalidation logic can find them by `layer_id`.
+        let key_victim = (ContentHash([1u8; 32]), ContentHash([2u8; 32]));
+        let key_bystander = (ContentHash([3u8; 32]), ContentHash([4u8; 32]));
+
+        backend
+            .put_anchored_commit(&key_victim.0, &key_victim.1, &victim_in_range)
+            .unwrap();
+        backend
+            .put_anchored_commit(&key_bystander.0, &key_bystander.1, &bystander_outside)
+            .unwrap();
+
+        // Sanity: both entries are live before consolidation.
+        assert_eq!(
+            backend
+                .lookup_anchored_commit(&key_victim.0, &key_victim.1)
+                .unwrap(),
+            Some(victim_in_range.clone())
+        );
+        assert_eq!(
+            backend
+                .lookup_anchored_commit(&key_bystander.0, &key_bystander.1)
+                .unwrap(),
+            Some(bystander_outside.clone())
+        );
+
+        consolidate_chain(
+            "main",
+            from,
+            to,
+            ConsolidateOpts::default(),
+            storage,
+            &backend,
+        )
+        .expect("consolidation succeeds");
+
+        // The victim's cache entry is gone — re-running the same
+        // content now misses the cache and lands a fresh commit on the
+        // new tip.
+        assert_eq!(
+            backend
+                .lookup_anchored_commit(&key_victim.0, &key_victim.1)
+                .unwrap(),
+            None,
+            "cache entry pointing at a consolidated layer must be evicted"
+        );
+        // The bystander's entry survives — it points at a layer
+        // outside the consolidated range, which is still reachable.
+        assert_eq!(
+            backend
+                .lookup_anchored_commit(&key_bystander.0, &key_bystander.1)
+                .unwrap(),
+            Some(bystander_outside),
+            "cache entry pointing at a layer outside the range must survive"
         );
     }
 

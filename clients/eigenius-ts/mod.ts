@@ -17,12 +17,16 @@
 
 export {
   type BranchInfo,
+  type ConsolidateChainResponse,
+  ConsolidateErrorKind,
+  type ConsolidateOptions,
   type CreateBranchOptions,
   type CreateBranchResponse,
   type DeleteBranchOptions,
   type DeleteBranchResponse,
   Eigen,
   type EigenOptions,
+  type EstimateConsolidationResponse,
   type GetBranchResponse,
   type InspectOptions,
   type LayerTopologyOptions,

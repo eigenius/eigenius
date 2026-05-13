@@ -27,11 +27,16 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { create } from "@bufbuild/protobuf";
 import {
   type BranchInfo,
+  ConsolidateChainRequestSchema,
+  type ConsolidateChainResponse,
+  ConsolidateErrorKind,
   CreateBranchRequestSchema,
   type CreateBranchResponse,
   DeleteBranchRequestSchema,
   type DeleteBranchResponse,
   EigeniusKernel,
+  EstimateConsolidationRequestSchema,
+  type EstimateConsolidationResponse,
   GetBranchRequestSchema,
   type GetBranchResponse,
   HealthRequestSchema,
@@ -67,8 +72,10 @@ import {
 // Re-export wire types so consumers don't have to reach into generated/.
 export type {
   BranchInfo,
+  ConsolidateChainResponse,
   CreateBranchResponse,
   DeleteBranchResponse,
+  EstimateConsolidationResponse,
   GetBranchResponse,
   HealthResponse,
   InspectResponse,
@@ -85,9 +92,9 @@ export type {
   ValidationError,
 };
 
-// `MergeOutcome` is a value-level enum (consumers compare against it),
-// so re-export as a value, not just a type.
-export { MergeOutcome };
+// Value-level enums (consumers compare against them) re-exported as
+// values, not just types.
+export { ConsolidateErrorKind, MergeOutcome };
 
 const TEXT_ENCODER = new TextEncoder();
 
@@ -254,6 +261,28 @@ export interface DeleteBranchOptions {
    * matches an active task pin. Default false.
    */
   force?: boolean;
+}
+
+export interface ConsolidateOptions {
+  /** Branch to consolidate. Omit (or pass empty) to default to "main". */
+  branch?: string;
+  /** Hex `LayerId` where the inclusive range starts (oldest). */
+  fromLayer: string;
+  /** Hex `LayerId` where the inclusive range ends (newest). */
+  toLayer: string;
+  /**
+   * Cost cap. Refuse if the predicted walk size exceeds this. Pass 0
+   * (the default) to use the kernel's built-in default.
+   */
+  maxWalkEntries?: bigint;
+  /** Reserved for v2 trace-pin policies. v1 ignores this field. */
+  tracePinPolicy?: string;
+  /**
+   * Keep the pre-consolidation history reachable for time-travel reads
+   * (D25 §12.8.1(b)). Default false (reclaim mode — the source range
+   * becomes GC-eligible).
+   */
+  preserveHistory?: boolean;
 }
 
 export class Eigen {
@@ -631,6 +660,49 @@ export class Eigen {
   ): Promise<PreviewMergeResponse> {
     return await this.kernel.previewMerge(
       create(PreviewMergeRequestSchema, { source, target }),
+    );
+  }
+
+  /**
+   * Side-effect-free dry-run of `ConsolidateChain` (D25). Same
+   * validation, predicted result layer and walk cost — used by the
+   * Compaction wizard's Step 2 preview before the user commits to the
+   * real run.
+   */
+  async estimateConsolidation(
+    options: ConsolidateOptions,
+  ): Promise<EstimateConsolidationResponse> {
+    return await this.kernel.estimateConsolidation(
+      create(EstimateConsolidationRequestSchema, {
+        branch: options.branch ?? "",
+        fromLayer: options.fromLayer,
+        toLayer: options.toLayer,
+        maxWalkEntries: options.maxWalkEntries ?? 0n,
+        tracePinPolicy: options.tracePinPolicy ?? "",
+        preserveHistory: options.preserveHistory ?? false,
+      }),
+    );
+  }
+
+  /**
+   * Real `ConsolidateChain` (D25 §12). Collapses the inclusive layer
+   * range `[fromLayer, toLayer]` on `branch` into a single
+   * consolidated layer. When the range ends at the branch tip, the
+   * branch ref advances; otherwise a resolve redirect is installed at
+   * `toLayer` and the branch is unchanged.
+   */
+  async consolidateChain(
+    options: ConsolidateOptions,
+  ): Promise<ConsolidateChainResponse> {
+    return await this.kernel.consolidateChain(
+      create(ConsolidateChainRequestSchema, {
+        branch: options.branch ?? "",
+        fromLayer: options.fromLayer,
+        toLayer: options.toLayer,
+        maxWalkEntries: options.maxWalkEntries ?? 0n,
+        tracePinPolicy: options.tracePinPolicy ?? "",
+        preserveHistory: options.preserveHistory ?? false,
+      }),
     );
   }
 

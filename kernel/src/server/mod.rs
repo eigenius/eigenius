@@ -379,6 +379,30 @@ impl BranchContextCache {
             contexts: RwLock::new(map),
         }
     }
+
+    /// Drop the cached `ExecutionContext` for `branch`. The next
+    /// `get_branch_context(branch)` call rebuilds it from the
+    /// backend's current branch ref (slow path).
+    ///
+    /// Use after any operation that mutates the branch ref or the
+    /// redirect map outside `ExecutionContext` itself — notably
+    /// `consolidate_chain`, which advances the backend's branch ref
+    /// (at-head) or installs a redirect (below-head) without going
+    /// through `ctx.commit()`. Without invalidation here, subsequent
+    /// reads against the branch use the stale in-memory `Layer`
+    /// graph and miss the new tip / redirect.
+    ///
+    /// In-flight requests holding an `Arc<RwLock<ExecutionContext>>`
+    /// continue against their stale ctx for the rest of their call;
+    /// new requests see the rebuilt one. Consolidation runs under
+    /// `with_branch_lock`, which serialises it with other branch-
+    /// mutating operations, so the transient window between "backend
+    /// advanced" and "cache invalidated" is the duration of this
+    /// method, not a real race.
+    async fn invalidate(&self, branch: &str) {
+        let mut cache = self.contexts.write().await;
+        cache.remove(branch);
+    }
 }
 
 /// Outcome of [`EigeniusService::persist_layer_if_backend`] — the
@@ -3421,16 +3445,27 @@ impl EigeniusKernel for EigeniusService {
             build_consolidate_opts(&req.max_walk_entries, req.preserve_history, &self).await?;
 
         match crate::layer::consolidate_chain(branch, from, to, opts, storage, backend.as_ref()) {
-            Ok(outcome) => Ok(Response::new(ConsolidateChainResponse {
-                success: true,
-                consolidated_layer: hex::encode(outcome.consolidated_layer.0),
-                collapsed_layer_count: outcome.collapsed_layer_count,
-                head_advanced: outcome.head_advanced,
-                error_kind: ConsolidateErrorKind::None as i32,
-                error: String::new(),
-                error_layer: String::new(),
-                error_count: 0,
-            })),
+            Ok(outcome) => {
+                // The inner call updated the backend's branch ref
+                // (at-head) and/or the redirect map (below-head) but
+                // never went through `ExecutionContext`. Drop the
+                // cached ctx so the next read for this branch
+                // rebuilds against the post-consolidation chain —
+                // otherwise reads see the stale in-memory `Layer`
+                // graph and a re-run candidate's parent walk goes
+                // through orphaned ancestors.
+                self.branch_contexts.invalidate(branch).await;
+                Ok(Response::new(ConsolidateChainResponse {
+                    success: true,
+                    consolidated_layer: hex::encode(outcome.consolidated_layer.0),
+                    collapsed_layer_count: outcome.collapsed_layer_count,
+                    head_advanced: outcome.head_advanced,
+                    error_kind: ConsolidateErrorKind::None as i32,
+                    error: String::new(),
+                    error_layer: String::new(),
+                    error_count: 0,
+                }))
+            }
             Err(err) => Ok(Response::new(consolidate_error_to_response(err))),
         }
     }

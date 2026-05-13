@@ -455,6 +455,18 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       if (output.kind === "load" && output.layerId) {
         set({ activeLayer: output.layerId });
       }
+      // If the run produced a commit (load / runProgram / FIBER query)
+      // the branch tip may have moved. Refresh the `branches` cache so
+      // the workspace header's tip indicator and rail panels that key
+      // off the branch head (LayerStackPanel, History) pick it up.
+      // Cheap on a persistent backend; a no-op on in-memory.
+      if (
+        output.kind !== "error" &&
+        "commit" in output &&
+        output.commit !== undefined
+      ) {
+        void get().refreshBranches(eigen);
+      }
       setState(output.kind === "error" ? "error" : "done");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

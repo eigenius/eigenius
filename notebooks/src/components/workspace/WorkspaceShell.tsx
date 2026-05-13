@@ -91,6 +91,7 @@ import { BranchBar } from "../BranchBar";
 import { Notebook } from "../Notebook";
 import { BranchesPanel } from "./BranchesPanel";
 import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
+import { CompactionPanel } from "./CompactionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MergePanel } from "./MergePanel";
 
@@ -462,13 +463,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "merge":
       return <MergePanel />;
     case "compaction":
-      return (
-        <ComingSoonPlaceholder
-          destination="Compaction"
-          phase={6}
-          description="ConsolidateChain wizard scoped to the active branch."
-        />
-      );
+      return <CompactionPanel />;
     case "tasks":
       return (
         <ComingSoonPlaceholder
