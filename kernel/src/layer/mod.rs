@@ -32,6 +32,7 @@ mod cache;
 mod consolidate;
 mod handle;
 mod index;
+mod merge;
 mod redirect;
 mod storage;
 mod supporting;

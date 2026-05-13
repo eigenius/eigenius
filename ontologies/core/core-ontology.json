@@ -642,5 +642,23 @@
     "urn:eigenius:core:short_name": "param_kind",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
+  },
+
+  {
+    "@id": "urn:eigenius:core:MergeComorphism",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A typed witness for a `Witness`-strategy merge resolution (D20 §6.1). Carries a `merge_transformation` whose Component must have signature `(A, A, Option<A>) -> A` where A is the class of the IRI being merged: the two branch values and the optional ancestor value collapse into the merged value. Distinct from the institution-layer `Comorphism` (which witnesses cross-institution translation); the two share the typing-discipline framing but live at different layers because merge resolution is a core concern while institution boundaries are not.",
+    "urn:eigenius:core:short_name": "MergeComorphism",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:merge_transformation"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_transformation",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Reference to the Mini-TT term (typed expression) realising the merge witness. The kernel verifies at resolution-submission time (D20 §6.1) that the term's type equals `(A, A, Option<A>) -> A` for the class A of the IRI being resolved — branch_a value, branch_b value, optional ancestor value, merged value. No `class_types` narrowing here because the core ontology loads before `program`, so the Mini-TT expression classes aren't yet in the chain at validation time. The kernel's resolution-submission signature check is what actually enforces the typing discipline; this property's `data_type: resource` keeps the structural shape minimal.",
+    "urn:eigenius:core:short_name": "merge_transformation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeComorphism"]
   }
 ]
