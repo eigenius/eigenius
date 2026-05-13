@@ -213,6 +213,7 @@ export function HistoryPanel() {
   const refreshBranches = useNotebookStore((s) => s.refreshBranches);
   const readPinLayerId = useNotebookStore((s) => s.readPinLayerId);
   const setReadPin = useNotebookStore((s) => s.setReadPin);
+  const setDestination = useNotebookStore((s) => s.setDestination);
 
   const [topology, setTopology] = useState<LayerTopologyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -341,6 +342,10 @@ export function HistoryPanel() {
                 );
               }}
               onCreateTag={() => setCreateTagFor(selectedRow.layerId)}
+              onInspectResources={() => {
+                setReadPin(selectedRow.layerId);
+                setDestination("topology");
+              }}
             />
           </aside>
         )}
@@ -419,6 +424,7 @@ interface DetailPanelProps {
   onTimeTravel: () => void;
   onCopy: () => void;
   onCreateTag: () => void;
+  onInspectResources: () => void;
 }
 
 function DetailPanel({
@@ -428,6 +434,7 @@ function DetailPanel({
   onTimeTravel,
   onCopy,
   onCreateTag,
+  onInspectResources,
 }: DetailPanelProps) {
   return (
     <>
@@ -496,12 +503,16 @@ function DetailPanel({
           <Button onClick={onCreateTag}>Create tag…</Button>
         </Tooltip>
 
-        {/* Disabled stub: Inspect resources → Phase 11 Topology. */}
+        {/* "Inspect resources" sets the read-pin to this layer and
+            navigates to the Topology destination, which honors the
+            pin as the graph root. The topology view includes Class /
+            Property / Resource / Institution nodes — exactly the
+            "what's defined here" lens. */}
         <Tooltip
           relationship="description"
-          content="Inspect this layer's resources — coming in Phase 11."
+          content="Open the Topology panel rooted at this layer (sets the session read-pin)."
         >
-          <Button disabled>Inspect resources…</Button>
+          <Button onClick={onInspectResources}>Inspect resources…</Button>
         </Tooltip>
       </div>
     </>

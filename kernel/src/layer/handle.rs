@@ -88,6 +88,27 @@ pub struct LayerHandle {
     /// the convention used by D21's `TaskRecord`.
     pub created_at: i64,
 
+    /// Encoded resource bytes for this layer — the sum of
+    /// `eigon_cbor::serialize_resource(...).len()` over every resource
+    /// defined directly in the layer. Stamped by `store_layer` at write
+    /// time and persisted alongside the rest of the handle.
+    ///
+    /// Used by GC's `EstimateGc` to surface a "reclaimable bytes" view
+    /// for the operator (D34 §G.4 / §9.4). **Approximate by design**:
+    /// excludes the per-layer bloom, topology entry, chain pointer,
+    /// content-hash index, and triple-index entries — those are
+    /// bounded per-layer overhead, dwarfed by resource bytes in any
+    /// realistic workload. A future enrichment that wants exact storage
+    /// footprint would aggregate the full WriteBatch byte count at
+    /// store time.
+    ///
+    /// `#[serde(default)]` on the field tolerates handles persisted by
+    /// older kernels that didn't carry this number — they read back as
+    /// `0` and the estimate under-counts for legacy layers until they
+    /// churn through GC + recommit. No migration needed.
+    #[serde(default)]
+    pub byte_size: u64,
+
     /// True for *synthetic tombstones* manufactured by `load_topology`
     /// from a [`RedirectEntry`](crate::layer::RedirectEntry). The flag
     /// lets diagnostic surfaces (`db log`, `inspect`, the notebook
@@ -199,6 +220,7 @@ mod tests {
             name: format!("layer-{byte}"),
             resource_count: 0,
             created_at: 0,
+            byte_size: 0,
             is_redirect_source: false,
         }
     }

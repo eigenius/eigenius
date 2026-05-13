@@ -90,14 +90,15 @@ import eigeniusLogoUrl from "../../assets/eigenius_logo_bw_24px.png";
 import { BranchBar } from "../BranchBar";
 import { Notebook } from "../Notebook";
 import { BranchesPanel } from "./BranchesPanel";
-import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
 import { CompactionPanel } from "./CompactionPanel";
 import { GcPanel } from "./GcPanel";
+import { HealthPanel } from "./HealthPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { InstitutionsPanel } from "./InstitutionsPanel";
 import { MergePanel } from "./MergePanel";
 import { TagsPanel } from "./TagsPanel";
 import { TasksPanel } from "./TasksPanel";
+import { TopologyPanel } from "./TopologyPanel";
 
 /**
  * Destination keys driving the active main-pane content. Strings
@@ -477,21 +478,9 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "institutions":
       return <InstitutionsPanel />;
     case "topology":
-      return (
-        <ComingSoonPlaceholder
-          destination="Topology"
-          phase={11}
-          description="The full layer + resource graph with a branch filter."
-        />
-      );
+      return <TopologyPanel />;
     case "health":
-      return (
-        <ComingSoonPlaceholder
-          destination="Health"
-          phase={11}
-          description="Kernel health, version, resume-sweep state."
-        />
-      );
+      return <HealthPanel />;
   }
 }
 

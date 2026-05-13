@@ -146,6 +146,18 @@ pub struct SweepStats {
     /// Number of layers that were unreachable but skipped due to
     /// `min_age` protection.
     pub layers_protected_by_age: u64,
+    /// Sum of `LayerHandle.byte_size` over the eligible set:
+    /// - For `estimate`: bytes that *would* be reclaimed by a real
+    ///   sweep right now (unreachable AND past `min_age`).
+    /// - For `collect`: bytes actually reclaimed (same set after the
+    ///   sweep).
+    ///
+    /// Approximation: counts encoded resource bytes per layer. The
+    /// per-layer bloom, topology entry, chain pointer, content-hash
+    /// index, and triple-index entries are bounded per-layer
+    /// overhead and not included — see `LayerHandle::byte_size` for
+    /// the rationale.
+    pub bytes_reclaimable: u64,
 }
 
 /// Run a single mark-and-sweep pass over the layer DAG.
@@ -221,6 +233,7 @@ pub fn collect(
         cache.evict_layer(&handle.id);
         bloom_cache.evict_layer(&handle.id);
         stats.layers_swept += 1;
+        stats.bytes_reclaimable += handle.byte_size;
     }
 
     Ok(stats)
@@ -263,7 +276,11 @@ pub fn estimate(
         let age_ms = now_ms.saturating_sub(handle.created_at);
         if age_ms < min_age_ms {
             stats.layers_protected_by_age += 1;
+            continue;
         }
+        // Eligible (unreachable AND past min_age) — accumulate the
+        // bytes that a real sweep would reclaim.
+        stats.bytes_reclaimable += handle.byte_size;
     }
     Ok(stats)
 }
@@ -427,6 +444,52 @@ mod tests {
         );
         // Topology untouched.
         assert_eq!(backend.load_topology().unwrap().layer_count(), 2);
+    }
+
+    #[test]
+    fn estimate_sums_reclaimable_bytes_over_eligible_layers() {
+        // Verifies the `bytes_reclaimable` accumulator only counts
+        // layers that would actually be swept — unreachable AND past
+        // `min_age`. Layers reachable from any root or protected by
+        // age must NOT contribute, otherwise the operator's reclaim
+        // estimate overpromises.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let _root = commit_root(&backend, &storage);
+        let _orphan = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&_root),
+            "orphan",
+            "urn:eigenius:test:o",
+        );
+
+        let topology = backend.load_topology().unwrap();
+        let expected: u64 = topology.iter_layers().map(|h| h.byte_size).sum();
+        assert!(
+            expected > 0,
+            "fixture must produce non-zero byte_size on stored handles"
+        );
+
+        // No roots: both layers are unreachable and (with no-age
+        // config) eligible. Expected reclaim == sum of every handle.
+        let stats = estimate(GcRoots::default(), &no_age_config(), &backend).unwrap();
+        assert_eq!(stats.layers_unreachable, 2);
+        assert_eq!(stats.layers_protected_by_age, 0);
+        assert_eq!(
+            stats.bytes_reclaimable, expected,
+            "all eligible layers' bytes must accumulate"
+        );
+
+        // Same chain, default config (60s min_age): both layers are
+        // unreachable but freshly-committed, so the protection window
+        // shields them. Bytes reclaimable must be 0.
+        let stats = estimate(GcRoots::default(), &GcConfig::default(), &backend).unwrap();
+        assert_eq!(stats.layers_protected_by_age, 2);
+        assert_eq!(
+            stats.bytes_reclaimable, 0,
+            "age-protected layers must NOT contribute to reclaim"
+        );
     }
 
     #[test]

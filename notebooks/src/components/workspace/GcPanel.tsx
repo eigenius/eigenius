@@ -310,6 +310,14 @@ function EstimateBlock({ state, styles }: EstimateBlockProps) {
         </Caption1>
       </div>
       <div className={styles.metricsGrid}>
+        <Caption1 className={styles.metricLabel}>Reclaimable</Caption1>
+        <Body1>
+          {formatBytes(resp.reclaimableBytes)}{" "}
+          <Caption1 as="span">
+            (encoded resource bytes; per-layer index/bloom overhead not
+            included)
+          </Caption1>
+        </Body1>
         <Caption1 className={styles.metricLabel}>Protected by min-age</Caption1>
         <Body1>
           {protectedByAge} layer{protectedByAge === 1 ? "" : "s"}{" "}
@@ -328,6 +336,30 @@ function EstimateBlock({ state, styles }: EstimateBlockProps) {
       </Caption1>
     </div>
   );
+}
+
+/**
+ * Render a byte count in the largest sensible unit. Uses 1024-based
+ * units (KiB / MiB / GiB) because the operator's mental model is
+ * "how much disk does this free", which matches the binary
+ * convention RocksDB-side tooling uses. Negative / NaN / undefined
+ * collapse to `"0 B"` defensively.
+ */
+function formatBytes(bytes: bigint | number): string {
+  const n = typeof bytes === "bigint" ? Number(bytes) : bytes;
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = n;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  // 1 decimal once we're past raw bytes; integer in the B range so
+  // small handle-only chains don't render "12.0 B".
+  return unitIndex === 0
+    ? `${Math.round(value)} ${units[unitIndex]}`
+    : `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 interface RunBlockProps {

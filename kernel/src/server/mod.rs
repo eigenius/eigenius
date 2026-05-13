@@ -2800,6 +2800,22 @@ impl EigeniusKernel for EigeniusService {
         let ctx = ctx_arc.read().await;
         let resource_count = ctx.head().iter_all_resources().count() as u64;
 
+        // Layer count covers every layer the backend currently
+        // tracks (including layers reachable only through other
+        // branches and orphans pending GC). This is the "health of
+        // the storage backend" view; `resource_count` above stays
+        // head-rooted because it's a quick sanity check against the
+        // active branch's working set. When no persistent backend is
+        // attached (in-memory mode), the topology is empty — fall
+        // back to `0`.
+        let layer_count = match self.backend.as_ref() {
+            Some(backend) => backend
+                .load_topology()
+                .map(|t| t.layer_count() as u64)
+                .unwrap_or(0),
+            None => 0,
+        };
+
         // D21 §6 resume observability — populated by the resume
         // sweep when it's active.
         use std::sync::atomic::Ordering;
@@ -2809,7 +2825,7 @@ impl EigeniusKernel for EigeniusService {
         Ok(Response::new(HealthResponse {
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
-            layer_count: 2, // core + program ontology
+            layer_count,
             resource_count,
             resume_in_progress,
             tasks_resuming,
@@ -3727,11 +3743,14 @@ impl EigeniusKernel for EigeniusService {
             branch_pins,
             tag_pins,
             task_pins: task_pins_count,
-            // Per-layer byte accounting isn't tracked on `LayerHandle`
-            // today; surfacing 0 is honest about the gap. The Tags-
-            // panel-style follow-up would add a `byte_size` field to
-            // the handle and aggregate it here.
-            reclaimable_bytes: 0,
+            // Sum of `LayerHandle.byte_size` over the eligible set —
+            // see `gc::SweepStats.bytes_reclaimable` for the
+            // approximation contract (encoded resource bytes only;
+            // bloom + topo + index overhead excluded). Layers
+            // persisted by pre-byte-size kernels have `byte_size = 0`
+            // via `#[serde(default)]`; the estimate under-counts for
+            // them until they churn through GC + recommit.
+            reclaimable_bytes: stats.bytes_reclaimable,
         }))
     }
 

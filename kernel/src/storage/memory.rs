@@ -213,6 +213,13 @@ impl PersistentBackend for MemoryPersistentBackend {
         // consistent with `Layer::parent()` semantics.
         let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
         let canonical_parent = all_parents.first().cloned();
+        // Match the persistent backend's `byte_size` accounting so
+        // GC estimate tests against this fixture produce the same
+        // numbers a real backend would.
+        let byte_size: u64 = layer
+            .iter_resources()
+            .map(|(_, r)| crate::ontology::eigon_cbor::serialize_resource(&r).len() as u64)
+            .sum();
         let handle = LayerHandle {
             id: id.clone(),
             content_hash: layer.content_hash().clone(),
@@ -225,6 +232,7 @@ impl PersistentBackend for MemoryPersistentBackend {
             // consistent on `created_at` (single source of truth in
             // `LayerBuilder::build`).
             created_at: layer.created_at(),
+            byte_size,
             is_redirect_source: false,
         };
         // Build the bloom outside the lock (it's a hash-heavy loop) and

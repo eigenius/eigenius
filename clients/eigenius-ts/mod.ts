@@ -35,6 +35,7 @@ export {
   type EstimateGcResponse,
   type GetBranchResponse,
   type GetTaskStatusResponse,
+  type HealthResponse,
   type InspectOptions,
   type InstitutionInfo,
   type LayerTopologyOptions,

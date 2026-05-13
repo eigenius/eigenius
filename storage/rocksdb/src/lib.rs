@@ -373,6 +373,17 @@ impl LayerStore for RocksStore {
         let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
         let canonical_parent = all_parents.first().cloned();
 
+        // Pre-serialize resources so we can both (a) stamp the
+        // handle's `byte_size` and (b) write the values below without
+        // re-encoding. CBOR encoding is the hot work, so doing it
+        // once per resource is the right shape regardless of
+        // byte_size.
+        let encoded: Vec<(Iri, Vec<u8>)> = layer
+            .iter_resources()
+            .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
+            .collect();
+        let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
+
         let handle = LayerHandle {
             id: id.clone(),
             content_hash: layer.content_hash().clone(),
@@ -385,6 +396,7 @@ impl LayerStore for RocksStore {
             // in-memory Layer and persisted handle consistent on
             // `created_at`.
             created_at: layer.created_at(),
+            byte_size,
             is_redirect_source: false,
         };
         self.put_topology_entry(&handle)?;
@@ -400,10 +412,9 @@ impl LayerStore for RocksStore {
             .put(content_key.as_bytes(), [])
             .map_err(|e| StorageError::Internal(format!("put content index: {e}")))?;
 
-        // Store each resource as CBOR
-        for (iri, resource) in layer.iter_resources() {
+        // Store each resource as CBOR (already serialized above).
+        for (iri, value) in &encoded {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            let value = eigon_cbor::serialize_resource(&resource);
             self.db
                 .put(key.as_bytes(), value)
                 .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
@@ -623,6 +634,16 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
         let canonical_parent = all_parents.first().cloned();
 
+        // Pre-serialize resources so we can both stamp the handle's
+        // `byte_size` (sum of encoded resource bytes — drives GC's
+        // reclaim estimate) and write the values into the batch
+        // without re-encoding.
+        let encoded: Vec<(Iri, Vec<u8>)> = layer
+            .iter_resources()
+            .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
+            .collect();
+        let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
+
         let handle = LayerHandle {
             id: id.clone(),
             content_hash: layer.content_hash().clone(),
@@ -635,6 +656,7 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             // in-memory Layer and persisted handle consistent on
             // `created_at`.
             created_at: layer.created_at(),
+            byte_size,
             is_redirect_source: false,
         };
         let bloom = BloomFilter::for_iris(layer.defined_iris());
@@ -656,9 +678,8 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         let bloom_key = format!("{BLOOM_PREFIX}{}", hex::encode(id.0));
         batch.put(bloom_key.as_bytes(), &bloom_bytes);
 
-        for (iri, resource) in layer.iter_resources() {
+        for (iri, value) in &encoded {
             let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            let value = eigon_cbor::serialize_resource(&resource);
             batch.put(key.as_bytes(), value);
         }
 
