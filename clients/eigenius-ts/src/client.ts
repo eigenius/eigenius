@@ -27,6 +27,8 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { create } from "@bufbuild/protobuf";
 import {
   type BranchInfo,
+  CancelTaskRequestSchema,
+  type CancelTaskResponse,
   ConsolidateChainRequestSchema,
   type ConsolidateChainResponse,
   ConsolidateErrorKind,
@@ -39,6 +41,8 @@ import {
   type EstimateConsolidationResponse,
   GetBranchRequestSchema,
   type GetBranchResponse,
+  GetTaskStatusRequestSchema,
+  type GetTaskStatusResponse,
   HealthRequestSchema,
   type HealthResponse,
   InspectRequestSchema,
@@ -48,6 +52,8 @@ import {
   type LayerTopologyResponse,
   ListBranchesRequestSchema,
   ListInstitutionsRequestSchema,
+  ListTasksRequestSchema,
+  type ListTasksResponse,
   LoadRequestSchema,
   type LoadResponse,
   MergeBranchesRequestSchema,
@@ -64,6 +70,7 @@ import {
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
+  type TaskInfo,
   ValidateProgramRequestSchema,
   type ValidateProgramResponse,
   type ValidationError,
@@ -72,15 +79,18 @@ import {
 // Re-export wire types so consumers don't have to reach into generated/.
 export type {
   BranchInfo,
+  CancelTaskResponse,
   ConsolidateChainResponse,
   CreateBranchResponse,
   DeleteBranchResponse,
   EstimateConsolidationResponse,
   GetBranchResponse,
+  GetTaskStatusResponse,
   HealthResponse,
   InspectResponse,
   InstitutionInfo,
   LayerTopologyResponse,
+  ListTasksResponse,
   LoadResponse,
   MergeBranchesResponse,
   MergeInfo,
@@ -88,6 +98,7 @@ export type {
   QueryResponse,
   ReflectResponse,
   RunProgramResponse,
+  TaskInfo,
   ValidateProgramResponse,
   ValidationError,
 };
@@ -703,6 +714,45 @@ export class Eigen {
         tracePinPolicy: options.tracePinPolicy ?? "",
         preserveHistory: options.preserveHistory ?? false,
       }),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Tasks (D21)
+  // ------------------------------------------------------------------
+
+  /**
+   * Snapshot of every task the kernel's TaskStore knows about — running,
+   * suspended, completed, failed, cancelled. Returned in unspecified
+   * order; callers sort for display.
+   */
+  async listTasks(): Promise<readonly TaskInfo[]> {
+    const resp = await this.kernel.listTasks(
+      create(ListTasksRequestSchema, {}),
+    );
+    return resp.tasks;
+  }
+
+  /**
+   * Look up one task by id. `response.found = false` means the kernel
+   * has no record for the given id (terminal tasks may be evicted from
+   * the in-memory store).
+   */
+  async getTaskStatus(taskId: string): Promise<GetTaskStatusResponse> {
+    return await this.kernel.getTaskStatus(
+      create(GetTaskStatusRequestSchema, { taskId }),
+    );
+  }
+
+  /**
+   * Request cancellation of a running or suspended task. Idempotent on
+   * already-terminal tasks: the response's `status` reflects the
+   * post-cancel state (`Cancelling` / `Cancelled` if the task was
+   * cancellable, otherwise the existing terminal state).
+   */
+  async cancelTask(taskId: string): Promise<CancelTaskResponse> {
+    return await this.kernel.cancelTask(
+      create(CancelTaskRequestSchema, { taskId }),
     );
   }
 

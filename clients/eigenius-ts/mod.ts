@@ -17,6 +17,7 @@
 
 export {
   type BranchInfo,
+  type CancelTaskResponse,
   type ConsolidateChainResponse,
   ConsolidateErrorKind,
   type ConsolidateOptions,
@@ -28,8 +29,10 @@ export {
   type EigenOptions,
   type EstimateConsolidationResponse,
   type GetBranchResponse,
+  type GetTaskStatusResponse,
   type InspectOptions,
   type LayerTopologyOptions,
+  type ListTasksResponse,
   type LoadOptions,
   type LoadResponse,
   type MergeBranchesResponse,
@@ -43,6 +46,7 @@ export {
   type RunProgramOptions,
   type RunProgramResponse,
   type SourceContentType,
+  type TaskInfo,
 } from "./src/client.ts";
 
 // Re-export the topology message + enum types so consumers don't need

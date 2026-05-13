@@ -94,6 +94,7 @@ import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
 import { CompactionPanel } from "./CompactionPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MergePanel } from "./MergePanel";
+import { TasksPanel } from "./TasksPanel";
 
 /**
  * Destination keys driving the active main-pane content. Strings
@@ -465,13 +466,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "compaction":
       return <CompactionPanel />;
     case "tasks":
-      return (
-        <ComingSoonPlaceholder
-          destination="Tasks"
-          phase={7}
-          description="List of recent task records — running, completed, failed."
-        />
-      );
+      return <TasksPanel />;
     case "tags":
       return (
         <ComingSoonPlaceholder

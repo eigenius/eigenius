@@ -185,11 +185,31 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.estimateConsolidation,
         req,
       ),
+    // Tasks panel (D34 §9.1 / Phase 7). The notebook polls listTasks
+    // for the rail destination; getTaskStatus + cancelTask back the
+    // row actions.
+    listTasks: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_LIST_TASKS,
+        kernel.raw.listTasks,
+        req,
+      ),
+    getTaskStatus: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_GET_TASK_STATUS,
+        kernel.raw.getTaskStatus,
+        req,
+      ),
+    cancelTask: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_CANCEL_TASK,
+        kernel.raw.cancelTask,
+        req,
+      ),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path
     //   getSchema       — Phase 5 (schema-aware visualisation)
-    //   listTasks / getTaskStatus / cancelTask — Phase 6 (task UI)
     //   layerTopology   — exposed via NotebookService instead
     //
     // FIBER queries ride on the regular Query RPC under D14 (D2 v2 §3.5),
