@@ -226,6 +226,48 @@ pub fn collect(
     Ok(stats)
 }
 
+/// Read-only preview of a `collect` pass. Same root snapshot + mark
+/// walk + age classification, *no deletes*. Powers the notebook's
+/// GC panel Step 1 (D34 §9.4) — operators want to know how many
+/// layers a `RunGc` will sweep before they commit to it.
+///
+/// `layers_swept` on the returned stats is always 0; `layers_marked`,
+/// `layers_unreachable`, and `layers_protected_by_age` carry the
+/// same meaning as the corresponding `collect` fields. The
+/// "eligible_layers" the RPC surfaces is
+/// `layers_unreachable - layers_protected_by_age`.
+pub fn estimate(
+    roots: GcRoots,
+    config: &GcConfig,
+    backend: &dyn PersistentBackend,
+) -> Result<SweepStats, StorageError> {
+    let (topology, redirects): (LayerTopology, Vec<RedirectEntry>) =
+        crate::lattice::with_branch_lock(|| {
+            let topo = backend.load_topology()?;
+            let redirects = backend.list_redirects()?;
+            Ok::<_, StorageError>((topo, redirects))
+        })?;
+
+    let reachable = mark_reachable(&roots, &topology, &redirects);
+    let now_ms = current_time_millis();
+    let min_age_ms = config.min_age.as_millis() as i64;
+    let mut stats = SweepStats {
+        layers_marked: reachable.len() as u64,
+        ..Default::default()
+    };
+    for handle in topology.iter_layers() {
+        if reachable.contains(&handle.id) {
+            continue;
+        }
+        stats.layers_unreachable += 1;
+        let age_ms = now_ms.saturating_sub(handle.created_at);
+        if age_ms < min_age_ms {
+            stats.layers_protected_by_age += 1;
+        }
+    }
+    Ok(stats)
+}
+
 /// BFS reachability over `LayerHandle.parents`, augmented for
 /// D25 §12.8 forward-pointer consolidation.
 ///
@@ -357,6 +399,53 @@ mod tests {
         GcConfig {
             min_age: Duration::from_secs(0),
         }
+    }
+
+    #[test]
+    fn estimate_reports_eligible_layers_without_sweeping() {
+        // The same chain that `unreachable_layer_swept_when_no_root_*`
+        // exercises, but through `estimate` instead of `collect` —
+        // the layers must NOT be deleted. This is the structural
+        // invariant the GC panel's preview step relies on.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let _root = commit_root(&backend, &storage);
+        let _orphan = commit_child(
+            &backend,
+            &storage,
+            Arc::clone(&_root),
+            "orphan",
+            "urn:eigenius:test:o",
+        );
+
+        let stats = estimate(GcRoots::default(), &no_age_config(), &backend).unwrap();
+        assert_eq!(stats.layers_marked, 0);
+        assert_eq!(stats.layers_unreachable, 2);
+        assert_eq!(
+            stats.layers_swept, 0,
+            "estimate must not sweep — that's the point of the preview"
+        );
+        // Topology untouched.
+        assert_eq!(backend.load_topology().unwrap().layer_count(), 2);
+    }
+
+    #[test]
+    fn estimate_classifies_age_protection() {
+        // With the default min_age (60s), a just-committed unreachable
+        // layer counts as `protected_by_age` rather than eligible —
+        // matching what `collect` would skip. The GC panel surfaces
+        // this so the operator sees why the eligible count isn't
+        // higher.
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let _orphan = commit_root(&backend, &storage);
+
+        let stats = estimate(GcRoots::default(), &GcConfig::default(), &backend).unwrap();
+        assert_eq!(stats.layers_unreachable, 1);
+        assert_eq!(stats.layers_protected_by_age, 1);
+        assert_eq!(stats.layers_swept, 0);
+        // Layer still on disk.
+        assert_eq!(backend.load_topology().unwrap().layer_count(), 1);
     }
 
     #[test]

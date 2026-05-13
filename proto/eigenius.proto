@@ -167,6 +167,25 @@ service EigeniusKernel {
   // GC-eligible if no other root (branch, active task pin, or
   // another tag) still reaches it.
   rpc DeleteTag(DeleteTagRequest) returns (DeleteTagResponse);
+
+  // --- GC (D34 §G.4 / §9.4) ---
+  //
+  // Reachability-based garbage collection (D23 §5.7). Roots are
+  // branches, tags, and active task pins; anything not transitively
+  // reachable from those roots is candidate for sweep, subject to a
+  // minimum-age protection that shields the
+  // commit_layer → update_branch window.
+
+  // Non-mutating dry-run of `RunGc`. Computes the same root set,
+  // runs the mark phase, and reports how many layers would be
+  // swept versus protected by the age window — but performs no
+  // delete. The notebook's GC panel Step 1 (preview) uses this.
+  rpc EstimateGc(EstimateGcRequest) returns (EstimateGcResponse);
+
+  // Run a single mark-and-sweep pass. Deletes every layer that is
+  // unreachable from the current root set and older than the kernel's
+  // `min_age` protection window.
+  rpc RunGc(RunGcRequest) returns (RunGcResponse);
 }
 
 // --- Load ---
@@ -991,6 +1010,50 @@ message DeleteTagResponse {
   // True when the tag existed and was removed; false when the call
   // was idempotent (no tag by that name).
   bool deleted = 3;
+}
+
+// --- GC (D34 §G.4 / §9.4) ---
+
+message EstimateGcRequest {}
+
+message EstimateGcResponse {
+  bool success = 1;
+  string error = 2;
+  // Layers that would be deleted by a `RunGc` call right now —
+  // unreachable from any root AND older than the kernel's `min_age`
+  // protection window.
+  uint64 eligible_layers = 3;
+  // Layers that are unreachable but younger than `min_age` and so
+  // would be skipped by sweep. Surfaced so the operator understands
+  // why a layer they think should go is still hanging around.
+  uint64 protected_by_age = 4;
+  // Protection accounting (D34 §9.4). Lists what's currently keeping
+  // layers alive so the operator can see why the eligible count is
+  // what it is.
+  uint64 branch_pins = 5;
+  uint64 tag_pins = 6;
+  uint64 task_pins = 7;
+  // Reserved for future per-layer byte accounting. v1 surfaces 0;
+  // accurate reclaim estimates need the backend to expose
+  // per-layer storage size (a tracked follow-up).
+  uint64 reclaimable_bytes = 8;
+}
+
+message RunGcRequest {}
+
+message RunGcResponse {
+  bool success = 1;
+  string error = 2;
+  // Number of layers walked during the mark phase (i.e., reachable
+  // from any root).
+  uint64 layers_marked = 3;
+  // Number of layers identified as unreachable.
+  uint64 layers_unreachable = 4;
+  // Number of unreachable layers actually deleted.
+  uint64 layers_swept = 5;
+  // Number of layers that were unreachable but skipped due to
+  // `min_age` protection.
+  uint64 layers_protected_by_age = 6;
 }
 
 // --- NotebookService (D22 §3.2) ---

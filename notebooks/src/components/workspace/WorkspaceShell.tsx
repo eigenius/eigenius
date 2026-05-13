@@ -92,6 +92,7 @@ import { Notebook } from "../Notebook";
 import { BranchesPanel } from "./BranchesPanel";
 import { ComingSoonPlaceholder } from "./ComingSoonPlaceholder";
 import { CompactionPanel } from "./CompactionPanel";
+import { GcPanel } from "./GcPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { MergePanel } from "./MergePanel";
 import { TagsPanel } from "./TagsPanel";
@@ -471,13 +472,7 @@ function DestinationView({ destination }: { destination: Destination }) {
     case "tags":
       return <TagsPanel />;
     case "gc":
-      return (
-        <ComingSoonPlaceholder
-          destination="GC"
-          phase={9}
-          description="RunGc — reclaim unreachable layers."
-        />
-      );
+      return <GcPanel />;
     case "institutions":
       return (
         <ComingSoonPlaceholder

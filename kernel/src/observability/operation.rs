@@ -54,6 +54,8 @@ pub const RPC_ESTIMATE_CONSOLIDATION: &str = "kernel.rpc.estimate_consolidation"
 pub const RPC_CREATE_TAG: &str = "kernel.rpc.create_tag";
 pub const RPC_LIST_TAGS: &str = "kernel.rpc.list_tags";
 pub const RPC_DELETE_TAG: &str = "kernel.rpc.delete_tag";
+pub const RPC_ESTIMATE_GC: &str = "kernel.rpc.estimate_gc";
+pub const RPC_RUN_GC: &str = "kernel.rpc.run_gc";
 
 // --- Layer ---
 

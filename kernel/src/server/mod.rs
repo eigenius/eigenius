@@ -3625,6 +3625,116 @@ impl EigeniusKernel for EigeniusService {
             Err(e) => Err(Status::internal(format!("delete_tag failed: {e}"))),
         }
     }
+
+    // --- GC (D34 §G.4 / §9.4) ---------------------------------------
+
+    async fn estimate_gc(
+        &self,
+        _request: Request<EstimateGcRequest>,
+    ) -> Result<Response<EstimateGcResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_ESTIMATE_GC);
+        let backend = self
+            .backend
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("GC requires a persistent backend"))?;
+
+        let (roots, branch_pins, tag_pins, task_pins_count) =
+            self.gather_gc_roots(backend.as_ref()).await?;
+
+        let config = crate::gc::GcConfig::default();
+        let stats = crate::gc::estimate(roots, &config, backend.as_ref())
+            .map_err(|e| Status::internal(format!("gc estimate failed: {e}")))?;
+
+        let eligible_layers = stats
+            .layers_unreachable
+            .saturating_sub(stats.layers_protected_by_age);
+        Ok(Response::new(EstimateGcResponse {
+            success: true,
+            error: String::new(),
+            eligible_layers,
+            protected_by_age: stats.layers_protected_by_age,
+            branch_pins,
+            tag_pins,
+            task_pins: task_pins_count,
+            // Per-layer byte accounting isn't tracked on `LayerHandle`
+            // today; surfacing 0 is honest about the gap. The Tags-
+            // panel-style follow-up would add a `byte_size` field to
+            // the handle and aggregate it here.
+            reclaimable_bytes: 0,
+        }))
+    }
+
+    async fn run_gc(
+        &self,
+        _request: Request<RunGcRequest>,
+    ) -> Result<Response<RunGcResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_RUN_GC);
+        let backend = self
+            .backend
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("GC requires a persistent backend"))?;
+
+        let (roots, _branch_pins, _tag_pins, _task_pins) =
+            self.gather_gc_roots(backend.as_ref()).await?;
+
+        // The sweep needs cache handles so it can `evict_layer` on
+        // each deletion. We construct a transient LayerStorage here
+        // only to access the caches — production reads against this
+        // chain use their own per-request storage.
+        let storage = LayerStorage::with_persistent(Arc::clone(backend));
+        let config = crate::gc::GcConfig::default();
+        let stats = crate::gc::collect(
+            roots,
+            &config,
+            storage.cache.as_ref(),
+            storage.bloom_cache.as_ref(),
+            backend.as_ref(),
+        )
+        .map_err(|e| Status::internal(format!("gc run failed: {e}")))?;
+
+        Ok(Response::new(RunGcResponse {
+            success: true,
+            error: String::new(),
+            layers_marked: stats.layers_marked,
+            layers_unreachable: stats.layers_unreachable,
+            layers_swept: stats.layers_swept,
+            layers_protected_by_age: stats.layers_protected_by_age,
+        }))
+    }
+}
+
+impl EigeniusService {
+    /// Build the GC root set from the live state: branch heads, tag
+    /// targets, and non-terminal task pins. Returns the root set plus
+    /// the three counts the RPC surfaces as protection accounting.
+    async fn gather_gc_roots(
+        &self,
+        backend: &dyn crate::storage::PersistentBackend,
+    ) -> Result<(crate::gc::GcRoots, u64, u64, u64), Status> {
+        let mut roots = crate::gc::GcRoots::from_branches(backend)
+            .map_err(|e| Status::internal(format!("list_branches/tags failed: {e}")))?;
+        let branch_pins = roots.branch_heads.len() as u64;
+        let tag_pins = roots.tag_targets.len() as u64;
+
+        // Task pins: non-terminal task records hold their `layer_head`
+        // alive. Mirrors the DeleteBranch handler's pin-gather logic.
+        let task_pins: Vec<crate::layer::LayerId> = if let Some(store) = self.task_store.as_ref() {
+            let session_id = self.session.read().await.session_id;
+            match store.list_tasks(&session_id) {
+                Ok(records) => records
+                    .into_iter()
+                    .filter(|r| !r.status.is_terminal())
+                    .map(|r| r.layer_head)
+                    .collect(),
+                Err(e) => return Err(Status::internal(format!("list_tasks failed: {e}"))),
+            }
+        } else {
+            Vec::new()
+        };
+        let task_pins_count = task_pins.len() as u64;
+        roots.task_pins = task_pins;
+        Ok((roots, branch_pins, tag_pins, task_pins_count))
+    }
 }
 
 /// Parse a hex-encoded LayerId from the wire, returning a typed

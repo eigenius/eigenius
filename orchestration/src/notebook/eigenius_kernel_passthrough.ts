@@ -228,6 +228,18 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.deleteTag,
         req,
       ),
+    // GC panel (D34 §G.4 / §9.4 / Phase 9). Two-screen flow:
+    // estimate (read-only mark walk) → confirm + run (real sweep).
+    // Destructive — the panel surfaces a confirmation dialog before
+    // calling runGc.
+    estimateGc: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_ESTIMATE_GC,
+        kernel.raw.estimateGc,
+        req,
+      ),
+    runGc: (req) =>
+      proxy(operation.KERNEL_PASSTHROUGH_RUN_GC, kernel.raw.runGc, req),
     // Methods deferred until the relevant notebook phase needs them:
     //
     //   reflect         — not in notebook critical path

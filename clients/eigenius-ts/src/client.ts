@@ -43,6 +43,8 @@ import {
   EigeniusKernel,
   EstimateConsolidationRequestSchema,
   type EstimateConsolidationResponse,
+  EstimateGcRequestSchema,
+  type EstimateGcResponse,
   GetBranchRequestSchema,
   type GetBranchResponse,
   GetTaskStatusRequestSchema,
@@ -73,6 +75,8 @@ import {
   type QueryResponse,
   ReflectRequestSchema,
   type ReflectResponse,
+  RunGcRequestSchema,
+  type RunGcResponse,
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
@@ -93,6 +97,7 @@ export type {
   DeleteBranchResponse,
   DeleteTagResponse,
   EstimateConsolidationResponse,
+  EstimateGcResponse,
   GetBranchResponse,
   GetTaskStatusResponse,
   HealthResponse,
@@ -107,6 +112,7 @@ export type {
   PreviewMergeResponse,
   QueryResponse,
   ReflectResponse,
+  RunGcResponse,
   RunProgramResponse,
   TagInfo,
   TaskInfo,
@@ -811,6 +817,32 @@ export class Eigen {
     return await this.kernel.deleteTag(
       create(DeleteTagRequestSchema, { name }),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Garbage collection (D34 §G.4 / §9.4)
+  // ------------------------------------------------------------------
+
+  /**
+   * Read-only dry-run of `runGc`. Same root snapshot + mark walk +
+   * age classification, but performs no delete. The notebook's GC
+   * panel uses this for its preview step so the operator sees what
+   * a `RunGc` would actually sweep before committing.
+   */
+  async estimateGc(): Promise<EstimateGcResponse> {
+    return await this.kernel.estimateGc(
+      create(EstimateGcRequestSchema, {}),
+    );
+  }
+
+  /**
+   * Run a single mark-and-sweep pass. Deletes every layer that is
+   * unreachable from the current root set and older than the kernel's
+   * `min_age` protection window. Destructive — surface a confirmation
+   * dialog in the UX before calling.
+   */
+  async runGc(): Promise<RunGcResponse> {
+    return await this.kernel.runGc(create(RunGcRequestSchema, {}));
   }
 
   // ------------------------------------------------------------------

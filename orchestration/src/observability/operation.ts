@@ -106,3 +106,7 @@ export const KERNEL_PASSTHROUGH_LIST_TAGS =
   "orchestrator.kernel.list_tags";
 export const KERNEL_PASSTHROUGH_DELETE_TAG =
   "orchestrator.kernel.delete_tag";
+export const KERNEL_PASSTHROUGH_ESTIMATE_GC =
+  "orchestrator.kernel.estimate_gc";
+export const KERNEL_PASSTHROUGH_RUN_GC =
+  "orchestrator.kernel.run_gc";
