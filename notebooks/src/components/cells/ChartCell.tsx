@@ -95,8 +95,12 @@ export function ChartCellEditor({ cellId, cell }: ChartCellEditorProps) {
 
   const supportsSeries = cell.chart_kind === "grouped-bar" ||
     cell.chart_kind === "line" || cell.chart_kind === "area";
-  const xLabel = cell.chart_kind === "donut" ? "Slice label column" : "X column";
-  const yLabel = cell.chart_kind === "donut" ? "Slice value column" : "Y column";
+  const xLabel = cell.chart_kind === "donut"
+    ? "Slice label column"
+    : "X column";
+  const yLabel = cell.chart_kind === "donut"
+    ? "Slice value column"
+    : "Y column";
 
   return (
     <div className={styles.root}>

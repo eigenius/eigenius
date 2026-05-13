@@ -33,7 +33,7 @@ import {
   LineChart,
   VerticalBarChart,
 } from "@fluentui/react-charts";
-import type { Eigen } from "@eigenius/client";
+import type { BranchInfo, Eigen } from "@eigenius/client";
 import type {
   CellJson,
   CellType,
@@ -43,7 +43,32 @@ import type {
   NotebookMetaJson,
 } from "../persistence/notebook-format";
 import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
+import { type CommitMeta, commitMetaFrom } from "./commitMeta";
 import { decodeResultDocument } from "./resultDocument";
+
+export type { CommitMeta };
+
+/**
+ * Rail destination keys (D34 §3.1). Kept as a string union so any
+ * panel can navigate by name without importing component refs, and
+ * so debugger / future URL routing output is self-describing.
+ *
+ * Add a destination here, register its rail item in `WorkspaceShell`'s
+ * `RAIL_ITEMS`, and add a `case` in `DestinationView` — that's the
+ * whole shape.
+ */
+export type WorkspaceDestination =
+  | "notebook"
+  | "branches"
+  | "history"
+  | "tags"
+  | "merge"
+  | "topology"
+  | "institutions"
+  | "tasks"
+  | "compaction"
+  | "gc"
+  | "health";
 
 /**
  * Curated chart namespace exposed to TS-cell sandboxes (Phase 5a).
@@ -103,6 +128,13 @@ export type CellOutput =
     resourceCount: number;
     /** Validation errors are non-fatal warnings here — load succeeded. */
     warnings: readonly string[];
+    /**
+     * D34 §6 commit / merge / cache outcome. Absent when the kernel
+     * didn't attempt a commit (e.g., validate-only Load with
+     * `auto_commit: false`); also absent on the no-backend
+     * in-memory path until the kernel disambiguates that case.
+     */
+    commit?: CommitMeta;
   }
   | {
     kind: "validate";
@@ -114,6 +146,12 @@ export type CellOutput =
     kind: "resultset";
     /** Eigon-CBOR document containing the ResultSet + row resources. */
     document: Uint8Array;
+    /**
+     * D34 §6 commit / merge / cache outcome — only present when the
+     * query had a `FIBER ... INTO` clause that committed. Plain reads
+     * leave this undefined.
+     */
+    commit?: CommitMeta;
   }
   | {
     kind: "resource";
@@ -121,6 +159,8 @@ export type CellOutput =
     resource: Uint8Array;
     /** Optional trace IRI when the kernel has a trace store configured. */
     traceIri?: string;
+    /** D34 §6 commit / merge / cache outcome for the trace-layer commit. */
+    commit?: CommitMeta;
   }
   | {
     /**
@@ -154,6 +194,12 @@ export interface ProgramRunResult {
   output?: Uint8Array;
   traceIri?: string;
   errorMessage?: string;
+  /**
+   * D34 §6 commit / merge / cache outcome for this run's trace-layer
+   * commit. Absent on failure (success=false) and when the kernel has
+   * no persistent backend (no commit happened).
+   */
+  commit?: CommitMeta;
 }
 
 export interface NotebookState {
@@ -187,6 +233,56 @@ export interface NotebookState {
    */
   lastRunCellId: string | null;
 
+  // ---- Branch state (D34 Phase 2) ----
+  /**
+   * Name of the kernel branch the editor's actions route to. Mirrors
+   * the SDK's `Eigen.getDefaultBranch()` so subscribed components
+   * re-render when the user switches branches. Defaults to `"main"`.
+   */
+  activeBranch: string;
+  /**
+   * Active read-pin (D34 §5.2's "Time-travel here"). When set, the
+   * editor's reads (Query, RunProgramByIri) pass `atLayer` so the
+   * kernel resolves them against this layer instead of the branch
+   * tip. Writes (Load, Reflect, the trace-layer commit of RunProgram)
+   * still go to the branch — the pin is read-only and per-session,
+   * not a kernel concept. `null` = not pinned, reads follow the
+   * branch's current head.
+   */
+  readPinLayerId: string | null;
+  /**
+   * Active workspace rail destination (D34 §3.1). String key so any
+   * panel can navigate ("View history" from BranchesPanel, "Merge
+   * into…" from a future Phase, etc.) without prop-drilling
+   * callbacks. The WorkspaceShell renders the matching destination
+   * component.
+   */
+  destination: WorkspaceDestination;
+  /**
+   * Hint that pre-fills the Merge panel's source dropdown. Set by
+   * the BranchesPanel's "Merge into…" action before it navigates;
+   * read + cleared by the Merge panel on mount. `null` = no hint;
+   * Merge defaults to the active branch as the source.
+   */
+  pendingMergeSource: string | null;
+  /**
+   * Cached `listBranches` result for the branch picker menu. Refreshed
+   * lazily on picker open and explicitly after `createBranch`.
+   * `null` means "never fetched" (distinct from "fetched, zero
+   * branches found"). In-memory-mode kernels reject `listBranches`,
+   * so we keep `null` there and the picker degrades to a single
+   * static `main` row.
+   */
+  branches: readonly BranchInfo[] | null;
+  /**
+   * True iff the in-memory document (cells + meta) has unsaved
+   * changes relative to the last `loadNotebook` / `markSaved` call.
+   * Drives the `●` indicator in the header. Cell outputs and view
+   * preferences (collapsed) don't count — they're not part of the
+   * document.
+   */
+  dirty: boolean;
+
   // ---- Run actions ----
   runCell: (eigen: Eigen, cell: CellJson) => Promise<void>;
   runAll: (eigen: Eigen) => Promise<void>;
@@ -200,9 +296,61 @@ export interface NotebookState {
   /** Set every cell's collapsed flag to the given value. */
   setAllCellsCollapsed: (collapsed: boolean) => void;
 
+  // ---- Branch actions (D34 Phase 2) ----
+  /**
+   * Refresh the `branches` cache by calling `eigen.listBranches()`.
+   * No-op if the kernel rejects the call (in-memory mode); leaves the
+   * cache at its previous value. Returns the list returned (or the
+   * existing cache if the call failed) for callers that need to act
+   * on it immediately.
+   */
+  refreshBranches: (eigen: Eigen) => Promise<readonly BranchInfo[] | null>;
+  /**
+   * Make `name` the active branch. Updates the SDK's default branch,
+   * mirrors it on the store, and clears the session-local run state
+   * (cellStates / cellOutputs / activeLayer / lastRunCellId) — those
+   * referenced the *old* branch's chain, so they'd dangle or
+   * mislead. Cells stay; the user re-establishes state on the new
+   * branch via Run All.
+   */
+  switchBranch: (eigen: Eigen, name: string) => void;
+  /**
+   * Create a new branch through the SDK and refresh the cache.
+   * Optionally switches the workspace to it on success. Returns
+   * the SDK response so callers can surface the kernel's
+   * `error` field on rejection.
+   */
+  createBranch: (
+    eigen: Eigen,
+    name: string,
+    fromLayer: string,
+    switchAfter: boolean,
+  ) => Promise<{ success: boolean; error: string }>;
+  /**
+   * Pin the editor's reads to a specific layer (or clear with
+   * `null` to return to branch-tip reads). Clears `cellStates` /
+   * `cellOutputs` for the same reason `switchBranch` does — the
+   * outputs were against a different read context.
+   */
+  setReadPin: (layerId: string | null) => void;
+  /** Switch the workspace rail to a different destination. */
+  setDestination: (d: WorkspaceDestination) => void;
+  /**
+   * Set / clear the pre-fill source for the Merge panel. Called by
+   * the BranchesPanel before navigating to Merge; cleared by the
+   * Merge panel after reading it.
+   */
+  setPendingMergeSource: (name: string | null) => void;
+
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
   exportNotebook: () => NotebookJson;
+  /**
+   * Mark the in-memory document as matching the last-saved version.
+   * Called from the toolbar's Save flow after the file has been
+   * written to disk. Clears `dirty`.
+   */
+  markSaved: () => void;
   updateMeta: (partial: Partial<NotebookMetaJson>) => void;
   updateCellSource: (cellId: string, source: string) => void;
   insertCell: (afterCellId: string | null, type: CellType) => string;
@@ -259,6 +407,13 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   activeLayer: null,
   lastRunCellId: null,
 
+  activeBranch: "main",
+  readPinLayerId: null,
+  destination: "notebook",
+  pendingMergeSource: null,
+  branches: null,
+  dirty: false,
+
   // ---- Run actions ----
 
   async runCell(eigen, cell) {
@@ -277,7 +432,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     try {
       // Snapshot the predecessor outputs at run time so TS cells can
       // refer to them via `previousOutputs[cellId]` (D22 §6.8).
-      const { cells, cellOutputs } = get();
+      const { cells, cellOutputs, readPinLayerId } = get();
       const cellIndex = cells.findIndex((c) => c.id === cell.id);
       const previousOutputs: Record<string, CellOutput> = {};
       if (cellIndex > 0) {
@@ -287,13 +442,30 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         }
       }
 
-      const output = await executeCell(eigen, cell, previousOutputs);
+      const output = await executeCell(
+        eigen,
+        cell,
+        previousOutputs,
+        readPinLayerId,
+      );
       setOutput(output);
       // Loads update the active layer for display purposes only — the
       // notebook does NOT pin downstream queries to this layer ID
       // (in-memory backend can't resolve explicit layer IDs).
       if (output.kind === "load" && output.layerId) {
         set({ activeLayer: output.layerId });
+      }
+      // If the run produced a commit (load / runProgram / FIBER query)
+      // the branch tip may have moved. Refresh the `branches` cache so
+      // the workspace header's tip indicator and rail panels that key
+      // off the branch head (LayerStackPanel, History) pick it up.
+      // Cheap on a persistent backend; a no-op on in-memory.
+      if (
+        output.kind !== "error" &&
+        "commit" in output &&
+        output.commit !== undefined
+      ) {
+        void get().refreshBranches(eigen);
       }
       setState(output.kind === "error" ? "error" : "done");
     } catch (err) {
@@ -339,6 +511,71 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     });
   },
 
+  async refreshBranches(eigen) {
+    try {
+      const list = await eigen.listBranches();
+      set({ branches: list });
+      return list;
+    } catch (_err) {
+      // In-memory kernels reject `listBranches` with `failed_precondition`.
+      // That's not an error from the user's perspective — there just
+      // isn't a multi-branch surface to enumerate. Leave the cache
+      // alone and return what we already had.
+      return get().branches;
+    }
+  },
+
+  switchBranch(eigen, name) {
+    // The SDK routes future calls through `useBranch`; the store
+    // mirrors the name so subscribed components re-render. The
+    // session-local run-state cache is dropped — its `layer_id` /
+    // `trace_iri` values reference the *old* branch's chain, so
+    // they'd dangle on `inspect` and mislead the user.
+    eigen.useBranch(name);
+    set({
+      activeBranch: name,
+      cellStates: new Map(),
+      cellOutputs: new Map(),
+      activeLayer: null,
+      lastRunCellId: null,
+    });
+  },
+
+  async createBranch(eigen, name, fromLayer, switchAfter) {
+    const resp = await eigen.createBranch(name, { fromLayer });
+    if (!resp.success) {
+      return { success: false, error: resp.error };
+    }
+    // Refresh the cache so the new branch appears in the menu
+    // even if the user doesn't switch to it.
+    await get().refreshBranches(eigen);
+    if (switchAfter) {
+      get().switchBranch(eigen, name);
+    }
+    return { success: true, error: "" };
+  },
+
+  setReadPin(layerId) {
+    set({
+      readPinLayerId: layerId,
+      // Outputs were against the prior read context; clear them so
+      // the user re-runs against the new pin (or, when clearing the
+      // pin, against the branch tip).
+      cellStates: new Map(),
+      cellOutputs: new Map(),
+      activeLayer: null,
+      lastRunCellId: null,
+    });
+  },
+
+  setDestination(d) {
+    set({ destination: d });
+  },
+
+  setPendingMergeSource(name) {
+    set({ pendingMergeSource: name });
+  },
+
   toggleCellCollapsed(cellId) {
     set((prev) => {
       const next = copyMap(prev.cellCollapsed);
@@ -368,6 +605,8 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       cellCollapsed: new Map(),
       activeLayer: null,
       lastRunCellId: null,
+      // Fresh load = nothing to save yet.
+      dirty: false,
     });
   },
 
@@ -380,8 +619,12 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     };
   },
 
+  markSaved() {
+    set({ dirty: false });
+  },
+
   updateMeta(partial) {
-    set((prev) => ({ meta: { ...prev.meta, ...partial } }));
+    set((prev) => ({ meta: { ...prev.meta, ...partial }, dirty: true }));
   },
 
   updateCellSource(cellId, source) {
@@ -393,6 +636,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         }
         return { ...c, source };
       }),
+      dirty: true,
     }));
   },
 
@@ -415,16 +659,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     }
     set((prev) => {
       if (afterCellId === null) {
-        return { cells: [newCell, ...prev.cells] };
+        return { cells: [newCell, ...prev.cells], dirty: true };
       }
       const idx = prev.cells.findIndex((c) => c.id === afterCellId);
       if (idx < 0) {
         // Unknown anchor — append at the end rather than silently failing.
-        return { cells: [...prev.cells, newCell] };
+        return { cells: [...prev.cells, newCell], dirty: true };
       }
       const next = prev.cells.slice();
       next.splice(idx + 1, 0, newCell);
-      return { cells: next };
+      return { cells: next, dirty: true };
     });
     return id;
   },
@@ -435,6 +679,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         if (c.id !== cellId || c.type !== "program-run") return c;
         return { ...c, ...partial };
       }),
+      dirty: true,
     }));
   },
 
@@ -444,6 +689,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         if (c.id !== cellId || c.type !== "chart") return c;
         return { ...c, ...partial };
       }),
+      dirty: true,
     }));
   },
 
@@ -456,6 +702,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       // The stale-cascade marker no longer makes sense if the cell it
       // pointed at is gone.
       lastRunCellId: prev.lastRunCellId === cellId ? null : prev.lastRunCellId,
+      dirty: true,
     }));
   },
 
@@ -469,7 +716,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       [next[idx], next[target]] = [next[target], next[idx]];
       // Cell positions changed; the stale marker references a position
       // that may no longer reflect the user's mental model. Clear it.
-      return { cells: next, lastRunCellId: null };
+      return { cells: next, lastRunCellId: null, dirty: true };
     });
   },
 }));
@@ -497,7 +744,9 @@ function serializeCell(c: CellJson): CellJson {
       chart_kind: c.chart_kind,
       x_column: c.x_column,
       y_column: c.y_column,
-      ...(c.series_column !== undefined ? { series_column: c.series_column } : {}),
+      ...(c.series_column !== undefined
+        ? { series_column: c.series_column }
+        : {}),
       ...(c.title !== undefined ? { title: c.title } : {}),
     };
   }
@@ -544,9 +793,13 @@ async function executeCell(
   eigen: Eigen,
   cell: CellJson,
   previousOutputs: Record<string, CellOutput>,
+  readPinLayerId: string | null,
 ): Promise<CellOutput> {
   switch (cell.type) {
     case "esl": {
+      // Loads are writes — they always commit to the branch tip, not
+      // the read-pin. (D34 §5.2: "Writes still go to branch tip — the
+      // read-pin is per-session, not a kernel concept.")
       const resp = await eigen.load(cell.source, {
         contentType: "application/x-esl",
         autoCommit: true,
@@ -565,24 +818,44 @@ async function executeCell(
         layerId: resp.layerId,
         resourceCount: resp.resourceCount,
         warnings: [],
+        // `merge === undefined` is the kernel's "no commit attempted"
+        // signal (validate-only Load, no-backend mode). Skip the
+        // CommitMeta so the cell footer doesn't render a stale badge.
+        commit: resp.merge !== undefined ? commitMetaFrom(resp) : undefined,
       };
     }
     case "eigenql": {
-      const resp = await eigen.query(cell.source);
+      // Read-pinned: query resolves against the pinned layer instead
+      // of the branch tip. A FIBER INTO inside the query still
+      // commits to the branch (the kernel's commit-vs-read split).
+      const resp = await eigen.query(cell.source, {
+        atLayer: readPinLayerId ?? undefined,
+      });
       if (!resp.success) {
         return {
           kind: "error",
           message: resp.error || "query failed (no error message)",
         };
       }
-      return { kind: "resultset", document: resp.document };
+      // The query may have included a FIBER INTO clause that committed.
+      // If `merge` is present and not UNSPECIFIED, surface the commit
+      // info; otherwise leave it undefined (this was a pure read).
+      const commit = resp.merge !== undefined
+        ? commitMetaFrom(resp)
+        : undefined;
+      return { kind: "resultset", document: resp.document, commit };
     }
     case "typescript":
       return executeTypeScriptCell(eigen, cell.source, previousOutputs);
     case "program-run":
-      return executeProgramRunCell(eigen, cell.program_iri, cell.input_iris);
+      return executeProgramRunCell(
+        eigen,
+        cell.program_iri,
+        cell.input_iris,
+        readPinLayerId,
+      );
     case "chart":
-      return executeChartCell(eigen, cell);
+      return executeChartCell(eigen, cell, readPinLayerId);
     case "markdown":
       // Should never reach here — runAll skips markdown, and the
       // per-cell Run button is hidden on markdown cells.
@@ -600,12 +873,15 @@ async function executeProgramRunCell(
   eigen: Eigen,
   programIri: string,
   inputIris: readonly string[],
+  readPinLayerId: string | null,
 ): Promise<CellOutput> {
   const trimmedProgram = programIri.trim();
   if (trimmedProgram.length === 0) {
     return { kind: "error", message: "program IRI is empty" };
   }
-  const validInputs = inputIris.map((s) => s.trim()).filter((s) => s.length > 0);
+  const validInputs = inputIris.map((s) => s.trim()).filter((s) =>
+    s.length > 0
+  );
   if (validInputs.length === 0) {
     return { kind: "error", message: "no input IRIs provided" };
   }
@@ -613,7 +889,11 @@ async function executeProgramRunCell(
   const results: ProgramRunResult[] = [];
   for (const inputIri of validInputs) {
     try {
-      const resp = await eigen.runProgramByIri(trimmedProgram, inputIri);
+      // Read-pin pins the kernel's resolution of `programIri` and
+      // `inputIri`; the trace layer still commits to the branch tip.
+      const resp = await eigen.runProgramByIri(trimmedProgram, inputIri, {
+        atLayer: readPinLayerId ?? undefined,
+      });
       if (!resp.success) {
         results.push({
           inputIri,
@@ -627,6 +907,7 @@ async function executeProgramRunCell(
           success: true,
           output: resp.output,
           traceIri: resp.traceIri || undefined,
+          commit: commitMetaFrom(resp),
         });
       }
     } catch (err) {
@@ -649,6 +930,7 @@ async function executeProgramRunCell(
 async function executeChartCell(
   eigen: Eigen,
   cell: ChartCellJson,
+  readPinLayerId: string | null,
 ): Promise<CellOutput> {
   const trimmedQuery = cell.query.trim();
   if (trimmedQuery.length === 0) {
@@ -660,7 +942,9 @@ async function executeChartCell(
       message: "chart x_column and y_column are required",
     };
   }
-  const resp = await eigen.query(trimmedQuery);
+  const resp = await eigen.query(trimmedQuery, {
+    atLayer: readPinLayerId ?? undefined,
+  });
   if (!resp.success) {
     return {
       kind: "error",
@@ -675,17 +959,19 @@ async function executeChartCell(
   if (!(cell.x_column in firstRow)) {
     return {
       kind: "error",
-      message: `x_column "${cell.x_column}" not found in query results (available: ${
-        Object.keys(firstRow).join(", ")
-      })`,
+      message:
+        `x_column "${cell.x_column}" not found in query results (available: ${
+          Object.keys(firstRow).join(", ")
+        })`,
     };
   }
   if (!(cell.y_column in firstRow)) {
     return {
       kind: "error",
-      message: `y_column "${cell.y_column}" not found in query results (available: ${
-        Object.keys(firstRow).join(", ")
-      })`,
+      message:
+        `y_column "${cell.y_column}" not found in query results (available: ${
+          Object.keys(firstRow).join(", ")
+        })`,
     };
   }
   if (
@@ -759,11 +1045,18 @@ function renderChart(
 ): React.ReactElement {
   const title = shape.title;
   const palette = [
-    "#5b88c5", "#37a172", "#cf6f1e", "#a45fa1",
-    "#c93434", "#3aa3a8", "#b3a02f", "#7e57c2",
+    "#5b88c5",
+    "#37a172",
+    "#cf6f1e",
+    "#a45fa1",
+    "#c93434",
+    "#3aa3a8",
+    "#b3a02f",
+    "#7e57c2",
   ];
   const colorOf = (seriesKey: string, idx: number): string =>
-    palette[Math.abs(hashString(seriesKey)) % palette.length] ?? palette[idx % palette.length];
+    palette[Math.abs(hashString(seriesKey)) % palette.length] ??
+      palette[idx % palette.length];
 
   switch (kind) {
     case "donut": {
@@ -789,7 +1082,10 @@ function renderChart(
     }
     case "grouped-bar": {
       // Group by x; series_column (if present) splits each group.
-      const grouped = new Map<string, { key: string; legend: string; data: number; color: string }[]>();
+      const grouped = new Map<
+        string,
+        { key: string; legend: string; data: number; color: string }[]
+      >();
       for (const r of rows) {
         const groupName = String(r[shape.x] ?? "");
         const seriesKey = shape.series && shape.series.length > 0
@@ -849,7 +1145,10 @@ function renderChart(
           color: colorOf(String(r[shape.x] ?? i), i),
         }],
       }));
-      return withTitle(title, React.createElement(HorizontalBarChart, { data }));
+      return withTitle(
+        title,
+        React.createElement(HorizontalBarChart, { data }),
+      );
     }
     case "line":
     case "area": {
@@ -967,7 +1266,8 @@ async function executeTypeScriptCell(
   const log: string[] = [];
   const capturedConsole = {
     log: (...args: unknown[]) => log.push(args.map(formatConsoleArg).join(" ")),
-    info: (...args: unknown[]) => log.push(args.map(formatConsoleArg).join(" ")),
+    info: (...args: unknown[]) =>
+      log.push(args.map(formatConsoleArg).join(" ")),
     warn: (...args: unknown[]) =>
       log.push(`[warn] ${args.map(formatConsoleArg).join(" ")}`),
     error: (...args: unknown[]) =>

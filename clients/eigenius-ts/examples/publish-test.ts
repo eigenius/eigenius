@@ -55,7 +55,9 @@ const q1 = await eigen.query(`
     iri:   ?n
   }
 `);
-console.log(`[query Notebook] success=${q1.success} bytes=${q1.document.length}`);
+console.log(
+  `[query Notebook] success=${q1.success} bytes=${q1.document.length}`,
+);
 if (!q1.success) console.error("error:", q1.error);
 
 // 4. Verify by querying for Cell resources

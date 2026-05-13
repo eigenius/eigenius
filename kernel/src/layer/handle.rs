@@ -33,7 +33,7 @@
 //! Phase 14a-i ships these types as pure additions; they are not yet wired
 //! into `Layer` or the persistent backend (those are 14a-ii and 14a-iii).
 
-use crate::layer::LayerId;
+use crate::layer::{ContentHash, LayerId};
 use std::collections::BTreeMap;
 
 /// Metadata-only handle for a layer.
@@ -45,10 +45,31 @@ use std::collections::BTreeMap;
 /// `parents` is a `Vec` to support multi-parent merge layers introduced in
 /// Phase 15. In Phase 14 it is always 0 or 1 entries: `[]` for the root layer,
 /// `[parent_id]` for every other layer.
+///
+/// **Two-hash identity (D25 §11.0 / D33 §5.1).** Handles carry both the
+/// position-addressed `id` and the content-only `content_hash`. Content
+/// hash duplicates across positions are expected (anchored-commit cache,
+/// content-hash dedup); position hashes are globally unique.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayerHandle {
-    /// Content-addressed identifier for this layer.
+    /// Position-addressed identifier for this layer. Folds content
+    /// hash + sorted parent ids; uniquely identifies the layer's slot
+    /// in the DAG.
     pub id: LayerId,
+
+    /// Content-only hash of the layer's resources (independent of
+    /// position). Two layers with identical resources at different DAG
+    /// positions share this hash. See [`ContentHash`] for the
+    /// position-vs-content distinction.
+    pub content_hash: ContentHash,
+
+    /// Supporting layer per D33 §4.3 — the youngest ancestor this
+    /// layer explicitly depends on. `None` for the root layer, for
+    /// layers with no external references, and (transiently) for
+    /// pre-PR-0 layers whose supporting layer hasn't been
+    /// back-filled. Carried on the topology entry so resume reads
+    /// don't need to recompute on every load.
+    pub supporting_layer: Option<LayerId>,
 
     /// Parent layer ids. Empty for the root layer; one entry for every other
     /// Phase-14 layer; multiple entries for Phase-15 merge layers.
@@ -66,6 +87,38 @@ pub struct LayerHandle {
     /// Milliseconds since Unix epoch — when the layer was committed. Matches
     /// the convention used by D21's `TaskRecord`.
     pub created_at: i64,
+
+    /// Encoded resource bytes for this layer — the sum of
+    /// `eigon_cbor::serialize_resource(...).len()` over every resource
+    /// defined directly in the layer. Stamped by `store_layer` at write
+    /// time and persisted alongside the rest of the handle.
+    ///
+    /// Used by GC's `EstimateGc` to surface a "reclaimable bytes" view
+    /// for the operator (D34 §G.4 / §9.4). **Approximate by design**:
+    /// excludes the per-layer bloom, topology entry, chain pointer,
+    /// content-hash index, and triple-index entries — those are
+    /// bounded per-layer overhead, dwarfed by resource bytes in any
+    /// realistic workload. A future enrichment that wants exact storage
+    /// footprint would aggregate the full WriteBatch byte count at
+    /// store time.
+    ///
+    /// `#[serde(default)]` on the field tolerates handles persisted by
+    /// older kernels that didn't carry this number — they read back as
+    /// `0` and the estimate under-counts for legacy layers until they
+    /// churn through GC + recommit. No migration needed.
+    #[serde(default)]
+    pub byte_size: u64,
+
+    /// True for *synthetic tombstones* manufactured by `load_topology`
+    /// from a [`RedirectEntry`](crate::layer::RedirectEntry). The flag
+    /// lets diagnostic surfaces (`db log`, `inspect`, the notebook
+    /// topology renderer) display "consolidated into <target>" rather
+    /// than rendering an ordinary-looking handle whose on-disk content
+    /// has been reclaimed.
+    ///
+    /// **Always `false`** on handles written to disk by `store_layer`
+    /// — the flag is an in-memory signal only.
+    pub is_redirect_source: bool,
 }
 
 impl LayerHandle {
@@ -161,10 +214,14 @@ mod tests {
     fn handle(byte: u8, parents: Vec<LayerId>) -> LayerHandle {
         LayerHandle {
             id: lid(byte),
+            content_hash: ContentHash([byte; 32]),
+            supporting_layer: None,
             parents,
             name: format!("layer-{byte}"),
             resource_count: 0,
             created_at: 0,
+            byte_size: 0,
+            is_redirect_source: false,
         }
     }
 

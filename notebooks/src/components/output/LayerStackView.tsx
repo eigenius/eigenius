@@ -190,8 +190,7 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
   const summaryHasResourcesForOpenLayer = useMemo(() => {
     if (!openLayer) return true;
     return topology.nodes.some(
-      (n) =>
-        n.kind === NodeKind.RESOURCE && n.attrs?.layer_id === openLayer.id,
+      (n) => n.kind === NodeKind.RESOURCE && n.attrs?.layer_id === openLayer.id,
     );
   }, [openLayer, topology]);
   const openLayerNeedsRichFetch = useMemo(() => {
@@ -200,7 +199,9 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
     return (counts.resources ?? 0) > 0 && !summaryHasResourcesForOpenLayer;
   }, [openLayer, summaryHasResourcesForOpenLayer]);
 
-  const [richTopology, setRichTopology] = useState<LayerTopologyResponse | null>(
+  const [richTopology, setRichTopology] = useState<
+    LayerTopologyResponse | null
+  >(
     null,
   );
   const [richError, setRichError] = useState<string | null>(null);
@@ -294,10 +295,12 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
             />
           </DialogTrigger>
           <DialogBody className={styles.fullScreenBody}>
-            {/* action={null} suppresses Fluent's default close-button
+            {
+              /* action={null} suppresses Fluent's default close-button
                 in the title's action slot — we use the absolutely-
                 positioned X above so it stays anchored when the
-                title grows to two lines. */}
+                title grows to two lines. */
+            }
             <DialogTitle action={null}>
               <div className={styles.dialogTitle}>
                 <span>
@@ -334,8 +337,7 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
                   : (
                     <Caption1 className={styles.empty}>
                       This layer added no class / property / institution /
-                      resource nodes — only its layer marker. Nothing to
-                      graph.
+                      resource nodes — only its layer marker. Nothing to graph.
                     </Caption1>
                   )}
               </div>
@@ -364,9 +366,8 @@ function LayerBox(
   return (
     <>
       <div
-        className={`${styles.layerCard} ${
-          isRoot ? styles.rootLayerCard : ""
-        }`.trim()}
+        className={`${styles.layerCard} ${isRoot ? styles.rootLayerCard : ""}`
+          .trim()}
       >
         <div className={styles.layerHeaderRow}>
           <div className={styles.label}>
@@ -417,9 +418,7 @@ function CountBadge(
 ) {
   return (
     <span className={styles.count}>
-      <span className={styles.countNumber}>{value ?? 0}</span>
-      {" "}
-      {label}
+      <span className={styles.countNumber}>{value ?? 0}</span> {label}
     </span>
   );
 }

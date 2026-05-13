@@ -27,13 +27,30 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { create } from "@bufbuild/protobuf";
 import {
   type BranchInfo,
+  CancelTaskRequestSchema,
+  type CancelTaskResponse,
+  type ComorphismDecl,
+  ConsolidateChainRequestSchema,
+  type ConsolidateChainResponse,
+  ConsolidateErrorKind,
   CreateBranchRequestSchema,
   type CreateBranchResponse,
+  CreateTagRequestSchema,
+  type CreateTagResponse,
   DeleteBranchRequestSchema,
   type DeleteBranchResponse,
+  DeleteTagRequestSchema,
+  type DeleteTagResponse,
+  DispatchRole,
   EigeniusKernel,
+  EstimateConsolidationRequestSchema,
+  type EstimateConsolidationResponse,
+  EstimateGcRequestSchema,
+  type EstimateGcResponse,
   GetBranchRequestSchema,
   type GetBranchResponse,
+  GetTaskStatusRequestSchema,
+  type GetTaskStatusResponse,
   HealthRequestSchema,
   type HealthResponse,
   InspectRequestSchema,
@@ -43,16 +60,32 @@ import {
   type LayerTopologyResponse,
   ListBranchesRequestSchema,
   ListInstitutionsRequestSchema,
+  ListTagsRequestSchema,
+  type ListTagsResponse,
+  ListTasksRequestSchema,
+  type ListTasksResponse,
   LoadRequestSchema,
   type LoadResponse,
+  MergeBranchesRequestSchema,
+  type MergeBranchesResponse,
+  type MergeInfo,
+  MergeOutcome,
   NotebookService,
+  PreviewMergeRequestSchema,
+  type PreviewMergeResponse,
+  type QueryClassDecl,
   QueryRequestSchema,
   type QueryResponse,
   ReflectRequestSchema,
   type ReflectResponse,
+  RunGcRequestSchema,
+  type RunGcResponse,
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
+  RuntimeKind,
+  type TagInfo,
+  type TaskInfo,
   ValidateProgramRequestSchema,
   type ValidateProgramResponse,
   type ValidationError,
@@ -61,20 +94,41 @@ import {
 // Re-export wire types so consumers don't have to reach into generated/.
 export type {
   BranchInfo,
+  CancelTaskResponse,
+  ComorphismDecl,
+  ConsolidateChainResponse,
   CreateBranchResponse,
+  CreateTagResponse,
   DeleteBranchResponse,
+  DeleteTagResponse,
+  EstimateConsolidationResponse,
+  EstimateGcResponse,
   GetBranchResponse,
+  GetTaskStatusResponse,
   HealthResponse,
   InspectResponse,
   InstitutionInfo,
   LayerTopologyResponse,
+  ListTagsResponse,
+  ListTasksResponse,
   LoadResponse,
+  MergeBranchesResponse,
+  MergeInfo,
+  PreviewMergeResponse,
+  QueryClassDecl,
   QueryResponse,
   ReflectResponse,
+  RunGcResponse,
   RunProgramResponse,
+  TagInfo,
+  TaskInfo,
   ValidateProgramResponse,
   ValidationError,
 };
+
+// Value-level enums (consumers compare against them) re-exported as
+// values, not just types.
+export { ConsolidateErrorKind, DispatchRole, MergeOutcome, RuntimeKind };
 
 const TEXT_ENCODER = new TextEncoder();
 
@@ -241,6 +295,28 @@ export interface DeleteBranchOptions {
    * matches an active task pin. Default false.
    */
   force?: boolean;
+}
+
+export interface ConsolidateOptions {
+  /** Branch to consolidate. Omit (or pass empty) to default to "main". */
+  branch?: string;
+  /** Hex `LayerId` where the inclusive range starts (oldest). */
+  fromLayer: string;
+  /** Hex `LayerId` where the inclusive range ends (newest). */
+  toLayer: string;
+  /**
+   * Cost cap. Refuse if the predicted walk size exceeds this. Pass 0
+   * (the default) to use the kernel's built-in default.
+   */
+  maxWalkEntries?: bigint;
+  /** Reserved for v2 trace-pin policies. v1 ignores this field. */
+  tracePinPolicy?: string;
+  /**
+   * Keep the pre-consolidation history reachable for time-travel reads
+   * (D25 §12.8.1(b)). Default false (reclaim mode — the source range
+   * becomes GC-eligible).
+   */
+  preserveHistory?: boolean;
 }
 
 export class Eigen {
@@ -587,6 +663,192 @@ export class Eigen {
         force: options.force ?? false,
       }),
     );
+  }
+
+  /**
+   * Fold `source` into `target` (D34 §6.3). Wraps the kernel's
+   * `update_branch(target, target_tip, source_tip, AllowTrivial)` —
+   * succeeds as fast-forward when source is ahead of target, as
+   * trivial merge when their contributions touch disjoint IRIs, or
+   * surfaces `NEEDS_WITNESSED_MERGE` with the conflict set and the
+   * orphan layer id when they conflict.
+   */
+  async mergeBranches(
+    source: string,
+    target: string,
+  ): Promise<MergeBranchesResponse> {
+    return await this.kernel.mergeBranches(
+      create(MergeBranchesRequestSchema, { source, target }),
+    );
+  }
+
+  /**
+   * Side-effect-free preview of `mergeBranches`. Same LCA + IRI
+   * disjointness walk; no merge layer built, no branch ref moved.
+   * The notebook's explicit Merge dialog uses this to show
+   * "Estimated outcome" before the user commits.
+   */
+  async previewMerge(
+    source: string,
+    target: string,
+  ): Promise<PreviewMergeResponse> {
+    return await this.kernel.previewMerge(
+      create(PreviewMergeRequestSchema, { source, target }),
+    );
+  }
+
+  /**
+   * Side-effect-free dry-run of `ConsolidateChain` (D25). Same
+   * validation, predicted result layer and walk cost — used by the
+   * Compaction wizard's Step 2 preview before the user commits to the
+   * real run.
+   */
+  async estimateConsolidation(
+    options: ConsolidateOptions,
+  ): Promise<EstimateConsolidationResponse> {
+    return await this.kernel.estimateConsolidation(
+      create(EstimateConsolidationRequestSchema, {
+        branch: options.branch ?? "",
+        fromLayer: options.fromLayer,
+        toLayer: options.toLayer,
+        maxWalkEntries: options.maxWalkEntries ?? 0n,
+        tracePinPolicy: options.tracePinPolicy ?? "",
+        preserveHistory: options.preserveHistory ?? false,
+      }),
+    );
+  }
+
+  /**
+   * Real `ConsolidateChain` (D25 §12). Collapses the inclusive layer
+   * range `[fromLayer, toLayer]` on `branch` into a single
+   * consolidated layer. When the range ends at the branch tip, the
+   * branch ref advances; otherwise a resolve redirect is installed at
+   * `toLayer` and the branch is unchanged.
+   */
+  async consolidateChain(
+    options: ConsolidateOptions,
+  ): Promise<ConsolidateChainResponse> {
+    return await this.kernel.consolidateChain(
+      create(ConsolidateChainRequestSchema, {
+        branch: options.branch ?? "",
+        fromLayer: options.fromLayer,
+        toLayer: options.toLayer,
+        maxWalkEntries: options.maxWalkEntries ?? 0n,
+        tracePinPolicy: options.tracePinPolicy ?? "",
+        preserveHistory: options.preserveHistory ?? false,
+      }),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Tasks (D21)
+  // ------------------------------------------------------------------
+
+  /**
+   * Snapshot of every task the kernel's TaskStore knows about — running,
+   * suspended, completed, failed, cancelled. Returned in unspecified
+   * order; callers sort for display.
+   */
+  async listTasks(): Promise<readonly TaskInfo[]> {
+    const resp = await this.kernel.listTasks(
+      create(ListTasksRequestSchema, {}),
+    );
+    return resp.tasks;
+  }
+
+  /**
+   * Look up one task by id. `response.found = false` means the kernel
+   * has no record for the given id (terminal tasks may be evicted from
+   * the in-memory store).
+   */
+  async getTaskStatus(taskId: string): Promise<GetTaskStatusResponse> {
+    return await this.kernel.getTaskStatus(
+      create(GetTaskStatusRequestSchema, { taskId }),
+    );
+  }
+
+  /**
+   * Request cancellation of a running or suspended task. Idempotent on
+   * already-terminal tasks: the response's `status` reflects the
+   * post-cancel state (`Cancelling` / `Cancelled` if the task was
+   * cancellable, otherwise the existing terminal state).
+   */
+  async cancelTask(taskId: string): Promise<CancelTaskResponse> {
+    return await this.kernel.cancelTask(
+      create(CancelTaskRequestSchema, { taskId }),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Tags (D34 §G.2 / §8)
+  // ------------------------------------------------------------------
+
+  /**
+   * Create a new immutable tag pointing at `layerId`. Names match
+   * `[A-Za-z0-9_-]+`, max 256 chars. Rejects re-using an existing
+   * name with `success: false, alreadyExists: true`; rejects an
+   * unknown `layerId` with `success: false, error` populated.
+   *
+   * There is intentionally no `updateTag` — retargeting an existing
+   * tag would defeat the "tag this state so I can come back to it
+   * later" contract (D34 §8.3). Use `deleteTag` + fresh `createTag`
+   * if a retarget is genuinely intended.
+   */
+  async createTag(
+    name: string,
+    layerId: string,
+  ): Promise<CreateTagResponse> {
+    return await this.kernel.createTag(
+      create(CreateTagRequestSchema, { name, layerId }),
+    );
+  }
+
+  /**
+   * Enumerate every tag with its target and the target layer's
+   * commit timestamp.
+   */
+  async listTags(): Promise<readonly TagInfo[]> {
+    const resp = await this.kernel.listTags(
+      create(ListTagsRequestSchema, {}),
+    );
+    return resp.tags;
+  }
+
+  /**
+   * Remove the tag. Idempotent: deleting a non-existent tag returns
+   * `success: true, deleted: false`. The target layer becomes
+   * GC-eligible if no other root still reaches it.
+   */
+  async deleteTag(name: string): Promise<DeleteTagResponse> {
+    return await this.kernel.deleteTag(
+      create(DeleteTagRequestSchema, { name }),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Garbage collection (D34 §G.4 / §9.4)
+  // ------------------------------------------------------------------
+
+  /**
+   * Read-only dry-run of `runGc`. Same root snapshot + mark walk +
+   * age classification, but performs no delete. The notebook's GC
+   * panel uses this for its preview step so the operator sees what
+   * a `RunGc` would actually sweep before committing.
+   */
+  async estimateGc(): Promise<EstimateGcResponse> {
+    return await this.kernel.estimateGc(
+      create(EstimateGcRequestSchema, {}),
+    );
+  }
+
+  /**
+   * Run a single mark-and-sweep pass. Deletes every layer that is
+   * unreachable from the current root set and older than the kernel's
+   * `min_age` protection window. Destructive — surface a confirmation
+   * dialog in the UX before calling.
+   */
+  async runGc(): Promise<RunGcResponse> {
+    return await this.kernel.runGc(create(RunGcRequestSchema, {}));
   }
 
   // ------------------------------------------------------------------

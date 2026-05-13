@@ -92,7 +92,9 @@ function shortenIri(iri: string): string {
   const local = iri.slice(last + 1);
   const before = iri.slice(0, last);
   const prev = before.lastIndexOf(":");
-  return prev >= 0 ? `${before.slice(prev + 1)}:${local}` : `${before}:${local}`;
+  return prev >= 0
+    ? `${before.slice(prev + 1)}:${local}`
+    : `${before}:${local}`;
 }
 
 function asStr(v: unknown): string | undefined {
@@ -198,7 +200,10 @@ function buildNode(resource: CborResource): TraceNode {
       }
       const inputHash = asStr(resource[PROP.inputHash]);
       if (inputHash) {
-        summary.push({ key: "input_hash", value: inputHash.slice(0, 16) + "…" });
+        summary.push({
+          key: "input_hash",
+          value: inputHash.slice(0, 16) + "…",
+        });
       }
       const argumentHash = asStr(resource[PROP.argumentHash]);
       if (argumentHash) {

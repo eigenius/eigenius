@@ -413,7 +413,13 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     // synthesises the motive from checking-mode context (Phase 11b
     // step 12 path, D19 §10).
     let result_type_prop = Iri::parse("urn:eigenius:program:result_type").unwrap();
-    if let Some(Value::String(rt_iri_str)) = resource.get(&result_type_prop) {
+    // `program:result_type` is `data_type: resource`, so post-
+    // `canonicalise_resource_refs` the value is `ResourceRef`, not
+    // `String`. Read via `as_iri_str` to handle both shapes — the
+    // `String`-only branch silently took the no-result-type path
+    // (`build_match_exp`) for every canonicalised program, which
+    // changed AST shape downstream.
+    if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_iri_str()) {
         let result_type_iri = Iri::parse(rt_iri_str)
             .map_err(|e| format!("invalid `result_type` IRI '{rt_iri_str}': {e}"))?;
         let result_type_val = resolve_class_type(&result_type_iri, layer)?;

@@ -29,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file eigenius.proto.
  */
 export const file_eigenius: GenFile = /*@__PURE__*/
-  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiWwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCBIOCgZicmFuY2gYBCABKAkihwEKDExvYWRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIQCghsYXllcl9pZBgDIAEoCRIWCg5yZXNvdXJjZV9jb3VudBgEIAEoDRIOCgZicmFuY2gYBSABKAkiPwoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJEg4KBmJyYW5jaBgDIAEoCSIyCg9JbnNwZWN0UmVzcG9uc2USDQoFZm91bmQYASABKAgSEAoIcmVzb3VyY2UYAiABKAwiQQoMUXVlcnlSZXF1ZXN0Eg8KB2VpZ2VucWwYASABKAkSEAoIYXRfbGF5ZXIYAiABKAkSDgoGYnJhbmNoGAMgASgJIlcKDVF1ZXJ5UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIQCghkb2N1bWVudBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkSDQoFZXJyb3IYBCABKAkiPwoWVmFsaWRhdGVQcm9ncmFtUmVxdWVzdBIPCgdwcm9ncmFtGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCSJsChdWYWxpZGF0ZVByb2dyYW1SZXNwb25zZRINCgV2YWxpZBgBIAEoCBIsCgZlcnJvcnMYAiADKAsyHC5laWdlbml1cy52MS5WYWxpZGF0aW9uRXJyb3ISFAoMcHJvZ3JhbV90eXBlGAMgASgJIlkKEVJ1blByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSDQoFaW5wdXQYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJEg4KBmJyYW5jaBgEIAEoCSKHAQoSUnVuUHJvZ3JhbVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEiwKBmVycm9ycxgDIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIRCgl0cmFjZV9pcmkYBCABKAkSDwoHdGFza19pZBgFIAEoCSJiChZSdW5Qcm9ncmFtQnlJcmlSZXF1ZXN0EhMKC3Byb2dyYW1faXJpGAEgASgJEhEKCWlucHV0X2lyaRgCIAEoCRIQCghhdF9sYXllchgDIAEoCRIOCgZicmFuY2gYBCABKAkiRQoOUmVmbGVjdFJlcXVlc3QSDQoFdHJhY2UYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEg4KBmJyYW5jaBgDIAEoCSI1Cg9SZWZsZWN0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIRCgl0cmFjZV9pcmkYAiABKAkiDwoNSGVhbHRoUmVxdWVzdCKTAQoOSGVhbHRoUmVzcG9uc2USDwoHaGVhbHRoeRgBIAEoCBIPCgd2ZXJzaW9uGAIgASgJEhMKC2xheWVyX2NvdW50GAMgASgEEhYKDnJlc291cmNlX2NvdW50GAQgASgEEhoKEnJlc3VtZV9pbl9wcm9ncmVzcxgFIAEoCBIWCg50YXNrc19yZXN1bWluZxgGIAEoDSJ6ChxSZWdpc3Rlcldhc21Db21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSEwoLd2FzbV9iaW5hcnkYAiABKAwSEgoKZnVlbF9saW1pdBgDIAEoBBIaChJtZW1vcnlfbGltaXRfcGFnZXMYBCABKAQiPwodUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSJgChBDb21wb25lbnRSZXF1ZXN0EhUKDWNvbXBvbmVudF9pcmkYASABKAkSDQoFaW5wdXQYAiABKAwSEAoIYXJndW1lbnQYAyABKAwSFAoMY29udGVudF90eXBlGAQgASgJInMKEUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDgoGb3V0cHV0GAIgASgMEg0KBWVycm9yGAMgASgJEi4KB21ldHJpY3MYBCABKAsyHS5laWdlbml1cy52MS5Db21wb25lbnRNZXRyaWNzInkKEENvbXBvbmVudE1ldHJpY3MSEAoIcHJvdmlkZXIYASABKAkSDQoFbW9kZWwYAiABKAkSFQoNcHJvbXB0X3Rva2VucxgDIAEoAxIZChFjb21wbGV0aW9uX3Rva2VucxgEIAEoAxISCgpsYXRlbmN5X21zGAUgASgDIswBChdEaXNwYXRjaEV4dGVybmFsUmVxdWVzdBIVCg1pbnZvY2F0aW9uX2lkGAEgASgJEhcKD2luc3RpdHV0aW9uX2lyaRgCIAEoCRIPCgdlbnZfaXJpGAMgASgJEhQKDGltYWdlX2RpZ2VzdBgEIAEoCRITCgttZXRob2RfbmFtZRgFIAEoCRIVCg1zaWduYXR1cmVfaXJpGAYgASgJEhwKFGlucHV0X3Jlc291cmNlX2Nib3JzGAcgAygMEhAKCGxhbmd1YWdlGAggASgJImEKGERpc3BhdGNoRXh0ZXJuYWxSZXNwb25zZRIcChRvdXRwdXRfcmVzb3VyY2VfY2JvchgBIAEoDBInCh9ydW50aW1lX2ludm9jYXRpb25fcGFydGlhbF9jYm9yGAIgASgMIisKF0xpc3RJbnN0aXR1dGlvbnNSZXF1ZXN0EhAKCGF0X2xheWVyGAEgASgJIk4KGExpc3RJbnN0aXR1dGlvbnNSZXNwb25zZRIyCgxpbnN0aXR1dGlvbnMYASADKAsyHC5laWdlbml1cy52MS5JbnN0aXR1dGlvbkluZm8iQQoPSW5zdGl0dXRpb25JbmZvEgsKA2lyaRgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC3F1ZXJ5X3R5cGVzGAMgAygJIjcKEEdldFNjaGVtYVJlcXVlc3QSEQoJY2xhc3NfaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJIkgKEUdldFNjaGVtYVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEwoLanNvbl9zY2hlbWEYAiABKAkSDQoFZXJyb3IYAyABKAkipgIKCFRhc2tJbmZvEg8KB3Rhc2tfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRITCgtwcm9ncmFtX2lyaRgDIAEoCRIRCglpbnB1dF9pcmkYBCABKAkSDgoGc3RhdHVzGAUgASgJEhIKCmxheWVyX2hlYWQYBiABKAkSEAoIc3RlcF9zZXEYByABKAQSGAoQbGF0ZXN0X3RyYWNlX3NlcRgIIAEoBBIcChRsYXN0X2NoZWNrcG9pbnRfc3RlcBgJIAEoCRIZChFyZXN1bHRfbGF5ZXJfaGVhZBgKIAEoCRIVCg1jcmVhdGVkX2F0X21zGAsgASgDEhUKDXVwZGF0ZWRfYXRfbXMYDCABKAMSFgoOcmV0YWluX2ZvcmV2ZXIYDSABKAgiEgoQTGlzdFRhc2tzUmVxdWVzdCI5ChFMaXN0VGFza3NSZXNwb25zZRIkCgV0YXNrcxgBIAMoCzIVLmVpZ2VuaXVzLnYxLlRhc2tJbmZvIicKFEdldFRhc2tTdGF0dXNSZXF1ZXN0Eg8KB3Rhc2tfaWQYASABKAkiSwoVR2V0VGFza1N0YXR1c1Jlc3BvbnNlEg0KBWZvdW5kGAEgASgIEiMKBHRhc2sYAiABKAsyFS5laWdlbml1cy52MS5UYXNrSW5mbyIkChFDYW5jZWxUYXNrUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIkQKEkNhbmNlbFRhc2tSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBnN0YXR1cxgCIAEoCRINCgVlcnJvchgDIAEoCSJuCg9WYWxpZGF0aW9uRXJyb3ISFAoMcmVzb3VyY2VfaXJpGAEgASgJEhQKDHByb3BlcnR5X2lyaRgCIAEoCRIMCgRydWxlGAMgASgJEg8KB21lc3NhZ2UYBCABKAkSEAoIc2V2ZXJpdHkYBSABKAkiWAoUTGF5ZXJUb3BvbG9neVJlcXVlc3QSEgoKcm9vdF9sYXllchgBIAEoCRIRCgltYXhfZGVwdGgYAiABKA0SGQoRaW5jbHVkZV9yZXNvdXJjZXMYAyABKAgiawoVTGF5ZXJUb3BvbG9neVJlc3BvbnNlEigKBW5vZGVzGAEgAygLMhkuZWlnZW5pdXMudjEuVG9wb2xvZ3lOb2RlEigKBWVkZ2VzGAIgAygLMhkuZWlnZW5pdXMudjEuVG9wb2xvZ3lFZGdlIrEBCgxUb3BvbG9neU5vZGUSCgoCaWQYASABKAkSIwoEa2luZBgCIAEoDjIVLmVpZ2VuaXVzLnYxLk5vZGVLaW5kEg0KBWxhYmVsGAMgASgJEjMKBWF0dHJzGAQgAygLMiQuZWlnZW5pdXMudjEuVG9wb2xvZ3lOb2RlLkF0dHJzRW50cnkaLAoKQXR0cnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIrYBCgxUb3BvbG9neUVkZ2USDgoGc291cmNlGAEgASgJEg4KBnRhcmdldBgCIAEoCRIjCgRraW5kGAMgASgOMhUuZWlnZW5pdXMudjEuRWRnZUtpbmQSMwoFYXR0cnMYBCADKAsyJC5laWdlbml1cy52MS5Ub3BvbG9neUVkZ2UuQXR0cnNFbnRyeRosCgpBdHRyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiLgoKQnJhbmNoSW5mbxIMCgRuYW1lGAEgASgJEhIKCmhlYWRfbGF5ZXIYAiABKAkiFQoTTGlzdEJyYW5jaGVzUmVxdWVzdCJBChRMaXN0QnJhbmNoZXNSZXNwb25zZRIpCghicmFuY2hlcxgBIAMoCzIXLmVpZ2VuaXVzLnYxLkJyYW5jaEluZm8iIAoQR2V0QnJhbmNoUmVxdWVzdBIMCgRuYW1lGAEgASgJIjYKEUdldEJyYW5jaFJlc3BvbnNlEg0KBWZvdW5kGAEgASgIEhIKCmhlYWRfbGF5ZXIYAiABKAkiNwoTQ3JlYXRlQnJhbmNoUmVxdWVzdBIMCgRuYW1lGAEgASgJEhIKCmZyb21fbGF5ZXIYAiABKAkiSgoUQ3JlYXRlQnJhbmNoUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBISCgpoZWFkX2xheWVyGAIgASgJEg0KBWVycm9yGAMgASgJIjIKE0RlbGV0ZUJyYW5jaFJlcXVlc3QSDAoEbmFtZRgBIAEoCRINCgVmb3JjZRgCIAEoCCJeChREZWxldGVCcmFuY2hSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB2RlbGV0ZWQYAiABKAgSFQoNcHJldmlvdXNfaGVhZBgDIAEoCRINCgVlcnJvchgEIAEoCSqaAQoITm9kZUtpbmQSGQoVTk9ERV9LSU5EX1VOU1BFQ0lGSUVEEAASEwoPTk9ERV9LSU5EX0xBWUVSEAESEwoPTk9ERV9LSU5EX0NMQVNTEAISFgoSTk9ERV9LSU5EX1BST1BFUlRZEAMSFgoSTk9ERV9LSU5EX1JFU09VUkNFEAQSGQoVTk9ERV9LSU5EX0lOU1RJVFVUSU9OEAUq4gEKCEVkZ2VLaW5kEhkKFUVER0VfS0lORF9VTlNQRUNJRklFRBAAEhoKFkVER0VfS0lORF9QQVJFTlRfTEFZRVIQARISCg5FREdFX0tJTkRfSVNfQRACEhkKFUVER0VfS0lORF9TVUJDTEFTU19PRhADEhYKEkVER0VfS0lORF9SRVFVSVJFUxAEEhgKFEVER0VfS0lORF9SRUNPTU1FTkRTEAUSGgoWRURHRV9LSU5EX1BST1BFUlRZX1JFRhAGEiIKHkVER0VfS0lORF9JTlNUSVRVVElPTl9ERUNMQVJFUxAHMqULCg5FaWdlbml1c0tlcm5lbBI7CgRMb2FkEhguZWlnZW5pdXMudjEuTG9hZFJlcXVlc3QaGS5laWdlbml1cy52MS5Mb2FkUmVzcG9uc2USRAoHSW5zcGVjdBIbLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuSW5zcGVjdFJlc3BvbnNlEj4KBVF1ZXJ5EhkuZWlnZW5pdXMudjEuUXVlcnlSZXF1ZXN0GhouZWlnZW5pdXMudjEuUXVlcnlSZXNwb25zZRJcCg9WYWxpZGF0ZVByb2dyYW0SIy5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXF1ZXN0GiQuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USTQoKUnVuUHJvZ3JhbRIeLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXF1ZXN0Gh8uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlc3BvbnNlElcKD1J1blByb2dyYW1CeUlyaRIjLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1CeUlyaVJlcXVlc3QaHy5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVzcG9uc2USRAoHUmVmbGVjdBIbLmVpZ2VuaXVzLnYxLlJlZmxlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuUmVmbGVjdFJlc3BvbnNlEkEKBkhlYWx0aBIaLmVpZ2VuaXVzLnYxLkhlYWx0aFJlcXVlc3QaGy5laWdlbml1cy52MS5IZWFsdGhSZXNwb25zZRJfChBMaXN0SW5zdGl0dXRpb25zEiQuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1JlcXVlc3QaJS5laWdlbml1cy52MS5MaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USSgoJR2V0U2NoZW1hEh0uZWlnZW5pdXMudjEuR2V0U2NoZW1hUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkdldFNjaGVtYVJlc3BvbnNlEkoKCUxpc3RUYXNrcxIdLmVpZ2VuaXVzLnYxLkxpc3RUYXNrc1JlcXVlc3QaHi5laWdlbml1cy52MS5MaXN0VGFza3NSZXNwb25zZRJWCg1HZXRUYXNrU3RhdHVzEiEuZWlnZW5pdXMudjEuR2V0VGFza1N0YXR1c1JlcXVlc3QaIi5laWdlbml1cy52MS5HZXRUYXNrU3RhdHVzUmVzcG9uc2USTQoKQ2FuY2VsVGFzaxIeLmVpZ2VuaXVzLnYxLkNhbmNlbFRhc2tSZXF1ZXN0Gh8uZWlnZW5pdXMudjEuQ2FuY2VsVGFza1Jlc3BvbnNlElYKDUxheWVyVG9wb2xvZ3kSIS5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVxdWVzdBoiLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXNwb25zZRJTCgxMaXN0QnJhbmNoZXMSIC5laWdlbml1cy52MS5MaXN0QnJhbmNoZXNSZXF1ZXN0GiEuZWlnZW5pdXMudjEuTGlzdEJyYW5jaGVzUmVzcG9uc2USSgoJR2V0QnJhbmNoEh0uZWlnZW5pdXMudjEuR2V0QnJhbmNoUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkdldEJyYW5jaFJlc3BvbnNlElMKDENyZWF0ZUJyYW5jaBIgLmVpZ2VuaXVzLnYxLkNyZWF0ZUJyYW5jaFJlcXVlc3QaIS5laWdlbml1cy52MS5DcmVhdGVCcmFuY2hSZXNwb25zZRJTCgxEZWxldGVCcmFuY2gSIC5laWdlbml1cy52MS5EZWxldGVCcmFuY2hSZXF1ZXN0GiEuZWlnZW5pdXMudjEuRGVsZXRlQnJhbmNoUmVzcG9uc2UyrgIKEUNvbXBvbmVudEV4ZWN1dG9yEkgKB0V4ZWN1dGUSHS5laWdlbml1cy52MS5Db21wb25lbnRSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVzcG9uc2USbgoVUmVnaXN0ZXJXYXNtQ29tcG9uZW50EikuZWlnZW5pdXMudjEuUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBoqLmVpZ2VuaXVzLnYxLlJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlEl8KEERpc3BhdGNoRXh0ZXJuYWwSJC5laWdlbml1cy52MS5EaXNwYXRjaEV4dGVybmFsUmVxdWVzdBolLmVpZ2VuaXVzLnYxLkRpc3BhdGNoRXh0ZXJuYWxSZXNwb25zZTJpCg9Ob3RlYm9va1NlcnZpY2USVgoNTGF5ZXJUb3BvbG9neRIhLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXF1ZXN0GiIuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Cg5laWdlbml1cy5wcm90bxILZWlnZW5pdXMudjEiWwoLTG9hZFJlcXVlc3QSEQoJcmVzb3VyY2VzGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRITCgthdXRvX2NvbW1pdBgDIAEoCBIOCgZicmFuY2gYBCABKAkixwEKDExvYWRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIQCghsYXllcl9pZBgDIAEoCRIWCg5yZXNvdXJjZV9jb3VudBgEIAEoDRIOCgZicmFuY2gYBSABKAkSFwoPYnJhbmNoX2FkdmFuY2VkGAYgASgIEiUKBW1lcmdlGAcgASgLMhYuZWlnZW5pdXMudjEuTWVyZ2VJbmZvIpgBCglNZXJnZUluZm8SKgoHb3V0Y29tZRgBIAEoDjIZLmVpZ2VuaXVzLnYxLk1lcmdlT3V0Y29tZRIWCg5tZXJnZV9sYXllcl9pZBgCIAEoCRIYChBjb25mbGljdGluZ19pcmlzGAMgAygJEhQKDGN1cnJlbnRfaGVhZBgEIAEoCRIXCg9vcnBoYW5fbGF5ZXJfaWQYBSABKAkiPwoOSW5zcGVjdFJlcXVlc3QSCwoDaXJpGAEgASgJEhAKCGF0X2xheWVyGAIgASgJEg4KBmJyYW5jaBgDIAEoCSIyCg9JbnNwZWN0UmVzcG9uc2USDQoFZm91bmQYASABKAgSEAoIcmVzb3VyY2UYAiABKAwiQQoMUXVlcnlSZXF1ZXN0Eg8KB2VpZ2VucWwYASABKAkSEAoIYXRfbGF5ZXIYAiABKAkSDgoGYnJhbmNoGAMgASgJIrUBCg1RdWVyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEAoIZG9jdW1lbnQYAiABKAwSFAoMY29udGVudF90eXBlGAMgASgJEg0KBWVycm9yGAQgASgJEhwKFG91dHB1dF9yZXNvdXJjZV9pcmlzGAUgAygJEhcKD2JyYW5jaF9hZHZhbmNlZBgGIAEoCBIlCgVtZXJnZRgHIAEoCzIWLmVpZ2VuaXVzLnYxLk1lcmdlSW5mbyI/ChZWYWxpZGF0ZVByb2dyYW1SZXF1ZXN0Eg8KB3Byb2dyYW0YASABKAwSFAoMY29udGVudF90eXBlGAIgASgJImwKF1ZhbGlkYXRlUHJvZ3JhbVJlc3BvbnNlEg0KBXZhbGlkGAEgASgIEiwKBmVycm9ycxgCIAMoCzIcLmVpZ2VuaXVzLnYxLlZhbGlkYXRpb25FcnJvchIUCgxwcm9ncmFtX3R5cGUYAyABKAkiWQoRUnVuUHJvZ3JhbVJlcXVlc3QSDwoHcHJvZ3JhbRgBIAEoDBINCgVpbnB1dBgCIAEoDBIUCgxjb250ZW50X3R5cGUYAyABKAkSDgoGYnJhbmNoGAQgASgJIuUBChJSdW5Qcm9ncmFtUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIOCgZvdXRwdXQYAiABKAwSLAoGZXJyb3JzGAMgAygLMhwuZWlnZW5pdXMudjEuVmFsaWRhdGlvbkVycm9yEhEKCXRyYWNlX2lyaRgEIAEoCRIPCgd0YXNrX2lkGAUgASgJEhwKFG91dHB1dF9yZXNvdXJjZV9pcmlzGAYgAygJEhcKD2JyYW5jaF9hZHZhbmNlZBgHIAEoCBIlCgVtZXJnZRgIIAEoCzIWLmVpZ2VuaXVzLnYxLk1lcmdlSW5mbyJiChZSdW5Qcm9ncmFtQnlJcmlSZXF1ZXN0EhMKC3Byb2dyYW1faXJpGAEgASgJEhEKCWlucHV0X2lyaRgCIAEoCRIQCghhdF9sYXllchgDIAEoCRIOCgZicmFuY2gYBCABKAkiRQoOUmVmbGVjdFJlcXVlc3QSDQoFdHJhY2UYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEg4KBmJyYW5jaBgDIAEoCSJ1Cg9SZWZsZWN0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIRCgl0cmFjZV9pcmkYAiABKAkSFwoPYnJhbmNoX2FkdmFuY2VkGAMgASgIEiUKBW1lcmdlGAQgASgLMhYuZWlnZW5pdXMudjEuTWVyZ2VJbmZvIg8KDUhlYWx0aFJlcXVlc3QikwEKDkhlYWx0aFJlc3BvbnNlEg8KB2hlYWx0aHkYASABKAgSDwoHdmVyc2lvbhgCIAEoCRITCgtsYXllcl9jb3VudBgDIAEoBBIWCg5yZXNvdXJjZV9jb3VudBgEIAEoBBIaChJyZXN1bWVfaW5fcHJvZ3Jlc3MYBSABKAgSFgoOdGFza3NfcmVzdW1pbmcYBiABKA0iegocUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEhMKC3dhc21fYmluYXJ5GAIgASgMEhIKCmZ1ZWxfbGltaXQYAyABKAQSGgoSbWVtb3J5X2xpbWl0X3BhZ2VzGAQgASgEIj8KHVJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDQoFZXJyb3IYAiABKAkiYAoQQ29tcG9uZW50UmVxdWVzdBIVCg1jb21wb25lbnRfaXJpGAEgASgJEg0KBWlucHV0GAIgASgMEhAKCGFyZ3VtZW50GAMgASgMEhQKDGNvbnRlbnRfdHlwZRgEIAEoCSJzChFDb21wb25lbnRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg4KBm91dHB1dBgCIAEoDBINCgVlcnJvchgDIAEoCRIuCgdtZXRyaWNzGAQgASgLMh0uZWlnZW5pdXMudjEuQ29tcG9uZW50TWV0cmljcyJ5ChBDb21wb25lbnRNZXRyaWNzEhAKCHByb3ZpZGVyGAEgASgJEg0KBW1vZGVsGAIgASgJEhUKDXByb21wdF90b2tlbnMYAyABKAMSGQoRY29tcGxldGlvbl90b2tlbnMYBCABKAMSEgoKbGF0ZW5jeV9tcxgFIAEoAyLMAQoXRGlzcGF0Y2hFeHRlcm5hbFJlcXVlc3QSFQoNaW52b2NhdGlvbl9pZBgBIAEoCRIXCg9pbnN0aXR1dGlvbl9pcmkYAiABKAkSDwoHZW52X2lyaRgDIAEoCRIUCgxpbWFnZV9kaWdlc3QYBCABKAkSEwoLbWV0aG9kX25hbWUYBSABKAkSFQoNc2lnbmF0dXJlX2lyaRgGIAEoCRIcChRpbnB1dF9yZXNvdXJjZV9jYm9ycxgHIAMoDBIQCghsYW5ndWFnZRgIIAEoCSJhChhEaXNwYXRjaEV4dGVybmFsUmVzcG9uc2USHAoUb3V0cHV0X3Jlc291cmNlX2Nib3IYASABKAwSJwofcnVudGltZV9pbnZvY2F0aW9uX3BhcnRpYWxfY2JvchgCIAEoDCIrChdMaXN0SW5zdGl0dXRpb25zUmVxdWVzdBIQCghhdF9sYXllchgBIAEoCSJOChhMaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USMgoMaW5zdGl0dXRpb25zGAEgAygLMhwuZWlnZW5pdXMudjEuSW5zdGl0dXRpb25JbmZvIvUBCg9JbnN0aXR1dGlvbkluZm8SCwoDaXJpGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLcXVlcnlfdHlwZXMYAyADKAkSLgoMcnVudGltZV9raW5kGAQgASgOMhguZWlnZW5pdXMudjEuUnVudGltZUtpbmQSHAoUcmVxdWlyZXNfZW52aXJvbm1lbnQYBSABKAkSMgoNcXVlcnlfY2xhc3NlcxgGIAMoCzIbLmVpZ2VuaXVzLnYxLlF1ZXJ5Q2xhc3NEZWNsEjAKC2NvbW9ycGhpc21zGAcgAygLMhsuZWlnZW5pdXMudjEuQ29tb3JwaGlzbURlY2wikgEKDlF1ZXJ5Q2xhc3NEZWNsEgsKA2lyaRgBIAEoCRITCgtxdWVyeV9jbGFzcxgCIAEoCRIUCgxyZXN1bHRfY2xhc3MYAyABKAkSFQoNcXVlcnlfaGFuZGxlchgEIAEoCRIxCg5kaXNwYXRjaF9yb2xlcxgFIAMoDjIZLmVpZ2VuaXVzLnYxLkRpc3BhdGNoUm9sZSJqCg5Db21vcnBoaXNtRGVjbBILCgNpcmkYASABKAkSEgoKZnJvbV9jbGFzcxgCIAEoCRIQCgh0b19jbGFzcxgDIAEoCRIWCg50cmFuc2Zvcm1hdGlvbhgEIAEoCRINCgVleGFjdBgFIAEoCCI3ChBHZXRTY2hlbWFSZXF1ZXN0EhEKCWNsYXNzX2lyaRgBIAEoCRIQCghhdF9sYXllchgCIAEoCSJIChFHZXRTY2hlbWFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhMKC2pzb25fc2NoZW1hGAIgASgJEg0KBWVycm9yGAMgASgJIqYCCghUYXNrSW5mbxIPCgd0YXNrX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEwoLcHJvZ3JhbV9pcmkYAyABKAkSEQoJaW5wdXRfaXJpGAQgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpsYXllcl9oZWFkGAYgASgJEhAKCHN0ZXBfc2VxGAcgASgEEhgKEGxhdGVzdF90cmFjZV9zZXEYCCABKAQSHAoUbGFzdF9jaGVja3BvaW50X3N0ZXAYCSABKAkSGQoRcmVzdWx0X2xheWVyX2hlYWQYCiABKAkSFQoNY3JlYXRlZF9hdF9tcxgLIAEoAxIVCg11cGRhdGVkX2F0X21zGAwgASgDEhYKDnJldGFpbl9mb3JldmVyGA0gASgIIhIKEExpc3RUYXNrc1JlcXVlc3QiOQoRTGlzdFRhc2tzUmVzcG9uc2USJAoFdGFza3MYASADKAsyFS5laWdlbml1cy52MS5UYXNrSW5mbyInChRHZXRUYXNrU3RhdHVzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJIksKFUdldFRhc2tTdGF0dXNSZXNwb25zZRINCgVmb3VuZBgBIAEoCBIjCgR0YXNrGAIgASgLMhUuZWlnZW5pdXMudjEuVGFza0luZm8iJAoRQ2FuY2VsVGFza1JlcXVlc3QSDwoHdGFza19pZBgBIAEoCSJEChJDYW5jZWxUYXNrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIOCgZzdGF0dXMYAiABKAkSDQoFZXJyb3IYAyABKAkibgoPVmFsaWRhdGlvbkVycm9yEhQKDHJlc291cmNlX2lyaRgBIAEoCRIUCgxwcm9wZXJ0eV9pcmkYAiABKAkSDAoEcnVsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJEhAKCHNldmVyaXR5GAUgASgJIlgKFExheWVyVG9wb2xvZ3lSZXF1ZXN0EhIKCnJvb3RfbGF5ZXIYASABKAkSEQoJbWF4X2RlcHRoGAIgASgNEhkKEWluY2x1ZGVfcmVzb3VyY2VzGAMgASgIImsKFUxheWVyVG9wb2xvZ3lSZXNwb25zZRIoCgVub2RlcxgBIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZRIoCgVlZGdlcxgCIAMoCzIZLmVpZ2VuaXVzLnYxLlRvcG9sb2d5RWRnZSKxAQoMVG9wb2xvZ3lOb2RlEgoKAmlkGAEgASgJEiMKBGtpbmQYAiABKA4yFS5laWdlbml1cy52MS5Ob2RlS2luZBINCgVsYWJlbBgDIAEoCRIzCgVhdHRycxgEIAMoCzIkLmVpZ2VuaXVzLnYxLlRvcG9sb2d5Tm9kZS5BdHRyc0VudHJ5GiwKCkF0dHJzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASK2AQoMVG9wb2xvZ3lFZGdlEg4KBnNvdXJjZRgBIAEoCRIOCgZ0YXJnZXQYAiABKAkSIwoEa2luZBgDIAEoDjIVLmVpZ2VuaXVzLnYxLkVkZ2VLaW5kEjMKBWF0dHJzGAQgAygLMiQuZWlnZW5pdXMudjEuVG9wb2xvZ3lFZGdlLkF0dHJzRW50cnkaLAoKQXR0cnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIkwKCkJyYW5jaEluZm8SDAoEbmFtZRgBIAEoCRISCgpoZWFkX2xheWVyGAIgASgJEhwKFGhlYWRfY29tbWl0dGVkX2F0X21zGAMgASgDIhUKE0xpc3RCcmFuY2hlc1JlcXVlc3QiQQoUTGlzdEJyYW5jaGVzUmVzcG9uc2USKQoIYnJhbmNoZXMYASADKAsyFy5laWdlbml1cy52MS5CcmFuY2hJbmZvIiAKEEdldEJyYW5jaFJlcXVlc3QSDAoEbmFtZRgBIAEoCSJUChFHZXRCcmFuY2hSZXNwb25zZRINCgVmb3VuZBgBIAEoCBISCgpoZWFkX2xheWVyGAIgASgJEhwKFGhlYWRfY29tbWl0dGVkX2F0X21zGAMgASgDIjcKE0NyZWF0ZUJyYW5jaFJlcXVlc3QSDAoEbmFtZRgBIAEoCRISCgpmcm9tX2xheWVyGAIgASgJIkoKFENyZWF0ZUJyYW5jaFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSEgoKaGVhZF9sYXllchgCIAEoCRINCgVlcnJvchgDIAEoCSIyChNEZWxldGVCcmFuY2hSZXF1ZXN0EgwKBG5hbWUYASABKAkSDQoFZm9yY2UYAiABKAgiXgoURGVsZXRlQnJhbmNoUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdkZWxldGVkGAIgASgIEhUKDXByZXZpb3VzX2hlYWQYAyABKAkSDQoFZXJyb3IYBCABKAkiNgoUTWVyZ2VCcmFuY2hlc1JlcXVlc3QSDgoGc291cmNlGAEgASgJEg4KBnRhcmdldBgCIAEoCSJyChVNZXJnZUJyYW5jaGVzUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCRIlCgVtZXJnZRgDIAEoCzIWLmVpZ2VuaXVzLnYxLk1lcmdlSW5mbxISCgp0YXJnZXRfdGlwGAQgASgJIjUKE1ByZXZpZXdNZXJnZVJlcXVlc3QSDgoGc291cmNlGAEgASgJEg4KBnRhcmdldBgCIAEoCSJ6ChRQcmV2aWV3TWVyZ2VSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg0KBWVycm9yGAIgASgJEiUKBW1lcmdlGAMgASgLMhYuZWlnZW5pdXMudjEuTWVyZ2VJbmZvEhsKE3ByZWRpY3RlZF9pcmlfY291bnQYBCABKA0inQEKF0NvbnNvbGlkYXRlQ2hhaW5SZXF1ZXN0Eg4KBmJyYW5jaBgBIAEoCRISCgpmcm9tX2xheWVyGAIgASgJEhAKCHRvX2xheWVyGAMgASgJEhgKEG1heF93YWxrX2VudHJpZXMYBCABKAQSGAoQdHJhY2VfcGluX3BvbGljeRgFIAEoCRIYChBwcmVzZXJ2ZV9oaXN0b3J5GAYgASgIIu0BChhDb25zb2xpZGF0ZUNoYWluUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIaChJjb25zb2xpZGF0ZWRfbGF5ZXIYAiABKAkSHQoVY29sbGFwc2VkX2xheWVyX2NvdW50GAMgASgEEhUKDWhlYWRfYWR2YW5jZWQYBCABKAgSNQoKZXJyb3Jfa2luZBgFIAEoDjIhLmVpZ2VuaXVzLnYxLkNvbnNvbGlkYXRlRXJyb3JLaW5kEg0KBWVycm9yGAYgASgJEhMKC2Vycm9yX2xheWVyGAcgASgJEhMKC2Vycm9yX2NvdW50GAggASgEIqIBChxFc3RpbWF0ZUNvbnNvbGlkYXRpb25SZXF1ZXN0Eg4KBmJyYW5jaBgBIAEoCRISCgpmcm9tX2xheWVyGAIgASgJEhAKCHRvX2xheWVyGAMgASgJEhgKEG1heF93YWxrX2VudHJpZXMYBCABKAQSGAoQdHJhY2VfcGluX3BvbGljeRgFIAEoCRIYChBwcmVzZXJ2ZV9oaXN0b3J5GAYgASgIIqICCh1Fc3RpbWF0ZUNvbnNvbGlkYXRpb25SZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEiQKHHByZWRpY3RlZF9jb25zb2xpZGF0ZWRfbGF5ZXIYAiABKAkSHQoVY29sbGFwc2VkX2xheWVyX2NvdW50GAMgASgEEh4KFnByZWRpY3RlZF93YWxrX2VudHJpZXMYBCABKAQSGwoTYWN0dWFsX3dhbGtfZW50cmllcxgFIAEoBBI1CgplcnJvcl9raW5kGAYgASgOMiEuZWlnZW5pdXMudjEuQ29uc29saWRhdGVFcnJvcktpbmQSDQoFZXJyb3IYByABKAkSEwoLZXJyb3JfbGF5ZXIYCCABKAkSEwoLZXJyb3JfY291bnQYCSABKAQiPwoHVGFnSW5mbxIMCgRuYW1lGAEgASgJEhAKCGxheWVyX2lkGAIgASgJEhQKDHRhZ2dlZF9hdF9tcxgDIAEoAyIyChBDcmVhdGVUYWdSZXF1ZXN0EgwKBG5hbWUYASABKAkSEAoIbGF5ZXJfaWQYAiABKAkiSwoRQ3JlYXRlVGFnUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCRIWCg5hbHJlYWR5X2V4aXN0cxgDIAEoCCIRCg9MaXN0VGFnc1JlcXVlc3QiNgoQTGlzdFRhZ3NSZXNwb25zZRIiCgR0YWdzGAEgAygLMhQuZWlnZW5pdXMudjEuVGFnSW5mbyIgChBEZWxldGVUYWdSZXF1ZXN0EgwKBG5hbWUYASABKAkiRAoRRGVsZXRlVGFnUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCRIPCgdkZWxldGVkGAMgASgIIhMKEUVzdGltYXRlR2NSZXF1ZXN0IrwBChJFc3RpbWF0ZUdjUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCRIXCg9lbGlnaWJsZV9sYXllcnMYAyABKAQSGAoQcHJvdGVjdGVkX2J5X2FnZRgEIAEoBBITCgticmFuY2hfcGlucxgFIAEoBBIQCgh0YWdfcGlucxgGIAEoBBIRCgl0YXNrX3BpbnMYByABKAQSGQoRcmVjbGFpbWFibGVfYnl0ZXMYCCABKAQiDgoMUnVuR2NSZXF1ZXN0IpkBCg1SdW5HY1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDQoFZXJyb3IYAiABKAkSFQoNbGF5ZXJzX21hcmtlZBgDIAEoBBIaChJsYXllcnNfdW5yZWFjaGFibGUYBCABKAQSFAoMbGF5ZXJzX3N3ZXB0GAUgASgEEh8KF2xheWVyc19wcm90ZWN0ZWRfYnlfYWdlGAYgASgEKsQBCgxNZXJnZU91dGNvbWUSHQoZTUVSR0VfT1VUQ09NRV9VTlNQRUNJRklFRBAAEh4KGk1FUkdFX09VVENPTUVfRkFTVF9GT1JXQVJEEAESHwobTUVSR0VfT1VUQ09NRV9UUklWSUFMX01FUkdFEAISJwojTUVSR0VfT1VUQ09NRV9ORUVEU19XSVRORVNTRURfTUVSR0UQAxIrCidNRVJHRV9PVVRDT01FX0NBQ0hFRF9ESUZGRVJFTlRfUE9TSVRJT04QBCp6CgtSdW50aW1lS2luZBIcChhSVU5USU1FX0tJTkRfVU5TUEVDSUZJRUQQABIbChdSVU5USU1FX0tJTkRfSU5fUFJPQ0VTUxABEhUKEVJVTlRJTUVfS0lORF9XQVNNEAISGQoVUlVOVElNRV9LSU5EX0VYVEVSTkFMEAMqhwEKDERpc3BhdGNoUm9sZRIdChlESVNQQVRDSF9ST0xFX1VOU1BFQ0lGSUVEEAASGwoXRElTUEFUQ0hfUk9MRV9PTl9ERU1BTkQQARIeChpESVNQQVRDSF9ST0xFX0FVVE9fT05fTE9BRBACEhsKF0RJU1BBVENIX1JPTEVfREVDSURBQkxFEAMqmgEKCE5vZGVLaW5kEhkKFU5PREVfS0lORF9VTlNQRUNJRklFRBAAEhMKD05PREVfS0lORF9MQVlFUhABEhMKD05PREVfS0lORF9DTEFTUxACEhYKEk5PREVfS0lORF9QUk9QRVJUWRADEhYKEk5PREVfS0lORF9SRVNPVVJDRRAEEhkKFU5PREVfS0lORF9JTlNUSVRVVElPThAFKuIBCghFZGdlS2luZBIZChVFREdFX0tJTkRfVU5TUEVDSUZJRUQQABIaChZFREdFX0tJTkRfUEFSRU5UX0xBWUVSEAESEgoORURHRV9LSU5EX0lTX0EQAhIZChVFREdFX0tJTkRfU1VCQ0xBU1NfT0YQAxIWChJFREdFX0tJTkRfUkVRVUlSRVMQBBIYChRFREdFX0tJTkRfUkVDT01NRU5EUxAFEhoKFkVER0VfS0lORF9QUk9QRVJUWV9SRUYQBhIiCh5FREdFX0tJTkRfSU5TVElUVVRJT05fREVDTEFSRVMQByrKAwoUQ29uc29saWRhdGVFcnJvcktpbmQSJgoiQ09OU09MSURBVEVfRVJST1JfS0lORF9VTlNQRUNJRklFRBAAEi4KKkNPTlNPTElEQVRFX0VSUk9SX0tJTkRfUkFOR0VfTk9UX0FOQ0VTVFJBTBABEioKJkNPTlNPTElEQVRFX0VSUk9SX0tJTkRfQlJBTkNIX0FEVkFOQ0VEEAISNAowQ09OU09MSURBVEVfRVJST1JfS0lORF9SQU5HRV9DT05UQUlOU19NRVJHRV9OT0RFEAMSMwovQ09OU09MSURBVEVfRVJST1JfS0lORF9SQU5HRV9DT05UQUlOU19UUkFDRV9QSU4QBBIrCidDT05TT0xJREFURV9FUlJPUl9LSU5EX0NPU1RfRVhDRUVEU19DQVAQBRIjCh9DT05TT0xJREFURV9FUlJPUl9LSU5EX0lOVEVSTkFMEAYSNQoxQ09OU09MSURBVEVfRVJST1JfS0lORF9UT19OT1RfUkVBQ0hBQkxFX0ZST01fSEVBRBAHEjoKNkNPTlNPTElEQVRFX0VSUk9SX0tJTkRfUkFOR0VfQ1JPU1NFU19FWElTVElOR19SRURJUkVDVBAIMpMRCg5FaWdlbml1c0tlcm5lbBI7CgRMb2FkEhguZWlnZW5pdXMudjEuTG9hZFJlcXVlc3QaGS5laWdlbml1cy52MS5Mb2FkUmVzcG9uc2USRAoHSW5zcGVjdBIbLmVpZ2VuaXVzLnYxLkluc3BlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuSW5zcGVjdFJlc3BvbnNlEj4KBVF1ZXJ5EhkuZWlnZW5pdXMudjEuUXVlcnlSZXF1ZXN0GhouZWlnZW5pdXMudjEuUXVlcnlSZXNwb25zZRJcCg9WYWxpZGF0ZVByb2dyYW0SIy5laWdlbml1cy52MS5WYWxpZGF0ZVByb2dyYW1SZXF1ZXN0GiQuZWlnZW5pdXMudjEuVmFsaWRhdGVQcm9ncmFtUmVzcG9uc2USTQoKUnVuUHJvZ3JhbRIeLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1SZXF1ZXN0Gh8uZWlnZW5pdXMudjEuUnVuUHJvZ3JhbVJlc3BvbnNlElcKD1J1blByb2dyYW1CeUlyaRIjLmVpZ2VuaXVzLnYxLlJ1blByb2dyYW1CeUlyaVJlcXVlc3QaHy5laWdlbml1cy52MS5SdW5Qcm9ncmFtUmVzcG9uc2USRAoHUmVmbGVjdBIbLmVpZ2VuaXVzLnYxLlJlZmxlY3RSZXF1ZXN0GhwuZWlnZW5pdXMudjEuUmVmbGVjdFJlc3BvbnNlEkEKBkhlYWx0aBIaLmVpZ2VuaXVzLnYxLkhlYWx0aFJlcXVlc3QaGy5laWdlbml1cy52MS5IZWFsdGhSZXNwb25zZRJfChBMaXN0SW5zdGl0dXRpb25zEiQuZWlnZW5pdXMudjEuTGlzdEluc3RpdHV0aW9uc1JlcXVlc3QaJS5laWdlbml1cy52MS5MaXN0SW5zdGl0dXRpb25zUmVzcG9uc2USSgoJR2V0U2NoZW1hEh0uZWlnZW5pdXMudjEuR2V0U2NoZW1hUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkdldFNjaGVtYVJlc3BvbnNlEkoKCUxpc3RUYXNrcxIdLmVpZ2VuaXVzLnYxLkxpc3RUYXNrc1JlcXVlc3QaHi5laWdlbml1cy52MS5MaXN0VGFza3NSZXNwb25zZRJWCg1HZXRUYXNrU3RhdHVzEiEuZWlnZW5pdXMudjEuR2V0VGFza1N0YXR1c1JlcXVlc3QaIi5laWdlbml1cy52MS5HZXRUYXNrU3RhdHVzUmVzcG9uc2USTQoKQ2FuY2VsVGFzaxIeLmVpZ2VuaXVzLnYxLkNhbmNlbFRhc2tSZXF1ZXN0Gh8uZWlnZW5pdXMudjEuQ2FuY2VsVGFza1Jlc3BvbnNlElYKDUxheWVyVG9wb2xvZ3kSIS5laWdlbml1cy52MS5MYXllclRvcG9sb2d5UmVxdWVzdBoiLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXNwb25zZRJTCgxMaXN0QnJhbmNoZXMSIC5laWdlbml1cy52MS5MaXN0QnJhbmNoZXNSZXF1ZXN0GiEuZWlnZW5pdXMudjEuTGlzdEJyYW5jaGVzUmVzcG9uc2USSgoJR2V0QnJhbmNoEh0uZWlnZW5pdXMudjEuR2V0QnJhbmNoUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkdldEJyYW5jaFJlc3BvbnNlElMKDENyZWF0ZUJyYW5jaBIgLmVpZ2VuaXVzLnYxLkNyZWF0ZUJyYW5jaFJlcXVlc3QaIS5laWdlbml1cy52MS5DcmVhdGVCcmFuY2hSZXNwb25zZRJTCgxEZWxldGVCcmFuY2gSIC5laWdlbml1cy52MS5EZWxldGVCcmFuY2hSZXF1ZXN0GiEuZWlnZW5pdXMudjEuRGVsZXRlQnJhbmNoUmVzcG9uc2USVgoNTWVyZ2VCcmFuY2hlcxIhLmVpZ2VuaXVzLnYxLk1lcmdlQnJhbmNoZXNSZXF1ZXN0GiIuZWlnZW5pdXMudjEuTWVyZ2VCcmFuY2hlc1Jlc3BvbnNlElMKDFByZXZpZXdNZXJnZRIgLmVpZ2VuaXVzLnYxLlByZXZpZXdNZXJnZVJlcXVlc3QaIS5laWdlbml1cy52MS5QcmV2aWV3TWVyZ2VSZXNwb25zZRJfChBDb25zb2xpZGF0ZUNoYWluEiQuZWlnZW5pdXMudjEuQ29uc29saWRhdGVDaGFpblJlcXVlc3QaJS5laWdlbml1cy52MS5Db25zb2xpZGF0ZUNoYWluUmVzcG9uc2USbgoVRXN0aW1hdGVDb25zb2xpZGF0aW9uEikuZWlnZW5pdXMudjEuRXN0aW1hdGVDb25zb2xpZGF0aW9uUmVxdWVzdBoqLmVpZ2VuaXVzLnYxLkVzdGltYXRlQ29uc29saWRhdGlvblJlc3BvbnNlEkoKCUNyZWF0ZVRhZxIdLmVpZ2VuaXVzLnYxLkNyZWF0ZVRhZ1JlcXVlc3QaHi5laWdlbml1cy52MS5DcmVhdGVUYWdSZXNwb25zZRJHCghMaXN0VGFncxIcLmVpZ2VuaXVzLnYxLkxpc3RUYWdzUmVxdWVzdBodLmVpZ2VuaXVzLnYxLkxpc3RUYWdzUmVzcG9uc2USSgoJRGVsZXRlVGFnEh0uZWlnZW5pdXMudjEuRGVsZXRlVGFnUmVxdWVzdBoeLmVpZ2VuaXVzLnYxLkRlbGV0ZVRhZ1Jlc3BvbnNlEk0KCkVzdGltYXRlR2MSHi5laWdlbml1cy52MS5Fc3RpbWF0ZUdjUmVxdWVzdBofLmVpZ2VuaXVzLnYxLkVzdGltYXRlR2NSZXNwb25zZRI+CgVSdW5HYxIZLmVpZ2VuaXVzLnYxLlJ1bkdjUmVxdWVzdBoaLmVpZ2VuaXVzLnYxLlJ1bkdjUmVzcG9uc2UyrgIKEUNvbXBvbmVudEV4ZWN1dG9yEkgKB0V4ZWN1dGUSHS5laWdlbml1cy52MS5Db21wb25lbnRSZXF1ZXN0Gh4uZWlnZW5pdXMudjEuQ29tcG9uZW50UmVzcG9uc2USbgoVUmVnaXN0ZXJXYXNtQ29tcG9uZW50EikuZWlnZW5pdXMudjEuUmVnaXN0ZXJXYXNtQ29tcG9uZW50UmVxdWVzdBoqLmVpZ2VuaXVzLnYxLlJlZ2lzdGVyV2FzbUNvbXBvbmVudFJlc3BvbnNlEl8KEERpc3BhdGNoRXh0ZXJuYWwSJC5laWdlbml1cy52MS5EaXNwYXRjaEV4dGVybmFsUmVxdWVzdBolLmVpZ2VuaXVzLnYxLkRpc3BhdGNoRXh0ZXJuYWxSZXNwb25zZTJpCg9Ob3RlYm9va1NlcnZpY2USVgoNTGF5ZXJUb3BvbG9neRIhLmVpZ2VuaXVzLnYxLkxheWVyVG9wb2xvZ3lSZXF1ZXN0GiIuZWlnZW5pdXMudjEuTGF5ZXJUb3BvbG9neVJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message eigenius.v1.LoadRequest
@@ -104,6 +104,36 @@ export type LoadResponse = Message<"eigenius.v1.LoadResponse"> & {
    * @generated from field: string branch = 5;
    */
   branch: string;
+
+  /**
+   * D33 §6 / Phase 20c: did this Load actually move the branch ref?
+   *
+   * - `true`: the freshly-built layer was stored (cache miss) or the
+   *  canonical layer at the same position was re-confirmed (cache
+   *  hit, same position) — either way, the branch ref now points
+   *  at `layer_id`.
+   * - `false`: the anchored-commit cache returned a canonical layer
+   *  living elsewhere in the DAG (cache hit, different position), or
+   *  the CAS resolved to `NEEDS_WITNESSED_MERGE` (see `merge`).
+   *  `layer_id` identifies that canonical layer; the branch ref did
+   *  not advance to it.
+   *
+   * Clients that pin to a branch (notebook cells, watchers) read
+   * this flag to decide whether to refresh their view.
+   *
+   * @generated from field: bool branch_advanced = 6;
+   */
+  branchAdvanced: boolean;
+
+  /**
+   * D23 §5.4.3 / D34 §G.1: the outcome of the branch-ref CAS that
+   * backed this commit. Defaults to `MERGE_OUTCOME_UNSPECIFIED` when
+   * no CAS was attempted (no persistent backend, or a different-
+   * position anchored-commit cache hit short-circuited the persist).
+   *
+   * @generated from field: eigenius.v1.MergeInfo merge = 7;
+   */
+  merge?: MergeInfo | undefined;
 };
 
 /**
@@ -112,6 +142,68 @@ export type LoadResponse = Message<"eigenius.v1.LoadResponse"> & {
  */
 export const LoadResponseSchema: GenMessage<LoadResponse> = /*@__PURE__*/
   messageDesc(file_eigenius, 1);
+
+/**
+ * @generated from message eigenius.v1.MergeInfo
+ */
+export type MergeInfo = Message<"eigenius.v1.MergeInfo"> & {
+  /**
+   * @generated from field: eigenius.v1.MergeOutcome outcome = 1;
+   */
+  outcome: MergeOutcome;
+
+  /**
+   * Hex-encoded layer id whose meaning depends on `outcome`:
+   * - `TRIVIAL_MERGE`: the merge layer the kernel produced (and
+   *  advanced the branch to).
+   * - `CACHED_DIFFERENT_POSITION`: the cached canonical layer the
+   *  freshly-built layer's content was found to match. The branch
+   *  ref did **not** advance to it.
+   *
+   * Empty for `FAST_FORWARD` / `NEEDS_WITNESSED_MERGE` / `UNSPECIFIED`.
+   *
+   * @generated from field: string merge_layer_id = 2;
+   */
+  mergeLayerId: string;
+
+  /**
+   * Set when outcome = NEEDS_WITNESSED_MERGE: the IRIs that both
+   * contributing chains defined since their LCA — the actual
+   * conflict set. Useful for the user-facing recovery dialog.
+   *
+   * @generated from field: repeated string conflicting_iris = 3;
+   */
+  conflictingIris: string[];
+
+  /**
+   * Set when outcome = NEEDS_WITNESSED_MERGE: hex-encoded id of the
+   * branch's current head (i.e., what the caller raced against and
+   * lost to).
+   *
+   * @generated from field: string current_head = 4;
+   */
+  currentHead: string;
+
+  /**
+   * Set when outcome = NEEDS_WITNESSED_MERGE: hex-encoded id of the
+   * *orphan* layer — the layer the caller built that wasn't merged
+   * onto the branch. It's still on disk but only reachable by id.
+   * The notebook's witnessed-merge recovery dialog (D34 §6.2) uses
+   * it to offer "Save my work as a sibling branch", which calls
+   * `CreateBranch(name, orphan_layer_id)` to keep it reachable.
+   * Without saving, the layer becomes GC-eligible.
+   *
+   * @generated from field: string orphan_layer_id = 5;
+   */
+  orphanLayerId: string;
+};
+
+/**
+ * Describes the message eigenius.v1.MergeInfo.
+ * Use `create(MergeInfoSchema)` to create a new message.
+ */
+export const MergeInfoSchema: GenMessage<MergeInfo> = /*@__PURE__*/
+  messageDesc(file_eigenius, 2);
 
 /**
  * @generated from message eigenius.v1.InspectRequest
@@ -145,7 +237,7 @@ export type InspectRequest = Message<"eigenius.v1.InspectRequest"> & {
  * Use `create(InspectRequestSchema)` to create a new message.
  */
 export const InspectRequestSchema: GenMessage<InspectRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 2);
+  messageDesc(file_eigenius, 3);
 
 /**
  * @generated from message eigenius.v1.InspectResponse
@@ -169,7 +261,7 @@ export type InspectResponse = Message<"eigenius.v1.InspectResponse"> & {
  * Use `create(InspectResponseSchema)` to create a new message.
  */
 export const InspectResponseSchema: GenMessage<InspectResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 3);
+  messageDesc(file_eigenius, 4);
 
 /**
  * @generated from message eigenius.v1.QueryRequest
@@ -204,7 +296,7 @@ export type QueryRequest = Message<"eigenius.v1.QueryRequest"> & {
  * Use `create(QueryRequestSchema)` to create a new message.
  */
 export const QueryRequestSchema: GenMessage<QueryRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 4);
+  messageDesc(file_eigenius, 5);
 
 /**
  * @generated from message eigenius.v1.QueryResponse
@@ -239,6 +331,36 @@ export type QueryResponse = Message<"eigenius.v1.QueryResponse"> & {
    * @generated from field: string error = 4;
    */
   error: string;
+
+  /**
+   * IRIs of resources committed to the chain by FIBER ... INTO clauses
+   * (D14 §9.3 chain-reinsertion via EigenQL). Each entry corresponds to
+   * exactly one chain-resident response resource the query just
+   * produced. Clients can resolve them via Inspect or follow-on queries.
+   *
+   * @generated from field: repeated string output_resource_iris = 5;
+   */
+  outputResourceIris: string[];
+
+  /**
+   * D33 §6 / Phase 20c: did the FIBER ... INTO commit (if any) actually
+   * move the branch ref? See `LoadResponse.branch_advanced` for the
+   * full semantics. Always `false` for queries with no INTO clauses
+   * (nothing committed → no branch motion to report).
+   *
+   * @generated from field: bool branch_advanced = 6;
+   */
+  branchAdvanced: boolean;
+
+  /**
+   * D23 §5.4.3 / D34 §G.1: outcome of the FIBER INTO commit's branch
+   * CAS, if one ran. `MERGE_OUTCOME_UNSPECIFIED` for queries that
+   * produced no INTO commit (nothing to merge against) or for
+   * different-position cache hits.
+   *
+   * @generated from field: eigenius.v1.MergeInfo merge = 7;
+   */
+  merge?: MergeInfo | undefined;
 };
 
 /**
@@ -246,7 +368,7 @@ export type QueryResponse = Message<"eigenius.v1.QueryResponse"> & {
  * Use `create(QueryResponseSchema)` to create a new message.
  */
 export const QueryResponseSchema: GenMessage<QueryResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 5);
+  messageDesc(file_eigenius, 6);
 
 /**
  * @generated from message eigenius.v1.ValidateProgramRequest
@@ -270,7 +392,7 @@ export type ValidateProgramRequest = Message<"eigenius.v1.ValidateProgramRequest
  * Use `create(ValidateProgramRequestSchema)` to create a new message.
  */
 export const ValidateProgramRequestSchema: GenMessage<ValidateProgramRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 6);
+  messageDesc(file_eigenius, 7);
 
 /**
  * @generated from message eigenius.v1.ValidateProgramResponse
@@ -299,7 +421,7 @@ export type ValidateProgramResponse = Message<"eigenius.v1.ValidateProgramRespon
  * Use `create(ValidateProgramResponseSchema)` to create a new message.
  */
 export const ValidateProgramResponseSchema: GenMessage<ValidateProgramResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 7);
+  messageDesc(file_eigenius, 8);
 
 /**
  * @generated from message eigenius.v1.RunProgramRequest
@@ -337,7 +459,7 @@ export type RunProgramRequest = Message<"eigenius.v1.RunProgramRequest"> & {
  * Use `create(RunProgramRequestSchema)` to create a new message.
  */
 export const RunProgramRequestSchema: GenMessage<RunProgramRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 8);
+  messageDesc(file_eigenius, 9);
 
 /**
  * @generated from message eigenius.v1.RunProgramResponse
@@ -373,6 +495,41 @@ export type RunProgramResponse = Message<"eigenius.v1.RunProgramResponse"> & {
    * @generated from field: string task_id = 5;
    */
   taskId: string;
+
+  /**
+   * persistent backend — the task is ephemeral
+   * and cannot be looked up via GetTaskStatus.
+   * IRIs of resources committed to the chain by this run (D14 §9.3 step 4):
+   * comorphism reify outputs and the program's final Resource value, each
+   * assigned a deterministic content-hash IRI. Clients can resolve these
+   * against the chain to get the chain-resident copies.
+   *
+   * @generated from field: repeated string output_resource_iris = 6;
+   */
+  outputResourceIris: string[];
+
+  /**
+   * D33 §6 / Phase 20c: did this run's trace-layer commit actually move
+   * the branch ref? See `LoadResponse.branch_advanced` for the full
+   * semantics. `true` iff at least one of the program-run layer or the
+   * (optional) AutoOnLoad provenance layer advanced the branch. An
+   * idempotent re-run against the same supporting context hits the
+   * anchored-commit cache and reports `false`.
+   *
+   * @generated from field: bool branch_advanced = 7;
+   */
+  branchAdvanced: boolean;
+
+  /**
+   * D23 §5.4.3 / D34 §G.1: outcome of the program-run user-layer's
+   * branch CAS. The (optional) AutoOnLoad provenance layer's CAS
+   * outcome is not surfaced here — it'd be a follow-up CAS chained
+   * on top, and surfacing both would conflate two distinct events.
+   * See [`LoadResponse.merge`] for the per-outcome semantics.
+   *
+   * @generated from field: eigenius.v1.MergeInfo merge = 8;
+   */
+  merge?: MergeInfo | undefined;
 };
 
 /**
@@ -380,7 +537,7 @@ export type RunProgramResponse = Message<"eigenius.v1.RunProgramResponse"> & {
  * Use `create(RunProgramResponseSchema)` to create a new message.
  */
 export const RunProgramResponseSchema: GenMessage<RunProgramResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 9);
+  messageDesc(file_eigenius, 10);
 
 /**
  * @generated from message eigenius.v1.RunProgramByIriRequest
@@ -422,7 +579,7 @@ export type RunProgramByIriRequest = Message<"eigenius.v1.RunProgramByIriRequest
  * Use `create(RunProgramByIriRequestSchema)` to create a new message.
  */
 export const RunProgramByIriRequestSchema: GenMessage<RunProgramByIriRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 10);
+  messageDesc(file_eigenius, 11);
 
 /**
  * @generated from message eigenius.v1.ReflectRequest
@@ -451,7 +608,7 @@ export type ReflectRequest = Message<"eigenius.v1.ReflectRequest"> & {
  * Use `create(ReflectRequestSchema)` to create a new message.
  */
 export const ReflectRequestSchema: GenMessage<ReflectRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 11);
+  messageDesc(file_eigenius, 12);
 
 /**
  * @generated from message eigenius.v1.ReflectResponse
@@ -466,6 +623,24 @@ export type ReflectResponse = Message<"eigenius.v1.ReflectResponse"> & {
    * @generated from field: string trace_iri = 2;
    */
   traceIri: string;
+
+  /**
+   * D33 §6 / Phase 20c: did the reflect commit actually move the
+   * branch ref? See `LoadResponse.branch_advanced` for the full
+   * semantics. Reflecting an already-reflected trace hits the
+   * anchored-commit cache and reports `false`.
+   *
+   * @generated from field: bool branch_advanced = 3;
+   */
+  branchAdvanced: boolean;
+
+  /**
+   * D23 §5.4.3 / D34 §G.1: outcome of the reflect commit's branch
+   * CAS. See [`LoadResponse.merge`] for the per-outcome semantics.
+   *
+   * @generated from field: eigenius.v1.MergeInfo merge = 4;
+   */
+  merge?: MergeInfo | undefined;
 };
 
 /**
@@ -473,7 +648,7 @@ export type ReflectResponse = Message<"eigenius.v1.ReflectResponse"> & {
  * Use `create(ReflectResponseSchema)` to create a new message.
  */
 export const ReflectResponseSchema: GenMessage<ReflectResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 12);
+  messageDesc(file_eigenius, 13);
 
 /**
  * @generated from message eigenius.v1.HealthRequest
@@ -486,7 +661,7 @@ export type HealthRequest = Message<"eigenius.v1.HealthRequest"> & {
  * Use `create(HealthRequestSchema)` to create a new message.
  */
 export const HealthRequestSchema: GenMessage<HealthRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 13);
+  messageDesc(file_eigenius, 14);
 
 /**
  * @generated from message eigenius.v1.HealthResponse
@@ -533,7 +708,7 @@ export type HealthResponse = Message<"eigenius.v1.HealthResponse"> & {
  * Use `create(HealthResponseSchema)` to create a new message.
  */
 export const HealthResponseSchema: GenMessage<HealthResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 14);
+  messageDesc(file_eigenius, 15);
 
 /**
  * @generated from message eigenius.v1.RegisterWasmComponentRequest
@@ -573,7 +748,7 @@ export type RegisterWasmComponentRequest = Message<"eigenius.v1.RegisterWasmComp
  * Use `create(RegisterWasmComponentRequestSchema)` to create a new message.
  */
 export const RegisterWasmComponentRequestSchema: GenMessage<RegisterWasmComponentRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 15);
+  messageDesc(file_eigenius, 16);
 
 /**
  * @generated from message eigenius.v1.RegisterWasmComponentResponse
@@ -595,7 +770,7 @@ export type RegisterWasmComponentResponse = Message<"eigenius.v1.RegisterWasmCom
  * Use `create(RegisterWasmComponentResponseSchema)` to create a new message.
  */
 export const RegisterWasmComponentResponseSchema: GenMessage<RegisterWasmComponentResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 16);
+  messageDesc(file_eigenius, 17);
 
 /**
  * @generated from message eigenius.v1.ComponentRequest
@@ -635,7 +810,7 @@ export type ComponentRequest = Message<"eigenius.v1.ComponentRequest"> & {
  * Use `create(ComponentRequestSchema)` to create a new message.
  */
 export const ComponentRequestSchema: GenMessage<ComponentRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 17);
+  messageDesc(file_eigenius, 18);
 
 /**
  * @generated from message eigenius.v1.ComponentResponse
@@ -671,7 +846,7 @@ export type ComponentResponse = Message<"eigenius.v1.ComponentResponse"> & {
  * Use `create(ComponentResponseSchema)` to create a new message.
  */
 export const ComponentResponseSchema: GenMessage<ComponentResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 18);
+  messageDesc(file_eigenius, 19);
 
 /**
  * @generated from message eigenius.v1.ComponentMetrics
@@ -712,7 +887,7 @@ export type ComponentMetrics = Message<"eigenius.v1.ComponentMetrics"> & {
  * Use `create(ComponentMetricsSchema)` to create a new message.
  */
 export const ComponentMetricsSchema: GenMessage<ComponentMetrics> = /*@__PURE__*/
-  messageDesc(file_eigenius, 19);
+  messageDesc(file_eigenius, 20);
 
 /**
  * @generated from message eigenius.v1.DispatchExternalRequest
@@ -796,7 +971,7 @@ export type DispatchExternalRequest = Message<"eigenius.v1.DispatchExternalReque
  * Use `create(DispatchExternalRequestSchema)` to create a new message.
  */
 export const DispatchExternalRequestSchema: GenMessage<DispatchExternalRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 20);
+  messageDesc(file_eigenius, 21);
 
 /**
  * @generated from message eigenius.v1.DispatchExternalResponse
@@ -828,7 +1003,7 @@ export type DispatchExternalResponse = Message<"eigenius.v1.DispatchExternalResp
  * Use `create(DispatchExternalResponseSchema)` to create a new message.
  */
 export const DispatchExternalResponseSchema: GenMessage<DispatchExternalResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 21);
+  messageDesc(file_eigenius, 22);
 
 /**
  * @generated from message eigenius.v1.ListInstitutionsRequest
@@ -848,7 +1023,7 @@ export type ListInstitutionsRequest = Message<"eigenius.v1.ListInstitutionsReque
  * Use `create(ListInstitutionsRequestSchema)` to create a new message.
  */
 export const ListInstitutionsRequestSchema: GenMessage<ListInstitutionsRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 22);
+  messageDesc(file_eigenius, 23);
 
 /**
  * @generated from message eigenius.v1.ListInstitutionsResponse
@@ -865,7 +1040,7 @@ export type ListInstitutionsResponse = Message<"eigenius.v1.ListInstitutionsResp
  * Use `create(ListInstitutionsResponseSchema)` to create a new message.
  */
 export const ListInstitutionsResponseSchema: GenMessage<ListInstitutionsResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 23);
+  messageDesc(file_eigenius, 24);
 
 /**
  * @generated from message eigenius.v1.InstitutionInfo
@@ -886,9 +1061,49 @@ export type InstitutionInfo = Message<"eigenius.v1.InstitutionInfo"> & {
    * entry corresponds to a `QueryClass` resource whose
    * `institution_ref` points at this institution.
    *
+   * Legacy field — `query_classes` (tag 6) carries the richer
+   * declaration the notebook inspector uses. Kept for backward
+   * compatibility with non-notebook clients.
+   *
    * @generated from field: repeated string query_types = 3;
    */
   queryTypes: string[];
+
+  /**
+   * D34 §G.8 enrichment. Drives the Institutions inspector
+   * (D34 §9.2) — surface the runtime + the declarations the
+   * operator wants to see for each institution.
+   *
+   * @generated from field: eigenius.v1.RuntimeKind runtime_kind = 4;
+   */
+  runtimeKind: RuntimeKind;
+
+  /**
+   * IRI of the `RuntimeEnvironment` for `RUNTIME_KIND_EXTERNAL`
+   * institutions (D31 §5). Empty for WASM and in-process kinds.
+   *
+   * @generated from field: string requires_environment = 5;
+   */
+  requiresEnvironment: string;
+
+  /**
+   * Every `QueryClass` resource whose `institution_ref` points at
+   * this institution. Sorted by IRI.
+   *
+   * @generated from field: repeated eigenius.v1.QueryClassDecl query_classes = 6;
+   */
+  queryClasses: QueryClassDecl[];
+
+  /**
+   * Every `Comorphism` resource whose triadic chain
+   * (export_format → transformation → import_format) names this
+   * institution as the source or target. Sorted by IRI. The
+   * notebook surfaces source/target class pairs derived from the
+   * referenced ExportFormat / ImportFormat resources.
+   *
+   * @generated from field: repeated eigenius.v1.ComorphismDecl comorphisms = 7;
+   */
+  comorphisms: ComorphismDecl[];
 };
 
 /**
@@ -896,7 +1111,107 @@ export type InstitutionInfo = Message<"eigenius.v1.InstitutionInfo"> & {
  * Use `create(InstitutionInfoSchema)` to create a new message.
  */
 export const InstitutionInfoSchema: GenMessage<InstitutionInfo> = /*@__PURE__*/
-  messageDesc(file_eigenius, 24);
+  messageDesc(file_eigenius, 25);
+
+/**
+ * @generated from message eigenius.v1.QueryClassDecl
+ */
+export type QueryClassDecl = Message<"eigenius.v1.QueryClassDecl"> & {
+  /**
+   * The QueryClass resource's own IRI.
+   *
+   * @generated from field: string iri = 1;
+   */
+  iri: string;
+
+  /**
+   * Input class the QueryClass is bound to (its fibre).
+   *
+   * @generated from field: string query_class = 2;
+   */
+  queryClass: string;
+
+  /**
+   * Output class (typically `Verdict` for Decidable / AutoOnLoad).
+   *
+   * @generated from field: string result_class = 3;
+   */
+  resultClass: string;
+
+  /**
+   * Procedure or comorphism IRI the kernel routes to.
+   *
+   * @generated from field: string query_handler = 4;
+   */
+  queryHandler: string;
+
+  /**
+   * Dispatch roles declared on this QueryClass. One or more of
+   * OnDemand / AutoOnLoad / Decidable.
+   *
+   * @generated from field: repeated eigenius.v1.DispatchRole dispatch_roles = 5;
+   */
+  dispatchRoles: DispatchRole[];
+};
+
+/**
+ * Describes the message eigenius.v1.QueryClassDecl.
+ * Use `create(QueryClassDeclSchema)` to create a new message.
+ */
+export const QueryClassDeclSchema: GenMessage<QueryClassDecl> = /*@__PURE__*/
+  messageDesc(file_eigenius, 26);
+
+/**
+ * @generated from message eigenius.v1.ComorphismDecl
+ */
+export type ComorphismDecl = Message<"eigenius.v1.ComorphismDecl"> & {
+  /**
+   * The Comorphism resource's own IRI.
+   *
+   * @generated from field: string iri = 1;
+   */
+  iri: string;
+
+  /**
+   * Source class — resolved from the referenced `ExportFormat`'s
+   * `from_class` property. Empty if the ExportFormat couldn't be
+   * resolved (malformed declaration; should not occur on a
+   * validated chain).
+   *
+   * @generated from field: string from_class = 2;
+   */
+  fromClass: string;
+
+  /**
+   * Target class — resolved from the referenced `ImportFormat`'s
+   * `to_class` property. Empty if the ImportFormat couldn't be
+   * resolved.
+   *
+   * @generated from field: string to_class = 3;
+   */
+  toClass: string;
+
+  /**
+   * Transformation program ref (procedure IRI).
+   *
+   * @generated from field: string transformation = 4;
+   */
+  transformation: string;
+
+  /**
+   * Comorphism's `exact` flag (D14 §5).
+   *
+   * @generated from field: bool exact = 5;
+   */
+  exact: boolean;
+};
+
+/**
+ * Describes the message eigenius.v1.ComorphismDecl.
+ * Use `create(ComorphismDeclSchema)` to create a new message.
+ */
+export const ComorphismDeclSchema: GenMessage<ComorphismDecl> = /*@__PURE__*/
+  messageDesc(file_eigenius, 27);
 
 /**
  * @generated from message eigenius.v1.GetSchemaRequest
@@ -922,7 +1237,7 @@ export type GetSchemaRequest = Message<"eigenius.v1.GetSchemaRequest"> & {
  * Use `create(GetSchemaRequestSchema)` to create a new message.
  */
 export const GetSchemaRequestSchema: GenMessage<GetSchemaRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 25);
+  messageDesc(file_eigenius, 28);
 
 /**
  * @generated from message eigenius.v1.GetSchemaResponse
@@ -953,7 +1268,7 @@ export type GetSchemaResponse = Message<"eigenius.v1.GetSchemaResponse"> & {
  * Use `create(GetSchemaResponseSchema)` to create a new message.
  */
 export const GetSchemaResponseSchema: GenMessage<GetSchemaResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 26);
+  messageDesc(file_eigenius, 29);
 
 /**
  * @generated from message eigenius.v1.TaskInfo
@@ -1046,7 +1361,7 @@ export type TaskInfo = Message<"eigenius.v1.TaskInfo"> & {
  * Use `create(TaskInfoSchema)` to create a new message.
  */
 export const TaskInfoSchema: GenMessage<TaskInfo> = /*@__PURE__*/
-  messageDesc(file_eigenius, 27);
+  messageDesc(file_eigenius, 30);
 
 /**
  * @generated from message eigenius.v1.ListTasksRequest
@@ -1059,7 +1374,7 @@ export type ListTasksRequest = Message<"eigenius.v1.ListTasksRequest"> & {
  * Use `create(ListTasksRequestSchema)` to create a new message.
  */
 export const ListTasksRequestSchema: GenMessage<ListTasksRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 28);
+  messageDesc(file_eigenius, 31);
 
 /**
  * @generated from message eigenius.v1.ListTasksResponse
@@ -1076,7 +1391,7 @@ export type ListTasksResponse = Message<"eigenius.v1.ListTasksResponse"> & {
  * Use `create(ListTasksResponseSchema)` to create a new message.
  */
 export const ListTasksResponseSchema: GenMessage<ListTasksResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 29);
+  messageDesc(file_eigenius, 32);
 
 /**
  * @generated from message eigenius.v1.GetTaskStatusRequest
@@ -1095,7 +1410,7 @@ export type GetTaskStatusRequest = Message<"eigenius.v1.GetTaskStatusRequest"> &
  * Use `create(GetTaskStatusRequestSchema)` to create a new message.
  */
 export const GetTaskStatusRequestSchema: GenMessage<GetTaskStatusRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 30);
+  messageDesc(file_eigenius, 33);
 
 /**
  * @generated from message eigenius.v1.GetTaskStatusResponse
@@ -1117,7 +1432,7 @@ export type GetTaskStatusResponse = Message<"eigenius.v1.GetTaskStatusResponse">
  * Use `create(GetTaskStatusResponseSchema)` to create a new message.
  */
 export const GetTaskStatusResponseSchema: GenMessage<GetTaskStatusResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 31);
+  messageDesc(file_eigenius, 34);
 
 /**
  * @generated from message eigenius.v1.CancelTaskRequest
@@ -1136,7 +1451,7 @@ export type CancelTaskRequest = Message<"eigenius.v1.CancelTaskRequest"> & {
  * Use `create(CancelTaskRequestSchema)` to create a new message.
  */
 export const CancelTaskRequestSchema: GenMessage<CancelTaskRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 32);
+  messageDesc(file_eigenius, 35);
 
 /**
  * @generated from message eigenius.v1.CancelTaskResponse
@@ -1170,7 +1485,7 @@ export type CancelTaskResponse = Message<"eigenius.v1.CancelTaskResponse"> & {
  * Use `create(CancelTaskResponseSchema)` to create a new message.
  */
 export const CancelTaskResponseSchema: GenMessage<CancelTaskResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 33);
+  messageDesc(file_eigenius, 36);
 
 /**
  * @generated from message eigenius.v1.ValidationError
@@ -1207,7 +1522,7 @@ export type ValidationError = Message<"eigenius.v1.ValidationError"> & {
  * Use `create(ValidationErrorSchema)` to create a new message.
  */
 export const ValidationErrorSchema: GenMessage<ValidationError> = /*@__PURE__*/
-  messageDesc(file_eigenius, 34);
+  messageDesc(file_eigenius, 37);
 
 /**
  * @generated from message eigenius.v1.LayerTopologyRequest
@@ -1247,7 +1562,7 @@ export type LayerTopologyRequest = Message<"eigenius.v1.LayerTopologyRequest"> &
  * Use `create(LayerTopologyRequestSchema)` to create a new message.
  */
 export const LayerTopologyRequestSchema: GenMessage<LayerTopologyRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 35);
+  messageDesc(file_eigenius, 38);
 
 /**
  * @generated from message eigenius.v1.LayerTopologyResponse
@@ -1269,7 +1584,7 @@ export type LayerTopologyResponse = Message<"eigenius.v1.LayerTopologyResponse">
  * Use `create(LayerTopologyResponseSchema)` to create a new message.
  */
 export const LayerTopologyResponseSchema: GenMessage<LayerTopologyResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 36);
+  messageDesc(file_eigenius, 39);
 
 /**
  * @generated from message eigenius.v1.TopologyNode
@@ -1312,7 +1627,7 @@ export type TopologyNode = Message<"eigenius.v1.TopologyNode"> & {
  * Use `create(TopologyNodeSchema)` to create a new message.
  */
 export const TopologyNodeSchema: GenMessage<TopologyNode> = /*@__PURE__*/
-  messageDesc(file_eigenius, 37);
+  messageDesc(file_eigenius, 40);
 
 /**
  * @generated from message eigenius.v1.TopologyEdge
@@ -1348,7 +1663,7 @@ export type TopologyEdge = Message<"eigenius.v1.TopologyEdge"> & {
  * Use `create(TopologyEdgeSchema)` to create a new message.
  */
 export const TopologyEdgeSchema: GenMessage<TopologyEdge> = /*@__PURE__*/
-  messageDesc(file_eigenius, 38);
+  messageDesc(file_eigenius, 41);
 
 /**
  * @generated from message eigenius.v1.BranchInfo
@@ -1367,6 +1682,16 @@ export type BranchInfo = Message<"eigenius.v1.BranchInfo"> & {
    * @generated from field: string head_layer = 2;
    */
   headLayer: string;
+
+  /**
+   * Head layer's commit timestamp, in milliseconds since Unix epoch.
+   * Same semantics as `GetBranchResponse.head_committed_at_ms`. Powers
+   * the notebook's branch-picker / Branches-panel "X min ago" stamps
+   * without forcing per-row `GetBranch` fan-out.
+   *
+   * @generated from field: int64 head_committed_at_ms = 3;
+   */
+  headCommittedAtMs: bigint;
 };
 
 /**
@@ -1374,7 +1699,7 @@ export type BranchInfo = Message<"eigenius.v1.BranchInfo"> & {
  * Use `create(BranchInfoSchema)` to create a new message.
  */
 export const BranchInfoSchema: GenMessage<BranchInfo> = /*@__PURE__*/
-  messageDesc(file_eigenius, 39);
+  messageDesc(file_eigenius, 42);
 
 /**
  * @generated from message eigenius.v1.ListBranchesRequest
@@ -1387,7 +1712,7 @@ export type ListBranchesRequest = Message<"eigenius.v1.ListBranchesRequest"> & {
  * Use `create(ListBranchesRequestSchema)` to create a new message.
  */
 export const ListBranchesRequestSchema: GenMessage<ListBranchesRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 40);
+  messageDesc(file_eigenius, 43);
 
 /**
  * @generated from message eigenius.v1.ListBranchesResponse
@@ -1404,7 +1729,7 @@ export type ListBranchesResponse = Message<"eigenius.v1.ListBranchesResponse"> &
  * Use `create(ListBranchesResponseSchema)` to create a new message.
  */
 export const ListBranchesResponseSchema: GenMessage<ListBranchesResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 41);
+  messageDesc(file_eigenius, 44);
 
 /**
  * @generated from message eigenius.v1.GetBranchRequest
@@ -1421,7 +1746,7 @@ export type GetBranchRequest = Message<"eigenius.v1.GetBranchRequest"> & {
  * Use `create(GetBranchRequestSchema)` to create a new message.
  */
 export const GetBranchRequestSchema: GenMessage<GetBranchRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 42);
+  messageDesc(file_eigenius, 45);
 
 /**
  * @generated from message eigenius.v1.GetBranchResponse
@@ -1438,6 +1763,20 @@ export type GetBranchResponse = Message<"eigenius.v1.GetBranchResponse"> & {
    * @generated from field: string head_layer = 2;
    */
   headLayer: string;
+
+  /**
+   * Set when found=true; the head layer's commit timestamp, in
+   * milliseconds since the Unix epoch. Matches `Layer.created_at` /
+   * `LayerHandle.created_at` / D21's `TaskRecord.created_at`. Powers
+   * the notebook's branch-picker "X min ago" relative timestamps
+   * (D34 §3.2 / §4.2). 0 when not available (e.g., the kernel can
+   * resolve the branch ref but the head's handle was reclaimed by
+   * GC — should not happen in practice, but the wire shape
+   * tolerates it).
+   *
+   * @generated from field: int64 head_committed_at_ms = 3;
+   */
+  headCommittedAtMs: bigint;
 };
 
 /**
@@ -1445,7 +1784,7 @@ export type GetBranchResponse = Message<"eigenius.v1.GetBranchResponse"> & {
  * Use `create(GetBranchResponseSchema)` to create a new message.
  */
 export const GetBranchResponseSchema: GenMessage<GetBranchResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 43);
+  messageDesc(file_eigenius, 46);
 
 /**
  * @generated from message eigenius.v1.CreateBranchRequest
@@ -1471,7 +1810,7 @@ export type CreateBranchRequest = Message<"eigenius.v1.CreateBranchRequest"> & {
  * Use `create(CreateBranchRequestSchema)` to create a new message.
  */
 export const CreateBranchRequestSchema: GenMessage<CreateBranchRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 44);
+  messageDesc(file_eigenius, 47);
 
 /**
  * @generated from message eigenius.v1.CreateBranchResponse
@@ -1502,7 +1841,7 @@ export type CreateBranchResponse = Message<"eigenius.v1.CreateBranchResponse"> &
  * Use `create(CreateBranchResponseSchema)` to create a new message.
  */
 export const CreateBranchResponseSchema: GenMessage<CreateBranchResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 45);
+  messageDesc(file_eigenius, 48);
 
 /**
  * @generated from message eigenius.v1.DeleteBranchRequest
@@ -1528,7 +1867,7 @@ export type DeleteBranchRequest = Message<"eigenius.v1.DeleteBranchRequest"> & {
  * Use `create(DeleteBranchRequestSchema)` to create a new message.
  */
 export const DeleteBranchRequestSchema: GenMessage<DeleteBranchRequest> = /*@__PURE__*/
-  messageDesc(file_eigenius, 46);
+  messageDesc(file_eigenius, 49);
 
 /**
  * @generated from message eigenius.v1.DeleteBranchResponse
@@ -1566,7 +1905,865 @@ export type DeleteBranchResponse = Message<"eigenius.v1.DeleteBranchResponse"> &
  * Use `create(DeleteBranchResponseSchema)` to create a new message.
  */
 export const DeleteBranchResponseSchema: GenMessage<DeleteBranchResponse> = /*@__PURE__*/
-  messageDesc(file_eigenius, 47);
+  messageDesc(file_eigenius, 50);
+
+/**
+ * @generated from message eigenius.v1.MergeBranchesRequest
+ */
+export type MergeBranchesRequest = Message<"eigenius.v1.MergeBranchesRequest"> & {
+  /**
+   * Branch to fold into `target`. Read at request-time to get its
+   * current head. Must exist; the kernel rejects unknown names with
+   * `failed_precondition`.
+   *
+   * @generated from field: string source = 1;
+   */
+  source: string;
+
+  /**
+   * Branch to receive the merge. Read at request-time to get its
+   * current head; mutated by the `update_branch` CAS the handler
+   * dispatches.
+   *
+   * @generated from field: string target = 2;
+   */
+  target: string;
+};
+
+/**
+ * Describes the message eigenius.v1.MergeBranchesRequest.
+ * Use `create(MergeBranchesRequestSchema)` to create a new message.
+ */
+export const MergeBranchesRequestSchema: GenMessage<MergeBranchesRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 51);
+
+/**
+ * @generated from message eigenius.v1.MergeBranchesResponse
+ */
+export type MergeBranchesResponse = Message<"eigenius.v1.MergeBranchesResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Error message when `success=false`. Empty otherwise.
+   *
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * Outcome of the CAS — same shape as commit responses. Populated
+   * when the merge attempt reached the lattice's `update_branch`.
+   *
+   * @generated from field: eigenius.v1.MergeInfo merge = 3;
+   */
+  merge?: MergeInfo | undefined;
+
+  /**
+   * Target branch's new tip on success. Equals the source's tip on
+   * fast-forward, the merge layer's id on trivial merge, or the
+   * target's unchanged tip on `NEEDS_WITNESSED_MERGE`. Empty on
+   * error before the merge attempt.
+   *
+   * @generated from field: string target_tip = 4;
+   */
+  targetTip: string;
+};
+
+/**
+ * Describes the message eigenius.v1.MergeBranchesResponse.
+ * Use `create(MergeBranchesResponseSchema)` to create a new message.
+ */
+export const MergeBranchesResponseSchema: GenMessage<MergeBranchesResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 52);
+
+/**
+ * @generated from message eigenius.v1.PreviewMergeRequest
+ */
+export type PreviewMergeRequest = Message<"eigenius.v1.PreviewMergeRequest"> & {
+  /**
+   * @generated from field: string source = 1;
+   */
+  source: string;
+
+  /**
+   * @generated from field: string target = 2;
+   */
+  target: string;
+};
+
+/**
+ * Describes the message eigenius.v1.PreviewMergeRequest.
+ * Use `create(PreviewMergeRequestSchema)` to create a new message.
+ */
+export const PreviewMergeRequestSchema: GenMessage<PreviewMergeRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 53);
+
+/**
+ * @generated from message eigenius.v1.PreviewMergeResponse
+ */
+export type PreviewMergeResponse = Message<"eigenius.v1.PreviewMergeResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Error message when `success=false`. Empty otherwise.
+   *
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * Predicted outcome. `success=true` always; the predicted
+   * `MergeOutcome` enum (FAST_FORWARD / TRIVIAL_MERGE /
+   * NEEDS_WITNESSED_MERGE) signals what would happen on a real
+   * merge. Side fields (`merge_layer_id`, `current_head`,
+   * `orphan_layer_id`) are NOT populated in preview — those refer
+   * to layers the kernel hasn't built yet. `conflicting_iris` IS
+   * populated when the prediction is `NEEDS_WITNESSED_MERGE` (no
+   * build cost, just the disjointness check).
+   *
+   * @generated from field: eigenius.v1.MergeInfo merge = 3;
+   */
+  merge?: MergeInfo | undefined;
+
+  /**
+   * Number of IRIs the merge layer would carry (union of per-head
+   * contributions). 0 for fast-forward / conflict. Useful for the
+   * dialog's preview line.
+   *
+   * @generated from field: uint32 predicted_iri_count = 4;
+   */
+  predictedIriCount: number;
+};
+
+/**
+ * Describes the message eigenius.v1.PreviewMergeResponse.
+ * Use `create(PreviewMergeResponseSchema)` to create a new message.
+ */
+export const PreviewMergeResponseSchema: GenMessage<PreviewMergeResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 54);
+
+/**
+ * @generated from message eigenius.v1.ConsolidateChainRequest
+ */
+export type ConsolidateChainRequest = Message<"eigenius.v1.ConsolidateChainRequest"> & {
+  /**
+   * Branch to consolidate. An empty string defaults to "main"
+   * (matches LoadRequest's convention).
+   *
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+
+  /**
+   * Hex-encoded LayerId where the consolidation range starts (oldest).
+   *
+   * @generated from field: string from_layer = 2;
+   */
+  fromLayer: string;
+
+  /**
+   * Hex-encoded LayerId where the consolidation range ends (newest).
+   * When equal to the branch's current head: at-head consolidation
+   * advances the branch ref to the consolidated layer. When strictly
+   * below the head: below-head consolidation installs a resolve
+   * redirect at `to` (D25 §12.8 / Phase 17f) and leaves the branch
+   * unchanged.
+   *
+   * @generated from field: string to_layer = 3;
+   */
+  toLayer: string;
+
+  /**
+   * Cost cap: refuse if `sum(handle.resource_count for handle in range)`
+   * exceeds this. Pass 0 to use the kernel default
+   * (`ConsolidateOpts::default`).
+   *
+   * @generated from field: uint64 max_walk_entries = 4;
+   */
+  maxWalkEntries: bigint;
+
+  /**
+   * Reserved for v2 trace-pin policies. v1 ignores this field; the
+   * kernel always uses `TracePinPolicy::Refuse`.
+   *
+   * @generated from field: string trace_pin_policy = 5;
+   */
+  tracePinPolicy: string;
+
+  /**
+   * Preserve the pre-consolidation history of the source range
+   * (D25 §12.8.1(b)). When `true` and the consolidation is below-head,
+   * GC's mark phase will keep the source-side chain alive so
+   * time-travel reads against intermediate layers continue to
+   * resolve. Default `false` (reclaim mode — the consolidated range
+   * becomes eligible for sweep). Ignored for at-head consolidations.
+   *
+   * @generated from field: bool preserve_history = 6;
+   */
+  preserveHistory: boolean;
+};
+
+/**
+ * Describes the message eigenius.v1.ConsolidateChainRequest.
+ * Use `create(ConsolidateChainRequestSchema)` to create a new message.
+ */
+export const ConsolidateChainRequestSchema: GenMessage<ConsolidateChainRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 55);
+
+/**
+ * @generated from message eigenius.v1.ConsolidateChainResponse
+ */
+export type ConsolidateChainResponse = Message<"eigenius.v1.ConsolidateChainResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Hex-encoded LayerId of the consolidated layer; empty on failure.
+   *
+   * @generated from field: string consolidated_layer = 2;
+   */
+  consolidatedLayer: string;
+
+  /**
+   * Number of layers in the original range that were collapsed.
+   *
+   * @generated from field: uint64 collapsed_layer_count = 3;
+   */
+  collapsedLayerCount: bigint;
+
+  /**
+   * True when the branch's head moved (always true on success in v1).
+   *
+   * @generated from field: bool head_advanced = 4;
+   */
+  headAdvanced: boolean;
+
+  /**
+   * Typed error kind. CONSOLIDATE_ERROR_NONE on success.
+   *
+   * @generated from field: eigenius.v1.ConsolidateErrorKind error_kind = 5;
+   */
+  errorKind: ConsolidateErrorKind;
+
+  /**
+   * Human-readable error text; empty on success.
+   *
+   * @generated from field: string error = 6;
+   */
+  error: string;
+
+  /**
+   * Echo of the offending layer id for kind=MERGE_NODE / TRACE_PIN
+   * / BRANCH_ADVANCED. Empty otherwise.
+   *
+   * @generated from field: string error_layer = 7;
+   */
+  errorLayer: string;
+
+  /**
+   * Echo of the trace count for kind=TRACE_PIN; the predicted entry
+   * count for kind=COST_EXCEEDS_CAP. Zero otherwise.
+   *
+   * @generated from field: uint64 error_count = 8;
+   */
+  errorCount: bigint;
+};
+
+/**
+ * Describes the message eigenius.v1.ConsolidateChainResponse.
+ * Use `create(ConsolidateChainResponseSchema)` to create a new message.
+ */
+export const ConsolidateChainResponseSchema: GenMessage<ConsolidateChainResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 56);
+
+/**
+ * @generated from message eigenius.v1.EstimateConsolidationRequest
+ */
+export type EstimateConsolidationRequest = Message<"eigenius.v1.EstimateConsolidationRequest"> & {
+  /**
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: string from_layer = 2;
+   */
+  fromLayer: string;
+
+  /**
+   * @generated from field: string to_layer = 3;
+   */
+  toLayer: string;
+
+  /**
+   * @generated from field: uint64 max_walk_entries = 4;
+   */
+  maxWalkEntries: bigint;
+
+  /**
+   * @generated from field: string trace_pin_policy = 5;
+   */
+  tracePinPolicy: string;
+
+  /**
+   * @generated from field: bool preserve_history = 6;
+   */
+  preserveHistory: boolean;
+};
+
+/**
+ * Describes the message eigenius.v1.EstimateConsolidationRequest.
+ * Use `create(EstimateConsolidationRequestSchema)` to create a new message.
+ */
+export const EstimateConsolidationRequestSchema: GenMessage<EstimateConsolidationRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 57);
+
+/**
+ * @generated from message eigenius.v1.EstimateConsolidationResponse
+ */
+export type EstimateConsolidationResponse = Message<"eigenius.v1.EstimateConsolidationResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Hex-encoded LayerId the consolidated layer would have if
+   * ConsolidateChain were invoked with the same inputs.
+   *
+   * @generated from field: string predicted_consolidated_layer = 2;
+   */
+  predictedConsolidatedLayer: string;
+
+  /**
+   * @generated from field: uint64 collapsed_layer_count = 3;
+   */
+  collapsedLayerCount: bigint;
+
+  /**
+   * Upper-bound prediction (counted before dedup).
+   *
+   * @generated from field: uint64 predicted_walk_entries = 4;
+   */
+  predictedWalkEntries: bigint;
+
+  /**
+   * Actual deduplicated walk size (≤ predicted; the gap is the
+   * dedup savings).
+   *
+   * @generated from field: uint64 actual_walk_entries = 5;
+   */
+  actualWalkEntries: bigint;
+
+  /**
+   * @generated from field: eigenius.v1.ConsolidateErrorKind error_kind = 6;
+   */
+  errorKind: ConsolidateErrorKind;
+
+  /**
+   * @generated from field: string error = 7;
+   */
+  error: string;
+
+  /**
+   * @generated from field: string error_layer = 8;
+   */
+  errorLayer: string;
+
+  /**
+   * @generated from field: uint64 error_count = 9;
+   */
+  errorCount: bigint;
+};
+
+/**
+ * Describes the message eigenius.v1.EstimateConsolidationResponse.
+ * Use `create(EstimateConsolidationResponseSchema)` to create a new message.
+ */
+export const EstimateConsolidationResponseSchema: GenMessage<EstimateConsolidationResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 58);
+
+/**
+ * @generated from message eigenius.v1.TagInfo
+ */
+export type TagInfo = Message<"eigenius.v1.TagInfo"> & {
+  /**
+   * Matches `[A-Za-z0-9_-]+`, max 256 chars.
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Hex-encoded LayerId the tag points at.
+   *
+   * @generated from field: string layer_id = 2;
+   */
+  layerId: string;
+
+  /**
+   * Layer's commit timestamp (millis since Unix epoch), surfaced so
+   * the notebook's Tags panel can show "tagged at <time>" without
+   * a per-row GetBranch fan-out. Zero when the layer's handle
+   * couldn't be loaded.
+   *
+   * @generated from field: int64 tagged_at_ms = 3;
+   */
+  taggedAtMs: bigint;
+};
+
+/**
+ * Describes the message eigenius.v1.TagInfo.
+ * Use `create(TagInfoSchema)` to create a new message.
+ */
+export const TagInfoSchema: GenMessage<TagInfo> = /*@__PURE__*/
+  messageDesc(file_eigenius, 59);
+
+/**
+ * @generated from message eigenius.v1.CreateTagRequest
+ */
+export type CreateTagRequest = Message<"eigenius.v1.CreateTagRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Hex-encoded LayerId. The kernel verifies the layer exists in
+   * storage; an unknown id is rejected with `NotFound`.
+   *
+   * @generated from field: string layer_id = 2;
+   */
+  layerId: string;
+};
+
+/**
+ * Describes the message eigenius.v1.CreateTagRequest.
+ * Use `create(CreateTagRequestSchema)` to create a new message.
+ */
+export const CreateTagRequestSchema: GenMessage<CreateTagRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 60);
+
+/**
+ * @generated from message eigenius.v1.CreateTagResponse
+ */
+export type CreateTagResponse = Message<"eigenius.v1.CreateTagResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * Human-readable error text; empty on success. Populated when the
+   * tag name is invalid, the name is already in use, or `layer_id`
+   * doesn't resolve.
+   *
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * True when the name was already taken by an existing tag. The
+   * client distinguishes "name collision" from other failures so a
+   * retry-with-different-name UX can short-circuit.
+   *
+   * @generated from field: bool already_exists = 3;
+   */
+  alreadyExists: boolean;
+};
+
+/**
+ * Describes the message eigenius.v1.CreateTagResponse.
+ * Use `create(CreateTagResponseSchema)` to create a new message.
+ */
+export const CreateTagResponseSchema: GenMessage<CreateTagResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 61);
+
+/**
+ * @generated from message eigenius.v1.ListTagsRequest
+ */
+export type ListTagsRequest = Message<"eigenius.v1.ListTagsRequest"> & {
+};
+
+/**
+ * Describes the message eigenius.v1.ListTagsRequest.
+ * Use `create(ListTagsRequestSchema)` to create a new message.
+ */
+export const ListTagsRequestSchema: GenMessage<ListTagsRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 62);
+
+/**
+ * @generated from message eigenius.v1.ListTagsResponse
+ */
+export type ListTagsResponse = Message<"eigenius.v1.ListTagsResponse"> & {
+  /**
+   * @generated from field: repeated eigenius.v1.TagInfo tags = 1;
+   */
+  tags: TagInfo[];
+};
+
+/**
+ * Describes the message eigenius.v1.ListTagsResponse.
+ * Use `create(ListTagsResponseSchema)` to create a new message.
+ */
+export const ListTagsResponseSchema: GenMessage<ListTagsResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 63);
+
+/**
+ * @generated from message eigenius.v1.DeleteTagRequest
+ */
+export type DeleteTagRequest = Message<"eigenius.v1.DeleteTagRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message eigenius.v1.DeleteTagRequest.
+ * Use `create(DeleteTagRequestSchema)` to create a new message.
+ */
+export const DeleteTagRequestSchema: GenMessage<DeleteTagRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 64);
+
+/**
+ * @generated from message eigenius.v1.DeleteTagResponse
+ */
+export type DeleteTagResponse = Message<"eigenius.v1.DeleteTagResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * True when the tag existed and was removed; false when the call
+   * was idempotent (no tag by that name).
+   *
+   * @generated from field: bool deleted = 3;
+   */
+  deleted: boolean;
+};
+
+/**
+ * Describes the message eigenius.v1.DeleteTagResponse.
+ * Use `create(DeleteTagResponseSchema)` to create a new message.
+ */
+export const DeleteTagResponseSchema: GenMessage<DeleteTagResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 65);
+
+/**
+ * @generated from message eigenius.v1.EstimateGcRequest
+ */
+export type EstimateGcRequest = Message<"eigenius.v1.EstimateGcRequest"> & {
+};
+
+/**
+ * Describes the message eigenius.v1.EstimateGcRequest.
+ * Use `create(EstimateGcRequestSchema)` to create a new message.
+ */
+export const EstimateGcRequestSchema: GenMessage<EstimateGcRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 66);
+
+/**
+ * @generated from message eigenius.v1.EstimateGcResponse
+ */
+export type EstimateGcResponse = Message<"eigenius.v1.EstimateGcResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * Layers that would be deleted by a `RunGc` call right now —
+   * unreachable from any root AND older than the kernel's `min_age`
+   * protection window.
+   *
+   * @generated from field: uint64 eligible_layers = 3;
+   */
+  eligibleLayers: bigint;
+
+  /**
+   * Layers that are unreachable but younger than `min_age` and so
+   * would be skipped by sweep. Surfaced so the operator understands
+   * why a layer they think should go is still hanging around.
+   *
+   * @generated from field: uint64 protected_by_age = 4;
+   */
+  protectedByAge: bigint;
+
+  /**
+   * Protection accounting (D34 §9.4). Lists what's currently keeping
+   * layers alive so the operator can see why the eligible count is
+   * what it is.
+   *
+   * @generated from field: uint64 branch_pins = 5;
+   */
+  branchPins: bigint;
+
+  /**
+   * @generated from field: uint64 tag_pins = 6;
+   */
+  tagPins: bigint;
+
+  /**
+   * @generated from field: uint64 task_pins = 7;
+   */
+  taskPins: bigint;
+
+  /**
+   * Reserved for future per-layer byte accounting. v1 surfaces 0;
+   * accurate reclaim estimates need the backend to expose
+   * per-layer storage size (a tracked follow-up).
+   *
+   * @generated from field: uint64 reclaimable_bytes = 8;
+   */
+  reclaimableBytes: bigint;
+};
+
+/**
+ * Describes the message eigenius.v1.EstimateGcResponse.
+ * Use `create(EstimateGcResponseSchema)` to create a new message.
+ */
+export const EstimateGcResponseSchema: GenMessage<EstimateGcResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 67);
+
+/**
+ * @generated from message eigenius.v1.RunGcRequest
+ */
+export type RunGcRequest = Message<"eigenius.v1.RunGcRequest"> & {
+};
+
+/**
+ * Describes the message eigenius.v1.RunGcRequest.
+ * Use `create(RunGcRequestSchema)` to create a new message.
+ */
+export const RunGcRequestSchema: GenMessage<RunGcRequest> = /*@__PURE__*/
+  messageDesc(file_eigenius, 68);
+
+/**
+ * @generated from message eigenius.v1.RunGcResponse
+ */
+export type RunGcResponse = Message<"eigenius.v1.RunGcResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * Number of layers walked during the mark phase (i.e., reachable
+   * from any root).
+   *
+   * @generated from field: uint64 layers_marked = 3;
+   */
+  layersMarked: bigint;
+
+  /**
+   * Number of layers identified as unreachable.
+   *
+   * @generated from field: uint64 layers_unreachable = 4;
+   */
+  layersUnreachable: bigint;
+
+  /**
+   * Number of unreachable layers actually deleted.
+   *
+   * @generated from field: uint64 layers_swept = 5;
+   */
+  layersSwept: bigint;
+
+  /**
+   * Number of layers that were unreachable but skipped due to
+   * `min_age` protection.
+   *
+   * @generated from field: uint64 layers_protected_by_age = 6;
+   */
+  layersProtectedByAge: bigint;
+};
+
+/**
+ * Describes the message eigenius.v1.RunGcResponse.
+ * Use `create(RunGcResponseSchema)` to create a new message.
+ */
+export const RunGcResponseSchema: GenMessage<RunGcResponse> = /*@__PURE__*/
+  messageDesc(file_eigenius, 69);
+
+/**
+ * The result of a `update_branch(AllowTrivial)` CAS attempt that
+ * backs a layer-committing RPC. Reported on every response that
+ * commits to a branch (Load, RunProgram, Reflect, Query INTO).
+ *
+ * @generated from enum eigenius.v1.MergeOutcome
+ */
+export enum MergeOutcome {
+  /**
+   * No CAS happened. The kernel has no persistent backend, or the
+   * commit didn't reach the persist step (eval errored, validation
+   * rejected the resources, etc.). Notebook UIs treat this as "no
+   * commit-shape information available" and render no badge.
+   *
+   * @generated from enum value: MERGE_OUTCOME_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Clean append — `expected_old` matched the branch's current head
+   * and the branch advanced to the caller's `new_head`.
+   *
+   * @generated from enum value: MERGE_OUTCOME_FAST_FORWARD = 1;
+   */
+  FAST_FORWARD = 1,
+
+  /**
+   * Disjoint-IRI auto-reconciliation: concurrent activity moved the
+   * branch under the caller, but the two contributions modify
+   * non-overlapping resource sets since their LCA. The kernel
+   * produced a merge layer with both heads as parents and advanced
+   * the branch to it. `merge_layer_id` is the merge layer's id.
+   *
+   * @generated from enum value: MERGE_OUTCOME_TRIVIAL_MERGE = 2;
+   */
+  TRIVIAL_MERGE = 2,
+
+  /**
+   * Real divergence: concurrent contributions touch the same IRIs.
+   * The branch was **not** advanced; the caller's layer exists in
+   * the DAG but isn't pointed at by any branch ref (and will become
+   * GC-eligible unless the caller saves it as a sibling branch).
+   * Pre-Phase-15, the caller must resolve manually (sibling branch /
+   * rebase / discard).
+   *
+   * @generated from enum value: MERGE_OUTCOME_NEEDS_WITNESSED_MERGE = 3;
+   */
+  NEEDS_WITNESSED_MERGE = 3,
+
+  /**
+   * The anchored-commit cache (D33 §6) found a content-equivalent
+   * layer at a different chain position; the persist short-circuited
+   * and the branch ref was **not** advanced. `merge_layer_id` carries
+   * the cached layer's id so consumers can read the canonical
+   * content there. Distinct from `UNSPECIFIED` so notebook UIs can
+   * render a "cached" badge for this case without false-positives
+   * on in-memory-only chains.
+   *
+   * @generated from enum value: MERGE_OUTCOME_CACHED_DIFFERENT_POSITION = 4;
+   */
+  CACHED_DIFFERENT_POSITION = 4,
+}
+
+/**
+ * Describes the enum eigenius.v1.MergeOutcome.
+ */
+export const MergeOutcomeSchema: GenEnum<MergeOutcome> = /*@__PURE__*/
+  enumDesc(file_eigenius, 0);
+
+/**
+ * Runtime classification for an institution (D34 §G.8). Mirrors
+ * `crate::institution::registry::RuntimeKind` on the kernel side.
+ *
+ * @generated from enum eigenius.v1.RuntimeKind
+ */
+export enum RuntimeKind {
+  /**
+   * The institution resource has no `runtime` property. The kernel
+   * can still dispatch through ordinary EigenQL paths; the operator
+   * just doesn't see a runtime-kind label.
+   *
+   * @generated from enum value: RUNTIME_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * In-process Rust trait object linked into the kernel binary.
+   *
+   * @generated from enum value: RUNTIME_KIND_IN_PROCESS = 1;
+   */
+  IN_PROCESS = 1,
+
+  /**
+   * WASM Component Model binary hosted via Wasmtime in the kernel.
+   *
+   * @generated from enum value: RUNTIME_KIND_WASM = 2;
+   */
+  WASM = 2,
+
+  /**
+   * External service (gRPC, LSP, etc.) routed through D31 lifecycle.
+   *
+   * @generated from enum value: RUNTIME_KIND_EXTERNAL = 3;
+   */
+  EXTERNAL = 3,
+}
+
+/**
+ * Describes the enum eigenius.v1.RuntimeKind.
+ */
+export const RuntimeKindSchema: GenEnum<RuntimeKind> = /*@__PURE__*/
+  enumDesc(file_eigenius, 1);
+
+/**
+ * Dispatch role declared on a `QueryClass` (D14 §6). One QueryClass
+ * can carry multiple roles — e.g. `[OnDemand, Decidable]`.
+ *
+ * @generated from enum eigenius.v1.DispatchRole
+ */
+export enum DispatchRole {
+  /**
+   * @generated from enum value: DISPATCH_ROLE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Explicit invocation — EigenQL FIBER clause (D2 v2 §3.5).
+   *
+   * @generated from enum value: DISPATCH_ROLE_ON_DEMAND = 1;
+   */
+  ON_DEMAND = 1,
+
+  /**
+   * Fired automatically on Load when a resource of the bound input
+   * class enters the chain. Result class must be `Verdict`.
+   *
+   * @generated from enum value: DISPATCH_ROLE_AUTO_ON_LOAD = 2;
+   */
+  AUTO_ON_LOAD = 2,
+
+  /**
+   * Fired during type-check reduction of `Exp::NativeDecide`.
+   * Result class must be `Verdict`.
+   *
+   * @generated from enum value: DISPATCH_ROLE_DECIDABLE = 3;
+   */
+  DECIDABLE = 3,
+}
+
+/**
+ * Describes the enum eigenius.v1.DispatchRole.
+ */
+export const DispatchRoleSchema: GenEnum<DispatchRole> = /*@__PURE__*/
+  enumDesc(file_eigenius, 2);
 
 /**
  * @generated from enum eigenius.v1.NodeKind
@@ -1607,7 +2804,7 @@ export enum NodeKind {
  * Describes the enum eigenius.v1.NodeKind.
  */
 export const NodeKindSchema: GenEnum<NodeKind> = /*@__PURE__*/
-  enumDesc(file_eigenius, 0);
+  enumDesc(file_eigenius, 3);
 
 /**
  * @generated from enum eigenius.v1.EdgeKind
@@ -1672,7 +2869,100 @@ export enum EdgeKind {
  * Describes the enum eigenius.v1.EdgeKind.
  */
 export const EdgeKindSchema: GenEnum<EdgeKind> = /*@__PURE__*/
-  enumDesc(file_eigenius, 1);
+  enumDesc(file_eigenius, 4);
+
+/**
+ * Typed error variants surfaced by the consolidation RPCs. Mirrors
+ * `crate::layer::ConsolidateError`; lets the CLI dispatch on the
+ * kind instead of regex-matching the human-readable `error`
+ * string.
+ *
+ * Variants carry the `CONSOLIDATE_ERROR_KIND_` prefix to satisfy
+ * buf's `ENUM_VALUE_PREFIX` lint and match the convention every
+ * other enum in this proto follows (`MERGE_OUTCOME_*`,
+ * `RUNTIME_KIND_*`, etc.). Both prost (Rust) and protoc-gen-es (TS)
+ * strip the prefix when generating their enum types, so Rust call
+ * sites stay clean (`ConsolidateErrorKind::RangeNotAncestral`) and
+ * TS bindings see `ConsolidateErrorKind.RANGE_NOT_ANCESTRAL`.
+ *
+ * @generated from enum eigenius.v1.ConsolidateErrorKind
+ */
+export enum ConsolidateErrorKind {
+  /**
+   * No error / unset. Successful responses leave this at the default.
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * `from` is not an ancestor of `to`.
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_RANGE_NOT_ANCESTRAL = 1;
+   */
+  RANGE_NOT_ANCESTRAL = 1,
+
+  /**
+   * The branch ref didn't match the expected head (concurrent advance,
+   * or the operator passed a stale `to`).
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_BRANCH_ADVANCED = 2;
+   */
+  BRANCH_ADVANCED = 2,
+
+  /**
+   * The range contains a multi-parent merge layer (D25 §8.1).
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_RANGE_CONTAINS_MERGE_NODE = 3;
+   */
+  RANGE_CONTAINS_MERGE_NODE = 3,
+
+  /**
+   * The range contains a layer pinned by an active task trace
+   * (TracePinPolicy::Refuse).
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_RANGE_CONTAINS_TRACE_PIN = 4;
+   */
+  RANGE_CONTAINS_TRACE_PIN = 4,
+
+  /**
+   * Predicted walk size exceeds `max_walk_entries`.
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_COST_EXCEEDS_CAP = 5;
+   */
+  COST_EXCEEDS_CAP = 5,
+
+  /**
+   * Underlying storage write failure or other internal fault.
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_INTERNAL = 6;
+   */
+  INTERNAL = 6,
+
+  /**
+   * `to` exists in storage but isn't on the chain `branch` currently
+   * points at — a redirect installed at `to` would be unreachable.
+   * Phase 17f below-head consolidation only.
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_TO_NOT_REACHABLE_FROM_HEAD = 7;
+   */
+  TO_NOT_REACHABLE_FROM_HEAD = 7,
+
+  /**
+   * The consolidation range crosses an existing resolve redirect
+   * (D25 §12.8.1(a)). v1 refuses; the future compose policy (issue
+   * #49) will lift this.
+   *
+   * @generated from enum value: CONSOLIDATE_ERROR_KIND_RANGE_CROSSES_EXISTING_REDIRECT = 8;
+   */
+  RANGE_CROSSES_EXISTING_REDIRECT = 8,
+}
+
+/**
+ * Describes the enum eigenius.v1.ConsolidateErrorKind.
+ */
+export const ConsolidateErrorKindSchema: GenEnum<ConsolidateErrorKind> = /*@__PURE__*/
+  enumDesc(file_eigenius, 5);
 
 /**
  * @generated from service eigenius.v1.EigeniusKernel
@@ -1883,6 +3173,129 @@ export const EigeniusKernel: GenService<{
     methodKind: "unary";
     input: typeof DeleteBranchRequestSchema;
     output: typeof DeleteBranchResponseSchema;
+  },
+  /**
+   * Explicit merge of `source` into `target` (D34 §6.3). Wraps an
+   * `update_branch(target, target_tip, source_tip, AllowTrivial)`
+   * call: a fast-forward when source is ahead of target, a trivial
+   * merge when their contributions since the LCA touch disjoint
+   * IRIs, or `NeedsWitnessedMerge` when they conflict. The latter
+   * populates `merge.conflicting_iris` + `merge.orphan_layer_id`
+   * (= source_tip) so the caller can offer "save as sibling".
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.MergeBranches
+   */
+  mergeBranches: {
+    methodKind: "unary";
+    input: typeof MergeBranchesRequestSchema;
+    output: typeof MergeBranchesResponseSchema;
+  },
+  /**
+   * Non-mutating dry-run of `MergeBranches`. Returns the predicted
+   * `MergeOutcome` without building a merge layer or moving any
+   * branch ref. Powers the explicit Merge dialog's preview pane
+   * (D34 §6.3). Cost: same LCA + IRI-disjointness walk as the real
+   * merge, minus the layer build + persist.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.PreviewMerge
+   */
+  previewMerge: {
+    methodKind: "unary";
+    input: typeof PreviewMergeRequestSchema;
+    output: typeof PreviewMergeResponseSchema;
+  },
+  /**
+   * Collapse `[from..to]` on `branch` into a single resolve-equivalent
+   * consolidated layer whose parent is `parent(from)`. `to` must equal
+   * the branch's current head (v1 restriction; see D25 §12.8 for the
+   * v2 forward-pointer relaxation). Trace pins are auto-enumerated
+   * from the task store and supplied to the kernel.
+   *
+   * Returns the consolidated `LayerId`, the number of collapsed
+   * layers, and a structured error variant (`error_kind`) when the
+   * operation can't proceed. See D25 §5.1 for the typed errors.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.ConsolidateChain
+   */
+  consolidateChain: {
+    methodKind: "unary";
+    input: typeof ConsolidateChainRequestSchema;
+    output: typeof ConsolidateChainResponseSchema;
+  },
+  /**
+   * Non-mutating dry-run of `ConsolidateChain`. Same validation, same
+   * typed errors, no persist and no branch advance. Returns the
+   * predicted consolidated `LayerId`, the collapsed-layer count, and
+   * both the predicted (upper-bound) and actual (dedup'd) top-of-stack
+   * walk-entry counts. The operator pipes the predicted LayerId into
+   * a follow-up real `ConsolidateChain` to confirm intent.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.EstimateConsolidation
+   */
+  estimateConsolidation: {
+    methodKind: "unary";
+    input: typeof EstimateConsolidationRequestSchema;
+    output: typeof EstimateConsolidationResponseSchema;
+  },
+  /**
+   * Create a new tag pointing at `layer_id`. Fails with
+   * `AlreadyExists` if a tag with this name already exists; fails
+   * with `NotFound` if `layer_id` is not in storage.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.CreateTag
+   */
+  createTag: {
+    methodKind: "unary";
+    input: typeof CreateTagRequestSchema;
+    output: typeof CreateTagResponseSchema;
+  },
+  /**
+   * Enumerate every tag as (name, layer_id) pairs.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.ListTags
+   */
+  listTags: {
+    methodKind: "unary";
+    input: typeof ListTagsRequestSchema;
+    output: typeof ListTagsResponseSchema;
+  },
+  /**
+   * Remove a tag ref. Idempotent: deleting a non-existent tag is a
+   * success with `deleted = false`. The target layer becomes
+   * GC-eligible if no other root (branch, active task pin, or
+   * another tag) still reaches it.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.DeleteTag
+   */
+  deleteTag: {
+    methodKind: "unary";
+    input: typeof DeleteTagRequestSchema;
+    output: typeof DeleteTagResponseSchema;
+  },
+  /**
+   * Non-mutating dry-run of `RunGc`. Computes the same root set,
+   * runs the mark phase, and reports how many layers would be
+   * swept versus protected by the age window — but performs no
+   * delete. The notebook's GC panel Step 1 (preview) uses this.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.EstimateGc
+   */
+  estimateGc: {
+    methodKind: "unary";
+    input: typeof EstimateGcRequestSchema;
+    output: typeof EstimateGcResponseSchema;
+  },
+  /**
+   * Run a single mark-and-sweep pass. Deletes every layer that is
+   * unreachable from the current root set and older than the kernel's
+   * `min_age` protection window.
+   *
+   * @generated from rpc eigenius.v1.EigeniusKernel.RunGc
+   */
+  runGc: {
+    methodKind: "unary";
+    input: typeof RunGcRequestSchema;
+    output: typeof RunGcResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_eigenius, 0);

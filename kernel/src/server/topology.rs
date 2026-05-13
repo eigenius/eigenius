@@ -89,6 +89,10 @@ fn walk_layer(
             "institution_count".to_string(),
             counts.institutions.to_string(),
         );
+        // Commit timestamp (D34 §5.2). Millis since Unix epoch.
+        // Consumers render this as the layer's "Last commit" timestamp;
+        // the notebook's History panel keys its row ordering on it.
+        attrs.insert("created_at_ms".to_string(), layer.created_at().to_string());
         nodes.push(proto::TopologyNode {
             id: layer_id.clone(),
             kind: proto::NodeKind::Layer as i32,
@@ -232,7 +236,10 @@ fn resource_attrs(
     }
     let data_type_iri = Iri::parse(wk::DATA_TYPE_PROP).expect("DATA_TYPE_PROP IRI");
     if let Some(v) = resource.get(&data_type_iri) {
-        if let Some(s) = v.as_str() {
+        // `data_type` is a resource-typed property — its value is
+        // `Value::ResourceRef` after `canonicalise_resource_refs` runs,
+        // not `Value::String`. Use `as_iri_str` to cover both shapes.
+        if let Some(s) = v.as_iri_str() {
             attrs.insert("data_type".to_string(), s.to_string());
         }
     }
@@ -253,7 +260,7 @@ fn emit_resource_edges(
     let is_a_iri = Iri::parse(wk::IS_A).expect("IS_A IRI");
     if let Some(Value::Array(values)) = resource.get(&is_a_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_str() {
+            if let Some(target_iri) = v.as_iri_str() {
                 // Skip self-typing for taxonomy meta-resources.
                 if kind == proto::NodeKind::Class && target_iri == wk::CLASS {
                     continue;
@@ -275,7 +282,7 @@ fn emit_resource_edges(
     let subclass_iri = Iri::parse(wk::PARENT_CLASSES).expect("PARENT_CLASSES IRI");
     if let Some(Value::Array(values)) = resource.get(&subclass_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_str() {
+            if let Some(target_iri) = v.as_iri_str() {
                 edges.push(proto::TopologyEdge {
                     source: source.clone(),
                     target: target_iri.to_string(),
@@ -290,7 +297,7 @@ fn emit_resource_edges(
     let requires_iri = Iri::parse(wk::REQUIRES).expect("REQUIRES IRI");
     if let Some(Value::Array(values)) = resource.get(&requires_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_str() {
+            if let Some(target_iri) = v.as_iri_str() {
                 edges.push(proto::TopologyEdge {
                     source: source.clone(),
                     target: target_iri.to_string(),
@@ -305,7 +312,7 @@ fn emit_resource_edges(
     let recommends_iri = Iri::parse(wk::RECOMMENDS).expect("RECOMMENDS IRI");
     if let Some(Value::Array(values)) = resource.get(&recommends_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_str() {
+            if let Some(target_iri) = v.as_iri_str() {
                 edges.push(proto::TopologyEdge {
                     source: source.clone(),
                     target: target_iri.to_string(),
@@ -321,7 +328,7 @@ fn emit_resource_edges(
         let class_types_iri = Iri::parse(wk::CLASS_TYPES).expect("CLASS_TYPES IRI");
         if let Some(Value::Array(values)) = resource.get(&class_types_iri) {
             for v in values {
-                if let Some(target_iri) = v.as_str() {
+                if let Some(target_iri) = v.as_iri_str() {
                     edges.push(proto::TopologyEdge {
                         source: source.clone(),
                         target: target_iri.to_string(),
@@ -608,6 +615,90 @@ mod tests {
             1,
             "expected exactly one Foo → name requires edge despite the resource appearing in two layers; got {:?}",
             requires_edges
+        );
+    }
+
+    /// Production resources go through `canonicalise_resource_refs` at
+    /// `LayerBuilder::build` time, which rewrites `Value::String` IRIs
+    /// on resource-typed properties to `Value::ResourceRef`. The walker
+    /// originally used `Value::as_str` which returns `None` for
+    /// `ResourceRef`, silently dropping every type/hierarchy edge in
+    /// any chain that had been built (= every production chain). This
+    /// test pins the post-canonicalisation shape directly so we'd
+    /// catch a regression even without a full LayerBuilder round-trip.
+    #[test]
+    fn walker_emits_edges_for_canonicalised_resource_refs() {
+        let mut animal = Resource::new(iri("urn:eigenius:example:Animal"));
+        animal.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        );
+        animal.set(iri(wk::SHORT_NAME), Value::String("Animal".to_string()));
+
+        let mut name_prop = Resource::new(iri("urn:eigenius:example:name"));
+        name_prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        name_prop.set(iri(wk::SHORT_NAME), Value::String("name".to_string()));
+        name_prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+
+        let mut dog = Resource::new(iri("urn:eigenius:example:Dog"));
+        dog.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        );
+        dog.set(iri(wk::SHORT_NAME), Value::String("Dog".to_string()));
+        dog.set(
+            iri(wk::PARENT_CLASSES),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:example:Animal"))]),
+        );
+        dog.set(
+            iri(wk::REQUIRES),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:example:name"))]),
+        );
+
+        let mut root = LayerBuilder::new("root", None);
+        root.add_resource(animal).unwrap();
+        root.add_resource(name_prop).unwrap();
+        root.add_resource(dog).unwrap();
+        let layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
+
+        let topo = walk(&layer, 0, false);
+
+        let subclass = topo.edges.iter().find(|e| {
+            e.kind == proto::EdgeKind::SubclassOf as i32
+                && e.source == "urn:eigenius:example:Dog"
+                && e.target == "urn:eigenius:example:Animal"
+        });
+        assert!(
+            subclass.is_some(),
+            "expected SUBCLASS_OF Dog → Animal edge from ResourceRef-shaped data; edges = {:?}",
+            topo.edges,
+        );
+
+        let requires = topo.edges.iter().find(|e| {
+            e.kind == proto::EdgeKind::Requires as i32
+                && e.source == "urn:eigenius:example:Dog"
+                && e.target == "urn:eigenius:example:name"
+        });
+        assert!(
+            requires.is_some(),
+            "expected REQUIRES Dog → name edge from ResourceRef-shaped data; edges = {:?}",
+            topo.edges,
+        );
+
+        // data_type attr should be readable post-canonicalisation too.
+        let name_node = topo
+            .nodes
+            .iter()
+            .find(|n| n.id == "urn:eigenius:example:name")
+            .expect("name property node present");
+        assert_eq!(
+            name_node.attrs.get("data_type").map(String::as_str),
+            Some(wk::STRING),
+            "expected data_type attr read off ResourceRef value; got: {:?}",
+            name_node.attrs,
         );
     }
 }

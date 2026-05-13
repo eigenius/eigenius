@@ -100,7 +100,7 @@ export const eigenqlLanguage = StreamLanguage.define<{ inComment: boolean }>({
     if (stream.match('"')) {
       while (!stream.eol()) {
         const ch = stream.next();
-        if (ch === '\\') {
+        if (ch === "\\") {
           stream.next(); // skip escaped char
         } else if (ch === '"') {
           return "string";

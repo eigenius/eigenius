@@ -655,12 +655,15 @@ impl<'a> Validator<'a> {
             // resolved through the chain first.
             if let Value::Embedded(embedded) = v {
                 if !self.is_instance_of_any(embedded, &allowed_refs) {
+                    let actual = format_is_a_list(embedded.is_a());
+                    let allowed = format_iri_refs(&allowed_refs);
                     errors.push(ValidationError {
                         resource_id: res_id.clone(),
                         property: Some(prop_iri.clone()),
                         rule: ValidationRule::ClassTypeMismatch,
-                        message: "embedded resource is not an instance of any allowed class"
-                            .to_string(),
+                        message: format!(
+                            "embedded value on property '{prop_iri}' has is_a {actual} but must be an instance of one of: {allowed}"
+                        ),
                     });
                 }
                 continue;
@@ -668,12 +671,14 @@ impl<'a> Validator<'a> {
             if let Some(ref_iri) = v.as_iri() {
                 if let Some(referenced) = self.layer.resolve(&ref_iri) {
                     if !self.is_instance_of_any(&referenced, &allowed_refs) {
+                        let actual = format_is_a_list(referenced.is_a());
+                        let allowed = format_iri_refs(&allowed_refs);
                         errors.push(ValidationError {
                             resource_id: res_id.clone(),
                             property: Some(prop_iri.clone()),
                             rule: ValidationRule::ClassTypeMismatch,
                             message: format!(
-                                "referenced resource '{ref_iri}' is not an instance of any allowed class"
+                                "referenced resource '{ref_iri}' has is_a {actual} but must be an instance of one of: {allowed}"
                             ),
                         });
                     }
@@ -1625,6 +1630,31 @@ fn value_as_iri(value: &Value) -> Option<Iri> {
     }
 }
 
+/// Format a resource's `is_a` list for inclusion in an error message.
+/// `[]` for empty, otherwise `[a, b, c]`.
+fn format_is_a_list(classes: Vec<Iri>) -> String {
+    if classes.is_empty() {
+        "[]".to_string()
+    } else {
+        let joined = classes
+            .iter()
+            .map(|i| i.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{joined}]")
+    }
+}
+
+/// Format an `&[&Iri]` slice for inclusion in an error message.
+fn format_iri_refs(refs: &[&Iri]) -> String {
+    let joined = refs
+        .iter()
+        .map(|i| i.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{joined}]")
+}
+
 /// Bundle of "what we're checking" for a Comorphism's typed-reference
 /// fields (rule 15, D14 §4.5). Two such values cover `export_format`
 /// and `import_format`.
@@ -2491,7 +2521,11 @@ mod tests {
         let base = build_full_bootstrap_layer();
         let mut builder = LayerBuilder::new("test", Some(base));
 
-        // A ProgramTrace missing trace_tree, started_at, completed_at
+        // A ProgramTrace missing started_at and completed_at. (Note:
+        // `trace_tree` is *recommended*, not required — pure-leaf
+        // programs like a `Var`-body identity produce no trace tree,
+        // and the reflection ontology accepts traces without one. See
+        // `Trace` enum's leaf comment in kernel/src/program/trace.rs.)
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:bad_trace",
@@ -2506,7 +2540,7 @@ mod tests {
                         "urn:eigenius:reflection:program",
                         Value::String("urn:eigenius:test:some_program".to_string()),
                     ),
-                    // Missing: trace_tree, started_at, completed_at
+                    // Missing: started_at, completed_at
                 ],
             ))
             .unwrap();
@@ -2522,11 +2556,31 @@ mod tests {
                     && e.rule == ValidationRule::MissingRequired
             })
             .collect();
-        // Should have at least 3 missing: trace_tree, started_at, completed_at
+        // Two required fields are missing: started_at, completed_at.
         assert!(
-            missing_errors.len() >= 3,
-            "ProgramTrace missing 3 required fields should have >= 3 errors, got {}: {missing_errors:?}",
+            missing_errors.len() >= 2,
+            "ProgramTrace missing 2 required fields should have >= 2 errors, got {}: {missing_errors:?}",
             missing_errors.len()
+        );
+        // Pin which fields are actually flagged — guards against a
+        // regression where `trace_tree` accidentally moves back to
+        // `requires` (or where started_at / completed_at quietly
+        // disappear from the requires list).
+        let missing_props: std::collections::BTreeSet<&str> = missing_errors
+            .iter()
+            .filter_map(|e| e.property.as_ref().map(|i| i.as_str()))
+            .collect();
+        assert!(
+            missing_props.contains("urn:eigenius:reflection:started_at"),
+            "expected `started_at` to be flagged missing; flagged set = {missing_props:?}",
+        );
+        assert!(
+            missing_props.contains("urn:eigenius:reflection:completed_at"),
+            "expected `completed_at` to be flagged missing; flagged set = {missing_props:?}",
+        );
+        assert!(
+            !missing_props.contains("urn:eigenius:reflection:trace_tree"),
+            "`trace_tree` is recommended, not required — a missing trace_tree must not surface as a MissingRequired error: {missing_props:?}",
         );
     }
 

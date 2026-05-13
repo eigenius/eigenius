@@ -154,7 +154,9 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
     looksLikeTopologyNode(obj.nodes[0])
   ) {
     const hasNonLayerNodes = obj.nodes.some(
-      (n) => looksLikeTopologyNode(n) && (n as { kind: number }).kind !== NodeKind.LAYER,
+      (n) =>
+        looksLikeTopologyNode(n) &&
+        (n as { kind: number }).kind !== NodeKind.LAYER,
     );
     return hasNonLayerNodes
       ? (
@@ -260,7 +262,8 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
     return (
       <div className={styles.status}>
         <Body1>
-          Loaded {obj.resourceCount} resource{obj.resourceCount === 1 ? "" : "s"}
+          Loaded {obj.resourceCount}{" "}
+          resource{obj.resourceCount === 1 ? "" : "s"}
         </Body1>
         {obj.layerId && (
           <Caption1 className={styles.meta}>
@@ -272,9 +275,7 @@ function renderValue(value: unknown, styles: ReturnType<typeof useStyles>) {
   }
 
   // Generic object / array — JSON tree.
-  return (
-    <pre className={styles.jsonPre}>{safeJsonStringify(value)}</pre>
-  );
+  return <pre className={styles.jsonPre}>{safeJsonStringify(value)}</pre>;
 }
 
 function looksLikeTopologyNode(value: unknown): boolean {
