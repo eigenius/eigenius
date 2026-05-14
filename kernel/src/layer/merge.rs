@@ -2596,12 +2596,60 @@ pub fn commit_resolutions_as_merge_layer(
                     .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
             }
             MergeResolution::Rename {
-                old_iri, new_iri, ..
+                side,
+                old_iri,
+                new_iri,
+                ..
             } => {
-                return Err(MergeError::RenameApplicationNotYetWired {
-                    old_iri: old_iri.clone(),
-                    new_iri: new_iri.clone(),
-                });
+                // Re-run rename validation + transformation. The
+                // cascade gate has already passed, but
+                // `apply_rename_resolution` also enforces the
+                // collision / target-presence rules — surfacing them
+                // here rather than letting them slide into a
+                // half-committed layer.
+                let application =
+                    apply_rename_resolution(span, *side, old_iri, new_iri, &topology, backend)?;
+
+                // Commit each renamed resource. The target body is
+                // keyed at `new_iri`; references-in-other-resources
+                // are keyed at their own (unchanged) IRIs with their
+                // bodies rewritten. The builder upserts, so these
+                // commits override the step-4 contributions for the
+                // same IRIs (which carried the pre-rewrite bodies).
+                for resource in application.resources.values() {
+                    builder
+                        .add_resource(resource.clone())
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                }
+
+                // Shadow the rename-side's `old_iri` body in the
+                // parent chain. If the other branch has `old_iri`
+                // (IRI-collision rename case), commit its body —
+                // merge-layer precedence makes it the post-merge
+                // representative. Otherwise tombstone so resolve
+                // returns None for `old_iri` instead of surfacing
+                // the renamed-away body via the parent walk.
+                let other_sources = match side {
+                    Side::A => &span.sources_b,
+                    Side::B => &span.sources_a,
+                };
+                if let Some(other_layer) = other_sources.get(old_iri) {
+                    let other_body = backend
+                        .try_load_resource(other_layer, old_iri)
+                        .map_err(MergeError::Storage)?
+                        .ok_or_else(|| {
+                            MergeError::Storage(StorageError::NotFound(format!(
+                                "other-side body for {old_iri} not loadable from {other_layer}"
+                            )))
+                        })?;
+                    builder
+                        .add_resource(other_body)
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                } else {
+                    builder
+                        .tombstone(old_iri.clone())
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                }
             }
             MergeResolution::SchemaQuotient { conflict, quotient } => {
                 let target = conflict_by_id
@@ -2700,10 +2748,65 @@ pub fn commit_resolutions_as_merge_layer(
                 }
             }
             MergeResolution::Restructure { conflict, spec } => {
-                return Err(MergeError::RestructureApplicationNotYetWired {
-                    conflict_id: conflict.clone(),
-                    new_parent: spec.new_parent.clone(),
-                });
+                // Re-validate + apply. The Restructure spec's
+                // structural checks (synthesized-parent, def
+                // presence, classes-in-span) run inside the apply
+                // function — surface failures here, before any
+                // partial commit.
+                let application =
+                    apply_restructure_resolution(conflict, spec, span, &topology, backend)?;
+
+                // 1. Commit the new parent class definition, if the
+                //    resolution supplied one (the parent was new to
+                //    the span). When the parent already existed,
+                //    `new_parent_resource` is `None` and we skip.
+                if let Some(new_parent_resource) = &application.new_parent_resource {
+                    builder
+                        .add_resource(new_parent_resource.clone())
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                }
+
+                // 2. Reparent each affected class. Semantics differ
+                //    between the affected class and the
+                //    `classes_under_new` set:
+                //    - Affected class: REPLACE `parent_classes` with
+                //      `[new_parent]`. This is the "raise the
+                //      abstraction" move — the original branch-side
+                //      parent disagreement is sidestepped by
+                //      pointing the conflicting class at the new
+                //      common parent only.
+                //    - Other classes (`classes_under_new`): ADD
+                //      `new_parent` to existing parents. They keep
+                //      their pre-restructure ancestry; the new
+                //      parent layers on top.
+                let parent_classes_iri =
+                    Iri::parse(wk::PARENT_CLASSES).expect("PARENT_CLASSES IRI parses");
+                for class_iri in &application.classes_to_reparent {
+                    let mut body =
+                        load_class_body_for_restructure(class_iri, span, &topology, backend)?;
+                    use crate::ontology::resource::Value;
+                    if class_iri == &spec.affected_class {
+                        body.set(
+                            parent_classes_iri.clone(),
+                            Value::Array(vec![Value::ResourceRef(spec.new_parent.clone())]),
+                        );
+                    } else {
+                        let mut parents: Vec<Iri> = body
+                            .get(&parent_classes_iri)
+                            .map(|v| v.as_iri_array())
+                            .unwrap_or_default();
+                        if !parents.iter().any(|p| p == &spec.new_parent) {
+                            parents.push(spec.new_parent.clone());
+                        }
+                        body.set(
+                            parent_classes_iri.clone(),
+                            Value::Array(parents.into_iter().map(Value::ResourceRef).collect()),
+                        );
+                    }
+                    builder
+                        .add_resource(body)
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                }
             }
         }
     }
@@ -2800,6 +2903,49 @@ fn witness_target_class(
         }
     }
     Ok(None)
+}
+
+/// Load the most-recent body for a class IRI somewhere in the merge
+/// span — branch A's contribution first, then branch B's, then the
+/// ancestor's chain. Used by the Restructure commit path to fetch a
+/// starting body for each reparented class so the merge layer's
+/// commit can layer the new parent edge on top. Branch A first is a
+/// deterministic tie-breaker; classes that agree across branches
+/// produce the same body either way.
+fn load_class_body_for_restructure(
+    iri: &Iri,
+    span: &MergeSpan,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<Resource, MergeError> {
+    if let Some(layer_id) = span.sources_a.get(iri) {
+        if let Some(r) = backend
+            .try_load_resource(layer_id, iri)
+            .map_err(MergeError::Storage)?
+        {
+            return Ok(r);
+        }
+    }
+    if let Some(layer_id) = span.sources_b.get(iri) {
+        if let Some(r) = backend
+            .try_load_resource(layer_id, iri)
+            .map_err(MergeError::Storage)?
+        {
+            return Ok(r);
+        }
+    }
+    if let Some((_, r)) =
+        find_iri_in_chain(&span.ancestor, iri, topology, backend).map_err(MergeError::Storage)?
+    {
+        return Ok(r);
+    }
+    // `apply_restructure_resolution` already verified every class
+    // resolves through the span, so reaching this branch implies a
+    // storage / topology inconsistency. Surface as `Storage` rather
+    // than `unreachable!()` so the operator sees a typed error.
+    Err(MergeError::Storage(StorageError::NotFound(format!(
+        "restructure: class {iri} not loadable from span"
+    ))))
 }
 
 // ─── Errors ────────────────────────────────────────────────────────────────
@@ -4575,12 +4721,12 @@ mod tests {
     }
 
     #[test]
-    fn merge_with_resolutions_rename_validates_then_reports_pending() {
-        // End-to-end through `merge_with_resolutions`: a Rename
-        // resolution targets a synthetic conflict id, validation
-        // passes, and the surface short-circuits with
-        // `RenameApplicationNotYetWired` until 15g lands the
-        // merge-layer construction path.
+    fn merge_with_resolutions_rename_unknown_conflict_id() {
+        // A Rename resolution targets a synthetic conflict id the
+        // classifier didn't produce — under open-world, single-side
+        // contributions never surface as conflicts. The pre-loop
+        // guard inside `commit_resolutions_as_merge_layer` rejects
+        // with `ConflictNotFound` before the Rename dispatch fires.
         let patient_iri = "urn:project:Patient";
         let renamed_iri = "urn:project:billing:Patient";
 
@@ -4590,10 +4736,6 @@ mod tests {
             vec![make_resource(patient_iri, &[wk::CLASS], &[])],
         );
 
-        // Synthesize a conflict so the surface accepts the resolution
-        // — classify_conflicts under open-world doesn't yet surface
-        // IriCollision, so we feed the resolution against the same
-        // discriminator scheme `ConflictId::from_iri` produces.
         let conflict = rename_conflict_id(patient_iri);
         let resolutions = vec![MergeResolution::Rename {
             conflict: conflict.clone(),
@@ -4604,8 +4746,6 @@ mod tests {
         let result = merge_with_resolutions(&span, resolutions, Vec::new(), storage, &*backend);
         match result {
             Err(MergeError::ConflictNotFound(id)) => {
-                // Open-world classifier doesn't surface this IRI as
-                // a conflict yet — verifies the surface threading.
                 assert_eq!(id, conflict);
             }
             other => panic!(
@@ -5136,6 +5276,113 @@ mod tests {
         }
     }
 
+    #[test]
+    fn commit_restructure_introduces_animal_and_reparents_classes() {
+        // D20 §6.4 motivating example, committed end-to-end. Both
+        // branches contribute `Dog` with structurally-different
+        // bodies (so the classifier surfaces an IriCollision that
+        // the Restructure resolution targets). Ancestor has Mammal
+        // and Reptile; the resolution introduces Animal, makes
+        // Mammal/Reptile subclass it, and points Dog at Animal only.
+        let mammal = make_resource("urn:test:Mammal", &[wk::CLASS], &[]);
+        let reptile = make_resource("urn:test:Reptile", &[wk::CLASS], &[]);
+        // Different parent_classes on each branch → IriCollision
+        // (structural body inequality at `Dog`).
+        let dog_a = make_resource(
+            "urn:test:Dog",
+            &[wk::CLASS],
+            &[(
+                wk::PARENT_CLASSES,
+                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+            )],
+        );
+        let dog_b = make_resource(
+            "urn:test:Dog",
+            &[wk::CLASS],
+            &[(
+                wk::PARENT_CLASSES,
+                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+            )],
+        );
+        let (span, backend, storage) =
+            build_span_arc(vec![mammal, reptile], vec![dog_a], vec![dog_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        assert_eq!(conflicts.len(), 1, "expected one IriCollision on Dog");
+        let conflict_id = conflicts[0].id.clone();
+
+        let resolutions = vec![MergeResolution::Restructure {
+            conflict: conflict_id,
+            spec: RestructureSpec {
+                affected_class: iri("urn:test:Dog"),
+                new_parent: iri("urn:test:Animal"),
+                new_parent_def: Some(animal_class_def()),
+                classes_under_new: vec![iri("urn:test:Mammal"), iri("urn:test:Reptile")],
+                affected_class_under_new: true,
+            },
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:restructure_animal",
+            storage,
+            &*backend,
+        )
+        .expect("Restructure should commit cleanly");
+
+        // 1. The new Animal Class lives in the merge layer.
+        assert!(
+            merge_layer.resolve(&iri("urn:test:Animal")).is_some(),
+            "Animal should be reachable post-merge"
+        );
+
+        // 2. Dog's `parent_classes` is replaced with [Animal] —
+        //    the original disagreement is sidestepped by raising
+        //    the abstraction.
+        let dog = merge_layer
+            .resolve(&iri("urn:test:Dog"))
+            .expect("Dog should resolve");
+        let dog_parents: Vec<String> = dog
+            .get(&iri(wk::PARENT_CLASSES))
+            .map(|v| v.as_iri_array())
+            .unwrap_or_default()
+            .iter()
+            .map(|i| i.as_str().to_string())
+            .collect();
+        assert_eq!(dog_parents, vec!["urn:test:Animal".to_string()]);
+
+        // 3. Mammal and Reptile gain Animal in their parents
+        //    (additive — keeping any pre-existing ancestry intact).
+        let mammal = merge_layer
+            .resolve(&iri("urn:test:Mammal"))
+            .expect("Mammal should resolve");
+        let mammal_parents: Vec<String> = mammal
+            .get(&iri(wk::PARENT_CLASSES))
+            .map(|v| v.as_iri_array())
+            .unwrap_or_default()
+            .iter()
+            .map(|i| i.as_str().to_string())
+            .collect();
+        assert!(
+            mammal_parents.contains(&"urn:test:Animal".to_string()),
+            "Mammal should subclass Animal; got {mammal_parents:?}"
+        );
+        let reptile = merge_layer
+            .resolve(&iri("urn:test:Reptile"))
+            .expect("Reptile should resolve");
+        let reptile_parents: Vec<String> = reptile
+            .get(&iri(wk::PARENT_CLASSES))
+            .map(|v| v.as_iri_array())
+            .unwrap_or_default()
+            .iter()
+            .map(|i| i.as_str().to_string())
+            .collect();
+        assert!(
+            reptile_parents.contains(&"urn:test:Animal".to_string()),
+            "Reptile should subclass Animal; got {reptile_parents:?}"
+        );
+    }
+
     // ─── Cascade impact analysis (15f) ─────────────────────────────────────
 
     #[test]
@@ -5612,17 +5859,15 @@ mod tests {
     }
 
     #[test]
-    fn commit_rename_resolution_surfaces_not_yet_wired() {
-        // Once the cascade gate passes, the Rename dispatch reaches
-        // `RenameApplicationNotYetWired` (committable shape isn't
-        // wired in 15g step 1; lands when tombstone semantics
-        // arrive). Verifies the gate-then-dispatch ordering and the
-        // typed error surface.
+    fn commit_rename_iri_collision_keeps_other_side_at_old_iri() {
+        // IRI-collision case: both branches contribute `Patient`
+        // with different bodies. Renaming A's Patient →
+        // billing:Patient should produce a merge layer where
+        // `Patient` resolves to B's body (the un-renamed side) and
+        // `billing:Patient` resolves to A's renamed body. Pins the
+        // "shadow old_iri via other-side body" path.
         let patient_iri = "urn:project:Patient";
-        // Build an IriCollision conflict (both branches contribute
-        // `Patient` with structurally-different bodies) so the
-        // pre-loop conflict-id guard passes and dispatch reaches the
-        // Rename arm.
+        let renamed_iri = "urn:project:billing:Patient";
         let (span, backend, storage) = build_span_arc(
             Vec::new(),
             vec![make_resource(
@@ -5642,26 +5887,114 @@ mod tests {
             conflict: conflict_id,
             side: Side::A,
             old_iri: iri(patient_iri),
-            new_iri: iri("urn:project:billing:Patient"),
+            new_iri: iri(renamed_iri),
         }];
-        // The classified IriCollision conflict generates a cascade
-        // item against branch B's body referencing the old IRI's
-        // classes — but for this minimal fixture there are no
-        // external references, so cascade is empty.
-        let result = commit_resolutions_as_merge_layer(
+        let merge_layer = commit_resolutions_as_merge_layer(
             &span,
             &resolutions,
             &[],
-            "merge:rename_pending",
+            "merge:rename_collision",
             storage,
             &*backend,
+        )
+        .expect("Rename should commit cleanly");
+
+        // `Patient` post-merge: B's body (other side's).
+        let resolved = merge_layer
+            .resolve(&iri(patient_iri))
+            .expect("Patient should resolve to B's body");
+        assert_eq!(
+            resolved
+                .get(&iri("urn:project:label"))
+                .and_then(|v| v.as_str()),
+            Some("B"),
         );
-        match result {
-            Err(MergeError::RenameApplicationNotYetWired { old_iri, new_iri }) => {
-                assert_eq!(old_iri.as_str(), patient_iri);
-                assert_eq!(new_iri.as_str(), "urn:project:billing:Patient");
+        // `billing:Patient` post-merge: A's renamed body.
+        let renamed = merge_layer
+            .resolve(&iri(renamed_iri))
+            .expect("renamed body should be reachable");
+        assert_eq!(
+            renamed
+                .get(&iri("urn:project:label"))
+                .and_then(|v| v.as_str()),
+            Some("A"),
+        );
+    }
+
+    #[test]
+    fn commit_rename_rewrites_external_references() {
+        // Branch A contributes both `Patient` (the rename target)
+        // and `Profile` (referencing `Patient`). Branch B also has
+        // `Patient` with a different body (so the classifier
+        // surfaces IriCollision and the rename can target it).
+        // After the rename → `billing:Patient`, the post-merge
+        // `Profile` body must carry the rewritten reference.
+        let patient_iri = "urn:project:Patient";
+        let renamed_iri = "urn:project:billing:Patient";
+        let profile_iri = "urn:project:profile";
+        let profile_for_iri = "urn:project:profile_for";
+
+        let patient_a = make_resource(
+            patient_iri,
+            &[wk::CLASS],
+            &[("urn:project:label", Value::String("A".to_string()))],
+        );
+        let patient_b = make_resource(
+            patient_iri,
+            &[wk::CLASS],
+            &[("urn:project:label", Value::String("B".to_string()))],
+        );
+        let profile = make_resource(
+            profile_iri,
+            &[wk::CLASS],
+            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+        );
+        let (span, backend, storage) =
+            build_span_arc(Vec::new(), vec![patient_a, profile], vec![patient_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        // Cascade preview will surface an orphaned ref against
+        // `Profile` (the rename apply doesn't walk branch B's
+        // contributions — but here the ref lives on the renamed
+        // side, which IS walked, so the cascade item comes from
+        // branch B's *unmodified* view of Profile in the
+        // ancestor-chain walk. Cover by acking it.
+        let resolutions = vec![MergeResolution::Rename {
+            conflict: conflict_id,
+            side: Side::A,
+            old_iri: iri(patient_iri),
+            new_iri: iri(renamed_iri),
+        }];
+        let preview = preview_cascade(&span, &resolutions, &*backend).unwrap();
+        let acks: Vec<CascadeAck> = preview
+            .item_ids()
+            .into_iter()
+            .map(|item_id| CascadeAck { item_id })
+            .collect();
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &acks,
+            "merge:rename_rewrite",
+            storage,
+            &*backend,
+        )
+        .expect("Rename with rewrite should commit cleanly");
+
+        // Profile's reference now points at the renamed IRI.
+        let resolved_profile = merge_layer
+            .resolve(&iri(profile_iri))
+            .expect("Profile should resolve");
+        match resolved_profile.get(&iri(profile_for_iri)) {
+            Some(Value::ResourceRef(r)) => {
+                assert_eq!(
+                    r.as_str(),
+                    renamed_iri,
+                    "Profile.profile_for should point at the renamed IRI"
+                );
             }
-            other => panic!("expected RenameApplicationNotYetWired, got {other:?}"),
+            other => panic!("expected ResourceRef to renamed IRI, got {other:?}"),
         }
     }
 
