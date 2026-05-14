@@ -145,6 +145,15 @@ service EigeniusKernel {
   // so consequences are visible before the action.
   rpc PreviewCascade(PreviewCascadeRequest) returns (PreviewCascadeResponse);
 
+  // Pre-compute the typed-conflict list for a (branch, candidate_head)
+  // pair (D36 §3.1). Non-mutating; wraps the kernel's
+  // `build_merge_span` + `classify_conflicts`. The notebook calls this
+  // to populate the resolution flow's strategy picker — the typed
+  // conflicts carry their kind-specific fields and the set of
+  // strategies whose applicability check passes, so the picker can
+  // grey out inapplicable strategy buttons per conflict.
+  rpc PrepareMerge(PrepareMergeRequest) returns (PrepareMergeResponse);
+
   // --- Chain consolidation (D25) ---
 
   // Collapse `[from..to]` on `branch` into a single resolve-equivalent
@@ -1148,6 +1157,127 @@ message PreviewCascadeResponse {
   // stable `item_id` so the caller can build acknowledgments from
   // this list directly.
   repeated CascadeItemWire items = 4;
+}
+
+// --- D36 §3.1: typed-conflict surface for the resolution UI ---
+
+// Resolution strategy taxonomy. Mirrors the kernel's
+// `MergeResolution` variants one-for-one (with `KeepBoth`,
+// `KeepOne`, `KeepNeither` broken out from the `SchemaQuotient`
+// container so the wire shape can talk about per-strategy
+// applicability uniformly).
+enum MergeStrategyKind {
+  MERGE_STRATEGY_KIND_UNSPECIFIED = 0;
+  MERGE_STRATEGY_KIND_WITNESS = 1;
+  MERGE_STRATEGY_KIND_RENAME = 2;
+  MERGE_STRATEGY_KIND_KEEP_BOTH = 3;
+  MERGE_STRATEGY_KIND_KEEP_ONE = 4;
+  MERGE_STRATEGY_KIND_KEEP_NEITHER = 5;
+  MERGE_STRATEGY_KIND_RESTRUCTURE = 6;
+}
+
+// Typed error variants for `PrepareMerge`. Smaller surface than
+// `SubmitResolution` since `PrepareMerge` is non-mutating and
+// doesn't run the ack gate.
+enum PrepareMergeErrorKind {
+  PREPARE_MERGE_ERROR_KIND_UNSPECIFIED = 0;
+  // The two heads share no ancestor in the topology, or one isn't
+  // present in the topology at all — same shape as
+  // `SubmitResolutionErrorKind::NO_COMMON_ANCESTOR`.
+  PREPARE_MERGE_ERROR_KIND_NO_COMMON_ANCESTOR = 1;
+  // Internal storage / handler failure. The kernel's stringified
+  // diagnostic lands in `error`.
+  PREPARE_MERGE_ERROR_KIND_INTERNAL = 2;
+}
+
+// A `Property`'s `data_type` disagrees across branches. Mirrors
+// `crate::layer::merge::ConflictKind::PropertyDataType`.
+message PropertyDataTypeConflict {
+  string property = 1;
+  string branch_a_type = 2;
+  string branch_b_type = 3;
+  // Empty if the property was branch-introduced (no ancestor value).
+  string ancestor_type = 4;
+}
+
+// Same IRI declared as one resource kind on one branch and a
+// different kind on the other (`Class` vs `Property` is the
+// canonical case). Mirrors `ConflictKind::KindMismatch`.
+message KindMismatchConflict {
+  string iri = 1;
+  // "Class", "Property", or "Other" (the kernel's
+  // `ResourceKind::Other` catch-all).
+  string branch_a_kind = 2;
+  string branch_b_kind = 3;
+}
+
+// Same IRI, materially different resource bodies on the two
+// branches. The bodies are encoded as Eigon-JSON strings so the UI
+// can render a diff without an additional resource-fetch round
+// trip. Mirrors `ConflictKind::IriCollision`.
+message IriCollisionConflict {
+  string iri = 1;
+  string branch_a_body_json = 2;
+  string branch_b_body_json = 3;
+  // Empty when the IRI was branch-introduced — both branches added
+  // it and the ancestor has nothing at this IRI.
+  string ancestor_body_json = 4;
+}
+
+// The merged `subclass_of` graph contains a cycle that didn't exist
+// in either branch alone. The `cycle` list carries the IRIs in
+// cycle order (deterministic across reruns via
+// `ConflictId::from_iris`). Mirrors `ConflictKind::InheritanceCycle`.
+message InheritanceCycleConflict {
+  repeated string cycle = 1;
+}
+
+// A single typed conflict from the classifier (D36 §3.1). The
+// `kind` oneof carries the variant-specific fields; `id` is the
+// kernel's deterministic ConflictId; `applicable_strategies` lists
+// the strategies whose applicability check passes — the UI greys
+// out the others.
+//
+// Reserved stage-2/3 kinds (`DeletionConflict`,
+// `DisjointnessViolation`, `PathEquationContradiction`) don't fire
+// in v1 and have no wire shape yet; they'll land as new `oneof`
+// arms when their kernel-side detection ships.
+message TypedConflictWire {
+  string id = 1;
+  oneof kind {
+    PropertyDataTypeConflict property_data_type = 2;
+    KindMismatchConflict kind_mismatch = 3;
+    IriCollisionConflict iri_collision = 4;
+    InheritanceCycleConflict inheritance_cycle = 5;
+  }
+  repeated MergeStrategyKind applicable_strategies = 6;
+}
+
+message PrepareMergeRequest {
+  // Branch whose current tip is one side of the span. Read at
+  // request time; the response's `branch_tip` lets the caller pin
+  // subsequent `SubmitResolution` against the same tip.
+  string branch = 1;
+  // Hex-encoded candidate head — the layer the caller built that
+  // diverged from `branch`'s current tip. Same shape as
+  // `SubmitResolutionRequest.candidate_head`.
+  string candidate_head = 2;
+}
+
+message PrepareMergeResponse {
+  bool success = 1;
+  string error = 2;
+  PrepareMergeErrorKind error_kind = 3;
+  // Typed conflicts the classifier surfaced. Empty when the branch
+  // tip and candidate head are equal, or when the candidate is a
+  // fast-forward / disjoint-IRI trivial merge (no resolution
+  // needed; caller goes through `MergeBranches` instead).
+  repeated TypedConflictWire conflicts = 4;
+  // Hex-encoded branch tip at the moment of the call. The caller
+  // stashes this and compares to the post-resolve branch tip;
+  // mismatch surfaces as `BRANCH_CAS_RACE` on the subsequent
+  // `SubmitResolution`.
+  string branch_tip = 5;
 }
 
 // --- Chain consolidation (D25) ---

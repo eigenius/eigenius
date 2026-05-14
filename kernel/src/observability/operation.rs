@@ -51,6 +51,7 @@ pub const RPC_MERGE_BRANCHES: &str = "kernel.rpc.merge_branches";
 pub const RPC_PREVIEW_MERGE: &str = "kernel.rpc.preview_merge";
 pub const RPC_SUBMIT_RESOLUTION: &str = "kernel.rpc.submit_resolution";
 pub const RPC_PREVIEW_CASCADE: &str = "kernel.rpc.preview_cascade";
+pub const RPC_PREPARE_MERGE: &str = "kernel.rpc.prepare_merge";
 pub const RPC_CONSOLIDATE_CHAIN: &str = "kernel.rpc.consolidate_chain";
 pub const RPC_ESTIMATE_CONSOLIDATION: &str = "kernel.rpc.estimate_consolidation";
 pub const RPC_CREATE_TAG: &str = "kernel.rpc.create_tag";

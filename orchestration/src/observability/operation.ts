@@ -90,6 +90,12 @@ export const KERNEL_PASSTHROUGH_MERGE_BRANCHES =
   "orchestrator.kernel.merge_branches";
 export const KERNEL_PASSTHROUGH_PREVIEW_MERGE =
   "orchestrator.kernel.preview_merge";
+export const KERNEL_PASSTHROUGH_PREPARE_MERGE =
+  "orchestrator.kernel.prepare_merge";
+export const KERNEL_PASSTHROUGH_PREVIEW_CASCADE =
+  "orchestrator.kernel.preview_cascade";
+export const KERNEL_PASSTHROUGH_SUBMIT_RESOLUTION =
+  "orchestrator.kernel.submit_resolution";
 export const KERNEL_PASSTHROUGH_CONSOLIDATE_CHAIN =
   "orchestrator.kernel.consolidate_chain";
 export const KERNEL_PASSTHROUGH_ESTIMATE_CONSOLIDATION =
