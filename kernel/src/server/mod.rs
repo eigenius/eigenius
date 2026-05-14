@@ -4196,13 +4196,11 @@ fn merge_error_to_submit_response(
             proto::SubmitResolutionErrorKind::NoCommonAncestor,
             Vec::new(),
         ),
-        MergeError::WitnessApplicationNotYetWired { .. }
-        | MergeError::RenameApplicationNotYetWired { .. }
-        | MergeError::QuotientApplicationNotYetWired { .. }
-        | MergeError::RestructureApplicationNotYetWired { .. } => (
-            proto::SubmitResolutionErrorKind::ApplicationPending,
-            Vec::new(),
-        ),
+        // `SUBMIT_RESOLUTION_ERROR_KIND_APPLICATION_PENDING` stays
+        // on the wire as a reserved value for backward compat with
+        // earlier kernel revisions; the kernel no longer constructs
+        // it (every variant's commit shape is wired). Future
+        // partially-supported resolution kinds would route here.
         MergeError::QuotientNotApplicable { .. }
         | MergeError::RenameTargetNotInBranch { .. }
         | MergeError::RenameCollision { .. }

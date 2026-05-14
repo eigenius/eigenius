@@ -57,17 +57,14 @@
 //!     different resource bodies), `DeletionConflict` (one branch
 //!     tombstoned an IRI the other modified).
 //!
-//! Sub-milestone 15a (this commit) lands the typed-conflict scaffolding
-//! and the classifier. 15b–15e add the six resolution strategies;
-//! 15f layers cascade impact analysis on top; 15g plumbs the surface
-//! to gRPC + CLI + notebook.
-
-// 15a is internal scaffolding: every exported type below is consumed
-// in 15b–15g (Witness application, classifier wiring into lattice,
-// proto surface). Without this allow, clippy's "never used" pass
-// flags the whole module under `-D warnings`. The allow shrinks as
-// each downstream milestone wires up its callers.
-#![allow(dead_code)]
+//! Phase 15 sub-milestones in this module: 15a typed-conflict
+//! scaffolding + classifier; 15b–15e six resolution strategies
+//! (Witness, Rename, KeepBoth/KeepOne/KeepNeither schema-quotients,
+//! Restructure); 15f cascade impact analysis with an ack gate; 15g
+//! the multi-parent merge-layer construction, tombstone semantics,
+//! gRPC surface (`SubmitResolution`, `PreviewCascade`), and CLI
+//! wrappers. Every resolution's commit path produces a real merge
+//! layer.
 
 use crate::layer::handle::LayerTopology;
 use crate::layer::LayerId;
@@ -1021,11 +1018,11 @@ pub fn classify_conflicts(
 /// Three distinct phases:
 ///
 /// 1. **Classification.** Always runs first. Empty conflicts +
-///    empty resolutions = clean merge (placeholder layer id; the
-///    multi-parent trivial-merge layer is built by
-///    [`crate::lattice::merge_independent_heads`], which owns the
-///    "no resolutions needed" path). Non-empty conflicts + empty
-///    resolutions = `NeedsResolution` surface for the client to
+///    empty resolutions returns a no-op `Merged` outcome carrying
+///    `head_a` as the merge layer id — the trivial-merge construction
+///    lives in [`crate::lattice::merge_independent_heads`], which
+///    owns the "no resolutions needed" path. Non-empty conflicts +
+///    empty resolutions returns `NeedsResolution` for the client to
 ///    fill in.
 ///
 /// 2. **Cascade acknowledgment gate (15f).** When `resolutions` is
@@ -1037,11 +1034,12 @@ pub fn classify_conflicts(
 ///
 /// 3. **Merge-layer construction (15g).** Delegates to
 ///    [`commit_resolutions_as_merge_layer`], which builds a
-///    multi-parent layer with both heads as parents and the
-///    per-resolution transformations applied on top. `Witness`
-///    resolutions land their merged bodies; other variants still
-///    surface their `*ApplicationNotYetWired` errors until their
-///    committable shapes wire up.
+///    multi-parent layer with both heads as parents and each
+///    resolution's transformation applied on top. All six
+///    resolution strategies — Witness, Rename, KeepBoth/KeepOne/
+///    KeepNeither, Restructure — produce real committed merge
+///    layers; the `merge_layer` field of `MergeOutcome::Merged`
+///    carries the persisted id.
 ///
 /// On any resolution error the function fails the whole merge;
 /// partial applications are not surfaced.
@@ -1057,12 +1055,11 @@ pub fn merge_with_resolutions(
     if resolutions.is_empty() {
         return if conflicts.is_empty() {
             // No structural conflicts — the merge proceeds. The
-            // trivial-merge layer construction stays in
-            // `lattice::merge_independent_heads` (the load-bearing
-            // producer for the "no resolutions" path); this surface
-            // keeps the placeholder so callers wire through the
-            // shape without taking on multi-parent layer building
-            // for the trivial case here.
+            // trivial-merge layer construction lives in
+            // `lattice::merge_independent_heads`; this surface
+            // returns the calling side's head as a no-op outcome so
+            // callers that route through here don't fan out a second
+            // multi-parent commit path for the trivial case.
             Ok(MergeOutcome::Merged {
                 merge_layer: span.head_a.clone(),
             })
@@ -2369,36 +2366,33 @@ fn verify_cascade_acknowledgments(
 /// persist it (D20 §7.2 step 6).
 ///
 /// This is the layer-construction surface that turns validated
-/// resolutions into a real merged layer. v1 supports
-/// `Witness`-strategy resolutions end-to-end: each witness's merged
-/// `Resource` is committed at the conflict's IRI in the new layer.
-/// `Rename`, `SchemaQuotient`, and `Restructure` continue to surface
-/// their `*ApplicationNotYetWired` errors here — those resolution
-/// shapes require tombstone semantics (or augmented-ancestor commit
-/// for `Restructure`) the kernel hasn't yet stood up.
+/// resolutions into a real merged layer. All six resolution
+/// strategies have committable shapes: `Witness` evaluates the
+/// merge term and commits its result; `Rename` commits the renamed
+/// resources + shadows or tombstones the renamed-from IRI;
+/// `SchemaQuotient` commits the winner's / ancestor's body or
+/// tombstones; `Restructure` commits the new parent + reparents the
+/// affected classes.
 ///
 /// Pipeline:
 ///  1. Compute + verify the cascade preview (D20 §8).
-///  2. Build the multi-parent base — `LayerBuilder::with_parents`
-///     against `[head_a, head_b]` so lookup for any IRI either
-///     branch defined resolves through the parent chain by default.
-///  3. For each `Witness` resolution: load both branches' bodies at
-///     the conflict's IRI, optionally load the ancestor body,
-///     resolve the comorphism, apply the witness via
-///     `apply_witness_resolution`, and add the merged body to the
-///     builder. The merge layer's body takes precedence over the
-///     parents' bodies on lookup.
-///  4. Build the layer and persist it via `backend.store_layer`.
+///  2. Verify every classified conflict has a matching resolution
+///     (`UnresolvedConflict` if not) and every resolution targets a
+///     classified conflict (`ConflictNotFound` if not).
+///  3. Resolve both heads to `Arc<Layer>` and build the multi-parent
+///     base — `LayerBuilder::with_parents` against `[head_a, head_b]`.
+///  4. Compute the union of conflict-target IRIs across all
+///     resolutions, then commit every non-target contribution from
+///     either branch directly to the merge layer (so branch B's
+///     unique contributions remain reachable through the merge
+///     layer, even though `Layer::resolve` only follows `parents.first()`).
+///  5. Per-resolution dispatch applies each variant's transformation.
+///     The merge layer's body takes precedence over the parents'
+///     bodies on lookup, so each commit shadows the parent chain at
+///     its target IRI.
+///  6. Build the layer and persist it via `backend.store_layer`.
 ///     Return the `Arc<Layer>` so callers can immediately use it
 ///     (e.g., to CAS-advance a branch ref).
-///
-/// **Scope note.** `merge_with_resolutions` now delegates to this
-/// function once the cascade ack gate passes; the `merge_layer`
-/// field of `MergeOutcome::Merged` carries the real persisted layer
-/// id. Non-Witness variants still surface their `*ApplicationNotYetWired`
-/// errors from inside the dispatch below — their committable shapes
-/// (tombstones for Rename / Quotient drops; augmented-ancestor commit
-/// for Restructure) light up when those surfaces wire up.
 pub fn commit_resolutions_as_merge_layer(
     span: &MergeSpan,
     resolutions: &[MergeResolution],
@@ -2732,18 +2726,18 @@ pub fn commit_resolutions_as_merge_layer(
                         }
                     }
                     SchemaQuotient::KeepBoth => {
-                        // The applicability validator rejects
-                        // KeepBoth for every v1 conflict kind, so
-                        // `apply_quotient_resolution` returned an
-                        // error before we reached this branch — this
-                        // is unreachable in practice. Surface the
-                        // pending error to keep the match exhaustive
-                        // without an `unreachable!()` that could
-                        // panic on future taxonomies.
-                        return Err(MergeError::QuotientApplicationNotYetWired {
-                            conflict_id: conflict.clone(),
-                            quotient: *quotient,
-                        });
+                        // Unreachable: `apply_quotient_resolution`
+                        // above rejects `KeepBoth` for every v1
+                        // conflict kind with `QuotientNotApplicable`,
+                        // so the `?` returns before the match. The
+                        // arm exists for exhaustiveness; if a future
+                        // taxonomy admits `KeepBoth`, this branch
+                        // becomes the place to wire its commit shape
+                        // and the panic guarantees we don't ship
+                        // silent semantics.
+                        unreachable!(
+                            "KeepBoth is rejected by apply_quotient_resolution before this match"
+                        );
                     }
                 }
             }
@@ -2984,14 +2978,6 @@ pub enum MergeError {
         iri: Iri,
         reason: String,
     },
-    /// A `Witness` resolution validated cleanly but the merge-layer
-    /// construction path (turning a per-conflict merged value into a
-    /// committed layer) isn't yet wired (15g deliverable). The
-    /// per-witness application is real — exercise it via
-    /// [`apply_witness_resolution`] directly.
-    WitnessApplicationNotYetWired {
-        comorphism: Iri,
-    },
     /// A `MergeComorphism`'s `merge_transformation` points at an IRI
     /// that doesn't resolve in the witness's source layer chain —
     /// the term was either uncommitted or lives in a parallel
@@ -3053,15 +3039,6 @@ pub enum MergeError {
     RenameIdentity {
         iri: Iri,
     },
-    /// A `Rename` resolution validated cleanly and the renamed slice
-    /// was produced, but the merge-layer construction path (running
-    /// the merge against the renamed branch and committing the
-    /// result) isn't yet wired (15g deliverable). Exercise the
-    /// transformation directly via [`apply_rename_resolution`].
-    RenameApplicationNotYetWired {
-        old_iri: Iri,
-        new_iri: Iri,
-    },
     /// A `SchemaQuotient` resolution selected a strategy the
     /// conflict's kind doesn't admit (e.g., `KeepBoth` on a
     /// `PropertyDataType` conflict — a property can't carry two
@@ -3073,16 +3050,6 @@ pub enum MergeError {
         conflict_kind: String,
         quotient: SchemaQuotient,
         reason: String,
-    },
-    /// A `SchemaQuotient` resolution validated cleanly and the drop
-    /// sets were computed, but the merge-layer construction path
-    /// (rebuilding the merge with the dropped contributions
-    /// excluded) isn't yet wired (15g deliverable). Exercise the
-    /// drop-set computation directly via
-    /// [`apply_quotient_resolution`].
-    QuotientApplicationNotYetWired {
-        conflict_id: ConflictId,
-        quotient: SchemaQuotient,
     },
     /// A `Restructure` resolution's `new_parent` IRI uses the
     /// reserved `urn:eigenius:auto:` namespace. D20 §6.4 forbids
@@ -3124,15 +3091,6 @@ pub enum MergeError {
     RestructureClassNotInSpan {
         iri: Iri,
         role: RestructureMissingRole,
-    },
-    /// A `Restructure` resolution validated cleanly and the
-    /// transformation was produced, but the merge-layer construction
-    /// path (committing the augmented ancestor + re-merging against
-    /// it) isn't yet wired (15g deliverable). Exercise the
-    /// transformation directly via [`apply_restructure_resolution`].
-    RestructureApplicationNotYetWired {
-        conflict_id: ConflictId,
-        new_parent: Iri,
     },
     /// The cascade preview surfaced items the user didn't
     /// acknowledge (D20 §8). The kernel refuses to commit a merge
@@ -3189,10 +3147,6 @@ impl std::fmt::Display for MergeError {
             MergeError::MalformedMergeComorphism { iri, reason } => {
                 write!(f, "MergeComorphism {iri} is malformed: {reason}")
             }
-            MergeError::WitnessApplicationNotYetWired { comorphism } => write!(
-                f,
-                "witness {comorphism} applied successfully but merge-layer construction is pending (15g)"
-            ),
             MergeError::TransformationNotFound {
                 comorphism,
                 transformation,
@@ -3240,10 +3194,6 @@ impl std::fmt::Display for MergeError {
             MergeError::RenameIdentity { iri } => {
                 write!(f, "Rename old_iri == new_iri ({iri}); rename is a no-op")
             }
-            MergeError::RenameApplicationNotYetWired { old_iri, new_iri } => write!(
-                f,
-                "Rename {old_iri} → {new_iri} validated successfully but merge-layer construction is pending (15g)"
-            ),
             MergeError::QuotientNotApplicable {
                 conflict_id,
                 conflict_kind,
@@ -3252,14 +3202,6 @@ impl std::fmt::Display for MergeError {
             } => write!(
                 f,
                 "SchemaQuotient {quotient:?} not applicable to {conflict_kind} conflict {}: {reason}",
-                conflict_id.0
-            ),
-            MergeError::QuotientApplicationNotYetWired {
-                conflict_id,
-                quotient,
-            } => write!(
-                f,
-                "SchemaQuotient {quotient:?} on conflict {} validated successfully but merge-layer construction is pending (15g)",
                 conflict_id.0
             ),
             MergeError::RestructureSynthesizedParent { new_parent } => write!(
@@ -3291,14 +3233,6 @@ impl std::fmt::Display for MergeError {
             MergeError::RestructureClassNotInSpan { iri, role } => write!(
                 f,
                 "Restructure {role} {iri} doesn't resolve anywhere in the merge span"
-            ),
-            MergeError::RestructureApplicationNotYetWired {
-                conflict_id,
-                new_parent,
-            } => write!(
-                f,
-                "Restructure on conflict {} (new parent {new_parent}) validated successfully but merge-layer construction is pending (15g)",
-                conflict_id.0
             ),
             MergeError::IncompleteAcknowledgments { missing } => {
                 let names: Vec<&str> = missing.iter().map(|m| m.0.as_str()).collect();
@@ -3940,14 +3874,14 @@ mod tests {
     }
 
     #[test]
-    fn valid_witness_progresses_to_application_stub() {
-        // The happy validation path: conflict id exists, comorphism
-        // IRI resolves to a well-formed MergeComorphism with a
-        // `merge_transformation` ResourceRef. Step 2 will plug the
-        // evaluator in here; Step 1 surfaces a typed
-        // `WitnessApplicationNotYetWired` so a deployment that
-        // tries to use witnesses against the in-progress kernel
-        // gets an honest error rather than a silent merge failure.
+    fn witness_with_unresolvable_transformation_surfaces_transformation_not_found() {
+        // The happy validation path with a placeholder transformation
+        // IRI: conflict id exists, comorphism IRI resolves to a
+        // well-formed `MergeComorphism`, but its `merge_transformation`
+        // points at a term that wasn't committed. The witness
+        // application step surfaces `TransformationNotFound` — the
+        // real end-to-end happy path is exercised in
+        // `merge_with_resolutions_commits_witness_resolution_to_real_layer`.
         let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(
             make_merge_comorphism("urn:test:witness", "urn:test:term_placeholder"),
         ));
@@ -3964,13 +3898,6 @@ mod tests {
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
-        // After 15g step 1 the dispatch goes all the way through to
-        // witness application. The fixture's transformation IRI
-        // (`urn:test:term_placeholder`) is a placeholder — no real
-        // Mini-TT term lives there — so the apply path surfaces
-        // `TransformationNotFound`. The real end-to-end happy path
-        // is exercised in
-        // `merge_with_resolutions_commits_witness_resolution_to_real_layer`.
         match result {
             Err(MergeError::TransformationNotFound {
                 comorphism,
@@ -4915,9 +4842,7 @@ mod tests {
     fn merge_with_resolutions_keep_one_commits_real_merge_layer() {
         // End-to-end through `merge_with_resolutions`: a KeepOne
         // resolution against a PropertyDataType conflict commits a
-        // real merge layer carrying the winner's body. Pins the
-        // 15g(e+) wiring: the dispatch surface is no longer a
-        // validation-only stub for SchemaQuotient.
+        // real merge layer carrying the winner's body.
         let (span, backend, conflict) = span_with_property_data_type_conflict();
         let resolutions = vec![MergeResolution::SchemaQuotient {
             conflict: conflict.id.clone(),
@@ -4941,8 +4866,9 @@ mod tests {
 
     #[test]
     fn merge_with_resolutions_quotient_surfaces_applicability_error() {
-        // KeepBoth on a PropertyDataType conflict — the validator
-        // rejects before the "not yet wired" short-circuit fires.
+        // KeepBoth on a PropertyDataType conflict — single-valued
+        // primitive types can't admit both contributions, so the
+        // applicability validator rejects before any commit work.
         let (span, backend, conflict) = span_with_property_data_type_conflict();
         let resolutions = vec![MergeResolution::SchemaQuotient {
             conflict: conflict.id.clone(),
