@@ -760,12 +760,59 @@ pub enum MergeResolution {
         /// in the merge span.
         new_iri: Iri,
     },
-    // 15d: SchemaQuotient { conflict, quotient: SchemaQuotient }
+    /// Quotient the span at a schema-level conflict (D20 §6.3). Three
+    /// flavors: `KeepBoth` admits the freely-combined pushout (only
+    /// legal for conflicts where both contributions can coexist —
+    /// none of v1's classified kinds qualify), `KeepOne { winner }`
+    /// drops the loser's contribution at the conflict point, and
+    /// `KeepNeither` collapses both contributions back to the
+    /// ancestor's state. The kernel rejects strategies that don't
+    /// apply to the conflict kind with a typed `QuotientNotApplicable`
+    /// error rather than producing a merged ontology that won't load.
+    SchemaQuotient {
+        conflict: ConflictId,
+        quotient: SchemaQuotient,
+    },
     // 15e: Restructure { conflict, new_parent, ... }
     //
     // Each variant lands with its own sub-milestone; the enum grows
     // monotonically so callers built against one variant stay
     // working as the others light up.
+}
+
+/// Three ways to quotient a span at a schema-level conflict (D20 §6.3).
+///
+/// Applicability is conflict-kind-dependent and enforced by the kernel
+/// at submission time — see [`apply_quotient_resolution`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Variant names share `Keep*` by design — D20 §6.3 names the three
+// strategies "KeepBoth", "KeepOne", "KeepNeither" and we mirror that
+// vocabulary verbatim so resolution-surface clients can map UI labels
+// to enum variants directly.
+#[allow(clippy::enum_variant_names)]
+pub enum SchemaQuotient {
+    /// Accept the freely-combined pushout. Only legal when the conflict
+    /// kind admits both sides' contributions structurally (Eigon's
+    /// multi-class membership for `subclass_of` would qualify; none of
+    /// v1's classified kinds do, because every kind we currently
+    /// surface is single-valued or mutually-exclusive). Submitting
+    /// `KeepBoth` against a current conflict kind always fails with
+    /// `QuotientNotApplicable`; the variant is reserved for future
+    /// taxonomies.
+    KeepBoth,
+    /// Quotient out the loser's contribution at the conflict point.
+    /// Every arrow the loser added is dropped from the merge; the
+    /// cascade analysis (15f) flags everything downstream that
+    /// referenced it.
+    KeepOne {
+        /// Which side wins. The opposite side's contribution at the
+        /// conflict point is dropped.
+        winner: Side,
+    },
+    /// Collapse both contributions back to the ancestor's state.
+    /// IRIs the ancestor didn't have are dropped entirely; IRIs the
+    /// ancestor had keep the ancestor's body.
+    KeepNeither,
 }
 
 /// A resolved `MergeComorphism` ready for application.
@@ -981,6 +1028,19 @@ pub fn merge_with_resolutions(
                 return Err(MergeError::RenameApplicationNotYetWired {
                     old_iri: old_iri.clone(),
                     new_iri: new_iri.clone(),
+                });
+            }
+            MergeResolution::SchemaQuotient { conflict, quotient } => {
+                let target = conflict_by_id
+                    .get(conflict)
+                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
+                // Validate applicability + compute the per-side drop
+                // sets. Actually applying them (rebuilding the merge
+                // layer with the dropped contributions excluded) is 15g.
+                let _application = apply_quotient_resolution(target, *quotient)?;
+                return Err(MergeError::QuotientApplicationNotYetWired {
+                    conflict_id: conflict.clone(),
+                    quotient: *quotient,
                 });
             }
         }
@@ -1528,6 +1588,136 @@ fn substitute_iri_in_value(
     }
 }
 
+// ─── Schema-quotient application (15d) ─────────────────────────────────────
+
+/// The drop-set produced by a `SchemaQuotient` resolution, ready for
+/// the merge-layer construction path (15g) to apply.
+///
+/// `drop_from_branch_a` / `drop_from_branch_b` enumerate the IRIs each
+/// branch's contribution should be excluded for at the conflict point.
+/// `KeepBoth` produces empty sets (and is only legal when the kernel
+/// finds the conflict kind admits it — see [`SchemaQuotient::KeepBoth`]
+/// docs for why no current kind qualifies). `KeepOne { winner: A }`
+/// drops the conflict's IRIs from branch B; `KeepNeither` drops them
+/// from both branches.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuotientApplication {
+    pub conflict_id: ConflictId,
+    pub quotient: SchemaQuotient,
+    /// IRIs whose branch-A contribution is dropped from the merge.
+    pub drop_from_branch_a: Vec<Iri>,
+    /// IRIs whose branch-B contribution is dropped from the merge.
+    pub drop_from_branch_b: Vec<Iri>,
+}
+
+/// Validate and apply a `SchemaQuotient` resolution against a
+/// pre-resolved conflict.
+///
+/// Checks the quotient is applicable to the conflict's kind and
+/// produces the per-side drop sets. Callers in the merge surface
+/// (e.g., [`merge_with_resolutions`]) resolve `ConflictId →
+/// &TypedConflict` once via `classify_conflicts` and thread the
+/// resolved conflict in here, avoiding a second classify pass. The
+/// actual merge-layer commit (combining the drop sets with the rest
+/// of the contributions to build the merged chain) is 15g.
+///
+/// **Applicability table** (D20 §6.3):
+///
+/// | Conflict kind             | `KeepBoth` | `KeepOne` | `KeepNeither` |
+/// |---------------------------|------------|-----------|---------------|
+/// | `PropertyDataType`        | ✗          | ✓         | ✓             |
+/// | `KindMismatch`            | ✗          | ✓         | ✓             |
+/// | `IriCollision`            | ✗          | ✓         | ✓             |
+/// | `InheritanceCycle`        | ✗          | ✓         | ✓             |
+/// | `DeletionConflict`        | ✗          | ✓         | ✓             |
+/// | `DisjointnessViolation`   | ✗          | ✓         | ✓             |
+/// | `PathEquationContradiction` | ✗        | ✓         | ✓             |
+///
+/// `KeepBoth` is never applicable to v1's classified kinds — every
+/// kind currently surfaced is single-valued or mutually-exclusive.
+/// It stays in the enum for forward compat with conflict taxonomies
+/// that admit additive quotients (e.g., subclass-membership conflicts,
+/// which open-world classification already treats as monotonically
+/// safe and therefore doesn't surface).
+pub fn apply_quotient_resolution(
+    conflict: &TypedConflict,
+    quotient: SchemaQuotient,
+) -> Result<QuotientApplication, MergeError> {
+    let conflict_iris = quotient_target_iris(&conflict.kind);
+
+    let (drop_from_branch_a, drop_from_branch_b) = match quotient {
+        SchemaQuotient::KeepBoth => {
+            // No current kind admits KeepBoth — every classified kind
+            // is single-valued or mutually-exclusive. Surface as a
+            // typed error rather than producing a no-op application.
+            return Err(MergeError::QuotientNotApplicable {
+                conflict_id: conflict.id.clone(),
+                conflict_kind: conflict_kind_discriminator(&conflict.kind).to_string(),
+                quotient,
+                reason: "KeepBoth requires a conflict kind that admits both contributions structurally; no v1 classified kind qualifies".to_string(),
+            });
+        }
+        SchemaQuotient::KeepOne { winner } => match winner {
+            Side::A => (Vec::new(), conflict_iris),
+            Side::B => (conflict_iris, Vec::new()),
+        },
+        SchemaQuotient::KeepNeither => (conflict_iris.clone(), conflict_iris),
+    };
+
+    Ok(QuotientApplication {
+        conflict_id: conflict.id.clone(),
+        quotient,
+        drop_from_branch_a,
+        drop_from_branch_b,
+    })
+}
+
+/// Enumerate the IRIs a quotient drops for the given conflict kind.
+///
+/// Single-IRI kinds (`PropertyDataType`, `KindMismatch`, `IriCollision`,
+/// `DeletionConflict`) return a single-element vec. `InheritanceCycle`
+/// returns every IRI in the cycle — dropping any one of them breaks
+/// the cycle, and the user's `KeepOne` choice means "drop the loser's
+/// edges in the cycle"; we conservatively drop all cycle-participating
+/// IRIs on the loser side (cascade analysis surfaces what was actually
+/// affected). Reserved kinds return their structural IRIs.
+fn quotient_target_iris(kind: &ConflictKind) -> Vec<Iri> {
+    match kind {
+        ConflictKind::PropertyDataType { property, .. } => vec![property.clone()],
+        ConflictKind::KindMismatch { iri, .. } => vec![iri.clone()],
+        ConflictKind::IriCollision { iri, .. } => vec![iri.clone()],
+        ConflictKind::DeletionConflict { iri, .. } => vec![iri.clone()],
+        ConflictKind::InheritanceCycle { cycle } => cycle.clone(),
+        ConflictKind::DisjointnessViolation {
+            class_a,
+            class_b,
+            offending_iris,
+        } => {
+            let mut out = Vec::with_capacity(2 + offending_iris.len());
+            out.push(class_a.clone());
+            out.push(class_b.clone());
+            out.extend(offending_iris.iter().cloned());
+            out
+        }
+        ConflictKind::PathEquationContradiction { .. } => Vec::new(),
+    }
+}
+
+/// Short discriminator string for a ConflictKind, used in typed
+/// errors so clients can branch on the conflict shape without
+/// pattern-matching the full enum.
+fn conflict_kind_discriminator(kind: &ConflictKind) -> &'static str {
+    match kind {
+        ConflictKind::PropertyDataType { .. } => "PropertyDataType",
+        ConflictKind::KindMismatch { .. } => "KindMismatch",
+        ConflictKind::IriCollision { .. } => "IriCollision",
+        ConflictKind::DeletionConflict { .. } => "DeletionConflict",
+        ConflictKind::InheritanceCycle { .. } => "InheritanceCycle",
+        ConflictKind::DisjointnessViolation { .. } => "DisjointnessViolation",
+        ConflictKind::PathEquationContradiction { .. } => "PathEquationContradiction",
+    }
+}
+
 // ─── Errors ────────────────────────────────────────────────────────────────
 
 /// Errors specific to layer-reconciliation operations. Storage failures
@@ -1642,6 +1832,28 @@ pub enum MergeError {
         old_iri: Iri,
         new_iri: Iri,
     },
+    /// A `SchemaQuotient` resolution selected a strategy the
+    /// conflict's kind doesn't admit (e.g., `KeepBoth` on a
+    /// `PropertyDataType` conflict — a property can't carry two
+    /// primitive types). The kernel refuses to apply incompatible
+    /// quotients rather than producing a merged ontology that won't
+    /// validate.
+    QuotientNotApplicable {
+        conflict_id: ConflictId,
+        conflict_kind: String,
+        quotient: SchemaQuotient,
+        reason: String,
+    },
+    /// A `SchemaQuotient` resolution validated cleanly and the drop
+    /// sets were computed, but the merge-layer construction path
+    /// (rebuilding the merge with the dropped contributions
+    /// excluded) isn't yet wired (15g deliverable). Exercise the
+    /// drop-set computation directly via
+    /// [`apply_quotient_resolution`].
+    QuotientApplicationNotYetWired {
+        conflict_id: ConflictId,
+        quotient: SchemaQuotient,
+    },
 }
 
 impl std::fmt::Display for MergeError {
@@ -1716,6 +1928,24 @@ impl std::fmt::Display for MergeError {
             MergeError::RenameApplicationNotYetWired { old_iri, new_iri } => write!(
                 f,
                 "Rename {old_iri} → {new_iri} validated successfully but merge-layer construction is pending (15g)"
+            ),
+            MergeError::QuotientNotApplicable {
+                conflict_id,
+                conflict_kind,
+                quotient,
+                reason,
+            } => write!(
+                f,
+                "SchemaQuotient {quotient:?} not applicable to {conflict_kind} conflict {}: {reason}",
+                conflict_id.0
+            ),
+            MergeError::QuotientApplicationNotYetWired {
+                conflict_id,
+                quotient,
+            } => write!(
+                f,
+                "SchemaQuotient {quotient:?} on conflict {} validated successfully but merge-layer construction is pending (15g)",
+                conflict_id.0
             ),
         }
     }
@@ -3124,5 +3354,196 @@ mod tests {
                 "expected ConflictNotFound (classifier doesn't yet surface IriCollision); got {other:?}"
             ),
         }
+    }
+
+    // ─── SchemaQuotient (15d) ──────────────────────────────────────────────
+
+    /// Build a span with a `PropertyDataType` conflict on
+    /// `urn:test:weight`. Branch A = integer, branch B = string.
+    fn span_with_property_data_type_conflict() -> (MergeSpan, MemoryPersistentBackend, TypedConflict)
+    {
+        let prop_a = make_resource(
+            "urn:test:weight",
+            &[wk::PROPERTY],
+            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+        );
+        let prop_b = make_resource(
+            "urn:test:weight",
+            &[wk::PROPERTY],
+            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+        );
+        let (span, backend) = build_span(Vec::new(), vec![prop_a], vec![prop_b]);
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        (span, backend, conflicts.into_iter().next().unwrap())
+    }
+
+    /// Build a span with a `KindMismatch` conflict on `urn:test:X`.
+    fn span_with_kind_mismatch_conflict() -> (MergeSpan, MemoryPersistentBackend, TypedConflict) {
+        let class_x = make_resource("urn:test:X", &[wk::CLASS], &[]);
+        let prop_x = make_resource("urn:test:X", &[wk::PROPERTY], &[]);
+        let (span, backend) = build_span(Vec::new(), vec![class_x], vec![prop_x]);
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        (span, backend, conflicts.into_iter().next().unwrap())
+    }
+
+    #[test]
+    fn quotient_keep_both_rejected_on_property_data_type() {
+        // `KeepBoth` requires the conflict kind to admit both
+        // contributions structurally. `PropertyDataType` is
+        // single-valued — a property can't have two primitive types.
+        let (_span, _backend, conflict) = span_with_property_data_type_conflict();
+        let result = apply_quotient_resolution(&conflict, SchemaQuotient::KeepBoth);
+        match result {
+            Err(MergeError::QuotientNotApplicable {
+                conflict_id: id,
+                conflict_kind,
+                quotient,
+                ..
+            }) => {
+                assert_eq!(id, conflict.id);
+                assert_eq!(conflict_kind, "PropertyDataType");
+                assert_eq!(quotient, SchemaQuotient::KeepBoth);
+            }
+            other => panic!("expected QuotientNotApplicable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quotient_keep_both_rejected_on_kind_mismatch() {
+        // Kind is single-valued per D1 §3 — same rejection shape as
+        // PropertyDataType.
+        let (_span, _backend, conflict) = span_with_kind_mismatch_conflict();
+        let result = apply_quotient_resolution(&conflict, SchemaQuotient::KeepBoth);
+        assert!(
+            matches!(result, Err(MergeError::QuotientNotApplicable { .. })),
+            "expected QuotientNotApplicable, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn quotient_keep_one_winner_a_drops_property_from_branch_b() {
+        let (_span, _backend, conflict) = span_with_property_data_type_conflict();
+        let application =
+            apply_quotient_resolution(&conflict, SchemaQuotient::KeepOne { winner: Side::A })
+                .expect("KeepOne is applicable to PropertyDataType");
+        assert_eq!(application.conflict_id, conflict.id);
+        assert_eq!(
+            application.quotient,
+            SchemaQuotient::KeepOne { winner: Side::A }
+        );
+        assert!(
+            application.drop_from_branch_a.is_empty(),
+            "winner A — nothing dropped from A; got {:?}",
+            application.drop_from_branch_a
+        );
+        assert_eq!(application.drop_from_branch_b.len(), 1);
+        assert_eq!(
+            application.drop_from_branch_b[0].as_str(),
+            "urn:test:weight"
+        );
+    }
+
+    #[test]
+    fn quotient_keep_one_winner_b_drops_property_from_branch_a() {
+        let (_span, _backend, conflict) = span_with_property_data_type_conflict();
+        let application =
+            apply_quotient_resolution(&conflict, SchemaQuotient::KeepOne { winner: Side::B })
+                .expect("KeepOne winner=B is applicable");
+        assert!(application.drop_from_branch_b.is_empty());
+        assert_eq!(application.drop_from_branch_a.len(), 1);
+        assert_eq!(
+            application.drop_from_branch_a[0].as_str(),
+            "urn:test:weight"
+        );
+    }
+
+    #[test]
+    fn quotient_keep_neither_drops_property_from_both() {
+        let (_span, _backend, conflict) = span_with_property_data_type_conflict();
+        let application = apply_quotient_resolution(&conflict, SchemaQuotient::KeepNeither)
+            .expect("KeepNeither is applicable to PropertyDataType");
+        assert_eq!(application.drop_from_branch_a.len(), 1);
+        assert_eq!(application.drop_from_branch_b.len(), 1);
+        assert_eq!(
+            application.drop_from_branch_a[0],
+            application.drop_from_branch_b[0]
+        );
+        assert_eq!(
+            application.drop_from_branch_a[0].as_str(),
+            "urn:test:weight"
+        );
+    }
+
+    #[test]
+    fn quotient_keep_one_on_kind_mismatch_drops_the_iri() {
+        let (_span, _backend, conflict) = span_with_kind_mismatch_conflict();
+        let application =
+            apply_quotient_resolution(&conflict, SchemaQuotient::KeepOne { winner: Side::A })
+                .expect("KeepOne is applicable to KindMismatch");
+        assert_eq!(application.drop_from_branch_b.len(), 1);
+        assert_eq!(application.drop_from_branch_b[0].as_str(), "urn:test:X");
+        assert!(application.drop_from_branch_a.is_empty());
+    }
+
+    #[test]
+    fn merge_with_resolutions_quotient_rejects_unknown_conflict_id() {
+        // The merge dispatch resolves ConflictId → TypedConflict via
+        // the classifier-derived index. An id that doesn't classify
+        // surfaces as `ConflictNotFound` before reaching the apply
+        // function. `apply_quotient_resolution` itself takes a
+        // resolved `&TypedConflict` and so cannot return this error.
+        let (span, backend, _conflict) = span_with_property_data_type_conflict();
+        let bogus_id = ConflictId("nonexistent:foo".to_string());
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: bogus_id.clone(),
+            quotient: SchemaQuotient::KeepNeither,
+        }];
+        let result = merge_with_resolutions(&span, resolutions, &backend);
+        match result {
+            Err(MergeError::ConflictNotFound(id)) => {
+                assert_eq!(id, bogus_id);
+            }
+            other => panic!("expected ConflictNotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_with_resolutions_quotient_validates_then_reports_pending() {
+        // End-to-end through `merge_with_resolutions`: a KeepOne
+        // resolution against a PropertyDataType conflict validates,
+        // produces drop sets, and the surface short-circuits with
+        // `QuotientApplicationNotYetWired` until 15g lands.
+        let (span, backend, conflict) = span_with_property_data_type_conflict();
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict.id.clone(),
+            quotient: SchemaQuotient::KeepOne { winner: Side::A },
+        }];
+        let result = merge_with_resolutions(&span, resolutions, &backend);
+        match result {
+            Err(MergeError::QuotientApplicationNotYetWired {
+                conflict_id: id,
+                quotient,
+            }) => {
+                assert_eq!(id, conflict.id);
+                assert_eq!(quotient, SchemaQuotient::KeepOne { winner: Side::A });
+            }
+            other => panic!("expected QuotientApplicationNotYetWired, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_with_resolutions_quotient_surfaces_applicability_error() {
+        // KeepBoth on a PropertyDataType conflict — the validator
+        // rejects before the "not yet wired" short-circuit fires.
+        let (span, backend, conflict) = span_with_property_data_type_conflict();
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict.id.clone(),
+            quotient: SchemaQuotient::KeepBoth,
+        }];
+        let result = merge_with_resolutions(&span, resolutions, &backend);
+        assert!(
+            matches!(result, Err(MergeError::QuotientNotApplicable { .. })),
+            "expected QuotientNotApplicable from merge surface, got {result:?}"
+        );
     }
 }
