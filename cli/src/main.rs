@@ -585,6 +585,54 @@ enum DbCommands {
         #[arg(long)]
         preserve_history: bool,
     },
+    /// Reconcile a diverged head with a branch (D20). `preview`
+    /// computes the cascade impact without committing; `resolve`
+    /// applies the resolutions and CAS-advances the branch ref.
+    Merge {
+        #[command(subcommand)]
+        command: MergeCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum MergeCommands {
+    /// Non-mutating dry-run: show the cascade items the resolutions
+    /// would generate without applying anything. Print each item's
+    /// stable id so the caller can pipe it into `resolve
+    /// --acknowledge`.
+    Preview {
+        /// Branch whose current head is one side of the merge.
+        #[arg(long, default_value = "main")]
+        branch: String,
+        /// Hex-encoded candidate head: the layer the caller built
+        /// that diverged from `branch`'s current tip.
+        #[arg(long, value_name = "LAYER_ID")]
+        candidate: String,
+        /// Path to a JSON file containing the tentative resolutions
+        /// (array of `{conflict_id, kind, ...}` objects). See
+        /// `docs/cli/merge-resolution-format.md` for the schema, or
+        /// the source of `parse_resolution_file` for the variants.
+        #[arg(long, value_name = "PATH")]
+        resolutions: std::path::PathBuf,
+    },
+    /// Apply resolutions, commit the merge layer, and CAS-advance
+    /// the branch ref. Every cascade item produced by the preview
+    /// must be acknowledged via repeated `--acknowledge`.
+    Resolve {
+        /// Branch whose ref will be advanced on success.
+        #[arg(long, default_value = "main")]
+        branch: String,
+        /// Hex-encoded candidate head.
+        #[arg(long, value_name = "LAYER_ID")]
+        candidate: String,
+        /// Path to a JSON file containing the resolutions to apply.
+        #[arg(long, value_name = "PATH")]
+        resolutions: std::path::PathBuf,
+        /// Cascade item id to acknowledge. Repeat for each item.
+        /// `merge preview` prints the ids to pass here.
+        #[arg(long = "acknowledge", value_name = "ITEM_ID")]
+        acknowledgments: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -680,6 +728,38 @@ async fn main() {
                     )
                     .await
                 }
+                DbCommands::Merge { command } => match command {
+                    MergeCommands::Preview {
+                        branch,
+                        candidate,
+                        resolutions,
+                    } => {
+                        remote_db_merge_preview(
+                            endpoint,
+                            &branch,
+                            &candidate,
+                            &resolutions,
+                            cli.json,
+                        )
+                        .await
+                    }
+                    MergeCommands::Resolve {
+                        branch,
+                        candidate,
+                        resolutions,
+                        acknowledgments,
+                    } => {
+                        remote_db_merge_resolve(
+                            endpoint,
+                            &branch,
+                            &candidate,
+                            &resolutions,
+                            &acknowledgments,
+                            cli.json,
+                        )
+                        .await
+                    }
+                },
                 _ => {
                     eprintln!(
                         "this 'db' subcommand is a local-only operation; drop --endpoint and pass \
@@ -1224,6 +1304,13 @@ fn cmd_db(command: DbCommands) {
                 "'db consolidate' requires --endpoint — consolidation must run against the live \
                  kernel server holding the same DB so the branch lock serialises with concurrent \
                  commits"
+            );
+            std::process::exit(1);
+        }
+        DbCommands::Merge { .. } => {
+            eprintln!(
+                "'db merge' requires --endpoint — merge resolution must run against the live \
+                 kernel server so the branch lock serialises with concurrent commits"
             );
             std::process::exit(1);
         }
@@ -2051,6 +2138,367 @@ async fn remote_db_consolidate(
                 eprintln!("gRPC error: {e}");
                 std::process::exit(1);
             }
+        }
+    }
+}
+
+/// Read and parse a JSON file of merge resolutions into the wire
+/// `MergeResolutionWire` shape. The file is an array of objects, one
+/// per resolution; each carries `conflict_id`, `kind`, and the
+/// variant-specific fields. Schema:
+///
+/// ```text
+/// [
+///   { "conflict_id": "...",
+///     "kind": "witness",
+///     "comorphism_iri": "..." },
+///
+///   { "conflict_id": "...",
+///     "kind": "rename",
+///     "side": "a"|"b",
+///     "old_iri": "...",
+///     "new_iri": "..." },
+///
+///   { "conflict_id": "...",
+///     "kind": "schema_quotient",
+///     "quotient": "keep_both"|"keep_one"|"keep_neither",
+///     "winner": "a"|"b"   // only for keep_one
+///   }
+/// ]
+/// ```
+///
+/// Returns the parsed wire vec on success or a human-readable
+/// diagnostic on shape failure.
+fn parse_resolution_file(
+    path: &std::path::Path,
+) -> Result<Vec<eigenius_kernel::server::proto::MergeResolutionWire>, String> {
+    use eigenius_kernel::server::proto;
+
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let array: Vec<serde_json::Value> = serde_json::from_str(&raw)
+        .map_err(|e| format!("{} is not a JSON array of resolutions: {e}", path.display()))?;
+
+    let mut out = Vec::with_capacity(array.len());
+    for (idx, entry) in array.iter().enumerate() {
+        let obj = entry
+            .as_object()
+            .ok_or_else(|| format!("resolutions[{idx}] is not a JSON object"))?;
+        let conflict_id = obj
+            .get("conflict_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("resolutions[{idx}]: missing string `conflict_id`"))?
+            .to_string();
+        let kind = obj
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("resolutions[{idx}]: missing string `kind`"))?;
+
+        let strategy = match kind {
+            "witness" => {
+                let comorphism_iri = obj
+                    .get("comorphism_iri")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        format!("resolutions[{idx}]: witness needs string `comorphism_iri`")
+                    })?
+                    .to_string();
+                proto::merge_resolution_wire::Strategy::Witness(proto::WitnessStrategy {
+                    comorphism_iri,
+                })
+            }
+            "rename" => {
+                let side = parse_side_str(obj.get("side"), idx)?;
+                let old_iri = obj
+                    .get("old_iri")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("resolutions[{idx}]: rename needs string `old_iri`"))?
+                    .to_string();
+                let new_iri = obj
+                    .get("new_iri")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("resolutions[{idx}]: rename needs string `new_iri`"))?
+                    .to_string();
+                proto::merge_resolution_wire::Strategy::Rename(proto::RenameStrategy {
+                    side: side as i32,
+                    old_iri,
+                    new_iri,
+                })
+            }
+            "schema_quotient" => {
+                let quotient_str =
+                    obj.get("quotient")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            format!("resolutions[{idx}]: schema_quotient needs string `quotient`")
+                        })?;
+                let kind = match quotient_str {
+                    "keep_both" => proto::MergeQuotientKind::KeepBoth,
+                    "keep_one" => proto::MergeQuotientKind::KeepOne,
+                    "keep_neither" => proto::MergeQuotientKind::KeepNeither,
+                    other => {
+                        return Err(format!("resolutions[{idx}]: unknown quotient {other:?}"));
+                    }
+                };
+                let winner = if matches!(kind, proto::MergeQuotientKind::KeepOne) {
+                    parse_side_str(obj.get("winner"), idx)?
+                } else {
+                    proto::MergeSide::Unspecified
+                };
+                proto::merge_resolution_wire::Strategy::Quotient(proto::QuotientStrategy {
+                    kind: kind as i32,
+                    winner: winner as i32,
+                })
+            }
+            other => {
+                return Err(format!(
+                    "resolutions[{idx}]: unknown kind {other:?}; expected witness, rename, schema_quotient"
+                ));
+            }
+        };
+        out.push(proto::MergeResolutionWire {
+            conflict_id,
+            strategy: Some(strategy),
+        });
+    }
+    Ok(out)
+}
+
+fn parse_side_str(
+    value: Option<&serde_json::Value>,
+    idx: usize,
+) -> Result<eigenius_kernel::server::proto::MergeSide, String> {
+    use eigenius_kernel::server::proto::MergeSide;
+    let s = value
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("resolutions[{idx}]: missing string `side` (\"a\" or \"b\")"))?;
+    match s {
+        "a" | "A" => Ok(MergeSide::A),
+        "b" | "B" => Ok(MergeSide::B),
+        other => Err(format!(
+            "resolutions[{idx}]: side must be \"a\" or \"b\", got {other:?}"
+        )),
+    }
+}
+
+async fn remote_db_merge_preview(
+    endpoint: &str,
+    branch: &str,
+    candidate: &str,
+    resolutions_path: &std::path::Path,
+    json_output: bool,
+) {
+    let resolutions = match parse_resolution_file(resolutions_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let mut client = connect_client(endpoint).await;
+    let req = eigenius_kernel::server::proto::PreviewCascadeRequest {
+        branch: branch.to_string(),
+        candidate_head: candidate.to_string(),
+        resolutions,
+    };
+    match client.preview_cascade(req).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": resp.success,
+                        "error": resp.error,
+                        "error_kind": resp.error_kind,
+                        "items": resp.items.iter().map(cascade_item_to_json).collect::<Vec<_>>(),
+                    }))
+                    .unwrap()
+                );
+            } else if resp.success {
+                if resp.items.is_empty() {
+                    println!("No cascade items — resolutions are self-contained.");
+                } else {
+                    println!("{} cascade item(s):", resp.items.len());
+                    for item in &resp.items {
+                        println!("  {}", item.item_id);
+                        print_cascade_item_body(item);
+                    }
+                    println!();
+                    println!(
+                        "Acknowledge with: eigenius db merge resolve --acknowledge <ITEM_ID> [...]"
+                    );
+                }
+            } else {
+                eprintln!("Preview failed ({}): {}", resp.error_kind, resp.error);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_db_merge_resolve(
+    endpoint: &str,
+    branch: &str,
+    candidate: &str,
+    resolutions_path: &std::path::Path,
+    acknowledgments: &[String],
+    json_output: bool,
+) {
+    let resolutions = match parse_resolution_file(resolutions_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let acks: Vec<eigenius_kernel::server::proto::CascadeAckWire> = acknowledgments
+        .iter()
+        .map(|id| eigenius_kernel::server::proto::CascadeAckWire {
+            item_id: id.clone(),
+        })
+        .collect();
+    let mut client = connect_client(endpoint).await;
+    let req = eigenius_kernel::server::proto::SubmitResolutionRequest {
+        branch: branch.to_string(),
+        candidate_head: candidate.to_string(),
+        resolutions,
+        acknowledgments: acks,
+    };
+    match client.submit_resolution(req).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "success": resp.success,
+                        "error": resp.error,
+                        "error_kind": resp.error_kind,
+                        "merge_layer_id": resp.merge_layer_id,
+                        "branch_tip": resp.branch_tip,
+                        "missing_acknowledgments": resp.missing_acknowledgments,
+                    }))
+                    .unwrap()
+                );
+            } else if resp.success {
+                println!("Merge committed on {branch}: layer {}", resp.merge_layer_id);
+                if resp.branch_tip != resp.merge_layer_id {
+                    println!("  branch tip: {}", resp.branch_tip);
+                }
+            } else {
+                eprintln!("Resolution failed ({}): {}", resp.error_kind, resp.error);
+                if !resp.missing_acknowledgments.is_empty() {
+                    eprintln!("Missing acknowledgments — pass each with --acknowledge:");
+                    for id in &resp.missing_acknowledgments {
+                        eprintln!("  --acknowledge {id}");
+                    }
+                }
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cascade_item_to_json(
+    item: &eigenius_kernel::server::proto::CascadeItemWire,
+) -> serde_json::Value {
+    use eigenius_kernel::server::proto::cascade_item_wire::Kind;
+    let mut body = serde_json::json!({ "item_id": item.item_id });
+    if let Some(kind) = &item.kind {
+        let body_obj = body.as_object_mut().unwrap();
+        match kind {
+            Kind::OrphanedReference(r) => {
+                body_obj.insert("kind".to_string(), "orphaned_reference".into());
+                body_obj.insert("resource".to_string(), r.resource.clone().into());
+                body_obj.insert(
+                    "dropped_target".to_string(),
+                    r.dropped_target.clone().into(),
+                );
+                body_obj.insert(
+                    "property_path".to_string(),
+                    serde_json::Value::Array(
+                        r.property_path
+                            .iter()
+                            .map(|s| serde_json::Value::String(s.clone()))
+                            .collect(),
+                    ),
+                );
+            }
+            Kind::OrphanedTyping(t) => {
+                body_obj.insert("kind".to_string(), "orphaned_typing".into());
+                body_obj.insert("class".to_string(), t.class.clone().into());
+                body_obj.insert(
+                    "affected_resources".to_string(),
+                    serde_json::Value::Array(
+                        t.affected_resources
+                            .iter()
+                            .map(|s| serde_json::Value::String(s.clone()))
+                            .collect(),
+                    ),
+                );
+            }
+            Kind::InvalidatedSignature(s) => {
+                body_obj.insert("kind".to_string(), "invalidated_signature".into());
+                body_obj.insert("program".to_string(), s.program.clone().into());
+                body_obj.insert(
+                    "signature_problem".to_string(),
+                    s.signature_problem.clone().into(),
+                );
+            }
+            Kind::InvalidatedTrace(t) => {
+                body_obj.insert("kind".to_string(), "invalidated_trace".into());
+                body_obj.insert("trace".to_string(), t.trace.clone().into());
+                body_obj.insert("reason".to_string(), t.reason.clone().into());
+            }
+        }
+    }
+    body
+}
+
+fn print_cascade_item_body(item: &eigenius_kernel::server::proto::CascadeItemWire) {
+    use eigenius_kernel::server::proto::cascade_item_wire::Kind;
+    let Some(kind) = &item.kind else {
+        return;
+    };
+    match kind {
+        Kind::OrphanedReference(r) => {
+            let path = if r.property_path.is_empty() {
+                "<root>".to_string()
+            } else {
+                r.property_path.join("/")
+            };
+            println!(
+                "    OrphanedReference: {} → {} (at {})",
+                r.resource, r.dropped_target, path
+            );
+        }
+        Kind::OrphanedTyping(t) => {
+            println!(
+                "    OrphanedTyping: class {} ({} affected resources)",
+                t.class,
+                t.affected_resources.len()
+            );
+            for r in &t.affected_resources {
+                println!("      {r}");
+            }
+        }
+        Kind::InvalidatedSignature(s) => {
+            println!(
+                "    InvalidatedSignature: program {} ({})",
+                s.program, s.signature_problem
+            );
+        }
+        Kind::InvalidatedTrace(t) => {
+            println!("    InvalidatedTrace: {} ({})", t.trace, t.reason);
         }
     }
 }

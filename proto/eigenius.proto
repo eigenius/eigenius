@@ -138,6 +138,13 @@ service EigeniusKernel {
   // regex-matching the human-readable `error` string.
   rpc SubmitResolution(SubmitResolutionRequest) returns (SubmitResolutionResponse);
 
+  // Non-mutating dry-run for cascade impact (D20 §7.3). Computes the
+  // same `CascadePreview` `SubmitResolution` would compute, without
+  // applying any resolution or moving any branch ref. The UI calls
+  // this between "user selected a strategy" and "user clicks commit"
+  // so consequences are visible before the action.
+  rpc PreviewCascade(PreviewCascadeRequest) returns (PreviewCascadeResponse);
+
   // --- Chain consolidation (D25) ---
 
   // Collapse `[from..to]` on `branch` into a single resolve-equivalent
@@ -1066,6 +1073,81 @@ message SubmitResolutionResponse {
   // Missing cascade item ids when
   // `error_kind = INCOMPLETE_ACKNOWLEDGMENTS`. Empty otherwise.
   repeated string missing_acknowledgments = 6;
+}
+
+// A single cascade item — downstream consequence of a resolution
+// (D20 §8). Mirrors `crate::layer::merge::CascadeItem`. The
+// `kind` oneof carries the variant-specific data; `item_id` is the
+// deterministic id the kernel produces for ack matching.
+message CascadeItemWire {
+  string item_id = 1;
+  oneof kind {
+    OrphanedReferenceItem orphaned_reference = 2;
+    OrphanedTypingItem orphaned_typing = 3;
+    InvalidatedSignatureItem invalidated_signature = 4;
+    InvalidatedTraceItem invalidated_trace = 5;
+  }
+}
+
+message OrphanedReferenceItem {
+  // IRI of the resource carrying the reference.
+  string resource = 1;
+  // The IRI that's being dropped or renamed.
+  string dropped_target = 2;
+  // Property-path segments from the resource's root to the reference
+  // site. Top-level reference is a single-element list; references
+  // inside `Embedded` resources or `Array` items carry the full
+  // chain of property IRIs.
+  repeated string property_path = 3;
+}
+
+message OrphanedTypingItem {
+  string class = 1;
+  repeated string affected_resources = 2;
+}
+
+// Reserved — does not fire in v1 of the kernel.
+message InvalidatedSignatureItem {
+  string program = 1;
+  string signature_problem = 2;
+}
+
+// Reserved — does not fire in v1 of the kernel.
+message InvalidatedTraceItem {
+  string trace = 1;
+  string reason = 2;
+}
+
+// Typed error variants for `PreviewCascade`. Mirrors the relevant
+// subset of `SubmitResolutionErrorKind` minus the ack-gate /
+// application / CAS variants that don't apply to a non-mutating
+// preview.
+enum PreviewCascadeErrorKind {
+  PREVIEW_CASCADE_ERROR_KIND_UNSPECIFIED = 0;
+  PREVIEW_CASCADE_ERROR_KIND_NO_COMMON_ANCESTOR = 1;
+  PREVIEW_CASCADE_ERROR_KIND_CONFLICT_NOT_FOUND = 2;
+  PREVIEW_CASCADE_ERROR_KIND_MALFORMED_RESOLUTION = 3;
+  PREVIEW_CASCADE_ERROR_KIND_INTERNAL = 4;
+}
+
+message PreviewCascadeRequest {
+  // Branch whose head is the "current" side of the span.
+  string branch = 1;
+  // Hex-encoded candidate head — the caller's would-be commit.
+  string candidate_head = 2;
+  // Tentative resolutions to preview. Empty is legal — the cascade
+  // for an empty resolution set is empty.
+  repeated MergeResolutionWire resolutions = 3;
+}
+
+message PreviewCascadeResponse {
+  bool success = 1;
+  string error = 2;
+  PreviewCascadeErrorKind error_kind = 3;
+  // Sorted + deduplicated cascade items. Each item carries its
+  // stable `item_id` so the caller can build acknowledgments from
+  // this list directly.
+  repeated CascadeItemWire items = 4;
 }
 
 // --- Chain consolidation (D25) ---

@@ -3546,6 +3546,94 @@ impl EigeniusKernel for EigeniusService {
         }
     }
 
+    async fn preview_cascade(
+        &self,
+        request: Request<PreviewCascadeRequest>,
+    ) -> Result<Response<PreviewCascadeResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_PREVIEW_CASCADE);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        let branch_tip = backend
+            .get_branch(&req.branch)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("branch {:?} not found", req.branch))
+            })?;
+        let candidate_head = parse_layer_id(&req.candidate_head, "candidate_head")?;
+
+        let resolutions = match decode_resolutions(&req.resolutions) {
+            Ok(r) => r,
+            Err(reason) => {
+                return Ok(Response::new(PreviewCascadeResponse {
+                    success: false,
+                    error: reason,
+                    error_kind: proto::PreviewCascadeErrorKind::MalformedResolution as i32,
+                    items: Vec::new(),
+                }));
+            }
+        };
+
+        let topology = backend
+            .load_topology()
+            .map_err(|e| Status::internal(format!("load_topology failed: {e}")))?;
+        let span = match crate::layer::merge::build_merge_span(
+            &branch_tip,
+            &candidate_head,
+            &topology,
+            backend.as_ref(),
+        ) {
+            Ok(s) => s,
+            Err(crate::layer::merge::MergeError::NoCommonAncestor { .. }) => {
+                return Ok(Response::new(PreviewCascadeResponse {
+                    success: false,
+                    error: format!(
+                        "no common ancestor between branch tip and candidate head {}",
+                        req.candidate_head
+                    ),
+                    error_kind: proto::PreviewCascadeErrorKind::NoCommonAncestor as i32,
+                    items: Vec::new(),
+                }));
+            }
+            Err(e) => {
+                return Ok(Response::new(PreviewCascadeResponse {
+                    success: false,
+                    error: format!("build_merge_span failed: {e}"),
+                    error_kind: proto::PreviewCascadeErrorKind::Internal as i32,
+                    items: Vec::new(),
+                }));
+            }
+        };
+
+        let preview =
+            match crate::layer::merge::preview_cascade(&span, &resolutions, backend.as_ref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    let kind = match e {
+                        crate::layer::merge::MergeError::ConflictNotFound(_) => {
+                            proto::PreviewCascadeErrorKind::ConflictNotFound
+                        }
+                        _ => proto::PreviewCascadeErrorKind::Internal,
+                    };
+                    return Ok(Response::new(PreviewCascadeResponse {
+                        success: false,
+                        error: e.to_string(),
+                        error_kind: kind as i32,
+                        items: Vec::new(),
+                    }));
+                }
+            };
+
+        Ok(Response::new(PreviewCascadeResponse {
+            success: true,
+            error: String::new(),
+            error_kind: proto::PreviewCascadeErrorKind::Unspecified as i32,
+            items: preview.items.iter().map(encode_cascade_item).collect(),
+        }))
+    }
+
     async fn preview_merge(
         &self,
         request: Request<PreviewMergeRequest>,
@@ -4158,6 +4246,55 @@ fn submit_resolution_internal_error(error: String) -> Response<SubmitResolutionR
         error_kind: proto::SubmitResolutionErrorKind::Internal as i32,
         ..Default::default()
     })
+}
+
+/// Encode a kernel `CascadeItem` as the wire shape. Mirrors the
+/// enum variants one-for-one; `item_id` is the deterministic id the
+/// kernel produces so clients can build acknowledgments from this
+/// list directly.
+fn encode_cascade_item(item: &crate::layer::merge::CascadeItem) -> proto::CascadeItemWire {
+    use crate::layer::merge::CascadeItem;
+    let item_id = item.id().0;
+    let kind = match item {
+        CascadeItem::OrphanedReference {
+            resource,
+            dropped_target,
+            location,
+        } => proto::cascade_item_wire::Kind::OrphanedReference(proto::OrphanedReferenceItem {
+            resource: resource.as_str().to_string(),
+            dropped_target: dropped_target.as_str().to_string(),
+            property_path: location.0.iter().map(|i| i.as_str().to_string()).collect(),
+        }),
+        CascadeItem::OrphanedTyping {
+            class,
+            affected_resources,
+        } => proto::cascade_item_wire::Kind::OrphanedTyping(proto::OrphanedTypingItem {
+            class: class.as_str().to_string(),
+            affected_resources: affected_resources
+                .iter()
+                .map(|i| i.as_str().to_string())
+                .collect(),
+        }),
+        CascadeItem::InvalidatedSignature {
+            program,
+            signature_problem,
+        } => {
+            proto::cascade_item_wire::Kind::InvalidatedSignature(proto::InvalidatedSignatureItem {
+                program: program.as_str().to_string(),
+                signature_problem: signature_problem.clone(),
+            })
+        }
+        CascadeItem::InvalidatedTrace { trace, reason } => {
+            proto::cascade_item_wire::Kind::InvalidatedTrace(proto::InvalidatedTraceItem {
+                trace: trace.clone(),
+                reason: reason.clone(),
+            })
+        }
+    };
+    proto::CascadeItemWire {
+        item_id,
+        kind: Some(kind),
+    }
 }
 
 /// Build a `ConsolidateOpts` from the wire request. Pulls active task
