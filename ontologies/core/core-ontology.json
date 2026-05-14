@@ -645,6 +645,37 @@
   },
 
   {
+    "@id": "urn:eigenius:core:Option",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Option",
+    "urn:eigenius:core:description": "The standard option/maybe parametric inductive: a value of `Option(A)` is either `none` or `some(value: A)`. Mirrors the canonical kernel-side declaration at `crate::nbe::term::option_decl`. Used by `MergeComorphism` to type the optional ancestor argument of a `(A, A, Option<A>) -> A` witness signature. Separate from the anonymous `Sum(some A | none 1)` encoding the type checker uses for recommended properties (`prop?` lowering) — that encoding is internal; this declaration is the named, chain-visible type for use sites that need to refer to `Option` by IRI.",
+    "urn:eigenius:core:type_params": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
+        "urn:eigenius:core:param_name": "A",
+        "urn:eigenius:core:param_kind": "urn:eigenius:core:Set"
+      }
+    ],
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "none"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "some",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "A"
+          }
+        ]
+      }
+    ]
+  },
+
+  {
     "@id": "urn:eigenius:core:MergeComorphism",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:description": "A typed witness for a `Witness`-strategy merge resolution (D20 §6.1). Carries a `merge_transformation` whose Component must have signature `(A, A, Option<A>) -> A` where A is the class of the IRI being merged: the two branch values and the optional ancestor value collapse into the merged value. Distinct from the institution-layer `Comorphism` (which witnesses cross-institution translation); the two share the typing-discipline framing but live at different layers because merge resolution is a core concern while institution boundaries are not.",

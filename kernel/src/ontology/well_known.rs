@@ -26,6 +26,23 @@ pub const FORMAT: &str = "urn:eigenius:core:Format";
 pub const ENCODING: &str = "urn:eigenius:core:Encoding";
 pub const CONDITIONAL_REQUIREMENT: &str = "urn:eigenius:core:ConditionalRequirement";
 
+// --- Layer reconciliation (D20 §6.1) ---
+//
+// A `MergeComorphism` is the typed witness for a `Witness`-strategy
+// resolution: its `merge_transformation` Component has signature
+// `(A, A, Option<A>) -> A` where `A` is the class of the IRI being
+// merged. Distinct from the institution-layer `Comorphism` (which
+// witnesses cross-institution translation); same triadic typing
+// discipline, different application surface.
+
+pub const MERGE_COMORPHISM: &str = "urn:eigenius:core:MergeComorphism";
+pub const MERGE_TRANSFORMATION: &str = "urn:eigenius:core:merge_transformation";
+
+/// Canonical optional/maybe inductive (Phase 15b step 3, D20 §6.1).
+/// Used by `MergeComorphism` to type the optional ancestor argument
+/// of a `(A, A, Option<A>) -> A` witness signature.
+pub const OPTION: &str = "urn:eigenius:core:Option";
+
 // --- Inductive types (Phase 11b, D19) ---
 
 pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";

@@ -531,6 +531,57 @@ fn build_list_decl() -> Arc<InductiveDecl> {
     })
 }
 
+/// Canonical `Option(A)` inductive declaration, lazily built and shared.
+///
+/// Used by the merge-witness type-check (Phase 15b step 3, D20 §6.1):
+/// a `MergeComorphism`'s transformation must have signature
+/// `(A, A, Option(A)) -> A`, where the third argument carries the
+/// optional ancestor value. Same stub-Arc / name-based-equality
+/// pattern as [`list_decl`].
+pub fn option_decl() -> Arc<InductiveDecl> {
+    static OPTION_DECL: OnceLock<Arc<InductiveDecl>> = OnceLock::new();
+    OPTION_DECL.get_or_init(build_option_decl).clone()
+}
+
+fn build_option_decl() -> Arc<InductiveDecl> {
+    let self_ref = Arc::new(InductiveDecl {
+        name: "Option".to_string(),
+        params: Vec::new(),
+        sort: Exp::Set,
+        ctors: Vec::new(),
+    });
+    let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
+    Arc::new(InductiveDecl {
+        name: "Option".to_string(),
+        params: vec![(Patt::Var("A".to_string()), Exp::Set)],
+        sort: Exp::Set,
+        ctors: vec![
+            // none : Π A:Set. Option A
+            InductiveCtorDecl {
+                name: "none".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Set),
+                    Box::new(option_a_typ.clone()),
+                ),
+            },
+            // some : Π A:Set. A → Option A
+            InductiveCtorDecl {
+                name: "some".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Set),
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(Exp::Var("A".to_string())),
+                        Box::new(option_a_typ),
+                    )),
+                ),
+            },
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,6 +646,24 @@ mod tests {
         // same allocation by ptr identity.
         let a = list_decl();
         let b = list_decl();
+        assert!(Arc::ptr_eq(&a, &b));
+    }
+
+    #[test]
+    fn option_decl_shape() {
+        let d = option_decl();
+        assert_eq!(d.name, "Option");
+        assert_eq!(d.params.len(), 1);
+        assert!(matches!(d.params[0].0, Patt::Var(ref s) if s == "A"));
+        assert_eq!(d.ctors.len(), 2);
+        assert_eq!(d.ctors[0].name, "none");
+        assert_eq!(d.ctors[1].name, "some");
+    }
+
+    #[test]
+    fn option_decl_is_shared_across_calls() {
+        let a = option_decl();
+        let b = option_decl();
         assert!(Arc::ptr_eq(&a, &b));
     }
 }

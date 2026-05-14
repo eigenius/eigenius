@@ -721,18 +721,54 @@ fn normalise_cycle(cycle: &[Iri]) -> Vec<Iri> {
 
 // ─── Resolution surface ───────────────────────────────────────────────────
 
-/// User-supplied resolution for a specific conflict. Empty until 15b
-/// (Witness), 15c (Rename), 15d (KeepBoth/One/Neither), 15e
-/// (Restructure) land their respective variants — this is the
-/// stub-shape so the entry point compiles.
+/// User-supplied resolution for a specific conflict.
+///
+/// Each variant transforms the merge span before the pushout is
+/// taken (D20 §6). 15b ships `Witness`; 15c–15e land the rest.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MergeResolution {
-    // 15b: Witness { conflict_id, comorphism_iri }
-    // 15c: Rename { conflict_id, side, old_iri, new_iri }
-    // 15d: SchemaQuotient { conflict_id, quotient: SchemaQuotient }
-    // 15e: Restructure { conflict_id, new_parent, ... }
+    /// Apply a `MergeComorphism` whose `merge_transformation` Component
+    /// realises the universal arrow at the conflicting IRI. The
+    /// transformation must have type `(A, A, Option<A>) → A` where
+    /// `A` is the class of the conflict's IRI (D20 §6.1). The kernel
+    /// resolves the comorphism IRI on the chain, validates the
+    /// resource shape at submission time, and applies the
+    /// transformation to produce the merged value.
+    Witness {
+        conflict: ConflictId,
+        /// IRI of a `MergeComorphism` resource committed earlier in
+        /// the chain. Must resolve through the ancestor's parent
+        /// chain (or either branch's contributions).
+        comorphism: Iri,
+    },
+    // 15c: Rename { conflict, side, old_iri, new_iri }
+    // 15d: SchemaQuotient { conflict, quotient: SchemaQuotient }
+    // 15e: Restructure { conflict, new_parent, ... }
     //
-    // Empty for 15a; populating each variant is its sub-milestone.
+    // Each variant lands with its own sub-milestone; the enum grows
+    // monotonically so callers built against one variant stay
+    // working as the others light up.
+}
+
+/// A resolved `MergeComorphism` ready for application.
+///
+/// Produced by [`resolve_merge_comorphism`] at submission time;
+/// carries everything the application path needs without re-walking
+/// the chain. The actual term evaluation (applying
+/// `merge_transformation` to the three branch values) lives in 15b
+/// Step 2 — Step 1 only validates the resource shape.
+#[derive(Debug, Clone)]
+pub struct MergeComorphismHandle {
+    /// The MergeComorphism resource's own IRI.
+    pub iri: Iri,
+    /// The layer where the resource was found. Useful for diagnostics
+    /// when a resolution fails at application time.
+    pub source_layer: LayerId,
+    /// The IRI of the Mini-TT term realising the universal arrow.
+    /// Resolves to a resource committed earlier in the chain whose
+    /// `is_a` includes one of the Mini-TT expression classes
+    /// (`program:Lambda`, etc.).
+    pub transformation: Iri,
 }
 
 /// Outcome of a merge attempt, taxonomy from D20 §7.1.
@@ -827,41 +863,394 @@ pub fn classify_conflicts(
 
 /// Attempt a merge with user-supplied resolutions.
 ///
-/// 15a skeleton: applies the classifier and either succeeds (when
-/// there are no conflicts and `resolutions` is empty) or returns
-/// `NeedsResolution`. The resolution-application machinery (15b–15e)
-/// fills in the strategy handling; `resolutions` is currently
-/// rejected if non-empty because no strategy is yet defined.
+/// Two distinct phases:
+///
+/// 1. **Classification.** Always runs first. Empty conflicts +
+///    empty resolutions = clean merge (placeholder layer id for
+///    now; lattice owns the actual layer-build path until 15g).
+///    Non-empty conflicts + empty resolutions = `NeedsResolution`
+///    surface for the client to fill in.
+///
+/// 2. **Resolution application.** Runs when `resolutions` is
+///    non-empty. Each resolution is dispatched on its variant:
+///    - `Witness` (15b): looks up the `MergeComorphism`, validates
+///      the resource shape, and (currently) returns
+///      `WitnessApplicationNotYetWired` because the evaluator
+///      integration that produces the merged resource body is the
+///      15b Step 2 deliverable.
+///    - Other variants land with their respective sub-milestones.
+///
+/// On any resolution error the function fails the whole merge;
+/// partial applications are not surfaced.
 pub fn merge_with_resolutions(
     span: &MergeSpan,
     resolutions: Vec<MergeResolution>,
     backend: &dyn PersistentBackend,
 ) -> Result<MergeOutcome, MergeError> {
-    if !resolutions.is_empty() {
-        // 15b–15e own the per-strategy application paths. Until they
-        // land, accepting resolutions would be a no-op that silently
-        // ignored user intent — better to reject explicitly.
-        return Err(MergeError::ResolutionsNotYetSupported);
+    let topology = backend.load_topology().map_err(MergeError::Storage)?;
+    let conflicts = classify_conflicts(span, backend).map_err(MergeError::Storage)?;
+
+    if resolutions.is_empty() {
+        return if conflicts.is_empty() {
+            // No structural conflicts — the merge proceeds. 15a
+            // doesn't build the merge layer itself; that path stays
+            // in `lattice::merge_independent_heads` for now. The
+            // skeleton returns a placeholder layer id so callers
+            // wire through the shape; the lattice layer's existing
+            // path is the load-bearing producer.
+            Ok(MergeOutcome::Merged {
+                // Placeholder: lattice owns merge-layer construction;
+                // 15g unifies the entry points.
+                merge_layer: span.head_a.clone(),
+            })
+        } else {
+            Ok(MergeOutcome::NeedsResolution {
+                conflicts,
+                candidate_chain: format!("{}+{}", span.head_a, span.head_b),
+            })
+        };
     }
 
-    let conflicts = classify_conflicts(span, backend).map_err(MergeError::Storage)?;
-    if conflicts.is_empty() {
-        // No structural conflicts — the merge proceeds. 15a doesn't
-        // build the merge layer itself; that path stays in
-        // `lattice::merge_independent_heads` for now. The skeleton
-        // returns a placeholder layer id so callers wire through the
-        // shape; the lattice layer's existing path is the
-        // load-bearing producer.
-        Ok(MergeOutcome::Merged {
-            // Placeholder: lattice owns merge-layer construction;
-            // 15g unifies the entry points.
-            merge_layer: span.head_a.clone(),
-        })
-    } else {
-        Ok(MergeOutcome::NeedsResolution {
-            conflicts,
-            candidate_chain: format!("{}+{}", span.head_a, span.head_b),
-        })
+    // Dispatch each resolution. Errors abort the whole merge so a
+    // partial application never leaves the chain in an intermediate
+    // state. Conflict-lookup table built once for O(1) targeting.
+    let conflict_by_id: BTreeMap<&ConflictId, &TypedConflict> =
+        conflicts.iter().map(|c| (&c.id, c)).collect();
+    // 15b Step 1 short-circuits on the first Witness with
+    // `WitnessApplicationNotYetWired` because the term evaluator
+    // isn't wired yet; Step 2 turns this into a real loop that
+    // accumulates resolved-and-applied state across resolutions.
+    // The for-loop shape stays so Step 2 is a localised in-place
+    // edit rather than a restructuring.
+    #[allow(clippy::never_loop)]
+    for resolution in &resolutions {
+        match resolution {
+            MergeResolution::Witness {
+                conflict,
+                comorphism,
+            } => {
+                let target = conflict_by_id
+                    .get(conflict)
+                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
+                let _handle = resolve_merge_comorphism(comorphism, span, &topology, backend)?;
+                // The handle is validated; Step 2 will pass it into
+                // the term-evaluator + produce the merged resource
+                // body for the conflict's IRI. Until that lands,
+                // surface a typed "validated but not applied" error
+                // rather than silently no-oping.
+                let _ = target;
+                return Err(MergeError::WitnessApplicationNotYetWired {
+                    comorphism: comorphism.clone(),
+                });
+            }
+        }
+    }
+
+    // Unreachable today — every `MergeResolution` variant either
+    // returns Ok or Err inside the match. Kept as a defensive
+    // fallthrough for when 15c–15e land their variants and one
+    // accidentally falls through without producing an outcome.
+    Err(MergeError::WitnessApplicationNotYetWired {
+        comorphism: Iri::parse("urn:eigenius:placeholder:internal").expect("placeholder IRI"),
+    })
+}
+
+/// Resolve a `MergeComorphism` IRI against the span and validate its
+/// resource shape per the core ontology's class declaration:
+///
+/// 1. Walk every layer that could plausibly carry the comorphism
+///    (each branch's contributions, then the ancestor's parent
+///    chain) — D20 §6.1 says witnesses are "committed earlier in
+///    the chain," which under the partial-order chain means
+///    visible from the merge span's ancestor.
+/// 2. Confirm the resource's `is_a` includes
+///    `urn:eigenius:core:MergeComorphism`.
+/// 3. Extract the `merge_transformation` property value; reject if
+///    missing or if it isn't a `ResourceRef`.
+///
+/// On success, returns a [`MergeComorphismHandle`] the application
+/// path consumes. On any structural failure, returns the matching
+/// typed [`MergeError`] variant so callers can render a useful
+/// message without parsing.
+pub fn resolve_merge_comorphism(
+    iri: &Iri,
+    span: &MergeSpan,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<MergeComorphismHandle, MergeError> {
+    let merge_comorphism_iri = Iri::parse(wk::MERGE_COMORPHISM).expect("MERGE_COMORPHISM IRI");
+    let merge_transformation_iri =
+        Iri::parse(wk::MERGE_TRANSFORMATION).expect("MERGE_TRANSFORMATION IRI");
+
+    // Search both branches' contributions before falling back to the
+    // ancestor's chain. v1 doesn't require the comorphism to live
+    // strictly under the ancestor — D20 §6.1 leaves the chain
+    // location open as long as the resource is reachable from the
+    // merge span. A comorphism committed on a branch is just as
+    // valid as one on the ancestor.
+    let resource_loc = find_in_span_chain(iri, span, topology, backend)
+        .map_err(MergeError::Storage)?
+        .ok_or_else(|| MergeError::MergeComorphismNotFound(iri.clone()))?;
+    let (source_layer, resource) = resource_loc;
+
+    if !resource.is_instance_of(&merge_comorphism_iri) {
+        let is_a_iri = Iri::parse(wk::IS_A).expect("IS_A IRI");
+        let found_classes: Vec<Iri> = resource
+            .get(&is_a_iri)
+            .map(iter_iri_values)
+            .unwrap_or_default();
+        return Err(MergeError::NotAMergeComorphism {
+            iri: iri.clone(),
+            found_classes,
+        });
+    }
+
+    let transformation = match resource.get(&merge_transformation_iri) {
+        Some(crate::ontology::resource::Value::ResourceRef(t)) => t.clone(),
+        Some(_) => {
+            return Err(MergeError::MalformedMergeComorphism {
+                iri: iri.clone(),
+                reason: "merge_transformation must be a ResourceRef to a Mini-TT term".to_string(),
+            });
+        }
+        None => {
+            return Err(MergeError::MalformedMergeComorphism {
+                iri: iri.clone(),
+                reason: "merge_transformation property is required".to_string(),
+            });
+        }
+    };
+
+    Ok(MergeComorphismHandle {
+        iri: iri.clone(),
+        source_layer,
+        transformation,
+    })
+}
+
+/// Walk the merge span looking for an IRI's definition. Searches
+/// each branch's contributions first (those are the most-recent
+/// commits and most-likely places for a freshly-committed witness)
+/// before falling back to the ancestor's parent chain.
+///
+/// Returns `Some((layer_id, resource))` for the topmost layer that
+/// defines `iri`; `None` if the IRI isn't reachable from any of the
+/// span's heads. Storage errors propagate.
+fn find_in_span_chain(
+    iri: &Iri,
+    span: &MergeSpan,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<Option<(LayerId, Resource)>, StorageError> {
+    if let Some(layer) = span.sources_a.get(iri) {
+        if let Some(resource) = backend.try_load_resource(layer, iri)? {
+            return Ok(Some((layer.clone(), resource)));
+        }
+    }
+    if let Some(layer) = span.sources_b.get(iri) {
+        if let Some(resource) = backend.try_load_resource(layer, iri)? {
+            return Ok(Some((layer.clone(), resource)));
+        }
+    }
+    find_iri_in_chain(&span.ancestor, iri, topology, backend)
+}
+
+// ─── Witness application (15b Step 2) ──────────────────────────────────────
+
+/// Apply a validated `MergeComorphism` witness to a triple of
+/// `(branch_a, branch_b, ancestor)` and produce the merged resource
+/// body. Implements D20 §6.1's `(A, A, Option<A>) → A` signature
+/// discipline end-to-end: type-check first, then evaluate.
+///
+/// Pipeline:
+///  1. Build an in-memory chain for `handle.source_layer` so the
+///     parser + evaluator can resolve references through it.
+///  2. Look up the transformation Resource (the Mini-TT term the
+///     comorphism points at). The lookup walks the chain — the
+///     transformation may live at the witness's source layer, an
+///     ancestor, or any layer reachable from the witness.
+///  3. Parse the Resource into a Mini-TT `Exp` via
+///     [`crate::program::expr::parse_expression`].
+///  4. Build the expected witness type
+///     `Π_:A. Π_:A. Π_:Option(A). A` and bidirectionally check the
+///     parsed term against it. A type mismatch surfaces as
+///     `WitnessTypeMismatch` and aborts before evaluation — the spec
+///     mandates a commit-time signature check.
+///  5. Evaluate in Pure mode (a merge witness must be deterministic +
+///     side-effect-free — no IO, no chain mutation).
+///  6. Apply the resulting function value to three arguments, each
+///     wrapped as the appropriate `Val`:
+///      - `branch_a` → `Val::ResourceVal(branch_a)`
+///      - `branch_b` → `Val::ResourceVal(branch_b)`
+///      - `ancestor` → `none A` or `some A r` as an `InductiveVal`
+///        on [`crate::nbe::term::option_decl`].
+///  7. Marshal the result back to an Eigon `Resource` via
+///     [`crate::nbe::eval::val_to_resource_value`] — the inverse of
+///     the `ResourceVal` wrap.
+pub fn apply_witness_resolution(
+    handle: &MergeComorphismHandle,
+    class: &Iri,
+    branch_a: Resource,
+    branch_b: Resource,
+    ancestor: Option<Resource>,
+    storage: crate::layer::LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<Resource, MergeError> {
+    use crate::nbe::check::{check, CheckCtx};
+    use crate::nbe::env::Rho;
+    use crate::nbe::eval::{eval_ctx, val_to_resource_value, EvalCtx};
+    use crate::nbe::term::{option_decl, Exp, Patt};
+    use crate::nbe::val::Val;
+    use crate::ontology::resource::Value;
+    use std::sync::Arc;
+
+    // 1. Rebuild the witness's source layer's chain in memory.
+    //    `parse_expression` walks references through this layer; the
+    //    transformation IRI must be visible from it.
+    let chain_info = backend
+        .load_chain_from(&handle.source_layer)
+        .map_err(MergeError::Storage)?
+        .ok_or_else(|| {
+            MergeError::Storage(StorageError::NotFound(format!(
+                "witness source layer {} not in store",
+                handle.source_layer
+            )))
+        })?;
+    let layer = crate::layer::build_chain(chain_info, storage);
+
+    // 2. Resolve the transformation IRI through the chain.
+    let transformation_resource = layer.resolve(&handle.transformation).ok_or_else(|| {
+        MergeError::TransformationNotFound {
+            comorphism: handle.iri.clone(),
+            transformation: handle.transformation.clone(),
+        }
+    })?;
+
+    // 3. Parse the Resource into a Mini-TT Exp.
+    let exp = crate::program::expr::parse_expression(&transformation_resource, &layer).map_err(
+        |reason| MergeError::TransformationParseError {
+            transformation: handle.transformation.clone(),
+            reason,
+        },
+    )?;
+
+    // 4. Build the expected type `Π_:A. Π_:A. Π_:Option(A). A` and
+    //    type-check the witness term against it. Building as an `Exp`
+    //    and evaluating in `Rho::Nil` keeps construction uniform with
+    //    how the rest of the kernel produces Pi-chain Vals.
+    let a_exp = Exp::EigonClass(class.clone());
+    let option_a_exp = Exp::InductiveType(option_decl(), vec![a_exp.clone()]);
+    let expected_exp = Exp::Pi(
+        Patt::Unit,
+        Box::new(a_exp.clone()),
+        Box::new(Exp::Pi(
+            Patt::Unit,
+            Box::new(a_exp.clone()),
+            Box::new(Exp::Pi(Patt::Unit, Box::new(option_a_exp), Box::new(a_exp))),
+        )),
+    );
+    let mut check_ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&layer));
+    let expected_val =
+        check_ctx
+            .eval(&expected_exp, &Rho::Nil)
+            .map_err(|e| MergeError::WitnessTypeMismatch {
+                transformation: handle.transformation.clone(),
+                expected: "Π_:A. Π_:A. Π_:Option(A). A".to_string(),
+                reason: format!("failed to build expected type: {e}"),
+            })?;
+    check(&mut check_ctx, &exp, &expected_val).map_err(|reason| {
+        MergeError::WitnessTypeMismatch {
+            transformation: handle.transformation.clone(),
+            expected: format!("Π_:{class}. Π_:{class}. Π_:Option({class}). {class}"),
+            reason,
+        }
+    })?;
+
+    // 5. Evaluate in Pure mode — merge witnesses can't do IO.
+    let ctx = EvalCtx::Pure;
+    let term_val =
+        eval_ctx(&exp, &Rho::Nil, &ctx).map_err(|e| MergeError::TransformationEvalError {
+            transformation: handle.transformation.clone(),
+            reason: e.to_string(),
+        })?;
+
+    // 6. Wrap each argument and apply. The transformation is
+    //    `λ a. λ b. λ opt. ...` — three curried applications fold the
+    //    merged value out. The ancestor lifts to `none A` or `some A r`
+    //    on the canonical `option_decl()` so the witness can pattern-
+    //    match it via Mini-TT's standard inductive elimination.
+    let a_val = Val::EigonClass(class.clone());
+    let val_a = Val::ResourceVal(Box::new(branch_a));
+    let val_b = Val::ResourceVal(Box::new(branch_b));
+    let val_opt = match ancestor {
+        None => Val::InductiveVal {
+            decl: option_decl(),
+            ctor_name: "none".to_string(),
+            args: vec![a_val.clone()],
+        },
+        Some(r) => Val::InductiveVal {
+            decl: option_decl(),
+            ctor_name: "some".to_string(),
+            args: vec![a_val, Val::ResourceVal(Box::new(r))],
+        },
+    };
+    let after_a = term_val
+        .clone()
+        .app_ctx(val_a, &ctx)
+        .map_err(|e| witness_app_error(&handle.transformation, &term_val, e))?;
+    let after_b = after_a
+        .clone()
+        .app_ctx(val_b, &ctx)
+        .map_err(|e| witness_app_error(&handle.transformation, &after_a, e))?;
+    let merged_val = after_b
+        .clone()
+        .app_ctx(val_opt, &ctx)
+        .map_err(|e| witness_app_error(&handle.transformation, &after_b, e))?;
+
+    // 7. Marshal back. `val_to_resource_value` returns a `Value`;
+    //    the merge surface needs a `Resource`. `Embedded(box)` unwraps
+    //    directly. Other shapes (scalars, refs) are wrapped into a
+    //    fresh embedded Resource so callers always get a Resource —
+    //    a single-string return is the CompleteText shortcut path
+    //    `val_to_resource_value` produces for one-property resources.
+    let result_value = val_to_resource_value(&merged_val);
+    let merged_resource = match result_value {
+        Value::Embedded(boxed) => *boxed,
+        other => {
+            // Wrap the scalar/ref into an embedded Resource so the
+            // surface is uniform. The marshalling path's "extract
+            // single property" shortcut is undone here.
+            let mut wrapper = Resource::new_embedded();
+            wrapper.set(
+                Iri::parse("urn:eigenius:merge:result").expect("merge result IRI"),
+                other,
+            );
+            wrapper
+        }
+    };
+
+    Ok(merged_resource)
+}
+
+/// Translate an `EvalError` raised during witness application into a
+/// typed `MergeError`. Distinguishes "the term wasn't a function" from
+/// other evaluation failures so the caller can render a focused
+/// diagnostic.
+fn witness_app_error(
+    transformation: &Iri,
+    failing_val: &crate::nbe::val::Val,
+    err: crate::nbe::eval::EvalError,
+) -> MergeError {
+    use crate::nbe::eval::EvalError;
+    match err {
+        EvalError::NotAFunction(_) => MergeError::WitnessTermNotAFunction {
+            transformation: transformation.clone(),
+            found: format!("{failing_val:?}"),
+        },
+        other => MergeError::TransformationEvalError {
+            transformation: transformation.clone(),
+            reason: other.to_string(),
+        },
     }
 }
 
@@ -873,18 +1262,142 @@ pub fn merge_with_resolutions(
 #[derive(Debug)]
 pub enum MergeError {
     Storage(StorageError),
-    /// `resolutions` was non-empty but no resolution-application
-    /// strategy is implemented yet (15a deliverable; 15b adds Witness).
-    ResolutionsNotYetSupported,
+    /// A resolution targets a `ConflictId` that the classifier's most
+    /// recent pass over the span did not surface. Either the
+    /// resolution refers to a stale conflict id (the span moved on
+    /// since the client read it) or to one the client invented.
+    ConflictNotFound(ConflictId),
+    /// A `Witness` resolution's `comorphism` IRI doesn't resolve to
+    /// any resource in the merge span (neither branch's contributions
+    /// nor the ancestor's parent chain). Common causes: the
+    /// comorphism wasn't committed before the merge attempt, or its
+    /// IRI was typoed.
+    MergeComorphismNotFound(Iri),
+    /// A `Witness` resolution's `comorphism` IRI resolved to a
+    /// resource, but it isn't a `MergeComorphism` (its `is_a` doesn't
+    /// include `urn:eigenius:core:MergeComorphism`). The kernel
+    /// refuses to apply non-witness resources as witnesses.
+    NotAMergeComorphism {
+        iri: Iri,
+        found_classes: Vec<Iri>,
+    },
+    /// A `MergeComorphism` resource is missing the required
+    /// `merge_transformation` property, or the property's value isn't
+    /// a `ResourceRef` to a Mini-TT term. Both shapes are required by
+    /// the core ontology's class declaration; surfacing this as a
+    /// typed error keeps the failure mode legible.
+    MalformedMergeComorphism {
+        iri: Iri,
+        reason: String,
+    },
+    /// A `Witness` resolution validated cleanly but the merge-layer
+    /// construction path (turning a per-conflict merged value into a
+    /// committed layer) isn't yet wired (15g deliverable). The
+    /// per-witness application is real — exercise it via
+    /// [`apply_witness_resolution`] directly.
+    WitnessApplicationNotYetWired {
+        comorphism: Iri,
+    },
+    /// A `MergeComorphism`'s `merge_transformation` points at an IRI
+    /// that doesn't resolve in the witness's source layer chain —
+    /// the term was either uncommitted or lives in a parallel
+    /// branch the merge can't see from here.
+    TransformationNotFound {
+        comorphism: Iri,
+        transformation: Iri,
+    },
+    /// `parse_expression` failed to convert the transformation
+    /// Resource into a Mini-TT `Exp`. The Resource is malformed
+    /// against the program ontology — e.g., a Lambda missing its
+    /// body, a Var without a binder name. Re-stringifies the parser's
+    /// diagnostic for a flat error shape.
+    TransformationParseError {
+        transformation: Iri,
+        reason: String,
+    },
+    /// The NbE evaluator returned an `EvalError` while applying the
+    /// witness. Re-stringified because `EvalError` is not `PartialEq`
+    /// and the merge surface wants a flat error shape.
+    TransformationEvalError {
+        transformation: Iri,
+        reason: String,
+    },
+    /// The transformation evaluated to a non-function value —
+    /// applying branch_a to it would fail, so we surface the typing
+    /// gap up front instead of letting the evaluator's
+    /// `NotAFunction` propagate without context.
+    WitnessTermNotAFunction {
+        transformation: Iri,
+        found: String,
+    },
+    /// The witness term failed bidirectional type-checking against
+    /// the spec signature `(A, A, Option<A>) → A`. Surfaces the
+    /// checker's diagnostic verbatim alongside the rendered expected
+    /// type so callers can show the witness author what was wrong.
+    WitnessTypeMismatch {
+        transformation: Iri,
+        expected: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for MergeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MergeError::Storage(e) => write!(f, "storage error during merge: {e}"),
-            MergeError::ResolutionsNotYetSupported => write!(
+            MergeError::ConflictNotFound(id) => {
+                write!(f, "resolution targets unknown conflict id: {}", id.0)
+            }
+            MergeError::MergeComorphismNotFound(iri) => write!(
                 f,
-                "merge resolutions not yet supported (15b–15e in progress)"
+                "Witness comorphism IRI not found in the merge span: {iri}"
+            ),
+            MergeError::NotAMergeComorphism { iri, found_classes } => write!(
+                f,
+                "Witness comorphism {iri} is not a MergeComorphism (is_a: {found_classes:?})"
+            ),
+            MergeError::MalformedMergeComorphism { iri, reason } => {
+                write!(f, "MergeComorphism {iri} is malformed: {reason}")
+            }
+            MergeError::WitnessApplicationNotYetWired { comorphism } => write!(
+                f,
+                "witness {comorphism} applied successfully but merge-layer construction is pending (15g)"
+            ),
+            MergeError::TransformationNotFound {
+                comorphism,
+                transformation,
+            } => write!(
+                f,
+                "MergeComorphism {comorphism}'s transformation {transformation} not found in the chain"
+            ),
+            MergeError::TransformationParseError {
+                transformation,
+                reason,
+            } => write!(
+                f,
+                "transformation {transformation} failed to parse as a Mini-TT term: {reason}"
+            ),
+            MergeError::TransformationEvalError {
+                transformation,
+                reason,
+            } => write!(
+                f,
+                "transformation {transformation} failed during evaluation: {reason}"
+            ),
+            MergeError::WitnessTermNotAFunction {
+                transformation,
+                found,
+            } => write!(
+                f,
+                "transformation {transformation} evaluated to a non-function value: {found}"
+            ),
+            MergeError::WitnessTypeMismatch {
+                transformation,
+                expected,
+                reason,
+            } => write!(
+                f,
+                "transformation {transformation} does not type-check against `{expected}`: {reason}"
             ),
         }
     }
@@ -1348,19 +1861,566 @@ mod tests {
     }
 
     #[test]
-    fn merge_with_resolutions_rejects_nonempty_resolutions_in_15a() {
-        // 15b–15e haven't landed; supplying resolutions must error
-        // out rather than silently ignore them. Pins the contract
-        // so accidental shipping of broken resolution paths fails
-        // loudly.
+    fn empty_resolutions_with_empty_span_yields_clean_merge() {
+        // Sanity baseline: no conflicts + no resolutions = the
+        // skeleton placeholder Merged outcome. Pins the 15a path
+        // through the new resolution dispatcher.
         let (span, backend) = build_span(Vec::new(), Vec::new(), Vec::new());
-        // MergeResolution has no variants yet; we can't actually
-        // construct one. This test exists to document the contract
-        // for when 15b lands its first variant.
         let result = merge_with_resolutions(&span, Vec::new(), &backend);
-        assert!(
-            result.is_ok(),
-            "empty span + empty resolutions = no-op success"
+        match result {
+            Ok(MergeOutcome::Merged { .. }) => {}
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+
+    // ─── 15b·1: Witness resolution validation ──────────────────────────
+
+    /// Helper for the four Witness tests: build a span with one
+    /// `IriCollision` conflict on `urn:test:patient_42` (so resolutions
+    /// have a real target). Optionally commits a `MergeComorphism`
+    /// resource on the ancestor side so the chain walk can find it.
+    fn build_span_with_iri_collision_and_optional_witness(
+        witness: Option<Resource>,
+    ) -> (MergeSpan, MemoryPersistentBackend) {
+        let ancestor_resources = witness.into_iter().collect();
+        build_span(
+            ancestor_resources,
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[("urn:test:weight", Value::Integer(75))],
+            )],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[("urn:test:weight", Value::Integer(76))],
+            )],
+        )
+    }
+
+    /// Make a well-formed MergeComorphism resource pointing at a
+    /// (placeholder) transformation IRI. Step 1 only validates the
+    /// resource shape; the transformation IRI doesn't need to point
+    /// at a real Mini-TT term until Step 2 wires the evaluator.
+    fn make_merge_comorphism(iri: &str, transformation: &str) -> Resource {
+        make_resource(
+            iri,
+            &[wk::MERGE_COMORPHISM],
+            &[(
+                wk::MERGE_TRANSFORMATION,
+                Value::ResourceRef(Iri::parse(transformation).unwrap()),
+            )],
+        )
+    }
+
+    #[test]
+    fn witness_with_unknown_conflict_id_is_rejected() {
+        // Resolution targets a conflict id the classifier didn't
+        // surface — common cause: stale read against the span. Must
+        // produce a typed `ConflictNotFound` rather than silently
+        // succeeding or panicking.
+        let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(
+            make_merge_comorphism("urn:test:witness", "urn:test:term_placeholder"),
+        ));
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: ConflictId("does_not_exist".to_string()),
+                comorphism: iri("urn:test:witness"),
+            }],
+            &backend,
         );
+        match result {
+            Err(MergeError::ConflictNotFound(id)) => {
+                assert_eq!(id.0, "does_not_exist");
+            }
+            other => panic!("expected ConflictNotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn witness_with_missing_comorphism_iri_is_rejected() {
+        // Comorphism IRI doesn't resolve anywhere in the span.
+        // Common cause: typo, or the witness wasn't committed
+        // before the merge attempt. Surfaces as
+        // `MergeComorphismNotFound`.
+        let (span, backend) = build_span_with_iri_collision_and_optional_witness(None);
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: iri("urn:test:missing_witness"),
+            }],
+            &backend,
+        );
+        match result {
+            Err(MergeError::MergeComorphismNotFound(i)) => {
+                assert_eq!(i.as_str(), "urn:test:missing_witness");
+            }
+            other => panic!("expected MergeComorphismNotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn witness_pointing_at_non_merge_comorphism_is_rejected() {
+        // The IRI resolves to a resource — but it's a plain Class,
+        // not a MergeComorphism. The kernel refuses to apply
+        // arbitrary resources as witnesses; surfaces as
+        // `NotAMergeComorphism` with the actual `is_a` list so the
+        // caller can render a useful diagnostic.
+        let bogus_witness = make_resource("urn:test:not_a_witness", &[wk::CLASS], &[]);
+        let (span, backend) =
+            build_span_with_iri_collision_and_optional_witness(Some(bogus_witness));
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: iri("urn:test:not_a_witness"),
+            }],
+            &backend,
+        );
+        match result {
+            Err(MergeError::NotAMergeComorphism {
+                iri: i,
+                found_classes,
+            }) => {
+                assert_eq!(i.as_str(), "urn:test:not_a_witness");
+                assert!(
+                    found_classes.iter().any(|c| c.as_str() == wk::CLASS),
+                    "expected `is_a` list to include Class, got {found_classes:?}"
+                );
+            }
+            other => panic!("expected NotAMergeComorphism, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn valid_witness_progresses_to_application_stub() {
+        // The happy validation path: conflict id exists, comorphism
+        // IRI resolves to a well-formed MergeComorphism with a
+        // `merge_transformation` ResourceRef. Step 2 will plug the
+        // evaluator in here; Step 1 surfaces a typed
+        // `WitnessApplicationNotYetWired` so a deployment that
+        // tries to use witnesses against the in-progress kernel
+        // gets an honest error rather than a silent merge failure.
+        let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(
+            make_merge_comorphism("urn:test:witness", "urn:test:term_placeholder"),
+        ));
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: iri("urn:test:witness"),
+            }],
+            &backend,
+        );
+        match result {
+            Err(MergeError::WitnessApplicationNotYetWired { comorphism }) => {
+                assert_eq!(comorphism.as_str(), "urn:test:witness");
+            }
+            other => panic!(
+                "expected WitnessApplicationNotYetWired (15b Step 2 deliverable), got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn malformed_merge_comorphism_missing_transformation_is_rejected() {
+        // MergeComorphism resource lacks the required
+        // `merge_transformation` property — the resolver detects
+        // this rather than the application path discovering it at
+        // evaluation time.
+        let malformed = make_resource("urn:test:malformed_witness", &[wk::MERGE_COMORPHISM], &[]);
+        let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(malformed));
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: iri("urn:test:malformed_witness"),
+            }],
+            &backend,
+        );
+        match result {
+            Err(MergeError::MalformedMergeComorphism { iri: i, reason }) => {
+                assert_eq!(i.as_str(), "urn:test:malformed_witness");
+                assert!(
+                    reason.contains("merge_transformation"),
+                    "reason should mention the missing property; got {reason:?}"
+                );
+            }
+            other => panic!("expected MalformedMergeComorphism, got {other:?}"),
+        }
+    }
+
+    // ─── 15b·2: Witness term evaluation ────────────────────────────────
+
+    /// Build an embedded-resource body for a Mini-TT `Var <name>`
+    /// expression. Embedded (no `@id`) — `parse_var` reads
+    /// `program:name` from whatever resource it's handed.
+    fn make_var_resource(name: &str) -> Resource {
+        let mut r = Resource::new_embedded();
+        let is_a_iri = Iri::parse(wk::IS_A).unwrap();
+        r.set(
+            is_a_iri,
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+        );
+        r.set(
+            iri("urn:eigenius:program:name"),
+            Value::String(name.to_string()),
+        );
+        r
+    }
+
+    /// Build an embedded-resource body for a Mini-TT
+    /// `Lambda <param> <body>` expression. `parse_lambda` reads
+    /// `program:parameter` + `program:body`.
+    fn make_lambda_resource(param: &str, body: Resource) -> Resource {
+        let mut r = Resource::new_embedded();
+        let is_a_iri = Iri::parse(wk::IS_A).unwrap();
+        r.set(
+            is_a_iri,
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+        );
+        r.set(
+            iri("urn:eigenius:program:parameter"),
+            Value::String(param.to_string()),
+        );
+        r.set(
+            iri("urn:eigenius:program:body"),
+            Value::Embedded(Box::new(body)),
+        );
+        r
+    }
+
+    /// Build a span with a `MergeComorphism` + `λ a. λ b. λ opt. <body>`
+    /// transformation committed on the ancestor side. Returns the
+    /// backend wrapped in an `Arc` so the `LayerStorage` and the
+    /// test's direct backend probes share the same storage instance
+    /// — without that, `Layer::resolve` walks a parallel empty
+    /// in-memory backend and finds nothing.
+    fn build_witness_fixture(
+        body: Resource,
+    ) -> (
+        MergeSpan,
+        std::sync::Arc<MemoryPersistentBackend>,
+        MergeComorphismHandle,
+        crate::layer::LayerStorage,
+    ) {
+        let transformation_iri = "urn:test:term:identity_b";
+        let witness_iri = "urn:test:witness";
+
+        // Three nested Lambdas binding the spec's `a`, `b`, and `opt`
+        // (the optional ancestor). Committed at a canonical top-level
+        // IRI so `layer.resolve` finds it.
+        let inner_opt = make_lambda_resource("opt", body);
+        let inner_b = make_lambda_resource("b", inner_opt);
+        let transformation = {
+            let lam = make_lambda_resource("a", inner_b);
+            let mut r = Resource::new(Iri::parse(transformation_iri).unwrap());
+            for (k, v) in lam.properties() {
+                r.set(k.clone(), v.clone());
+            }
+            r
+        };
+
+        let witness = make_resource(
+            witness_iri,
+            &[wk::MERGE_COMORPHISM],
+            &[(
+                wk::MERGE_TRANSFORMATION,
+                Value::ResourceRef(iri(transformation_iri)),
+            )],
+        );
+
+        let (span, backend, storage) = build_span_arc(
+            vec![transformation, witness],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[("urn:test:weight", Value::Integer(75))],
+            )],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[("urn:test:weight", Value::Integer(76))],
+            )],
+        );
+        let topology = backend.load_topology().unwrap();
+        let handle =
+            resolve_merge_comorphism(&iri(witness_iri), &span, &topology, &*backend).unwrap();
+        (span, backend, handle, storage)
+    }
+
+    /// Same as [`build_span`] but threads an `Arc<MemoryPersistentBackend>`
+    /// through `LayerStorage::with_persistent` so the apply path's
+    /// `build_chain` sees the same storage the test commits to.
+    /// Returns the span, the Arc-backed backend, and the storage
+    /// the test should pass to `apply_witness_resolution`.
+    fn build_span_arc(
+        ancestor_resources: Vec<Resource>,
+        branch_a_resources: Vec<Resource>,
+        branch_b_resources: Vec<Resource>,
+    ) -> (
+        MergeSpan,
+        std::sync::Arc<MemoryPersistentBackend>,
+        crate::layer::LayerStorage,
+    ) {
+        use std::sync::Arc;
+        let backend: Arc<MemoryPersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let backend_dyn: Arc<dyn crate::storage::PersistentBackend> = backend.clone();
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend_dyn));
+
+        let mut ab = LayerBuilder::new("ancestor", None);
+        for r in ancestor_resources {
+            ab.add_resource(r).unwrap();
+        }
+        let ancestor = Arc::new(ab.build(storage.clone()));
+        backend.store_layer(&ancestor).unwrap();
+
+        let mut a_builder = LayerBuilder::new("branch_a", Some(Arc::clone(&ancestor)));
+        for r in branch_a_resources {
+            a_builder.add_resource(r).unwrap();
+        }
+        let head_a = Arc::new(a_builder.build(storage.clone()));
+        backend.store_layer(&head_a).unwrap();
+
+        let mut b_builder = LayerBuilder::new("branch_b", Some(Arc::clone(&ancestor)));
+        for r in branch_b_resources {
+            b_builder.add_resource(r).unwrap();
+        }
+        let head_b = Arc::new(b_builder.build(storage.clone()));
+        backend.store_layer(&head_b).unwrap();
+
+        let topology = backend.load_topology().unwrap();
+        let sources_a =
+            crate::lattice::iri_sources_since(head_a.id(), ancestor.id(), &topology, &*backend)
+                .unwrap();
+        let sources_b =
+            crate::lattice::iri_sources_since(head_b.id(), ancestor.id(), &topology, &*backend)
+                .unwrap();
+
+        let span = MergeSpan {
+            ancestor: ancestor.id().clone(),
+            head_a: head_a.id().clone(),
+            head_b: head_b.id().clone(),
+            sources_a,
+            sources_b,
+        };
+        (span, backend, storage)
+    }
+
+    #[test]
+    fn witness_returning_second_argument_produces_branch_b_resource() {
+        // Happy-path test: a `λ a. λ b. λ opt. b` witness should
+        // produce branch B's body when applied. Pins the round-trip:
+        // Resource → Val::ResourceVal → eval → val_to_resource_value
+        // → Resource. The merged body's `weight` should match
+        // branch B's (76). Ancestor is `None` — the witness ignores
+        // its third argument.
+        let (_span, backend, handle, storage) = build_witness_fixture(make_var_resource("b"));
+
+        let branch_a = make_resource(
+            "urn:test:patient_42",
+            &["urn:test:Patient"],
+            &[("urn:test:weight", Value::Integer(75))],
+        );
+        let branch_b = make_resource(
+            "urn:test:patient_42",
+            &["urn:test:Patient"],
+            &[("urn:test:weight", Value::Integer(76))],
+        );
+
+        let class = iri("urn:test:Patient");
+        let merged = apply_witness_resolution(
+            &handle,
+            &class,
+            branch_a,
+            branch_b.clone(),
+            None,
+            storage,
+            &*backend,
+        )
+        .expect("witness should apply cleanly");
+
+        // `val_to_resource_value` round-trips a `ResourceVal` to
+        // `Value::Embedded(resource)`; the wrapper inside
+        // `apply_witness_resolution` unboxes that to a `Resource`.
+        // The merged body should structurally match branch_b.
+        assert_eq!(
+            merged.properties().len(),
+            branch_b.properties().len(),
+            "merged should have the same property count as branch_b; got {merged:?}"
+        );
+        let weight_iri = iri("urn:test:weight");
+        assert_eq!(
+            merged.get(&weight_iri),
+            branch_b.get(&weight_iri),
+            "merged weight should equal branch_b's"
+        );
+    }
+
+    #[test]
+    fn witness_referencing_unbound_variable_surfaces_type_error() {
+        // A `λ a. λ b. λ opt. <unknown_var>` witness — the body
+        // references a variable name that's not bound by any lambda.
+        // Step 3's commit-time type-check catches this before
+        // evaluation: the var lookup in `check_infer` fails and the
+        // diagnostic is rewrapped as `WitnessTypeMismatch`.
+        let (_span, backend, handle, storage) =
+            build_witness_fixture(make_var_resource("not_bound_anywhere"));
+
+        let branch_a = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
+        let branch_b = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
+
+        let class = iri("urn:test:Patient");
+        let result = apply_witness_resolution(
+            &handle, &class, branch_a, branch_b, None, storage, &*backend,
+        );
+        match result {
+            Err(MergeError::WitnessTypeMismatch {
+                transformation,
+                reason,
+                ..
+            }) => {
+                assert_eq!(transformation.as_str(), "urn:test:term:identity_b");
+                assert!(
+                    reason.contains("not_bound_anywhere"),
+                    "reason should mention the unbound variable; got {reason:?}"
+                );
+            }
+            other => panic!("expected WitnessTypeMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_witness_resolution_rejects_unparseable_transformation() {
+        // A transformation Resource that ISN'T a Mini-TT term (no
+        // recognised `is_a`) makes `parse_expression` fail. Surfaces
+        // as `TransformationParseError` rather than a panic or
+        // generic storage error.
+        let transformation_iri = "urn:test:term:bogus";
+        let bogus_term = make_resource(transformation_iri, &["urn:test:NotATerm"], &[]);
+        let witness_iri = "urn:test:witness";
+        let witness = make_resource(
+            witness_iri,
+            &[wk::MERGE_COMORPHISM],
+            &[(
+                wk::MERGE_TRANSFORMATION,
+                Value::ResourceRef(iri(transformation_iri)),
+            )],
+        );
+
+        let (span, backend, storage) = build_span_arc(
+            vec![bogus_term, witness],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[],
+            )],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[],
+            )],
+        );
+        let topology = backend.load_topology().unwrap();
+        let handle =
+            resolve_merge_comorphism(&iri(witness_iri), &span, &topology, &*backend).unwrap();
+
+        let branch_a = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
+        let branch_b = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
+
+        let class = iri("urn:test:Patient");
+        let result = apply_witness_resolution(
+            &handle, &class, branch_a, branch_b, None, storage, &*backend,
+        );
+        match result {
+            Err(MergeError::TransformationParseError { transformation, .. }) => {
+                assert_eq!(transformation.as_str(), transformation_iri);
+            }
+            other => panic!("expected TransformationParseError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn witness_with_wrong_arity_fails_type_check() {
+        // A `λ a. a` witness — only one binder, missing the b/opt
+        // binders. The expected type is `Π_:A. Π_:A. Π_:Option(A). A`,
+        // so check::check fails as soon as it tries to match the
+        // body (`a`) against `Π_:A. Π_:Option(A). A` — `a : A` is
+        // not a function. Step 3's commit-time check catches this
+        // before evaluation.
+        let transformation_iri = "urn:test:term:wrong_arity";
+        let witness_iri = "urn:test:witness";
+
+        // Build `λ a. a` only (no inner b/opt binders). The body
+        // `a` is just a Var resource referring to the outer binder.
+        let transformation = {
+            let lam = make_lambda_resource("a", make_var_resource("a"));
+            let mut r = Resource::new(Iri::parse(transformation_iri).unwrap());
+            for (k, v) in lam.properties() {
+                r.set(k.clone(), v.clone());
+            }
+            r
+        };
+        let witness = make_resource(
+            witness_iri,
+            &[wk::MERGE_COMORPHISM],
+            &[(
+                wk::MERGE_TRANSFORMATION,
+                Value::ResourceRef(iri(transformation_iri)),
+            )],
+        );
+
+        let (span, backend, storage) = build_span_arc(
+            vec![transformation, witness],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[],
+            )],
+            vec![make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[],
+            )],
+        );
+        let topology = backend.load_topology().unwrap();
+        let handle =
+            resolve_merge_comorphism(&iri(witness_iri), &span, &topology, &*backend).unwrap();
+
+        let branch_a = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
+        let branch_b = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
+
+        let class = iri("urn:test:Patient");
+        let result = apply_witness_resolution(
+            &handle, &class, branch_a, branch_b, None, storage, &*backend,
+        );
+        match result {
+            Err(MergeError::WitnessTypeMismatch {
+                transformation,
+                expected,
+                ..
+            }) => {
+                assert_eq!(transformation.as_str(), transformation_iri);
+                assert!(
+                    expected.contains("Option"),
+                    "expected-type rendering should mention Option; got {expected:?}"
+                );
+            }
+            other => panic!("expected WitnessTypeMismatch, got {other:?}"),
+        }
     }
 }
