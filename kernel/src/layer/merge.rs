@@ -773,11 +773,57 @@ pub enum MergeResolution {
         conflict: ConflictId,
         quotient: SchemaQuotient,
     },
-    // 15e: Restructure { conflict, new_parent, ... }
+    /// Augment the ancestor with new common structure and re-merge
+    /// against it (D20 §6.4). The motivating shape: branch A added
+    /// `Dog subclass_of Mammal`, branch B added `Dog subclass_of
+    /// Reptile`. Restructure introduces a new `Animal` class, makes
+    /// `Mammal` and `Reptile` subclass it, and the previously
+    /// conflicting `Dog` class subclasses `Animal` only —
+    /// sidestepping the original conflict by raising the
+    /// abstraction. The kernel rejects synthesized parent IRIs (no
+    /// `urn:eigenius:auto:*`); the user must name the new structure
+    /// explicitly so the merged schema stays readable.
+    Restructure {
+        conflict: ConflictId,
+        spec: RestructureSpec,
+    },
     //
     // Each variant lands with its own sub-milestone; the enum grows
     // monotonically so callers built against one variant stay
     // working as the others light up.
+}
+
+/// The structural inputs to a `Restructure` resolution (D20 §6.4).
+///
+/// Kept as a sub-struct rather than inlined into the variant because
+/// the resolution carries five logically-related fields and the apply
+/// function threads them as a unit; bundling keeps the call surface
+/// readable and the variant constructor terse.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RestructureSpec {
+    /// IRI of the class whose contradictory `subclass_of` arrows
+    /// motivated the restructure. The kernel uses this both for
+    /// downstream cascade analysis (15f) and for the
+    /// `affected_class_under_new` toggle below.
+    pub affected_class: Iri,
+    /// Existing or new IRI for the parent class to introduce.
+    pub new_parent: Iri,
+    /// If `new_parent` is new (not yet in any layer of the span),
+    /// its full `Class` resource definition. If `new_parent` already
+    /// exists, must be `None` — supplying a definition for an
+    /// existing IRI is a redeclaration that the apply path refuses
+    /// to attempt.
+    pub new_parent_def: Option<Resource>,
+    /// Existing classes that should now subclass `new_parent`. Each
+    /// IRI must resolve through the span. Empty is legal — the user
+    /// may want a structural placeholder without immediate
+    /// subclasses (e.g., creating `Animal` first, then letting
+    /// follow-up commits attach `Mammal`/`Reptile`).
+    pub classes_under_new: Vec<Iri>,
+    /// Whether the conflicting class itself goes under `new_parent`.
+    /// In the motivating example (`Dog`-under-`Mammal` vs
+    /// `Dog`-under-`Reptile`), this is `true`.
+    pub affected_class_under_new: bool,
 }
 
 /// Three ways to quotient a span at a schema-level conflict (D20 §6.3).
@@ -1041,6 +1087,22 @@ pub fn merge_with_resolutions(
                 return Err(MergeError::QuotientApplicationNotYetWired {
                     conflict_id: conflict.clone(),
                     quotient: *quotient,
+                });
+            }
+            MergeResolution::Restructure { conflict, spec } => {
+                let target = conflict_by_id
+                    .get(conflict)
+                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
+                let _ = target;
+                // Validate the restructure shape — synthesized
+                // parent rejection, definition presence rules,
+                // class-in-span checks. Building the augmented
+                // ancestor + re-merging against it is 15g.
+                let _application =
+                    apply_restructure_resolution(conflict, spec, span, &topology, backend)?;
+                return Err(MergeError::RestructureApplicationNotYetWired {
+                    conflict_id: conflict.clone(),
+                    new_parent: spec.new_parent.clone(),
                 });
             }
         }
@@ -1718,6 +1780,190 @@ fn conflict_kind_discriminator(kind: &ConflictKind) -> &'static str {
     }
 }
 
+// ─── Restructure application (15e) ─────────────────────────────────────────
+
+/// Prefix that flags "synthesized" parent IRIs the kernel refuses for
+/// `Restructure` resolutions. D20 §6.4 mandates user-supplied names so
+/// the merged schema stays readable; auto-generated parents undermine
+/// the structural intent of the resolution.
+const SYNTHESIZED_PARENT_PREFIX: &str = "urn:eigenius:auto:";
+
+/// The structural transformation produced by a validated
+/// `Restructure` resolution, ready for the 15g merge-layer
+/// construction path to commit.
+///
+/// `new_parent_resource` is `Some` when the user supplied a new
+/// `Class` definition (the parent didn't exist anywhere in the span);
+/// `None` when the parent already existed and the restructure only
+/// re-attaches existing classes to it. `classes_to_reparent` is the
+/// set of IRIs that gain `new_parent` in their `parent_classes`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RestructureApplication {
+    pub conflict_id: ConflictId,
+    pub new_parent: Iri,
+    /// The new parent Class resource, only `Some` when the user
+    /// supplied a `new_parent_def`. Carries the verbatim resource
+    /// the user submitted, so the merge-layer construction path
+    /// commits it without further transformation.
+    pub new_parent_resource: Option<Resource>,
+    /// Existing class IRIs that gain `new_parent` in their
+    /// `parent_classes`. Includes the affected class iff
+    /// `spec.affected_class_under_new`. Iteration order is
+    /// deterministic (BTreeSet semantics) so downstream layer
+    /// construction stays reproducible.
+    pub classes_to_reparent: BTreeSet<Iri>,
+}
+
+/// Validate and produce the structural transformation for a
+/// `Restructure` resolution (D20 §6.4).
+///
+/// Checks performed:
+/// 1. `new_parent` is not synthesized — D20 §6.4's "the kernel
+///    rejects synthesized parents like `urn:eigenius:auto:…`"
+///    structural requirement.
+/// 2. `new_parent`'s presence in the span and the presence of
+///    `new_parent_def` are consistent: if the parent is new (not in
+///    any branch nor the ancestor chain), `new_parent_def` must be
+///    `Some`; if it exists, `new_parent_def` must be `None`.
+/// 3. When supplied, `new_parent_def`'s `@id` matches `new_parent`
+///    and its `is_a` declares it a `Class`.
+/// 4. `spec.affected_class` and every IRI in `spec.classes_under_new`
+///    resolve through the span.
+///
+/// Returns a [`RestructureApplication`] carrying the new parent
+/// resource (if any) and the set of IRIs that gain `new_parent` in
+/// their `parent_classes`. The actual merge-layer commit (rebuilding
+/// the merge against the augmented ancestor + re-attached subclass
+/// arrows) is 15g.
+///
+/// **Cascade-analysis interaction (15f).** D20 §6.4 also mandates a
+/// "subsumed arrow" check: any `subclass_of` arrow the restructure
+/// implicitly drops (because transitivity through the new parent
+/// covers it) must be surfaced to the user, who explicitly
+/// acknowledges the loss. That check lives in cascade analysis (15f)
+/// — this apply step produces the structural transformation; the
+/// cascade walker reads it and computes the implication.
+pub fn apply_restructure_resolution(
+    conflict_id: &ConflictId,
+    spec: &RestructureSpec,
+    span: &MergeSpan,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<RestructureApplication, MergeError> {
+    // 1. Reject synthesized parent IRIs. D20 §6.4 forbids
+    //    `urn:eigenius:auto:*` so the merged schema retains
+    //    human-readable names.
+    if spec
+        .new_parent
+        .as_str()
+        .starts_with(SYNTHESIZED_PARENT_PREFIX)
+    {
+        return Err(MergeError::RestructureSynthesizedParent {
+            new_parent: spec.new_parent.clone(),
+        });
+    }
+
+    // 2. Reconcile `new_parent`'s presence with `new_parent_def`.
+    let parent_existing = find_in_span_chain(&spec.new_parent, span, topology, backend)
+        .map_err(MergeError::Storage)?;
+    match (&parent_existing, &spec.new_parent_def) {
+        (Some(_), Some(_)) => {
+            return Err(MergeError::RestructureParentRedeclaration {
+                new_parent: spec.new_parent.clone(),
+            });
+        }
+        (None, None) => {
+            return Err(MergeError::RestructureParentMissingDefinition {
+                new_parent: spec.new_parent.clone(),
+            });
+        }
+        _ => {}
+    }
+
+    // 3. If a definition was supplied, validate it shape-wise.
+    if let Some(def) = &spec.new_parent_def {
+        match def.id() {
+            Some(id) if id == &spec.new_parent => {}
+            Some(id) => {
+                return Err(MergeError::RestructureParentDefMismatch {
+                    new_parent: spec.new_parent.clone(),
+                    found: Some(id.clone()),
+                });
+            }
+            None => {
+                return Err(MergeError::RestructureParentDefMismatch {
+                    new_parent: spec.new_parent.clone(),
+                    found: None,
+                });
+            }
+        }
+        if !def.is_a().iter().any(|c| c.as_str() == wk::CLASS) {
+            return Err(MergeError::RestructureParentDefNotAClass {
+                new_parent: spec.new_parent.clone(),
+            });
+        }
+    }
+
+    // 4. Every IRI the restructure re-parents must resolve through
+    //    the span — otherwise the merge would dangle subclass arrows
+    //    against IRIs that don't exist.
+    if find_in_span_chain(&spec.affected_class, span, topology, backend)
+        .map_err(MergeError::Storage)?
+        .is_none()
+    {
+        return Err(MergeError::RestructureClassNotInSpan {
+            iri: spec.affected_class.clone(),
+            role: RestructureMissingRole::AffectedClass,
+        });
+    }
+    for cls in &spec.classes_under_new {
+        if find_in_span_chain(cls, span, topology, backend)
+            .map_err(MergeError::Storage)?
+            .is_none()
+        {
+            return Err(MergeError::RestructureClassNotInSpan {
+                iri: cls.clone(),
+                role: RestructureMissingRole::ClassUnderNew,
+            });
+        }
+    }
+
+    // Build the reparent set deterministically. Including the
+    // affected class is gated on the explicit toggle so the user
+    // can express "introduce Animal as a sibling of Dog under
+    // Mammal/Reptile" if they want a non-stretched hierarchy.
+    let mut classes_to_reparent: BTreeSet<Iri> = spec.classes_under_new.iter().cloned().collect();
+    if spec.affected_class_under_new {
+        classes_to_reparent.insert(spec.affected_class.clone());
+    }
+
+    Ok(RestructureApplication {
+        conflict_id: conflict_id.clone(),
+        new_parent: spec.new_parent.clone(),
+        new_parent_resource: spec.new_parent_def.clone(),
+        classes_to_reparent,
+    })
+}
+
+/// Which role a missing class IRI was filling in a `Restructure`
+/// spec. Used inside [`MergeError::RestructureClassNotInSpan`] so
+/// the resolution UI can render "the affected class isn't in the
+/// span" differently from "the parent's subclass isn't in the span".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestructureMissingRole {
+    AffectedClass,
+    ClassUnderNew,
+}
+
+impl std::fmt::Display for RestructureMissingRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RestructureMissingRole::AffectedClass => write!(f, "affected_class"),
+            RestructureMissingRole::ClassUnderNew => write!(f, "classes_under_new entry"),
+        }
+    }
+}
+
 // ─── Errors ────────────────────────────────────────────────────────────────
 
 /// Errors specific to layer-reconciliation operations. Storage failures
@@ -1854,6 +2100,56 @@ pub enum MergeError {
         conflict_id: ConflictId,
         quotient: SchemaQuotient,
     },
+    /// A `Restructure` resolution's `new_parent` IRI uses the
+    /// reserved `urn:eigenius:auto:` namespace. D20 §6.4 forbids
+    /// synthesized parents so the merged schema retains
+    /// human-readable names.
+    RestructureSynthesizedParent {
+        new_parent: Iri,
+    },
+    /// A `Restructure` resolution supplied a `new_parent_def` for a
+    /// parent IRI that already exists in the span. Redeclaration
+    /// would silently shadow the existing class; the kernel refuses
+    /// to attempt it.
+    RestructureParentRedeclaration {
+        new_parent: Iri,
+    },
+    /// A `Restructure` resolution's `new_parent` doesn't exist
+    /// anywhere in the span and no `new_parent_def` was supplied —
+    /// the merge has nothing to attach the new subclasses to.
+    RestructureParentMissingDefinition {
+        new_parent: Iri,
+    },
+    /// A `Restructure` resolution's supplied `new_parent_def` has
+    /// an `@id` that doesn't match `new_parent`, or has no `@id` at
+    /// all. The definition must be self-consistent.
+    RestructureParentDefMismatch {
+        new_parent: Iri,
+        found: Option<Iri>,
+    },
+    /// A `Restructure` resolution's supplied `new_parent_def` is
+    /// not declared as a `Class`. The new parent must be a Class —
+    /// subclass arrows can't target Properties or instances.
+    RestructureParentDefNotAClass {
+        new_parent: Iri,
+    },
+    /// A `Restructure` resolution references an IRI (the affected
+    /// class or one of `classes_under_new`) that doesn't resolve
+    /// anywhere in the span. The merge would dangle subclass
+    /// arrows against a non-existent target.
+    RestructureClassNotInSpan {
+        iri: Iri,
+        role: RestructureMissingRole,
+    },
+    /// A `Restructure` resolution validated cleanly and the
+    /// transformation was produced, but the merge-layer construction
+    /// path (committing the augmented ancestor + re-merging against
+    /// it) isn't yet wired (15g deliverable). Exercise the
+    /// transformation directly via [`apply_restructure_resolution`].
+    RestructureApplicationNotYetWired {
+        conflict_id: ConflictId,
+        new_parent: Iri,
+    },
 }
 
 impl std::fmt::Display for MergeError {
@@ -1945,6 +2241,44 @@ impl std::fmt::Display for MergeError {
             } => write!(
                 f,
                 "SchemaQuotient {quotient:?} on conflict {} validated successfully but merge-layer construction is pending (15g)",
+                conflict_id.0
+            ),
+            MergeError::RestructureSynthesizedParent { new_parent } => write!(
+                f,
+                "Restructure new_parent {new_parent} uses the reserved `{SYNTHESIZED_PARENT_PREFIX}` namespace; user must name the new structure explicitly (D20 §6.4)"
+            ),
+            MergeError::RestructureParentRedeclaration { new_parent } => write!(
+                f,
+                "Restructure new_parent {new_parent} already exists in the span; remove `new_parent_def` to attach to the existing class"
+            ),
+            MergeError::RestructureParentMissingDefinition { new_parent } => write!(
+                f,
+                "Restructure new_parent {new_parent} doesn't exist in the span and no `new_parent_def` was supplied"
+            ),
+            MergeError::RestructureParentDefMismatch { new_parent, found } => match found {
+                Some(f_iri) => write!(
+                    f,
+                    "Restructure new_parent_def's @id {f_iri} doesn't match new_parent {new_parent}"
+                ),
+                None => write!(
+                    f,
+                    "Restructure new_parent_def has no @id; must match new_parent {new_parent}"
+                ),
+            },
+            MergeError::RestructureParentDefNotAClass { new_parent } => write!(
+                f,
+                "Restructure new_parent_def for {new_parent} is not declared as a Class"
+            ),
+            MergeError::RestructureClassNotInSpan { iri, role } => write!(
+                f,
+                "Restructure {role} {iri} doesn't resolve anywhere in the merge span"
+            ),
+            MergeError::RestructureApplicationNotYetWired {
+                conflict_id,
+                new_parent,
+            } => write!(
+                f,
+                "Restructure on conflict {} (new parent {new_parent}) validated successfully but merge-layer construction is pending (15g)",
                 conflict_id.0
             ),
         }
@@ -3545,5 +3879,314 @@ mod tests {
             matches!(result, Err(MergeError::QuotientNotApplicable { .. })),
             "expected QuotientNotApplicable from merge surface, got {result:?}"
         );
+    }
+
+    // ─── Restructure (15e) ─────────────────────────────────────────────────
+
+    /// Build the Dog/Mammal/Reptile motivating span from D20 §6.4.
+    /// Ancestor has `Mammal` and `Reptile` as classes; branch A
+    /// adds `Dog subclass_of Mammal`, branch B adds `Dog subclass_of
+    /// Reptile`. Under open-world the classifier doesn't surface
+    /// this as a conflict (the union is monotonically combined), so
+    /// tests synthesize a ConflictId off `Dog`'s IRI when exercising
+    /// merge-dispatch end-to-end.
+    fn span_for_restructure() -> (MergeSpan, MemoryPersistentBackend) {
+        let mammal = make_resource("urn:test:Mammal", &[wk::CLASS], &[]);
+        let reptile = make_resource("urn:test:Reptile", &[wk::CLASS], &[]);
+        let dog_a = make_resource(
+            "urn:test:Dog",
+            &[wk::CLASS],
+            &[(
+                wk::PARENT_CLASSES,
+                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+            )],
+        );
+        let dog_b = make_resource(
+            "urn:test:Dog",
+            &[wk::CLASS],
+            &[(
+                wk::PARENT_CLASSES,
+                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+            )],
+        );
+        build_span(vec![mammal, reptile], vec![dog_a], vec![dog_b])
+    }
+
+    fn restructure_conflict_id() -> ConflictId {
+        ConflictId::from_iri("subclass_conflict", &iri("urn:test:Dog"))
+    }
+
+    /// Build a fresh-style `Animal` Class resource for use as the
+    /// `new_parent_def` in restructure tests.
+    fn animal_class_def() -> Resource {
+        make_resource("urn:test:Animal", &[wk::CLASS], &[])
+    }
+
+    #[test]
+    fn restructure_rejects_synthesized_parent() {
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:eigenius:auto:CommonParent_42"),
+            new_parent_def: None,
+            classes_under_new: vec![iri("urn:test:Mammal"), iri("urn:test:Reptile")],
+            affected_class_under_new: true,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureSynthesizedParent { new_parent }) => {
+                assert_eq!(new_parent.as_str(), "urn:eigenius:auto:CommonParent_42");
+            }
+            other => panic!("expected RestructureSynthesizedParent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_rejects_redeclaration_of_existing_parent() {
+        // Mammal already exists in the ancestor — supplying a def
+        // for it is a silent redeclaration.
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Mammal"),
+            new_parent_def: Some(make_resource("urn:test:Mammal", &[wk::CLASS], &[])),
+            classes_under_new: Vec::new(),
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureParentRedeclaration { new_parent }) => {
+                assert_eq!(new_parent.as_str(), "urn:test:Mammal");
+            }
+            other => panic!("expected RestructureParentRedeclaration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_rejects_missing_definition_for_new_parent() {
+        // Animal isn't anywhere in the span; user forgot the def.
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: None,
+            classes_under_new: vec![iri("urn:test:Mammal")],
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureParentMissingDefinition { new_parent }) => {
+                assert_eq!(new_parent.as_str(), "urn:test:Animal");
+            }
+            other => panic!("expected RestructureParentMissingDefinition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_rejects_parent_def_with_mismatched_id() {
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let bad_def = make_resource("urn:test:NotAnimal", &[wk::CLASS], &[]);
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: Some(bad_def),
+            classes_under_new: Vec::new(),
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureParentDefMismatch { new_parent, found }) => {
+                assert_eq!(new_parent.as_str(), "urn:test:Animal");
+                assert_eq!(
+                    found.map(|i| i.as_str().to_string()),
+                    Some("urn:test:NotAnimal".to_string())
+                );
+            }
+            other => panic!("expected RestructureParentDefMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_rejects_parent_def_that_is_not_a_class() {
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        // Declared as Property, not Class.
+        let bad_def = make_resource("urn:test:Animal", &[wk::PROPERTY], &[]);
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: Some(bad_def),
+            classes_under_new: Vec::new(),
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureParentDefNotAClass { new_parent }) => {
+                assert_eq!(new_parent.as_str(), "urn:test:Animal");
+            }
+            other => panic!("expected RestructureParentDefNotAClass, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_rejects_affected_class_not_in_span() {
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Unicorn"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: Some(animal_class_def()),
+            classes_under_new: Vec::new(),
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureClassNotInSpan { iri, role }) => {
+                assert_eq!(iri.as_str(), "urn:test:Unicorn");
+                assert_eq!(role, RestructureMissingRole::AffectedClass);
+            }
+            other => panic!("expected RestructureClassNotInSpan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_rejects_classes_under_new_not_in_span() {
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: Some(animal_class_def()),
+            classes_under_new: vec![iri("urn:test:Mammal"), iri("urn:test:Phoenix")],
+            affected_class_under_new: true,
+        };
+        let id = restructure_conflict_id();
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        match result {
+            Err(MergeError::RestructureClassNotInSpan { iri, role }) => {
+                assert_eq!(iri.as_str(), "urn:test:Phoenix");
+                assert_eq!(role, RestructureMissingRole::ClassUnderNew);
+            }
+            other => panic!("expected RestructureClassNotInSpan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restructure_motivating_example_succeeds_with_dog_under_animal() {
+        // The canonical D20 §6.4 case: introduce Animal as a new
+        // parent for Mammal, Reptile, and Dog.
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let animal_def = animal_class_def();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: Some(animal_def.clone()),
+            classes_under_new: vec![iri("urn:test:Mammal"), iri("urn:test:Reptile")],
+            affected_class_under_new: true,
+        };
+        let id = restructure_conflict_id();
+        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &backend)
+            .expect("canonical Animal/Mammal/Reptile/Dog restructure should succeed");
+
+        assert_eq!(application.conflict_id, id);
+        assert_eq!(application.new_parent.as_str(), "urn:test:Animal");
+        assert_eq!(application.new_parent_resource, Some(animal_def));
+        let names: Vec<&str> = application
+            .classes_to_reparent
+            .iter()
+            .map(|i| i.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["urn:test:Dog", "urn:test:Mammal", "urn:test:Reptile"]
+        );
+    }
+
+    #[test]
+    fn restructure_can_keep_affected_class_outside_new_parent() {
+        // Same span, but the user wants Animal as a sibling of Dog
+        // (introduced alongside) rather than as Dog's parent.
+        // affected_class_under_new = false → Dog is not in the
+        // reparent set.
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Animal"),
+            new_parent_def: Some(animal_class_def()),
+            classes_under_new: vec![iri("urn:test:Mammal"), iri("urn:test:Reptile")],
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &backend)
+            .expect("Animal-as-sibling restructure should also succeed");
+        let names: Vec<&str> = application
+            .classes_to_reparent
+            .iter()
+            .map(|i| i.as_str())
+            .collect();
+        assert_eq!(names, vec!["urn:test:Mammal", "urn:test:Reptile"]);
+        assert!(!application
+            .classes_to_reparent
+            .iter()
+            .any(|i| i.as_str() == "urn:test:Dog"));
+    }
+
+    #[test]
+    fn restructure_attaches_to_existing_parent_when_no_def_supplied() {
+        // Mammal already exists in the ancestor; the user wants
+        // Reptile re-parented under Mammal without redeclaring it.
+        // Tests the "parent exists, no def" branch.
+        let (span, backend) = span_for_restructure();
+        let topology = backend.load_topology().unwrap();
+        let spec = RestructureSpec {
+            affected_class: iri("urn:test:Dog"),
+            new_parent: iri("urn:test:Mammal"),
+            new_parent_def: None,
+            classes_under_new: vec![iri("urn:test:Reptile")],
+            affected_class_under_new: false,
+        };
+        let id = restructure_conflict_id();
+        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &backend)
+            .expect("attach-to-existing restructure should succeed");
+        assert!(application.new_parent_resource.is_none());
+        let names: Vec<&str> = application
+            .classes_to_reparent
+            .iter()
+            .map(|i| i.as_str())
+            .collect();
+        assert_eq!(names, vec!["urn:test:Reptile"]);
+    }
+
+    #[test]
+    fn merge_with_resolutions_restructure_rejects_unknown_conflict_id() {
+        let (span, backend) = span_for_restructure();
+        let bogus = ConflictId("nonexistent:foo".to_string());
+        let resolutions = vec![MergeResolution::Restructure {
+            conflict: bogus.clone(),
+            spec: RestructureSpec {
+                affected_class: iri("urn:test:Dog"),
+                new_parent: iri("urn:test:Animal"),
+                new_parent_def: Some(animal_class_def()),
+                classes_under_new: Vec::new(),
+                affected_class_under_new: true,
+            },
+        }];
+        let result = merge_with_resolutions(&span, resolutions, &backend);
+        match result {
+            Err(MergeError::ConflictNotFound(id)) => assert_eq!(id, bogus),
+            other => panic!("expected ConflictNotFound, got {other:?}"),
+        }
     }
 }
