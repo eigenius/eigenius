@@ -124,6 +124,20 @@ service EigeniusKernel {
   // merge, minus the layer build + persist.
   rpc PreviewMerge(PreviewMergeRequest) returns (PreviewMergeResponse);
 
+  // --- D20 §7.2: Resolution submission ---
+  //
+  // Submit a list of resolutions for a branch's diverged head and a
+  // candidate chain. The kernel computes the merge span between
+  // `branch`'s current tip and `candidate_head`, runs the cascade
+  // gate, applies each resolution, and (on success) CAS-advances
+  // the branch ref to the resulting merge layer.
+  //
+  // Typed error variants distinguish ack-gate failures, unknown
+  // conflict ids, missing common ancestor, and resolution-shape
+  // problems — the CLI/UI dispatches on `error_kind` instead of
+  // regex-matching the human-readable `error` string.
+  rpc SubmitResolution(SubmitResolutionRequest) returns (SubmitResolutionResponse);
+
   // --- Chain consolidation (D25) ---
 
   // Collapse `[from..to]` on `branch` into a single resolve-equivalent
@@ -927,6 +941,131 @@ message PreviewMergeResponse {
   // contributions). 0 for fast-forward / conflict. Useful for the
   // dialog's preview line.
   uint32 predicted_iri_count = 4;
+}
+
+// --- D20 §7.2: Resolution submission ---
+
+// Which side of a merge span a resolution applies to. Mirrors
+// `crate::layer::merge::Side`. `SIDE_UNSPECIFIED` is the default and
+// is rejected by the handler — clients must specify a side.
+enum MergeSide {
+  MERGE_SIDE_UNSPECIFIED = 0;
+  MERGE_SIDE_A = 1;
+  MERGE_SIDE_B = 2;
+}
+
+// Quotient strategy for `SchemaQuotient` resolutions (D20 §6.3).
+// Mirrors `crate::layer::merge::SchemaQuotient`.
+enum MergeQuotientKind {
+  MERGE_QUOTIENT_KIND_UNSPECIFIED = 0;
+  MERGE_QUOTIENT_KIND_KEEP_BOTH = 1;
+  MERGE_QUOTIENT_KIND_KEEP_ONE = 2;
+  MERGE_QUOTIENT_KIND_KEEP_NEITHER = 3;
+}
+
+// A single typed resolution. The `strategy` oneof carries the
+// variant-specific data; `conflict_id` is opaque to the wire (the
+// kernel produced it deterministically via `classify_conflicts`).
+message MergeResolutionWire {
+  string conflict_id = 1;
+  oneof strategy {
+    WitnessStrategy witness = 2;
+    RenameStrategy rename = 3;
+    QuotientStrategy quotient = 4;
+    // Restructure intentionally absent for v1 — D20 §6.4's
+    // `new_parent_def: Option<Resource>` shape needs CBOR/Eigon-JSON
+    // bytes encoding which adds complexity not justified by the
+    // current kernel surface (Restructure's commit path is still
+    // `*ApplicationNotYetWired`). The wire format is forward-compat:
+    // a future field 5 lands when tombstone semantics + Restructure
+    // commit unblock the full surface.
+  }
+}
+
+message WitnessStrategy {
+  // IRI of a `MergeComorphism` resource committed earlier in the
+  // chain.
+  string comorphism_iri = 1;
+}
+
+message RenameStrategy {
+  MergeSide side = 1;
+  string old_iri = 2;
+  string new_iri = 3;
+}
+
+message QuotientStrategy {
+  MergeQuotientKind kind = 1;
+  // Only consulted when `kind = MERGE_QUOTIENT_KIND_KEEP_ONE`.
+  // Ignored for KEEP_BOTH / KEEP_NEITHER.
+  MergeSide winner = 2;
+}
+
+// User acknowledgment of a single cascade item (D20 §8). The kernel
+// only reads `item_id`; downstream audit-log surfaces may attach
+// `user`/`acknowledged_at` independently.
+message CascadeAckWire {
+  string item_id = 1;
+}
+
+// Typed error variants for `SubmitResolution`. CLI/UI clients
+// dispatch on the kind instead of regex-matching `error`.
+enum SubmitResolutionErrorKind {
+  SUBMIT_RESOLUTION_ERROR_KIND_UNSPECIFIED = 0;
+  // The cascade preview surfaced items the user didn't acknowledge.
+  // `missing_acknowledgments` lists the missing item ids.
+  SUBMIT_RESOLUTION_ERROR_KIND_INCOMPLETE_ACKNOWLEDGMENTS = 1;
+  // A resolution targets a conflict id the classifier didn't produce.
+  SUBMIT_RESOLUTION_ERROR_KIND_CONFLICT_NOT_FOUND = 2;
+  // No common ancestor for the branch's current tip and the
+  // candidate head — unrelated DAG roots, or an unknown head id.
+  SUBMIT_RESOLUTION_ERROR_KIND_NO_COMMON_ANCESTOR = 3;
+  // The resolution validated but its commit path isn't yet wired
+  // (Rename / SchemaQuotient drops / Restructure pending tombstone
+  // semantics).
+  SUBMIT_RESOLUTION_ERROR_KIND_APPLICATION_PENDING = 4;
+  // A resolution's shape was malformed (unknown side, missing
+  // strategy oneof, IRI parse error, etc.).
+  SUBMIT_RESOLUTION_ERROR_KIND_MALFORMED_RESOLUTION = 5;
+  // The CAS-advance race lost — the branch's actual tip wasn't the
+  // tip we computed the span against. Caller should re-fetch and
+  // retry.
+  SUBMIT_RESOLUTION_ERROR_KIND_BRANCH_CAS_RACE = 6;
+  // Other internal failure (storage, witness type-check, etc.).
+  SUBMIT_RESOLUTION_ERROR_KIND_INTERNAL = 7;
+}
+
+message SubmitResolutionRequest {
+  // Branch whose head will be advanced on success. Must exist.
+  string branch = 1;
+  // Hex-encoded candidate head: the layer the caller built that
+  // diverged from `branch`'s current tip. The merge span is computed
+  // between `branch`'s current tip (read at request time) and this.
+  string candidate_head = 2;
+  // One `MergeResolutionWire` per conflict the classifier surfaced.
+  // Order is irrelevant — the kernel re-classifies internally.
+  repeated MergeResolutionWire resolutions = 3;
+  // Cascade-item acknowledgments. Must cover every item in the
+  // preview the resolutions would generate, or the kernel returns
+  // `INCOMPLETE_ACKNOWLEDGMENTS`.
+  repeated CascadeAckWire acknowledgments = 4;
+}
+
+message SubmitResolutionResponse {
+  bool success = 1;
+  // Human-readable error message when `success=false`. Empty
+  // otherwise. CLI/UI prefer the typed `error_kind` for dispatch.
+  string error = 2;
+  // Typed error variant. `UNSPECIFIED` on success.
+  SubmitResolutionErrorKind error_kind = 3;
+  // Hex-encoded id of the committed merge layer on success.
+  string merge_layer_id = 4;
+  // Hex-encoded id the branch ref now points at. Equals
+  // `merge_layer_id` on the typical success path.
+  string branch_tip = 5;
+  // Missing cascade item ids when
+  // `error_kind = INCOMPLETE_ACKNOWLEDGMENTS`. Empty otherwise.
+  repeated string missing_acknowledgments = 6;
 }
 
 // --- Chain consolidation (D25) ---

@@ -3414,6 +3414,138 @@ impl EigeniusKernel for EigeniusService {
         }
     }
 
+    async fn submit_resolution(
+        &self,
+        request: Request<SubmitResolutionRequest>,
+    ) -> Result<Response<SubmitResolutionResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_SUBMIT_RESOLUTION);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        // Resolve branch tip + candidate head.
+        let branch_tip = backend
+            .get_branch(&req.branch)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("branch {:?} not found", req.branch))
+            })?;
+        let candidate_head = parse_layer_id(&req.candidate_head, "candidate_head")?;
+
+        // Decode the wire resolutions / acks into kernel types.
+        // Malformed shapes surface as `MALFORMED_RESOLUTION` with the
+        // human-readable reason — the CLI/UI can render verbatim.
+        let resolutions = match decode_resolutions(&req.resolutions) {
+            Ok(r) => r,
+            Err(reason) => {
+                return Ok(Response::new(SubmitResolutionResponse {
+                    success: false,
+                    error: reason,
+                    error_kind: proto::SubmitResolutionErrorKind::MalformedResolution as i32,
+                    ..Default::default()
+                }));
+            }
+        };
+        let acks: Vec<crate::layer::merge::CascadeAck> = req
+            .acknowledgments
+            .iter()
+            .map(|a| crate::layer::merge::CascadeAck {
+                item_id: crate::layer::merge::CascadeItemId(a.item_id.clone()),
+            })
+            .collect();
+
+        // Build the span between branch tip and candidate head.
+        let topology = backend
+            .load_topology()
+            .map_err(|e| Status::internal(format!("load_topology failed: {e}")))?;
+        let span = match crate::layer::merge::build_merge_span(
+            &branch_tip,
+            &candidate_head,
+            &topology,
+            backend.as_ref(),
+        ) {
+            Ok(s) => s,
+            Err(crate::layer::merge::MergeError::NoCommonAncestor { .. }) => {
+                return Ok(Response::new(SubmitResolutionResponse {
+                    success: false,
+                    error: format!(
+                        "no common ancestor between branch tip and candidate head {}",
+                        req.candidate_head
+                    ),
+                    error_kind: proto::SubmitResolutionErrorKind::NoCommonAncestor as i32,
+                    ..Default::default()
+                }));
+            }
+            Err(e) => {
+                return Ok(submit_resolution_internal_error(format!(
+                    "build_merge_span failed: {e}"
+                )));
+            }
+        };
+
+        // Apply the resolutions and commit the merge layer.
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        let merge_layer_id = match crate::layer::merge::merge_with_resolutions(
+            &span,
+            resolutions,
+            acks,
+            storage.clone(),
+            backend.as_ref(),
+        ) {
+            Ok(crate::layer::merge::MergeOutcome::Merged { merge_layer }) => merge_layer,
+            Ok(crate::layer::merge::MergeOutcome::NeedsResolution { .. }) => {
+                // Shouldn't happen post-resolution-application — the
+                // surface returns NeedsResolution only when
+                // `resolutions` is empty. Surface as internal.
+                return Ok(submit_resolution_internal_error(
+                    "merge surface returned NeedsResolution despite supplied resolutions"
+                        .to_string(),
+                ));
+            }
+            Err(e) => return Ok(merge_error_to_submit_response(&e)),
+        };
+
+        // CAS-advance the branch ref. The merge layer's parents are
+        // `[branch_tip, candidate_head]`, so advancing `branch` from
+        // `branch_tip` to `merge_layer_id` is a fast-forward in DAG
+        // terms — `update_branch` with `StrictFastForward` does
+        // exactly the CAS without attempting a second merge.
+        let cas = crate::lattice::update_branch(
+            &req.branch,
+            Some(branch_tip.clone()),
+            merge_layer_id.clone(),
+            crate::lattice::ConflictPolicy::StrictFastForward,
+            storage,
+            backend.as_ref(),
+        );
+        match cas {
+            Ok(_) => Ok(Response::new(SubmitResolutionResponse {
+                success: true,
+                error: String::new(),
+                error_kind: proto::SubmitResolutionErrorKind::Unspecified as i32,
+                merge_layer_id: hex::encode(merge_layer_id.0),
+                branch_tip: hex::encode(merge_layer_id.0),
+                missing_acknowledgments: Vec::new(),
+            })),
+            Err(crate::lattice::BranchUpdateError::StrictFastForwardViolation { .. }) => {
+                Ok(Response::new(SubmitResolutionResponse {
+                    success: false,
+                    error: format!(
+                        "branch {:?} moved between resolution preview and commit; re-fetch and retry",
+                        req.branch
+                    ),
+                    error_kind: proto::SubmitResolutionErrorKind::BranchCasRace as i32,
+                    merge_layer_id: hex::encode(merge_layer_id.0),
+                    ..Default::default()
+                }))
+            }
+            Err(e) => Ok(submit_resolution_internal_error(format!(
+                "branch CAS failed: {e}"
+            ))),
+        }
+    }
+
     async fn preview_merge(
         &self,
         request: Request<PreviewMergeRequest>,
@@ -3865,6 +3997,167 @@ fn parse_layer_id(hex_str: &str, field: &str) -> Result<crate::layer::LayerId, S
     let mut id = [0u8; 32];
     id.copy_from_slice(&bytes);
     Ok(crate::layer::LayerId(id))
+}
+
+/// Decode a list of wire-shaped `MergeResolutionWire` into kernel
+/// `MergeResolution`s (D20 §7.2). Returns a human-readable diagnostic
+/// on malformed input; the handler wraps it in
+/// `SubmitResolutionErrorKind::MalformedResolution`.
+fn decode_resolutions(
+    wire: &[proto::MergeResolutionWire],
+) -> Result<Vec<crate::layer::merge::MergeResolution>, String> {
+    use crate::layer::merge::{
+        ConflictId, MergeResolution, SchemaQuotient as KernelQuotient, Side as KernelSide,
+    };
+
+    let mut out = Vec::with_capacity(wire.len());
+    for (idx, r) in wire.iter().enumerate() {
+        let conflict_id = ConflictId(r.conflict_id.clone());
+        let strategy = r
+            .strategy
+            .as_ref()
+            .ok_or_else(|| format!("resolutions[{idx}]: missing strategy oneof"))?;
+        let resolution = match strategy {
+            proto::merge_resolution_wire::Strategy::Witness(w) => {
+                let comorphism = crate::ontology::iri::Iri::parse(&w.comorphism_iri)
+                    .map_err(|e| format!("resolutions[{idx}].comorphism_iri: {e}"))?;
+                MergeResolution::Witness {
+                    conflict: conflict_id,
+                    comorphism,
+                }
+            }
+            proto::merge_resolution_wire::Strategy::Rename(r) => {
+                let side = decode_side(r.side, idx)?;
+                let old_iri = crate::ontology::iri::Iri::parse(&r.old_iri)
+                    .map_err(|e| format!("resolutions[{idx}].old_iri: {e}"))?;
+                let new_iri = crate::ontology::iri::Iri::parse(&r.new_iri)
+                    .map_err(|e| format!("resolutions[{idx}].new_iri: {e}"))?;
+                MergeResolution::Rename {
+                    conflict: conflict_id,
+                    side,
+                    old_iri,
+                    new_iri,
+                }
+            }
+            proto::merge_resolution_wire::Strategy::Quotient(q) => {
+                let quotient = decode_quotient(q, idx)?;
+                MergeResolution::SchemaQuotient {
+                    conflict: conflict_id,
+                    quotient,
+                }
+            }
+        };
+        let _ = KernelQuotient::KeepBoth; // keep import used regardless of variants exercised
+        let _ = KernelSide::A;
+        out.push(resolution);
+    }
+    Ok(out)
+}
+
+fn decode_side(wire: i32, idx: usize) -> Result<crate::layer::merge::Side, String> {
+    use crate::layer::merge::Side;
+    match proto::MergeSide::try_from(wire) {
+        Ok(proto::MergeSide::A) => Ok(Side::A),
+        Ok(proto::MergeSide::B) => Ok(Side::B),
+        Ok(proto::MergeSide::Unspecified) => Err(format!(
+            "resolutions[{idx}]: side is MERGE_SIDE_UNSPECIFIED"
+        )),
+        Err(_) => Err(format!("resolutions[{idx}]: unknown MergeSide enum value")),
+    }
+}
+
+fn decode_quotient(
+    wire: &proto::QuotientStrategy,
+    idx: usize,
+) -> Result<crate::layer::merge::SchemaQuotient, String> {
+    use crate::layer::merge::SchemaQuotient;
+    match proto::MergeQuotientKind::try_from(wire.kind) {
+        Ok(proto::MergeQuotientKind::KeepBoth) => Ok(SchemaQuotient::KeepBoth),
+        Ok(proto::MergeQuotientKind::KeepOne) => {
+            let winner = decode_side(wire.winner, idx)?;
+            Ok(SchemaQuotient::KeepOne { winner })
+        }
+        Ok(proto::MergeQuotientKind::KeepNeither) => Ok(SchemaQuotient::KeepNeither),
+        Ok(proto::MergeQuotientKind::Unspecified) => Err(format!(
+            "resolutions[{idx}]: quotient kind is MERGE_QUOTIENT_KIND_UNSPECIFIED"
+        )),
+        Err(_) => Err(format!(
+            "resolutions[{idx}]: unknown MergeQuotientKind enum value"
+        )),
+    }
+}
+
+/// Translate a `MergeError` into a `SubmitResolutionResponse` with
+/// the right typed `error_kind`. Internal failures map to
+/// `INTERNAL`; structural failures (cascade gate, conflict-not-found,
+/// applicability) map to their dedicated variants.
+fn merge_error_to_submit_response(
+    err: &crate::layer::merge::MergeError,
+) -> Response<SubmitResolutionResponse> {
+    use crate::layer::merge::MergeError;
+    let (error_kind, missing) = match err {
+        MergeError::IncompleteAcknowledgments { missing } => (
+            proto::SubmitResolutionErrorKind::IncompleteAcknowledgments,
+            missing.iter().map(|m| m.0.clone()).collect(),
+        ),
+        MergeError::ConflictNotFound(_) => (
+            proto::SubmitResolutionErrorKind::ConflictNotFound,
+            Vec::new(),
+        ),
+        MergeError::NoCommonAncestor { .. } => (
+            proto::SubmitResolutionErrorKind::NoCommonAncestor,
+            Vec::new(),
+        ),
+        MergeError::WitnessApplicationNotYetWired { .. }
+        | MergeError::RenameApplicationNotYetWired { .. }
+        | MergeError::QuotientApplicationNotYetWired { .. }
+        | MergeError::RestructureApplicationNotYetWired { .. } => (
+            proto::SubmitResolutionErrorKind::ApplicationPending,
+            Vec::new(),
+        ),
+        MergeError::QuotientNotApplicable { .. }
+        | MergeError::RenameTargetNotInBranch { .. }
+        | MergeError::RenameCollision { .. }
+        | MergeError::RenameIdentity { .. }
+        | MergeError::MergeComorphismNotFound(_)
+        | MergeError::NotAMergeComorphism { .. }
+        | MergeError::MalformedMergeComorphism { .. }
+        | MergeError::TransformationNotFound { .. }
+        | MergeError::TransformationParseError { .. }
+        | MergeError::TransformationEvalError { .. }
+        | MergeError::WitnessTermNotAFunction { .. }
+        | MergeError::WitnessTypeMismatch { .. }
+        | MergeError::WitnessTargetNotResolvable { .. }
+        | MergeError::RestructureSynthesizedParent { .. }
+        | MergeError::RestructureParentRedeclaration { .. }
+        | MergeError::RestructureParentMissingDefinition { .. }
+        | MergeError::RestructureParentDefMismatch { .. }
+        | MergeError::RestructureParentDefNotAClass { .. }
+        | MergeError::RestructureClassNotInSpan { .. } => (
+            proto::SubmitResolutionErrorKind::MalformedResolution,
+            Vec::new(),
+        ),
+        MergeError::Storage(_) | MergeError::LayerBuild(_) => {
+            (proto::SubmitResolutionErrorKind::Internal, Vec::new())
+        }
+    };
+    Response::new(SubmitResolutionResponse {
+        success: false,
+        error: err.to_string(),
+        error_kind: error_kind as i32,
+        merge_layer_id: String::new(),
+        branch_tip: String::new(),
+        missing_acknowledgments: missing,
+    })
+}
+
+fn submit_resolution_internal_error(error: String) -> Response<SubmitResolutionResponse> {
+    Response::new(SubmitResolutionResponse {
+        success: false,
+        error,
+        error_kind: proto::SubmitResolutionErrorKind::Internal as i32,
+        ..Default::default()
+    })
 }
 
 /// Build a `ConsolidateOpts` from the wire request. Pulls active task

@@ -32,7 +32,7 @@ mod cache;
 mod consolidate;
 mod handle;
 mod index;
-mod merge;
+pub mod merge;
 mod redirect;
 mod storage;
 mod supporting;
