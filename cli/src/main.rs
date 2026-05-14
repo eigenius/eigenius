@@ -2163,6 +2163,22 @@ async fn remote_db_consolidate(
 ///     "kind": "schema_quotient",
 ///     "quotient": "keep_both"|"keep_one"|"keep_neither",
 ///     "winner": "a"|"b"   // only for keep_one
+///   },
+///
+///   { "conflict_id": "...",
+///     "kind": "restructure",
+///     "affected_class": "urn:project:Dog",
+///     "new_parent": "urn:project:Animal",
+///     // Inline Eigon-JSON Class definition; omit when
+///     // `new_parent` already exists in the chain.
+///     "new_parent_def": {
+///       "@id": "urn:project:Animal",
+///       "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+///       "urn:eigenius:core:short_name": "Animal",
+///       "urn:eigenius:core:description": "..."
+///     },
+///     "classes_under_new": ["urn:project:Mammal", "urn:project:Reptile"],
+///     "affected_class_under_new": true
 ///   }
 /// ]
 /// ```
@@ -2250,9 +2266,66 @@ fn parse_resolution_file(
                     winner: winner as i32,
                 })
             }
+            "restructure" => {
+                let affected_class = obj
+                    .get("affected_class")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        format!("resolutions[{idx}]: restructure needs string `affected_class`")
+                    })?
+                    .to_string();
+                let new_parent = obj
+                    .get("new_parent")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        format!("resolutions[{idx}]: restructure needs string `new_parent`")
+                    })?
+                    .to_string();
+                // `new_parent_def` is an inline Eigon-JSON resource
+                // when the parent is new; serialize it back to a
+                // string for the wire so the kernel re-parses with
+                // `eigon_json::parse_embedded`. Empty when the
+                // parent already exists.
+                let new_parent_def_json = match obj.get("new_parent_def") {
+                    None | Some(serde_json::Value::Null) => String::new(),
+                    Some(value) => serde_json::to_string(value).map_err(|e| {
+                        format!("resolutions[{idx}].new_parent_def: cannot serialize as JSON: {e}")
+                    })?,
+                };
+                let classes_under_new = match obj.get("classes_under_new") {
+                    None => Vec::new(),
+                    Some(serde_json::Value::Array(arr)) => arr
+                        .iter()
+                        .enumerate()
+                        .map(|(j, v)| {
+                            v.as_str().map(|s| s.to_string()).ok_or_else(|| {
+                                format!(
+                                    "resolutions[{idx}].classes_under_new[{j}] must be a string"
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    Some(_) => {
+                        return Err(format!(
+                            "resolutions[{idx}].classes_under_new must be an array of strings"
+                        ));
+                    }
+                };
+                let affected_class_under_new = obj
+                    .get("affected_class_under_new")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                proto::merge_resolution_wire::Strategy::Restructure(proto::RestructureStrategy {
+                    affected_class,
+                    new_parent,
+                    new_parent_def_json,
+                    classes_under_new,
+                    affected_class_under_new,
+                })
+            }
             other => {
                 return Err(format!(
-                    "resolutions[{idx}]: unknown kind {other:?}; expected witness, rename, schema_quotient"
+                    "resolutions[{idx}]: unknown kind {other:?}; expected witness, rename, schema_quotient, restructure"
                 ));
             }
         };

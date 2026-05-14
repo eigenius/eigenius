@@ -988,13 +988,7 @@ message MergeResolutionWire {
     WitnessStrategy witness = 2;
     RenameStrategy rename = 3;
     QuotientStrategy quotient = 4;
-    // Restructure intentionally absent for v1 — D20 §6.4's
-    // `new_parent_def: Option<Resource>` shape needs CBOR/Eigon-JSON
-    // bytes encoding which adds complexity not justified by the
-    // current kernel surface (Restructure's commit path is still
-    // `*ApplicationNotYetWired`). The wire format is forward-compat:
-    // a future field 5 lands when tombstone semantics + Restructure
-    // commit unblock the full surface.
+    RestructureStrategy restructure = 5;
   }
 }
 
@@ -1015,6 +1009,40 @@ message QuotientStrategy {
   // Only consulted when `kind = MERGE_QUOTIENT_KIND_KEEP_ONE`.
   // Ignored for KEEP_BOTH / KEEP_NEITHER.
   MergeSide winner = 2;
+}
+
+// Restructure resolution wire shape (D20 §6.4, D36 §6.4). Introduces
+// a new parent class so the conflicting class can subclass it
+// directly, sidestepping the disagreement. The kernel maps this to
+// `RestructureSpec` server-side.
+//
+// `new_parent_def_json` is Eigon-JSON-encoded (the same format
+// `IriCollisionConflict.branch_*_body_json` uses on the response
+// side) when `new_parent` is a fresh class the user is introducing
+// with this resolution. Empty string when `new_parent` already
+// exists in the span and the resolution just re-parents existing
+// classes under it.
+message RestructureStrategy {
+  // IRI of the class the conflict is rooted at — the affected
+  // class is read directly from the conflict in the kernel, but
+  // carried here too so the wire shape is self-describing.
+  string affected_class = 1;
+  // IRI of the parent to introduce / attach to.
+  string new_parent = 2;
+  // Eigon-JSON-encoded Class resource definition for `new_parent`.
+  // Empty when the parent already exists in the span; the kernel
+  // rejects empty + parent-missing and non-empty + parent-exists
+  // with typed errors.
+  string new_parent_def_json = 3;
+  // Existing classes that should also subclass `new_parent`.
+  // Each IRI must resolve through the span.
+  repeated string classes_under_new = 4;
+  // Whether the affected class itself goes under `new_parent` —
+  // when true, its `parent_classes` is replaced with `[new_parent]`
+  // (the "raise the abstraction" move). When false, the affected
+  // class keeps its current parents and only the `classes_under_new`
+  // entries gain `new_parent` in their `parent_classes`.
+  bool affected_class_under_new = 5;
 }
 
 // User acknowledgment of a single cascade item (D20 §8). The kernel

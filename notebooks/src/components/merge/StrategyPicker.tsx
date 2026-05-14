@@ -45,6 +45,7 @@ import {
 import { WitnessEditor } from "./WitnessEditor";
 import { RenameEditor } from "./RenameEditor";
 import { QuotientEditor } from "./QuotientEditor";
+import { RestructureEditor } from "./RestructureEditor";
 
 const useStyles = makeStyles({
   card: {
@@ -272,9 +273,13 @@ export function StrategyPicker({ conflict, resolution, onChange }: StrategyPicke
           )}
           {renderStrategyRadio(
             MergeStrategyKind.RESTRUCTURE,
-            "Restructure — introduce a new common parent (use the CLI for now)",
+            "Restructure — introduce a new common parent",
             applicable,
-            true, // PR 3 lands the Restructure editor; greyed out for now.
+            // Restructure needs the affected_class to derive the
+            // resolution shape; cycle conflicts (which have no
+            // single primary IRI) can't drive the form, so disable
+            // for those.
+            targetMissing,
             styles,
           )}
         </RadioGroup>
@@ -301,6 +306,13 @@ export function StrategyPicker({ conflict, resolution, onChange }: StrategyPicke
             conflictId={conflict.id}
             strategy={strategy}
             conflict={conflict}
+            onChange={onChange}
+          />
+        )}
+        {strategy === MergeStrategyKind.RESTRUCTURE && !targetMissing && (
+          <RestructureEditor
+            conflictId={conflict.id}
+            affectedClass={targetIri}
             onChange={onChange}
           />
         )}

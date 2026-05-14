@@ -4168,9 +4168,7 @@ fn parse_layer_id(hex_str: &str, field: &str) -> Result<crate::layer::LayerId, S
 fn decode_resolutions(
     wire: &[proto::MergeResolutionWire],
 ) -> Result<Vec<crate::layer::merge::MergeResolution>, String> {
-    use crate::layer::merge::{
-        ConflictId, MergeResolution, SchemaQuotient as KernelQuotient, Side as KernelSide,
-    };
+    use crate::layer::merge::{ConflictId, MergeResolution, RestructureSpec};
 
     let mut out = Vec::with_capacity(wire.len());
     for (idx, r) in wire.iter().enumerate() {
@@ -4208,12 +4206,59 @@ fn decode_resolutions(
                     quotient,
                 }
             }
+            proto::merge_resolution_wire::Strategy::Restructure(spec) => {
+                let affected_class = crate::ontology::iri::Iri::parse(&spec.affected_class)
+                    .map_err(|e| format!("resolutions[{idx}].affected_class: {e}"))?;
+                let new_parent = crate::ontology::iri::Iri::parse(&spec.new_parent)
+                    .map_err(|e| format!("resolutions[{idx}].new_parent: {e}"))?;
+                let new_parent_def = if spec.new_parent_def_json.is_empty() {
+                    None
+                } else {
+                    Some(decode_eigon_json_resource(&spec.new_parent_def_json, idx)?)
+                };
+                let mut classes_under_new = Vec::with_capacity(spec.classes_under_new.len());
+                for (j, cls) in spec.classes_under_new.iter().enumerate() {
+                    let iri = crate::ontology::iri::Iri::parse(cls)
+                        .map_err(|e| format!("resolutions[{idx}].classes_under_new[{j}]: {e}"))?;
+                    classes_under_new.push(iri);
+                }
+                MergeResolution::Restructure {
+                    conflict: conflict_id,
+                    spec: RestructureSpec {
+                        affected_class,
+                        new_parent,
+                        new_parent_def,
+                        classes_under_new,
+                        affected_class_under_new: spec.affected_class_under_new,
+                    },
+                }
+            }
         };
-        let _ = KernelQuotient::KeepBoth; // keep import used regardless of variants exercised
-        let _ = KernelSide::A;
         out.push(resolution);
     }
     Ok(out)
+}
+
+/// Decode an Eigon-JSON-encoded `Resource` from a wire string. Used
+/// for `RestructureStrategy.new_parent_def_json`. The wire shape is
+/// one top-level Class resource (with `@id`), so we wrap it in an
+/// array for `parse_document` — `parse_embedded` rejects resources
+/// that carry an `@id`. Returns a human-readable diagnostic on
+/// parse failure; the caller wraps it in `MALFORMED_RESOLUTION`.
+fn decode_eigon_json_resource(
+    json: &str,
+    idx: usize,
+) -> Result<crate::ontology::resource::Resource, String> {
+    let wrapped = format!("[{json}]");
+    let mut resources = crate::ontology::eigon_json::parse_document(&wrapped)
+        .map_err(|e| format!("resolutions[{idx}].new_parent_def_json: {e}"))?;
+    if resources.len() != 1 {
+        return Err(format!(
+            "resolutions[{idx}].new_parent_def_json: expected exactly one resource, got {}",
+            resources.len()
+        ));
+    }
+    Ok(resources.remove(0))
 }
 
 fn decode_side(wire: i32, idx: usize) -> Result<crate::layer::merge::Side, String> {
@@ -5240,5 +5285,110 @@ mod prepare_merge_encoding_tests {
         let strategies = applicable_strategies_for(&cycle);
         assert!(strategies.contains(&proto::MergeStrategyKind::KeepOne));
         assert!(!strategies.contains(&proto::MergeStrategyKind::KeepBoth));
+    }
+
+    #[test]
+    fn decode_resolutions_restructure_with_new_parent_def_round_trips() {
+        // Wire shape carrying an inline Eigon-JSON Class for a fresh
+        // parent should decode into a `MergeResolution::Restructure`
+        // with a `new_parent_def: Some(Resource)`.
+        use crate::layer::merge::MergeResolution;
+
+        let def_json = serde_json::json!({
+            "@id": "urn:test:Animal",
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+            "urn:eigenius:core:short_name": "Animal",
+            "urn:eigenius:core:description": "A common parent."
+        });
+        let wire = vec![proto::MergeResolutionWire {
+            conflict_id: "subclass_conflict:urn:test:Dog".to_string(),
+            strategy: Some(proto::merge_resolution_wire::Strategy::Restructure(
+                proto::RestructureStrategy {
+                    affected_class: "urn:test:Dog".to_string(),
+                    new_parent: "urn:test:Animal".to_string(),
+                    new_parent_def_json: def_json.to_string(),
+                    classes_under_new: vec![
+                        "urn:test:Mammal".to_string(),
+                        "urn:test:Reptile".to_string(),
+                    ],
+                    affected_class_under_new: true,
+                },
+            )),
+        }];
+        let resolutions = decode_resolutions(&wire).expect("decode succeeds");
+        assert_eq!(resolutions.len(), 1);
+        match &resolutions[0] {
+            MergeResolution::Restructure { conflict, spec } => {
+                assert_eq!(conflict.0, "subclass_conflict:urn:test:Dog");
+                assert_eq!(spec.affected_class.as_str(), "urn:test:Dog");
+                assert_eq!(spec.new_parent.as_str(), "urn:test:Animal");
+                assert!(spec.new_parent_def.is_some());
+                let def = spec.new_parent_def.as_ref().unwrap();
+                assert_eq!(def.id().map(|i| i.as_str()), Some("urn:test:Animal"));
+                assert_eq!(spec.classes_under_new.len(), 2);
+                assert!(spec.affected_class_under_new);
+            }
+            other => panic!("expected Restructure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_resolutions_restructure_empty_def_means_attach_existing() {
+        // Empty `new_parent_def_json` decodes to `None` — the
+        // resolution is attaching to a parent that already exists
+        // in the chain. The kernel's apply path validates the
+        // presence rule (`RestructureParentMissingDefinition` /
+        // `RestructureParentRedeclaration`).
+        use crate::layer::merge::MergeResolution;
+
+        let wire = vec![proto::MergeResolutionWire {
+            conflict_id: "subclass_conflict:urn:test:Dog".to_string(),
+            strategy: Some(proto::merge_resolution_wire::Strategy::Restructure(
+                proto::RestructureStrategy {
+                    affected_class: "urn:test:Dog".to_string(),
+                    new_parent: "urn:test:Mammal".to_string(),
+                    new_parent_def_json: String::new(),
+                    classes_under_new: vec!["urn:test:Reptile".to_string()],
+                    affected_class_under_new: false,
+                },
+            )),
+        }];
+        let resolutions = decode_resolutions(&wire).expect("decode succeeds");
+        match &resolutions[0] {
+            MergeResolution::Restructure { spec, .. } => {
+                assert!(spec.new_parent_def.is_none());
+                assert!(!spec.affected_class_under_new);
+            }
+            other => panic!("expected Restructure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_resolutions_restructure_rejects_malformed_def_json() {
+        // Garbage JSON in the def field surfaces as a typed decode
+        // error so the handler returns `MALFORMED_RESOLUTION` to the
+        // client — better than silently ignoring or panicking.
+        let wire = vec![proto::MergeResolutionWire {
+            conflict_id: "x".to_string(),
+            strategy: Some(proto::merge_resolution_wire::Strategy::Restructure(
+                proto::RestructureStrategy {
+                    affected_class: "urn:test:Dog".to_string(),
+                    new_parent: "urn:test:Animal".to_string(),
+                    new_parent_def_json: "not-valid-json}".to_string(),
+                    classes_under_new: vec![],
+                    affected_class_under_new: true,
+                },
+            )),
+        }];
+        let result = decode_resolutions(&wire);
+        match result {
+            Err(reason) => {
+                assert!(
+                    reason.contains("new_parent_def_json"),
+                    "diagnostic should mention the field; got {reason:?}"
+                );
+            }
+            Ok(_) => panic!("expected decode failure on malformed JSON"),
+        }
     }
 }
