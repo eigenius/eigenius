@@ -33,7 +33,18 @@ import {
   LineChart,
   VerticalBarChart,
 } from "@fluentui/react-charts";
-import type { BranchInfo, Eigen } from "@eigenius/client";
+import type {
+  BranchInfo,
+  CascadeAckWire,
+  Eigen,
+  MergeResolutionWire,
+} from "@eigenius/client";
+import {
+  MergeOutcome,
+  PrepareMergeErrorKind,
+  PreviewCascadeErrorKind,
+  SubmitResolutionErrorKind,
+} from "@eigenius/client";
 import type {
   CellJson,
   CellType,
@@ -44,7 +55,15 @@ import type {
 } from "../persistence/notebook-format";
 import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
 import { type CommitMeta, commitMetaFrom } from "./commitMeta";
+import {
+  diffConflictIds,
+  type MergeResolutionState,
+  persistMergeResolution,
+  restoreMergeResolution,
+} from "./mergeResolution";
 import { decodeResultDocument } from "./resultDocument";
+
+export type { MergeResolutionState };
 
 export type { CommitMeta };
 
@@ -342,6 +361,59 @@ export interface NotebookState {
    */
   setPendingMergeSource: (name: string | null) => void;
 
+  // ---- Merge resolution (D36) ----
+  /**
+   * Current node in the resolution flow state machine. `closed`
+   * outside an active session; every other variant carries the
+   * (branch, candidateHead) pair the session is anchored to. See
+   * `mergeResolution.ts` for the variant shape.
+   */
+  mergeResolution: MergeResolutionState;
+  /**
+   * Open the resolution flow for `(branch, candidateHead)`. Switches
+   * the workspace destination to "merge" so the user lands in the
+   * panel that hosts the flow; transitions the state machine to
+   * `loading` and fires `prepareMerge`. `cellId` is the cell that
+   * triggered the resolution (if any) — passed through to the
+   * `done` state so the cell's error badge can auto-clear (D36 §8.1).
+   */
+  openResolution: (
+    eigen: Eigen,
+    args: { branch: string; candidateHead: string; cellId?: string },
+  ) => Promise<void>;
+  /**
+   * Set the resolution for a single conflict. Pass `undefined` to
+   * clear (the editor's form went incomplete). No-op outside the
+   * `picking` state.
+   */
+  setMergeResolution: (
+    conflictId: string,
+    resolution: MergeResolutionWire | undefined,
+  ) => void;
+  /**
+   * Transition picking → previewing → acknowledging by calling
+   * `previewCascade`. No-op if not all conflicts have a resolution
+   * picked. Short-circuits straight to `committing` if the cascade
+   * is empty (D36 §7.1).
+   */
+  previewMergeCascade: (eigen: Eigen) => Promise<void>;
+  /**
+   * Toggle a cascade item's acknowledged flag. No-op outside the
+   * `acknowledging` state.
+   */
+  toggleCascadeAck: (itemId: string) => void;
+  /**
+   * Commit the resolved merge. Transitions
+   * acknowledging → committing → done|error. Handles
+   * `BRANCH_CAS_RACE` by re-running `prepareMerge` and surfacing
+   * the conflict-id diff via the `picking.raceDiff` banner.
+   */
+  commitMergeResolution: (eigen: Eigen) => Promise<void>;
+  /** Drop the current resolution session. State → closed. */
+  cancelMergeResolution: () => void;
+  /** Retry from the state recorded in `error.retryFrom`. */
+  retryMergeResolution: (eigen: Eigen) => Promise<void>;
+
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
   exportNotebook: () => NotebookJson;
@@ -370,6 +442,101 @@ export interface NotebookState {
 
 function copyMap<K, V>(map: ReadonlyMap<K, V>): Map<K, V> {
   return new Map(map);
+}
+
+/**
+ * Shared `prepareMerge` driver — called by `openResolution`, by
+ * `retryMergeResolution` when retrying from `loading`, and by
+ * `commitMergeResolution` on `BRANCH_CAS_RACE` recovery. Centralised
+ * here so the three entry points apply the same state transitions
+ * and (when `previousConflicts` is non-null) the same race-recovery
+ * diff banner.
+ */
+async function runPrepareMerge(
+  set: (
+    next:
+      | Partial<NotebookState>
+      | ((s: NotebookState) => Partial<NotebookState>),
+  ) => void,
+  get: () => NotebookState,
+  eigen: Eigen,
+  args: {
+    branch: string;
+    candidateHead: string;
+    cellId?: string;
+    /** Non-null on race recovery — the prior conflict-id list. The
+     * diff banner reports what changed. */
+    previousConflicts: readonly string[] | null;
+  },
+): Promise<void> {
+  const { branch, candidateHead, cellId, previousConflicts } = args;
+  let resp;
+  try {
+    resp = await eigen.prepareMerge(branch, candidateHead);
+  } catch (e) {
+    const errored: MergeResolutionState = {
+      kind: "error",
+      branch,
+      candidateHead,
+      cellId,
+      retryFrom: "loading",
+      message: e instanceof Error ? e.message : String(e),
+      rpc: "prepare",
+      errorKind: PrepareMergeErrorKind.INTERNAL,
+    };
+    set({ mergeResolution: errored });
+    persistMergeResolution(errored);
+    return;
+  }
+
+  if (!resp.success) {
+    const errored: MergeResolutionState = {
+      kind: "error",
+      branch,
+      candidateHead,
+      cellId,
+      // No retry path on no-common-ancestor; the user closes and
+      // re-evaluates manually.
+      retryFrom: resp.errorKind === PrepareMergeErrorKind.NO_COMMON_ANCESTOR
+        ? null
+        : "loading",
+      message: resp.error,
+      rpc: "prepare",
+      errorKind: resp.errorKind,
+    };
+    set({ mergeResolution: errored });
+    persistMergeResolution(errored);
+    return;
+  }
+
+  // Preserve prior resolution picks for surviving conflict ids when
+  // recovering from a race — IDs are deterministic per D20 §8.
+  const prior = get().mergeResolution;
+  const priorResolutions: Record<string, MergeResolutionWire | undefined> =
+    prior.kind === "picking" ? prior.resolutions : {};
+  const conflictIds = resp.conflicts.map((c) => c.id);
+  const resolutions: Record<string, MergeResolutionWire | undefined> = {};
+  for (const id of conflictIds) {
+    if (priorResolutions[id] !== undefined) resolutions[id] = priorResolutions[id];
+  }
+
+  const raceDiff = previousConflicts !== null
+    ? diffConflictIds(previousConflicts, conflictIds)
+    : undefined;
+  const picking: MergeResolutionState = {
+    kind: "picking",
+    branch,
+    candidateHead,
+    cellId,
+    branchTip: resp.branchTip,
+    conflicts: resp.conflicts,
+    resolutions,
+    raceDiff: raceDiff && (raceDiff.added.length > 0 || raceDiff.removed.length > 0)
+      ? raceDiff
+      : undefined,
+  };
+  set({ mergeResolution: picking });
+  persistMergeResolution(picking);
 }
 
 function newCellId(): string {
@@ -413,6 +580,9 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   pendingMergeSource: null,
   branches: null,
   dirty: false,
+  // Restore from localStorage so a page-reload mid-resolution doesn't
+  // lose partial picks (D36 §10).
+  mergeResolution: restoreMergeResolution(),
 
   // ---- Run actions ----
 
@@ -574,6 +744,336 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
 
   setPendingMergeSource(name) {
     set({ pendingMergeSource: name });
+  },
+
+  // ---- Merge resolution (D36) ----
+
+  async openResolution(eigen, { branch, candidateHead, cellId }) {
+    const initial: MergeResolutionState = {
+      kind: "loading",
+      branch,
+      candidateHead,
+      cellId,
+    };
+    set({ mergeResolution: initial, destination: "merge" });
+    persistMergeResolution(initial);
+    await runPrepareMerge(set, get, eigen, {
+      branch,
+      candidateHead,
+      cellId,
+      previousConflicts: null,
+    });
+  },
+
+  setMergeResolution(conflictId, resolution) {
+    const current = get().mergeResolution;
+    if (current.kind !== "picking") return;
+    const next: MergeResolutionState = {
+      ...current,
+      resolutions: { ...current.resolutions, [conflictId]: resolution },
+      raceDiff: undefined,
+    };
+    set({ mergeResolution: next });
+    persistMergeResolution(next);
+  },
+
+  async previewMergeCascade(eigen) {
+    const current = get().mergeResolution;
+    if (current.kind !== "picking") return;
+    if (
+      !current.conflicts.every((c) => current.resolutions[c.id] !== undefined)
+    ) {
+      return;
+    }
+    const resolutions = current.conflicts.map((c) =>
+      current.resolutions[c.id]!
+    );
+    const previewing: MergeResolutionState = {
+      kind: "previewing",
+      branch: current.branch,
+      candidateHead: current.candidateHead,
+      cellId: current.cellId,
+      branchTip: current.branchTip,
+      conflicts: current.conflicts,
+      resolutions: current.conflicts.reduce<Record<string, MergeResolutionWire>>(
+        (acc, c) => {
+          acc[c.id] = current.resolutions[c.id]!;
+          return acc;
+        },
+        {},
+      ),
+    };
+    set({ mergeResolution: previewing });
+    persistMergeResolution(previewing);
+
+    let resp;
+    try {
+      resp = await eigen.previewCascade(
+        current.branch,
+        current.candidateHead,
+        resolutions,
+      );
+    } catch (e) {
+      const errored: MergeResolutionState = {
+        kind: "error",
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+        retryFrom: "picking",
+        message: e instanceof Error ? e.message : String(e),
+        rpc: "preview",
+        errorKind: PreviewCascadeErrorKind.INTERNAL,
+      };
+      set({ mergeResolution: errored });
+      persistMergeResolution(errored);
+      return;
+    }
+    if (!resp.success) {
+      const errored: MergeResolutionState = {
+        kind: "error",
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+        retryFrom: resp.errorKind === PreviewCascadeErrorKind.CONFLICT_NOT_FOUND
+          ? "loading"
+          : "picking",
+        message: resp.error,
+        rpc: "preview",
+        errorKind: resp.errorKind,
+      };
+      set({ mergeResolution: errored });
+      persistMergeResolution(errored);
+      return;
+    }
+
+    // Empty-cascade short-circuit (§7.1): no items to ack, so the
+    // commit gate is vacuously satisfied. Transition straight to
+    // `committing` so the next user action is "Commit merge"
+    // without a no-op ack step.
+    if (resp.items.length === 0) {
+      const acknowledging: MergeResolutionState = {
+        kind: "acknowledging",
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+        branchTip: current.branchTip,
+        conflicts: current.conflicts,
+        resolutions: previewing.resolutions,
+        preview: [],
+        acknowledged: {},
+      };
+      set({ mergeResolution: acknowledging });
+      persistMergeResolution(acknowledging);
+      return;
+    }
+
+    // Preserve any acks the user had from a prior pass against
+    // identical item ids — `item_id` is deterministic per D20 §8,
+    // so re-previews with the same picks restore acks transparently.
+    const priorAcked: Record<string, boolean> =
+      "acknowledged" in current && current.kind !== "picking"
+        ? (current as { acknowledged?: Record<string, boolean> })
+          .acknowledged ?? {}
+        : {};
+    const acknowledged: Record<string, boolean> = {};
+    for (const item of resp.items) {
+      if (priorAcked[item.itemId]) acknowledged[item.itemId] = true;
+    }
+    const acking: MergeResolutionState = {
+      kind: "acknowledging",
+      branch: current.branch,
+      candidateHead: current.candidateHead,
+      cellId: current.cellId,
+      branchTip: current.branchTip,
+      conflicts: current.conflicts,
+      resolutions: previewing.resolutions,
+      preview: resp.items,
+      acknowledged,
+    };
+    set({ mergeResolution: acking });
+    persistMergeResolution(acking);
+  },
+
+  toggleCascadeAck(itemId) {
+    const current = get().mergeResolution;
+    if (current.kind !== "acknowledging") return;
+    const next: MergeResolutionState = {
+      ...current,
+      acknowledged: {
+        ...current.acknowledged,
+        [itemId]: !current.acknowledged[itemId],
+      },
+    };
+    set({ mergeResolution: next });
+    persistMergeResolution(next);
+  },
+
+  async commitMergeResolution(eigen) {
+    const current = get().mergeResolution;
+    if (current.kind !== "acknowledging") return;
+    if (!current.preview.every((i) => current.acknowledged[i.itemId])) return;
+    const resolutions = current.conflicts.map((c) => current.resolutions[c.id]);
+    const acks: CascadeAckWire[] = current.preview.map((i) => ({
+      $typeName: "eigenius.v1.CascadeAckWire",
+      itemId: i.itemId,
+    }));
+    const committing: MergeResolutionState = {
+      kind: "committing",
+      branch: current.branch,
+      candidateHead: current.candidateHead,
+      cellId: current.cellId,
+      branchTip: current.branchTip,
+      conflicts: current.conflicts,
+      resolutions: current.resolutions,
+      preview: current.preview,
+      acknowledged: current.acknowledged,
+    };
+    set({ mergeResolution: committing });
+    persistMergeResolution(committing);
+
+    let resp;
+    try {
+      resp = await eigen.submitResolution(
+        current.branch,
+        current.candidateHead,
+        resolutions,
+        acks,
+      );
+    } catch (e) {
+      const errored: MergeResolutionState = {
+        kind: "error",
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+        retryFrom: "acknowledging",
+        message: e instanceof Error ? e.message : String(e),
+        rpc: "submit",
+        errorKind: SubmitResolutionErrorKind.INTERNAL,
+      };
+      set({ mergeResolution: errored });
+      persistMergeResolution(errored);
+      return;
+    }
+
+    if (resp.success) {
+      const done: MergeResolutionState = {
+        kind: "done",
+        branch: current.branch,
+        cellId: current.cellId,
+        mergeLayerId: resp.mergeLayerId,
+        branchTip: resp.branchTip,
+      };
+      // D36 §8.1 — auto-clear the originating cell's failed-commit
+      // badge. Replace the `NEEDS_WITNESSED_MERGE` commit meta with
+      // a synthetic `TRIVIAL_MERGE`-style entry pointing at the new
+      // merge layer; the badge renders the standard ◆ merged
+      // indicator from there. A future polish pass can replace
+      // this with a dedicated "resolved-via-rail" status for the
+      // 30-second green callout the spec calls out.
+      if (current.cellId) {
+        set((prev) => {
+          const outputs = copyMap(prev.cellOutputs);
+          const existing = outputs.get(current.cellId!);
+          // Only outputs that carry a `commit` field can be in a
+          // failed-merge state; the union variants without one
+          // (validate, value) were never a needs-witnessed-merge
+          // case in the first place.
+          if (existing && "commit" in existing && existing.commit) {
+            const resolved: CellOutput = {
+              ...existing,
+              commit: {
+                ...existing.commit,
+                mergeOutcome: MergeOutcome.TRIVIAL_MERGE,
+                mergeLayerId: resp.mergeLayerId,
+                conflictingIris: [],
+                orphanLayerId: undefined,
+                currentHead: undefined,
+              },
+            };
+            outputs.set(current.cellId!, resolved);
+          }
+          return { cellOutputs: outputs };
+        });
+      }
+      set({ mergeResolution: done });
+      persistMergeResolution(done);
+      return;
+    }
+
+    // Branch CAS race → drop back to loading and re-prepareMerge.
+    // The race-diff banner gets populated by `runPrepareMerge`.
+    if (
+      resp.errorKind === SubmitResolutionErrorKind.BRANCH_CAS_RACE ||
+      resp.errorKind === SubmitResolutionErrorKind.CONFLICT_NOT_FOUND
+    ) {
+      const priorConflictIds = current.conflicts.map((c) => c.id);
+      const loading: MergeResolutionState = {
+        kind: "loading",
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+      };
+      set({ mergeResolution: loading });
+      persistMergeResolution(loading);
+      await runPrepareMerge(set, get, eigen, {
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+        previousConflicts: priorConflictIds,
+      });
+      return;
+    }
+
+    // Other errors: route the user back to picking or acknowledging
+    // based on the kind.
+    const retryFrom: "picking" | "acknowledging" =
+      resp.errorKind === SubmitResolutionErrorKind.INCOMPLETE_ACKNOWLEDGMENTS
+        ? "acknowledging"
+        : "picking";
+    const errored: MergeResolutionState = {
+      kind: "error",
+      branch: current.branch,
+      candidateHead: current.candidateHead,
+      cellId: current.cellId,
+      retryFrom,
+      message: resp.error,
+      rpc: "submit",
+      errorKind: resp.errorKind,
+      missingAcks: resp.missingAcknowledgments.length > 0
+        ? [...resp.missingAcknowledgments]
+        : undefined,
+    };
+    set({ mergeResolution: errored });
+    persistMergeResolution(errored);
+  },
+
+  cancelMergeResolution() {
+    const closed: MergeResolutionState = { kind: "closed" };
+    set({ mergeResolution: closed });
+    persistMergeResolution(closed);
+  },
+
+  async retryMergeResolution(eigen) {
+    const current = get().mergeResolution;
+    if (current.kind !== "error") return;
+    if (current.retryFrom === "loading") {
+      const loading: MergeResolutionState = {
+        kind: "loading",
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+      };
+      set({ mergeResolution: loading });
+      persistMergeResolution(loading);
+      await runPrepareMerge(set, get, eigen, {
+        branch: current.branch,
+        candidateHead: current.candidateHead,
+        cellId: current.cellId,
+        previousConflicts: null,
+      });
+    }
+    // For `picking` / `acknowledging` / null retry targets the user
+    // re-clicks the action button in the panel; no implicit retry.
   },
 
   toggleCellCollapsed(cellId) {

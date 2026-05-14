@@ -29,7 +29,6 @@
  *   `MessageBar` listing the conflicting IRIs. Recovery dialog (save
  *   as sibling / rebase / discard) lands in Phase 5.
  */
-import { useState } from "react";
 import {
   Badge,
   Button,
@@ -42,8 +41,9 @@ import {
   tokens,
   Tooltip,
 } from "@fluentui/react-components";
+import { useEigen } from "../../runtime/EigenProvider";
 import { classifyCommit, type CommitMeta } from "../../runtime/commitMeta";
-import { WitnessedMergeRecoveryDialog } from "../dialogs/WitnessedMergeRecoveryDialog";
+import { useNotebookStore } from "../../runtime/notebookStore";
 
 const useStyles = makeStyles({
   badge: {
@@ -62,11 +62,19 @@ const useStyles = makeStyles({
 
 export interface CommitStatusBadgeProps {
   commit: CommitMeta;
+  /** Cell that produced this commit. Threaded into the resolution
+   * flow so a successful resolve can auto-clear this cell's error
+   * badge (D36 §8.1). Optional for backwards compat with callers
+   * that don't have a cell context (e.g., program-run cells where
+   * the trace-layer commit has no associated source cell). */
+  cellId?: string;
 }
 
-export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
+export function CommitStatusBadge({ commit, cellId }: CommitStatusBadgeProps) {
   const styles = useStyles();
-  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const eigen = useEigen();
+  const activeBranch = useNotebookStore((s) => s.activeBranch);
+  const openResolution = useNotebookStore((s) => s.openResolution);
   const status = classifyCommit(commit);
 
   switch (status.kind) {
@@ -142,34 +150,29 @@ export function CommitStatusBadge({ commit }: CommitStatusBadgeProps) {
                 </Caption1>
               )}
             </MessageBarBody>
-            {
-              /* "Recover…" opens the §6.2 dialog. Disabled if the
-                kernel didn't surface an orphan id — without it the
-                "save as sibling" path can't run, and the other two
-                paths would partially-recover state. Older kernel
-                builds without the §G.1+ field set would land here. */
-            }
+            {/* D36 §8.1 — route the user into the rail Merge
+              panel's resolution flow. The orphan layer becomes the
+              candidate head; the resolution flow's `done` state
+              auto-clears this cell's error badge via the cellId
+              threaded into the resolution session. */}
             {status.orphanLayerId && (
               <MessageBarActions>
                 <Button
                   size="small"
                   appearance="primary"
-                  onClick={() => setRecoveryOpen(true)}
+                  onClick={() => {
+                    void openResolution(eigen, {
+                      branch: activeBranch,
+                      candidateHead: status.orphanLayerId!,
+                      cellId,
+                    });
+                  }}
                 >
-                  Recover…
+                  Resolve in Merge rail
                 </Button>
               </MessageBarActions>
             )}
           </MessageBar>
-          {status.orphanLayerId && (
-            <WitnessedMergeRecoveryDialog
-              open={recoveryOpen}
-              onClose={() => setRecoveryOpen(false)}
-              orphanLayerId={status.orphanLayerId}
-              currentHead={status.currentHead}
-              conflictingIris={status.conflictingIris}
-            />
-          )}
         </>
       );
   }

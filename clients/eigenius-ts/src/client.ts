@@ -66,13 +66,29 @@ import {
   type ListTasksResponse,
   LoadRequestSchema,
   type LoadResponse,
+  type CascadeAckWire,
+  type CascadeItemWire,
   MergeBranchesRequestSchema,
   type MergeBranchesResponse,
   type MergeInfo,
   MergeOutcome,
+  MergeQuotientKind,
+  type MergeResolutionWire,
+  MergeSide,
+  MergeStrategyKind,
   NotebookService,
+  PrepareMergeErrorKind,
+  PrepareMergeRequestSchema,
+  type PrepareMergeResponse,
+  PreviewCascadeErrorKind,
+  PreviewCascadeRequestSchema,
+  type PreviewCascadeResponse,
   PreviewMergeRequestSchema,
   type PreviewMergeResponse,
+  SubmitResolutionErrorKind,
+  SubmitResolutionRequestSchema,
+  type SubmitResolutionResponse,
+  type TypedConflictWire,
   type QueryClassDecl,
   QueryRequestSchema,
   type QueryResponse,
@@ -95,6 +111,8 @@ import {
 export type {
   BranchInfo,
   CancelTaskResponse,
+  CascadeAckWire,
+  CascadeItemWire,
   ComorphismDecl,
   ConsolidateChainResponse,
   CreateBranchResponse,
@@ -114,21 +132,37 @@ export type {
   LoadResponse,
   MergeBranchesResponse,
   MergeInfo,
+  MergeResolutionWire,
+  PrepareMergeResponse,
+  PreviewCascadeResponse,
   PreviewMergeResponse,
   QueryClassDecl,
   QueryResponse,
   ReflectResponse,
   RunGcResponse,
   RunProgramResponse,
+  SubmitResolutionResponse,
   TagInfo,
   TaskInfo,
+  TypedConflictWire,
   ValidateProgramResponse,
   ValidationError,
 };
 
 // Value-level enums (consumers compare against them) re-exported as
 // values, not just types.
-export { ConsolidateErrorKind, DispatchRole, MergeOutcome, RuntimeKind };
+export {
+  ConsolidateErrorKind,
+  DispatchRole,
+  MergeOutcome,
+  MergeQuotientKind,
+  MergeSide,
+  MergeStrategyKind,
+  PrepareMergeErrorKind,
+  PreviewCascadeErrorKind,
+  RuntimeKind,
+  SubmitResolutionErrorKind,
+};
 
 const TEXT_ENCODER = new TextEncoder();
 
@@ -694,6 +728,70 @@ export class Eigen {
   ): Promise<PreviewMergeResponse> {
     return await this.kernel.previewMerge(
       create(PreviewMergeRequestSchema, { source, target }),
+    );
+  }
+
+  /**
+   * D36 §3.1 — Pre-compute the typed-conflict list for a (branch,
+   * candidate_head) pair. Non-mutating; wraps the kernel's
+   * `build_merge_span` + `classify_conflicts`. The notebook's
+   * resolution flow calls this to populate the strategy picker;
+   * each `TypedConflictWire` carries its kind-specific fields and
+   * the strategies whose applicability check passes.
+   */
+  async prepareMerge(
+    branch: string,
+    candidateHead: string,
+  ): Promise<PrepareMergeResponse> {
+    return await this.kernel.prepareMerge(
+      create(PrepareMergeRequestSchema, {
+        branch,
+        candidateHead,
+      }),
+    );
+  }
+
+  /**
+   * D20 §7.3 — Non-mutating dry-run of cascade impact. Returns the
+   * same `CascadeItemWire[]` `submitResolution` would compute,
+   * without applying anything or moving any branch ref. The
+   * resolution flow calls this between "user picked strategies"
+   * and "user acknowledges consequences."
+   */
+  async previewCascade(
+    branch: string,
+    candidateHead: string,
+    resolutions: MergeResolutionWire[],
+  ): Promise<PreviewCascadeResponse> {
+    return await this.kernel.previewCascade(
+      create(PreviewCascadeRequestSchema, {
+        branch,
+        candidateHead,
+        resolutions,
+      }),
+    );
+  }
+
+  /**
+   * D20 §7.2 — Apply resolutions to a (branch, candidate_head) pair,
+   * commit the merge layer, and CAS-advance the branch ref. The
+   * caller must supply an acknowledgment for every cascade item
+   * `previewCascade` would produce; missing acks surface as
+   * `SubmitResolutionErrorKind::INCOMPLETE_ACKNOWLEDGMENTS`.
+   */
+  async submitResolution(
+    branch: string,
+    candidateHead: string,
+    resolutions: MergeResolutionWire[],
+    acknowledgments: CascadeAckWire[],
+  ): Promise<SubmitResolutionResponse> {
+    return await this.kernel.submitResolution(
+      create(SubmitResolutionRequestSchema, {
+        branch,
+        candidateHead,
+        resolutions,
+        acknowledgments,
+      }),
     );
   }
 

@@ -66,6 +66,7 @@ import {
 } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
+import { MergeResolutionFlow } from "../merge/MergeResolutionFlow";
 
 const TOASTER_ID = "merge-panel-toaster";
 
@@ -244,6 +245,30 @@ export function MergePanel() {
   };
 
   const canSubmit = source && target && source !== target;
+  // D36 §4 — when a resolution session is open, the panel switches
+  // into resolution mode and hosts `MergeResolutionFlow` instead of
+  // the explicit source/target merge UI. The two modes are mutually
+  // exclusive within a session.
+  const resolutionState = useNotebookStore((s) => s.mergeResolution);
+  if (resolutionState.kind !== "closed") {
+    return (
+      <div className={styles.root}>
+        <div className={styles.header}>
+          <Merge20Regular />
+          <Subtitle1 as="h2">
+            Merge — {resolutionState.kind === "done"
+              ? "committed"
+              : "resolving conflicts"}
+          </Subtitle1>
+        </div>
+        <div className={styles.body}>
+          <div className={styles.bodyInner}>
+            <MergeResolutionFlow />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.root}>

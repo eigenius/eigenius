@@ -317,7 +317,7 @@ export function Cell({ cellId }: CellProps) {
                 onChange={onSourceChange}
               />
             )}
-          {output && <CellOutputView output={output} />}
+          {output && <CellOutputView output={output} cellId={cellId} />}
         </div>
       )}
     </Card>

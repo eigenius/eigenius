@@ -18,6 +18,8 @@
 export {
   type BranchInfo,
   type CancelTaskResponse,
+  type CascadeAckWire,
+  type CascadeItemWire,
   type ComorphismDecl,
   type ConsolidateChainResponse,
   ConsolidateErrorKind,
@@ -46,6 +48,14 @@ export {
   type MergeBranchesResponse,
   type MergeInfo,
   MergeOutcome,
+  MergeQuotientKind,
+  type MergeResolutionWire,
+  MergeSide,
+  MergeStrategyKind,
+  PrepareMergeErrorKind,
+  type PrepareMergeResponse,
+  PreviewCascadeErrorKind,
+  type PreviewCascadeResponse,
   type PreviewMergeResponse,
   type QueryClassDecl,
   type QueryOptions,
@@ -57,8 +67,11 @@ export {
   type RunProgramResponse,
   RuntimeKind,
   type SourceContentType,
+  SubmitResolutionErrorKind,
+  type SubmitResolutionResponse,
   type TagInfo,
   type TaskInfo,
+  type TypedConflictWire,
 } from "./src/client.ts";
 
 // Re-export the topology message + enum types so consumers don't need
