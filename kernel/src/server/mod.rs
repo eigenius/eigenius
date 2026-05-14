@@ -4188,7 +4188,7 @@ fn merge_error_to_submit_response(
             proto::SubmitResolutionErrorKind::IncompleteAcknowledgments,
             missing.iter().map(|m| m.0.clone()).collect(),
         ),
-        MergeError::ConflictNotFound(_) => (
+        MergeError::ConflictNotFound(_) | MergeError::UnresolvedConflict { .. } => (
             proto::SubmitResolutionErrorKind::ConflictNotFound,
             Vec::new(),
         ),

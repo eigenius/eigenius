@@ -2431,6 +2431,23 @@ pub fn commit_resolutions_as_merge_layer(
         }
     }
 
+    // Coverage check: every classified conflict must be targeted by
+    // exactly one resolution. Without this the merge commits a
+    // partial outcome — branches' conflicting bodies would survive
+    // unresolved and the resulting chain wouldn't satisfy the
+    // classifier post-merge. Reject loudly.
+    let resolution_by_conflict: BTreeMap<&ConflictId, &MergeResolution> = resolutions
+        .iter()
+        .map(|r| (resolution_conflict_id(r), r))
+        .collect();
+    for conflict in &conflicts {
+        if !resolution_by_conflict.contains_key(&conflict.id) {
+            return Err(MergeError::UnresolvedConflict {
+                conflict_id: conflict.id.clone(),
+            });
+        }
+    }
+
     // 2. Resolve both heads to `Arc<Layer>` so they can be wired in
     //    as parents. The chain-resolved Layer also gives us a
     //    handle for loading branch-side bodies during witness
@@ -2442,7 +2459,82 @@ pub fn commit_resolutions_as_merge_layer(
     let mut builder =
         crate::layer::LayerBuilder::with_parents(name, vec![head_a.clone(), head_b.clone()]);
 
-    // 3. Per-resolution dispatch.
+    // 3. Compute the union of conflict target IRIs across all
+    //    resolutions. Non-target contributions from either branch
+    //    are committed directly to the merge layer in step 4 so
+    //    they remain reachable post-merge (the resolve walker
+    //    only follows `parents.first()`, so branch B's unique
+    //    contributions aren't reachable through the merge layer's
+    //    parent chain — we must replicate them here).
+    let mut conflict_target_iris: BTreeSet<Iri> = BTreeSet::new();
+    for resolution in resolutions {
+        let conflict = conflict_by_id[resolution_conflict_id(resolution)];
+        match resolution {
+            MergeResolution::Witness { .. } => {
+                if let Some(iri) = witness_target_iri(&conflict.kind) {
+                    conflict_target_iris.insert(iri.clone());
+                }
+            }
+            MergeResolution::Rename {
+                old_iri, new_iri, ..
+            } => {
+                conflict_target_iris.insert(old_iri.clone());
+                conflict_target_iris.insert(new_iri.clone());
+            }
+            MergeResolution::SchemaQuotient { .. } => {
+                conflict_target_iris.extend(quotient_target_iris(&conflict.kind));
+            }
+            MergeResolution::Restructure { spec, .. } => {
+                conflict_target_iris.insert(spec.affected_class.clone());
+                conflict_target_iris.insert(spec.new_parent.clone());
+                conflict_target_iris.extend(spec.classes_under_new.iter().cloned());
+            }
+        }
+    }
+
+    // 4. Commit non-target contributions from both branches. The
+    //    intersection (shared IRIs not in `conflict_target_iris`)
+    //    have structurally-equal bodies by construction — the
+    //    classifier surfaces every disagreeing shared IRI as a
+    //    conflict — so committing either branch's body produces the
+    //    same merge view. We pick A's deterministically.
+    let mut emitted: BTreeSet<Iri> = BTreeSet::new();
+    for (iri, layer_id) in &span.sources_a {
+        if conflict_target_iris.contains(iri) {
+            continue;
+        }
+        let body = backend
+            .try_load_resource(layer_id, iri)
+            .map_err(MergeError::Storage)?
+            .ok_or_else(|| {
+                MergeError::Storage(StorageError::NotFound(format!(
+                    "branch A body for {iri} not loadable from {layer_id}"
+                )))
+            })?;
+        builder
+            .add_resource(body)
+            .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+        emitted.insert(iri.clone());
+    }
+    for (iri, layer_id) in &span.sources_b {
+        if conflict_target_iris.contains(iri) || emitted.contains(iri) {
+            continue;
+        }
+        let body = backend
+            .try_load_resource(layer_id, iri)
+            .map_err(MergeError::Storage)?
+            .ok_or_else(|| {
+                MergeError::Storage(StorageError::NotFound(format!(
+                    "branch B body for {iri} not loadable from {layer_id}"
+                )))
+            })?;
+        builder
+            .add_resource(body)
+            .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+        emitted.insert(iri.clone());
+    }
+
+    // 5. Per-resolution dispatch.
     for resolution in resolutions {
         match resolution {
             MergeResolution::Witness {
@@ -2545,7 +2637,61 @@ pub fn commit_resolutions_as_merge_layer(
                             }
                         }
                     }
-                    _ => {
+                    SchemaQuotient::KeepOne { winner } => {
+                        // Commit the winner's body for each conflict
+                        // IRI. Merge-layer precedence shadows the
+                        // loser's body in the parent chain. If the
+                        // winner doesn't have the IRI (it's only on
+                        // the loser's side — possible for
+                        // `KindMismatch`/`InheritanceCycle` shapes),
+                        // tombstone it so the loser's body is
+                        // suppressed.
+                        let winner_sources = match winner {
+                            Side::A => &span.sources_a,
+                            Side::B => &span.sources_b,
+                        };
+                        let loser_sources = match winner {
+                            Side::A => &span.sources_b,
+                            Side::B => &span.sources_a,
+                        };
+                        // The application's drop set for the loser
+                        // is the set of IRIs the loser contributed
+                        // at the conflict point; iterate those.
+                        let to_resolve = match winner {
+                            Side::A => &application.drop_from_branch_b,
+                            Side::B => &application.drop_from_branch_a,
+                        };
+                        for iri in to_resolve {
+                            if let Some(layer_id) = winner_sources.get(iri) {
+                                let body = backend
+                                    .try_load_resource(layer_id, iri)
+                                    .map_err(MergeError::Storage)?
+                                    .ok_or_else(|| {
+                                        MergeError::Storage(StorageError::NotFound(format!(
+                                            "winner body for {iri} not loadable"
+                                        )))
+                                    })?;
+                                builder
+                                    .add_resource(body)
+                                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                            } else if loser_sources.contains_key(iri) {
+                                // Only the loser had it; tombstone
+                                // to suppress.
+                                builder
+                                    .tombstone(iri.clone())
+                                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                            }
+                        }
+                    }
+                    SchemaQuotient::KeepBoth => {
+                        // The applicability validator rejects
+                        // KeepBoth for every v1 conflict kind, so
+                        // `apply_quotient_resolution` returned an
+                        // error before we reached this branch — this
+                        // is unreachable in practice. Surface the
+                        // pending error to keep the match exhaustive
+                        // without an `unreachable!()` that could
+                        // panic on future taxonomies.
                         return Err(MergeError::QuotientApplicationNotYetWired {
                             conflict_id: conflict.clone(),
                             quotient: *quotient,
@@ -2869,6 +3015,14 @@ pub enum MergeError {
         head_a: LayerId,
         head_b: LayerId,
     },
+    /// The classifier surfaced a conflict no resolution in the
+    /// submitted list targets. Committing the merge would leave both
+    /// branches' conflicting bodies in place — the resulting chain
+    /// wouldn't satisfy the classifier post-merge. Callers must
+    /// include a resolution per classified conflict.
+    UnresolvedConflict {
+        conflict_id: ConflictId,
+    },
 }
 
 impl std::fmt::Display for MergeError {
@@ -3020,6 +3174,11 @@ impl std::fmt::Display for MergeError {
             MergeError::NoCommonAncestor { head_a, head_b } => write!(
                 f,
                 "no common ancestor for heads {head_a} and {head_b}; cannot build a merge span"
+            ),
+            MergeError::UnresolvedConflict { conflict_id } => write!(
+                f,
+                "classified conflict {} has no matching resolution in the submitted list",
+                conflict_id.0
             ),
         }
     }
@@ -4613,11 +4772,12 @@ mod tests {
     }
 
     #[test]
-    fn merge_with_resolutions_quotient_validates_then_reports_pending() {
+    fn merge_with_resolutions_keep_one_commits_real_merge_layer() {
         // End-to-end through `merge_with_resolutions`: a KeepOne
-        // resolution against a PropertyDataType conflict validates,
-        // produces drop sets, and the surface short-circuits with
-        // `QuotientApplicationNotYetWired` until 15g lands.
+        // resolution against a PropertyDataType conflict commits a
+        // real merge layer carrying the winner's body. Pins the
+        // 15g(e+) wiring: the dispatch surface is no longer a
+        // validation-only stub for SchemaQuotient.
         let (span, backend, conflict) = span_with_property_data_type_conflict();
         let resolutions = vec![MergeResolution::SchemaQuotient {
             conflict: conflict.id.clone(),
@@ -4631,14 +4791,11 @@ mod tests {
             &backend,
         );
         match result {
-            Err(MergeError::QuotientApplicationNotYetWired {
-                conflict_id: id,
-                quotient,
-            }) => {
-                assert_eq!(id, conflict.id);
-                assert_eq!(quotient, SchemaQuotient::KeepOne { winner: Side::A });
+            Ok(MergeOutcome::Merged { merge_layer }) => {
+                // The merge layer must be persisted and resolvable.
+                assert!(backend.load_chain_from(&merge_layer).unwrap().is_some());
             }
-            other => panic!("expected QuotientApplicationNotYetWired, got {other:?}"),
+            other => panic!("expected Merged, got {other:?}"),
         }
     }
 
@@ -5695,10 +5852,10 @@ mod tests {
     }
 
     #[test]
-    fn keep_one_still_returns_application_not_yet_wired() {
-        // KeepOne's commit path is a follow-up to 15g step 3 (which
-        // only wires KeepNeither). Verifies the typed error stays
-        // until the broader rewrite lands.
+    fn keep_one_commits_winner_body() {
+        // KeepOne winner=A commits A's body at the conflict IRI; the
+        // merge-layer-precedence rule means resolve sees A's value
+        // even though both branches modified the IRI.
         let body_a = make_resource(
             "urn:test:X",
             &["urn:test:Thing"],
@@ -5717,20 +5874,139 @@ mod tests {
             conflict: conflict_id,
             quotient: SchemaQuotient::KeepOne { winner: Side::A },
         }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:keep_one",
+            storage,
+            &*backend,
+        )
+        .expect("KeepOne winner=A should commit cleanly");
+        let resolved = merge_layer
+            .resolve(&iri("urn:test:X"))
+            .expect("winner body should be reachable");
+        assert_eq!(
+            resolved.get(&iri("urn:test:weight")),
+            Some(&Value::Integer(1)),
+            "merge layer should expose branch A's body"
+        );
+        assert!(
+            merge_layer.tombstoned_iris().is_empty(),
+            "KeepOne shouldn't tombstone — the winner's body is present"
+        );
+    }
+
+    #[test]
+    fn merge_commits_non_conflict_contributions_from_both_branches() {
+        // Branch A adds `urn:test:OnlyA`; branch B adds `urn:test:OnlyB`
+        // (non-overlapping). Both branches also modify `urn:test:X`
+        // (the conflict the resolution targets). The merge layer's
+        // resolve must see all three IRIs — without committing
+        // non-conflict contributions, branch B's OnlyB would be
+        // unreachable through the merge layer (the resolve walker
+        // only follows `parents.first()` = branch A).
+        let only_a = make_resource(
+            "urn:test:OnlyA",
+            &["urn:test:Thing"],
+            &[("urn:test:label", Value::String("a".into()))],
+        );
+        let only_b = make_resource(
+            "urn:test:OnlyB",
+            &["urn:test:Thing"],
+            &[("urn:test:label", Value::String("b".into()))],
+        );
+        let conflict_a = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(1))],
+        );
+        let conflict_b = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(2))],
+        );
+        let (span, backend, storage) = build_span_arc(
+            Vec::new(),
+            vec![only_a, conflict_a],
+            vec![only_b, conflict_b],
+        );
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict_id,
+            quotient: SchemaQuotient::KeepOne { winner: Side::A },
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:full_view",
+            storage,
+            &*backend,
+        )
+        .expect("merge should commit");
+
+        assert!(
+            merge_layer.resolve(&iri("urn:test:OnlyA")).is_some(),
+            "branch A's unique contribution should be reachable"
+        );
+        assert!(
+            merge_layer.resolve(&iri("urn:test:OnlyB")).is_some(),
+            "branch B's unique contribution should be reachable through the merge layer"
+        );
+        assert!(merge_layer.resolve(&iri("urn:test:X")).is_some());
+    }
+
+    #[test]
+    fn commit_rejects_unresolved_conflict() {
+        // Two conflicts surface; only one resolution submitted. The
+        // commit path rejects rather than producing a partial outcome.
+        let prop_a = make_resource(
+            "urn:test:weight",
+            &[wk::PROPERTY],
+            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+        );
+        let prop_b = make_resource(
+            "urn:test:weight",
+            &[wk::PROPERTY],
+            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+        );
+        let other_prop_a = make_resource(
+            "urn:test:height",
+            &[wk::PROPERTY],
+            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+        );
+        let other_prop_b = make_resource(
+            "urn:test:height",
+            &[wk::PROPERTY],
+            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+        );
+        let (span, backend, storage) = build_span_arc(
+            Vec::new(),
+            vec![prop_a, other_prop_a],
+            vec![prop_b, other_prop_b],
+        );
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        assert_eq!(conflicts.len(), 2);
+        // Resolve only the first one.
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflicts[0].id.clone(),
+            quotient: SchemaQuotient::KeepOne { winner: Side::A },
+        }];
         let result = commit_resolutions_as_merge_layer(
             &span,
             &resolutions,
             &[],
-            "merge:keep_one_pending",
+            "merge:partial",
             storage,
             &*backend,
         );
-        assert!(
-            matches!(
-                result,
-                Err(MergeError::QuotientApplicationNotYetWired { .. })
-            ),
-            "got {result:?}"
-        );
+        match result {
+            Err(MergeError::UnresolvedConflict { conflict_id }) => {
+                assert_eq!(conflict_id, conflicts[1].id);
+            }
+            other => panic!("expected UnresolvedConflict, got {other:?}"),
+        }
     }
 }
