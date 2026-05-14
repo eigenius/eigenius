@@ -398,6 +398,9 @@ impl LayerStore for RocksStore {
             created_at: layer.created_at(),
             byte_size,
             is_redirect_source: false,
+            // 15g step 3: persist tombstones onto the handle so the
+            // round-trip preserves them through `load_chain_from`.
+            tombstoned_iris: layer.tombstoned_iris().clone(),
         };
         self.put_topology_entry(&handle)?;
         // Content-hash dedup index (D25 §11.0). Idempotent by
@@ -658,6 +661,9 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             created_at: layer.created_at(),
             byte_size,
             is_redirect_source: false,
+            // 15g step 3: persist tombstones onto the handle so the
+            // round-trip preserves them through `load_chain_from`.
+            tombstoned_iris: layer.tombstoned_iris().clone(),
         };
         let bloom = BloomFilter::for_iris(layer.defined_iris());
 

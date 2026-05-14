@@ -2512,10 +2512,46 @@ pub fn commit_resolutions_as_merge_layer(
                 });
             }
             MergeResolution::SchemaQuotient { conflict, quotient } => {
-                return Err(MergeError::QuotientApplicationNotYetWired {
-                    conflict_id: conflict.clone(),
-                    quotient: *quotient,
-                });
+                let target = conflict_by_id
+                    .get(conflict)
+                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
+                let application = apply_quotient_resolution(target, *quotient)?;
+                match *quotient {
+                    SchemaQuotient::KeepNeither => {
+                        // For each dropped IRI: if the ancestor has a
+                        // body, commit it in the merge layer (its
+                        // body takes precedence over both branches'
+                        // bodies via merge-layer precedence). If the
+                        // ancestor has nothing, tombstone the IRI so
+                        // the merge layer suppresses both branches'
+                        // additions.
+                        let mut dropped: BTreeSet<Iri> =
+                            application.drop_from_branch_a.iter().cloned().collect();
+                        dropped.extend(application.drop_from_branch_b.iter().cloned());
+                        for iri in dropped {
+                            match find_iri_in_chain(&span.ancestor, &iri, &topology, backend)
+                                .map_err(MergeError::Storage)?
+                            {
+                                Some((_, ancestor_body)) => {
+                                    builder
+                                        .add_resource(ancestor_body)
+                                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                                }
+                                None => {
+                                    builder
+                                        .tombstone(iri)
+                                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(MergeError::QuotientApplicationNotYetWired {
+                            conflict_id: conflict.clone(),
+                            quotient: *quotient,
+                        });
+                    }
+                }
             }
             MergeResolution::Restructure { conflict, spec } => {
                 return Err(MergeError::RestructureApplicationNotYetWired {
@@ -5562,5 +5598,139 @@ mod tests {
             }
             other => panic!("expected NoCommonAncestor, got {other:?}"),
         }
+    }
+
+    // ─── Tombstones (15g step 3) ───────────────────────────────────────────
+
+    #[test]
+    fn keep_neither_tombstones_iri_when_ancestor_absent() {
+        // Both branches add `urn:test:X` (different bodies → IriCollision),
+        // ancestor has nothing. KeepNeither produces a merge layer
+        // that tombstones the conflict IRI so neither branch's body
+        // is reachable post-merge.
+        let body_a = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(1))],
+        );
+        let body_b = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(2))],
+        );
+        let (span, backend, storage) = build_span_arc(Vec::new(), vec![body_a], vec![body_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        assert_eq!(conflicts.len(), 1);
+        let conflict_id = conflicts[0].id.clone();
+
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict_id,
+            quotient: SchemaQuotient::KeepNeither,
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:keep_neither",
+            storage,
+            &*backend,
+        )
+        .expect("KeepNeither should commit cleanly");
+
+        // The merge layer's tombstone shadows both branches' bodies.
+        assert!(merge_layer.tombstoned_iris().contains(&iri("urn:test:X")));
+        assert!(merge_layer.resolve(&iri("urn:test:X")).is_none());
+    }
+
+    #[test]
+    fn keep_neither_restores_ancestor_body_when_present() {
+        // Ancestor has `urn:test:X` (the canonical pre-divergence
+        // body). Both branches modified it. KeepNeither produces a
+        // merge layer that commits ANCESTOR's body — overriding both
+        // branches' bodies via merge-layer precedence. No tombstone
+        // because the canonical body resolves to ancestor's version.
+        let ancestor_body = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(0))],
+        );
+        let body_a = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(1))],
+        );
+        let body_b = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(2))],
+        );
+        let (span, backend, storage) =
+            build_span_arc(vec![ancestor_body], vec![body_a], vec![body_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict_id,
+            quotient: SchemaQuotient::KeepNeither,
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:keep_neither_ancestor",
+            storage,
+            &*backend,
+        )
+        .expect("KeepNeither with ancestor body should commit cleanly");
+
+        assert!(merge_layer.tombstoned_iris().is_empty());
+        let resolved = merge_layer
+            .resolve(&iri("urn:test:X"))
+            .expect("ancestor body should be reachable");
+        assert_eq!(
+            resolved.get(&iri("urn:test:weight")),
+            Some(&Value::Integer(0)),
+            "merged body should match the ancestor's"
+        );
+    }
+
+    #[test]
+    fn keep_one_still_returns_application_not_yet_wired() {
+        // KeepOne's commit path is a follow-up to 15g step 3 (which
+        // only wires KeepNeither). Verifies the typed error stays
+        // until the broader rewrite lands.
+        let body_a = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(1))],
+        );
+        let body_b = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(2))],
+        );
+        let (span, backend, storage) = build_span_arc(Vec::new(), vec![body_a], vec![body_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict_id,
+            quotient: SchemaQuotient::KeepOne { winner: Side::A },
+        }];
+        let result = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:keep_one_pending",
+            storage,
+            &*backend,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MergeError::QuotientApplicationNotYetWired { .. })
+            ),
+            "got {result:?}"
+        );
     }
 }

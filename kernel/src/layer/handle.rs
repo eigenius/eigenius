@@ -34,7 +34,8 @@
 //! into `Layer` or the persistent backend (those are 14a-ii and 14a-iii).
 
 use crate::layer::{ContentHash, LayerId};
-use std::collections::BTreeMap;
+use crate::ontology::iri::Iri;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Metadata-only handle for a layer.
 ///
@@ -119,6 +120,19 @@ pub struct LayerHandle {
     /// **Always `false`** on handles written to disk by `store_layer`
     /// — the flag is an in-memory signal only.
     pub is_redirect_source: bool,
+
+    /// IRIs explicitly tombstoned at this layer (D20 §6.2 / §6.3 for
+    /// `Rename` and `SchemaQuotient::KeepNeither` resolutions; 15g
+    /// step 3). The lookup walker treats a tombstoned IRI as
+    /// "removed from view": `Layer::resolve(iri)` returns `None`
+    /// when the walk encounters a tombstoning layer before any
+    /// defining layer.
+    ///
+    /// `#[serde(default)]` tolerates handles persisted by older
+    /// kernels — they read back with an empty set and the lookup
+    /// behaves identically to pre-15g chains.
+    #[serde(default)]
+    pub tombstoned_iris: BTreeSet<Iri>,
 }
 
 impl LayerHandle {
@@ -222,6 +236,7 @@ mod tests {
             created_at: 0,
             byte_size: 0,
             is_redirect_source: false,
+            tombstoned_iris: BTreeSet::new(),
         }
     }
 
