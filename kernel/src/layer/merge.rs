@@ -272,6 +272,50 @@ impl MergeSpan {
     }
 }
 
+/// Construct a [`MergeSpan`] from a pair of layer heads (D20 §7.2's
+/// `(branch_head, candidate_chain)` input).
+///
+/// Finds the lowest common ancestor of the two heads via
+/// [`crate::lattice::find_lca`], then computes each branch's
+/// `sources_*` map via [`crate::lattice::iri_sources_since`]. The
+/// result is the canonical merge-span input to every classifier and
+/// resolution applier in this module.
+///
+/// Errors:
+/// - `MergeError::NoCommonAncestor` if `head_a` and `head_b` share no
+///   ancestor in the topology (unrelated DAG roots), or if either head
+///   isn't in the topology — without an LCA there's no merge span to
+///   build.
+/// - `MergeError::Storage` on backend read failures.
+///
+/// `head_a == head_b` is valid: the LCA is the head itself, both
+/// branches' `sources_*` are empty, and the resulting span describes
+/// the trivial "merge with self" — every classifier returns no
+/// conflicts.
+pub fn build_merge_span(
+    head_a: &LayerId,
+    head_b: &LayerId,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<MergeSpan, MergeError> {
+    let ancestor = crate::lattice::find_lca(&[head_a.clone(), head_b.clone()], topology)
+        .ok_or_else(|| MergeError::NoCommonAncestor {
+            head_a: head_a.clone(),
+            head_b: head_b.clone(),
+        })?;
+    let sources_a = crate::lattice::iri_sources_since(head_a, &ancestor, topology, backend)
+        .map_err(MergeError::Storage)?;
+    let sources_b = crate::lattice::iri_sources_since(head_b, &ancestor, topology, backend)
+        .map_err(MergeError::Storage)?;
+    Ok(MergeSpan {
+        ancestor,
+        head_a: head_a.clone(),
+        head_b: head_b.clone(),
+        sources_a,
+        sources_b,
+    })
+}
+
 // ─── Classifier ────────────────────────────────────────────────────────────
 
 /// Classify the per-IRI disagreement at `iri` between the two branches.
@@ -977,10 +1021,12 @@ pub fn classify_conflicts(
 /// Three distinct phases:
 ///
 /// 1. **Classification.** Always runs first. Empty conflicts +
-///    empty resolutions = clean merge (placeholder layer id for
-///    now; lattice owns the actual layer-build path until 15g).
-///    Non-empty conflicts + empty resolutions = `NeedsResolution`
-///    surface for the client to fill in.
+///    empty resolutions = clean merge (placeholder layer id; the
+///    multi-parent trivial-merge layer is built by
+///    [`crate::lattice::merge_independent_heads`], which owns the
+///    "no resolutions needed" path). Non-empty conflicts + empty
+///    resolutions = `NeedsResolution` surface for the client to
+///    fill in.
 ///
 /// 2. **Cascade acknowledgment gate (15f).** When `resolutions` is
 ///    non-empty, compute the cascade preview and verify every item
@@ -989,11 +1035,13 @@ pub fn classify_conflicts(
 ///    (D20 §8); missing acks surface as
 ///    `MergeError::IncompleteAcknowledgments`.
 ///
-/// 3. **Resolution application.** Each resolution is dispatched on
-///    its variant. Per-variant validation runs; the actual
-///    merge-layer construction is 15g — successful validation
-///    currently short-circuits with a typed `*ApplicationNotYetWired`
-///    so callers see exactly which path is pending.
+/// 3. **Merge-layer construction (15g).** Delegates to
+///    [`commit_resolutions_as_merge_layer`], which builds a
+///    multi-parent layer with both heads as parents and the
+///    per-resolution transformations applied on top. `Witness`
+///    resolutions land their merged bodies; other variants still
+///    surface their `*ApplicationNotYetWired` errors until their
+///    committable shapes wire up.
 ///
 /// On any resolution error the function fails the whole merge;
 /// partial applications are not surfaced.
@@ -1001,22 +1049,21 @@ pub fn merge_with_resolutions(
     span: &MergeSpan,
     resolutions: Vec<MergeResolution>,
     acknowledgments: Vec<CascadeAck>,
+    storage: crate::layer::LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<MergeOutcome, MergeError> {
-    let topology = backend.load_topology().map_err(MergeError::Storage)?;
     let conflicts = classify_conflicts(span, backend).map_err(MergeError::Storage)?;
 
     if resolutions.is_empty() {
         return if conflicts.is_empty() {
-            // No structural conflicts — the merge proceeds. 15a
-            // doesn't build the merge layer itself; that path stays
-            // in `lattice::merge_independent_heads` for now. The
-            // skeleton returns a placeholder layer id so callers
-            // wire through the shape; the lattice layer's existing
-            // path is the load-bearing producer.
+            // No structural conflicts — the merge proceeds. The
+            // trivial-merge layer construction stays in
+            // `lattice::merge_independent_heads` (the load-bearing
+            // producer for the "no resolutions" path); this surface
+            // keeps the placeholder so callers wire through the
+            // shape without taking on multi-parent layer building
+            // for the trivial case here.
             Ok(MergeOutcome::Merged {
-                // Placeholder: lattice owns merge-layer construction;
-                // 15g unifies the entry points.
                 merge_layer: span.head_a.clone(),
             })
         } else {
@@ -1027,107 +1074,17 @@ pub fn merge_with_resolutions(
         };
     }
 
-    // 15f cascade gate. Compute the preview first so callers see
-    // ack failures before per-resolution validation errors — the UI
-    // wants the consequences-list, not "your witness signature is
-    // wrong AND by the way 47 references will dangle." Validation
-    // errors from per-resolution apply functions still fire after
-    // this, in the dispatch loop below.
-    let preview = preview_cascade(span, &resolutions, backend)?;
-    verify_cascade_acknowledgments(&preview, &acknowledgments)?;
-
-    // Dispatch each resolution. Errors abort the whole merge so a
-    // partial application never leaves the chain in an intermediate
-    // state. Conflict-lookup table built once for O(1) targeting.
-    let conflict_by_id: BTreeMap<&ConflictId, &TypedConflict> =
-        conflicts.iter().map(|c| (&c.id, c)).collect();
-    // 15b Step 1 short-circuits on the first Witness with
-    // `WitnessApplicationNotYetWired` because the term evaluator
-    // isn't wired yet; Step 2 turns this into a real loop that
-    // accumulates resolved-and-applied state across resolutions.
-    // The for-loop shape stays so Step 2 is a localised in-place
-    // edit rather than a restructuring.
-    #[allow(clippy::never_loop)]
-    for resolution in &resolutions {
-        match resolution {
-            MergeResolution::Witness {
-                conflict,
-                comorphism,
-            } => {
-                let target = conflict_by_id
-                    .get(conflict)
-                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
-                let _handle = resolve_merge_comorphism(comorphism, span, &topology, backend)?;
-                // The handle is validated; Step 2 will pass it into
-                // the term-evaluator + produce the merged resource
-                // body for the conflict's IRI. Until that lands,
-                // surface a typed "validated but not applied" error
-                // rather than silently no-oping.
-                let _ = target;
-                return Err(MergeError::WitnessApplicationNotYetWired {
-                    comorphism: comorphism.clone(),
-                });
-            }
-            MergeResolution::Rename {
-                conflict,
-                side,
-                old_iri,
-                new_iri,
-            } => {
-                let target = conflict_by_id
-                    .get(conflict)
-                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
-                let _ = target;
-                // Validate the rename — collisions, missing target.
-                // Application produces a renamed slice of the chosen
-                // branch's contributions; merge-layer construction
-                // (running the merge against the renamed branch and
-                // committing the result) is 15g.
-                let _renamed =
-                    apply_rename_resolution(span, *side, old_iri, new_iri, &topology, backend)?;
-                return Err(MergeError::RenameApplicationNotYetWired {
-                    old_iri: old_iri.clone(),
-                    new_iri: new_iri.clone(),
-                });
-            }
-            MergeResolution::SchemaQuotient { conflict, quotient } => {
-                let target = conflict_by_id
-                    .get(conflict)
-                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
-                // Validate applicability + compute the per-side drop
-                // sets. Actually applying them (rebuilding the merge
-                // layer with the dropped contributions excluded) is 15g.
-                let _application = apply_quotient_resolution(target, *quotient)?;
-                return Err(MergeError::QuotientApplicationNotYetWired {
-                    conflict_id: conflict.clone(),
-                    quotient: *quotient,
-                });
-            }
-            MergeResolution::Restructure { conflict, spec } => {
-                let target = conflict_by_id
-                    .get(conflict)
-                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
-                let _ = target;
-                // Validate the restructure shape — synthesized
-                // parent rejection, definition presence rules,
-                // class-in-span checks. Building the augmented
-                // ancestor + re-merging against it is 15g.
-                let _application =
-                    apply_restructure_resolution(conflict, spec, span, &topology, backend)?;
-                return Err(MergeError::RestructureApplicationNotYetWired {
-                    conflict_id: conflict.clone(),
-                    new_parent: spec.new_parent.clone(),
-                });
-            }
-        }
-    }
-
-    // Unreachable today — every `MergeResolution` variant either
-    // returns Ok or Err inside the match. Kept as a defensive
-    // fallthrough for when 15c–15e land their variants and one
-    // accidentally falls through without producing an outcome.
-    Err(MergeError::WitnessApplicationNotYetWired {
-        comorphism: Iri::parse("urn:eigenius:placeholder:internal").expect("placeholder IRI"),
+    let layer_name = format!("merge:{}+{}", span.head_a, span.head_b);
+    let merge_layer = commit_resolutions_as_merge_layer(
+        span,
+        &resolutions,
+        &acknowledgments,
+        &layer_name,
+        storage,
+        backend,
+    )?;
+    Ok(MergeOutcome::Merged {
+        merge_layer: merge_layer.id().clone(),
     })
 }
 
@@ -2406,6 +2363,263 @@ fn verify_cascade_acknowledgments(
     }
 }
 
+// ─── Merge-layer construction (15g step 1) ─────────────────────────────────
+
+/// Commit a list of resolutions as a multi-parent merge layer and
+/// persist it (D20 §7.2 step 6).
+///
+/// This is the layer-construction surface that turns validated
+/// resolutions into a real merged layer. v1 supports
+/// `Witness`-strategy resolutions end-to-end: each witness's merged
+/// `Resource` is committed at the conflict's IRI in the new layer.
+/// `Rename`, `SchemaQuotient`, and `Restructure` continue to surface
+/// their `*ApplicationNotYetWired` errors here — those resolution
+/// shapes require tombstone semantics (or augmented-ancestor commit
+/// for `Restructure`) the kernel hasn't yet stood up.
+///
+/// Pipeline:
+///  1. Compute + verify the cascade preview (D20 §8).
+///  2. Build the multi-parent base — `LayerBuilder::with_parents`
+///     against `[head_a, head_b]` so lookup for any IRI either
+///     branch defined resolves through the parent chain by default.
+///  3. For each `Witness` resolution: load both branches' bodies at
+///     the conflict's IRI, optionally load the ancestor body,
+///     resolve the comorphism, apply the witness via
+///     `apply_witness_resolution`, and add the merged body to the
+///     builder. The merge layer's body takes precedence over the
+///     parents' bodies on lookup.
+///  4. Build the layer and persist it via `backend.store_layer`.
+///     Return the `Arc<Layer>` so callers can immediately use it
+///     (e.g., to CAS-advance a branch ref).
+///
+/// **Scope note.** `merge_with_resolutions` now delegates to this
+/// function once the cascade ack gate passes; the `merge_layer`
+/// field of `MergeOutcome::Merged` carries the real persisted layer
+/// id. Non-Witness variants still surface their `*ApplicationNotYetWired`
+/// errors from inside the dispatch below — their committable shapes
+/// (tombstones for Rename / Quotient drops; augmented-ancestor commit
+/// for Restructure) light up when those surfaces wire up.
+pub fn commit_resolutions_as_merge_layer(
+    span: &MergeSpan,
+    resolutions: &[MergeResolution],
+    acknowledgments: &[CascadeAck],
+    name: &str,
+    storage: crate::layer::LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<std::sync::Arc<crate::layer::Layer>, MergeError> {
+    use std::sync::Arc;
+
+    // 1. Cascade gate. Same shape as merge_with_resolutions —
+    //    inconsistencies surface before any layer construction
+    //    happens.
+    let preview = preview_cascade(span, resolutions, backend)?;
+    verify_cascade_acknowledgments(&preview, acknowledgments)?;
+
+    let conflicts = classify_conflicts(span, backend).map_err(MergeError::Storage)?;
+    let conflict_by_id: BTreeMap<&ConflictId, &TypedConflict> =
+        conflicts.iter().map(|c| (&c.id, c)).collect();
+
+    // Pre-loop guard: every resolution must target a classified
+    // conflict. Resolutions against bogus ids must fail with
+    // `ConflictNotFound` before per-variant dispatch — otherwise a
+    // typo'd id silently slides into the variant's `*NotYetWired`
+    // error and the diagnostic chain becomes misleading.
+    for resolution in resolutions {
+        let conflict_id = resolution_conflict_id(resolution);
+        if !conflict_by_id.contains_key(conflict_id) {
+            return Err(MergeError::ConflictNotFound(conflict_id.clone()));
+        }
+    }
+
+    // 2. Resolve both heads to `Arc<Layer>` so they can be wired in
+    //    as parents. The chain-resolved Layer also gives us a
+    //    handle for loading branch-side bodies during witness
+    //    application.
+    let head_a = load_head_layer(&span.head_a, storage.clone(), backend)?;
+    let head_b = load_head_layer(&span.head_b, storage.clone(), backend)?;
+
+    let topology = backend.load_topology().map_err(MergeError::Storage)?;
+    let mut builder =
+        crate::layer::LayerBuilder::with_parents(name, vec![head_a.clone(), head_b.clone()]);
+
+    // 3. Per-resolution dispatch.
+    for resolution in resolutions {
+        match resolution {
+            MergeResolution::Witness {
+                conflict,
+                comorphism,
+            } => {
+                let target = conflict_by_id
+                    .get(conflict)
+                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
+                let conflict_iri = witness_target_iri(&target.kind)
+                    .ok_or_else(|| MergeError::WitnessTargetNotResolvable {
+                        conflict_id: conflict.clone(),
+                    })?
+                    .clone();
+                let class = witness_target_class(&conflict_iri, span, &topology, backend)?
+                    .ok_or_else(|| MergeError::WitnessTargetNotResolvable {
+                        conflict_id: conflict.clone(),
+                    })?;
+
+                let body_a = backend
+                    .try_load_resource(&span.sources_a[&conflict_iri], &conflict_iri)
+                    .map_err(MergeError::Storage)?
+                    .ok_or_else(|| {
+                        MergeError::Storage(StorageError::NotFound(format!(
+                            "branch A body for {conflict_iri} not loadable"
+                        )))
+                    })?;
+                let body_b = backend
+                    .try_load_resource(&span.sources_b[&conflict_iri], &conflict_iri)
+                    .map_err(MergeError::Storage)?
+                    .ok_or_else(|| {
+                        MergeError::Storage(StorageError::NotFound(format!(
+                            "branch B body for {conflict_iri} not loadable"
+                        )))
+                    })?;
+                let ancestor_body =
+                    find_iri_in_chain(&span.ancestor, &conflict_iri, &topology, backend)
+                        .map_err(MergeError::Storage)?
+                        .map(|(_, r)| r);
+
+                let handle = resolve_merge_comorphism(comorphism, span, &topology, backend)?;
+                let mut merged = apply_witness_resolution(
+                    &handle,
+                    &class,
+                    body_a,
+                    body_b,
+                    ancestor_body,
+                    storage.clone(),
+                    backend,
+                )?;
+                // Witness terms operate on embedded bodies (the
+                // `Resource → ResourceVal → Resource` round-trip
+                // drops the `@id`); re-attach the conflict IRI so
+                // the layer commit places the merged body at the
+                // right key.
+                merged.set_id(Some(conflict_iri));
+                builder
+                    .add_resource(merged)
+                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+            }
+            MergeResolution::Rename {
+                old_iri, new_iri, ..
+            } => {
+                return Err(MergeError::RenameApplicationNotYetWired {
+                    old_iri: old_iri.clone(),
+                    new_iri: new_iri.clone(),
+                });
+            }
+            MergeResolution::SchemaQuotient { conflict, quotient } => {
+                return Err(MergeError::QuotientApplicationNotYetWired {
+                    conflict_id: conflict.clone(),
+                    quotient: *quotient,
+                });
+            }
+            MergeResolution::Restructure { conflict, spec } => {
+                return Err(MergeError::RestructureApplicationNotYetWired {
+                    conflict_id: conflict.clone(),
+                    new_parent: spec.new_parent.clone(),
+                });
+            }
+        }
+    }
+
+    let layer = Arc::new(builder.build(storage));
+    backend.store_layer(&layer).map_err(MergeError::Storage)?;
+    Ok(layer)
+}
+
+/// Return the `ConflictId` a resolution targets. Used by the
+/// merge-layer construction surface's pre-loop guard so that every
+/// variant gets the same `ConflictNotFound` treatment.
+fn resolution_conflict_id(resolution: &MergeResolution) -> &ConflictId {
+    match resolution {
+        MergeResolution::Witness { conflict, .. } => conflict,
+        MergeResolution::Rename { conflict, .. } => conflict,
+        MergeResolution::SchemaQuotient { conflict, .. } => conflict,
+        MergeResolution::Restructure { conflict, .. } => conflict,
+    }
+}
+
+/// Load a layer's full chain and return the head `Arc<Layer>` —
+/// the same shape `apply_witness_resolution` builds internally. Used
+/// by [`commit_resolutions_as_merge_layer`] so the resulting merge
+/// layer can declare both heads as parents with their chains
+/// already wired.
+fn load_head_layer(
+    head: &LayerId,
+    storage: crate::layer::LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<std::sync::Arc<crate::layer::Layer>, MergeError> {
+    let chain_info = backend
+        .load_chain_from(head)
+        .map_err(MergeError::Storage)?
+        .ok_or_else(|| {
+            MergeError::Storage(StorageError::NotFound(format!(
+                "head layer {head} not in store"
+            )))
+        })?;
+    Ok(crate::layer::build_chain(chain_info, storage))
+}
+
+/// Return the IRI a Witness merge transforms. v1 supports the
+/// single-IRI conflict kinds (`IriCollision`, `KindMismatch`,
+/// `PropertyDataType`); the inheritance-cycle and reserved kinds
+/// don't have a single witness target.
+fn witness_target_iri(kind: &ConflictKind) -> Option<&Iri> {
+    match kind {
+        ConflictKind::IriCollision { iri, .. } => Some(iri),
+        ConflictKind::KindMismatch { iri, .. } => Some(iri),
+        ConflictKind::PropertyDataType { property, .. } => Some(property),
+        ConflictKind::DeletionConflict { iri, .. } => Some(iri),
+        _ => None,
+    }
+}
+
+/// Look up the class of the conflict's IRI by reading any branch's
+/// or the ancestor's body and pulling the first `is_a` entry. The
+/// witness signature is `(A, A, Option<A>) → A` where `A` is this
+/// class; supplying it to `apply_witness_resolution` enables the
+/// commit-time signature check.
+fn witness_target_class(
+    iri: &Iri,
+    span: &MergeSpan,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+) -> Result<Option<Iri>, MergeError> {
+    let pick_class = |r: &Resource| r.is_a().first().cloned();
+    if let Some(layer_id) = span.sources_a.get(iri) {
+        if let Some(r) = backend
+            .try_load_resource(layer_id, iri)
+            .map_err(MergeError::Storage)?
+        {
+            if let Some(c) = pick_class(&r) {
+                return Ok(Some(c));
+            }
+        }
+    }
+    if let Some(layer_id) = span.sources_b.get(iri) {
+        if let Some(r) = backend
+            .try_load_resource(layer_id, iri)
+            .map_err(MergeError::Storage)?
+        {
+            if let Some(c) = pick_class(&r) {
+                return Ok(Some(c));
+            }
+        }
+    }
+    if let Some((_, r)) =
+        find_iri_in_chain(&span.ancestor, iri, topology, backend).map_err(MergeError::Storage)?
+    {
+        if let Some(c) = pick_class(&r) {
+            return Ok(Some(c));
+        }
+    }
+    Ok(None)
+}
+
 // ─── Errors ────────────────────────────────────────────────────────────────
 
 /// Errors specific to layer-reconciliation operations. Storage failures
@@ -2598,6 +2812,27 @@ pub enum MergeError {
     IncompleteAcknowledgments {
         missing: Vec<CascadeItemId>,
     },
+    /// A `Witness` resolution targets a conflict whose kind has no
+    /// single IRI to merge at — `InheritanceCycle` and the reserved
+    /// stage-2 kinds carry multi-IRI structure. Witnessing those
+    /// requires a different resolution shape than the single
+    /// `(A, A, Option<A>) → A` term.
+    WitnessTargetNotResolvable {
+        conflict_id: ConflictId,
+    },
+    /// The merge-layer construction path's `LayerBuilder` rejected a
+    /// resource (e.g., missing `@id`, core-namespace violation). Wraps
+    /// the underlying `LayerError` as a string to keep `MergeError`
+    /// independent of the layer-builder error shape.
+    LayerBuild(String),
+    /// [`build_merge_span`] couldn't find a common ancestor for the
+    /// two heads — either they live on unrelated DAG roots, or one
+    /// (or both) isn't present in the topology. Without an LCA there
+    /// is no span to construct.
+    NoCommonAncestor {
+        head_a: LayerId,
+        head_b: LayerId,
+    },
 }
 
 impl std::fmt::Display for MergeError {
@@ -2738,6 +2973,18 @@ impl std::fmt::Display for MergeError {
                     names.join(", ")
                 )
             }
+            MergeError::WitnessTargetNotResolvable { conflict_id } => write!(
+                f,
+                "Witness resolution on conflict {} has no single-IRI merge target; this conflict kind needs a different resolution strategy",
+                conflict_id.0
+            ),
+            MergeError::LayerBuild(reason) => {
+                write!(f, "merge-layer builder rejected a resource: {reason}")
+            }
+            MergeError::NoCommonAncestor { head_a, head_b } => write!(
+                f,
+                "no common ancestor for heads {head_a} and {head_b}; cannot build a merge span"
+            ),
         }
     }
 }
@@ -3205,7 +3452,13 @@ mod tests {
         // skeleton placeholder Merged outcome. Pins the 15a path
         // through the new resolution dispatcher.
         let (span, backend) = build_span(Vec::new(), Vec::new(), Vec::new());
-        let result = merge_with_resolutions(&span, Vec::new(), Vec::new(), &backend);
+        let result = merge_with_resolutions(
+            &span,
+            Vec::new(),
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
         match result {
             Ok(MergeOutcome::Merged { .. }) => {}
             other => panic!("expected Merged, got {other:?}"),
@@ -3268,6 +3521,7 @@ mod tests {
                 comorphism: iri("urn:test:witness"),
             }],
             Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
             &backend,
         );
         match result {
@@ -3295,6 +3549,7 @@ mod tests {
                 comorphism: iri("urn:test:missing_witness"),
             }],
             Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
             &backend,
         );
         match result {
@@ -3325,6 +3580,7 @@ mod tests {
                 comorphism: iri("urn:test:not_a_witness"),
             }],
             Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
             &backend,
         );
         match result {
@@ -3364,15 +3620,25 @@ mod tests {
                 comorphism: iri("urn:test:witness"),
             }],
             Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
             &backend,
         );
+        // After 15g step 1 the dispatch goes all the way through to
+        // witness application. The fixture's transformation IRI
+        // (`urn:test:term_placeholder`) is a placeholder — no real
+        // Mini-TT term lives there — so the apply path surfaces
+        // `TransformationNotFound`. The real end-to-end happy path
+        // is exercised in
+        // `merge_with_resolutions_commits_witness_resolution_to_real_layer`.
         match result {
-            Err(MergeError::WitnessApplicationNotYetWired { comorphism }) => {
+            Err(MergeError::TransformationNotFound {
+                comorphism,
+                transformation,
+            }) => {
                 assert_eq!(comorphism.as_str(), "urn:test:witness");
+                assert_eq!(transformation.as_str(), "urn:test:term_placeholder");
             }
-            other => panic!(
-                "expected WitnessApplicationNotYetWired (15b Step 2 deliverable), got {other:?}"
-            ),
+            other => panic!("expected TransformationNotFound, got {other:?}"),
         }
     }
 
@@ -3394,6 +3660,7 @@ mod tests {
                 comorphism: iri("urn:test:malformed_witness"),
             }],
             Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
             &backend,
         );
         match result {
@@ -4122,7 +4389,7 @@ mod tests {
         let patient_iri = "urn:project:Patient";
         let renamed_iri = "urn:project:billing:Patient";
 
-        let (span, backend, _storage) = build_span_arc(
+        let (span, backend, storage) = build_span_arc(
             Vec::new(),
             Vec::new(),
             vec![make_resource(patient_iri, &[wk::CLASS], &[])],
@@ -4139,7 +4406,7 @@ mod tests {
             old_iri: iri(patient_iri),
             new_iri: iri(renamed_iri),
         }];
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), &*backend);
+        let result = merge_with_resolutions(&span, resolutions, Vec::new(), storage, &*backend);
         match result {
             Err(MergeError::ConflictNotFound(id)) => {
                 // Open-world classifier doesn't surface this IRI as
@@ -4294,7 +4561,13 @@ mod tests {
             conflict: bogus_id.clone(),
             quotient: SchemaQuotient::KeepNeither,
         }];
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), &backend);
+        let result = merge_with_resolutions(
+            &span,
+            resolutions,
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
         match result {
             Err(MergeError::ConflictNotFound(id)) => {
                 assert_eq!(id, bogus_id);
@@ -4314,7 +4587,13 @@ mod tests {
             conflict: conflict.id.clone(),
             quotient: SchemaQuotient::KeepOne { winner: Side::A },
         }];
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), &backend);
+        let result = merge_with_resolutions(
+            &span,
+            resolutions,
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
         match result {
             Err(MergeError::QuotientApplicationNotYetWired {
                 conflict_id: id,
@@ -4336,7 +4615,13 @@ mod tests {
             conflict: conflict.id.clone(),
             quotient: SchemaQuotient::KeepBoth,
         }];
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), &backend);
+        let result = merge_with_resolutions(
+            &span,
+            resolutions,
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
         assert!(
             matches!(result, Err(MergeError::QuotientNotApplicable { .. })),
             "expected QuotientNotApplicable from merge surface, got {result:?}"
@@ -4645,7 +4930,13 @@ mod tests {
                 affected_class_under_new: true,
             },
         }];
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), &backend);
+        let result = merge_with_resolutions(
+            &span,
+            resolutions,
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
         match result {
             Err(MergeError::ConflictNotFound(id)) => assert_eq!(id, bogus),
             other => panic!("expected ConflictNotFound, got {other:?}"),
@@ -4888,7 +5179,7 @@ mod tests {
                 Value::ResourceRef(iri(patient_iri)),
             )],
         );
-        let (span, backend, _storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
+        let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
         let resolutions = vec![MergeResolution::Rename {
             conflict: ConflictId::from_iri("iri_collision", &iri(patient_iri)),
@@ -4897,7 +5188,7 @@ mod tests {
             new_iri: iri("urn:project:billing:Patient"),
         }];
         // No acks supplied — gate must reject.
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), &*backend);
+        let result = merge_with_resolutions(&span, resolutions, Vec::new(), storage, &*backend);
         match result {
             Err(MergeError::IncompleteAcknowledgments { missing }) => {
                 assert_eq!(missing.len(), 1);
@@ -4928,7 +5219,7 @@ mod tests {
                 Value::ResourceRef(iri(patient_iri)),
             )],
         );
-        let (span, backend, _storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
+        let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
         let conflict_id = ConflictId::from_iri("iri_collision", &iri(patient_iri));
         let resolution = MergeResolution::Rename {
@@ -4947,7 +5238,7 @@ mod tests {
         // Open-world classifier doesn't surface IriCollision for
         // disjoint branches, so the dispatch reports
         // ConflictNotFound after the gate passes.
-        let result = merge_with_resolutions(&span, vec![resolution], acks, &*backend);
+        let result = merge_with_resolutions(&span, vec![resolution], acks, storage, &*backend);
         match result {
             Err(MergeError::ConflictNotFound(id)) => assert_eq!(id, conflict_id),
             other => panic!("expected ConflictNotFound after gate, got {other:?}"),
@@ -4961,5 +5252,315 @@ mod tests {
         let preview = CascadePreview::default();
         verify_cascade_acknowledgments(&preview, &[])
             .expect("empty preview + empty acks should pass");
+    }
+
+    // ─── Merge-layer construction (15g step 1) ─────────────────────────────
+
+    #[test]
+    fn commit_witness_resolution_produces_multi_parent_merge_layer() {
+        // End-to-end happy path: build the witness fixture, classify
+        // (surfaces IriCollision for patient_42), submit a Witness
+        // resolution + ack the empty cascade, commit. Verify the
+        // returned layer has both heads as parents and the merged
+        // body lives at the conflict's IRI.
+        let (span, backend, handle, storage) = build_witness_fixture(make_var_resource("b"));
+
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        assert_eq!(
+            conflicts.len(),
+            1,
+            "expected one IriCollision; got {conflicts:?}"
+        );
+        let conflict_id = conflicts[0].id.clone();
+
+        let resolutions = vec![MergeResolution::Witness {
+            conflict: conflict_id,
+            comorphism: handle.iri.clone(),
+        }];
+        // Witness cascade is empty by design (well-typed by
+        // construction). No acks needed.
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:patient_test",
+            storage.clone(),
+            &*backend,
+        )
+        .expect("commit should succeed");
+
+        // Multi-parent topology: both heads should be the layer's
+        // immediate parents.
+        let parent_ids: BTreeSet<LayerId> = merge_layer
+            .parents()
+            .iter()
+            .map(|l| l.id().clone())
+            .collect();
+        let mut expected = BTreeSet::new();
+        expected.insert(span.head_a.clone());
+        expected.insert(span.head_b.clone());
+        assert_eq!(parent_ids, expected);
+
+        // The merged body lives in the merge layer at the conflict
+        // IRI. The `λa.λb.λopt.b` witness returns branch B's body,
+        // so weight should match 76 (branch B's value).
+        let patient_iri = iri("urn:test:patient_42");
+        let weight_iri = iri("urn:test:weight");
+        let merged_resource = merge_layer
+            .resolve(&patient_iri)
+            .expect("merged body should be reachable from merge layer");
+        assert_eq!(merged_resource.get(&weight_iri), Some(&Value::Integer(76)));
+
+        // Verify the layer was persisted — re-load it from the backend.
+        let reloaded = backend
+            .load_chain_from(merge_layer.id())
+            .unwrap()
+            .expect("layer should be in store");
+        assert!(
+            reloaded.handles.iter().any(|h| h.id == *merge_layer.id()),
+            "persisted chain should include the merge layer"
+        );
+    }
+
+    #[test]
+    fn commit_witness_rejects_missing_cascade_acks() {
+        // If the cascade preview surfaces items (e.g., from a
+        // witness fixture that introduces external refs), missing
+        // acks must surface before any layer is built. The witness
+        // fixture's branches don't have cross-references so the
+        // preview is empty — to exercise the gate, we synthesize a
+        // missing ack by passing one that doesn't match anything in
+        // the (empty) preview. Witness cascade is empty → no acks
+        // needed → call succeeds, NOT the right test shape.
+        //
+        // Instead: pin that a Rename resolution submitted alongside
+        // a witness (the Rename surfaces cascade items) errors out
+        // with IncompleteAcknowledgments before commit. This also
+        // pins that the gate runs before per-resolution dispatch.
+        let patient_iri = "urn:project:Patient";
+        let profile_iri = "urn:project:profile";
+        let patient = make_resource(patient_iri, &[wk::CLASS], &[]);
+        let profile = make_resource(
+            profile_iri,
+            &[wk::CLASS],
+            &[(
+                "urn:project:profile_for",
+                Value::ResourceRef(iri(patient_iri)),
+            )],
+        );
+        let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
+
+        let resolutions = vec![MergeResolution::Rename {
+            conflict: ConflictId::from_iri("iri_collision", &iri(patient_iri)),
+            side: Side::A,
+            old_iri: iri(patient_iri),
+            new_iri: iri("urn:project:billing:Patient"),
+        }];
+        let result = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:should_not_build",
+            storage,
+            &*backend,
+        );
+        match result {
+            Err(MergeError::IncompleteAcknowledgments { missing }) => {
+                assert!(!missing.is_empty());
+            }
+            other => panic!("expected IncompleteAcknowledgments, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_with_resolutions_commits_witness_resolution_to_real_layer() {
+        // End-to-end through the unified `merge_with_resolutions`
+        // surface (15g step 1 wiring): a Witness resolution against a
+        // classified IriCollision conflict produces a real
+        // `MergeOutcome::Merged` with a multi-parent layer id —
+        // confirming the placeholder Merged path is replaced by
+        // `commit_resolutions_as_merge_layer` whenever resolutions
+        // are non-empty.
+        let (span, backend, handle, storage) = build_witness_fixture(make_var_resource("b"));
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: handle.iri.clone(),
+            }],
+            Vec::new(),
+            storage,
+            &*backend,
+        );
+        match result {
+            Ok(MergeOutcome::Merged { merge_layer }) => {
+                // Layer id must be reachable from the backend and
+                // declare both heads as parents.
+                let chain = backend
+                    .load_chain_from(&merge_layer)
+                    .unwrap()
+                    .expect("merge layer should be persisted");
+                let head_handle = chain
+                    .handles
+                    .iter()
+                    .find(|h| h.id == merge_layer)
+                    .expect("chain should include the merge layer");
+                let parents: BTreeSet<LayerId> = head_handle.parents.iter().cloned().collect();
+                let mut expected = BTreeSet::new();
+                expected.insert(span.head_a.clone());
+                expected.insert(span.head_b.clone());
+                assert_eq!(parents, expected);
+            }
+            other => panic!("expected Merged with real layer id, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn commit_rename_resolution_surfaces_not_yet_wired() {
+        // Once the cascade gate passes, the Rename dispatch reaches
+        // `RenameApplicationNotYetWired` (committable shape isn't
+        // wired in 15g step 1; lands when tombstone semantics
+        // arrive). Verifies the gate-then-dispatch ordering and the
+        // typed error surface.
+        let patient_iri = "urn:project:Patient";
+        // Build an IriCollision conflict (both branches contribute
+        // `Patient` with structurally-different bodies) so the
+        // pre-loop conflict-id guard passes and dispatch reaches the
+        // Rename arm.
+        let (span, backend, storage) = build_span_arc(
+            Vec::new(),
+            vec![make_resource(
+                patient_iri,
+                &[wk::CLASS],
+                &[("urn:project:label", Value::String("A".to_string()))],
+            )],
+            vec![make_resource(
+                patient_iri,
+                &[wk::CLASS],
+                &[("urn:project:label", Value::String("B".to_string()))],
+            )],
+        );
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::Rename {
+            conflict: conflict_id,
+            side: Side::A,
+            old_iri: iri(patient_iri),
+            new_iri: iri("urn:project:billing:Patient"),
+        }];
+        // The classified IriCollision conflict generates a cascade
+        // item against branch B's body referencing the old IRI's
+        // classes — but for this minimal fixture there are no
+        // external references, so cascade is empty.
+        let result = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:rename_pending",
+            storage,
+            &*backend,
+        );
+        match result {
+            Err(MergeError::RenameApplicationNotYetWired { old_iri, new_iri }) => {
+                assert_eq!(old_iri.as_str(), patient_iri);
+                assert_eq!(new_iri.as_str(), "urn:project:billing:Patient");
+            }
+            other => panic!("expected RenameApplicationNotYetWired, got {other:?}"),
+        }
+    }
+
+    // ─── Span construction (15g step 2) ────────────────────────────────────
+
+    #[test]
+    fn build_merge_span_reconstructs_ancestor_and_sources_from_heads() {
+        // Two diverged branches off a common ancestor. Calling
+        // `build_merge_span` should produce a span identical (modulo
+        // ordering) to the hand-assembled one from `build_span`.
+        let ancestor_class = make_resource("urn:test:Base", &[wk::CLASS], &[]);
+        let (hand_span, backend) = build_span(
+            vec![ancestor_class],
+            vec![make_resource("urn:test:A", &[wk::CLASS], &[])],
+            vec![make_resource("urn:test:B", &[wk::CLASS], &[])],
+        );
+        let topology = backend.load_topology().unwrap();
+
+        let span = build_merge_span(&hand_span.head_a, &hand_span.head_b, &topology, &backend)
+            .expect("build_merge_span should succeed on a connected DAG");
+        assert_eq!(span.ancestor, hand_span.ancestor);
+        assert_eq!(span.head_a, hand_span.head_a);
+        assert_eq!(span.head_b, hand_span.head_b);
+        assert_eq!(span.sources_a, hand_span.sources_a);
+        assert_eq!(span.sources_b, hand_span.sources_b);
+    }
+
+    #[test]
+    fn build_merge_span_same_head_produces_empty_sources() {
+        // Head merged with itself — LCA is the head; both sources
+        // maps are empty (nothing changed since "ancestor").
+        let (hand_span, backend) = build_span(
+            vec![make_resource("urn:test:Base", &[wk::CLASS], &[])],
+            vec![make_resource("urn:test:A", &[wk::CLASS], &[])],
+            Vec::new(),
+        );
+        let topology = backend.load_topology().unwrap();
+
+        let span = build_merge_span(&hand_span.head_a, &hand_span.head_a, &topology, &backend)
+            .expect("same-head merge should succeed");
+        assert_eq!(span.ancestor, hand_span.head_a);
+        assert!(span.sources_a.is_empty());
+        assert!(span.sources_b.is_empty());
+    }
+
+    #[test]
+    fn build_merge_span_unrelated_roots_surface_no_common_ancestor() {
+        // Two independently-rooted DAGs share no ancestor. v1's LCA
+        // walker returns None, surfacing as `NoCommonAncestor`.
+        let backend = MemoryPersistentBackend::new();
+        let storage = crate::layer::LayerStorage::in_memory();
+
+        let mut ab = LayerBuilder::new("root_a", None);
+        ab.add_resource(make_resource("urn:test:RootA", &[wk::CLASS], &[]))
+            .unwrap();
+        let root_a = Arc::new(ab.build(storage.clone()));
+        backend.store_layer(&root_a).unwrap();
+
+        let mut bb = LayerBuilder::new("root_b", None);
+        bb.add_resource(make_resource("urn:test:RootB", &[wk::CLASS], &[]))
+            .unwrap();
+        let root_b = Arc::new(bb.build(storage));
+        backend.store_layer(&root_b).unwrap();
+
+        let topology = backend.load_topology().unwrap();
+        let result = build_merge_span(root_a.id(), root_b.id(), &topology, &backend);
+        match result {
+            Err(MergeError::NoCommonAncestor { head_a, head_b }) => {
+                assert_eq!(&head_a, root_a.id());
+                assert_eq!(&head_b, root_b.id());
+            }
+            other => panic!("expected NoCommonAncestor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_merge_span_head_not_in_topology_surfaces_no_common_ancestor() {
+        // Head id that doesn't exist in the topology — find_lca
+        // returns None, surface as NoCommonAncestor.
+        let (hand_span, backend) = build_span(
+            vec![make_resource("urn:test:Base", &[wk::CLASS], &[])],
+            vec![make_resource("urn:test:A", &[wk::CLASS], &[])],
+            Vec::new(),
+        );
+        let topology = backend.load_topology().unwrap();
+        let bogus = LayerId([0xCC; 32]);
+        let result = build_merge_span(&hand_span.head_a, &bogus, &topology, &backend);
+        match result {
+            Err(MergeError::NoCommonAncestor { head_b, .. }) => {
+                assert_eq!(head_b, bogus);
+            }
+            other => panic!("expected NoCommonAncestor, got {other:?}"),
+        }
     }
 }
