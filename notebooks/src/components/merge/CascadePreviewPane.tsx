@@ -22,8 +22,9 @@
  * is intentional — the user is being asked to see N consequences
  * before committing.
  */
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import {
+  Button,
   Caption1,
   Checkbox,
   makeStyles,
@@ -95,10 +96,8 @@ export function CascadePreviewPane(
       {buckets.orphanedReferences.length > 0 && (
         <Section
           title="Orphaned references"
-          count={buckets.orphanedReferences.length}
-          styles={styles}
-        >
-          {buckets.orphanedReferences.map((item) => (
+          items={buckets.orphanedReferences}
+          renderItem={(item) => (
             <OrphanedReferenceRow
               key={item.itemId}
               item={item}
@@ -106,16 +105,15 @@ export function CascadePreviewPane(
               onToggle={onToggle}
               styles={styles}
             />
-          ))}
-        </Section>
+          )}
+          styles={styles}
+        />
       )}
       {buckets.orphanedTypings.length > 0 && (
         <Section
           title="Orphaned typing"
-          count={buckets.orphanedTypings.length}
-          styles={styles}
-        >
-          {buckets.orphanedTypings.map((item) => (
+          items={buckets.orphanedTypings}
+          renderItem={(item) => (
             <OrphanedTypingRow
               key={item.itemId}
               item={item}
@@ -123,16 +121,15 @@ export function CascadePreviewPane(
               onToggle={onToggle}
               styles={styles}
             />
-          ))}
-        </Section>
+          )}
+          styles={styles}
+        />
       )}
       {buckets.invalidatedSignatures.length > 0 && (
         <Section
           title="Invalidated signatures (informational)"
-          count={buckets.invalidatedSignatures.length}
-          styles={styles}
-        >
-          {buckets.invalidatedSignatures.map((item) => (
+          items={buckets.invalidatedSignatures}
+          renderItem={(item) => (
             <InfoRow
               key={item.itemId}
               itemId={item.itemId}
@@ -141,16 +138,15 @@ export function CascadePreviewPane(
               onToggle={onToggle}
               styles={styles}
             />
-          ))}
-        </Section>
+          )}
+          styles={styles}
+        />
       )}
       {buckets.invalidatedTraces.length > 0 && (
         <Section
           title="Invalidated traces (informational)"
-          count={buckets.invalidatedTraces.length}
-          styles={styles}
-        >
-          {buckets.invalidatedTraces.map((item) => (
+          items={buckets.invalidatedTraces}
+          renderItem={(item) => (
             <InfoRow
               key={item.itemId}
               itemId={item.itemId}
@@ -159,31 +155,56 @@ export function CascadePreviewPane(
               onToggle={onToggle}
               styles={styles}
             />
-          ))}
-        </Section>
+          )}
+          styles={styles}
+        />
       )}
     </div>
   );
 }
 
-function Section({
+/**
+ * Items per section past which the section folds and surfaces a
+ * "Show all N" toggle. Picked at 20 because real-world cascade
+ * sections rarely exceed it; when they do, dumping 100s of
+ * checkboxes inline hurts both render time and the user's ability
+ * to track which items they've ticked. The folded view shows the
+ * first `SECTION_FOLD_THRESHOLD` items + a toggle.
+ */
+const SECTION_FOLD_THRESHOLD = 20;
+
+function Section<T>({
   title,
-  count,
+  items,
+  renderItem,
   styles,
-  children,
 }: {
   title: string;
-  count: number;
+  items: readonly T[];
+  renderItem: (item: T) => React.ReactNode;
   styles: ReturnType<typeof useStyles>;
-  children: React.ReactNode;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const folded = items.length > SECTION_FOLD_THRESHOLD && !expanded;
+  const visible = folded ? items.slice(0, SECTION_FOLD_THRESHOLD) : items;
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
         <Subtitle2>{title}</Subtitle2>
-        <Caption1 className={styles.count}>({count})</Caption1>
+        <Caption1 className={styles.count}>({items.length})</Caption1>
       </div>
-      {children}
+      {visible.map(renderItem)}
+      {items.length > SECTION_FOLD_THRESHOLD && (
+        <Button
+          size="small"
+          appearance="subtle"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {folded
+            ? `Show all ${items.length}`
+            : `Show first ${SECTION_FOLD_THRESHOLD}`}
+        </Button>
+      )}
     </section>
   );
 }

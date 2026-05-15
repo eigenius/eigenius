@@ -241,6 +241,54 @@ export interface ResolutionRpcs {
 }
 
 /**
+ * Emit a telemetry event per state-machine transition. Currently a
+ * `console.debug` so the events are visible in browser devtools and
+ * captured by any console-intercepting telemetry pipeline; future
+ * surfaces (D34 telemetry, a Sentry-style sink) can substitute a
+ * real emitter without changing callers.
+ *
+ * Props are kept small and side-effect-free — branch + short
+ * candidate-head hash + state kind + strategy/conflict counts. No
+ * PII, no full IRIs (which can be sensitive in private chains).
+ */
+export function emitResolutionTelemetry(
+  event: string,
+  state: MergeResolutionState,
+  extra?: Record<string, unknown>,
+): void {
+  // Cheap props: pull only the high-level shape without copying
+  // the full conflict list or resolutions map.
+  const props: Record<string, unknown> = { state: state.kind };
+  if (
+    state.kind === "loading" ||
+    state.kind === "picking" ||
+    state.kind === "previewing" ||
+    state.kind === "acknowledging" ||
+    state.kind === "committing" ||
+    state.kind === "error"
+  ) {
+    props.branch = state.branch;
+    props.candidateHeadShort = state.candidateHead.slice(0, 12);
+  }
+  if (state.kind === "picking" || state.kind === "previewing") {
+    props.conflictCount = state.conflicts.length;
+  }
+  if (state.kind === "acknowledging" || state.kind === "committing") {
+    props.cascadeItemCount = state.preview.length;
+  }
+  if (state.kind === "done") {
+    props.branch = state.branch;
+    props.mergeLayerShort = state.mergeLayerId.slice(0, 12);
+  }
+  if (state.kind === "error") {
+    props.errorKind = state.errorKind;
+    props.rpc = state.rpc;
+  }
+  if (extra) Object.assign(props, extra);
+  console.debug(`[merge-resolution] ${event}`, props);
+}
+
+/**
  * Map the kernel's error kinds to the flow driver's discriminator.
  * Each subset of the three error-kind enums (Prepare / Preview /
  * Submit) is normalised to a single error node carrying the

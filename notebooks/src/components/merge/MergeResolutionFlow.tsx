@@ -34,7 +34,10 @@ import {
   Subtitle1,
   tokens,
 } from "@fluentui/react-components";
-import { CheckmarkCircle20Regular } from "@fluentui/react-icons";
+import {
+  CheckmarkCircle20Regular,
+  QuestionCircle20Regular,
+} from "@fluentui/react-icons";
 import {
   PrepareMergeErrorKind,
   PreviewCascadeErrorKind,
@@ -46,6 +49,16 @@ import { ackCount, isResolvable } from "../../runtime/mergeResolution";
 import { StrategyPicker } from "./StrategyPicker";
 import { CascadePreviewPane } from "./CascadePreviewPane";
 
+/**
+ * D36 §15 (Decisions log §15.5) — in-app help link. Points at the
+ * mkdocs-rendered platform guide chapter; users running `mkdocs
+ * serve` alongside the notebook see the live doc, users without it
+ * see the source markdown via the GitHub repo path. Single
+ * constant so future hosting changes are one-line edits.
+ */
+const MERGE_RESOLUTION_GUIDE_URL =
+  "https://github.com/anthropic-experimental/eigenius/blob/main/docs/guides/platform/11-merge-resolution.md";
+
 const useStyles = makeStyles({
   root: {
     display: "flex",
@@ -56,6 +69,12 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalXS,
+  },
+  helpLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXXS,
+    fontSize: tokens.fontSizeBase200,
   },
   conflictList: {
     display: "flex",
@@ -126,6 +145,15 @@ export function MergeResolutionFlow() {
               <code>{state.branchTip.slice(0, 12)}…</code> ↔ candidate{" "}
               <code>{state.candidateHead.slice(0, 12)}…</code>
             </Caption1>
+            <Link
+              className={styles.helpLink}
+              href={MERGE_RESOLUTION_GUIDE_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <QuestionCircle20Regular />
+              Strategy reference
+            </Link>
           </header>
 
           {state.raceDiff && (
@@ -353,5 +381,3 @@ function errorTitle(
   }
 }
 
-// Silence unused-imports — the JSX path conditionally renders Link.
-void Link;

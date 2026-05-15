@@ -57,6 +57,7 @@ import { CURRENT_FORMAT_VERSION } from "../persistence/notebook-format";
 import { type CommitMeta, commitMetaFrom } from "./commitMeta";
 import {
   diffConflictIds,
+  emitResolutionTelemetry,
   type MergeResolutionState,
   persistMergeResolution,
   restoreMergeResolution,
@@ -486,6 +487,7 @@ async function runPrepareMerge(
     };
     set({ mergeResolution: errored });
     persistMergeResolution(errored);
+    emitResolutionTelemetry("error", errored);
     return;
   }
 
@@ -757,6 +759,9 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     };
     set({ mergeResolution: initial, destination: "merge" });
     persistMergeResolution(initial);
+    emitResolutionTelemetry("open", initial, {
+      fromCell: cellId !== undefined,
+    });
     await runPrepareMerge(set, get, eigen, {
       branch,
       candidateHead,
@@ -826,6 +831,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       };
       set({ mergeResolution: errored });
       persistMergeResolution(errored);
+      emitResolutionTelemetry("error", errored);
       return;
     }
     if (!resp.success) {
@@ -843,6 +849,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       };
       set({ mergeResolution: errored });
       persistMergeResolution(errored);
+      emitResolutionTelemetry("error", errored);
       return;
     }
 
@@ -952,6 +959,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       };
       set({ mergeResolution: errored });
       persistMergeResolution(errored);
+      emitResolutionTelemetry("error", errored);
       return;
     }
 
@@ -963,6 +971,9 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         mergeLayerId: resp.mergeLayerId,
         branchTip: resp.branchTip,
       };
+      emitResolutionTelemetry("commit-success", done, {
+        cellAutoCleared: current.cellId !== undefined,
+      });
       // D36 §8.1 — auto-clear the originating cell's failed-commit
       // badge. Replace the `NEEDS_WITNESSED_MERGE` commit meta with
       // a synthetic `TRIVIAL_MERGE`-style entry pointing at the new
@@ -1045,9 +1056,12 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     };
     set({ mergeResolution: errored });
     persistMergeResolution(errored);
+    emitResolutionTelemetry("error", errored);
   },
 
   cancelMergeResolution() {
+    const previous = get().mergeResolution;
+    emitResolutionTelemetry("cancel", previous);
     const closed: MergeResolutionState = { kind: "closed" };
     set({ mergeResolution: closed });
     persistMergeResolution(closed);
