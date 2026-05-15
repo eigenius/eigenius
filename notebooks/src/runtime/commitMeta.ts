@@ -46,9 +46,9 @@ export interface CommitMeta {
   readonly conflictingIris: readonly string[];
   /**
    * Set when `mergeOutcome === NEEDS_WITNESSED_MERGE`: hex-encoded
-   * id of the orphan layer the caller built. The witnessed-merge
-   * recovery dialog (D34 §6.2) feeds this into a `CreateBranch`
-   * call when the user picks "save as sibling branch".
+   * id of the orphan layer the caller built. Fed into the D36
+   * resolution flow as the `candidateHead` so the user can pick
+   * per-conflict resolution strategies and commit a merge layer.
    */
   readonly orphanLayerId?: string;
 }

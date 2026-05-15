@@ -27,8 +27,8 @@
  * - `eigen.mergeBranches(source, target)` — wraps the kernel's
  *   `update_branch(target, target_tip, source_tip, AllowTrivial)`.
  *   On `NEEDS_WITNESSED_MERGE`, the response carries
- *   `merge.orphan_layer_id` so the recovery dialog (Phase 5b) can
- *   offer "save as sibling".
+ *   `merge.orphan_layer_id`, which we feed into `openResolution` to
+ *   route the user into the D36 resolution flow.
  *
  * Both calls are scoped to branches the kernel already knows about —
  * the panel doesn't accept arbitrary layer ids. Layer-level merges
@@ -45,6 +45,7 @@ import {
   Field,
   makeStyles,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Option,
@@ -144,6 +145,7 @@ export function MergePanel() {
   const activeBranch = useNotebookStore((s) => s.activeBranch);
   const branches = useNotebookStore((s) => s.branches);
   const refreshBranches = useNotebookStore((s) => s.refreshBranches);
+  const openResolution = useNotebookStore((s) => s.openResolution);
   const pendingMergeSource = useNotebookStore((s) => s.pendingMergeSource);
   const setPendingMergeSource = useNotebookStore(
     (s) => s.setPendingMergeSource,
@@ -305,7 +307,16 @@ export function MergePanel() {
             styles={styles}
           />
 
-          <ResultBlock state={mergeState} styles={styles} />
+          <ResultBlock
+            state={mergeState}
+            styles={styles}
+            onResolve={(candidateHead) => {
+              void openResolution(eigen, {
+                branch: target,
+                candidateHead,
+              });
+            }}
+          />
 
           <div className={styles.actions}>
             <Button
@@ -489,9 +500,10 @@ function PreviewBlock({ state, onRun, canSubmit, styles }: PreviewBlockProps) {
 interface ResultBlockProps {
   state: MergeState;
   styles: ReturnType<typeof useStyles>;
+  onResolve: (candidateHead: string) => void;
 }
 
-function ResultBlock({ state, styles }: ResultBlockProps) {
+function ResultBlock({ state, styles, onResolve }: ResultBlockProps) {
   if (state.kind === "idle") return null;
   if (state.kind === "running") {
     return (
@@ -521,23 +533,29 @@ function ResultBlock({ state, styles }: ResultBlockProps) {
   }
   const outcome = resp.merge?.outcome;
   if (outcome === MergeOutcome.NEEDS_WITNESSED_MERGE) {
+    const orphanLayerId = resp.merge?.orphanLayerId;
     return (
       <MessageBar intent="warning">
         <MessageBarBody>
           <MessageBarTitle>Conflict — target unchanged</MessageBarTitle>
           <div>
             The merge would conflict on{" "}
-            {resp.merge?.conflictingIris.length ?? 0}{" "}
-            resource(s); witnessed- merge resolution isn't available yet. The
-            target branch was left at its current head.
+            {resp.merge?.conflictingIris.length ?? 0} resource(s). The target
+            branch is unchanged; pick a per-conflict resolution strategy to
+            commit a merge layer.
           </div>
-          {resp.merge?.orphanLayerId && (
-            <Caption1>
-              Source tip ({resp.merge.orphanLayerId}) is still on disk and
-              reachable through the source branch.
-            </Caption1>
-          )}
         </MessageBarBody>
+        {orphanLayerId && (
+          <MessageBarActions>
+            <Button
+              size="small"
+              appearance="primary"
+              onClick={() => onResolve(orphanLayerId)}
+            >
+              Resolve conflicts
+            </Button>
+          </MessageBarActions>
+        )}
       </MessageBar>
     );
   }
