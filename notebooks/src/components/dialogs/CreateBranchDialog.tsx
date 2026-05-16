@@ -26,7 +26,7 @@
  * sees the actual reason.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Caption1,
@@ -46,6 +46,7 @@ import {
   RadioGroup,
   tokens,
 } from "@fluentui/react-components";
+import type { TagInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
 
@@ -79,12 +80,13 @@ export interface CreateBranchDialogProps {
 
 /**
  * Discriminated union over the "Start from" radio options. The
- * `existing` shape carries the chosen branch name so we can look up
- * its current head at create time (rather than at open time, which
- * could be stale by the time the user clicks Create).
+ * `existing` and `tag` shapes carry the chosen name so we can look
+ * up its target layer at create time (rather than at open time,
+ * which could be stale by the time the user clicks Create).
  */
 type StartFrom =
   | { kind: "existing"; branch: string }
+  | { kind: "tag"; tag: string }
   | { kind: "explicit"; layerId: string };
 
 export function CreateBranchDialog({
@@ -106,18 +108,46 @@ export function CreateBranchDialog({
   const [switchAfter, setSwitchAfter] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tags are pulled fresh on every dialog open. Cheap (one RPC) and
+  // avoids the "stale tag list a session later" problem. `null` =
+  // fetch in flight; `[]` = fetched, none defined.
+  const [tags, setTags] = useState<readonly TagInfo[] | null>(null);
 
-  // Reset transient state every time the dialog opens — leftover
-  // values from a previous interaction would be confusing.
+  // Held in a ref rather than the effect's deps because
+  // `createBranch` flips `activeBranch` in the store mid-`await` (the
+  // `switchAfter` path calls `switchBranch`). With `activeBranch` in
+  // the deps the reset effect re-fires while the user is still inside
+  // a create flow, clobbering the typed name + `busy` flag. The ref
+  // always reflects the latest value so the captured-on-open default
+  // for `startFrom` stays correct.
+  const activeBranchRef = useRef(activeBranch);
+  activeBranchRef.current = activeBranch;
+
+  // Reset transient state on the `open` false → true transition.
   useEffect(() => {
     if (open) {
       setName("");
-      setStartFrom({ kind: "existing", branch: activeBranch });
+      setStartFrom({ kind: "existing", branch: activeBranchRef.current });
       setSwitchAfter(true);
       setBusy(false);
       setError(null);
+      setTags(null);
+      let cancelled = false;
+      void (async () => {
+        try {
+          const list = await eigen.listTags();
+          if (!cancelled) setTags(list);
+        } catch {
+          // Best-effort: a tag-fetch failure shouldn't block branch
+          // creation off existing branches or explicit layer ids.
+          if (!cancelled) setTags([]);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [open, activeBranch]);
+  }, [open, eigen]);
 
   const startBranchOptions = useMemo(() => {
     // Always offer the active branch even when the SDK's branches
@@ -134,10 +164,13 @@ export function CreateBranchDialog({
     return out;
   }, [branches, activeBranch]);
 
-  const canSubmit = name.trim().length > 0 &&
-    (startFrom.kind === "existing"
+  const canSubmit = name.trim().length > 0 && (
+    startFrom.kind === "existing"
       ? startFrom.branch.length > 0
-      : startFrom.layerId.trim().length > 0);
+      : startFrom.kind === "tag"
+      ? startFrom.tag.length > 0
+      : startFrom.layerId.trim().length > 0
+  );
 
   const onCreate = async () => {
     setBusy(true);
@@ -160,6 +193,18 @@ export function CreateBranchDialog({
           }
           fromLayer = resp.headLayer;
         }
+      } else if (startFrom.kind === "tag") {
+        // Re-fetch on submit so the resolved layer is current even
+        // if the dialog has been open for a while. Tags are immutable
+        // by contract, but a fresh fetch surfaces deletions cleanly.
+        const fresh = await eigen.listTags();
+        const found = fresh.find((t) => t.name === startFrom.tag);
+        if (!found) {
+          setError(`tag ${startFrom.tag} not found`);
+          setBusy(false);
+          return;
+        }
+        fromLayer = found.layerId;
       } else {
         fromLayer = startFrom.layerId.trim();
       }
@@ -174,6 +219,10 @@ export function CreateBranchDialog({
         setBusy(false);
         return;
       }
+      // Reset the in-flight flag before closing so a follow-up open
+      // can't catch a stale `busy=true` (which would render the form
+      // disabled until the on-open reset effect fires).
+      setBusy(false);
       onCreated?.(name.trim());
       onClose();
     } catch (err) {
@@ -209,12 +258,13 @@ export function CreateBranchDialog({
 
             <Field label="Start from" required>
               <RadioGroup
-                value={startFrom.kind === "existing"
-                  ? `existing:${startFrom.branch}`
-                  : "explicit"}
+                value={startFromRadioValue(startFrom)}
                 onChange={(_e, data) => {
                   if (data.value === "explicit") {
                     setStartFrom({ kind: "explicit", layerId: "" });
+                  } else if (data.value.startsWith("tag:")) {
+                    const tag = data.value.slice("tag:".length);
+                    setStartFrom({ kind: "tag", tag });
                   } else {
                     const branch = data.value.slice("existing:".length);
                     setStartFrom({ kind: "existing", branch });
@@ -225,7 +275,7 @@ export function CreateBranchDialog({
                   const head = branches?.find((x) => x.name === b)?.headLayer;
                   return (
                     <Radio
-                      key={b}
+                      key={`existing:${b}`}
                       value={`existing:${b}`}
                       disabled={busy}
                       label={
@@ -241,12 +291,30 @@ export function CreateBranchDialog({
                     />
                   );
                 })}
+                {(tags ?? []).map((t) => (
+                  <Radio
+                    key={`tag:${t.name}`}
+                    value={`tag:${t.name}`}
+                    disabled={busy}
+                    label={
+                      <span>
+                        Tag <strong>{t.name}</strong>
+                        <span className={styles.branchHead}>
+                          {shortHash(t.layerId)}
+                        </span>
+                      </span>
+                    }
+                  />
+                ))}
                 <Radio
                   value="explicit"
                   disabled={busy}
                   label="Specific layer id"
                 />
               </RadioGroup>
+              {tags === null && (
+                <Caption1>Loading tags…</Caption1>
+              )}
               {startFrom.kind === "explicit" && (
                 <Input
                   className={styles.layerInput}
@@ -294,4 +362,18 @@ export function CreateBranchDialog({
 function shortHash(hex: string): string {
   if (hex.length <= 10) return hex;
   return `${hex.slice(0, 4)}…${hex.slice(-4)}`;
+}
+
+/** Encode the `StartFrom` discriminator into the RadioGroup's string-
+ *  valued state. The inverse split lives inline in the radio's
+ *  `onChange`. */
+function startFromRadioValue(s: StartFrom): string {
+  switch (s.kind) {
+    case "existing":
+      return `existing:${s.branch}`;
+    case "tag":
+      return `tag:${s.tag}`;
+    case "explicit":
+      return "explicit";
+  }
 }
