@@ -418,6 +418,13 @@ export interface NotebookState {
 
   // ---- Document actions (Phase 4a) ----
   loadNotebook: (json: NotebookJson) => void;
+  /**
+   * Reset the workspace to an empty notebook (no cells, default title,
+   * runtime state cleared). Matches the post-load shape of
+   * `loadNotebook` so the toolbar's "New" button doesn't need to
+   * carry its own empty-document shape.
+   */
+  newNotebook: () => void;
   exportNotebook: () => NotebookJson;
   /**
    * Mark the in-memory document as matching the last-saved version.
@@ -1121,6 +1128,28 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       activeLayer: null,
       lastRunCellId: null,
       // Fresh load = nothing to save yet.
+      dirty: false,
+    });
+  },
+
+  newNotebook() {
+    // Seed with one markdown cell so the user lands on something to
+    // edit rather than a blank canvas; the placeholder copy also
+    // teaches the "+" cell-insert affordance for the next cell.
+    const placeholder: CellJson = {
+      id: newCellId(),
+      type: "markdown",
+      source:
+        "# Untitled Notebook\n\nUse the **+** button between cells to add a new cell.",
+    };
+    set({
+      meta: { ...EMPTY_NOTEBOOK.meta },
+      cells: [placeholder],
+      cellStates: new Map(),
+      cellOutputs: new Map(),
+      cellCollapsed: new Map(),
+      activeLayer: null,
+      lastRunCellId: null,
       dirty: false,
     });
   },

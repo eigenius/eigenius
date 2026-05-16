@@ -35,6 +35,7 @@ import {
   ChevronDoubleDown16Regular,
   ChevronDoubleRight16Regular,
   Dismiss20Regular,
+  DocumentAdd16Regular,
   Edit16Regular,
   FolderOpen16Regular,
   GlobeArrowUp20Regular,
@@ -147,6 +148,7 @@ export function Notebook() {
   const updateMeta = useNotebookStore((s) => s.updateMeta);
   const exportNotebook = useNotebookStore((s) => s.exportNotebook);
   const loadNotebook = useNotebookStore((s) => s.loadNotebook);
+  const newNotebook = useNotebookStore((s) => s.newNotebook);
   const markSaved = useNotebookStore((s) => s.markSaved);
   const runAll = useNotebookStore((s) => s.runAll);
   const resetOutputs = useNotebookStore((s) => s.resetOutputs);
@@ -312,6 +314,15 @@ export function Notebook() {
               {cells.length} cell{cells.length === 1 ? "" : "s"}
               {modified ? ` · ${modified}` : ""}
             </Caption1>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<DocumentAdd16Regular />}
+              disabled={anyRunning || isPublishing}
+              onClick={newNotebook}
+            >
+              New
+            </Button>
             <Button
               size="small"
               appearance="subtle"
