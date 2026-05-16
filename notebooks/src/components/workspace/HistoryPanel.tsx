@@ -341,7 +341,7 @@ export function HistoryPanel() {
               onCreateTag={() => setCreateTagFor(selectedRow.layerId)}
               onInspectResources={() => {
                 setReadPin(selectedRow.layerId);
-                setDestination("topology");
+                setDestination("layer");
               }}
             />
           </aside>
@@ -513,14 +513,13 @@ function DetailPanel({
 
         {
           /* "Inspect resources" sets the read-pin to this layer and
-            navigates to the Topology destination, which honors the
-            pin as the graph root. The topology view includes Class /
-            Property / Resource / Institution nodes — exactly the
-            "what's defined here" lens. */
+            navigates to the Layer-inspector destination, which lists
+            every resource defined in *this* layer (not the inherited
+            chain) with pretty-printed Eigon JSON. */
         }
         <Tooltip
           relationship="description"
-          content="Open the Topology panel rooted at this layer (sets the session read-pin)."
+          content="Open the layer inspector — every resource defined in this commit, with full Eigon JSON."
         >
           <Button onClick={onInspectResources}>Inspect resources…</Button>
         </Tooltip>

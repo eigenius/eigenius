@@ -192,7 +192,7 @@ export function MergeResolutionFlow() {
                 key={conflict.id}
                 conflict={conflict}
                 resolution={state.resolutions[conflict.id]}
-                onChange={(next) => setMergeResolution(conflict.id, next)}
+                setResolution={setMergeResolution}
               />
             ))}
           </div>

@@ -394,8 +394,22 @@ export class Eigen {
     this.defaultBranch = branch;
   }
 
-  /** Resolve a per-call branch override, falling back to the default. */
-  private resolveBranch(branch: string | undefined): string {
+  /**
+   * Resolve a per-call branch override, falling back to the default.
+   *
+   * When `atLayer` is non-empty the caller has pinned the read to a
+   * specific layer; the kernel rejects requests that carry **both**
+   * `at_layer` and `branch`, so this returns `""` to leave the
+   * mutual-exclusion contract on the wire intact. Callers that don't
+   * support `at_layer` (e.g. `load`, `recordTrace`) omit the second
+   * argument and the function falls through to the default-branch
+   * path unchanged.
+   */
+  private resolveBranch(
+    branch: string | undefined,
+    atLayer?: string,
+  ): string {
+    if (atLayer !== undefined && atLayer !== "") return "";
     return branch ?? this.defaultBranch;
   }
 
@@ -440,11 +454,12 @@ export class Eigen {
     iri: string,
     options: InspectOptions = {},
   ): Promise<InspectResponse> {
+    const atLayer = options.atLayer ?? "";
     return await this.kernel.inspect(
       create(InspectRequestSchema, {
         iri,
-        atLayer: options.atLayer ?? "",
-        branch: this.resolveBranch(options.branch),
+        atLayer,
+        branch: this.resolveBranch(options.branch, atLayer),
       }),
     );
   }
@@ -462,11 +477,12 @@ export class Eigen {
     eigenql: string,
     options: QueryOptions = {},
   ): Promise<QueryResponse> {
+    const atLayer = options.atLayer ?? "";
     return await this.kernel.query(
       create(QueryRequestSchema, {
         eigenql,
-        atLayer: options.atLayer ?? "",
-        branch: this.resolveBranch(options.branch),
+        atLayer,
+        branch: this.resolveBranch(options.branch, atLayer),
       }),
     );
   }
@@ -589,12 +605,13 @@ export class Eigen {
     inputIri: string,
     options: RunProgramByIriOptions = {},
   ): Promise<RunProgramResponse> {
+    const atLayer = options.atLayer ?? "";
     return await this.kernel.runProgramByIri(
       create(RunProgramByIriRequestSchema, {
         programIri,
         inputIri,
-        atLayer: options.atLayer ?? "",
-        branch: this.resolveBranch(options.branch),
+        atLayer,
+        branch: this.resolveBranch(options.branch, atLayer),
       }),
     );
   }

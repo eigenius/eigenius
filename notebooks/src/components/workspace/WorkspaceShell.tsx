@@ -95,6 +95,7 @@ import { GcPanel } from "./GcPanel";
 import { HealthPanel } from "./HealthPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { InstitutionsPanel } from "./InstitutionsPanel";
+import { LayerPanel } from "./LayerPanel";
 import { MergePanel } from "./MergePanel";
 import { TagsPanel } from "./TagsPanel";
 import { TasksPanel } from "./TasksPanel";
@@ -503,6 +504,8 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <InstitutionsPanel />;
     case "topology":
       return <TopologyPanel />;
+    case "layer":
+      return <LayerPanel />;
     case "health":
       return <HealthPanel />;
   }

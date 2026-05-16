@@ -25,7 +25,7 @@
  * it (D36 §6.5 / §15.5) — teaches the user that the strategy exists
  * and clarifies the structural reason it doesn't apply.
  */
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Caption1,
   Field,
@@ -86,10 +86,13 @@ const useStyles = makeStyles({
 export interface StrategyPickerProps {
   conflict: TypedConflictWire;
   resolution: MergeResolutionWire | undefined;
-  onChange: (next: MergeResolutionWire | undefined) => void;
-  /** Eigon-JSON-decoded body diffs, summary info, etc. could land
-   * here in a future iteration. Today the editor components
-   * consume the kind's fields directly off the conflict. */
+  /** Pass the store action directly so we can derive a stable
+   * per-conflict `onChange` here via `useCallback`. An inline
+   * `(next) => setMergeResolution(conflict.id, next)` from the
+   * parent re-creates on every render, which combined with the
+   * editors' `useEffect` deps would loop the picker into a render
+   * storm. */
+  setResolution: (conflictId: string, next: MergeResolutionWire | undefined) => void;
 }
 
 /**
@@ -201,7 +204,9 @@ function primaryIri(conflict: TypedConflictWire): string {
   }
 }
 
-export function StrategyPicker({ conflict, resolution, onChange }: StrategyPickerProps) {
+export function StrategyPicker(
+  { conflict, resolution, setResolution }: StrategyPickerProps,
+) {
   const styles = useStyles();
   // Local UI state: which strategy the user has selected (may be
   // different from `resolution` while the editor's form is still
@@ -209,6 +214,13 @@ export function StrategyPicker({ conflict, resolution, onChange }: StrategyPicke
   // until the editor is submittable).
   const [strategy, setStrategy] = useState<MergeStrategyKind>(
     resolution ? resolutionStrategyKind(resolution) : MergeStrategyKind.UNSPECIFIED,
+  );
+  // Per-conflict stable handler; the editors put `onChange` in
+  // their `useEffect` deps and need a reference that doesn't churn
+  // every render.
+  const onChange = useCallback(
+    (next: MergeResolutionWire | undefined) => setResolution(conflict.id, next),
+    [conflict.id, setResolution],
   );
 
   const applicable = useMemo(

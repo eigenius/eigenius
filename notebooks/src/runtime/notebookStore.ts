@@ -84,6 +84,7 @@ export type WorkspaceDestination =
   | "tags"
   | "merge"
   | "topology"
+  | "layer"
   | "institutions"
   | "tasks"
   | "compaction"

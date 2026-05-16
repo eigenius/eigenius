@@ -3368,22 +3368,37 @@ impl EigeniusKernel for EigeniusService {
         }
 
         let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
-        let outcome = crate::lattice::update_branch(
+        // `merge_branch_tips` (vs. `update_branch`) computes the
+        // ancestor relationship between the two tips before deciding
+        // whether to fast-forward, trivial-merge, or surface
+        // NeedsWitnessedMerge — `update_branch`'s CAS-shortcut path
+        // would happily overwrite the target with an unrelated source
+        // tip and call it FastForward, dropping the target's history.
+        let outcome = crate::lattice::merge_branch_tips(
             &req.target,
-            Some(target_tip.clone()),
             source_tip.clone(),
-            crate::lattice::ConflictPolicy::AllowTrivial,
             storage,
             backend.as_ref(),
         );
         match outcome {
             Ok(update) => {
-                // New tip depends on the outcome — fast-forward is at
-                // the source's tip; trivial merge is at the merge
-                // layer's id; needs-witnessed-merge leaves the target
-                // unchanged.
+                // FastForward covers two sub-cases (source-descends-
+                // from-target advances the branch; target-already-
+                // ahead leaves it unchanged) and the outcome itself
+                // doesn't distinguish them. Re-read the branch tip
+                // for the authoritative answer in all cases.
                 let new_tip = match &update {
-                    crate::lattice::UpdateOutcome::FastForward => source_tip.clone(),
+                    crate::lattice::UpdateOutcome::FastForward => backend
+                        .get_branch(&req.target)
+                        .map_err(|e| {
+                            Status::internal(format!("get_branch after merge failed: {e}"))
+                        })?
+                        .ok_or_else(|| {
+                            Status::internal(format!(
+                                "branch {:?} disappeared after merge_branch_tips",
+                                req.target
+                            ))
+                        })?,
                     crate::lattice::UpdateOutcome::TrivialMerge { merge_layer } => {
                         merge_layer.clone()
                     }
