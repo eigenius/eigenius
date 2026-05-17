@@ -197,18 +197,21 @@ class project:Dog : project:Reptile {
 
 ---
 
-## Scenario 6 — Witness with APPLICATION_PENDING
+## Scenario 6 — Witness, missing-comorphism error surface
 
-**Tests.** `WitnessEditor` · error path for the not-yet-wired witness application code.
+**Tests.** `WitnessEditor` UI · `MergeComorphismNotFound` → `MALFORMED_RESOLUTION` error path · Try-again recovery.
 
-**Branch setup.** Same as Scenario 1 (IriCollision).
+**Kernel status.** The witness apply path is wired end-to-end (`apply_witness_resolution` in [kernel/src/layer/merge.rs](../../kernel/src/layer/merge.rs)). The server [explicitly notes](../../kernel/src/server/mod.rs) that `SubmitResolutionErrorKind::APPLICATION_PENDING` is a reserved wire value the kernel **no longer constructs** — every variant's commit shape is implemented. Happy-path witness application is covered by kernel unit tests (`witness_returning_second_argument_produces_branch_b_resource` and siblings in `merge.rs`).
+
+**Why this scenario is the error surface and not the happy path.** Authoring a working `MergeComorphism` requires committing a Mini-TT lambda transformation of shape `(A, A, Option<A>) -> A`. ESL v1 doesn't expose a surface for free-standing lambda terms (the `program` declaration produces a typed `Program`, not the bare Lambda that `merge_transformation` references). Until that authoring affordance lands, the notebook scenario exercises the error surface — the kernel still picks up a real, chain-committed comorphism when given one (and the unit tests pin that behaviour).
+
+**Branch setup.** Same as Scenario 1 (IriCollision on `urn:project:Patient`).
 
 **Resolution.**
 1. Drive to the picker.
-2. Pick **Witness**. Comorphism IRI = `urn:project:patient_merge_witness` (a placeholder — no such resource is on the chain).
-3. Preview cascade. May succeed with an empty cascade *or* fail with `MALFORMED_RESOLUTION` depending on how strict the kernel's witness validation is — note which.
-4. If preview succeeded, ack and click **Commit merge**. Expect the error MessageBar: *"Resolution strategy not yet wired"* (kernel-side `APPLICATION_PENDING`).
-5. The **Try again** button should drop back to `picking`. Switch the strategy to Rename, confirm the resolution can be retried in the same session.
+2. Pick **Witness**. Comorphism IRI = `urn:project:patient_merge_witness` (placeholder — no such resource on the chain).
+3. Click **Preview cascade**. Expect `MALFORMED_RESOLUTION` from the kernel with copy pointing at the missing IRI (specifically `MergeComorphismNotFound`).
+4. The error MessageBar offers **Try again**, dropping back to `picking`. Switch the strategy to Rename, confirm the session continues without a reload.
 
 ---
 
@@ -344,7 +347,7 @@ Or, if testing against the docker-compose stack: `docker compose down -v && dock
 | 3 | QuotientEditor → KeepNeither + ancestor-fallback semantics |
 | 4 | KeepBoth greyed-out rationale (§15.5) |
 | 5 | RestructureEditor + new-parent definition (heaviest editor) |
-| 6 | WitnessEditor + APPLICATION_PENDING error path |
+| 6 | WitnessEditor + MergeComorphismNotFound error path (kernel apply path is wired; happy-path test deferred until ESL gains lambda authoring) |
 | 7 | MALFORMED_RESOLUTION + Try-again loop |
 | 8 | Cell auto-clear on success (§15.3) |
 | 9 | BRANCH_CAS_RACE recovery + race-diff banner (§11) |
