@@ -18,7 +18,6 @@ import {
   Caption1,
   Input,
   makeStyles,
-  mergeClasses,
   MessageBar,
   MessageBarActions,
   MessageBarBody,
@@ -39,8 +38,6 @@ import {
   Edit16Regular,
   FolderOpen16Regular,
   GlobeArrowUp20Regular,
-  Pin16Regular,
-  PinOff16Regular,
   PlayMultiple16Regular,
 } from "@fluentui/react-icons";
 import { parseNotebook } from "../persistence/notebook-format";
@@ -52,24 +49,15 @@ import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 
 const useStyles = makeStyles({
-  // Pinned mode (default): outer fills its parent flex column. The
-  // notebook header is fixed-height at top; the cell list is the only
-  // scroll surface. Unpinned mode: outer collapses to natural height
-  // and the surrounding scroll surface owns scrolling (the original
-  // Phase 4 behaviour, useful when the notebook is embedded in a
-  // longer page).
-  //
-  // Pre-D34: outer was `height: 100vh`. Now the WorkspaceShell sets
-  // the viewport bound and the notebook fills its rail destination
-  // (`height: 100%`).
-  rootPinned: {
+  // Outer fills its parent flex column. The notebook header is
+  // fixed-height at top; the cell list is the only scroll surface.
+  // WorkspaceShell sets the viewport bound; the notebook fills its
+  // rail destination (`height: 100%`).
+  root: {
     display: "flex",
     flexDirection: "column",
     height: "100%",
     overflow: "hidden",
-  },
-  rootUnpinned: {
-    display: "block",
   },
   header: {
     display: "flex",
@@ -92,9 +80,6 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
     overflowY: "auto",
-  },
-  cellsScrollUnpinned: {
-    overflow: "visible",
   },
   cellsInner: {
     maxWidth: "880px",
@@ -166,7 +151,6 @@ export function Notebook() {
 
   const [publish, setPublish] = useState<PublishState>({ kind: "idle" });
   const [loadError, setLoadError] = useState<LoadError>({ kind: "idle" });
-  const [pinned, setPinned] = useState(true);
   const [openDialogOpen, setOpenDialogOpen] = useState(false);
   const [editMetaOpen, setEditMetaOpen] = useState(false);
   const isPublishing = publish.kind === "publishing";
@@ -257,7 +241,7 @@ export function Notebook() {
   const titleEmpty = meta.title.trim().length === 0;
 
   return (
-    <div className={pinned ? styles.rootPinned : styles.rootUnpinned}>
+    <div className={styles.root}>
       <input
         ref={fileInputRef}
         type="file"
@@ -286,21 +270,6 @@ export function Notebook() {
                 icon={<Edit16Regular />}
                 aria-label="Edit notebook metadata"
                 onClick={() => setEditMetaOpen(true)}
-              />
-            </Tooltip>
-            <Tooltip
-              content={pinned
-                ? "Unpin header (whole page scrolls)"
-                : "Pin header to top"}
-              relationship="label"
-            >
-              <Button
-                size="small"
-                appearance="subtle"
-                icon={pinned ? <Pin16Regular /> : <PinOff16Regular />}
-                aria-label={pinned ? "Unpin header" : "Pin header"}
-                aria-pressed={pinned}
-                onClick={() => setPinned((p) => !p)}
               />
             </Tooltip>
           </div>
@@ -469,12 +438,7 @@ export function Notebook() {
           )}
         </div>
       </div>
-      <div
-        className={mergeClasses(
-          styles.cellsScroll,
-          !pinned && styles.cellsScrollUnpinned,
-        )}
-      >
+      <div className={styles.cellsScroll}>
         <div className={styles.cellsInner}>
           <CellInsertGap afterCellId={null} />
           {cells.map((cell) => (

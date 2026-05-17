@@ -70,6 +70,7 @@ import { EdgeKind, NodeKind } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
 import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
+import { CreateBranchDialog } from "../dialogs/CreateBranchDialog";
 import { CreateTagDialog } from "../dialogs/CreateTagDialog";
 
 const TOASTER_ID = "history-panel-toaster";
@@ -216,6 +217,7 @@ export function HistoryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [createTagFor, setCreateTagFor] = useState<string | null>(null);
+  const [createBranchFor, setCreateBranchFor] = useState<string | null>(null);
 
   // Ensure the branches cache is populated so we can resolve the
   // active branch's head. Refresh on mount + when the user switches
@@ -339,6 +341,8 @@ export function HistoryPanel() {
                 );
               }}
               onCreateTag={() => setCreateTagFor(selectedRow.layerId)}
+              onCreateBranch={() =>
+                setCreateBranchFor(selectedRow.layerId)}
               onInspectResources={() => {
                 setReadPin(selectedRow.layerId);
                 setDestination("layer");
@@ -355,6 +359,18 @@ export function HistoryPanel() {
           dispatchToast(
             <Toast>
               <ToastTitle>Created tag {name}</ToastTitle>
+            </Toast>,
+            { intent: "success", timeout: 4000 },
+          )}
+      />
+      <CreateBranchDialog
+        open={createBranchFor !== null}
+        onClose={() => setCreateBranchFor(null)}
+        defaultLayerId={createBranchFor ?? undefined}
+        onCreated={(name) =>
+          dispatchToast(
+            <Toast>
+              <ToastTitle>Created branch {name}</ToastTitle>
             </Toast>,
             { intent: "success", timeout: 4000 },
           )}
@@ -421,6 +437,7 @@ interface DetailPanelProps {
   onTimeTravel: () => void;
   onCopy: () => void;
   onCreateTag: () => void;
+  onCreateBranch: () => void;
   onInspectResources: () => void;
 }
 
@@ -431,6 +448,7 @@ function DetailPanel({
   onTimeTravel,
   onCopy,
   onCreateTag,
+  onCreateBranch,
   onInspectResources,
 }: DetailPanelProps) {
   return (
@@ -509,6 +527,17 @@ function DetailPanel({
           content="Create an immutable named ref at this layer (also protects it from GC)."
         >
           <Button onClick={onCreateTag}>Create tag…</Button>
+        </Tooltip>
+
+        {
+          /* "Create branch" — opens the Create-branch dialog with
+            `Specific layer id` pre-filled to this row's layer id. */
+        }
+        <Tooltip
+          relationship="description"
+          content="Fork a new branch starting at this layer."
+        >
+          <Button onClick={onCreateBranch}>Create branch…</Button>
         </Tooltip>
 
         {

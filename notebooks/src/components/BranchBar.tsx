@@ -109,7 +109,10 @@ const useStyles = makeStyles({
     gridTemplateColumns: "1fr auto",
     columnGap: tokens.spacingHorizontalM,
     alignItems: "baseline",
-    minWidth: "320px",
+    // Room for `branch-name` + `tip aabb…ccdd · NN units ago` without
+    // truncation. Previously 320px clipped the relative-time suffix
+    // once the menu's content density grew past the active branch.
+    minWidth: "440px",
   },
   menuName: {
     fontWeight: tokens.fontWeightSemibold,
@@ -122,11 +125,15 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
+    // Keep `tip <hash> · <relative-time>` on one line so the time
+    // suffix never wraps off the right edge of the menu.
+    whiteSpace: "nowrap",
   },
   menuTime: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     fontFamily: tokens.fontFamilyBase,
+    whiteSpace: "nowrap",
   },
   // Read-pin indicator: `· reading at <hash>` next to the tip. Drawn
   // in a warning-tint so the user notices reads aren't at the tip.
