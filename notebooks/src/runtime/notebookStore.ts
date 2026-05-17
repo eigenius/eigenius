@@ -280,6 +280,16 @@ export interface NotebookState {
    */
   destination: WorkspaceDestination;
   /**
+   * Browser-style navigation stack for back/forward buttons in the
+   * workspace header. Invariant: `destinationHistory[destinationCursor]`
+   * always equals `destination`. `setDestination` truncates any
+   * forward entries when called (matching browser semantics — a new
+   * navigation drops the redo arm), while `goBack` and `goForward`
+   * just shift the cursor.
+   */
+  destinationHistory: WorkspaceDestination[];
+  destinationCursor: number;
+  /**
    * Hint that pre-fills the Merge panel's source dropdown. Set by
    * the BranchesPanel's "Merge into…" action before it navigates;
    * read + cleared by the Merge panel on mount. `null` = no hint;
@@ -354,8 +364,17 @@ export interface NotebookState {
    * outputs were against a different read context.
    */
   setReadPin: (layerId: string | null) => void;
-  /** Switch the workspace rail to a different destination. */
+  /** Switch the workspace rail to a different destination. Pushes
+   *  onto the back/forward navigation stack (no-op if `d` already
+   *  equals the current destination, so a panel re-routing to itself
+   *  doesn't pollute the history). */
   setDestination: (d: WorkspaceDestination) => void;
+  /** Pop the navigation stack and switch to the previous destination.
+   *  No-op when there's nothing to go back to. */
+  goBackDestination: () => void;
+  /** Re-enter a destination we navigated away from via `goBack`. No-op
+   *  when the cursor is already at the end of the history. */
+  goForwardDestination: () => void;
   /**
    * Set / clear the pre-fill source for the Merge panel. Called by
    * the BranchesPanel before navigating to Merge; cleared by the
@@ -587,6 +606,8 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   activeBranch: "main",
   readPinLayerId: null,
   destination: "notebook",
+  destinationHistory: ["notebook"],
+  destinationCursor: 0,
   pendingMergeSource: null,
   branches: null,
   dirty: false,
@@ -749,7 +770,45 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   },
 
   setDestination(d) {
-    set({ destination: d });
+    set((prev) => {
+      if (prev.destination === d) return prev;
+      // Browser semantics: a new navigation drops anything we'd have
+      // gone "forward" into, then appends the new destination.
+      const truncated = prev.destinationHistory.slice(
+        0,
+        prev.destinationCursor + 1,
+      );
+      truncated.push(d);
+      return {
+        destination: d,
+        destinationHistory: truncated,
+        destinationCursor: truncated.length - 1,
+      };
+    });
+  },
+
+  goBackDestination() {
+    set((prev) => {
+      if (prev.destinationCursor <= 0) return prev;
+      const cursor = prev.destinationCursor - 1;
+      return {
+        destination: prev.destinationHistory[cursor],
+        destinationCursor: cursor,
+      };
+    });
+  },
+
+  goForwardDestination() {
+    set((prev) => {
+      if (prev.destinationCursor >= prev.destinationHistory.length - 1) {
+        return prev;
+      }
+      const cursor = prev.destinationCursor + 1;
+      return {
+        destination: prev.destinationHistory[cursor],
+        destinationCursor: cursor,
+      };
+    });
   },
 
   setPendingMergeSource(name) {
@@ -765,7 +824,10 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       candidateHead,
       cellId,
     };
-    set({ mergeResolution: initial, destination: "merge" });
+    set({ mergeResolution: initial });
+    // Route the workspace to the Merge panel through the navigation
+    // surface so back/forward history captures the transition.
+    get().setDestination("merge");
     persistMergeResolution(initial);
     emitResolutionTelemetry("open", initial, {
       fromCell: cellId !== undefined,

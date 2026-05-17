@@ -80,8 +80,15 @@ export interface CreateBranchDialogProps {
   onCreated?: (name: string) => void;
   /** Pre-fill the dialog with `Specific layer id = defaultLayerId`.
    *  Set when the dialog is opened from the History panel's per-layer
-   *  "Create branch…" affordance so the user only has to type a name. */
+   *  "Create branch…" affordance so the user only has to type a name.
+   *  Ignored when `defaultTagName` is also set (tags win since they're
+   *  the more human-readable handle on the same layer). */
   defaultLayerId?: string;
+  /** Pre-select `Tag = defaultTagName` in the start-from picker. Set
+   *  when the dialog is opened from a Tags-panel row so the user sees
+   *  the tag name they clicked rather than its (semantically
+   *  identical, but opaque) underlying layer id. */
+  defaultTagName?: string;
 }
 
 /**
@@ -95,11 +102,26 @@ type StartFrom =
   | { kind: "tag"; tag: string }
   | { kind: "explicit"; layerId: string };
 
+/** Default `startFrom` derived from the dialog's pre-fill props.
+ *  Priority: tag pre-select wins over layer-id pre-fill, since a tag
+ *  is the more human-readable handle on the same layer; both fall
+ *  back to the active branch's head. */
+function initialStartFrom(
+  defaultTagName: string | undefined,
+  defaultLayerId: string | undefined,
+  activeBranch: string,
+): StartFrom {
+  if (defaultTagName) return { kind: "tag", tag: defaultTagName };
+  if (defaultLayerId) return { kind: "explicit", layerId: defaultLayerId };
+  return { kind: "existing", branch: activeBranch };
+}
+
 export function CreateBranchDialog({
   open,
   onClose,
   onCreated,
   defaultLayerId,
+  defaultTagName,
 }: CreateBranchDialogProps) {
   const styles = useStyles();
   const eigen = useEigen();
@@ -109,9 +131,7 @@ export function CreateBranchDialog({
 
   const [name, setName] = useState("");
   const [startFrom, setStartFrom] = useState<StartFrom>(
-    defaultLayerId
-      ? { kind: "explicit", layerId: defaultLayerId }
-      : { kind: "existing", branch: activeBranch },
+    initialStartFrom(defaultTagName, defaultLayerId, activeBranch),
   );
   const [switchAfter, setSwitchAfter] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -131,20 +151,24 @@ export function CreateBranchDialog({
   const activeBranchRef = useRef(activeBranch);
   activeBranchRef.current = activeBranch;
 
-  // Hold the latest `defaultLayerId` in a ref for the same reason as
-  // `activeBranch` — the prop can change while the dialog is open
+  // Hold the latest `default*` props in refs for the same reason as
+  // `activeBranch` — they can change while the dialog is open
   // (parent re-renders) without us wanting to clobber a typed name.
   const defaultLayerIdRef = useRef(defaultLayerId);
   defaultLayerIdRef.current = defaultLayerId;
+  const defaultTagNameRef = useRef(defaultTagName);
+  defaultTagNameRef.current = defaultTagName;
 
   // Reset transient state on the `open` false → true transition.
   useEffect(() => {
     if (open) {
       setName("");
       setStartFrom(
-        defaultLayerIdRef.current
-          ? { kind: "explicit", layerId: defaultLayerIdRef.current }
-          : { kind: "existing", branch: activeBranchRef.current },
+        initialStartFrom(
+          defaultTagNameRef.current,
+          defaultLayerIdRef.current,
+          activeBranchRef.current,
+        ),
       );
       setSwitchAfter(true);
       setBusy(false);
