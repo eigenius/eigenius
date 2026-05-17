@@ -147,8 +147,8 @@ property project:weight : core:integer {
 
 **Steps.**
 1. Open the resolution flow.
-2. In the QuotientEditor, hover over the **Keep both** radio.
-3. Expect: radio **disabled**, with inline copy like *"Not applicable to this conflict (data_type is single-valued; both bodies can't coexist)."*
+2. Locate the **Keep both** radio in the strategy list.
+3. Expect: radio **disabled** with the generic inline caption *"Not applicable to this conflict kind."* — D36 §15.5's kind-specific verbiage (e.g. "data_type is single-valued…") was deferred and is not in v1; the longer story is one click away via the **Strategy reference** help link.
 4. Do not commit — close with **Cancel**.
 
 ---
