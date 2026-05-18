@@ -300,7 +300,7 @@ export function StrategyPicker(
       <div className={styles.body}>
         {strategy === MergeStrategyKind.WITNESS && !targetMissing && (
           <WitnessEditor
-            conflictId={conflict.id}
+            conflict={conflict}
             onChange={onChange}
           />
         )}

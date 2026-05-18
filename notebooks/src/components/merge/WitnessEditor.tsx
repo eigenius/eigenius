@@ -13,44 +13,110 @@
 // limitations under the License.
 
 /**
- * D36 §6.1 — Witness strategy editor.
+ * D36 §6.1 / D37 §7.1 — Witness strategy editor.
  *
- * One IRI input: the `MergeComorphism` resource the kernel will
- * apply as the merge witness. The kernel type-checks the witness
- * against the conflict's class at submission time, so this editor
- * doesn't need to do pre-validation beyond the IRI parse — the
- * structural failures surface as `MALFORMED_RESOLUTION` /
- * `WitnessTypeMismatch` from `submitResolution` and the error
- * banner routes back to picking with the field highlighted.
+ * Combobox of applicable `MergeComorphism` IRIs, populated by an
+ * EigenQL query against the chain for comorphisms whose
+ * `merge_target_class` matches the conflict's class. The Combobox is
+ * preferred over a free-form IRI input because:
  *
- * The "Browse committed MergeComorphisms" affordance D36 §6.1
- * sketches is a follow-up (chain-browser helper, D36 §9.3).
+ * 1. Discoverability — the user sees which witnesses exist for this
+ *    conflict's class without leaving the resolution flow.
+ * 2. Validation — typoed IRIs no longer slip through to
+ *    `MALFORMED_RESOLUTION` at submit time; the picker only shows
+ *    IRIs that resolve in the chain.
+ * 3. Class-correctness — the kernel rejects comorphisms applied to
+ *    the wrong class (D37 §6.2), but the picker pre-filters them so
+ *    the user never sees an incompatible witness in the first place.
+ *
+ * Three fallback shapes:
+ * - **Conflict class undetectable** (kind isn't IriCollision /
+ *   KindMismatch, or the body JSON didn't parse): render the
+ *   free-form Input the editor used pre-D37.
+ * - **No applicable comorphisms found**: free-form Input plus a
+ *   caption explaining no witnesses are committed for this class.
+ * - **Query errored**: free-form Input plus a soft error caption;
+ *   the user can still author by hand.
+ *
+ * The query fires on mount + whenever the conflict's id changes.
+ * The resolution session itself is atomic against a captured
+ * `branchTip` (D36 §11), so we don't need to re-fire on chain
+ * advance during a session — the tip is frozen for the session's
+ * lifetime, and CAS-race recovery re-mounts the picker.
  */
 import { useEffect, useState } from "react";
-import { Field, Input } from "@fluentui/react-components";
 import {
-  MergeStrategyKind,
-  type MergeResolutionWire,
-} from "@eigenius/client";
+  Combobox,
+  Field,
+  Input,
+  Option,
+  Spinner,
+} from "@fluentui/react-components";
+import { type Eigen, type MergeResolutionWire, type TypedConflictWire } from "@eigenius/client";
+import { useEigen } from "../../runtime/EigenProvider";
+import { decodeResultDocument } from "../../runtime/resultDocument";
 
 export interface WitnessEditorProps {
-  conflictId: string;
+  conflict: TypedConflictWire;
   onChange: (next: MergeResolutionWire | undefined) => void;
 }
 
-export function WitnessEditor({ conflictId, onChange }: WitnessEditorProps) {
-  const [iri, setIri] = useState("");
+interface ApplicableComorphism {
+  iri: string;
+  shortName: string | null;
+}
 
+type PickerState =
+  | { kind: "loading" }
+  | { kind: "ready"; comorphisms: ApplicableComorphism[]; conflictClass: string }
+  | { kind: "no-class" } // Class wasn't extractable from the conflict.
+  | { kind: "error"; message: string };
+
+export function WitnessEditor({ conflict, onChange }: WitnessEditorProps) {
+  const eigen = useEigen();
+  const [iri, setIri] = useState("");
+  const [picker, setPicker] = useState<PickerState>({ kind: "loading" });
+
+  // Fire the comorphism query when the conflict's id changes.
+  // Captures the EigenQL response in a state machine; the render
+  // arm picks the right surface based on the outcome.
   useEffect(() => {
-    // Empty IRI → incomplete form; surface `undefined` so the
-    // panel-level Preview button stays disabled.
+    let cancelled = false;
+    const conflictClass = extractConflictClass(conflict);
+    if (conflictClass === null) {
+      setPicker({ kind: "no-class" });
+      return;
+    }
+    setPicker({ kind: "loading" });
+    void queryApplicableComorphisms(eigen, conflictClass).then(
+      (comorphisms) => {
+        if (cancelled) return;
+        setPicker({ kind: "ready", comorphisms, conflictClass });
+      },
+      (err: unknown) => {
+        if (cancelled) return;
+        setPicker({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [conflict, eigen]);
+
+  // Push the current IRI (free-form or picker-selected) up to the
+  // resolution state as a witness resolution. Empty → undefined so
+  // the panel-level Preview button stays disabled.
+  useEffect(() => {
     if (iri.trim() === "") {
       onChange(undefined);
       return;
     }
     const resolution: MergeResolutionWire = {
       $typeName: "eigenius.v1.MergeResolutionWire",
-      conflictId,
+      conflictId: conflict.id,
       strategy: {
         case: "witness",
         value: {
@@ -60,22 +126,197 @@ export function WitnessEditor({ conflictId, onChange }: WitnessEditorProps) {
       },
     };
     onChange(resolution);
-  }, [iri, conflictId, onChange]);
+  }, [iri, conflict.id, onChange]);
 
-  return (
-    <Field
-      label="Comorphism IRI"
-      hint="IRI of a MergeComorphism resource committed earlier in the chain."
-    >
-      <Input
-        value={iri}
-        onChange={(_, data) => setIri(data.value)}
-        placeholder="urn:project:patient_merge_witness"
-      />
-    </Field>
-  );
+  const onSelectComorphism = (selectedIri: string) => {
+    setIri(selectedIri);
+  };
+
+  // Render path picks based on the picker state.
+  switch (picker.kind) {
+    case "loading":
+      return (
+        <Field label="Comorphism IRI">
+          <Spinner size="tiny" label="searching for applicable comorphisms…" />
+        </Field>
+      );
+
+    case "ready": {
+      if (picker.comorphisms.length === 0) {
+        return (
+          <Field
+            label="Comorphism IRI"
+            hint={
+              <span>
+                No <code>MergeComorphism</code>{" "}
+                resources are committed for class{" "}
+                <code>{picker.conflictClass}</code>. Author one
+                (see <code>merge_comorphism</code> in ESL, D37 §3.3)
+                then paste its IRI here.
+              </span>
+            }
+          >
+            <Input
+              value={iri}
+              onChange={(_, data) => setIri(data.value)}
+              placeholder="urn:project:patient_merge_witness"
+            />
+          </Field>
+        );
+      }
+      return (
+        <Field
+          label="Comorphism"
+          hint={
+            <span>
+              Pick a witness committed for class{" "}
+              <code>{picker.conflictClass}</code>.
+            </span>
+          }
+        >
+          <Combobox
+            value={iri}
+            selectedOptions={iri ? [iri] : []}
+            onOptionSelect={(_e, data) => {
+              if (data.optionValue) onSelectComorphism(data.optionValue);
+            }}
+            placeholder="Select a comorphism"
+          >
+            {picker.comorphisms.map((c) => (
+              <Option key={c.iri} value={c.iri} text={c.shortName ?? c.iri}>
+                {c.shortName
+                  ? (
+                    <span>
+                      <strong>{c.shortName}</strong>{" "}
+                      <code style={{ opacity: 0.6 }}>{c.iri}</code>
+                    </span>
+                  )
+                  : <code>{c.iri}</code>}
+              </Option>
+            ))}
+          </Combobox>
+        </Field>
+      );
+    }
+
+    case "no-class":
+      return (
+        <Field
+          label="Comorphism IRI"
+          hint="Conflict shape doesn't expose a target class for the picker — paste an IRI directly."
+        >
+          <Input
+            value={iri}
+            onChange={(_, data) => setIri(data.value)}
+            placeholder="urn:project:patient_merge_witness"
+          />
+        </Field>
+      );
+
+    case "error":
+      return (
+        <Field
+          label="Comorphism IRI"
+          hint={
+            <span>
+              Couldn't query the chain for applicable comorphisms:{" "}
+              <em>{picker.message}</em>. Paste an IRI directly.
+            </span>
+          }
+          validationState="warning"
+        >
+          <Input
+            value={iri}
+            onChange={(_, data) => setIri(data.value)}
+            placeholder="urn:project:patient_merge_witness"
+          />
+        </Field>
+      );
+  }
 }
 
-// Silence unused-import warning in case the file is included before
-// callers wire MergeStrategyKind through.
-void MergeStrategyKind;
+/**
+ * Pull the conflict's class IRI from the wire shape (D37 §7.1).
+ *
+ * `TypedConflictWire`'s variants don't expose `class` directly. For
+ * `IriCollisionConflict` the bodies are class instances — we parse
+ * `branchABodyJson` and read `urn:eigenius:core:is_a[0]`. For
+ * `KindMismatchConflict` the `branchAKind` field is already the
+ * class IRI. Other kinds (`PropertyDataTypeConflict`,
+ * `InheritanceCycleConflict`) don't have a single target class the
+ * Witness strategy operates on — return null so the editor falls
+ * back to the free-form IRI input.
+ */
+function extractConflictClass(conflict: TypedConflictWire): string | null {
+  const kind = conflict.kind;
+  if (!kind) return null;
+  switch (kind.case) {
+    case "iriCollision": {
+      const bodyJson = kind.value.branchABodyJson;
+      if (!bodyJson) return null;
+      try {
+        const parsed = JSON.parse(bodyJson) as Record<string, unknown>;
+        const isA = parsed["urn:eigenius:core:is_a"];
+        if (!Array.isArray(isA) || isA.length === 0) return null;
+        const first = isA[0];
+        return typeof first === "string" ? first : null;
+      } catch {
+        return null;
+      }
+    }
+    case "kindMismatch": {
+      // `branchAKind` is itself the class IRI; use it as the target
+      // class for the Witness picker query.
+      return kind.value.branchAKind || null;
+    }
+    case "propertyDataType":
+    case "inheritanceCycle":
+    default:
+      return null;
+  }
+}
+
+/**
+ * Query the chain for `MergeComorphism` resources whose
+ * `merge_target_class` matches the supplied class IRI. Returns the
+ * applicable comorphisms with their (optional) `core:short_name`
+ * surfaced for the Combobox label.
+ */
+async function queryApplicableComorphisms(
+  eigen: Eigen,
+  classIri: string,
+): Promise<ApplicableComorphism[]> {
+  // EigenQL — return both the comorphism IRI and its short_name (if
+  // any) so the Combobox can show a human-readable label.
+  const eigenql = `
+USING "urn:eigenius:core:MergeComorphism"
+
+MATCH MergeComorphism(?c) {
+    "urn:eigenius:core:merge_target_class": ?cls
+},
+?c { "urn:eigenius:core:short_name": ?short_name }
+WHERE ?cls = ${JSON.stringify(classIri)}
+RETURN [] {
+    iri: ?c,
+    short_name: ?short_name
+}
+ORDER BY ?c
+`;
+  const resp = await eigen.query(eigenql);
+  if (!resp.success) {
+    throw new Error(resp.error || "comorphism query failed");
+  }
+  const decoded = decodeResultDocument(resp.document);
+  const out: ApplicableComorphism[] = [];
+  for (const row of decoded.rows) {
+    let iri: string | undefined;
+    let shortName: string | null = null;
+    for (const [key, value] of row.values) {
+      if (typeof value !== "string") continue;
+      if (key.endsWith(":iri")) iri = value;
+      else if (key.endsWith(":short_name")) shortName = value;
+    }
+    if (iri) out.push({ iri, shortName });
+  }
+  return out;
+}
