@@ -3138,7 +3138,9 @@ mod tests {
         };
         let obs_type = &codata.observations[0].typ;
         match obs_type {
-            TypeExpr::Pi { params, codomain, .. } => {
+            TypeExpr::Pi {
+                params, codomain, ..
+            } => {
                 assert_eq!(params.len(), 2);
                 assert_eq!(params[0].name, "a");
                 assert_eq!(params[1].name, "b");
@@ -3168,7 +3170,10 @@ mod tests {
                 assert_eq!(mc.target_class.name, "Patient");
                 match &mc.body {
                     MergeComorphismBody::Inline { params, body, .. } => {
-                        assert_eq!(params, &["a".to_string(), "b".to_string(), "opt".to_string()]);
+                        assert_eq!(
+                            params,
+                            &["a".to_string(), "b".to_string(), "opt".to_string()]
+                        );
                         assert!(matches!(body, Expr::Var { name, .. } if name == "b"));
                     }
                     other => panic!("expected inline body, got {other:?}"),

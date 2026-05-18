@@ -333,9 +333,10 @@ pub struct TypedParam {
 }
 
 /// D37 §3.3 — `merge_comorphism <iri> for <class> { <body> }`.
-/// Compiles to a `MergeComorphism` resource (with `merge_target_class`
-/// + `merge_transformation`) plus, for the inline-body form, a
-/// synthesised standalone Lambda resource at a content-hash IRI.
+/// Compiles to a `MergeComorphism` resource (with the
+/// `merge_target_class` and `merge_transformation` slots populated)
+/// plus, for the inline-body form, a synthesised standalone Lambda
+/// resource at a content-hash IRI.
 #[derive(Debug)]
 pub struct MergeComorphismDecl {
     /// The comorphism's own IRI (the `<iri>` after `merge_comorphism`).
