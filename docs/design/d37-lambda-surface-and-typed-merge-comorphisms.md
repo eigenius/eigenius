@@ -341,24 +341,32 @@ The same query underlies a future **Comorphisms** rail destination — list all 
 
 Four PRs. Each individually shippable; the kernel changes (§5–6) land first so subsequent PRs can rely on the new shapes.
 
-### PR 1: Kernel surface (the structural foundation)
+### PR 1: Kernel foundation + apply-time enforcement — **SHIPPED**
 
-- New well-known IRIs (`merge_target_class`, `program:type`).
-- Core ontology JSON updated with the new Properties and class-required slots.
-- Validator additions for lambda well-typedness and MergeComorphism shape.
-- `resolve_merge_comorphism` early class-equality check.
-- Kernel unit tests for each new validation path + the early-reject flow.
+What landed:
 
-Estimated effort: ~3–4 days.
+- New well-known IRIs (`MERGE_TARGET_CLASS`, `PROGRAM_TYPE`).
+- Core ontology JSON updated: `merge_target_class` Property declared and added to `MergeComorphism.requires`; `program:type`'s domain extended to include `Lambda`; `Lambda.recommends` gains `program:type`.
+- `resolve_merge_comorphism` gains an `expected_class` parameter and an early-reject path returning `MergeError::MergeComorphismWrongClass` on a class mismatch (plus `MalformedMergeComorphism` for the missing-property case).
+- Existing kernel `merge.rs` fixtures migrated to include `merge_target_class` (the §10.2 strict-mode side effect; ~5 call sites). This was originally scoped to PR 4 but had to land alongside the resolver change to keep tests green.
+- Two new unit tests pinning the early-reject flow.
 
-### PR 2: ESL syntax
+Realised effort: ~2 days. Slightly under the 3–4 day estimate because two pieces moved out (see below).
 
-- AST nodes for `LambdaLiteral`, `PiType`, `MergeComorphismDecl`.
+**What moved to PR 2 (commit-time validators).** Lambda well-typedness and MergeComorphism shape are gated on PR 2's ESL surface — every Lambda in the chain today is type-free (no `program:type` populated), so commit-time validation would either reject every existing Lambda or have to skip them. The validators land alongside the ESL surface that actually produces typed lambdas. The wire surface and apply-time enforcement are fully in place now; commit-time pinning waits until there's something to pin.
+
+### PR 2: ESL syntax + commit-time validators
+
+- AST nodes: extend `Expr::Lambda` with an optional `param_type`; add `TypeExpr::Pi` variant; new `MergeComorphismDecl` declaration node.
 - Parser rules per §3.4.
-- Compiler lowering per §4.
+- Compiler lowering per §4 (including the inline `merge_comorphism` body sugar that emits the synthesised standalone lambda at a content-hash IRI).
+- **Commit-time validators (folded in from PR 1):**
+  - Lambda well-typedness — when a standalone Lambda carries `program:type`, the validator type-checks the body against the declared Pi-term.
+  - MergeComorphism shape — `merge_target_class` required; the referenced (or synthesised) transformation's Pi-type must match `(A, A, Option<A>) -> A` where A is the target class.
 - ESL tests pinning the resource bytes emitted by each form (round-trip via `compile + load + inspect`).
+- Validator unit tests for each commit-time rejection path.
 
-Estimated effort: ~7–9 days. Largest piece. Extends the existing `Expr::Lambda` AST node with an optional `param_type` and adds a `TypeExpr::Pi` variant for value-typed binders — both are additive but touch every existing match-site on those enums. The parser delta itself is small; the lowering and type-elaboration paths are where most of the work goes.
+Estimated effort: ~9–11 days (up from 7–9 because the commit-time validators moved in from PR 1). Still the largest piece. The parser delta is small; lowering, type-elaboration, and the new validators are where most of the work goes.
 
 ### PR 3: Notebook WitnessEditor — comorphism picker
 
@@ -369,17 +377,16 @@ Estimated effort: ~7–9 days. Largest piece. Extends the existing `Expr::Lambda
 
 Estimated effort: ~2.5 days. Mostly UI; the EigenQL surface is already in place.
 
-### PR 4: Test scenario conversion + fixture migration
+### PR 4: Test scenario conversion
 
 - Update D36 manual test Scenario 6 to exercise the happy path (commit a witness via the new ESL surface, drive a successful Witness resolution).
 - Add ESL-side unit tests for worked examples §9.1–§9.4.
-- **Migrate existing kernel `merge.rs` tests** that build `MergeComorphism` resources by hand — each fixture needs `urn:eigenius:core:merge_target_class` populated to satisfy the new strict-mode validator (§5.3). Mechanical update across ~6–10 fixture call sites.
 
-Estimated effort: ~1.5 days.
+Estimated effort: ~1 day (down from 1.5 — the fixture migration moved into PR 1's actual landing).
 
 ### Total
 
-Roughly **14–17 days** of focused work, ~3 weeks calendar with normal review cycles. PRs 1 and 2 each contain their own internal review boundary; PRs 3 and 4 are independent of one another and can land in either order once PRs 1–2 ship.
+Roughly **14–17 days** of focused work, ~3 weeks calendar. PR 1 is in; PR 2 is the long pole. PRs 3 and 4 are independent of one another and can land in either order once PR 2 ships.
 
 ---
 

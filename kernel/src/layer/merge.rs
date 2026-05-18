@@ -1104,6 +1104,7 @@ pub fn merge_with_resolutions(
 /// message without parsing.
 pub fn resolve_merge_comorphism(
     iri: &Iri,
+    expected_class: &Iri,
     span: &MergeSpan,
     topology: &LayerTopology,
     backend: &dyn PersistentBackend,
@@ -1111,6 +1112,8 @@ pub fn resolve_merge_comorphism(
     let merge_comorphism_iri = Iri::parse(wk::MERGE_COMORPHISM).expect("MERGE_COMORPHISM IRI");
     let merge_transformation_iri =
         Iri::parse(wk::MERGE_TRANSFORMATION).expect("MERGE_TRANSFORMATION IRI");
+    let merge_target_class_iri =
+        Iri::parse(wk::MERGE_TARGET_CLASS).expect("MERGE_TARGET_CLASS IRI");
 
     // Search both branches' contributions before falling back to the
     // ancestor's chain. v1 doesn't require the comorphism to live
@@ -1132,6 +1135,35 @@ pub fn resolve_merge_comorphism(
         return Err(MergeError::NotAMergeComorphism {
             iri: iri.clone(),
             found_classes,
+        });
+    }
+
+    // D37 §6.2: every MergeComorphism declares the class A its
+    // transformation operates on. Reject early if the conflict's
+    // class doesn't match — the witness's term type-check would
+    // eventually fail anyway, but the diagnostic surfaces deep
+    // inside the evaluator with an opaque message; the typed
+    // up-front error is much more actionable.
+    let target_class = match resource.get(&merge_target_class_iri) {
+        Some(crate::ontology::resource::Value::ResourceRef(c)) => c.clone(),
+        Some(_) => {
+            return Err(MergeError::MalformedMergeComorphism {
+                iri: iri.clone(),
+                reason: "merge_target_class must be a ResourceRef to a Class".to_string(),
+            });
+        }
+        None => {
+            return Err(MergeError::MalformedMergeComorphism {
+                iri: iri.clone(),
+                reason: "merge_target_class property is required".to_string(),
+            });
+        }
+    };
+    if &target_class != expected_class {
+        return Err(MergeError::MergeComorphismWrongClass {
+            iri: iri.clone(),
+            expected: expected_class.clone(),
+            actual: target_class,
         });
     }
 
@@ -2569,7 +2601,8 @@ pub fn commit_resolutions_as_merge_layer(
                         .map_err(MergeError::Storage)?
                         .map(|(_, r)| r);
 
-                let handle = resolve_merge_comorphism(comorphism, span, &topology, backend)?;
+                let handle =
+                    resolve_merge_comorphism(comorphism, &class, span, &topology, backend)?;
                 let mut merged = apply_witness_resolution(
                     &handle,
                     &class,
@@ -2978,6 +3011,18 @@ pub enum MergeError {
         iri: Iri,
         reason: String,
     },
+    /// A `MergeComorphism` was applied to a conflict whose class
+    /// doesn't match the comorphism's declared `merge_target_class`
+    /// (D37 §6.2). The witness's transformation has signature
+    /// `(A, A, Option<A>) -> A` where A is `merge_target_class` —
+    /// applying it to a different class would fail downstream during
+    /// term evaluation with an opaque diagnostic; this variant
+    /// surfaces the mismatch up-front.
+    MergeComorphismWrongClass {
+        iri: Iri,
+        expected: Iri,
+        actual: Iri,
+    },
     /// A `MergeComorphism`'s `merge_transformation` points at an IRI
     /// that doesn't resolve in the witness's source layer chain —
     /// the term was either uncommitted or lives in a parallel
@@ -3147,6 +3192,14 @@ impl std::fmt::Display for MergeError {
             MergeError::MalformedMergeComorphism { iri, reason } => {
                 write!(f, "MergeComorphism {iri} is malformed: {reason}")
             }
+            MergeError::MergeComorphismWrongClass {
+                iri,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "MergeComorphism {iri} declared for class {actual} cannot be applied to a conflict on {expected}"
+            ),
             MergeError::TransformationNotFound {
                 comorphism,
                 transformation,
@@ -3766,17 +3819,24 @@ mod tests {
     }
 
     /// Make a well-formed MergeComorphism resource pointing at a
-    /// (placeholder) transformation IRI. Step 1 only validates the
-    /// resource shape; the transformation IRI doesn't need to point
-    /// at a real Mini-TT term until Step 2 wires the evaluator.
+    /// (placeholder) transformation IRI. The witness fixtures
+    /// resolve against `urn:test:Patient` in every existing test, so
+    /// that's the default class — call sites that need a different
+    /// `merge_target_class` should construct the resource inline.
     fn make_merge_comorphism(iri: &str, transformation: &str) -> Resource {
         make_resource(
             iri,
             &[wk::MERGE_COMORPHISM],
-            &[(
-                wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(Iri::parse(transformation).unwrap()),
-            )],
+            &[
+                (
+                    wk::MERGE_TRANSFORMATION,
+                    Value::ResourceRef(Iri::parse(transformation).unwrap()),
+                ),
+                (
+                    wk::MERGE_TARGET_CLASS,
+                    Value::ResourceRef(Iri::parse("urn:test:Patient").unwrap()),
+                ),
+            ],
         )
     }
 
@@ -3874,6 +3934,100 @@ mod tests {
     }
 
     #[test]
+    fn witness_for_wrong_class_is_rejected_early() {
+        // D37 §6.2: a `MergeComorphism` declares `merge_target_class`;
+        // applying it to a conflict on a different class must fail
+        // up-front with `MergeComorphismWrongClass`, not deep inside
+        // the term evaluator with an opaque type-mismatch.
+        //
+        // Construct a comorphism declared for `urn:test:Visit` and
+        // try to apply it to the IriCollision on `urn:test:Patient`.
+        let wrong_class_witness = make_resource(
+            "urn:test:wrong_class_witness",
+            &[wk::MERGE_COMORPHISM],
+            &[
+                (
+                    wk::MERGE_TRANSFORMATION,
+                    Value::ResourceRef(Iri::parse("urn:test:term_placeholder").unwrap()),
+                ),
+                (
+                    wk::MERGE_TARGET_CLASS,
+                    Value::ResourceRef(Iri::parse("urn:test:Visit").unwrap()),
+                ),
+            ],
+        );
+        let (span, backend) =
+            build_span_with_iri_collision_and_optional_witness(Some(wrong_class_witness));
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: iri("urn:test:wrong_class_witness"),
+            }],
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
+        match result {
+            Err(MergeError::MergeComorphismWrongClass {
+                iri: i,
+                expected,
+                actual,
+            }) => {
+                assert_eq!(i.as_str(), "urn:test:wrong_class_witness");
+                assert_eq!(expected.as_str(), "urn:test:Patient");
+                assert_eq!(actual.as_str(), "urn:test:Visit");
+            }
+            other => panic!("expected MergeComorphismWrongClass, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn witness_missing_merge_target_class_is_rejected() {
+        // D37 §5.3: every `MergeComorphism` must carry
+        // `merge_target_class`. The resolver enforces it at apply
+        // time as a defensive check (the commit-time validator in
+        // PR 2 catches it earlier, but this guards against pre-D37
+        // resources that might still be reachable on disk).
+        let no_class_witness = make_resource(
+            "urn:test:no_class_witness",
+            &[wk::MERGE_COMORPHISM],
+            &[(
+                wk::MERGE_TRANSFORMATION,
+                Value::ResourceRef(Iri::parse("urn:test:term_placeholder").unwrap()),
+            )],
+        );
+        let (span, backend) =
+            build_span_with_iri_collision_and_optional_witness(Some(no_class_witness));
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let result = merge_with_resolutions(
+            &span,
+            vec![MergeResolution::Witness {
+                conflict: conflict_id,
+                comorphism: iri("urn:test:no_class_witness"),
+            }],
+            Vec::new(),
+            crate::layer::LayerStorage::in_memory(),
+            &backend,
+        );
+        match result {
+            Err(MergeError::MalformedMergeComorphism { iri: i, reason }) => {
+                assert_eq!(i.as_str(), "urn:test:no_class_witness");
+                assert!(
+                    reason.contains("merge_target_class"),
+                    "reason should mention the missing property; got {reason:?}"
+                );
+            }
+            other => panic!("expected MalformedMergeComorphism, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn witness_with_unresolvable_transformation_surfaces_transformation_not_found() {
         // The happy validation path with a placeholder transformation
         // IRI: conflict id exists, comorphism IRI resolves to a
@@ -3916,7 +4070,18 @@ mod tests {
         // `merge_transformation` property — the resolver detects
         // this rather than the application path discovering it at
         // evaluation time.
-        let malformed = make_resource("urn:test:malformed_witness", &[wk::MERGE_COMORPHISM], &[]);
+        // Carry the class field so the missing-transformation check
+        // is what the resolver hits (otherwise the missing-class
+        // check would fire first and the test's error variant would
+        // be wrong).
+        let malformed = make_resource(
+            "urn:test:malformed_witness",
+            &[wk::MERGE_COMORPHISM],
+            &[(
+                wk::MERGE_TARGET_CLASS,
+                Value::ResourceRef(Iri::parse("urn:test:Patient").unwrap()),
+            )],
+        );
         let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(malformed));
         let conflicts = classify_conflicts(&span, &backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
@@ -4017,10 +4182,16 @@ mod tests {
         let witness = make_resource(
             witness_iri,
             &[wk::MERGE_COMORPHISM],
-            &[(
-                wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(iri(transformation_iri)),
-            )],
+            &[
+                (
+                    wk::MERGE_TRANSFORMATION,
+                    Value::ResourceRef(iri(transformation_iri)),
+                ),
+                (
+                    wk::MERGE_TARGET_CLASS,
+                    Value::ResourceRef(iri("urn:test:Patient")),
+                ),
+            ],
         );
 
         let (span, backend, storage) = build_span_arc(
@@ -4037,8 +4208,14 @@ mod tests {
             )],
         );
         let topology = backend.load_topology().unwrap();
-        let handle =
-            resolve_merge_comorphism(&iri(witness_iri), &span, &topology, &*backend).unwrap();
+        let handle = resolve_merge_comorphism(
+            &iri(witness_iri),
+            &iri("urn:test:Patient"),
+            &span,
+            &topology,
+            &*backend,
+        )
+        .unwrap();
         (span, backend, handle, storage)
     }
 
@@ -4195,10 +4372,16 @@ mod tests {
         let witness = make_resource(
             witness_iri,
             &[wk::MERGE_COMORPHISM],
-            &[(
-                wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(iri(transformation_iri)),
-            )],
+            &[
+                (
+                    wk::MERGE_TRANSFORMATION,
+                    Value::ResourceRef(iri(transformation_iri)),
+                ),
+                (
+                    wk::MERGE_TARGET_CLASS,
+                    Value::ResourceRef(iri("urn:test:Patient")),
+                ),
+            ],
         );
 
         let (span, backend, storage) = build_span_arc(
@@ -4215,8 +4398,14 @@ mod tests {
             )],
         );
         let topology = backend.load_topology().unwrap();
-        let handle =
-            resolve_merge_comorphism(&iri(witness_iri), &span, &topology, &*backend).unwrap();
+        let handle = resolve_merge_comorphism(
+            &iri(witness_iri),
+            &iri("urn:test:Patient"),
+            &span,
+            &topology,
+            &*backend,
+        )
+        .unwrap();
 
         let branch_a = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
         let branch_b = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
@@ -4257,10 +4446,16 @@ mod tests {
         let witness = make_resource(
             witness_iri,
             &[wk::MERGE_COMORPHISM],
-            &[(
-                wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(iri(transformation_iri)),
-            )],
+            &[
+                (
+                    wk::MERGE_TRANSFORMATION,
+                    Value::ResourceRef(iri(transformation_iri)),
+                ),
+                (
+                    wk::MERGE_TARGET_CLASS,
+                    Value::ResourceRef(iri("urn:test:Patient")),
+                ),
+            ],
         );
 
         let (span, backend, storage) = build_span_arc(
@@ -4277,8 +4472,14 @@ mod tests {
             )],
         );
         let topology = backend.load_topology().unwrap();
-        let handle =
-            resolve_merge_comorphism(&iri(witness_iri), &span, &topology, &*backend).unwrap();
+        let handle = resolve_merge_comorphism(
+            &iri(witness_iri),
+            &iri("urn:test:Patient"),
+            &span,
+            &topology,
+            &*backend,
+        )
+        .unwrap();
 
         let branch_a = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);
         let branch_b = make_resource("urn:test:patient_42", &["urn:test:Patient"], &[]);

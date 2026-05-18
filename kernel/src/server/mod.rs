@@ -4342,6 +4342,7 @@ fn merge_error_to_submit_response(
         | MergeError::MergeComorphismNotFound(_)
         | MergeError::NotAMergeComorphism { .. }
         | MergeError::MalformedMergeComorphism { .. }
+        | MergeError::MergeComorphismWrongClass { .. }
         | MergeError::TransformationNotFound { .. }
         | MergeError::TransformationParseError { .. }
         | MergeError::TransformationEvalError { .. }

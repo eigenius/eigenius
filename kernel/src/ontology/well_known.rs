@@ -37,6 +37,22 @@ pub const CONDITIONAL_REQUIREMENT: &str = "urn:eigenius:core:ConditionalRequirem
 
 pub const MERGE_COMORPHISM: &str = "urn:eigenius:core:MergeComorphism";
 pub const MERGE_TRANSFORMATION: &str = "urn:eigenius:core:merge_transformation";
+/// The class a `MergeComorphism` is declared for — its `A` in the
+/// `(A, A, Option<A>) -> A` transformation signature (D37 §3.3, §6.1).
+/// Required on every committed `MergeComorphism` so the witness path
+/// can early-reject application to a mismatched conflict class and so
+/// the notebook's WitnessEditor can show only applicable comorphisms
+/// for the current conflict's class.
+pub const MERGE_TARGET_CLASS: &str = "urn:eigenius:core:merge_target_class";
+
+/// The declared Pi-type of a standalone `Lambda` resource (D37 §4.1,
+/// §5.1). Carrying the type alongside the term lets the validator
+/// commit-time-check the lambda's body against its declared signature
+/// rather than deferring the check to apply time. Optional on
+/// embedded lambdas inside `program` bodies (where the type is
+/// inferred from the surrounding `Pi`), required on top-level Lambda
+/// resources.
+pub const PROGRAM_TYPE: &str = "urn:eigenius:program:type";
 
 /// Canonical optional/maybe inductive (Phase 15b step 3, D20 §6.1).
 /// Used by `MergeComorphism` to type the optional ancestor argument

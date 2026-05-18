@@ -51,6 +51,12 @@ pub enum Declaration {
     Program(ProgramDecl),
     Codata(CodataDecl),
     Data(DataDecl),
+    /// D37 §3.3 — `merge_comorphism <iri> for <class> { … }`.
+    /// Lowers to a `MergeComorphism` resource carrying
+    /// `merge_target_class` + `merge_transformation`, plus (for the
+    /// inline-body form) a synthesised standalone Lambda resource at a
+    /// content-hash IRI.
+    MergeComorphism(MergeComorphismDecl),
 }
 
 /// `class ex:Dog : ex:Animal { ... }` or
@@ -301,6 +307,66 @@ pub enum TypeExpr {
         body: Box<TypeExpr>,
         pos: Position,
     },
+    /// D37 §3.5 — value-typed Pi binder:
+    /// `pi x_1 : T_1, ..., x_N : T_N => U`. Compiles to N nested
+    /// single-parameter `Exp::Pi` nodes; the rightmost `U` is the
+    /// return type. Distinct from `BinderArrow` (size-binder
+    /// specific) and `Arrow` (anonymous, non-dependent) — `Pi` is
+    /// the general value-typed binder needed for standalone Lambda
+    /// resources' `program:type` slot and for `merge_comorphism`
+    /// transformation signatures.
+    Pi {
+        params: Vec<TypedParam>,
+        codomain: Box<TypeExpr>,
+        pos: Position,
+    },
+}
+
+/// A typed binder: `name : type`. Used by `TypeExpr::Pi` and by the
+/// new typed `lambda` literal (D37 §3.1). The type can be any
+/// `TypeExpr`, including nested `Pi` / `Ref` / `Arrow` forms.
+#[derive(Debug, Clone)]
+pub struct TypedParam {
+    pub name: String,
+    pub typ: TypeExpr,
+    pub pos: Position,
+}
+
+/// D37 §3.3 — `merge_comorphism <iri> for <class> { <body> }`.
+/// Compiles to a `MergeComorphism` resource (with `merge_target_class`
+/// + `merge_transformation`) plus, for the inline-body form, a
+/// synthesised standalone Lambda resource at a content-hash IRI.
+#[derive(Debug)]
+pub struct MergeComorphismDecl {
+    /// The comorphism's own IRI (the `<iri>` after `merge_comorphism`).
+    pub name: QualifiedName,
+    /// The class A the comorphism is declared for. Compiled into
+    /// `urn:eigenius:core:merge_target_class`.
+    pub target_class: QualifiedName,
+    pub body: MergeComorphismBody,
+    pub pos: Position,
+}
+
+/// Either an inline lambda body or a reference to a separately-declared
+/// Lambda resource. The two forms compile to the same `MergeComorphism`
+/// resource shape; the inline form additionally emits the synthesised
+/// transformation.
+#[derive(Debug)]
+pub enum MergeComorphismBody {
+    /// `(a, b, opt) => <expression>` — the parameter types are
+    /// inferred from the surrounding `for <class>` clause as
+    /// `(class, class, Option<class>)`.
+    Inline {
+        params: Vec<String>,
+        body: Expr,
+        pos: Position,
+    },
+    /// `transformation = <iri>;` — references a previously-declared
+    /// Lambda resource. Its Pi-type must match `(A, A, Option<A>) -> A`.
+    Reference {
+        transformation: QualifiedName,
+        pos: Position,
+    },
 }
 
 /// An expression (ML-style, inside program bodies).
@@ -336,9 +402,15 @@ pub enum Expr {
     },
     /// `x`
     Var { name: String, pos: Position },
-    /// `\x -> e`
+    /// `\x -> e` (untyped, embedded in `program` bodies) or
+    /// `lambda x : T => body` (typed, D37 §3.1). The `param_type` slot
+    /// is `None` for the untyped form (the type is inferred from the
+    /// surrounding Pi during program elaboration) and `Some(T)` for
+    /// the typed form. Multi-parameter `lambda x_1 : T_1, …, x_N : T_N
+    /// => body` parses to N nested single-parameter `Lambda` nodes.
     Lambda {
         param: String,
+        param_type: Option<TypeExpr>,
         body: Box<Expr>,
         pos: Position,
     },

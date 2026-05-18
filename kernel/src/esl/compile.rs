@@ -185,6 +185,15 @@ impl Compiler {
             ast::Declaration::Program(p) => self.compile_program(p),
             ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
+            // D37 §3.3 — full lowering lands later in PR 2. Stubbed
+            // so the AST extension can roll out independently of the
+            // compiler; the parser arm isn't wired yet, so this is
+            // unreachable in practice until the parser catches up.
+            ast::Declaration::MergeComorphism(_) => Err(EslError::compiler(
+                None,
+                "merge_comorphism declarations are not yet lowered (D37 PR 2 in progress)"
+                    .to_string(),
+            )),
         }
     }
 
@@ -342,6 +351,15 @@ impl Compiler {
                 );
                 Ok(Value::Embedded(Box::new(ar)))
             }
+            // D37 §3.5 — value-typed Pi lowering lands later in PR 2.
+            // Stubbed so the AST extension can roll out independently
+            // of the compiler; the parser arm isn't wired yet, so
+            // this is unreachable in practice until the parser
+            // catches up.
+            ast::TypeExpr::Pi { .. } => Err(EslError::compiler(
+                None,
+                "pi type expressions are not yet lowered (D37 PR 2 in progress)".to_string(),
+            )),
         }
     }
 
