@@ -2207,7 +2207,7 @@ mod tests {
             "expected the notebook to ship ≥ 3 ESL cells; got {esl_cell_count}"
         );
 
-        let validator = Validator::new(ctx.head());
+        let validator = Validator::new(std::sync::Arc::clone(ctx.head()));
         let errors = validator.validate();
         assert!(
             errors.is_empty(),

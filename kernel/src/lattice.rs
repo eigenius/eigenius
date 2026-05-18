@@ -325,7 +325,7 @@ pub fn commit_layer(
     backend: &dyn PersistentBackend,
 ) -> Result<Arc<Layer>, CommitError> {
     let layer = Arc::new(builder.build(storage));
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(CommitError::Validation(errors));
@@ -417,7 +417,7 @@ pub fn commit_layer_with_cache(
     }
 
     // Cache miss: standard validate + store, then insert.
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(CommitError::Validation(errors));
@@ -436,7 +436,7 @@ fn commit_without_cache(
     layer: Arc<Layer>,
     backend: &dyn PersistentBackend,
 ) -> Result<AnchoredCommitOutcome, CommitError> {
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(CommitError::Validation(errors));

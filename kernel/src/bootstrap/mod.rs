@@ -150,7 +150,7 @@ fn load_layer(
     }
     let layer = Arc::new(builder.build(storage));
 
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         tracing::warn!(

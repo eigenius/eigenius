@@ -1060,10 +1060,11 @@ fn cmd_validate(file: &str, json_output: bool) {
             std::process::exit(1);
         }
     }
-    let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
+    let layer =
+        std::sync::Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
 
     // Validate
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(std::sync::Arc::clone(&layer));
     let errors = validator.validate();
 
     if errors.is_empty() {
