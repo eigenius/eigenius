@@ -197,21 +197,49 @@ class project:Dog : project:Reptile {
 
 ---
 
-## Scenario 6 — Witness, missing-comorphism error surface
+## Scenario 6 — Witness, happy path (D37)
 
-**Tests.** `WitnessEditor` UI · `MergeComorphismNotFound` → `MALFORMED_RESOLUTION` error path · Try-again recovery.
+**Tests.** D37 PRs 2+3 end-to-end: `merge_comorphism` ESL declaration → commit-time validator (Rule 18 + Rule 19) → `WitnessEditor` Combobox of applicable witnesses → resolver's apply-time class check → successful merge layer.
 
-**Kernel status.** The witness apply path is wired end-to-end (`apply_witness_resolution` in [kernel/src/layer/merge.rs](../../kernel/src/layer/merge.rs)). The server [explicitly notes](../../kernel/src/server/mod.rs) that `SubmitResolutionErrorKind::APPLICATION_PENDING` is a reserved wire value the kernel **no longer constructs** — every variant's commit shape is implemented. Happy-path witness application is covered by kernel unit tests (`witness_returning_second_argument_produces_branch_b_resource` and siblings in `merge.rs`).
+**Kernel status.** D37 PR 1 wired apply-time class enforcement (`resolve_merge_comorphism` early-rejects on `merge_target_class` mismatch). PR 2 added the ESL surface (`merge_comorphism`, `lambda`, `pi`, `for`) plus commit-time validators for `MergeComorphism` shape (Rule 18) and standalone Lambda well-typedness (Rule 19, NbE-backed). PR 3 turned the `WitnessEditor` into an EigenQL-driven Combobox of applicable comorphisms. PR 4's notebook scenario closes the loop.
 
-**Why this scenario is the error surface and not the happy path.** Authoring a working `MergeComorphism` requires committing a Mini-TT lambda transformation of shape `(A, A, Option<A>) -> A`. ESL v1 doesn't expose a surface for free-standing lambda terms (the `program` declaration produces a typed `Program`, not the bare Lambda that `merge_transformation` references). Until that authoring affordance lands, the notebook scenario exercises the error surface — the kernel still picks up a real, chain-committed comorphism when given one (and the unit tests pin that behaviour).
+**Branch setup.** Same conflict as Scenario 1 — `urn:project:Patient` declared two different ways across `s6-a` and `s6-b`. The new piece is **before** the per-branch divergence: commit a witness to `d36-base` (or `main`) via the new ESL surface so it's visible to both branches at merge time.
 
-**Branch setup.** Same as Scenario 1 (IriCollision on `urn:project:Patient`).
+**Author the witness on the shared base.**
+
+Run this cell on `main` *before* tagging `d36-base` (or on `d36-base` itself if you re-tag after):
+
+```esl
+namespace core    = "urn:eigenius:core";
+namespace project = "urn:project";
+
+// Take Branch B's body unchanged. Simplest witness — `Var "b"`
+// returns the second parameter as the merged value. D37 §9.1.
+merge_comorphism project:patient_take_b for project:Patient {
+    (a, b, opt) => b
+}
+```
+
+This emits two chain resources:
+
+- A synthesised standalone `Lambda` at `urn:eigenius:auto:lambda:<sha256>` carrying its declared Pi-type (`pi a : Patient, b : Patient, opt : Option<Patient> => Patient`) and `parameter_type` annotations on each binder.
+- A `MergeComorphism` at `urn:project:patient_take_b` with `merge_target_class = urn:project:Patient` and `merge_transformation` pointing at the synthesised lambda.
+
+The commit-time validator (Rule 18 + Rule 19) runs on both. Reject conditions: missing `merge_target_class`, transformation isn't a 3-binder Lambda chain, body fails NbE check against the declared Pi-type.
 
 **Resolution.**
-1. Drive to the picker.
-2. Pick **Witness**. Comorphism IRI = `urn:project:patient_merge_witness` (placeholder — no such resource on the chain).
-3. Click **Preview cascade**. Expect `MALFORMED_RESOLUTION` from the kernel with copy pointing at the missing IRI (specifically `MergeComorphismNotFound`).
-4. The error MessageBar offers **Try again**, dropping back to `picking`. Switch the strategy to Rename, confirm the session continues without a reload.
+
+1. Branches `s6-a` and `s6-b` already exist (Scenario 1 setup). Drive the explicit merge to the picker.
+2. Pick **Witness**. The `WitnessEditor` (PR 3) auto-runs an EigenQL query against the chain for `MergeComorphism` resources with `merge_target_class = urn:project:Patient` and surfaces the result as a Combobox:
+   - **Expected**: `patient_take_b` (short name) appears as a single option.
+3. Select `patient_take_b`. The Combobox commits its IRI as the `WitnessStrategy`'s `comorphismIri`.
+4. Click **Preview cascade**. Expect: cascade computed, may be empty (no Profile referencing `urn:project:Patient` in the stub).
+5. Click **Commit merge**. Expect: success card *"Merge committed"*. The merged `urn:project:Patient` is **branch B's body** (the billing description) — the witness's `Var "b"` returned the second argument unchanged.
+6. Switch to `s6-a` in the Branches panel — confirm the tip advanced to the merge layer. The merge layer's contributions: `urn:project:Patient` = B's body (via witness), plus any other non-conflict contributions from A and B.
+
+**Negative path (optional follow-on).** Pick **Witness**, then in the Combobox pick a comorphism declared for a *different* class (commit a second witness `merge_comorphism project:visit_take_b for project:Visit { (a, b, opt) => b }` first). The Combobox should NOT show this one for a `Patient` conflict — the EigenQL query filters by `merge_target_class`. If you manually paste the IRI in the empty-list fallback flow, the apply-time resolver returns `MergeComorphismWrongClass`.
+
+**Negative path — placeholder IRI.** As in the pre-D37 version of this scenario, pasting an IRI that doesn't resolve to a `MergeComorphism` (e.g., `urn:project:nonexistent`) still surfaces `MergeComorphismNotFound` → `MALFORMED_RESOLUTION`. The Combobox prevents this in the happy path but the free-form fallback (for conflict kinds without a target class) preserves the error surface.
 
 ---
 
@@ -347,7 +375,7 @@ Or, if testing against the docker-compose stack: `docker compose down -v && dock
 | 3 | QuotientEditor → KeepNeither + ancestor-fallback semantics |
 | 4 | KeepBoth greyed-out rationale (§15.5) |
 | 5 | RestructureEditor + new-parent definition (heaviest editor) |
-| 6 | WitnessEditor + MergeComorphismNotFound error path (kernel apply path is wired; happy-path test deferred until ESL gains lambda authoring) |
+| 6 | Happy-path Witness via D37 — `merge_comorphism` ESL → commit-time validators (Rule 18 + Rule 19) → WitnessEditor Combobox → successful merge |
 | 7 | MALFORMED_RESOLUTION + Try-again loop |
 | 8 | Cell auto-clear on success (§15.3) |
 | 9 | BRANCH_CAS_RACE recovery + race-diff banner (§11) |

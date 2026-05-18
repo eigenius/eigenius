@@ -3052,4 +3052,158 @@ mod tests {
             "expected arity error mentioning 3 parameters, got: {msg}"
         );
     }
+
+    // --- D37 §9: worked-example round-trip tests ---
+    //
+    // Each test compiles the worked example from D37 §9.x through
+    // the ESL pipeline and verifies the produced resource pair
+    // (synthesised Lambda + MergeComorphism) has the expected shape.
+    // These are compile-only smoke tests — the validator-side check
+    // for §9.1 is exercised by
+    // `compiler_output_validates_clean_end_to_end` in
+    // `validation::tests`. §9.2–9.4 require a richer chain (Patient
+    // with `description`/`weight` properties, `core:add`/`core:divide`
+    // operators) before the Rule 19 NbE check can run; the compile
+    // tests below pin the lowering shape regardless.
+
+    #[test]
+    fn d37_worked_example_9_1_take_side_b() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:project";
+            merge_comorphism ex:patient_take_b for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 2, "inline form emits lambda + comorphism");
+        // Synthesised lambda: outermost binder is `a`, body chain
+        // terminates in a Var resource pointing at `b`.
+        let lambda = &resources[0];
+        assert!(lambda
+            .id()
+            .unwrap()
+            .as_str()
+            .starts_with("urn:eigenius:auto:lambda:"));
+        // Comorphism: pinned for the Patient class, points at the
+        // synthesised lambda.
+        let comorphism = &resources[1];
+        assert_eq!(
+            comorphism.id().unwrap().as_str(),
+            "urn:project:patient_take_b"
+        );
+        assert_eq!(
+            comorphism
+                .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
+                .and_then(|v| v.as_iri_str()),
+            Some("urn:project:Patient")
+        );
+    }
+
+    #[test]
+    fn d37_worked_example_9_2_field_merge() {
+        // Take A's description and B's weight, build a fresh
+        // Patient. Uses `Construct` (Σ-introduction) + `Project`
+        // (Σ-elimination via `a.description`).
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:project";
+
+            merge_comorphism ex:patient_merge_fields for ex:Patient {
+                (a, b, opt) => Construct ex:Patient {
+                    ex:description = a.ex:description,
+                    ex:weight      = b.ex:weight
+                }
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 2);
+        let comorphism = &resources[1];
+        assert_eq!(
+            comorphism.id().unwrap().as_str(),
+            "urn:project:patient_merge_fields"
+        );
+    }
+
+    #[test]
+    fn d37_worked_example_9_3_arithmetic_average() {
+        // Average a's and b's weight via chain-committed
+        // `core:add` + `core:divide` operators. Uses `Apply` over
+        // those operator IRIs.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:project";
+
+            merge_comorphism ex:patient_avg_weight for ex:Patient {
+                (a, b, opt) => Construct ex:Patient {
+                    ex:description = a.ex:description,
+                    ex:weight      = core:divide(core:add(a.ex:weight, b.ex:weight), 2.0)
+                }
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 2);
+        let comorphism = &resources[1];
+        assert_eq!(
+            comorphism.id().unwrap().as_str(),
+            "urn:project:patient_avg_weight"
+        );
+    }
+
+    #[test]
+    fn d37_worked_example_9_4_ancestor_aware() {
+        // Match over Option<Patient> for the ancestor argument,
+        // branching on whether the ancestor disagrees with A. Uses
+        // `Match` over the `Option` inductive's two constructors.
+        //
+        // The ESL compile pass (Phase 11b) requires constructors
+        // referenced in `match` arms to be declared via a `data`
+        // block in the *same file*. `Option` is committed in the
+        // core ontology rather than re-declared per file, so the
+        // worked example needs a local `data` shadowing for the
+        // compile-time ctor lookup to find `some` / `none`.
+        // Lifting that restriction (so chain-committed inductives'
+        // constructors are reachable from `match`) is tracked as a
+        // separate ESL extension; until then the worked example
+        // declares Option locally to exercise the lowering path.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:project";
+
+            data ex:Option(A : core:Set) {
+                none,
+                some(A),
+            }
+
+            merge_comorphism ex:patient_ancestor_aware for ex:Patient {
+                (a, b, opt) => match opt {
+                    some(ancestor) -> a;
+                    none -> a;
+                }
+            }
+            "#,
+        );
+        // 3 resources: the local Option `data` decl + lambda + comorphism.
+        assert!(
+            resources.len() >= 2,
+            "expected at least lambda + comorphism, got {} resources",
+            resources.len()
+        );
+        let comorphism = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .is_some_and(|i| i.as_str() == "urn:project:patient_ancestor_aware")
+            })
+            .expect("comorphism resource should be present");
+        assert_eq!(
+            comorphism
+                .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
+                .and_then(|v| v.as_iri_str()),
+            Some("urn:project:Patient")
+        );
+    }
 }
