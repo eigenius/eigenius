@@ -189,6 +189,9 @@ impl<'a> Parser<'a> {
                     declarations.push(Declaration::Codata(self.parse_codata()?))
                 }
                 TokenKind::Data => declarations.push(Declaration::Data(self.parse_data()?)),
+                TokenKind::MergeComorphism => declarations.push(Declaration::MergeComorphism(
+                    self.parse_merge_comorphism()?,
+                )),
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
@@ -886,6 +889,15 @@ impl<'a> Parser<'a> {
     fn parse_type_expr(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
 
+        // D37 §3.5 — `pi x_1 : T_1, …, x_N : T_N => U`. The value-
+        // typed Pi binder. Distinct from the size-binder form
+        // (`{j : Size < bound} -> body`, below) which compiles to
+        // `Exp::SizedPi` / `Exp::Pi` for size kinds, and from the
+        // anonymous arrow `A -> B`.
+        if self.at(&TokenKind::Pi) {
+            return self.parse_pi_type();
+        }
+
         // Size-binder arrow form — unambiguous because codata obs
         // types start fresh (no braces ever appear as a normal type
         // here).
@@ -976,6 +988,141 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         Ok(TypeExpr::Ref { name, args, pos })
+    }
+
+    /// D37 §3.5 — `pi x_1 : T_1, …, x_N : T_N => U`. Value-typed
+    /// Pi expression for forward-declared signatures and for the
+    /// `program:type` slot on standalone Lambda resources.
+    ///
+    /// Single-parameter form is `pi x : T => U`. Multi-parameter is
+    /// comma-separated; the compiler folds N binders into N nested
+    /// single-parameter `Exp::Pi` nodes, with U as the innermost
+    /// return type.
+    fn parse_pi_type(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Pi)?;
+        let params = self.parse_typed_param_list()?;
+        self.expect(&TokenKind::FatArrow)?;
+        let codomain = self.parse_type_expr()?;
+        Ok(TypeExpr::Pi {
+            params,
+            codomain: Box::new(codomain),
+            pos,
+        })
+    }
+
+    /// `x_1 : T_1, x_2 : T_2, ...` — typed binder list shared by
+    /// `pi` (D37 §3.5) and the typed `lambda` literal (D37 §3.1).
+    /// Requires at least one binder; the list ends when the parser
+    /// sees a non-comma token after a binder (typically `=>`).
+    fn parse_typed_param_list(&mut self) -> Result<Vec<TypedParam>, EslError> {
+        let mut params = Vec::new();
+        loop {
+            let pos = self.current_pos();
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Colon)?;
+            let typ = self.parse_type_expr()?;
+            params.push(TypedParam { name, typ, pos });
+            if !self.at(&TokenKind::Comma) {
+                break;
+            }
+            self.advance();
+        }
+        Ok(params)
+    }
+
+    /// D37 §3.3 — `merge_comorphism <iri> for <class> { <body> }`.
+    ///
+    /// Body is either:
+    ///
+    /// - **Inline:** `(a, b, opt) => <expr>` — parameter types are
+    ///   inferred from the surrounding `for <class>` clause as
+    ///   `(class, class, Option<class>)`. The expression's type is
+    ///   inferred from the body.
+    /// - **Reference:** `transformation = <iri>;` — references a
+    ///   previously-declared standalone Lambda resource.
+    ///
+    /// Discriminator: an opening `(` after the `{` means inline; the
+    /// contextual keyword `transformation` means reference. No
+    /// ambiguity since the two forms can't overlap syntactically.
+    fn parse_merge_comorphism(&mut self) -> Result<MergeComorphismDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::MergeComorphism)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::For)?;
+        let target_class = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let body = match self.peek() {
+            TokenKind::LParen => self.parse_merge_comorphism_inline_body()?,
+            TokenKind::Ident(s) if s == "transformation" => {
+                self.parse_merge_comorphism_reference_body()?
+            }
+            other => {
+                return Err(EslError::parser(
+                    Some(self.current_pos()),
+                    format!(
+                        "expected '(' for an inline lambda body or 'transformation = <iri>' \
+                         for a reference body, found {other:?}"
+                    ),
+                ));
+            }
+        };
+
+        self.expect(&TokenKind::RBrace)?;
+        Ok(MergeComorphismDecl {
+            name,
+            target_class,
+            body,
+            pos,
+        })
+    }
+
+    fn parse_merge_comorphism_inline_body(&mut self) -> Result<MergeComorphismBody, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if !self.at(&TokenKind::RParen) {
+            loop {
+                params.push(self.expect_ident()?);
+                if !self.at(&TokenKind::Comma) {
+                    break;
+                }
+                self.advance();
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::FatArrow)?;
+        let body = self.parse_expr()?;
+        Ok(MergeComorphismBody::Inline { params, body, pos })
+    }
+
+    fn parse_merge_comorphism_reference_body(&mut self) -> Result<MergeComorphismBody, EslError> {
+        let pos = self.current_pos();
+        // The `transformation` keyword is contextual — match the
+        // identifier rather than tokenising it globally. Anywhere
+        // else in the grammar it stays a free identifier.
+        let kw = self.expect_ident()?;
+        if kw != "transformation" {
+            return Err(EslError::parser(
+                Some(pos.clone()),
+                format!(
+                    "expected 'transformation' keyword in merge_comorphism reference body, \
+                     found {kw:?}"
+                ),
+            ));
+        }
+        self.expect(&TokenKind::Eq)?;
+        let transformation = self.parse_qualified_name()?;
+        // Optional trailing semicolon — matches the ESL style for
+        // single-line property assignments.
+        if self.at(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(MergeComorphismBody::Reference {
+            transformation,
+            pos,
+        })
     }
 
     // --- Data (Phase 11b step 7, D19 §10) ---
@@ -1212,6 +1359,11 @@ impl<'a> Parser<'a> {
             TokenKind::Match => self.parse_match(),
             TokenKind::Corecord => self.parse_corecord(),
             TokenKind::Backslash | TokenKind::Lambda => self.parse_lambda(),
+            // D37 §3.1 — typed lambda literal `lambda x : T => body`.
+            // Distinct from the untyped `\x -> e` / `λx -> e` forms
+            // above; the typed form's params carry annotations and
+            // the body separator is `=>` instead of `->`.
+            TokenKind::LambdaKw => self.parse_lambda_literal(),
             _ => self.parse_apply_or_atom(),
         }
     }
@@ -1258,9 +1410,52 @@ impl<'a> Parser<'a> {
 
         Ok(Expr::Lambda {
             param,
+            param_type: None,
             body: Box::new(body),
             pos,
         })
+    }
+
+    /// D37 §3.1 — typed lambda literal:
+    ///   `lambda x_1 : T_1, …, x_N : T_N => body`
+    ///
+    /// Multi-parameter form folds into N nested single-parameter
+    /// `Expr::Lambda` nodes. Each binder carries `param_type =
+    /// Some(T_i)` so the validator can commit-time-check the body
+    /// against its declared signature.
+    ///
+    /// The optional `=> body : ReturnType` suffix from D37 §3.4 is
+    /// not yet accepted by the parser — the return type is inferred
+    /// from the body at validation time. Adding the suffix is a
+    /// pure grammar extension that doesn't change AST shape.
+    fn parse_lambda_literal(&mut self) -> Result<Expr, EslError> {
+        let outer_pos = self.current_pos();
+        self.expect(&TokenKind::LambdaKw)?;
+        let params = self.parse_typed_param_list()?;
+        self.expect(&TokenKind::FatArrow)?;
+        let body = self.parse_expr()?;
+
+        // Fold N parameters into nested Lambda nodes. The rightmost
+        // parameter wraps the body directly; the leftmost is the
+        // outermost lambda.
+        let mut expr = body;
+        for param in params.into_iter().rev() {
+            let pos = param.pos.clone();
+            expr = Expr::Lambda {
+                param: param.name,
+                param_type: Some(param.typ),
+                body: Box::new(expr),
+                pos,
+            };
+        }
+        // If we collapsed everything, the outermost lambda already
+        // has its own pos. The `outer_pos` captures the `lambda`
+        // keyword position itself — useful for diagnostics on an
+        // empty parameter list (which `parse_typed_param_list`
+        // rejects via `expect_ident` already, so this branch is
+        // defensive).
+        let _ = outer_pos;
+        Ok(expr)
     }
 
     /// `corecord { head = e1; tail = e2 }`
@@ -1578,6 +1773,8 @@ impl<'a> Parser<'a> {
 
             // Lambda (can appear as atom in nested position)
             TokenKind::Backslash | TokenKind::Lambda => self.parse_lambda(),
+            // D37 §3.1 — typed lambda literal in atom position.
+            TokenKind::LambdaKw => self.parse_lambda_literal(),
 
             // Keywords that are also valid in expression position
             TokenKind::Map | TokenKind::Reduce => {
@@ -2842,5 +3039,181 @@ mod tests {
             },
             _ => panic!("expected program"),
         }
+    }
+
+    // --- D37: lambda / pi / merge_comorphism surface forms ---
+
+    #[test]
+    fn parses_typed_lambda_literal_with_single_param() {
+        // Standalone-style typed lambda. Parses as a single
+        // Lambda node with `param_type = Some(Ref(A))`.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            program ex:f : ex:A -> ex:A {
+                lambda x : ex:A => x
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Program(p) => match &p.body {
+                Expr::Lambda {
+                    param,
+                    param_type: Some(TypeExpr::Ref { name, .. }),
+                    ..
+                } => {
+                    assert_eq!(param, "x");
+                    assert_eq!(name.name, "A");
+                }
+                other => panic!("expected typed Lambda, got {other:?}"),
+            },
+            _ => panic!("expected program"),
+        }
+    }
+
+    #[test]
+    fn parses_typed_lambda_literal_multi_param_folds_to_nested_lambdas() {
+        // `lambda a : ex:A, b : ex:A => a` lowers to
+        // `Lambda{a, Lambda{b, Var(a)}}`. The leftmost binder is
+        // the outermost lambda. Program signatures use
+        // `QualifiedName` input/output (single-class on each side);
+        // the typechecker would eventually disagree with the
+        // multi-arg lambda body's shape, but the parser only builds
+        // AST and is happy.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            program ex:f : ex:A -> ex:B {
+                lambda a : ex:A, b : ex:A => a
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Program(p) => match &p.body {
+                Expr::Lambda { param, body, .. } => {
+                    assert_eq!(param, "a");
+                    match body.as_ref() {
+                        Expr::Lambda {
+                            param: inner_param,
+                            body: inner_body,
+                            ..
+                        } => {
+                            assert_eq!(inner_param, "b");
+                            assert!(matches!(
+                                inner_body.as_ref(),
+                                Expr::Var { name, .. } if name == "a"
+                            ));
+                        }
+                        other => panic!("expected inner Lambda, got {other:?}"),
+                    }
+                }
+                other => panic!("expected outer Lambda, got {other:?}"),
+            },
+            _ => panic!("expected program"),
+        }
+    }
+
+    #[test]
+    fn parses_pi_type_expression() {
+        // `pi a : ex:A, b : ex:A => ex:A` as a codata observation
+        // type. Codata observation types accept full `TypeExpr`s
+        // (unlike `program` whose input/output slots are
+        // `QualifiedName` — a separate piece of work to extend),
+        // which is the natural existing surface for testing the new
+        // Pi expression.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            codata ex:F {
+                run : pi a : ex:A, b : ex:A => ex:A;
+            }
+            "#,
+        )
+        .unwrap();
+        let codata = match &file.declarations[0] {
+            Declaration::Codata(c) => c,
+            _ => panic!("expected codata"),
+        };
+        let obs_type = &codata.observations[0].typ;
+        match obs_type {
+            TypeExpr::Pi {
+                params, codomain, ..
+            } => {
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].name, "a");
+                assert_eq!(params[1].name, "b");
+                assert!(matches!(
+                    codomain.as_ref(),
+                    TypeExpr::Ref { name, .. } if name.name == "A"
+                ));
+            }
+            other => panic!("expected Pi, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_merge_comorphism_inline_body() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::MergeComorphism(mc) => {
+                assert_eq!(mc.name.name, "take_b");
+                assert_eq!(mc.target_class.name, "Patient");
+                match &mc.body {
+                    MergeComorphismBody::Inline { params, body, .. } => {
+                        assert_eq!(
+                            params,
+                            &["a".to_string(), "b".to_string(), "opt".to_string()]
+                        );
+                        assert!(matches!(body, Expr::Var { name, .. } if name == "b"));
+                    }
+                    other => panic!("expected inline body, got {other:?}"),
+                }
+            }
+            _ => panic!("expected merge_comorphism declaration"),
+        }
+    }
+
+    #[test]
+    fn parses_merge_comorphism_reference_body() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b for ex:Patient {
+                transformation = ex:take_b_term;
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::MergeComorphism(mc) => match &mc.body {
+                MergeComorphismBody::Reference { transformation, .. } => {
+                    assert_eq!(transformation.namespace.as_deref(), Some("ex"));
+                    assert_eq!(transformation.name, "take_b_term");
+                }
+                other => panic!("expected reference body, got {other:?}"),
+            },
+            _ => panic!("expected merge_comorphism declaration"),
+        }
+    }
+
+    #[test]
+    fn merge_comorphism_rejects_missing_for_clause() {
+        let result = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b { (a, b, opt) => b }
+            "#,
+        );
+        assert!(result.is_err(), "missing 'for' clause should fail to parse");
     }
 }

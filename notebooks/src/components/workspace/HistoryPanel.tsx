@@ -70,6 +70,7 @@ import { EdgeKind, NodeKind } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
 import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
+import { CreateBranchDialog } from "../dialogs/CreateBranchDialog";
 import { CreateTagDialog } from "../dialogs/CreateTagDialog";
 
 const TOASTER_ID = "history-panel-toaster";
@@ -216,6 +217,7 @@ export function HistoryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [createTagFor, setCreateTagFor] = useState<string | null>(null);
+  const [createBranchFor, setCreateBranchFor] = useState<string | null>(null);
 
   // Ensure the branches cache is populated so we can resolve the
   // active branch's head. Refresh on mount + when the user switches
@@ -339,9 +341,11 @@ export function HistoryPanel() {
                 );
               }}
               onCreateTag={() => setCreateTagFor(selectedRow.layerId)}
+              onCreateBranch={() =>
+                setCreateBranchFor(selectedRow.layerId)}
               onInspectResources={() => {
                 setReadPin(selectedRow.layerId);
-                setDestination("topology");
+                setDestination("layer");
               }}
             />
           </aside>
@@ -355,6 +359,18 @@ export function HistoryPanel() {
           dispatchToast(
             <Toast>
               <ToastTitle>Created tag {name}</ToastTitle>
+            </Toast>,
+            { intent: "success", timeout: 4000 },
+          )}
+      />
+      <CreateBranchDialog
+        open={createBranchFor !== null}
+        onClose={() => setCreateBranchFor(null)}
+        defaultLayerId={createBranchFor ?? undefined}
+        onCreated={(name) =>
+          dispatchToast(
+            <Toast>
+              <ToastTitle>Created branch {name}</ToastTitle>
             </Toast>,
             { intent: "success", timeout: 4000 },
           )}
@@ -421,6 +437,7 @@ interface DetailPanelProps {
   onTimeTravel: () => void;
   onCopy: () => void;
   onCreateTag: () => void;
+  onCreateBranch: () => void;
   onInspectResources: () => void;
 }
 
@@ -431,6 +448,7 @@ function DetailPanel({
   onTimeTravel,
   onCopy,
   onCreateTag,
+  onCreateBranch,
   onInspectResources,
 }: DetailPanelProps) {
   return (
@@ -512,15 +530,25 @@ function DetailPanel({
         </Tooltip>
 
         {
-          /* "Inspect resources" sets the read-pin to this layer and
-            navigates to the Topology destination, which honors the
-            pin as the graph root. The topology view includes Class /
-            Property / Resource / Institution nodes — exactly the
-            "what's defined here" lens. */
+          /* "Create branch" — opens the Create-branch dialog with
+            `Specific layer id` pre-filled to this row's layer id. */
         }
         <Tooltip
           relationship="description"
-          content="Open the Topology panel rooted at this layer (sets the session read-pin)."
+          content="Fork a new branch starting at this layer."
+        >
+          <Button onClick={onCreateBranch}>Create branch…</Button>
+        </Tooltip>
+
+        {
+          /* "Inspect resources" sets the read-pin to this layer and
+            navigates to the Layer-inspector destination, which lists
+            every resource defined in *this* layer (not the inherited
+            chain) with pretty-printed Eigon JSON. */
+        }
+        <Tooltip
+          relationship="description"
+          content="Open the layer inspector — every resource defined in this commit, with full Eigon JSON."
         >
           <Button onClick={onInspectResources}>Inspect resources…</Button>
         </Tooltip>

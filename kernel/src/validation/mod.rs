@@ -23,6 +23,7 @@ use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
 
 /// FormulaTerm InductiveType IRI (D32 §4). Pinned here so the
 /// formula-specific arity rule can short-circuit before doing any
@@ -105,6 +106,24 @@ pub enum ValidationRule {
     /// A FormulaTerm `App` spine doesn't match the leftmost operator's
     /// declared arity. D32 §5.4 / Phase 19d.0.d.
     OperatorArityMismatch,
+    /// A `MergeComorphism` resource is structurally inconsistent
+    /// with its declared `merge_target_class` (D37 §5.2). Typical
+    /// causes: the referenced `merge_transformation` isn't a
+    /// Lambda, the Lambda chain doesn't have the 3-binder
+    /// `(a, b, opt)` shape, or a binder's `parameter_type` slot
+    /// disagrees with `target_class` / `Option<target_class>`.
+    /// Commit-time enforcement of the witness signature contract;
+    /// complements the resolver's apply-time class check.
+    MergeComorphismShapeViolation,
+    /// A standalone Lambda resource's body fails to type-check
+    /// against its declared `program:type` Pi-term (D37 §5.1).
+    /// Commit-time NbE-backed verification: the body evaluated
+    /// against the typing context implied by the declared Pi-type
+    /// produces a type error rather than the expected codomain.
+    /// Catches witness bodies that reference unbound variables,
+    /// return the wrong type, or apply operators with mismatched
+    /// arities before the resource lands on the chain.
+    LambdaTypeMismatch,
 }
 
 impl fmt::Display for ValidationError {
@@ -121,12 +140,18 @@ impl fmt::Display for ValidationError {
 
 /// Validates resources in a layer against definitions reachable through
 /// the parent chain (and within the layer itself).
-pub struct Validator<'a> {
-    layer: &'a Layer,
+///
+/// Holds an `Arc<Layer>` rather than a borrow so the NbE-backed
+/// checks (Rule 19: standalone Lambda well-typedness) can construct a
+/// `CheckCtx` that owns the layer reference. Callers passing an
+/// already-Arc'd layer should `Arc::clone` it; callers with a fresh
+/// `Layer` should wrap in `Arc::new`.
+pub struct Validator {
+    layer: Arc<Layer>,
 }
 
-impl<'a> Validator<'a> {
-    pub fn new(layer: &'a Layer) -> Self {
+impl Validator {
+    pub fn new(layer: Arc<Layer>) -> Self {
         Self { layer }
     }
 
@@ -237,6 +262,25 @@ impl<'a> Validator<'a> {
         // and the export/import payload types is deferred until the
         // institution dispatch evaluator lands (M5 of the D14 plan).
         errors.extend(self.check_comorphism_well_formedness(resource, &res_id));
+
+        // Rule 18: MergeComorphism shape (D37 §5.2). The witness
+        // contract is `(A, A, Option<A>) -> A` where A is
+        // `merge_target_class`; check that the referenced
+        // `merge_transformation` is a Lambda chain matching that
+        // shape. Catches mismatched witnesses at commit time rather
+        // than at apply time.
+        errors.extend(self.check_merge_comorphism_shape(resource, &res_id));
+
+        // Rule 19: Standalone Lambda well-typedness (D37 §5.1).
+        // When a Lambda resource is committed at a top-level IRI
+        // and carries a declared `program:type`, NbE-check its
+        // body against the declared Pi-term. The cheapest fail
+        // mode is "binder count doesn't match Pi-arity", which the
+        // checker catches as it walks the lambda chain alongside
+        // the Pi. Body-internal errors (unbound var, wrong return
+        // type, operator arity mismatch) surface as the
+        // `nbe::check` diagnostic.
+        errors.extend(self.check_standalone_lambda_well_typedness(resource, &res_id));
 
         errors
     }
@@ -1507,6 +1551,308 @@ impl<'a> Validator<'a> {
         }
     }
 
+    /// Rule 18: MergeComorphism shape (D37 §5.2).
+    ///
+    /// The witness contract is `(A, A, Option<A>) -> A` where A is
+    /// the comorphism's declared `merge_target_class`. This check
+    /// verifies — at commit time, before any merge attempt — that
+    /// the referenced `merge_transformation`:
+    ///
+    /// 1. Resolves to a resource in the chain.
+    /// 2. Is a `urn:eigenius:program:Lambda` resource.
+    /// 3. Has exactly three nested-Lambda binders (the (a, b, opt)
+    ///    triple).
+    /// 4. Each binder's `parameter_type` (when populated) matches
+    ///    the witness contract:
+    ///    - binders 1 and 2: ResourceRef to `target_class`
+    ///    - binder 3: embedded `InductiveArgType` with
+    ///      `type_name = Option` and `type_args = [target_class]`
+    ///
+    /// The check is purely structural — full NbE-based body
+    /// type-checking against the Pi-term is a follow-on once
+    /// the elaborator surface is wired up. Even the cheap shape
+    /// check catches the most-impactful failure modes (wrong
+    /// target class, wrong arity, wrong parameter types) before
+    /// the resource hits the merge path.
+    fn check_merge_comorphism_shape(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let merge_class = iri(wk::MERGE_COMORPHISM);
+        if !resource.is_instance_of(&merge_class) {
+            return errors;
+        }
+
+        // `merge_target_class` is required by the core ontology; if
+        // absent, Rule 1 already flagged it. Only proceed if present.
+        let Some(target_class_value) = resource.get(&iri(wk::MERGE_TARGET_CLASS)) else {
+            return errors;
+        };
+        let Some(target_class_iri_str) = target_class_value.as_iri_str() else {
+            return errors;
+        };
+        let Ok(target_class) = Iri::parse(target_class_iri_str) else {
+            return errors;
+        };
+
+        // `merge_transformation` is required; if absent, Rule 1
+        // already flagged it. Only proceed if present.
+        let Some(transformation_value) = resource.get(&iri(wk::MERGE_TRANSFORMATION)) else {
+            return errors;
+        };
+        let Some(transformation_iri_str) = transformation_value.as_iri_str() else {
+            return errors;
+        };
+        let Ok(transformation_iri) = Iri::parse(transformation_iri_str) else {
+            return errors;
+        };
+
+        // Resolve the transformation in the chain.
+        let Some(transformation_resource_arc) = self.layer.resolve(&transformation_iri) else {
+            errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(iri(wk::MERGE_TRANSFORMATION)),
+                rule: ValidationRule::MergeComorphismShapeViolation,
+                message: format!(
+                    "MergeComorphism.merge_transformation: '{transformation_iri}' does not \
+                     resolve to any resource in the layer chain"
+                ),
+            });
+            return errors;
+        };
+        let transformation_resource: &Resource = &transformation_resource_arc;
+
+        // Must be a Lambda.
+        let lambda_class = iri("urn:eigenius:program:Lambda");
+        if !transformation_resource.is_instance_of(&lambda_class) {
+            errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(iri(wk::MERGE_TRANSFORMATION)),
+                rule: ValidationRule::MergeComorphismShapeViolation,
+                message: format!(
+                    "MergeComorphism.merge_transformation: '{transformation_iri}' resolves to a \
+                     resource that is not a urn:eigenius:program:Lambda"
+                ),
+            });
+            return errors;
+        }
+
+        // Walk the nested-Lambda chain. Expected shape: outer
+        // Lambda(a, _, Lambda(b, _, Lambda(opt, _, body))). Collect
+        // each binder's `parameter_type` (when populated) to check
+        // against the witness contract.
+        let parameter_type_iri = iri("urn:eigenius:program:parameter_type");
+        let body_iri = iri("urn:eigenius:program:body");
+
+        let mut current: &Resource = transformation_resource;
+        // Hold a local arc to keep ownership alive across iterations
+        // when we descend into an embedded body.
+        let mut _hold_embedded: Option<Box<Resource>> = None;
+        let mut binder_param_types: Vec<Option<Value>> = Vec::new();
+
+        for depth in 0..3usize {
+            // Each Lambda layer must carry `parameter` + `body`.
+            if !current.is_instance_of(&lambda_class) {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(iri(wk::MERGE_TRANSFORMATION)),
+                    rule: ValidationRule::MergeComorphismShapeViolation,
+                    message: format!(
+                        "MergeComorphism.merge_transformation: '{transformation_iri}' lambda \
+                         chain truncates at depth {depth}; the witness signature \
+                         (a, b, opt) requires three nested Lambda binders"
+                    ),
+                });
+                return errors;
+            }
+            binder_param_types.push(current.get(&parameter_type_iri).cloned());
+            let Some(body_value) = current.get(&body_iri) else {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(iri(wk::MERGE_TRANSFORMATION)),
+                    rule: ValidationRule::MergeComorphismShapeViolation,
+                    message: format!(
+                        "MergeComorphism.merge_transformation: '{transformation_iri}' Lambda at \
+                         depth {depth} is missing its `body` property"
+                    ),
+                });
+                return errors;
+            };
+            // The inner body is either an embedded Lambda (when we
+            // haven't yet hit the innermost) or a different
+            // expression shape (Var, Construct, etc.) at the
+            // innermost. After three layers we exit the loop.
+            if depth == 2 {
+                // Innermost — body is the actual witness expression.
+                // Don't descend further.
+                break;
+            }
+            match body_value {
+                Value::Embedded(embedded) => {
+                    _hold_embedded = Some(embedded.clone());
+                    current = _hold_embedded.as_ref().unwrap().as_ref();
+                }
+                _ => {
+                    errors.push(ValidationError {
+                        resource_id: res_id.clone(),
+                        property: Some(iri(wk::MERGE_TRANSFORMATION)),
+                        rule: ValidationRule::MergeComorphismShapeViolation,
+                        message: format!(
+                            "MergeComorphism.merge_transformation: '{transformation_iri}' Lambda \
+                             at depth {depth} body is not an embedded resource — the witness's \
+                             nested-Lambda chain is malformed"
+                        ),
+                    });
+                    return errors;
+                }
+            }
+        }
+
+        // Verify each binder's parameter_type when populated. We
+        // suppress check on a missing slot — the parameter_type is
+        // a recommends, not required — to keep this validator
+        // additive over existing untyped lambdas. Future iteration
+        // can require populated slots once the typed surface is the
+        // primary authoring path.
+        let class_iri_str = target_class.as_str();
+        for (idx, pt) in binder_param_types.iter().enumerate() {
+            let Some(value) = pt else { continue };
+            let (label, ok) = match idx {
+                0 | 1 => (
+                    "the class A (merge_target_class)",
+                    value.as_iri_str() == Some(class_iri_str),
+                ),
+                2 => (
+                    "Option<A> (Option of merge_target_class)",
+                    is_option_of_class(value, class_iri_str),
+                ),
+                _ => unreachable!(),
+            };
+            if !ok {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(iri(wk::MERGE_TRANSFORMATION)),
+                    rule: ValidationRule::MergeComorphismShapeViolation,
+                    message: format!(
+                        "MergeComorphism.merge_transformation: '{transformation_iri}' binder #{} \
+                         parameter_type does not match {label}",
+                        idx + 1
+                    ),
+                });
+            }
+        }
+
+        errors
+    }
+
+    /// Rule 19: Standalone Lambda well-typedness (D37 §5.1).
+    ///
+    /// When a resource is a `urn:eigenius:program:Lambda` committed
+    /// at a top-level IRI (i.e., it has `@id`) and carries a
+    /// declared `urn:eigenius:program:type`, NbE-check the body
+    /// against the declared Pi-term using `nbe::check::check`. This
+    /// is the deferred work from PR 2's initial cut — Rule 18 caught
+    /// structural mismatches; this catches semantic ones (unbound
+    /// vars, wrong return types, operator arity mismatches inside
+    /// the body).
+    ///
+    /// Skip when:
+    /// - The resource doesn't carry a top-level `@id` (embedded
+    ///   lambdas inside `program` bodies infer their type from
+    ///   context).
+    /// - `program:type` is absent (recommends, not requires — keeps
+    ///   the check additive over untyped lambdas).
+    /// - Any preparatory step fails (decoder error, parse error,
+    ///   eval error) — these get surfaced as a single typed error
+    ///   rather than letting NbE crash.
+    fn check_standalone_lambda_well_typedness(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        // Only standalone (top-level) lambdas — embedded lambdas
+        // have no @id and rely on surrounding-Pi inference.
+        if res_id.is_none() {
+            return errors;
+        }
+        let lambda_class = iri("urn:eigenius:program:Lambda");
+        if !resource.is_instance_of(&lambda_class) {
+            return errors;
+        }
+        let Some(type_value) = resource.get(&iri(wk::PROGRAM_TYPE)) else {
+            return errors;
+        };
+
+        // Decode the declared Pi-term.
+        let type_exp = match crate::program::expr::decode_program_type(type_value, &self.layer) {
+            Ok(e) => e,
+            Err(reason) => {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(iri(wk::PROGRAM_TYPE)),
+                    rule: ValidationRule::LambdaTypeMismatch,
+                    message: format!(
+                        "standalone Lambda's `program:type` could not be decoded: {reason}"
+                    ),
+                });
+                return errors;
+            }
+        };
+
+        // Parse the lambda body.
+        let lam_exp = match crate::program::expr::parse_expression(resource, &self.layer) {
+            Ok(e) => e,
+            Err(reason) => {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::LambdaTypeMismatch,
+                    message: format!("standalone Lambda body did not parse as Mini-TT: {reason}"),
+                });
+                return errors;
+            }
+        };
+
+        // Evaluate the declared type to a Val so `check` can use it.
+        let type_val = match crate::nbe::eval::eval(&type_exp, &crate::nbe::env::Rho::Nil) {
+            Ok(v) => v,
+            Err(eval_err) => {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(iri(wk::PROGRAM_TYPE)),
+                    rule: ValidationRule::LambdaTypeMismatch,
+                    message: format!(
+                        "standalone Lambda's `program:type` failed to evaluate: {eval_err}"
+                    ),
+                });
+                return errors;
+            }
+        };
+
+        // Run the NbE check. The check arm for `(Lam, Pi)` walks
+        // both chains and recurses on the body against the codomain.
+        let mut ctx = crate::nbe::check::CheckCtx::with_layer(
+            crate::nbe::env::Rho::Nil,
+            Vec::new(),
+            Arc::clone(&self.layer),
+        );
+        if let Err(reason) = crate::nbe::check::check(&mut ctx, &lam_exp, &type_val) {
+            errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::LambdaTypeMismatch,
+                message: format!(
+                    "standalone Lambda body fails to type-check against declared `program:type`: \
+                     {reason}"
+                ),
+            });
+        }
+        errors
+    }
+
     /// Rule 13: Universe stratification (D6b §7).
     ///
     /// A resource at universe level N may only reference resources at
@@ -1630,6 +1976,37 @@ fn value_as_iri(value: &Value) -> Option<Iri> {
     }
 }
 
+/// Helper: check that `value` is an embedded `InductiveArgType`
+/// resource representing `Option<class_iri>`. Used by the
+/// MergeComorphism shape check (Rule 18) to verify the third
+/// binder's parameter_type is `Option<A>`.
+fn is_option_of_class(value: &Value, class_iri: &str) -> bool {
+    let Value::Embedded(r) = value else {
+        return false;
+    };
+    let resource: &Resource = r.as_ref();
+    let inductive_arg_type = iri(wk::INDUCTIVE_ARG_TYPE);
+    if !resource.is_instance_of(&inductive_arg_type) {
+        return false;
+    }
+    let Some(name_value) = resource.get(&iri(wk::TYPE_NAME)) else {
+        return false;
+    };
+    let Some(name_str) = name_value.as_iri_str() else {
+        return false;
+    };
+    if name_str != wk::OPTION {
+        return false;
+    }
+    let Some(Value::Array(args)) = resource.get(&iri(wk::TYPE_ARGS)) else {
+        return false;
+    };
+    if args.len() != 1 {
+        return false;
+    }
+    args[0].as_iri_str() == Some(class_iri)
+}
+
 /// Format a resource's `is_a` list for inclusion in an error message.
 /// `[]` for empty, otherwise `[a, b, c]`.
 fn format_is_a_list(classes: Vec<Iri>) -> String {
@@ -1750,7 +2127,7 @@ mod tests {
     #[test]
     fn core_ontology_validates_against_itself() {
         let core = build_core_layer();
-        let validator = Validator::new(&core);
+        let validator = Validator::new(Arc::clone(&core));
         let errors = validator.validate();
         for e in &errors {
             eprintln!("  {e}");
@@ -1782,9 +2159,9 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         assert!(errors
             .iter()
@@ -1809,9 +2186,9 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         assert!(
             errors
@@ -1843,9 +2220,9 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         assert!(errors
             .iter()
@@ -1876,9 +2253,9 @@ mod tests {
                 ],
             ))
             .unwrap();
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         assert!(errors
             .iter()
@@ -1981,8 +2358,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         // Should have a MissingRequired for 'name' on rex
@@ -2019,8 +2396,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let my_errors: Vec<_> = errors
             .iter()
@@ -2084,8 +2461,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let derived_errors: Vec<_> = errors
@@ -2124,8 +2501,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let declared_errors: Vec<_> = errors
@@ -2158,8 +2535,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         assert!(
@@ -2188,8 +2565,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         assert!(
@@ -2220,8 +2597,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let verified_errors: Vec<_> = errors
@@ -2297,8 +2674,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let strat_errors: Vec<_> = errors
@@ -2337,8 +2714,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let strat_errors: Vec<_> = errors
@@ -2378,8 +2755,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let strat_errors: Vec<_> = errors
@@ -2417,8 +2794,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let strat_errors: Vec<_> = errors
@@ -2444,8 +2821,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let range_errors: Vec<_> = errors
@@ -2499,8 +2876,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let trace_errors: Vec<_> = errors
@@ -2545,8 +2922,8 @@ mod tests {
             ))
             .unwrap();
 
-        let layer = builder.build(crate::layer::LayerStorage::in_memory());
-        let validator = Validator::new(&layer);
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
 
         let missing_errors: Vec<_> = errors
@@ -2616,7 +2993,7 @@ mod tests {
         top.add_resource(bad_class).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let dangling: Vec<_> = errors
             .iter()
@@ -2673,7 +3050,7 @@ mod tests {
         top.add_resource(class).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let dangling: Vec<_> = errors
             .iter()
@@ -2709,7 +3086,7 @@ mod tests {
         top.add_resource(bad_prop).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let dangling: Vec<_> = errors
             .iter()
@@ -2838,7 +3215,7 @@ mod tests {
         .unwrap();
 
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let comorphism_errors: Vec<_> = validator
             .validate()
             .into_iter()
@@ -2884,7 +3261,7 @@ mod tests {
         .unwrap();
 
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let dangling: Vec<_> = errors
             .iter()
@@ -2943,7 +3320,7 @@ mod tests {
         .unwrap();
 
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let mismatched: Vec<_> = errors
             .iter()
@@ -2990,7 +3367,7 @@ mod tests {
         .unwrap();
 
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let dangling: Vec<_> = errors
             .iter()
@@ -3049,7 +3426,7 @@ mod tests {
         top.add_resource(bad_prop).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let dangling: Vec<_> = errors
             .iter()
@@ -3185,7 +3562,7 @@ mod tests {
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(&layer);
+        let validator = Validator::new(Arc::clone(&layer));
         let errors = validator.validate();
         let inductive_errors: Vec<_> = errors
             .iter()
@@ -3215,7 +3592,7 @@ mod tests {
         top.add_resource(bad).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let errors = Validator::new(&layer).validate();
+        let errors = Validator::new(Arc::clone(&layer)).validate();
         let mismatches: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
@@ -3251,7 +3628,7 @@ mod tests {
         top.add_resource(bad).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let errors = Validator::new(&layer).validate();
+        let errors = Validator::new(Arc::clone(&layer)).validate();
         let mismatches: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
@@ -3332,7 +3709,7 @@ mod tests {
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let errors = Validator::new(&layer).validate();
+        let errors = Validator::new(Arc::clone(&layer)).validate();
         let arity_errors: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == ValidationRule::OperatorArityMismatch)
@@ -3363,7 +3740,7 @@ mod tests {
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let errors = Validator::new(&layer).validate();
+        let errors = Validator::new(Arc::clone(&layer)).validate();
         let arity_errors: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == ValidationRule::OperatorArityMismatch)
@@ -3418,7 +3795,7 @@ mod tests {
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let errors = Validator::new(&layer).validate();
+        let errors = Validator::new(Arc::clone(&layer)).validate();
         let arity_errors: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == ValidationRule::OperatorArityMismatch)
@@ -3448,7 +3825,7 @@ mod tests {
         top.add_resource(bad).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let errors = Validator::new(&layer).validate();
+        let errors = Validator::new(Arc::clone(&layer)).validate();
         let mismatches: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
@@ -3462,6 +3839,526 @@ mod tests {
         assert!(
             path_match,
             "error must include structured path `args[0]`: {mismatches:?}"
+        );
+    }
+
+    // --- D37 §5.2: MergeComorphism shape (Rule 18) ---
+
+    /// Builds a layer with the core ontology + a `Patient` class and
+    /// the supplied resources. The Patient class gives the
+    /// MergeComorphism a real `merge_target_class` target.
+    fn build_d37_layer(extras: Vec<Resource>) -> Arc<Layer> {
+        let core = build_core_layer();
+        let mut builder = LayerBuilder::new("d37-test", Some(core));
+        // Minimal Patient class so target_class references resolve.
+        let mut patient = Resource::new(iri("urn:test:Patient"));
+        patient.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        );
+        patient.set(iri(wk::SHORT_NAME), Value::String("Patient".to_string()));
+        builder.add_resource(patient).unwrap();
+        for r in extras {
+            builder.add_resource(r).unwrap();
+        }
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    /// Build a 3-binder Lambda chain `λ a. λ b. λ opt. body` with
+    /// the given parameter types and body expression. Pass `None`
+    /// for any binder to omit its `parameter_type` (untyped binder).
+    fn make_witness_lambda_chain(
+        iri_str: &str,
+        param_types: [Option<Value>; 3],
+        body: Resource,
+    ) -> Resource {
+        let mut current = body;
+        let params = ["a", "b", "opt"];
+        for i in (0..3).rev() {
+            let mut lam = Resource::new_embedded();
+            lam.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+            );
+            lam.set(
+                iri("urn:eigenius:program:parameter"),
+                Value::String(params[i].to_string()),
+            );
+            if let Some(pt) = &param_types[i] {
+                lam.set(iri("urn:eigenius:program:parameter_type"), pt.clone());
+            }
+            lam.set(
+                iri("urn:eigenius:program:body"),
+                Value::Embedded(Box::new(current)),
+            );
+            current = lam;
+        }
+        // Outermost lambda is the top-level resource — set its IRI.
+        current.set_id(Some(iri(iri_str)));
+        current
+    }
+
+    /// Build a `Var "b"` body — the simplest witness body.
+    fn make_var_b_body() -> Resource {
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+        );
+        r.set(
+            iri("urn:eigenius:program:name"),
+            Value::String("b".to_string()),
+        );
+        r
+    }
+
+    fn make_option_of(class_iri: &str) -> Value {
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+        );
+        r.set(iri(wk::TYPE_NAME), Value::String(wk::OPTION.to_string()));
+        r.set(
+            iri(wk::TYPE_ARGS),
+            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+        );
+        Value::Embedded(Box::new(r))
+    }
+
+    fn make_merge_comorphism(iri_str: &str, target_class: &str, transformation: &str) -> Resource {
+        let mut r = Resource::new(iri(iri_str));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::MERGE_COMORPHISM))]),
+        );
+        r.set(
+            iri(wk::MERGE_TARGET_CLASS),
+            Value::ResourceRef(iri(target_class)),
+        );
+        r.set(
+            iri(wk::MERGE_TRANSFORMATION),
+            Value::ResourceRef(iri(transformation)),
+        );
+        r
+    }
+
+    #[test]
+    fn merge_comorphism_with_well_typed_witness_validates_clean() {
+        let lambda = make_witness_lambda_chain(
+            "urn:test:take_b_term",
+            [
+                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(make_option_of("urn:test:Patient")),
+            ],
+            make_var_b_body(),
+        );
+        let comorphism = make_merge_comorphism(
+            "urn:test:take_b",
+            "urn:test:Patient",
+            "urn:test:take_b_term",
+        );
+        let layer = build_d37_layer(vec![lambda, comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let shape_violations: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::MergeComorphismShapeViolation)
+            .collect();
+        assert!(
+            shape_violations.is_empty(),
+            "well-typed witness should not produce a shape violation; got {shape_violations:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_with_unresolved_transformation_is_rejected() {
+        // Transformation points at an IRI that doesn't resolve.
+        let comorphism = make_merge_comorphism(
+            "urn:test:take_b",
+            "urn:test:Patient",
+            "urn:test:missing_term",
+        );
+        let layer = build_d37_layer(vec![comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let matches: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::MergeComorphismShapeViolation
+                    && e.message.contains("does not resolve")
+            })
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "missing transformation should be flagged; got errors {errors:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_with_non_lambda_transformation_is_rejected() {
+        // Transformation points at the Patient class (a Class, not a
+        // Lambda). The shape check rejects it.
+        let comorphism =
+            make_merge_comorphism("urn:test:take_b", "urn:test:Patient", "urn:test:Patient");
+        let layer = build_d37_layer(vec![comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let matches: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::MergeComorphismShapeViolation
+                    && e.message.contains("not a urn:eigenius:program:Lambda")
+            })
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "non-Lambda transformation should be flagged; got errors {errors:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_with_wrong_parameter_type_is_rejected() {
+        // First binder's parameter_type is `urn:test:Visit` instead
+        // of the comorphism's `merge_target_class` (Patient).
+        let lambda = make_witness_lambda_chain(
+            "urn:test:wrong_param_term",
+            [
+                Some(Value::ResourceRef(iri("urn:test:Visit"))),
+                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(make_option_of("urn:test:Patient")),
+            ],
+            make_var_b_body(),
+        );
+        let comorphism = make_merge_comorphism(
+            "urn:test:take_b",
+            "urn:test:Patient",
+            "urn:test:wrong_param_term",
+        );
+        let layer = build_d37_layer(vec![lambda, comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let matches: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::MergeComorphismShapeViolation
+                    && e.message.contains("binder #1")
+            })
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "binder #1 parameter_type mismatch should be flagged; got errors {errors:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_with_wrong_option_type_is_rejected() {
+        // Third binder is `Option<Visit>` instead of `Option<Patient>`.
+        let lambda = make_witness_lambda_chain(
+            "urn:test:wrong_opt_term",
+            [
+                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(make_option_of("urn:test:Visit")),
+            ],
+            make_var_b_body(),
+        );
+        let comorphism = make_merge_comorphism(
+            "urn:test:take_b",
+            "urn:test:Patient",
+            "urn:test:wrong_opt_term",
+        );
+        let layer = build_d37_layer(vec![lambda, comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let matches: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::MergeComorphismShapeViolation
+                    && e.message.contains("binder #3")
+            })
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "binder #3 parameter_type mismatch should be flagged; got errors {errors:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_with_too_few_binders_is_rejected() {
+        // Transformation is a SINGLE-binder Lambda instead of three
+        // nested. The shape check rejects at depth 1.
+        let mut single_lambda = Resource::new(iri("urn:test:single_term"));
+        single_lambda.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+        );
+        single_lambda.set(
+            iri("urn:eigenius:program:parameter"),
+            Value::String("a".to_string()),
+        );
+        single_lambda.set(
+            iri("urn:eigenius:program:body"),
+            Value::Embedded(Box::new(make_var_b_body())),
+        );
+        let comorphism = make_merge_comorphism(
+            "urn:test:take_b",
+            "urn:test:Patient",
+            "urn:test:single_term",
+        );
+        let layer = build_d37_layer(vec![single_lambda, comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let matches: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::MergeComorphismShapeViolation
+                    && e.message.contains("truncates")
+            })
+            .collect();
+        assert!(
+            !matches.is_empty(),
+            "truncated lambda chain should be flagged; got errors {errors:?}"
+        );
+    }
+
+    // --- D37 §5.1: Standalone Lambda well-typedness (Rule 19) ---
+
+    /// Build a witness Lambda resource at `iri_str` carrying the
+    /// canonical `pi a : C, b : C, opt : Option<C> => C` `program:type`
+    /// for the supplied target class, plus its parameter_type slots,
+    /// and the supplied innermost body. Used to test the body-vs-type
+    /// check path end-to-end.
+    fn make_witness_lambda_with_program_type(
+        iri_str: &str,
+        target_class: &str,
+        body: Resource,
+    ) -> Resource {
+        let class_value = Value::ResourceRef(iri(target_class));
+        let option_value = make_option_of(target_class);
+        let param_types = [
+            Some(class_value.clone()),
+            Some(class_value.clone()),
+            Some(option_value.clone()),
+        ];
+        let mut lambda = make_witness_lambda_chain(iri_str, param_types.clone(), body);
+
+        // Build the Pi-term: `pi a : C, b : C, opt : Option<C> => C`.
+        // Nested TypeBinderArrow resources.
+        let mut pi_acc: Value = class_value;
+        let params = ["a", "b", "opt"];
+        let kinds = [
+            param_types[0].as_ref().unwrap(),
+            param_types[1].as_ref().unwrap(),
+            param_types[2].as_ref().unwrap(),
+        ];
+        for i in (0..3).rev() {
+            let mut ar = Resource::new_embedded();
+            ar.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::TYPE_BINDER_ARROW))]),
+            );
+            ar.set(iri(wk::BINDER_NAME), Value::String(params[i].to_string()));
+            ar.set(iri(wk::BINDER_KIND), kinds[i].clone());
+            ar.set(iri(wk::BINDER_BODY), pi_acc);
+            pi_acc = Value::Embedded(Box::new(ar));
+        }
+        lambda.set(iri(wk::PROGRAM_TYPE), pi_acc);
+        lambda
+    }
+
+    #[test]
+    fn standalone_lambda_with_well_typed_body_validates_clean() {
+        // Body is `Var "b"`. The witness contract says the body's
+        // type must match the codomain (Patient). `b` is bound at
+        // type Patient — well-typed.
+        let lambda = make_witness_lambda_with_program_type(
+            "urn:test:take_b_term",
+            "urn:test:Patient",
+            make_var_b_body(),
+        );
+        let layer = build_d37_layer(vec![lambda]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let lambda_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::LambdaTypeMismatch)
+            .collect();
+        assert!(
+            lambda_errs.is_empty(),
+            "well-typed witness body should validate clean; got {lambda_errs:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_lambda_with_unbound_var_body_is_rejected() {
+        // Body references `unbound_var` which isn't in scope. NbE
+        // catches it.
+        let mut bad_body = Resource::new_embedded();
+        bad_body.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+        );
+        bad_body.set(
+            iri("urn:eigenius:program:name"),
+            Value::String("unbound_var".to_string()),
+        );
+        let lambda = make_witness_lambda_with_program_type(
+            "urn:test:bad_term",
+            "urn:test:Patient",
+            bad_body,
+        );
+        let layer = build_d37_layer(vec![lambda]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let lambda_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::LambdaTypeMismatch)
+            .collect();
+        assert!(
+            !lambda_errs.is_empty(),
+            "unbound-var witness body should be flagged; got errors {errors:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_lambda_without_program_type_is_skipped() {
+        // Lambda has no `program:type` declared — the validator
+        // skips the body check (the check is additive over untyped
+        // lambdas). No error should fire from Rule 19.
+        let lambda = make_witness_lambda_chain(
+            "urn:test:untyped_term",
+            [None, None, None],
+            make_var_b_body(),
+        );
+        let layer = build_d37_layer(vec![lambda]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let lambda_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::LambdaTypeMismatch)
+            .collect();
+        assert!(
+            lambda_errs.is_empty(),
+            "untyped lambda should not fire Rule 19; got {lambda_errs:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_lambda_without_id_is_skipped() {
+        // Lambda inside a `program` body has no top-level @id; the
+        // check skips it (the surrounding Pi handles its type
+        // inference). We verify by committing a synthetic embedded
+        // lambda as part of a wrapper resource — but since the
+        // validator iterates top-level resources, the embedded
+        // lambda never gets directly visited. This test pins that
+        // behaviour structurally: no error should fire for any
+        // committed embedded resource.
+        let outer_iri = "urn:test:outer_with_embedded";
+        let inner_lambda = {
+            let mut lam = Resource::new_embedded();
+            lam.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+            );
+            lam.set(
+                iri("urn:eigenius:program:parameter"),
+                Value::String("x".to_string()),
+            );
+            lam.set(
+                iri("urn:eigenius:program:body"),
+                Value::Embedded(Box::new(make_var_b_body())),
+            );
+            // No @id — embedded.
+            lam
+        };
+        // Wrap in a generic top-level resource (Class) — just to
+        // commit something containing an embedded lambda.
+        let mut wrapper = Resource::new(iri(outer_iri));
+        wrapper.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        );
+        wrapper.set(iri(wk::SHORT_NAME), Value::String("outer".to_string()));
+        // Stash the embedded lambda on a benign property — even if
+        // the validator picks it up, the lambda has no @id so Rule
+        // 19 skips. The wrapper class itself doesn't get Rule 19.
+        wrapper.set(
+            iri(wk::DESCRIPTION),
+            Value::Embedded(Box::new(inner_lambda)),
+        );
+        let layer = build_d37_layer(vec![wrapper]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let lambda_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::LambdaTypeMismatch)
+            .collect();
+        assert!(
+            lambda_errs.is_empty(),
+            "embedded lambdas (no top-level @id) should not fire Rule 19; got {lambda_errs:?}"
+        );
+    }
+
+    #[test]
+    fn compiler_output_validates_clean_end_to_end() {
+        // End-to-end smoke: compile a `merge_comorphism` inline body
+        // through the ESL pipeline (which emits both the synthesised
+        // Lambda and the MergeComorphism), load into a layer
+        // alongside the Patient class, and verify the validator
+        // accepts the result. This closes the compiler↔validator
+        // loop: anything the compiler produces should pass the
+        // validator's shape check.
+        let resources = crate::esl::compile(
+            r#"
+            namespace ex = "urn:test";
+            merge_comorphism ex:take_b for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        )
+        .unwrap();
+        let layer = build_d37_layer(resources);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let shape_violations: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::MergeComorphismShapeViolation)
+            .collect();
+        assert!(
+            shape_violations.is_empty(),
+            "compiler-produced witness must pass the shape validator; got {shape_violations:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_with_untyped_binders_still_validates() {
+        // parameter_type is optional today (a recommends, not
+        // requires). When binders carry no parameter_type, the
+        // shape check passes — only present-but-wrong slots are
+        // flagged. This keeps the validator additive over existing
+        // untyped lambdas.
+        let lambda = make_witness_lambda_chain(
+            "urn:test:untyped_term",
+            [None, None, None],
+            make_var_b_body(),
+        );
+        let comorphism = make_merge_comorphism(
+            "urn:test:take_b",
+            "urn:test:Patient",
+            "urn:test:untyped_term",
+        );
+        let layer = build_d37_layer(vec![lambda, comorphism]);
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let shape_violations: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::MergeComorphismShapeViolation)
+            .collect();
+        assert!(
+            shape_violations.is_empty(),
+            "untyped binders should pass (only present-but-wrong slots are flagged); got {shape_violations:?}"
         );
     }
 }

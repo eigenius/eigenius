@@ -170,6 +170,29 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.previewMerge,
         req,
       ),
+    // D20 / D36 resolution surface. `prepareMerge` returns the
+    // typed-conflict list the notebook's resolution flow drives;
+    // `previewCascade` runs the cascade-impact dry-run; the user
+    // acknowledges each cascade item and `submitResolution` commits
+    // the resulting merge layer and CAS-advances the branch.
+    prepareMerge: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_PREPARE_MERGE,
+        kernel.raw.prepareMerge,
+        req,
+      ),
+    previewCascade: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_PREVIEW_CASCADE,
+        kernel.raw.previewCascade,
+        req,
+      ),
+    submitResolution: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_SUBMIT_RESOLUTION,
+        kernel.raw.submitResolution,
+        req,
+      ),
     // Compaction wizard (D34 §7 / Phase 6). Browser drives a 3-step
     // wizard: estimate → confirm → consolidate. Both RPCs round-trip
     // through to the kernel verbatim.

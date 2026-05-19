@@ -26,6 +26,71 @@ pub const FORMAT: &str = "urn:eigenius:core:Format";
 pub const ENCODING: &str = "urn:eigenius:core:Encoding";
 pub const CONDITIONAL_REQUIREMENT: &str = "urn:eigenius:core:ConditionalRequirement";
 
+// --- Layer reconciliation (D20 §6.1) ---
+//
+// A `MergeComorphism` is the typed witness for a `Witness`-strategy
+// resolution: its `merge_transformation` Component has signature
+// `(A, A, Option<A>) -> A` where `A` is the class of the IRI being
+// merged. Distinct from the institution-layer `Comorphism` (which
+// witnesses cross-institution translation); same triadic typing
+// discipline, different application surface.
+
+pub const MERGE_COMORPHISM: &str = "urn:eigenius:core:MergeComorphism";
+pub const MERGE_TRANSFORMATION: &str = "urn:eigenius:core:merge_transformation";
+/// The class a `MergeComorphism` is declared for — its `A` in the
+/// `(A, A, Option<A>) -> A` transformation signature (D37 §3.3, §6.1).
+/// Required on every committed `MergeComorphism` so the witness path
+/// can early-reject application to a mismatched conflict class and so
+/// the notebook's WitnessEditor can show only applicable comorphisms
+/// for the current conflict's class.
+pub const MERGE_TARGET_CLASS: &str = "urn:eigenius:core:merge_target_class";
+
+/// The declared Pi-type of a standalone `Lambda` resource (D37 §4.1,
+/// §5.1). Carrying the type alongside the term lets the validator
+/// commit-time-check the lambda's body against its declared signature
+/// rather than deferring the check to apply time. Optional on
+/// embedded lambdas inside `program` bodies (where the type is
+/// inferred from the surrounding `Pi`), required on top-level Lambda
+/// resources.
+pub const PROGRAM_TYPE: &str = "urn:eigenius:program:type";
+
+// --- Merge resolution records (D38 §3) ---
+//
+// One `MergeResolutionRecord` resource is committed alongside the
+// resolved bodies in every merge layer, one record per resolved
+// conflict. Required slots pin the strategy + conflict id; per-strategy
+// optional slots capture the strategy-specific choices. For Witness
+// resolutions the comorphism + transformation Lambda are also copied
+// into the merge layer at their original IRIs so the record's pointer
+// is guaranteed to resolve on the merge layer's own chain (D38 §3.2).
+
+pub const MERGE_RESOLUTION_RECORD: &str = "urn:eigenius:core:MergeResolutionRecord";
+pub const MERGE_RECORD_CONFLICT_ID: &str = "urn:eigenius:core:merge_record_conflict_id";
+pub const MERGE_RECORD_STRATEGY: &str = "urn:eigenius:core:merge_record_strategy";
+pub const MERGE_RECORD_BRANCH_A_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_branch_a_source_layer";
+pub const MERGE_RECORD_BRANCH_B_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_branch_b_source_layer";
+pub const MERGE_RECORD_ANCESTOR_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_ancestor_source_layer";
+pub const MERGE_RECORD_WITNESS: &str = "urn:eigenius:core:merge_record_witness";
+pub const MERGE_RECORD_WITNESS_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_witness_source_layer";
+pub const MERGE_RECORD_RENAME_SIDE: &str = "urn:eigenius:core:merge_record_rename_side";
+pub const MERGE_RECORD_RENAME_FROM_IRI: &str = "urn:eigenius:core:merge_record_rename_from_iri";
+pub const MERGE_RECORD_RENAME_TO_IRI: &str = "urn:eigenius:core:merge_record_rename_to_iri";
+pub const MERGE_RECORD_QUOTIENT_KIND: &str = "urn:eigenius:core:merge_record_quotient_kind";
+pub const MERGE_RECORD_QUOTIENT_WINNER: &str = "urn:eigenius:core:merge_record_quotient_winner";
+pub const MERGE_RECORD_RESTRUCTURE_NEW_PARENT: &str =
+    "urn:eigenius:core:merge_record_restructure_new_parent";
+pub const MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS: &str =
+    "urn:eigenius:core:merge_record_restructure_affected_class";
+
+/// Canonical optional/maybe inductive (Phase 15b step 3, D20 §6.1).
+/// Used by `MergeComorphism` to type the optional ancestor argument
+/// of a `(A, A, Option<A>) -> A` witness signature.
+pub const OPTION: &str = "urn:eigenius:core:Option";
+
 // --- Inductive types (Phase 11b, D19) ---
 
 pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";

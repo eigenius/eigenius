@@ -30,6 +30,12 @@ pub enum TokenKind {
     Program,
     Codata,
     Data,
+    /// D37 §3.3 — `merge_comorphism <iri> for <class> { … }`.
+    MergeComorphism,
+    /// D37 §3.3 — the `for` keyword separating a merge_comorphism's
+    /// IRI from its target class. Reserved globally so it can't be
+    /// shadowed by user-defined identifiers.
+    For,
 
     // Expression keywords
     Let,
@@ -40,6 +46,19 @@ pub enum TokenKind {
     Map,
     Reduce,
     Corecord,
+    /// D37 §3.1 — `lambda x : T => body` (the typed, English-word
+    /// form). Distinct from `Backslash` (`\`) and `Lambda` (`λ`),
+    /// which produce the untyped lambda surface used in `program`
+    /// bodies.
+    LambdaKw,
+    /// D37 §3.5 — `pi x : T => U` value-typed Pi expression.
+    Pi,
+    /// D37 §3.3 — `=>` returns/produces. Used in `lambda` bodies
+    /// (after the parameter list) and inline `merge_comorphism`
+    /// bodies. Distinct from `Arrow` (`->`) which separates the
+    /// untyped lambda's parameter from its body and types in
+    /// non-dependent arrows.
+    FatArrow,
 
     // Literals
     StringLit(String),
@@ -200,6 +219,26 @@ impl<'a> Lexer<'a> {
             Some(ch) => ch,
         };
 
+        // FatArrow `=>` vs single Eq `=`. The `=>` token (D37 §3.1)
+        // marks the lambda-body separator in typed lambda literals
+        // and inline `merge_comorphism` bodies. Same lookahead shape
+        // as `-` / `->` below.
+        if ch == b'=' {
+            if self.peek_at(1) == Some(b'>') {
+                self.advance();
+                self.advance();
+                return Ok(Token {
+                    kind: TokenKind::FatArrow,
+                    pos,
+                });
+            }
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Eq,
+                pos,
+            });
+        }
+
         // Single-character tokens
         let simple = match ch {
             b'(' => Some(TokenKind::LParen),
@@ -211,7 +250,6 @@ impl<'a> Lexer<'a> {
             b';' => Some(TokenKind::Semicolon),
             b',' => Some(TokenKind::Comma),
             b'.' => Some(TokenKind::Dot),
-            b'=' => Some(TokenKind::Eq),
             b'\\' => Some(TokenKind::Backslash),
             b'<' => Some(TokenKind::Less),
             b'+' => Some(TokenKind::Plus),
@@ -395,6 +433,9 @@ impl<'a> Lexer<'a> {
             "program" => TokenKind::Program,
             "codata" => TokenKind::Codata,
             "data" => TokenKind::Data,
+            // D37 §3.3 — typed merge witness declaration.
+            "merge_comorphism" => TokenKind::MergeComorphism,
+            "for" => TokenKind::For,
             // Expression keywords
             "let" => TokenKind::Let,
             "case" => TokenKind::Case,
@@ -404,6 +445,11 @@ impl<'a> Lexer<'a> {
             "map" => TokenKind::Map,
             "reduce" => TokenKind::Reduce,
             "corecord" => TokenKind::Corecord,
+            // D37 §3.1, §3.5 — typed lambda literal + Pi type expr.
+            // Distinct from `\` / `λ` (Backslash / Lambda tokens),
+            // which produce the untyped lambda surface.
+            "lambda" => TokenKind::LambdaKw,
+            "pi" => TokenKind::Pi,
             // Literals
             "true" => TokenKind::BoolLit(true),
             "false" => TokenKind::BoolLit(false),

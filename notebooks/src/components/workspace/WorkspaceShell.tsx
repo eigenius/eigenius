@@ -64,6 +64,8 @@ import {
   Apps20Regular,
   Archive20Filled,
   Archive20Regular,
+  ArrowLeft20Regular,
+  ArrowRight20Regular,
   BranchFork20Filled,
   BranchFork20Regular,
   bundleIcon,
@@ -95,6 +97,7 @@ import { GcPanel } from "./GcPanel";
 import { HealthPanel } from "./HealthPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { InstitutionsPanel } from "./InstitutionsPanel";
+import { LayerPanel } from "./LayerPanel";
 import { MergePanel } from "./MergePanel";
 import { TagsPanel } from "./TagsPanel";
 import { TasksPanel } from "./TasksPanel";
@@ -241,6 +244,11 @@ const useStyles = makeStyles({
     // app puts the rail-toggle here, not nested inside the rail.
     flexShrink: 0,
   },
+  navBtn: {
+    // Match the hamburger's footprint so the row of icon-buttons in
+    // the top bar lines up cleanly.
+    flexShrink: 0,
+  },
   main: {
     flex: 1,
     minWidth: 0,
@@ -318,6 +326,17 @@ export function WorkspaceShell() {
   // "View history" action jumps to History without prop-drilling).
   const destination = useNotebookStore((s) => s.destination);
   const setDestination = useNotebookStore((s) => s.setDestination);
+  // Browser-style back/forward over destination history. The store
+  // owns the stack so navigations triggered by any panel (not just
+  // the rail) participate.
+  const goBackDestination = useNotebookStore((s) => s.goBackDestination);
+  const goForwardDestination = useNotebookStore(
+    (s) => s.goForwardDestination,
+  );
+  const canGoBack = useNotebookStore((s) => s.destinationCursor > 0);
+  const canGoForward = useNotebookStore(
+    (s) => s.destinationCursor < s.destinationHistory.length - 1,
+  );
   // `railCollapsed`: icon-only mode. Section headers, dividers, and
   // item labels are hidden; each icon gets a hover tooltip. Default
   // expanded so a first-time user sees the IA; subsequent toggles
@@ -355,6 +374,26 @@ export function WorkspaceShell() {
               : <PanelLeftContract20Regular />}
             onClick={() => setRailCollapsed((v) => !v)}
             aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          />
+        </Tooltip>
+        <Tooltip relationship="label" content="Back">
+          <Button
+            appearance="subtle"
+            className={styles.navBtn}
+            icon={<ArrowLeft20Regular />}
+            disabled={!canGoBack}
+            onClick={goBackDestination}
+            aria-label="Back"
+          />
+        </Tooltip>
+        <Tooltip relationship="label" content="Forward">
+          <Button
+            appearance="subtle"
+            className={styles.navBtn}
+            icon={<ArrowRight20Regular />}
+            disabled={!canGoForward}
+            onClick={goForwardDestination}
+            aria-label="Forward"
           />
         </Tooltip>
         <div className={styles.headerBranch}>
@@ -503,6 +542,8 @@ function DestinationView({ destination }: { destination: Destination }) {
       return <InstitutionsPanel />;
     case "topology":
       return <TopologyPanel />;
+    case "layer":
+      return <LayerPanel />;
     case "health":
       return <HealthPanel />;
   }

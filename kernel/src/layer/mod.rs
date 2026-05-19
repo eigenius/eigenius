@@ -32,6 +32,7 @@ mod cache;
 mod consolidate;
 mod handle;
 mod index;
+pub mod merge;
 mod redirect;
 mod storage;
 mod supporting;
@@ -263,6 +264,15 @@ pub struct Layer {
     /// `storage` instead — for deep chains, the bloom is the right data
     /// structure for the skip-or-probe decision (D23 §5.2).
     defined_iris: BTreeSet<Iri>,
+    /// IRIs explicitly tombstoned at this layer (D20 §6.2 / §6.3; 15g
+    /// step 3). The lookup walker — [`Layer::resolve`] and
+    /// [`Layer::resolve_all`] — treats a tombstoned IRI as "removed
+    /// from view," returning `None` for the resolve and skipping it
+    /// during the merged-view iteration. Typically empty; populated
+    /// only by `Rename` (suppressing the renamed-from IRI) and
+    /// `SchemaQuotient::KeepNeither` (suppressing an IRI both branches
+    /// added that the user wants gone from the merge).
+    tombstoned_iris: BTreeSet<Iri>,
     /// Bundled storage handles. Adding a new handle (e.g., a triple-pattern
     /// index in 14h) is a one-line change to `LayerStorage`; no call-site
     /// churn.
@@ -323,6 +333,7 @@ impl Layer {
             name: handle.name,
             parents: parent.into_iter().collect(),
             defined_iris,
+            tombstoned_iris: handle.tombstoned_iris,
             storage,
             redirect_target: None,
             created_at: handle.created_at,
@@ -347,6 +358,7 @@ impl Layer {
             name: handle.name,
             parents,
             defined_iris,
+            tombstoned_iris: handle.tombstoned_iris,
             storage,
             redirect_target: None,
             created_at: handle.created_at,
@@ -442,6 +454,14 @@ impl Layer {
         &self.defined_iris
     }
 
+    /// Returns the set of IRIs explicitly tombstoned at this layer
+    /// (D20 §6.2 / §6.3; 15g step 3). Walking the chain treats a hit
+    /// in this set as "removed" — see [`Layer::resolve`] for the
+    /// short-circuit semantics.
+    pub fn tombstoned_iris(&self) -> &BTreeSet<Iri> {
+        &self.tombstoned_iris
+    }
+
     /// Returns the bundled `LayerStorage` (cache + backend + bloom cache).
     /// Use this when constructing a child layer or `ExecutionContext` that
     /// should share the same handles.
@@ -520,6 +540,15 @@ impl Layer {
                     continue;
                 }
             }
+            // D20 §6.2 / §6.3 (15g step 3): a tombstone short-circuits
+            // the walk. The IRI is "removed from view" at this layer;
+            // we don't probe its content and we don't continue up the
+            // parent chain. A layer that simultaneously tombstones and
+            // defines the same IRI is rejected by `LayerBuilder`, so
+            // this branch is unambiguous when reached.
+            if layer.tombstoned_iris.contains(iri) {
+                return None;
+            }
             let maybe_present = match layer.storage.bloom_cache.get_or_load(&layer.id) {
                 Ok(Some(bloom)) => bloom.might_contain(iri),
                 _ => true,
@@ -540,9 +569,19 @@ impl Layer {
     /// Redirect-aware: on encountering a redirect source, the walk
     /// continues through the redirect target's chain (D25 §12.8). The
     /// source layer's own content + parents are skipped.
+    ///
+    /// Tombstone-aware (15g step 3): a tombstone at this layer stops
+    /// the walk for this IRI — the merged view treats the IRI as
+    /// removed, so no parent-side bodies are returned even if they
+    /// exist. This matches the `resolve` short-circuit so the
+    /// single-resource and all-resources views agree on whether an
+    /// IRI is reachable.
     pub fn resolve_all(&self, iri: &Iri) -> Vec<Arc<Resource>> {
         if let Some(target) = self.redirect_target.as_ref() {
             return target.resolve_all(iri);
+        }
+        if self.tombstoned_iris.contains(iri) {
+            return Vec::new();
         }
         let mut results = Vec::new();
         if let Some(r) = self.get_resource(iri) {
@@ -599,6 +638,14 @@ pub enum LayerError {
     CoreNamespaceViolation { iri: Iri },
     /// Resource has no @id (only top-level resources can be added to layers).
     MissingId,
+    /// `LayerBuilder::tombstone(iri)` was called for an IRI the builder
+    /// already has a resource for via `add_resource`. A layer can't
+    /// simultaneously define and tombstone the same IRI — the merge
+    /// layer's body would shadow the tombstone, so the suppression is
+    /// either redundant (we define it; suppressing is a no-op) or
+    /// contradictory (we suppress it; the body is unreachable). 15g
+    /// rejects both shapes.
+    TombstoneCollidesWithResource { iri: Iri },
 }
 
 impl fmt::Display for LayerError {
@@ -611,6 +658,10 @@ impl fmt::Display for LayerError {
                 )
             }
             LayerError::MissingId => write!(f, "resource must have an @id to be added to a layer"),
+            LayerError::TombstoneCollidesWithResource { iri } => write!(
+                f,
+                "cannot tombstone '{iri}': the same IRI is already defined in this layer"
+            ),
         }
     }
 }
@@ -627,6 +678,7 @@ pub struct LayerBuilder {
     name: String,
     resources: BTreeMap<Iri, Resource>,
     parents: Vec<Arc<Layer>>,
+    tombstoned_iris: BTreeSet<Iri>,
 }
 
 impl LayerBuilder {
@@ -639,6 +691,7 @@ impl LayerBuilder {
             name: name.to_string(),
             resources: BTreeMap::new(),
             parents: parent.into_iter().collect(),
+            tombstoned_iris: BTreeSet::new(),
         }
     }
 
@@ -652,6 +705,7 @@ impl LayerBuilder {
             name: name.to_string(),
             resources: BTreeMap::new(),
             parents,
+            tombstoned_iris: BTreeSet::new(),
         }
     }
 
@@ -669,6 +723,35 @@ impl LayerBuilder {
 
         self.resources.insert(iri, resource);
         Ok(())
+    }
+
+    /// Tombstone an IRI at this layer (D20 §6.2 / §6.3, 15g step 3).
+    /// Post-build, `Layer::resolve(iri)` returns `None` instead of
+    /// walking parents — so tombstoning lets a merge layer suppress
+    /// an IRI a parent chain would otherwise expose. Used by the
+    /// resolution-application surface for `Rename` (suppressing the
+    /// renamed-from IRI when no surviving body sits at that key) and
+    /// `SchemaQuotient::KeepNeither` (suppressing an IRI both
+    /// branches added that the user wants gone from the merge).
+    ///
+    /// Calling with an IRI that's also `add_resource`'d is rejected:
+    /// the layer can't simultaneously define and suppress the same
+    /// IRI. Tombstoning a core IRI from a non-root layer is also
+    /// rejected (core never disappears under merges).
+    pub fn tombstone(&mut self, iri: Iri) -> Result<(), LayerError> {
+        if iri.is_core() {
+            return Err(LayerError::CoreNamespaceViolation { iri });
+        }
+        if self.resources.contains_key(&iri) {
+            return Err(LayerError::TombstoneCollidesWithResource { iri });
+        }
+        self.tombstoned_iris.insert(iri);
+        Ok(())
+    }
+
+    /// Returns the IRIs the builder will tombstone at build time.
+    pub fn tombstoned_iris(&self) -> &BTreeSet<Iri> {
+        &self.tombstoned_iris
     }
 
     /// Returns true if the builder has a resource with the given IRI.
@@ -748,6 +831,7 @@ impl LayerBuilder {
             name: self.name,
             parents: self.parents,
             defined_iris,
+            tombstoned_iris: self.tombstoned_iris,
             storage,
             // Freshly-built layers can't be their own redirect source —
             // a redirect is only installed by `consolidate_chain` on
@@ -1097,6 +1181,90 @@ mod tests {
         let resolved = child.resolve(&iri("urn:eigenius:example:X")).unwrap();
         let desc = resolved.get(&iri("urn:eigenius:core:description")).unwrap();
         assert_eq!(desc.as_str(), Some("v2")); // child wins
+    }
+
+    #[test]
+    fn tombstone_shadows_parent_body() {
+        // Parent layer defines an IRI; a child layer tombstones it.
+        // Resolving the IRI through the child returns None — the
+        // walker short-circuits at the tombstone before reaching the
+        // parent's body. `resolve_all` is symmetric.
+        let storage = test_storage();
+        let mut root_builder = LayerBuilder::new("root", None);
+        root_builder
+            .add_resource(make_resource(
+                "urn:eigenius:example:Patient",
+                vec![("urn:eigenius:core:description", Value::String("v1".into()))],
+            ))
+            .unwrap();
+        let root = Arc::new(root_builder.build(storage.clone()));
+        assert!(root.resolve(&iri("urn:eigenius:example:Patient")).is_some());
+
+        let mut child_builder = LayerBuilder::new("child", Some(Arc::clone(&root)));
+        child_builder
+            .tombstone(iri("urn:eigenius:example:Patient"))
+            .unwrap();
+        let child = child_builder.build(storage);
+
+        assert!(child
+            .resolve(&iri("urn:eigenius:example:Patient"))
+            .is_none());
+        assert!(child
+            .resolve_all(&iri("urn:eigenius:example:Patient"))
+            .is_empty());
+        assert!(child
+            .tombstoned_iris()
+            .contains(&iri("urn:eigenius:example:Patient")));
+    }
+
+    #[test]
+    fn tombstone_collides_with_resource_is_rejected() {
+        let mut builder = LayerBuilder::new("test", None);
+        builder
+            .add_resource(make_resource("urn:eigenius:example:X", Vec::new()))
+            .unwrap();
+        let err = builder
+            .tombstone(iri("urn:eigenius:example:X"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LayerError::TombstoneCollidesWithResource { .. }
+        ));
+    }
+
+    #[test]
+    fn tombstone_round_trips_through_memory_backend() {
+        // Build a child layer that tombstones an IRI, persist it,
+        // load the chain back, and verify the reconstructed Layer's
+        // `tombstoned_iris` matches. Pins the LayerHandle → Layer
+        // round-trip the merge surface relies on.
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(crate::storage::memory::MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
+
+        let mut root_builder = LayerBuilder::new("root", None);
+        root_builder
+            .add_resource(make_resource("urn:eigenius:example:Patient", Vec::new()))
+            .unwrap();
+        let root = Arc::new(root_builder.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        let mut child_builder = LayerBuilder::new("child", Some(Arc::clone(&root)));
+        child_builder
+            .tombstone(iri("urn:eigenius:example:Patient"))
+            .unwrap();
+        let child = Arc::new(child_builder.build(storage.clone()));
+        backend.store_layer(&child).unwrap();
+
+        let info = backend.load_chain_from(child.id()).unwrap().unwrap();
+        let reloaded = build_chain(info, storage);
+        assert_eq!(reloaded.id(), child.id());
+        assert!(reloaded
+            .tombstoned_iris()
+            .contains(&iri("urn:eigenius:example:Patient")));
+        assert!(reloaded
+            .resolve(&iri("urn:eigenius:example:Patient"))
+            .is_none());
     }
 
     #[test]

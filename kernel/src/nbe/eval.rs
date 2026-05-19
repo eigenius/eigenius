@@ -2207,7 +2207,7 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
 /// The principled fix is type-directed conversion consulting the
 /// property's declared `data_type` — deferred to Phase 11+ when the
 /// type checker has full property-type awareness during evaluation.
-fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
+pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
     use crate::ontology::resource::Value as RVal;
     match v {
         RVal::String(s) => {
@@ -2235,7 +2235,7 @@ fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
 }
 
 /// Convert a Mini-TT Val to an Eigon resource Value (for Construct).
-fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
+pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
     use crate::ontology::resource::Value as RVal;
     match val {
         Val::ResourceVal(r) => {

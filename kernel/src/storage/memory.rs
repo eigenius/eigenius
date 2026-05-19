@@ -234,6 +234,12 @@ impl PersistentBackend for MemoryPersistentBackend {
             created_at: layer.created_at(),
             byte_size,
             is_redirect_source: false,
+            // 15g step 3: persist tombstones onto the handle so
+            // `load_chain_from` → `build_chain` → `Layer::from_handle`
+            // round-trips the suppression set. Cheap (a small
+            // BTreeSet of IRI strings); zero overhead for layers
+            // without any.
+            tombstoned_iris: layer.tombstoned_iris().clone(),
         };
         // Build the bloom outside the lock (it's a hash-heavy loop) and
         // insert it together with the rest of the layer's state.

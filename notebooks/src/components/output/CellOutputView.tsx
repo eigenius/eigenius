@@ -66,13 +66,18 @@ const useStyles = makeStyles({
 
 export interface CellOutputViewProps {
   output: CellOutput;
+  /** Cell that produced this output. Threaded into the commit
+   * status badge so a `NEEDS_WITNESSED_MERGE` failure can route
+   * the user into the rail Merge panel's resolution flow with the
+   * cell context preserved (D36 §8.1). */
+  cellId?: string;
 }
 
-export function CellOutputView({ output }: CellOutputViewProps) {
+export function CellOutputView({ output, cellId }: CellOutputViewProps) {
   const styles = useStyles();
   return (
     <div className={styles.root}>
-      {renderBody(output, styles)}
+      {renderBody(output, styles, cellId)}
     </div>
   );
 }
@@ -80,6 +85,7 @@ export function CellOutputView({ output }: CellOutputViewProps) {
 function renderBody(
   output: CellOutput,
   styles: ReturnType<typeof useStyles>,
+  cellId: string | undefined,
 ) {
   switch (output.kind) {
     case "load":
@@ -96,7 +102,9 @@ function renderBody(
             {output.warnings.length > 0 && (
               <Caption1>{output.warnings.length} warning(s)</Caption1>
             )}
-            {output.commit && <CommitStatusBadge commit={output.commit} />}
+            {output.commit && (
+              <CommitStatusBadge commit={output.commit} cellId={cellId} />
+            )}
           </div>
           <Accordion collapsible className={styles.stackAccordion}>
             <AccordionItem value="stack">
@@ -130,7 +138,9 @@ function renderBody(
       return (
         <>
           <ResultTable document={output.document} />
-          {output.commit && <CommitStatusBadge commit={output.commit} />}
+          {output.commit && (
+              <CommitStatusBadge commit={output.commit} cellId={cellId} />
+            )}
         </>
       );
 
@@ -141,7 +151,9 @@ function renderBody(
             resource={output.resource}
             traceIri={output.traceIri}
           />
-          {output.commit && <CommitStatusBadge commit={output.commit} />}
+          {output.commit && (
+              <CommitStatusBadge commit={output.commit} cellId={cellId} />
+            )}
         </>
       );
 

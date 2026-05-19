@@ -58,6 +58,7 @@ import {
 } from "@fluentui/react-components";
 import {
   Add16Regular,
+  BranchFork16Regular,
   Delete16Regular,
   History16Regular,
   Tag20Regular,
@@ -66,6 +67,7 @@ import type { TagInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
 import { formatAbsoluteIso, formatRelative } from "../../runtime/relativeTime";
+import { CreateBranchDialog } from "../dialogs/CreateBranchDialog";
 import { CreateTagDialog } from "../dialogs/CreateTagDialog";
 
 const TOASTER_ID = "tags-panel-toaster";
@@ -156,6 +158,11 @@ export function TagsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TagInfo | null>(null);
+  // Tag we're forking a branch off of. `null` = dialog closed. We
+  // carry the tag *name* (not its layer id) so the dialog pre-selects
+  // the tag in the "Tag" picker — semantically the same layer but a
+  // more human-readable handle than the hex.
+  const [createBranchFor, setCreateBranchFor] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -260,6 +267,7 @@ export function TagsPanel() {
               tags={tags}
               styles={styles}
               onViewInHistory={onViewInHistory}
+              onCreateBranch={(t) => setCreateBranchFor(t.name)}
               onDelete={(t) => setDeleteTarget(t)}
             />
           )}
@@ -286,6 +294,19 @@ export function TagsPanel() {
         onConfirm={(t) => void onDelete(t)}
       />
 
+      <CreateBranchDialog
+        open={createBranchFor !== null}
+        onClose={() => setCreateBranchFor(null)}
+        defaultTagName={createBranchFor ?? undefined}
+        onCreated={(name) =>
+          dispatchToast(
+            <Toast>
+              <ToastTitle>Created branch {name}</ToastTitle>
+            </Toast>,
+            { intent: "success", timeout: 4000 },
+          )}
+      />
+
       <Toaster toasterId={toasterId} position="top-end" />
     </div>
   );
@@ -295,6 +316,7 @@ interface TagsTableProps {
   tags: readonly TagInfo[];
   styles: ReturnType<typeof useStyles>;
   onViewInHistory: (t: TagInfo) => void;
+  onCreateBranch: (t: TagInfo) => void;
   onDelete: (t: TagInfo) => void;
 }
 
@@ -302,6 +324,7 @@ function TagsTable({
   tags,
   styles,
   onViewInHistory,
+  onCreateBranch,
   onDelete,
 }: TagsTableProps) {
   return (
@@ -352,6 +375,19 @@ function TagsTable({
                       onClick={() => onViewInHistory(t)}
                     >
                       View in history
+                    </Button>
+                  </Tooltip>
+                  <Tooltip
+                    content="Fork a new branch starting at this tag's layer."
+                    relationship="description"
+                  >
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<BranchFork16Regular />}
+                      onClick={() => onCreateBranch(t)}
+                    >
+                      Create branch…
                     </Button>
                   </Tooltip>
                   <Tooltip

@@ -719,7 +719,7 @@ The phase decomposes into two milestones that are separately reviewable:
 
 - [D22 — Notebook UX and TypeScript SDK](d22-notebook-and-typescript-sdk.md) — full spec including the Eigon-CBOR ↔ TypeScript marshalling rules
 - [Platform guide chapter 14 — Notebook](../guides/platform/14-notebook.md)
-- [Platform guide chapter 15 — TypeScript SDK](../guides/platform/15-typescript-sdk.md)
+- [Platform guide chapter 17 — TypeScript SDK](../guides/platform/17-typescript-sdk.md)
 
 ---
 

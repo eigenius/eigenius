@@ -49,7 +49,7 @@ Eigenius is a small set of cooperating processes:
 - **In-process** — for file commands and read-only ontology inspection. No kernel server needed.
 - **Remote** — for live operations against a running kernel. Pass `--endpoint http://localhost:50051`.
 
-**TypeScript SDK** ([`clients/eigenius-ts/`](../../../clients/eigenius-ts/)) — `@eigenius/client`. Wraps the orchestrator's two Connect-RPC services in a single typed `Eigen` class. The notebook uses it; you can use it programmatically from any TypeScript runtime (browser, Deno, Node). See [chapter 15](15-typescript-sdk.md).
+**TypeScript SDK** ([`clients/eigenius-ts/`](../../../clients/eigenius-ts/)) — `@eigenius/client`. Wraps the orchestrator's two Connect-RPC services in a single typed `Eigen` class. The notebook uses it; you can use it programmatically from any TypeScript runtime (browser, Deno, Node). See [chapter 17](17-typescript-sdk.md).
 
 ## 1.2. Seven ways to interact with the platform
 
@@ -57,7 +57,7 @@ You'll touch the platform through one of seven interfaces depending on what you'
 
 1. **The notebook** — the most accessible UX. A React SPA the orchestrator serves at `http://localhost:8080/notebooks/` once `docker compose up -d` is running; cells (markdown, ESL, EigenQL, TypeScript, program-run) run against the live kernel and auto-render typed outputs. Notebook documents are JSON files and can be saved, loaded, or published into the kernel as queryable resources. See [chapter 14](14-notebook.md).
 
-2. **The TypeScript SDK** — for programmatic browser / Deno / Node use of the same RPC surface the notebook drives. The `Eigen` class wraps `inspect` / `query` / `load` / `runProgram` / `runProgramByIri` / `layerTopology` / `publishNotebook` and a few more. See [chapter 15](15-typescript-sdk.md).
+2. **The TypeScript SDK** — for programmatic browser / Deno / Node use of the same RPC surface the notebook drives. The `Eigen` class wraps `inspect` / `query` / `load` / `runProgram` / `runProgramByIri` / `layerTopology` / `publishNotebook` and a few more. See [chapter 17](17-typescript-sdk.md).
 
 3. **The CLI** — for ad-hoc operations: load a file, run a program, query the graph, inspect a resource, install a WASM capability or substrate institution. The `eigenius` binary in [`cli/`](../../../cli/) is the everyday tool. See [chapter 4](04-cli-reference.md).
 
@@ -98,8 +98,10 @@ The chapters in order:
 - **[Chapter 12](12-deployment.md)** — Docker Compose and Azure ContainerApps deployment.
 - **[Chapters 13](13-troubleshooting.md)** — troubleshooting.
 - **[Chapter 14](14-notebook.md)** — the notebook UX (cells, file format, publish-to-layer, the patent and kinase-institutions demos).
-- **[Chapter 15](15-typescript-sdk.md)** — the TypeScript SDK that powers the notebook and that you can use programmatically.
-- **[Chapter 16](16-appendix.md)** — appendix (env vars, file locations, source index).
+- **[Chapter 15](15-tags-branches-history.md)** — tags, branches, and history in the notebook (the workspace rail's chain destinations + time-travel read-pin).
+- **[Chapter 16](16-merge-resolution.md)** — merge resolution: picking strategies (Witness / Rename / SchemaQuotient / Restructure), the cascade gate, provenance records.
+- **[Chapter 17](17-typescript-sdk.md)** — the TypeScript SDK that powers the notebook and that you can use programmatically.
+- **[Chapter 18](18-appendix.md)** — appendix (env vars, file locations, source index).
 
 ## 1.5. What this guide does not cover
 
