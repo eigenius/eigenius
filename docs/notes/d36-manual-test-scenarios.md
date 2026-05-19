@@ -33,8 +33,16 @@ The scenarios share a small ontology stub on `main` to avoid re-typing the same 
    property project:weight : core:float {
        description = "Patient weight in kilograms.";
    }
+
+   // Placeholder so subsequent scenarios can reference Patient
+   // (Scenario 6's witness in particular needs Patient to exist
+   // in the chain at commit time). Branches re-declare with
+   // different descriptions to drive the IriCollision conflict.
+   class project:Patient {
+       description = "Placeholder Patient class — branches re-declare.";
+   }
    ```
-3. Run the cell. Expect "Loaded 3 resources" in the cell footer; the commit-status badge shows `TRIVIAL_MERGE` or `BRANCH_ADVANCED`.
+3. Run the cell. Expect "Loaded 4 resources" in the cell footer; the commit-status badge shows `TRIVIAL_MERGE` or `BRANCH_ADVANCED`.
 4. Note the resulting branch tip layer id (visible in the Topology panel) — call it **L₀**. You'll need it as the divergence point.
 
 ---
@@ -203,43 +211,73 @@ class project:Dog : project:Reptile {
 
 **Kernel status.** D37 PR 1 wired apply-time class enforcement (`resolve_merge_comorphism` early-rejects on `merge_target_class` mismatch). PR 2 added the ESL surface (`merge_comorphism`, `lambda`, `pi`, `for`) plus commit-time validators for `MergeComorphism` shape (Rule 18) and standalone Lambda well-typedness (Rule 19, NbE-backed). PR 3 turned the `WitnessEditor` into an EigenQL-driven Combobox of applicable comorphisms. PR 4's notebook scenario closes the loop.
 
-**Branch setup.** Same conflict as Scenario 1 — `urn:project:Patient` declared two different ways across `s6-a` and `s6-b`. The new piece is **before** the per-branch divergence: commit a witness to `d36-base` (or `main`) via the new ESL surface so it's visible to both branches at merge time.
+**Witness vs. other strategies — what kind of conflict it fits.** Witness operates at the **instance** level. `merge_comorphism for A` means "applies when both sides of an IriCollision are instances of class A." The WitnessEditor's Combobox query filters on the conflict's `is_a[0]` — i.e., the class the conflicting instances belong to.
 
-**Author the witness on the shared base.**
+- **Instance-level conflicts** (this scenario): both branches commit `resource project:patient_42 : project:Patient { … }` with different field values. The conflict's `is_a[0]` is `urn:project:Patient`, so `merge_comorphism for project:Patient` resolves.
+- **Class-level conflicts** (Scenario 1): both branches re-declare `class project:Patient`. The conflict's `is_a[0]` is `urn:eigenius:core:Class`, so witnesses authored `for project:Patient` don't surface in the Combobox. Class-level conflicts are usually resolved structurally via Rename or Restructure.
 
-Run this cell on `main` *before* tagging `d36-base` (or on `d36-base` itself if you re-tag after):
+**Branch setup.**
 
-```esl
-namespace core    = "urn:eigenius:core";
-namespace project = "urn:project";
+1. Create branches `s6-a` and `s6-b`, both off `d36-base`. The fixture already commits `class project:Patient` + `property project:weight` — that's everything needed for Patient instances.
+2. On `s6-a`, run the **branch-A** cell:
 
-// Take Branch B's body unchanged. Simplest witness — `Var "b"`
-// returns the second parameter as the merged value. D37 §9.1.
-merge_comorphism project:patient_take_b for project:Patient {
-    (a, b, opt) => b
-}
-```
+   ```esl
+   namespace project = "urn:project";
 
-This emits two chain resources:
+   resource project:patient_42 : project:Patient {
+       project:weight = 75.0;
+   }
+   ```
+3. Switch back to `main`, create `s6-b` off `d36-base`, switch to it. Run the **branch-B** cell — same IRI, different weight:
+
+   ```esl
+   namespace project = "urn:project";
+
+   resource project:patient_42 : project:Patient {
+       project:weight = 80.0;
+   }
+   ```
+4. Switch back to `s6-a` (the merge target). Run the **witness cell**:
+
+   ```esl
+   namespace core    = "urn:eigenius:core";
+   namespace project = "urn:project";
+
+   // D37 §9.1 — take Branch B's body unchanged.
+   merge_comorphism project:patient_take_b for project:Patient {
+       (a, b, opt) => b
+   }
+   ```
+
+The witness cell compiles to two chain resources:
 
 - A synthesised standalone `Lambda` at `urn:eigenius:auto:lambda:<sha256>` carrying its declared Pi-type (`pi a : Patient, b : Patient, opt : Option<Patient> => Patient`) and `parameter_type` annotations on each binder.
 - A `MergeComorphism` at `urn:project:patient_take_b` with `merge_target_class = urn:project:Patient` and `merge_transformation` pointing at the synthesised lambda.
 
-The commit-time validator (Rule 18 + Rule 19) runs on both. Reject conditions: missing `merge_target_class`, transformation isn't a 3-binder Lambda chain, body fails NbE check against the declared Pi-type.
+The commit-time validators run on both. Reject conditions: missing `merge_target_class`, transformation isn't a 3-binder Lambda chain, body fails NbE check against the declared Pi-type. The witness lives on `s6-a` and is reachable at merge time — `resolve_merge_comorphism` searches both branch tips' contributions, not just the ancestor (per `merge.rs:1118-1126`).
 
 **Resolution.**
 
-1. Branches `s6-a` and `s6-b` already exist (Scenario 1 setup). Drive the explicit merge to the picker.
-2. Pick **Witness**. The `WitnessEditor` (PR 3) auto-runs an EigenQL query against the chain for `MergeComorphism` resources with `merge_target_class = urn:project:Patient` and surfaces the result as a Combobox:
-   - **Expected**: `patient_take_b` (short name) appears as a single option.
+1. Open the Merge rail. Source = `s6-b`, target = `s6-a`. Drive to the picker. One conflict card; kind = `IriCollision` on `urn:project:patient_42`.
+2. Pick **Witness**. The `WitnessEditor` extracts the conflict's class from `branchABodyJson` (`urn:project:Patient`) and queries the chain for `MergeComorphism` resources matching.
+   - **Expected**: `patient_take_b` appears as a single option in the Combobox.
 3. Select `patient_take_b`. The Combobox commits its IRI as the `WitnessStrategy`'s `comorphismIri`.
-4. Click **Preview cascade**. Expect: cascade computed, may be empty (no Profile referencing `urn:project:Patient` in the stub).
-5. Click **Commit merge**. Expect: success card *"Merge committed"*. The merged `urn:project:Patient` is **branch B's body** (the billing description) — the witness's `Var "b"` returned the second argument unchanged.
-6. Switch to `s6-a` in the Branches panel — confirm the tip advanced to the merge layer. The merge layer's contributions: `urn:project:Patient` = B's body (via witness), plus any other non-conflict contributions from A and B.
+4. Click **Preview cascade**. Expect: cascade may be empty.
+5. Click **Commit merge**. Expect success card. The merged `urn:project:patient_42` is **branch B's body** (weight = 80.0) — the witness's `Var "b"` returned the second argument unchanged.
+6. Switch to `s6-a` in the Branches panel — confirm the tip advanced. Verify with an EigenQL cell:
 
-**Negative path (optional follow-on).** Pick **Witness**, then in the Combobox pick a comorphism declared for a *different* class (commit a second witness `merge_comorphism project:visit_take_b for project:Visit { (a, b, opt) => b }` first). The Combobox should NOT show this one for a `Patient` conflict — the EigenQL query filters by `merge_target_class`. If you manually paste the IRI in the empty-list fallback flow, the apply-time resolver returns `MergeComorphismWrongClass`.
+   ```eigenql
+   MATCH "urn:project:Patient"(?p) {
+       "urn:project:weight": ?w
+   }
+   RETURN ?w
+   ```
 
-**Negative path — placeholder IRI.** As in the pre-D37 version of this scenario, pasting an IRI that doesn't resolve to a `MergeComorphism` (e.g., `urn:project:nonexistent`) still surfaces `MergeComorphismNotFound` → `MALFORMED_RESOLUTION`. The Combobox prevents this in the happy path but the free-form fallback (for conflict kinds without a target class) preserves the error surface.
+   Should return `80.0`.
+
+**Negative path — wrong class.** Author a second witness `merge_comorphism project:visit_take_b for project:Visit { (a, b, opt) => b }` (requires a `class project:Visit` to exist; add `class project:Visit { description = "A visit."; }` to a setup cell first). For the Patient conflict, the Combobox filters by class and should NOT surface `visit_take_b`. Manually pasting its IRI into the free-form fallback lands on `MergeComorphismWrongClass` from the resolver.
+
+**Negative path — unresolved IRI.** Pasting an IRI that doesn't resolve to a `MergeComorphism` (e.g., `urn:project:nonexistent`) still surfaces `MergeComorphismNotFound` → `MALFORMED_RESOLUTION`. The Combobox prevents this in the happy path; the free-form fallback (for conflict kinds without a target class) preserves the error surface.
 
 ---
 

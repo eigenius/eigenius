@@ -1144,18 +1144,26 @@ pub fn resolve_merge_comorphism(
     // eventually fail anyway, but the diagnostic surfaces deep
     // inside the evaluator with an opaque message; the typed
     // up-front error is much more actionable.
-    let target_class = match resource.get(&merge_target_class_iri) {
-        Some(crate::ontology::resource::Value::ResourceRef(c)) => c.clone(),
-        Some(_) => {
-            return Err(MergeError::MalformedMergeComorphism {
-                iri: iri.clone(),
-                reason: "merge_target_class must be a ResourceRef to a Class".to_string(),
-            });
-        }
+    // Accept both `ResourceRef` (canonical post-`canonicalise_resource_refs`)
+    // and `String` (the shape that survives CBOR storage round-trips —
+    // `Value::ResourceRef` serialises as a plain text node, so any
+    // resource re-loaded from disk via `try_load_resource` comes back
+    // with `Value::String` for IRI-typed properties). `Value::as_iri()`
+    // unifies the two shapes.
+    let target_class = match resource
+        .get(&merge_target_class_iri)
+        .and_then(|v| v.as_iri())
+    {
+        Some(c) => c,
         None => {
+            let reason = if resource.get(&merge_target_class_iri).is_some() {
+                "merge_target_class must be a Class IRI (ResourceRef or String)"
+            } else {
+                "merge_target_class property is required"
+            };
             return Err(MergeError::MalformedMergeComorphism {
                 iri: iri.clone(),
-                reason: "merge_target_class property is required".to_string(),
+                reason: reason.to_string(),
             });
         }
     };
@@ -1167,18 +1175,22 @@ pub fn resolve_merge_comorphism(
         });
     }
 
-    let transformation = match resource.get(&merge_transformation_iri) {
-        Some(crate::ontology::resource::Value::ResourceRef(t)) => t.clone(),
-        Some(_) => {
-            return Err(MergeError::MalformedMergeComorphism {
-                iri: iri.clone(),
-                reason: "merge_transformation must be a ResourceRef to a Mini-TT term".to_string(),
-            });
-        }
+    // Same dual-shape acceptance as `merge_target_class` above —
+    // storage-round-tripped IRIs deserialize as `Value::String`.
+    let transformation = match resource
+        .get(&merge_transformation_iri)
+        .and_then(|v| v.as_iri())
+    {
+        Some(t) => t,
         None => {
+            let reason = if resource.get(&merge_transformation_iri).is_some() {
+                "merge_transformation must be an IRI reference to a Mini-TT term"
+            } else {
+                "merge_transformation property is required"
+            };
             return Err(MergeError::MalformedMergeComorphism {
                 iri: iri.clone(),
-                reason: "merge_transformation property is required".to_string(),
+                reason: reason.to_string(),
             });
         }
     };

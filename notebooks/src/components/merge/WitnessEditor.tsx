@@ -52,6 +52,7 @@ import {
   Option,
   Spinner,
 } from "@fluentui/react-components";
+import { decode as cborDecode } from "cbor-x";
 import { type Eigen, type MergeResolutionWire, type TypedConflictWire } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { decodeResultDocument } from "../../runtime/resultDocument";
@@ -286,19 +287,24 @@ async function queryApplicableComorphisms(
   eigen: Eigen,
   classIri: string,
 ): Promise<ApplicableComorphism[]> {
-  // EigenQL — return both the comorphism IRI and its short_name (if
-  // any) so the Combobox can show a human-readable label.
+  // EigenQL — return the matching comorphism IRIs. `short_name` is
+  // optional on a `MergeComorphism` (the ESL compiler doesn't emit
+  // it for `merge_comorphism` declarations), and the current
+  // EigenQL surface doesn't have an OPTIONAL pattern, so binding
+  // `short_name` in the MATCH would filter out every comorphism
+  // that lacks it. We resolve the short name out-of-band via a
+  // follow-up inspect call per row — cheap (one round-trip per
+  // applicable witness, usually 1-3) and keeps the Combobox label
+  // human-readable when one exists.
   const eigenql = `
 USING "urn:eigenius:core:MergeComorphism"
 
 MATCH MergeComorphism(?c) {
     "urn:eigenius:core:merge_target_class": ?cls
-},
-?c { "urn:eigenius:core:short_name": ?short_name }
+}
 WHERE ?cls = ${JSON.stringify(classIri)}
 RETURN [] {
-    iri: ?c,
-    short_name: ?short_name
+    iri: ?c
 }
 ORDER BY ?c
 `;
@@ -307,16 +313,38 @@ ORDER BY ?c
     throw new Error(resp.error || "comorphism query failed");
   }
   const decoded = decodeResultDocument(resp.document);
-  const out: ApplicableComorphism[] = [];
+  const iris: string[] = [];
   for (const row of decoded.rows) {
-    let iri: string | undefined;
-    let shortName: string | null = null;
     for (const [key, value] of row.values) {
       if (typeof value !== "string") continue;
-      if (key.endsWith(":iri")) iri = value;
-      else if (key.endsWith(":short_name")) shortName = value;
+      if (key.endsWith(":iri")) {
+        iris.push(value);
+        break;
+      }
     }
-    if (iri) out.push({ iri, shortName });
   }
-  return out;
+  return await Promise.all(
+    iris.map(async (iri) => ({
+      iri,
+      shortName: await fetchShortName(eigen, iri),
+    })),
+  );
+}
+
+/**
+ * Best-effort `core:short_name` lookup for the Combobox label.
+ * Returns `null` on any failure (not-found, parse error, network) —
+ * the picker falls back to the IRI in that case.
+ */
+async function fetchShortName(eigen: Eigen, iri: string): Promise<string | null> {
+  try {
+    const resp = await eigen.inspect(iri);
+    if (!resp.found) return null;
+    const decoded = cborDecode(resp.resource) as Record<string, unknown> | null;
+    if (decoded === null || typeof decoded !== "object") return null;
+    const v = decoded["urn:eigenius:core:short_name"];
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
 }
