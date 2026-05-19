@@ -17,22 +17,38 @@ Eigenius is grounded in [dependent type theory and institution theory](https://g
 > is to close those quality gaps rather aggressively. Feel free
 > to submit issues in the discussion forum or directly as issue.
 
-Key features that we still need to wire up:
+Eigenius's key features include:
 
-- Completion of storage graph management and versioning. [Branching and
-  trivial merges have been implemented but are not yet exposed in the
-  notebook interface](docs/design/d23-out-of-core-layer-architecture.md). [Layer reconciliation](docs/design/d20-layer-reconciliation.md) and [chain consolidation](docs/design/d25-chain-consolidation.md) still
-  need to be implemented. [Garbage collection across graph layers has been
-  implemented](docs/design/d23-out-of-core-layer-architecture.md), but it has yet to be integrated into the application 
-  life-cycle.
-- The [generic runtime substrate](docs/design/d26-runtime-substrate.md) is in place. The Julia worker is live with five reference [Julia Institutions](docs/design/d27-julia-institutions.md) landed end-to-end:
-  [`Symbolics`](https://juliasymbolics.org/) / [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl) (symbolic algebra over a chain-typed
-  `FormulaTerm`), [`IntervalArithmetic`](https://juliaintervals.github.io/) (rigorous bounds; Decidable role), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) (chemical
-  reaction networks), [`DifferentialEquations.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) (ODEs), and [`JuMP`](https://jump.dev/) (mathematical
-  programming, HiGHS back end for LP/QP). Two cross-institution comorphisms over the shared
-  `FormulaTerm` representation are wired and tested end-to-end: Catalyst → DiffEq
-  (reaction-network compilation to ODE problems) and Symbolics → JuMP (symbolic-objective framing
-  into optimisation problems, demonstrated by a kinase Ki-fit). Still pending in this surface:
+- **Storage graph management and versioning.**
+  [Branches, tags, and trivial merges](docs/design/d23-out-of-core-layer-architecture.md),
+  the [layer reconciliation surface](docs/design/d20-layer-reconciliation.md)
+  (Witness / Rename / SchemaQuotient / Restructure strategies plus a chain-resident
+  [`MergeResolutionRecord`](docs/design/d38-merge-provenance-and-witness-discovery.md)
+  per resolved conflict and off-span witness discovery), and
+  [chain consolidation](docs/design/d25-chain-consolidation.md) are wired through
+  to the notebook (Branches / Tags / History / Merge / Compaction destinations on the
+  workspace rail) and the CLI (`eigenius db branch`, `db tag`, `db merge`,
+  `db consolidate`).
+  [Garbage collection across graph layers](docs/design/d23-out-of-core-layer-architecture.md)
+  has a notebook destination and a CLI surface; still pending is integrating it into
+  the application life-cycle (automatic triggering on branch/tag delete and during
+  low-traffic windows).
+
+- **Generic runtime substrate** ([D26](docs/design/d26-runtime-substrate.md)) with
+  the Julia worker live and five reference
+  [Julia Institutions](docs/design/d27-julia-institutions.md) landed end-to-end:
+  [`Symbolics`](https://juliasymbolics.org/) /
+  [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl)
+  (symbolic algebra over a chain-typed `FormulaTerm`),
+  [`IntervalArithmetic`](https://juliaintervals.github.io/)
+  (rigorous bounds; Decidable role),
+  [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) (chemical reaction networks),
+  [`DifferentialEquations.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) (ODEs), and
+  [`JuMP`](https://jump.dev/) (mathematical programming, HiGHS back end for LP/QP).
+  Two cross-institution comorphisms over the shared `FormulaTerm` representation are
+  wired and tested end-to-end: Catalyst → DiffEq (reaction-network compilation to ODE
+  problems) and Symbolics → JuMP (symbolic-objective framing into optimisation
+  problems, demonstrated by a kinase Ki-fit). Still pending in this surface:
   [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md).
 
 ## The notebook — start here
@@ -233,26 +249,34 @@ useful — that's where high-volume per-resource events live.
 
 ```
 kernel/          Rust kernel crate
-  src/ontology/    IRI, Resource, Value, Eigon-JSON parser, well-known constants
-  src/layer/       Layer, LayerBuilder, LayerId (content-addressed)
-  src/validation/  Validator with 12 validation rules
+  src/ontology/    IRI, Resource, Value, Eigon-JSON / Eigon-CBOR, well-known constants
+  src/layer/       Layer, LayerBuilder, LayerId (content-addressed), merge (D20/D36/D37/D38)
+  src/lattice.rs   Branch-ref CAS, LCA + iri_sources_since, trivial-merge driver
+  src/gc.rs        Garbage collection over the reachable layer graph (D24)
+  src/validation/  Validator (commit-time rules incl. Lambda well-typedness, MergeComorphism shape)
   src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator
   src/nbe/         Mini-TT type theory: terms, values, eval, readback, type checker
   src/program/     Program model: expression parser, ground type resolution, executor
-  src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON
+  src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON (incl. `merge_comorphism`, `lambda`, `pi`)
   src/capability/  WASM capability hosting, ComponentRegistry, WasmInstitution (D14), chain-scan auto-registration
   src/institution/ D14 Institution trait, InstitutionIndex (chain-derived), InstitutionRuntime, AutoOnLoad dispatch
+  src/runtime/     Runtime-substrate dispatch (D26 worker IPC, mirror-derived call routing)
   src/context/     ExecutionContext (snapshot isolation, read/write control)
-  src/bootstrap/   Ontology loader and system initialization (4 bootstrap layers)
-  src/storage/     Storage interface traits (LayerStore, ResourceStore)
+  src/bootstrap/   Ontology loader and system initialization (six bootstrap layers)
+  src/storage/     Storage interface traits (LayerStore, ResourceStore, branch/tag CAS)
+  src/server/      gRPC service implementations (Connect-RPC compatible)
   src/task/        Task model: TaskRecord, Checkpoint, resume sweep
+  src/api/         Public re-exports for embedded-kernel consumers
+  src/observability/  Tracing spans, RPC guards, operation labels
 storage/         Storage backend implementations
   memory/          In-memory backend (BTreeMap + Arc<RwLock>)
-  rocksdb/         RocksDB backend (durable layers, traces, capabilities)
+  rocksdb/         RocksDB backend (durable layers, traces, branch refs, capabilities)
   tikv/            TiKV backend (placeholder)
-  indexing/        SPO/POS/OPS triple index construction
 crates/
-  wasm-runtime/    Wasmtime integration for WASM capability sandboxing
+  wasm-runtime/        Wasmtime integration for WASM capability sandboxing
+  runtime-substrate/   D26 substrate: worker spawning + UDS IPC + mirror generation
+  eigenius-julia/      Julia worker host (spawns the Julia process, marshals FormulaTerm)
+  eigenius-config/     Workspace configuration parsing
 sdk/
   wasm-sdk/        Rust SDK for authoring WASM capabilities
 examples/        WASM capability examples (excluded from workspace, built with cargo-component)
@@ -260,26 +284,50 @@ examples/        WASM capability examples (excluded from workspace, built with c
   wasm-doc-validator/        Document validation component
   wasm-http-shout/           IO component with HTTP dispatch
   wasm-read-query-probe/     Read-capability query probe
+  wasm-ordering-institution/ Ordering institution (D14 totality/finiteness predicates)
   wasm-d14-echo/             Minimum-viable D14 institution (smoke test of WIT bindings)
   wasm-d14-dock/             Dock institution for the M8 worked example
   wasm-d14-assay/            Assay institution for the M8 worked example
   wasm-d14-arrhenius/        Arrhenius transformation Component (the m of dock_to_assay)
-cli/             Command-line interface (load, validate, query, run, serve, tasks, capability, ...)
-ontologies/      Ontology definitions
-  core/            Core ontology (core-ontology.json) — self-describing bootstrap
-  program/         Program ontology (program-ontology.json) — expression classes, components
+julia/           Julia v1 institutions + substrate host (D27)
+  runtime-worker/    The Julia process the runtime-substrate spawns (FormulaTerm marshalling, RPC dispatch)
+  common/            Shared helpers consumed by every Julia institution
+  institutions/      Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP
+  comorphisms/       Catalyst → DiffEq, Symbolics → JuMP, Symbolics → IntervalArithmetic
+  research/          Experimental institutions
+cli/             Command-line interface (load, validate, query, run, serve, tasks, capability,
+                  db {branch,tag,merge,consolidate,gc,export,stats}, capability install, ...)
+ontologies/      Ontology definitions (chain-bootstrapped on startup)
+  core/            Core ontology — self-describing bootstrap (incl. MergeComorphism + MergeResolutionRecord)
+  program/         Program ontology — expression classes, Lambda, Pi, Components
   reflection/      Reflection ontology (reasoning traces, derivation, epistemic status)
   institution/     Institution ontology (D14: Institution / ExportFormat / ImportFormat / QueryClass / Comorphism / Verdict)
   notebook/        Notebook ontology (Notebook + Cell + CellType — backs `Publish` from the UI)
+  formulas/        Formula language (D32: FormulaTerm InductiveType + Operator catalog)
+  runtime/         Runtime-substrate ontology (D26: RuntimeEnvironment, RuntimeKind, …)
   examples/        Example ontologies and programs
-notebooks/       React notebook SPA (D22 — six cell types incl. charts, layer/topology graphs, publish-to-layer) — bundled into the orchestrator image
+notebooks/       React notebook SPA (D22) — bundled into the orchestrator image
+  src/             Source: cell editors + output renderers + workspace rail (Branches/Tags/
+                   History/Merge/Compaction/GC/Layer/Institutions/Health/Topology destinations)
+  examples/        Bundled notebooks (patent-analysis, kinase-institutions, D36 merge tests)
+  e2e/             Playwright specs (patent-demo, kinase-charts)
 clients/
   eigenius-ts/     `@eigenius/client` — TypeScript SDK that wraps the orchestrator's RPC surface
-docs/design/     Design documents (D1–D22)
-deploy/          Azure ContainerApps deployment (Dockerfiles, Bicep IaC)
+                   (incl. branch/tag/merge/preview/submit surfaces with witness-search-branches)
 proto/           gRPC protobuf definitions
-orchestration/   Deno/TypeScript orchestration layer (LLM dispatch, MCP server, notebook static-file route)
-demo/            End-to-end demo scripts
+wit/             WIT world definitions for D14 WASM institutions + capability components
+orchestration/   Deno/TypeScript orchestration layer (LLM dispatch, MCP server, notebook static-file route,
+                  substrate addon)
+deploy/          Dockerfiles + Azure ContainerApps Bicep IaC
+demo/            End-to-end demo scripts (`run.sh`, `patent/run.sh`, `wasm/run.sh`, …)
+docs/            Documentation
+  design/          Design documents (D1–D38; the kernel/UX surface specs)
+  guides/          User guides — platform (18 chapters), ESL, EigenQL, formula, references
+  notes/           Working notes (e.g. manual-test scenarios)
+  references/      BibTeX bibliography
+  papers/          Drafts + working papers
+scripts/         License-header application, BibTeX-to-Markdown, citation verification
+references/      Reference implementations consulted during development (e.g. `nanoda_lib` for Mini-TT)
 ```
 
 ## Getting Started
