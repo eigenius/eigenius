@@ -1,10 +1,10 @@
-# 15. TypeScript SDK — `@eigenius/client`
+# 17. TypeScript SDK — `@eigenius/client`
 
 The TypeScript SDK at [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) wraps the orchestrator's two Connect-RPC services in a single typed `Eigen` class. It is the same SDK the notebook uses ([chapter 14](14-notebook.md)); you can use it from any TypeScript runtime that speaks Connect-RPC — Deno scripts, browser apps, Node.js servers — to drive the kernel programmatically.
 
 Per [D22 §5](../../design/d22-notebook-and-typescript-sdk.md).
 
-## 15.1. What it covers
+## 17.1. What it covers
 
 The `Eigen` class exposes everything the notebook MVP needs. All methods are async; all responses are protobuf message objects (camelCased fields).
 
@@ -25,7 +25,7 @@ The SDK also exports the underlying request/response types (`LoadResponse`, `Que
 
 Source: [`clients/eigenius-ts/src/client.ts`](../../../clients/eigenius-ts/src/client.ts) (the `Eigen` class), [`clients/eigenius-ts/src/notebook.ts`](../../../clients/eigenius-ts/src/notebook.ts) (notebook-publish translator), [`clients/eigenius-ts/mod.ts`](../../../clients/eigenius-ts/mod.ts) (public exports).
 
-## 15.2. Construction
+## 17.2. Construction
 
 ```typescript
 import { Eigen } from "@eigenius/client";
@@ -45,9 +45,9 @@ const eigen = new Eigen({ endpoint: "http://localhost:8080" });
 | `endpoint` | yes | Orchestrator base URL — e.g. `http://localhost:8080` |
 | `fetch` | no | Override the global `fetch` (Deno tests, custom interceptors) |
 | `bearerToken` | no | Currently unused; the hook for token auth without an API change later (D22 §8.3) |
-| `defaultBranch` | no | Branch used when a call doesn't pass an explicit `branch`. Empty / omitted = the server's default (`main`). See §15.4 for branch semantics. |
+| `defaultBranch` | no | Branch used when a call doesn't pass an explicit `branch`. Empty / omitted = the server's default (`main`). See §17.4 for branch semantics. |
 
-## 15.3. Five-line examples
+## 17.3. Five-line examples
 
 ### Liveness + inspect
 
@@ -126,7 +126,7 @@ console.log(`${publish.cellIris.length} cell IRI(s) in the published layer ${loa
 
 Identical content yields the same `notebookIri` (content-addressed). See [chapter 14 §14.5](14-notebook.md#135-publish-to-layer).
 
-## 15.4. Branches
+## 17.4. Branches
 
 Phase 14g made every `load` / `runProgram` / `runProgramByIri` / `reflect` call branch-aware. The TypeScript client mirrors the gRPC surface: per-call `branch` overrides on the relevant methods, plus a `defaultBranch` constructor option and a `useBranch(name)` mutator for setting the client-wide default after construction. Empty / omitted on a call falls back to the client default; empty / omitted on the constructor falls back to the server default (`main`).
 
@@ -186,13 +186,13 @@ await eigen.deleteBranch("feature-x", { force: true });
 
 See [chapter 4 §4.6](04-cli-reference.md#46-branch-commands-require---endpoint) for the equivalent CLI surface and [D23 §5.4–§5.5](../../design/d23-out-of-core-layer-architecture.md#54-write-model) for the design.
 
-## 15.6. Error handling
+## 17.6. Error handling
 
 Most methods return structured response objects with `success: bool` and an `errors: ValidationError[]` array — non-RPC failures (validation, parse, etc.) come back this way and the call doesn't throw.
 
 Connect-RPC errors (network failures, kernel-side gRPC `Status` errors that the orchestrator translates) throw `ConnectError` (from `@connectrpc/connect`). The orchestrator's passthrough explicitly re-wraps kernel gRPC errors so the inbound Connect protocol carries the actual message — without this, browser callers see `[internal] HTTP 400` with the real message URL-encoded into a `grpc-message` header. See [`orchestration/src/notebook/eigenius_kernel_passthrough.ts`](../../../orchestration/src/notebook/eigenius_kernel_passthrough.ts).
 
-## 15.7. Layout and dependencies
+## 17.7. Layout and dependencies
 
 ```
 clients/eigenius-ts/
@@ -212,7 +212,7 @@ clients/eigenius-ts/
 
 Runtime deps: `@bufbuild/protobuf@^2`, `@connectrpc/connect@^2`, `@connectrpc/connect-web@^2`. The notebook consumes the SDK as a `file:../clients/eigenius-ts` workspace dep; once the SDK stabilises, npm publication via `dnt` (Deno-to-Node) will follow.
 
-## 15.8. Regenerating the proto stubs
+## 17.8. Regenerating the proto stubs
 
 The buf pipeline lives at the repo root ([`buf.yaml`](../../../buf.yaml) + [`buf.gen.yaml`](../../../buf.gen.yaml)). The SDK's `generated/` is one of two output targets (the other being the orchestrator's `src/gen/`). Regenerate after any change to [`proto/eigenius.proto`](../../../proto/eigenius.proto):
 
@@ -222,7 +222,7 @@ npx --yes @bufbuild/buf generate
 
 Buf is pinned at v2; both targets emit `protoc-gen-es target=ts`, which produces idiomatic Connect-Web TypeScript stubs.
 
-## 15.9. Smoke test
+## 17.9. Smoke test
 
 The smoke test at [`clients/eigenius-ts/examples/smoke-test.ts`](../../../clients/eigenius-ts/examples/smoke-test.ts) hits every RPC against a live stack:
 
@@ -234,7 +234,7 @@ deno run --allow-net --allow-env examples/smoke-test.ts
 
 Output is a 7-step transcript: `health → inspect → query → listInstitutions → layerTopology (taxonomy + full) → load → validateProgram`. This is the SDK's Phase 1 acceptance criterion (D22 §5.7).
 
-## 15.10. Design references
+## 17.10. Design references
 
 - [**D22** — Notebook UX and TypeScript SDK](../../design/d22-notebook-and-typescript-sdk.md) — full SDK + notebook spec, including the layer-topology data shape and the planned post-MVP additions
 - [**D5** — gRPC API specification](../../design/d5-grpc-api-specification.md) — the underlying RPC surface (the SDK is a thin wrapper)
@@ -242,4 +242,4 @@ Output is a 7-step transcript: `health → inspect → query → listInstitution
 
 ---
 
-Next: **[16. Appendix →](16-appendix.md)**
+Next: **[18. Appendix →](18-appendix.md)**

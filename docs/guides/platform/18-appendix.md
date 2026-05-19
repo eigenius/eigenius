@@ -1,6 +1,6 @@
-# 16. Appendix
+# 18. Appendix
 
-## 16.1. Environment variables
+## 18.1. Environment variables
 
 | Variable | Default | Used by | Effect |
 |---|---|---|---|
@@ -15,7 +15,7 @@
 
 CLI commands also accept `--endpoint <url>` as an alternative to setting an env var; the flag takes precedence.
 
-## 16.2. File and directory locations
+## 18.2. File and directory locations
 
 | Location | Contents |
 |---|---|
@@ -32,14 +32,14 @@ CLI commands also accept `--endpoint <url>` as an alternative to setting an env 
 | `julia/institutions/<institution>/` | Per-institution handler package (`Project.toml` + `src/`) and chain declarations |
 | `julia/comorphisms/` | Cross-institution comorphism declarations |
 
-## 16.3. Default ports
+## 18.3. Default ports
 
 | Port | Service | Configuration |
 |---|---|---|
 | 50051 | Kernel gRPC | `eigenius serve --port <N>` |
 | 8080 | Orchestrator HTTP | `EIGENIUS_ORCHESTRATOR_PORT=<N>` |
 
-## 16.4. The four embedded ontology layers
+## 18.4. The four embedded ontology layers
 
 Loaded at every kernel startup; their parent-pointer chain forms the bootstrap:
 
@@ -52,7 +52,7 @@ Loaded at every kernel startup; their parent-pointer chain forms the bootstrap:
 
 When `serve --db <path>` is used, a SHA-256 manifest of these is written on first start and verified on subsequent starts (drift refusal — see [chapter 6](06-database-management.md) §6.3).
 
-## 16.5. Source index — implementation files referenced in this guide
+## 18.5. Source index — implementation files referenced in this guide
 
 ### CLI
 
@@ -130,7 +130,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 - [`justfile`](../../../justfile) — task recipes (`build`, `test`, `check`, `up`, `serve`, etc.)
 
-## 16.6. Related documents
+## 18.6. Related documents
 
 - [**ESL user guide**](../esl/README.md) — the surface language for ontologies and programs
 - [**EigenQL user guide**](../eigenql/README.md) — the query language
@@ -151,7 +151,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 The full design-document set lives in [`docs/design/`](../../design/).
 
-## 16.7. Phase status
+## 18.7. Phase status
 
 The platform is currently complete through Phase 11e (see top-level [README.md](../../../README.md)):
 
