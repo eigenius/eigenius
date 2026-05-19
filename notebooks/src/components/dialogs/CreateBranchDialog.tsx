@@ -26,11 +26,12 @@
  * sees the actual reason.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Caption1,
   Checkbox,
+  Combobox,
   Dialog,
   DialogActions,
   DialogBody,
@@ -42,10 +43,12 @@ import {
   makeStyles,
   MessageBar,
   MessageBarBody,
+  Option,
   Radio,
   RadioGroup,
   tokens,
 } from "@fluentui/react-components";
+import type { TagInfo } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
 
@@ -75,22 +78,50 @@ export interface CreateBranchDialogProps {
   open: boolean;
   onClose: () => void;
   onCreated?: (name: string) => void;
+  /** Pre-fill the dialog with `Specific layer id = defaultLayerId`.
+   *  Set when the dialog is opened from the History panel's per-layer
+   *  "Create branch…" affordance so the user only has to type a name.
+   *  Ignored when `defaultTagName` is also set (tags win since they're
+   *  the more human-readable handle on the same layer). */
+  defaultLayerId?: string;
+  /** Pre-select `Tag = defaultTagName` in the start-from picker. Set
+   *  when the dialog is opened from a Tags-panel row so the user sees
+   *  the tag name they clicked rather than its (semantically
+   *  identical, but opaque) underlying layer id. */
+  defaultTagName?: string;
 }
 
 /**
  * Discriminated union over the "Start from" radio options. The
- * `existing` shape carries the chosen branch name so we can look up
- * its current head at create time (rather than at open time, which
- * could be stale by the time the user clicks Create).
+ * `existing` and `tag` shapes carry the chosen name so we can look
+ * up its target layer at create time (rather than at open time,
+ * which could be stale by the time the user clicks Create).
  */
 type StartFrom =
   | { kind: "existing"; branch: string }
+  | { kind: "tag"; tag: string }
   | { kind: "explicit"; layerId: string };
+
+/** Default `startFrom` derived from the dialog's pre-fill props.
+ *  Priority: tag pre-select wins over layer-id pre-fill, since a tag
+ *  is the more human-readable handle on the same layer; both fall
+ *  back to the active branch's head. */
+function initialStartFrom(
+  defaultTagName: string | undefined,
+  defaultLayerId: string | undefined,
+  activeBranch: string,
+): StartFrom {
+  if (defaultTagName) return { kind: "tag", tag: defaultTagName };
+  if (defaultLayerId) return { kind: "explicit", layerId: defaultLayerId };
+  return { kind: "existing", branch: activeBranch };
+}
 
 export function CreateBranchDialog({
   open,
   onClose,
   onCreated,
+  defaultLayerId,
+  defaultTagName,
 }: CreateBranchDialogProps) {
   const styles = useStyles();
   const eigen = useEigen();
@@ -99,25 +130,66 @@ export function CreateBranchDialog({
   const createBranch = useNotebookStore((s) => s.createBranch);
 
   const [name, setName] = useState("");
-  const [startFrom, setStartFrom] = useState<StartFrom>({
-    kind: "existing",
-    branch: activeBranch,
-  });
+  const [startFrom, setStartFrom] = useState<StartFrom>(
+    initialStartFrom(defaultTagName, defaultLayerId, activeBranch),
+  );
   const [switchAfter, setSwitchAfter] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tags are pulled fresh on every dialog open. Cheap (one RPC) and
+  // avoids the "stale tag list a session later" problem. `null` =
+  // fetch in flight; `[]` = fetched, none defined.
+  const [tags, setTags] = useState<readonly TagInfo[] | null>(null);
 
-  // Reset transient state every time the dialog opens — leftover
-  // values from a previous interaction would be confusing.
+  // Held in a ref rather than the effect's deps because
+  // `createBranch` flips `activeBranch` in the store mid-`await` (the
+  // `switchAfter` path calls `switchBranch`). With `activeBranch` in
+  // the deps the reset effect re-fires while the user is still inside
+  // a create flow, clobbering the typed name + `busy` flag. The ref
+  // always reflects the latest value so the captured-on-open default
+  // for `startFrom` stays correct.
+  const activeBranchRef = useRef(activeBranch);
+  activeBranchRef.current = activeBranch;
+
+  // Hold the latest `default*` props in refs for the same reason as
+  // `activeBranch` — they can change while the dialog is open
+  // (parent re-renders) without us wanting to clobber a typed name.
+  const defaultLayerIdRef = useRef(defaultLayerId);
+  defaultLayerIdRef.current = defaultLayerId;
+  const defaultTagNameRef = useRef(defaultTagName);
+  defaultTagNameRef.current = defaultTagName;
+
+  // Reset transient state on the `open` false → true transition.
   useEffect(() => {
     if (open) {
       setName("");
-      setStartFrom({ kind: "existing", branch: activeBranch });
+      setStartFrom(
+        initialStartFrom(
+          defaultTagNameRef.current,
+          defaultLayerIdRef.current,
+          activeBranchRef.current,
+        ),
+      );
       setSwitchAfter(true);
       setBusy(false);
       setError(null);
+      setTags(null);
+      let cancelled = false;
+      void (async () => {
+        try {
+          const list = await eigen.listTags();
+          if (!cancelled) setTags(list);
+        } catch {
+          // Best-effort: a tag-fetch failure shouldn't block branch
+          // creation off existing branches or explicit layer ids.
+          if (!cancelled) setTags([]);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [open, activeBranch]);
+  }, [open, eigen]);
 
   const startBranchOptions = useMemo(() => {
     // Always offer the active branch even when the SDK's branches
@@ -134,10 +206,13 @@ export function CreateBranchDialog({
     return out;
   }, [branches, activeBranch]);
 
-  const canSubmit = name.trim().length > 0 &&
-    (startFrom.kind === "existing"
+  const canSubmit = name.trim().length > 0 && (
+    startFrom.kind === "existing"
       ? startFrom.branch.length > 0
-      : startFrom.layerId.trim().length > 0);
+      : startFrom.kind === "tag"
+      ? startFrom.tag.length > 0
+      : startFrom.layerId.trim().length > 0
+  );
 
   const onCreate = async () => {
     setBusy(true);
@@ -160,6 +235,18 @@ export function CreateBranchDialog({
           }
           fromLayer = resp.headLayer;
         }
+      } else if (startFrom.kind === "tag") {
+        // Re-fetch on submit so the resolved layer is current even
+        // if the dialog has been open for a while. Tags are immutable
+        // by contract, but a fresh fetch surfaces deletions cleanly.
+        const fresh = await eigen.listTags();
+        const found = fresh.find((t) => t.name === startFrom.tag);
+        if (!found) {
+          setError(`tag ${startFrom.tag} not found`);
+          setBusy(false);
+          return;
+        }
+        fromLayer = found.layerId;
       } else {
         fromLayer = startFrom.layerId.trim();
       }
@@ -174,6 +261,10 @@ export function CreateBranchDialog({
         setBusy(false);
         return;
       }
+      // Reset the in-flight flag before closing so a follow-up open
+      // can't catch a stale `busy=true` (which would render the form
+      // disabled until the on-open reset effect fires).
+      setBusy(false);
       onCreated?.(name.trim());
       onClose();
     } catch (err) {
@@ -209,54 +300,116 @@ export function CreateBranchDialog({
 
             <Field label="Start from" required>
               <RadioGroup
-                value={startFrom.kind === "existing"
-                  ? `existing:${startFrom.branch}`
-                  : "explicit"}
+                value={startFrom.kind}
                 onChange={(_e, data) => {
                   if (data.value === "explicit") {
                     setStartFrom({ kind: "explicit", layerId: "" });
+                  } else if (data.value === "tag") {
+                    setStartFrom({
+                      kind: "tag",
+                      tag: tags?.[0]?.name ?? "",
+                    });
                   } else {
-                    const branch = data.value.slice("existing:".length);
-                    setStartFrom({ kind: "existing", branch });
+                    setStartFrom({
+                      kind: "existing",
+                      branch: activeBranchRef.current,
+                    });
                   }
                 }}
               >
-                {startBranchOptions.map((b) => {
-                  const head = branches?.find((x) => x.name === b)?.headLayer;
-                  return (
-                    <Radio
-                      key={b}
-                      value={`existing:${b}`}
-                      disabled={busy}
-                      label={
-                        <span>
-                          Current head of <strong>{b}</strong>
-                          {head && (
-                            <span className={styles.branchHead}>
-                              {shortHash(head)}
-                            </span>
-                          )}
-                        </span>
+                <Radio
+                  value="existing"
+                  disabled={busy}
+                  label="Current head of a branch"
+                />
+                {startFrom.kind === "existing" && (
+                  <Combobox
+                    value={startFrom.branch}
+                    selectedOptions={startFrom.branch ? [startFrom.branch] : []}
+                    onOptionSelect={(_e, data) => {
+                      if (data.optionValue) {
+                        setStartFrom({
+                          kind: "existing",
+                          branch: data.optionValue,
+                        });
                       }
-                    />
-                  );
-                })}
+                    }}
+                    placeholder="Select a branch"
+                    disabled={busy}
+                  >
+                    {startBranchOptions.map((b) => {
+                      const head = branches?.find((x) => x.name === b)
+                        ?.headLayer;
+                      return (
+                        <Option key={b} value={b} text={b}>
+                          <span>
+                            <strong>{b}</strong>
+                            {head && (
+                              <span className={styles.branchHead}>
+                                {shortHash(head)}
+                              </span>
+                            )}
+                          </span>
+                        </Option>
+                      );
+                    })}
+                  </Combobox>
+                )}
+                <Radio
+                  value="tag"
+                  disabled={busy || (tags !== null && tags.length === 0)}
+                  label={tags !== null && tags.length === 0
+                    ? "Tag (no tags defined)"
+                    : "Tag"}
+                />
+                {startFrom.kind === "tag" && (
+                  <>
+                    {tags === null && <Caption1>Loading tags…</Caption1>}
+                    {tags !== null && tags.length > 0 && (
+                      <Combobox
+                        value={startFrom.tag}
+                        selectedOptions={startFrom.tag ? [startFrom.tag] : []}
+                        onOptionSelect={(_e, data) => {
+                          if (data.optionValue) {
+                            setStartFrom({
+                              kind: "tag",
+                              tag: data.optionValue,
+                            });
+                          }
+                        }}
+                        placeholder="Select a tag"
+                        disabled={busy}
+                      >
+                        {tags.map((t) => (
+                          <Option key={t.name} value={t.name} text={t.name}>
+                            <span>
+                              <strong>{t.name}</strong>
+                              <span className={styles.branchHead}>
+                                {shortHash(t.layerId)}
+                              </span>
+                            </span>
+                          </Option>
+                        ))}
+                      </Combobox>
+                    )}
+                  </>
+                )}
                 <Radio
                   value="explicit"
                   disabled={busy}
                   label="Specific layer id"
                 />
+                {startFrom.kind === "explicit" && (
+                  <Input
+                    className={styles.layerInput}
+                    value={startFrom.layerId}
+                    onChange={(_e, data) =>
+                      setStartFrom({ kind: "explicit", layerId: data.value })}
+                    placeholder="64-char hex LayerId"
+                    disabled={busy}
+                  />
+                )}
               </RadioGroup>
-              {startFrom.kind === "explicit" && (
-                <Input
-                  className={styles.layerInput}
-                  value={startFrom.layerId}
-                  onChange={(_e, data) =>
-                    setStartFrom({ kind: "explicit", layerId: data.value })}
-                  placeholder="64-char hex LayerId"
-                  disabled={busy}
-                />
-              )}
             </Field>
 
             <Checkbox
@@ -295,3 +448,4 @@ function shortHash(hex: string): string {
   if (hex.length <= 10) return hex;
   return `${hex.slice(0, 4)}…${hex.slice(-4)}`;
 }
+

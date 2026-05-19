@@ -3368,22 +3368,37 @@ impl EigeniusKernel for EigeniusService {
         }
 
         let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
-        let outcome = crate::lattice::update_branch(
+        // `merge_branch_tips` (vs. `update_branch`) computes the
+        // ancestor relationship between the two tips before deciding
+        // whether to fast-forward, trivial-merge, or surface
+        // NeedsWitnessedMerge — `update_branch`'s CAS-shortcut path
+        // would happily overwrite the target with an unrelated source
+        // tip and call it FastForward, dropping the target's history.
+        let outcome = crate::lattice::merge_branch_tips(
             &req.target,
-            Some(target_tip.clone()),
             source_tip.clone(),
-            crate::lattice::ConflictPolicy::AllowTrivial,
             storage,
             backend.as_ref(),
         );
         match outcome {
             Ok(update) => {
-                // New tip depends on the outcome — fast-forward is at
-                // the source's tip; trivial merge is at the merge
-                // layer's id; needs-witnessed-merge leaves the target
-                // unchanged.
+                // FastForward covers two sub-cases (source-descends-
+                // from-target advances the branch; target-already-
+                // ahead leaves it unchanged) and the outcome itself
+                // doesn't distinguish them. Re-read the branch tip
+                // for the authoritative answer in all cases.
                 let new_tip = match &update {
-                    crate::lattice::UpdateOutcome::FastForward => source_tip.clone(),
+                    crate::lattice::UpdateOutcome::FastForward => backend
+                        .get_branch(&req.target)
+                        .map_err(|e| {
+                            Status::internal(format!("get_branch after merge failed: {e}"))
+                        })?
+                        .ok_or_else(|| {
+                            Status::internal(format!(
+                                "branch {:?} disappeared after merge_branch_tips",
+                                req.target
+                            ))
+                        })?,
                     crate::lattice::UpdateOutcome::TrivialMerge { merge_layer } => {
                         merge_layer.clone()
                     }
@@ -3412,6 +3427,310 @@ impl EigeniusKernel for EigeniusService {
                 target_tip: String::new(),
             })),
         }
+    }
+
+    async fn submit_resolution(
+        &self,
+        request: Request<SubmitResolutionRequest>,
+    ) -> Result<Response<SubmitResolutionResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_SUBMIT_RESOLUTION);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        // Resolve branch tip + candidate head.
+        let branch_tip = backend
+            .get_branch(&req.branch)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("branch {:?} not found", req.branch))
+            })?;
+        let candidate_head = parse_layer_id(&req.candidate_head, "candidate_head")?;
+
+        // Decode the wire resolutions / acks into kernel types.
+        // Malformed shapes surface as `MALFORMED_RESOLUTION` with the
+        // human-readable reason — the CLI/UI can render verbatim.
+        let resolutions = match decode_resolutions(&req.resolutions) {
+            Ok(r) => r,
+            Err(reason) => {
+                return Ok(Response::new(SubmitResolutionResponse {
+                    success: false,
+                    error: reason,
+                    error_kind: proto::SubmitResolutionErrorKind::MalformedResolution as i32,
+                    ..Default::default()
+                }));
+            }
+        };
+        let acks: Vec<crate::layer::merge::CascadeAck> = req
+            .acknowledgments
+            .iter()
+            .map(|a| crate::layer::merge::CascadeAck {
+                item_id: crate::layer::merge::CascadeItemId(a.item_id.clone()),
+            })
+            .collect();
+
+        // Build the span between branch tip and candidate head.
+        let topology = backend
+            .load_topology()
+            .map_err(|e| Status::internal(format!("load_topology failed: {e}")))?;
+        let span = match crate::layer::merge::build_merge_span(
+            &branch_tip,
+            &candidate_head,
+            &topology,
+            backend.as_ref(),
+        ) {
+            Ok(s) => s,
+            Err(crate::layer::merge::MergeError::NoCommonAncestor { .. }) => {
+                return Ok(Response::new(SubmitResolutionResponse {
+                    success: false,
+                    error: format!(
+                        "no common ancestor between branch tip and candidate head {}",
+                        req.candidate_head
+                    ),
+                    error_kind: proto::SubmitResolutionErrorKind::NoCommonAncestor as i32,
+                    ..Default::default()
+                }));
+            }
+            Err(e) => {
+                return Ok(submit_resolution_internal_error(format!(
+                    "build_merge_span failed: {e}"
+                )));
+            }
+        };
+
+        // Apply the resolutions and commit the merge layer.
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        // D38 §4 — caller-supplied search-branch scope for the witness
+        // resolver's fourth-tier walk. Empty list means span-only
+        // (the pre-D38 default).
+        let extra_branches: Vec<String> = req
+            .witness_search_branches
+            .iter()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .collect();
+        let merge_layer_id = match crate::layer::merge::merge_with_resolutions(
+            &span,
+            resolutions,
+            acks,
+            extra_branches,
+            storage.clone(),
+            backend.as_ref(),
+        ) {
+            Ok(crate::layer::merge::MergeOutcome::Merged { merge_layer }) => merge_layer,
+            Ok(crate::layer::merge::MergeOutcome::NeedsResolution { .. }) => {
+                // Shouldn't happen post-resolution-application — the
+                // surface returns NeedsResolution only when
+                // `resolutions` is empty. Surface as internal.
+                return Ok(submit_resolution_internal_error(
+                    "merge surface returned NeedsResolution despite supplied resolutions"
+                        .to_string(),
+                ));
+            }
+            Err(e) => return Ok(merge_error_to_submit_response(&e)),
+        };
+
+        // CAS-advance the branch ref. The merge layer's parents are
+        // `[branch_tip, candidate_head]`, so advancing `branch` from
+        // `branch_tip` to `merge_layer_id` is a fast-forward in DAG
+        // terms — `update_branch` with `StrictFastForward` does
+        // exactly the CAS without attempting a second merge.
+        let cas = crate::lattice::update_branch(
+            &req.branch,
+            Some(branch_tip.clone()),
+            merge_layer_id.clone(),
+            crate::lattice::ConflictPolicy::StrictFastForward,
+            storage,
+            backend.as_ref(),
+        );
+        match cas {
+            Ok(_) => Ok(Response::new(SubmitResolutionResponse {
+                success: true,
+                error: String::new(),
+                error_kind: proto::SubmitResolutionErrorKind::Unspecified as i32,
+                merge_layer_id: hex::encode(merge_layer_id.0),
+                branch_tip: hex::encode(merge_layer_id.0),
+                missing_acknowledgments: Vec::new(),
+            })),
+            Err(crate::lattice::BranchUpdateError::StrictFastForwardViolation { .. }) => {
+                Ok(Response::new(SubmitResolutionResponse {
+                    success: false,
+                    error: format!(
+                        "branch {:?} moved between resolution preview and commit; re-fetch and retry",
+                        req.branch
+                    ),
+                    error_kind: proto::SubmitResolutionErrorKind::BranchCasRace as i32,
+                    merge_layer_id: hex::encode(merge_layer_id.0),
+                    ..Default::default()
+                }))
+            }
+            Err(e) => Ok(submit_resolution_internal_error(format!(
+                "branch CAS failed: {e}"
+            ))),
+        }
+    }
+
+    async fn preview_cascade(
+        &self,
+        request: Request<PreviewCascadeRequest>,
+    ) -> Result<Response<PreviewCascadeResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_PREVIEW_CASCADE);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        let branch_tip = backend
+            .get_branch(&req.branch)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("branch {:?} not found", req.branch))
+            })?;
+        let candidate_head = parse_layer_id(&req.candidate_head, "candidate_head")?;
+
+        let resolutions = match decode_resolutions(&req.resolutions) {
+            Ok(r) => r,
+            Err(reason) => {
+                return Ok(Response::new(PreviewCascadeResponse {
+                    success: false,
+                    error: reason,
+                    error_kind: proto::PreviewCascadeErrorKind::MalformedResolution as i32,
+                    items: Vec::new(),
+                }));
+            }
+        };
+
+        let topology = backend
+            .load_topology()
+            .map_err(|e| Status::internal(format!("load_topology failed: {e}")))?;
+        let span = match crate::layer::merge::build_merge_span(
+            &branch_tip,
+            &candidate_head,
+            &topology,
+            backend.as_ref(),
+        ) {
+            Ok(s) => s,
+            Err(crate::layer::merge::MergeError::NoCommonAncestor { .. }) => {
+                return Ok(Response::new(PreviewCascadeResponse {
+                    success: false,
+                    error: format!(
+                        "no common ancestor between branch tip and candidate head {}",
+                        req.candidate_head
+                    ),
+                    error_kind: proto::PreviewCascadeErrorKind::NoCommonAncestor as i32,
+                    items: Vec::new(),
+                }));
+            }
+            Err(e) => {
+                return Ok(Response::new(PreviewCascadeResponse {
+                    success: false,
+                    error: format!("build_merge_span failed: {e}"),
+                    error_kind: proto::PreviewCascadeErrorKind::Internal as i32,
+                    items: Vec::new(),
+                }));
+            }
+        };
+
+        let preview =
+            match crate::layer::merge::preview_cascade(&span, &resolutions, backend.as_ref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    let kind = match e {
+                        crate::layer::merge::MergeError::ConflictNotFound(_) => {
+                            proto::PreviewCascadeErrorKind::ConflictNotFound
+                        }
+                        _ => proto::PreviewCascadeErrorKind::Internal,
+                    };
+                    return Ok(Response::new(PreviewCascadeResponse {
+                        success: false,
+                        error: e.to_string(),
+                        error_kind: kind as i32,
+                        items: Vec::new(),
+                    }));
+                }
+            };
+
+        Ok(Response::new(PreviewCascadeResponse {
+            success: true,
+            error: String::new(),
+            error_kind: proto::PreviewCascadeErrorKind::Unspecified as i32,
+            items: preview.items.iter().map(encode_cascade_item).collect(),
+        }))
+    }
+
+    async fn prepare_merge(
+        &self,
+        request: Request<PrepareMergeRequest>,
+    ) -> Result<Response<PrepareMergeResponse>, Status> {
+        let _guard = RpcGuard::start(operation::RPC_PREPARE_MERGE);
+        let req = request.into_inner();
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            Status::failed_precondition("branch operations require a persistent backend")
+        })?;
+
+        let branch_tip = backend
+            .get_branch(&req.branch)
+            .map_err(|e| Status::internal(format!("get_branch failed: {e}")))?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("branch {:?} not found", req.branch))
+            })?;
+        let candidate_head = parse_layer_id(&req.candidate_head, "candidate_head")?;
+
+        let topology = backend
+            .load_topology()
+            .map_err(|e| Status::internal(format!("load_topology failed: {e}")))?;
+
+        let span = match crate::layer::merge::build_merge_span(
+            &branch_tip,
+            &candidate_head,
+            &topology,
+            backend.as_ref(),
+        ) {
+            Ok(s) => s,
+            Err(crate::layer::merge::MergeError::NoCommonAncestor { .. }) => {
+                return Ok(Response::new(PrepareMergeResponse {
+                    success: false,
+                    error: format!(
+                        "no common ancestor between branch tip and candidate head {}",
+                        req.candidate_head
+                    ),
+                    error_kind: proto::PrepareMergeErrorKind::NoCommonAncestor as i32,
+                    conflicts: Vec::new(),
+                    branch_tip: hex::encode(branch_tip.0),
+                }));
+            }
+            Err(e) => {
+                return Ok(Response::new(PrepareMergeResponse {
+                    success: false,
+                    error: format!("build_merge_span failed: {e}"),
+                    error_kind: proto::PrepareMergeErrorKind::Internal as i32,
+                    conflicts: Vec::new(),
+                    branch_tip: hex::encode(branch_tip.0),
+                }));
+            }
+        };
+
+        let conflicts = match crate::layer::merge::classify_conflicts(&span, backend.as_ref()) {
+            Ok(c) => c,
+            Err(e) => {
+                return Ok(Response::new(PrepareMergeResponse {
+                    success: false,
+                    error: format!("classify_conflicts failed: {e}"),
+                    error_kind: proto::PrepareMergeErrorKind::Internal as i32,
+                    conflicts: Vec::new(),
+                    branch_tip: hex::encode(branch_tip.0),
+                }));
+            }
+        };
+
+        Ok(Response::new(PrepareMergeResponse {
+            success: true,
+            error: String::new(),
+            error_kind: proto::PrepareMergeErrorKind::Unspecified as i32,
+            conflicts: conflicts.iter().map(encode_typed_conflict).collect(),
+            branch_tip: hex::encode(branch_tip.0),
+        }))
     }
 
     async fn preview_merge(
@@ -3865,6 +4184,405 @@ fn parse_layer_id(hex_str: &str, field: &str) -> Result<crate::layer::LayerId, S
     let mut id = [0u8; 32];
     id.copy_from_slice(&bytes);
     Ok(crate::layer::LayerId(id))
+}
+
+/// Decode a list of wire-shaped `MergeResolutionWire` into kernel
+/// `MergeResolution`s (D20 §7.2). Returns a human-readable diagnostic
+/// on malformed input; the handler wraps it in
+/// `SubmitResolutionErrorKind::MalformedResolution`.
+fn decode_resolutions(
+    wire: &[proto::MergeResolutionWire],
+) -> Result<Vec<crate::layer::merge::MergeResolution>, String> {
+    use crate::layer::merge::{ConflictId, MergeResolution, RestructureSpec};
+
+    let mut out = Vec::with_capacity(wire.len());
+    for (idx, r) in wire.iter().enumerate() {
+        let conflict_id = ConflictId(r.conflict_id.clone());
+        let strategy = r
+            .strategy
+            .as_ref()
+            .ok_or_else(|| format!("resolutions[{idx}]: missing strategy oneof"))?;
+        let resolution = match strategy {
+            proto::merge_resolution_wire::Strategy::Witness(w) => {
+                let comorphism = crate::ontology::iri::Iri::parse(&w.comorphism_iri)
+                    .map_err(|e| format!("resolutions[{idx}].comorphism_iri: {e}"))?;
+                MergeResolution::Witness {
+                    conflict: conflict_id,
+                    comorphism,
+                }
+            }
+            proto::merge_resolution_wire::Strategy::Rename(r) => {
+                let side = decode_side(r.side, idx)?;
+                let old_iri = crate::ontology::iri::Iri::parse(&r.old_iri)
+                    .map_err(|e| format!("resolutions[{idx}].old_iri: {e}"))?;
+                let new_iri = crate::ontology::iri::Iri::parse(&r.new_iri)
+                    .map_err(|e| format!("resolutions[{idx}].new_iri: {e}"))?;
+                MergeResolution::Rename {
+                    conflict: conflict_id,
+                    side,
+                    old_iri,
+                    new_iri,
+                }
+            }
+            proto::merge_resolution_wire::Strategy::Quotient(q) => {
+                let quotient = decode_quotient(q, idx)?;
+                MergeResolution::SchemaQuotient {
+                    conflict: conflict_id,
+                    quotient,
+                }
+            }
+            proto::merge_resolution_wire::Strategy::Restructure(spec) => {
+                let affected_class = crate::ontology::iri::Iri::parse(&spec.affected_class)
+                    .map_err(|e| format!("resolutions[{idx}].affected_class: {e}"))?;
+                let new_parent = crate::ontology::iri::Iri::parse(&spec.new_parent)
+                    .map_err(|e| format!("resolutions[{idx}].new_parent: {e}"))?;
+                let new_parent_def = if spec.new_parent_def_json.is_empty() {
+                    None
+                } else {
+                    Some(decode_eigon_json_resource(&spec.new_parent_def_json, idx)?)
+                };
+                let mut classes_under_new = Vec::with_capacity(spec.classes_under_new.len());
+                for (j, cls) in spec.classes_under_new.iter().enumerate() {
+                    let iri = crate::ontology::iri::Iri::parse(cls)
+                        .map_err(|e| format!("resolutions[{idx}].classes_under_new[{j}]: {e}"))?;
+                    classes_under_new.push(iri);
+                }
+                MergeResolution::Restructure {
+                    conflict: conflict_id,
+                    spec: RestructureSpec {
+                        affected_class,
+                        new_parent,
+                        new_parent_def,
+                        classes_under_new,
+                        affected_class_under_new: spec.affected_class_under_new,
+                    },
+                }
+            }
+        };
+        out.push(resolution);
+    }
+    Ok(out)
+}
+
+/// Decode an Eigon-JSON-encoded `Resource` from a wire string. Used
+/// for `RestructureStrategy.new_parent_def_json`. The wire shape is
+/// one top-level Class resource (with `@id`), so we wrap it in an
+/// array for `parse_document` — `parse_embedded` rejects resources
+/// that carry an `@id`. Returns a human-readable diagnostic on
+/// parse failure; the caller wraps it in `MALFORMED_RESOLUTION`.
+fn decode_eigon_json_resource(
+    json: &str,
+    idx: usize,
+) -> Result<crate::ontology::resource::Resource, String> {
+    let wrapped = format!("[{json}]");
+    let mut resources = crate::ontology::eigon_json::parse_document(&wrapped)
+        .map_err(|e| format!("resolutions[{idx}].new_parent_def_json: {e}"))?;
+    if resources.len() != 1 {
+        return Err(format!(
+            "resolutions[{idx}].new_parent_def_json: expected exactly one resource, got {}",
+            resources.len()
+        ));
+    }
+    Ok(resources.remove(0))
+}
+
+fn decode_side(wire: i32, idx: usize) -> Result<crate::layer::merge::Side, String> {
+    use crate::layer::merge::Side;
+    match proto::MergeSide::try_from(wire) {
+        Ok(proto::MergeSide::A) => Ok(Side::A),
+        Ok(proto::MergeSide::B) => Ok(Side::B),
+        Ok(proto::MergeSide::Unspecified) => Err(format!(
+            "resolutions[{idx}]: side is MERGE_SIDE_UNSPECIFIED"
+        )),
+        Err(_) => Err(format!("resolutions[{idx}]: unknown MergeSide enum value")),
+    }
+}
+
+fn decode_quotient(
+    wire: &proto::QuotientStrategy,
+    idx: usize,
+) -> Result<crate::layer::merge::SchemaQuotient, String> {
+    use crate::layer::merge::SchemaQuotient;
+    match proto::MergeQuotientKind::try_from(wire.kind) {
+        Ok(proto::MergeQuotientKind::KeepBoth) => Ok(SchemaQuotient::KeepBoth),
+        Ok(proto::MergeQuotientKind::KeepOne) => {
+            let winner = decode_side(wire.winner, idx)?;
+            Ok(SchemaQuotient::KeepOne { winner })
+        }
+        Ok(proto::MergeQuotientKind::KeepNeither) => Ok(SchemaQuotient::KeepNeither),
+        Ok(proto::MergeQuotientKind::Unspecified) => Err(format!(
+            "resolutions[{idx}]: quotient kind is MERGE_QUOTIENT_KIND_UNSPECIFIED"
+        )),
+        Err(_) => Err(format!(
+            "resolutions[{idx}]: unknown MergeQuotientKind enum value"
+        )),
+    }
+}
+
+/// Translate a `MergeError` into a `SubmitResolutionResponse` with
+/// the right typed `error_kind`. Internal failures map to
+/// `INTERNAL`; structural failures (cascade gate, conflict-not-found,
+/// applicability) map to their dedicated variants.
+fn merge_error_to_submit_response(
+    err: &crate::layer::merge::MergeError,
+) -> Response<SubmitResolutionResponse> {
+    use crate::layer::merge::MergeError;
+    let (error_kind, missing) = match err {
+        MergeError::IncompleteAcknowledgments { missing } => (
+            proto::SubmitResolutionErrorKind::IncompleteAcknowledgments,
+            missing.iter().map(|m| m.0.clone()).collect(),
+        ),
+        MergeError::ConflictNotFound(_) | MergeError::UnresolvedConflict { .. } => (
+            proto::SubmitResolutionErrorKind::ConflictNotFound,
+            Vec::new(),
+        ),
+        MergeError::NoCommonAncestor { .. } => (
+            proto::SubmitResolutionErrorKind::NoCommonAncestor,
+            Vec::new(),
+        ),
+        // `SUBMIT_RESOLUTION_ERROR_KIND_APPLICATION_PENDING` stays
+        // on the wire as a reserved value for backward compat with
+        // earlier kernel revisions; the kernel no longer constructs
+        // it (every variant's commit shape is wired). Future
+        // partially-supported resolution kinds would route here.
+        MergeError::QuotientNotApplicable { .. }
+        | MergeError::RenameTargetNotInBranch { .. }
+        | MergeError::RenameCollision { .. }
+        | MergeError::RenameIdentity { .. }
+        | MergeError::MergeComorphismNotFound(_)
+        | MergeError::NotAMergeComorphism { .. }
+        | MergeError::MalformedMergeComorphism { .. }
+        | MergeError::MergeComorphismWrongClass { .. }
+        | MergeError::TransformationNotFound { .. }
+        | MergeError::TransformationParseError { .. }
+        | MergeError::TransformationEvalError { .. }
+        | MergeError::WitnessTermNotAFunction { .. }
+        | MergeError::WitnessTypeMismatch { .. }
+        | MergeError::WitnessTargetNotResolvable { .. }
+        | MergeError::RestructureSynthesizedParent { .. }
+        | MergeError::RestructureParentRedeclaration { .. }
+        | MergeError::RestructureParentMissingDefinition { .. }
+        | MergeError::RestructureParentDefMismatch { .. }
+        | MergeError::RestructureParentDefNotAClass { .. }
+        | MergeError::RestructureClassNotInSpan { .. } => (
+            proto::SubmitResolutionErrorKind::MalformedResolution,
+            Vec::new(),
+        ),
+        MergeError::Storage(_) | MergeError::LayerBuild(_) => {
+            (proto::SubmitResolutionErrorKind::Internal, Vec::new())
+        }
+    };
+    Response::new(SubmitResolutionResponse {
+        success: false,
+        error: err.to_string(),
+        error_kind: error_kind as i32,
+        merge_layer_id: String::new(),
+        branch_tip: String::new(),
+        missing_acknowledgments: missing,
+    })
+}
+
+fn submit_resolution_internal_error(error: String) -> Response<SubmitResolutionResponse> {
+    Response::new(SubmitResolutionResponse {
+        success: false,
+        error,
+        error_kind: proto::SubmitResolutionErrorKind::Internal as i32,
+        ..Default::default()
+    })
+}
+
+/// Encode a kernel `CascadeItem` as the wire shape. Mirrors the
+/// enum variants one-for-one; `item_id` is the deterministic id the
+/// kernel produces so clients can build acknowledgments from this
+/// list directly.
+fn encode_cascade_item(item: &crate::layer::merge::CascadeItem) -> proto::CascadeItemWire {
+    use crate::layer::merge::CascadeItem;
+    let item_id = item.id().0;
+    let kind = match item {
+        CascadeItem::OrphanedReference {
+            resource,
+            dropped_target,
+            location,
+        } => proto::cascade_item_wire::Kind::OrphanedReference(proto::OrphanedReferenceItem {
+            resource: resource.as_str().to_string(),
+            dropped_target: dropped_target.as_str().to_string(),
+            property_path: location.0.iter().map(|i| i.as_str().to_string()).collect(),
+        }),
+        CascadeItem::OrphanedTyping {
+            class,
+            affected_resources,
+        } => proto::cascade_item_wire::Kind::OrphanedTyping(proto::OrphanedTypingItem {
+            class: class.as_str().to_string(),
+            affected_resources: affected_resources
+                .iter()
+                .map(|i| i.as_str().to_string())
+                .collect(),
+        }),
+        CascadeItem::InvalidatedSignature {
+            program,
+            signature_problem,
+        } => {
+            proto::cascade_item_wire::Kind::InvalidatedSignature(proto::InvalidatedSignatureItem {
+                program: program.as_str().to_string(),
+                signature_problem: signature_problem.clone(),
+            })
+        }
+        CascadeItem::InvalidatedTrace { trace, reason } => {
+            proto::cascade_item_wire::Kind::InvalidatedTrace(proto::InvalidatedTraceItem {
+                trace: trace.clone(),
+                reason: reason.clone(),
+            })
+        }
+    };
+    proto::CascadeItemWire {
+        item_id,
+        kind: Some(kind),
+    }
+}
+
+/// Encode a kernel `TypedConflict` as the wire shape (D36 §3.1).
+/// Mirrors the `ConflictKind` enum one-for-one; the four reserved
+/// stage-2/3 kinds (`DeletionConflict`, `DisjointnessViolation`,
+/// `PathEquationContradiction`) don't fire in v1 and produce a
+/// conflict with `kind = None` (the resolution UI surfaces that as
+/// "internal kernel error — please report"). Once those kinds gain
+/// wire shapes, add the corresponding `oneof` arms here.
+fn encode_typed_conflict(
+    conflict: &crate::layer::merge::TypedConflict,
+) -> proto::TypedConflictWire {
+    use crate::layer::merge::ConflictKind;
+    let kind = match &conflict.kind {
+        ConflictKind::PropertyDataType {
+            property,
+            branch_a,
+            branch_b,
+            ancestor,
+        } => Some(proto::typed_conflict_wire::Kind::PropertyDataType(
+            proto::PropertyDataTypeConflict {
+                property: property.as_str().to_string(),
+                branch_a_type: branch_a.as_str().to_string(),
+                branch_b_type: branch_b.as_str().to_string(),
+                ancestor_type: ancestor
+                    .as_ref()
+                    .map(|i| i.as_str().to_string())
+                    .unwrap_or_default(),
+            },
+        )),
+        ConflictKind::KindMismatch {
+            iri,
+            branch_a_kind,
+            branch_b_kind,
+        } => Some(proto::typed_conflict_wire::Kind::KindMismatch(
+            proto::KindMismatchConflict {
+                iri: iri.as_str().to_string(),
+                branch_a_kind: render_resource_kind(*branch_a_kind),
+                branch_b_kind: render_resource_kind(*branch_b_kind),
+            },
+        )),
+        ConflictKind::IriCollision {
+            iri,
+            branch_a_body,
+            branch_b_body,
+            ancestor_body,
+        } => Some(proto::typed_conflict_wire::Kind::IriCollision(
+            proto::IriCollisionConflict {
+                iri: iri.as_str().to_string(),
+                branch_a_body_json: serialize_body_as_json(&branch_a_body.resource),
+                branch_b_body_json: serialize_body_as_json(&branch_b_body.resource),
+                ancestor_body_json: ancestor_body
+                    .as_ref()
+                    .map(|b| serialize_body_as_json(&b.resource))
+                    .unwrap_or_default(),
+            },
+        )),
+        ConflictKind::InheritanceCycle { cycle } => Some(
+            proto::typed_conflict_wire::Kind::InheritanceCycle(proto::InheritanceCycleConflict {
+                cycle: cycle.iter().map(|i| i.as_str().to_string()).collect(),
+            }),
+        ),
+        // Reserved kinds — no wire shape yet. The notebook should
+        // never see these because the classifier doesn't surface
+        // them in v1, but we leave `kind = None` rather than
+        // panic'ing so a future kernel that does surface them gets
+        // an unambiguous "wire shape missing" signal at the UI.
+        ConflictKind::DeletionConflict { .. }
+        | ConflictKind::DisjointnessViolation { .. }
+        | ConflictKind::PathEquationContradiction { .. } => None,
+    };
+    let applicable_strategies = applicable_strategies_for(&conflict.kind)
+        .into_iter()
+        .map(|k| k as i32)
+        .collect();
+    proto::TypedConflictWire {
+        id: conflict.id.0.clone(),
+        kind,
+        applicable_strategies,
+    }
+}
+
+/// Render a `ResourceKind` as the wire string mirroring D36 §3.1's
+/// `KindMismatchConflict.branch_*_kind` field comment.
+fn render_resource_kind(k: crate::layer::merge::ResourceKind) -> String {
+    use crate::layer::merge::ResourceKind;
+    match k {
+        ResourceKind::Class => "Class",
+        ResourceKind::Property => "Property",
+        ResourceKind::Other => "Other",
+    }
+    .to_string()
+}
+
+/// Serialize a `Resource` as Eigon-JSON for inclusion in the
+/// `IriCollisionConflict` wire shape. The UI uses this to render a
+/// body-diff without an additional resource-fetch round trip.
+fn serialize_body_as_json(resource: &crate::ontology::resource::Resource) -> String {
+    let value = crate::ontology::eigon_json::serialize_resource(resource);
+    serde_json::to_string(&value).unwrap_or_default()
+}
+
+/// Compute the list of strategies whose applicability check passes
+/// for a given `ConflictKind` (D36 §3.1, mirroring the kernel's
+/// per-strategy rules from D20 §6).
+///
+/// **Witness, Rename, Restructure** apply to every kind in v1:
+/// the witness term is type-checked against the kind's class at
+/// commit time, rename rewrites references regardless of kind, and
+/// restructure raises the abstraction by introducing a new parent
+/// (which works for any class-shaped or even instance-shaped
+/// conflict, though the user's `RestructureSpec` may not pass the
+/// per-conflict validation — that's caught at commit time).
+///
+/// **SchemaQuotient** applicability is per the D20 §6.3 table:
+/// every classified v1 kind is single-valued or mutually exclusive,
+/// so `KeepBoth` is never applicable; `KeepOne` and `KeepNeither`
+/// always are.
+fn applicable_strategies_for(
+    kind: &crate::layer::merge::ConflictKind,
+) -> Vec<proto::MergeStrategyKind> {
+    use crate::layer::merge::ConflictKind;
+    let mut out = vec![
+        proto::MergeStrategyKind::Witness,
+        proto::MergeStrategyKind::Rename,
+    ];
+    match kind {
+        ConflictKind::PropertyDataType { .. }
+        | ConflictKind::KindMismatch { .. }
+        | ConflictKind::IriCollision { .. }
+        | ConflictKind::InheritanceCycle { .. }
+        | ConflictKind::DeletionConflict { .. }
+        | ConflictKind::DisjointnessViolation { .. }
+        | ConflictKind::PathEquationContradiction { .. } => {
+            // KeepBoth is structurally inapplicable to every v1
+            // kind (each is single-valued or mutually exclusive).
+            // The wire-side picker greys it out per
+            // `applicable_strategies` rather than per the editor's
+            // own check, so the response is the source of truth.
+            out.push(proto::MergeStrategyKind::KeepOne);
+            out.push(proto::MergeStrategyKind::KeepNeither);
+        }
+    }
+    out.push(proto::MergeStrategyKind::Restructure);
+    out
 }
 
 /// Build a `ConsolidateOpts` from the wire request. Pulls active task
@@ -4367,5 +5085,336 @@ mod institution_enrichment_tests {
             dispatch_role_to_proto(KernelDispatchRole::Decidable),
             proto::DispatchRole::Decidable
         );
+    }
+}
+
+#[cfg(test)]
+mod prepare_merge_encoding_tests {
+    //! Pin the `encode_typed_conflict` + `applicable_strategies_for`
+    //! wire-encoding (D36 §3.1). The handler is a thin wrapper around
+    //! `build_merge_span` + `classify_conflicts` + this encoder — the
+    //! kernel-internal merge tests already pin the classifier; these
+    //! tests pin the wire shape so a future enum-variant churn breaks
+    //! the build at the right layer.
+    use super::*;
+    use crate::layer::merge::{
+        ConflictId, ConflictKind, ResourceBody, ResourceKind, TypedConflict,
+    };
+    use crate::layer::LayerId;
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::{Resource, Value};
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).expect("test IRI parses")
+    }
+
+    fn lid(byte: u8) -> LayerId {
+        LayerId([byte; 32])
+    }
+
+    fn make_body(id: &str, props: &[(&str, Value)]) -> Resource {
+        let mut r = Resource::new(iri(id));
+        for (k, v) in props {
+            r.set(iri(k), v.clone());
+        }
+        r
+    }
+
+    #[test]
+    fn encode_property_data_type_round_trips_all_fields() {
+        let conflict = TypedConflict {
+            id: ConflictId("pdt:urn:test:weight".to_string()),
+            kind: ConflictKind::PropertyDataType {
+                property: iri("urn:test:weight"),
+                branch_a: iri("urn:eigenius:core:integer"),
+                branch_b: iri("urn:eigenius:core:string"),
+                ancestor: Some(iri("urn:eigenius:core:integer")),
+            },
+        };
+        let wire = encode_typed_conflict(&conflict);
+        assert_eq!(wire.id, "pdt:urn:test:weight");
+        match wire.kind {
+            Some(proto::typed_conflict_wire::Kind::PropertyDataType(p)) => {
+                assert_eq!(p.property, "urn:test:weight");
+                assert_eq!(p.branch_a_type, "urn:eigenius:core:integer");
+                assert_eq!(p.branch_b_type, "urn:eigenius:core:string");
+                assert_eq!(p.ancestor_type, "urn:eigenius:core:integer");
+            }
+            other => panic!("expected PropertyDataType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_property_data_type_handles_branch_introduced() {
+        // ancestor = None when the property was introduced on the
+        // branches (no pre-divergence value). The wire's
+        // `ancestor_type` is the empty string.
+        let conflict = TypedConflict {
+            id: ConflictId("pdt:urn:test:weight".to_string()),
+            kind: ConflictKind::PropertyDataType {
+                property: iri("urn:test:weight"),
+                branch_a: iri("urn:eigenius:core:integer"),
+                branch_b: iri("urn:eigenius:core:string"),
+                ancestor: None,
+            },
+        };
+        let wire = encode_typed_conflict(&conflict);
+        match wire.kind {
+            Some(proto::typed_conflict_wire::Kind::PropertyDataType(p)) => {
+                assert!(p.ancestor_type.is_empty());
+            }
+            other => panic!("expected PropertyDataType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_kind_mismatch_renders_resource_kinds() {
+        let conflict = TypedConflict {
+            id: ConflictId("kind:urn:test:X".to_string()),
+            kind: ConflictKind::KindMismatch {
+                iri: iri("urn:test:X"),
+                branch_a_kind: ResourceKind::Class,
+                branch_b_kind: ResourceKind::Property,
+            },
+        };
+        let wire = encode_typed_conflict(&conflict);
+        match wire.kind {
+            Some(proto::typed_conflict_wire::Kind::KindMismatch(k)) => {
+                assert_eq!(k.iri, "urn:test:X");
+                assert_eq!(k.branch_a_kind, "Class");
+                assert_eq!(k.branch_b_kind, "Property");
+            }
+            other => panic!("expected KindMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_iri_collision_serialises_bodies_as_eigon_json() {
+        let body_a = make_body("urn:test:X", &[("urn:test:weight", Value::Integer(75))]);
+        let body_b = make_body("urn:test:X", &[("urn:test:weight", Value::Integer(76))]);
+        let ancestor_body = make_body("urn:test:X", &[("urn:test:weight", Value::Integer(0))]);
+        let conflict = TypedConflict {
+            id: ConflictId("collision:urn:test:X".to_string()),
+            kind: ConflictKind::IriCollision {
+                iri: iri("urn:test:X"),
+                branch_a_body: ResourceBody {
+                    source_layer: lid(0xAA),
+                    resource: body_a,
+                },
+                branch_b_body: ResourceBody {
+                    source_layer: lid(0xBB),
+                    resource: body_b,
+                },
+                ancestor_body: Some(ResourceBody {
+                    source_layer: lid(0xCC),
+                    resource: ancestor_body,
+                }),
+            },
+        };
+        let wire = encode_typed_conflict(&conflict);
+        match wire.kind {
+            Some(proto::typed_conflict_wire::Kind::IriCollision(c)) => {
+                assert_eq!(c.iri, "urn:test:X");
+                // Bodies round-trip as Eigon-JSON; the diff-renderer
+                // on the notebook side parses them. We pin that the
+                // serialization is non-empty and contains the value;
+                // exact byte match would be brittle against
+                // serde_json's whitespace defaults.
+                assert!(c.branch_a_body_json.contains("75"));
+                assert!(c.branch_b_body_json.contains("76"));
+                assert!(c.ancestor_body_json.contains('0'));
+            }
+            other => panic!("expected IriCollision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_iri_collision_empty_ancestor_when_branch_introduced() {
+        let body_a = make_body("urn:test:X", &[]);
+        let body_b = make_body("urn:test:X", &[]);
+        let conflict = TypedConflict {
+            id: ConflictId("collision:urn:test:X".to_string()),
+            kind: ConflictKind::IriCollision {
+                iri: iri("urn:test:X"),
+                branch_a_body: ResourceBody {
+                    source_layer: lid(0xAA),
+                    resource: body_a,
+                },
+                branch_b_body: ResourceBody {
+                    source_layer: lid(0xBB),
+                    resource: body_b,
+                },
+                ancestor_body: None,
+            },
+        };
+        let wire = encode_typed_conflict(&conflict);
+        match wire.kind {
+            Some(proto::typed_conflict_wire::Kind::IriCollision(c)) => {
+                assert!(c.ancestor_body_json.is_empty());
+            }
+            other => panic!("expected IriCollision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encode_inheritance_cycle_preserves_cycle_order() {
+        let conflict = TypedConflict {
+            id: ConflictId("cycle:a,b,c".to_string()),
+            kind: ConflictKind::InheritanceCycle {
+                cycle: vec![iri("urn:test:A"), iri("urn:test:B"), iri("urn:test:C")],
+            },
+        };
+        let wire = encode_typed_conflict(&conflict);
+        match wire.kind {
+            Some(proto::typed_conflict_wire::Kind::InheritanceCycle(c)) => {
+                assert_eq!(
+                    c.cycle,
+                    vec![
+                        "urn:test:A".to_string(),
+                        "urn:test:B".to_string(),
+                        "urn:test:C".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected InheritanceCycle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn applicable_strategies_for_classified_kinds_excludes_keep_both() {
+        // Every v1-classified kind is single-valued or
+        // mutually-exclusive; `KeepBoth` is structurally inapplicable
+        // and must be absent from `applicable_strategies`.
+        let pdt = ConflictKind::PropertyDataType {
+            property: iri("urn:test:p"),
+            branch_a: iri("urn:eigenius:core:integer"),
+            branch_b: iri("urn:eigenius:core:string"),
+            ancestor: None,
+        };
+        let strategies = applicable_strategies_for(&pdt);
+        assert!(strategies.contains(&proto::MergeStrategyKind::Witness));
+        assert!(strategies.contains(&proto::MergeStrategyKind::Rename));
+        assert!(strategies.contains(&proto::MergeStrategyKind::KeepOne));
+        assert!(strategies.contains(&proto::MergeStrategyKind::KeepNeither));
+        assert!(strategies.contains(&proto::MergeStrategyKind::Restructure));
+        assert!(
+            !strategies.contains(&proto::MergeStrategyKind::KeepBoth),
+            "KeepBoth must not be applicable to PropertyDataType"
+        );
+    }
+
+    #[test]
+    fn applicable_strategies_for_inheritance_cycle_matches_classified_shape() {
+        let cycle = ConflictKind::InheritanceCycle {
+            cycle: vec![iri("urn:test:A"), iri("urn:test:B")],
+        };
+        let strategies = applicable_strategies_for(&cycle);
+        assert!(strategies.contains(&proto::MergeStrategyKind::KeepOne));
+        assert!(!strategies.contains(&proto::MergeStrategyKind::KeepBoth));
+    }
+
+    #[test]
+    fn decode_resolutions_restructure_with_new_parent_def_round_trips() {
+        // Wire shape carrying an inline Eigon-JSON Class for a fresh
+        // parent should decode into a `MergeResolution::Restructure`
+        // with a `new_parent_def: Some(Resource)`.
+        use crate::layer::merge::MergeResolution;
+
+        let def_json = serde_json::json!({
+            "@id": "urn:test:Animal",
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+            "urn:eigenius:core:short_name": "Animal",
+            "urn:eigenius:core:description": "A common parent."
+        });
+        let wire = vec![proto::MergeResolutionWire {
+            conflict_id: "subclass_conflict:urn:test:Dog".to_string(),
+            strategy: Some(proto::merge_resolution_wire::Strategy::Restructure(
+                proto::RestructureStrategy {
+                    affected_class: "urn:test:Dog".to_string(),
+                    new_parent: "urn:test:Animal".to_string(),
+                    new_parent_def_json: def_json.to_string(),
+                    classes_under_new: vec![
+                        "urn:test:Mammal".to_string(),
+                        "urn:test:Reptile".to_string(),
+                    ],
+                    affected_class_under_new: true,
+                },
+            )),
+        }];
+        let resolutions = decode_resolutions(&wire).expect("decode succeeds");
+        assert_eq!(resolutions.len(), 1);
+        match &resolutions[0] {
+            MergeResolution::Restructure { conflict, spec } => {
+                assert_eq!(conflict.0, "subclass_conflict:urn:test:Dog");
+                assert_eq!(spec.affected_class.as_str(), "urn:test:Dog");
+                assert_eq!(spec.new_parent.as_str(), "urn:test:Animal");
+                assert!(spec.new_parent_def.is_some());
+                let def = spec.new_parent_def.as_ref().unwrap();
+                assert_eq!(def.id().map(|i| i.as_str()), Some("urn:test:Animal"));
+                assert_eq!(spec.classes_under_new.len(), 2);
+                assert!(spec.affected_class_under_new);
+            }
+            other => panic!("expected Restructure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_resolutions_restructure_empty_def_means_attach_existing() {
+        // Empty `new_parent_def_json` decodes to `None` — the
+        // resolution is attaching to a parent that already exists
+        // in the chain. The kernel's apply path validates the
+        // presence rule (`RestructureParentMissingDefinition` /
+        // `RestructureParentRedeclaration`).
+        use crate::layer::merge::MergeResolution;
+
+        let wire = vec![proto::MergeResolutionWire {
+            conflict_id: "subclass_conflict:urn:test:Dog".to_string(),
+            strategy: Some(proto::merge_resolution_wire::Strategy::Restructure(
+                proto::RestructureStrategy {
+                    affected_class: "urn:test:Dog".to_string(),
+                    new_parent: "urn:test:Mammal".to_string(),
+                    new_parent_def_json: String::new(),
+                    classes_under_new: vec!["urn:test:Reptile".to_string()],
+                    affected_class_under_new: false,
+                },
+            )),
+        }];
+        let resolutions = decode_resolutions(&wire).expect("decode succeeds");
+        match &resolutions[0] {
+            MergeResolution::Restructure { spec, .. } => {
+                assert!(spec.new_parent_def.is_none());
+                assert!(!spec.affected_class_under_new);
+            }
+            other => panic!("expected Restructure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_resolutions_restructure_rejects_malformed_def_json() {
+        // Garbage JSON in the def field surfaces as a typed decode
+        // error so the handler returns `MALFORMED_RESOLUTION` to the
+        // client — better than silently ignoring or panicking.
+        let wire = vec![proto::MergeResolutionWire {
+            conflict_id: "x".to_string(),
+            strategy: Some(proto::merge_resolution_wire::Strategy::Restructure(
+                proto::RestructureStrategy {
+                    affected_class: "urn:test:Dog".to_string(),
+                    new_parent: "urn:test:Animal".to_string(),
+                    new_parent_def_json: "not-valid-json}".to_string(),
+                    classes_under_new: vec![],
+                    affected_class_under_new: true,
+                },
+            )),
+        }];
+        let result = decode_resolutions(&wire);
+        match result {
+            Err(reason) => {
+                assert!(
+                    reason.contains("new_parent_def_json"),
+                    "diagnostic should mention the field; got {reason:?}"
+                );
+            }
+            Ok(_) => panic!("expected decode failure on malformed JSON"),
+        }
     }
 }

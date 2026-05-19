@@ -19,7 +19,7 @@
 //! Namespace aliases are resolved to full IRIs.
 
 use crate::esl::ast;
-use crate::esl::error::EslError;
+use crate::esl::error::{EslError, Position};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
@@ -185,7 +185,181 @@ impl Compiler {
             ast::Declaration::Program(p) => self.compile_program(p),
             ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
+            ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
         }
+    }
+
+    /// D37 §3.3 / §4.3 — lower a `merge_comorphism <iri> for <class>`
+    /// declaration to chain resources.
+    ///
+    /// **Reference form** (`transformation = <iri>`): emits a single
+    /// `MergeComorphism` resource at `<iri>` with `merge_target_class`
+    /// + `merge_transformation` populated.
+    ///
+    /// **Inline form** (`(a, b, opt) => <expr>`): emits two resources:
+    /// 1. A synthesised standalone `Lambda` at a content-hash IRI of
+    ///    shape `urn:eigenius:auto:lambda:<sha256>`, with
+    ///    `program:type = pi a : C, b : C, opt : Option<C> => C`
+    ///    materialised from the surrounding `for <class>` clause.
+    ///    The compiler folds the three-parameter inline body into
+    ///    three nested `Lambda` resources, each carrying the
+    ///    appropriate `parameter_type`.
+    /// 2. A `MergeComorphism` resource at the declaration's IRI
+    ///    pointing at the synthesised lambda.
+    ///
+    /// The content-hash IRI gives free deduplication via the
+    /// anchored-commit cache — re-declaring the same inline body
+    /// (regardless of which comorphism's surrounding `for` clause)
+    /// hashes to the same lambda IRI and short-circuits the commit.
+    fn compile_merge_comorphism(
+        &self,
+        decl: &ast::MergeComorphismDecl,
+    ) -> Result<Vec<Resource>, EslError> {
+        let comorphism_iri_str = self.resolve(&decl.name)?;
+        let comorphism_iri = Iri::parse(&comorphism_iri_str).map_err(|e| {
+            EslError::compiler(
+                Some(decl.pos.clone()),
+                format!("invalid comorphism IRI '{comorphism_iri_str}': {e}"),
+            )
+        })?;
+        let target_class_str = self.resolve(&decl.target_class)?;
+        let target_class_iri = Iri::parse(&target_class_str).map_err(|e| {
+            EslError::compiler(
+                Some(decl.pos.clone()),
+                format!("invalid target class IRI '{target_class_str}': {e}"),
+            )
+        })?;
+
+        match &decl.body {
+            ast::MergeComorphismBody::Reference { transformation, .. } => {
+                let transformation_str = self.resolve(transformation)?;
+                let transformation_iri = Iri::parse(&transformation_str).map_err(|e| {
+                    EslError::compiler(
+                        Some(transformation.pos.clone()),
+                        format!("invalid transformation IRI '{transformation_str}': {e}"),
+                    )
+                })?;
+                let comorphism = build_merge_comorphism_resource(
+                    comorphism_iri,
+                    target_class_iri,
+                    transformation_iri,
+                );
+                Ok(vec![comorphism])
+            }
+            ast::MergeComorphismBody::Inline { params, body, pos } => {
+                if params.len() != 3 {
+                    return Err(EslError::compiler(
+                        Some(pos.clone()),
+                        format!(
+                            "inline merge_comorphism body must have exactly 3 parameters \
+                             (the witness signature is `(a, b, opt) => …`); got {}",
+                            params.len()
+                        ),
+                    ));
+                }
+                // Synthesise the standalone Lambda resource at the
+                // content-hash IRI.
+                let synthesised =
+                    self.synthesise_witness_lambda(&target_class_iri, params, body, pos)?;
+                let synth_iri = synthesised
+                    .id()
+                    .cloned()
+                    .expect("synthesised witness lambda must carry an @id");
+                let comorphism =
+                    build_merge_comorphism_resource(comorphism_iri, target_class_iri, synth_iri);
+                Ok(vec![synthesised, comorphism])
+            }
+        }
+    }
+
+    /// Build the synthesised standalone Lambda resource for an
+    /// inline `merge_comorphism` body.
+    ///
+    /// Shape:
+    /// - 3 nested Lambda resources for the (a, b, opt) parameters
+    /// - Each Lambda's `parameter_type` populated:
+    ///   - parameters 1 and 2: the class `C` (target_class)
+    ///   - parameter 3: `Option<C>`
+    /// - The outermost Lambda's `program:type` carries the full
+    ///   `pi a : C, b : C, opt : Option<C> => C` Pi-term so the
+    ///   commit-time validator can verify the body in one shot.
+    /// - `@id` set to `urn:eigenius:auto:lambda:<sha256>` of the
+    ///   resource's canonical Eigon-CBOR (with `@id` cleared) so
+    ///   structurally-identical inline bodies dedupe via the
+    ///   anchored-commit cache.
+    fn synthesise_witness_lambda(
+        &self,
+        target_class: &Iri,
+        params: &[String],
+        body: &ast::Expr,
+        pos: &Position,
+    ) -> Result<Resource, EslError> {
+        use crate::ontology::well_known as wk;
+        // Compile the body expression first — the resulting embedded
+        // Lambda chain has no `@id` until we attach the content-hash.
+        let body_r = self.compile_expr(body)?;
+
+        // Build the parameter types: [C, C, Option<C>].
+        let class_value = Value::ResourceRef(target_class.clone());
+        let option_arg = {
+            let mut ar = Resource::new_embedded();
+            set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
+            ar.set(iri(wk::TYPE_NAME), Value::String(wk::OPTION.to_string()));
+            ar.set(iri(wk::TYPE_ARGS), Value::Array(vec![class_value.clone()]));
+            Value::Embedded(Box::new(ar))
+        };
+        let param_types = [class_value.clone(), class_value.clone(), option_arg.clone()];
+
+        // Build the Pi-term: `pi a : C, b : C, opt : Option<C> => C`.
+        // Nested TypeBinderArrow resources, same shape `TypeExpr::Pi`
+        // would have produced.
+        let mut pi_acc: Value = class_value.clone();
+        for (name, kind_value) in params.iter().zip(param_types.iter()).rev() {
+            let mut ar = Resource::new_embedded();
+            set_is_a(&mut ar, wk::TYPE_BINDER_ARROW);
+            ar.set(iri(wk::BINDER_NAME), Value::String(name.clone()));
+            ar.set(iri(wk::BINDER_KIND), kind_value.clone());
+            ar.set(iri(wk::BINDER_BODY), pi_acc);
+            pi_acc = Value::Embedded(Box::new(ar));
+        }
+
+        // Wrap the body in 3 nested Lambdas, each carrying its
+        // `parameter_type`. The innermost lambda's body is the
+        // user-supplied expression; the outermost is the
+        // synthesised standalone Lambda resource.
+        let mut current: Resource = body_r;
+        let n = params.len();
+        for i in (0..n).rev() {
+            let mut lam = Resource::new_embedded();
+            set_is_a(&mut lam, "urn:eigenius:program:Lambda");
+            lam.set(
+                iri("urn:eigenius:program:parameter"),
+                Value::String(params[i].clone()),
+            );
+            lam.set(
+                iri("urn:eigenius:program:parameter_type"),
+                param_types[i].clone(),
+            );
+            lam.set(
+                iri("urn:eigenius:program:body"),
+                Value::Embedded(Box::new(current)),
+            );
+            current = lam;
+        }
+
+        // Attach the full Pi-type so the commit-time validator can
+        // type-check the body against the declared signature in one
+        // step rather than walking the parameter chain.
+        current.set(iri(wk::PROGRAM_TYPE), pi_acc);
+
+        // Compute the content-hash IRI. The hash is over the
+        // resource's canonical Eigon-CBOR with @id cleared — so
+        // structurally-identical bodies produce the same IRI
+        // regardless of which `merge_comorphism` synthesised them.
+        let id = compute_witness_lambda_iri(&current);
+        current.set_id(Some(id));
+        let _ = pos; // pos retained for future diagnostic surfaces
+        Ok(current)
     }
 
     // --- Codata ---
@@ -341,6 +515,46 @@ impl Compiler {
                     self.compile_type_expr(body, &body_scope)?,
                 );
                 Ok(Value::Embedded(Box::new(ar)))
+            }
+            // D37 §3.5 — `pi x_1 : T_1, …, x_N : T_N => U`. Lowers
+            // to N nested `TypeBinderArrow` resources, each carrying
+            // its parameter's name + type. The innermost body is the
+            // codomain U. Reuses the existing `TypeBinderArrow`
+            // shape rather than introducing a new marker class —
+            // the decoder in `kernel/src/program/ground.rs` already
+            // produces `Exp::Pi` from a non-size-kind `TypeBinderArrow`,
+            // so D37 Pi-types decode through the same path.
+            //
+            // Parameter types can be arbitrary `TypeExpr`s (including
+            // parametric types like `Option<A>` whose lowering
+            // produces an embedded `InductiveArgType`). The kind
+            // slot accepts both string and embedded forms — the
+            // decoder dispatches on the value's shape.
+            ast::TypeExpr::Pi {
+                params, codomain, ..
+            } => {
+                // Compile parameter types left-to-right so dependent
+                // forms like `pi a : A, b : F<a> => …` see `a` in
+                // scope when compiling `F<a>`. Then assemble the
+                // nested `TypeBinderArrow` resources right-to-left
+                // (the rightmost binder wraps the codomain directly).
+                let mut working_scope = scope.clone();
+                let mut compiled_kinds: Vec<(String, Value)> = Vec::with_capacity(params.len());
+                for p in params {
+                    let k = self.compile_type_expr(&p.typ, &working_scope)?;
+                    compiled_kinds.push((p.name.clone(), k));
+                    working_scope.insert(p.name.as_str());
+                }
+                let mut acc = self.compile_type_expr(codomain, &working_scope)?;
+                for (name, kind_value) in compiled_kinds.into_iter().rev() {
+                    let mut ar = Resource::new_embedded();
+                    set_is_a(&mut ar, wk::TYPE_BINDER_ARROW);
+                    ar.set(iri(wk::BINDER_NAME), Value::String(name));
+                    ar.set(iri(wk::BINDER_KIND), kind_value);
+                    ar.set(iri(wk::BINDER_BODY), acc);
+                    acc = Value::Embedded(Box::new(ar));
+                }
+                Ok(acc)
             }
         }
     }
@@ -1093,13 +1307,30 @@ impl Compiler {
                 Ok(r)
             }
 
-            ast::Expr::Lambda { param, body, .. } => {
+            ast::Expr::Lambda {
+                param,
+                param_type,
+                body,
+                ..
+            } => {
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Lambda");
                 r.set(
                     iri("urn:eigenius:program:parameter"),
                     Value::String(param.clone()),
                 );
+                // D37 §3.1 — when the typed-lambda surface supplied a
+                // parameter type, emit it on the Lambda resource so
+                // the commit-time validator (PR 2's later step) and
+                // the runtime evaluator can both see the binder's
+                // declared type. Untyped `\x -> e` lambdas inside
+                // `program` bodies omit this slot and rely on the
+                // surrounding Pi for inference.
+                if let Some(t) = param_type {
+                    let scope = std::collections::HashSet::new();
+                    let kind_value = self.compile_type_expr(t, &scope)?;
+                    r.set(iri("urn:eigenius:program:parameter_type"), kind_value);
+                }
                 let body_r = self.compile_expr(body)?;
                 r.set(
                     iri("urn:eigenius:program:body"),
@@ -1451,6 +1682,48 @@ fn set_is_a(resource: &mut Resource, class_iri: &str) {
         iri("urn:eigenius:core:is_a"),
         Value::Array(vec![Value::String(class_iri.to_string())]),
     );
+}
+
+/// Build a `MergeComorphism` resource (D37 §3.3 / §4.3) with the
+/// three required slots: `is_a`, `merge_target_class`, and
+/// `merge_transformation`. Used by both the inline and reference
+/// `merge_comorphism` lowering paths.
+fn build_merge_comorphism_resource(
+    comorphism_iri: Iri,
+    target_class: Iri,
+    transformation: Iri,
+) -> Resource {
+    use crate::ontology::well_known as wk;
+    let mut r = Resource::new(comorphism_iri);
+    set_is_a(&mut r, wk::MERGE_COMORPHISM);
+    r.set(
+        iri(wk::MERGE_TARGET_CLASS),
+        Value::ResourceRef(target_class),
+    );
+    r.set(
+        iri(wk::MERGE_TRANSFORMATION),
+        Value::ResourceRef(transformation),
+    );
+    r
+}
+
+/// Compute the content-hash IRI for a synthesised standalone Lambda
+/// resource (D37 §4.3, §10.1). The hash is SHA-256 over the
+/// resource's canonical Eigon-CBOR bytes with `@id` cleared, so
+/// structurally-identical bodies — including ones synthesised by
+/// different `merge_comorphism` declarations — produce the same IRI
+/// and dedupe through the anchored-commit cache.
+fn compute_witness_lambda_iri(resource: &Resource) -> Iri {
+    use sha2::{Digest, Sha256};
+    // Clone, clear @id, serialize to canonical Eigon-CBOR, hash.
+    // `serialize_resource` already produces a deterministic encoding
+    // (BTreeMap iteration is sorted, ciborium emits shortest form).
+    let mut canonical = resource.clone();
+    canonical.set_id(None);
+    let bytes = crate::ontology::eigon_cbor::serialize_resource(&canonical);
+    let digest = Sha256::digest(&bytes);
+    let hex = format!("{digest:x}");
+    Iri::parse(&format!("urn:eigenius:auto:lambda:{hex}")).expect("synthesised IRI must be valid")
 }
 
 /// Append `DeclaredResource` to `is_a` and set `declared_by` on a
@@ -1934,7 +2207,7 @@ mod tests {
             "expected the notebook to ship ≥ 3 ESL cells; got {esl_cell_count}"
         );
 
-        let validator = Validator::new(ctx.head());
+        let validator = Validator::new(std::sync::Arc::clone(ctx.head()));
         let errors = validator.validate();
         assert!(
             errors.is_empty(),
@@ -2584,6 +2857,353 @@ mod tests {
         assert!(
             msg.contains("constructor `mk`") && msg.contains("collides"),
             "unexpected error: {msg}"
+        );
+    }
+
+    // --- D37: lambda / pi / merge_comorphism lowering ---
+
+    #[test]
+    fn typed_lambda_literal_emits_parameter_type() {
+        // Inside a `program` body, a typed lambda literal lowers to
+        // a Lambda resource whose `parameter_type` is the class IRI.
+        // The untyped `\x -> e` form (verified by existing tests)
+        // omits `parameter_type`; this test pins the typed shape.
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            program ex:identity : ex:A -> ex:A {
+                lambda x : ex:A => x
+            }
+            "#,
+        );
+        // The program resource is at index 0; its `body` embeds the
+        // Lambda. Walk into it and verify `parameter_type` is set.
+        let prog = &resources[0];
+        let body = prog
+            .get(&iri("urn:eigenius:program:body"))
+            .expect("program has body");
+        let body_r = match body {
+            Value::Embedded(b) => b,
+            other => panic!("expected embedded body, got {other:?}"),
+        };
+        // Body's is_a should include Lambda.
+        let is_a = body_r.is_a();
+        assert!(
+            is_a.iter()
+                .any(|c| c.as_str() == "urn:eigenius:program:Lambda"),
+            "expected Lambda is_a, got {is_a:?}"
+        );
+        let pt = body_r
+            .get(&iri("urn:eigenius:program:parameter_type"))
+            .expect("typed lambda must emit parameter_type");
+        assert_eq!(
+            pt.as_iri_str(),
+            Some("urn:ex:A"),
+            "expected parameter_type IRI = urn:ex:A, got {pt:?}"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_reference_form_lowers_to_one_resource() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b for ex:Patient {
+                transformation = ex:take_b_term;
+            }
+            "#,
+        );
+        assert_eq!(
+            resources.len(),
+            1,
+            "reference form should produce exactly one resource"
+        );
+        let r = &resources[0];
+        assert_eq!(r.id().unwrap().as_str(), "urn:ex:take_b");
+        let is_a = r.is_a();
+        assert!(
+            is_a.iter()
+                .any(|c| c.as_str() == crate::ontology::well_known::MERGE_COMORPHISM),
+            "expected MergeComorphism is_a, got {is_a:?}"
+        );
+        let target_class = r
+            .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
+            .expect("merge_target_class must be set");
+        assert_eq!(target_class.as_iri_str(), Some("urn:ex:Patient"));
+        let transformation = r
+            .get(&iri(crate::ontology::well_known::MERGE_TRANSFORMATION))
+            .expect("merge_transformation must be set");
+        assert_eq!(transformation.as_iri_str(), Some("urn:ex:take_b_term"));
+    }
+
+    #[test]
+    fn merge_comorphism_inline_form_lowers_to_two_resources() {
+        // The inline form emits both the synthesised standalone
+        // Lambda (at a content-hash IRI) and the MergeComorphism
+        // resource pointing at it.
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        );
+        assert_eq!(
+            resources.len(),
+            2,
+            "inline form should produce two resources (lambda + comorphism)"
+        );
+
+        // First resource: the synthesised lambda at an
+        // `urn:eigenius:auto:lambda:<hex>` IRI.
+        let lambda_r = &resources[0];
+        let lambda_iri = lambda_r.id().unwrap().as_str().to_string();
+        assert!(
+            lambda_iri.starts_with("urn:eigenius:auto:lambda:"),
+            "lambda IRI should be content-hash form, got {lambda_iri}"
+        );
+        let lambda_is_a = lambda_r.is_a();
+        assert!(
+            lambda_is_a
+                .iter()
+                .any(|c| c.as_str() == "urn:eigenius:program:Lambda"),
+            "expected Lambda is_a, got {lambda_is_a:?}"
+        );
+        // The outermost lambda binds `a` and carries `program:type`
+        // with the full Pi-term `pi a : C, b : C, opt : Option<C> => C`.
+        let param = lambda_r
+            .get(&iri("urn:eigenius:program:parameter"))
+            .and_then(|v| v.as_str())
+            .expect("outermost lambda binds the first parameter `a`");
+        assert_eq!(param, "a");
+        assert!(
+            lambda_r
+                .get(&iri(crate::ontology::well_known::PROGRAM_TYPE))
+                .is_some(),
+            "outermost synthesised lambda must carry `program:type`"
+        );
+
+        // Second resource: the MergeComorphism pointing at the lambda.
+        let comorphism_r = &resources[1];
+        assert_eq!(comorphism_r.id().unwrap().as_str(), "urn:ex:take_b");
+        assert_eq!(
+            comorphism_r
+                .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
+                .and_then(|v| v.as_iri_str()),
+            Some("urn:ex:Patient")
+        );
+        assert_eq!(
+            comorphism_r
+                .get(&iri(crate::ontology::well_known::MERGE_TRANSFORMATION))
+                .and_then(|v| v.as_iri_str()),
+            Some(lambda_iri.as_str()),
+            "comorphism's `merge_transformation` should point at the synthesised lambda's IRI"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_inline_form_dedupes_via_content_hash() {
+        // Re-declaring the same inline body (regardless of
+        // comorphism name + target class differences in the
+        // surrounding wrapper) should produce a synthesised lambda
+        // at the SAME content-hash IRI, because the hash is over
+        // the lambda's structural content with @id cleared.
+        let resources_a = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b_v1 for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        );
+        let resources_b = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b_v2 for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        );
+        let lambda_iri_a = resources_a[0].id().unwrap().as_str();
+        let lambda_iri_b = resources_b[0].id().unwrap().as_str();
+        assert_eq!(
+            lambda_iri_a, lambda_iri_b,
+            "structurally-identical inline bodies must hash to the same IRI"
+        );
+    }
+
+    #[test]
+    fn merge_comorphism_inline_form_rejects_wrong_arity() {
+        // The inline body's signature is fixed to (a, b, opt) — a
+        // wrong arity produces a structured compile error.
+        let result = esl::compile(
+            r#"
+            namespace ex = "urn:ex";
+            merge_comorphism ex:take_b for ex:Patient {
+                (only_one) => only_one
+            }
+            "#,
+        );
+        let err = result.expect_err("wrong arity must be rejected");
+        let msg = err[0].message.clone();
+        assert!(
+            msg.contains("3 parameters") || msg.contains("witness signature"),
+            "expected arity error mentioning 3 parameters, got: {msg}"
+        );
+    }
+
+    // --- D37 §9: worked-example round-trip tests ---
+    //
+    // Each test compiles the worked example from D37 §9.x through
+    // the ESL pipeline and verifies the produced resource pair
+    // (synthesised Lambda + MergeComorphism) has the expected shape.
+    // These are compile-only smoke tests — the validator-side check
+    // for §9.1 is exercised by
+    // `compiler_output_validates_clean_end_to_end` in
+    // `validation::tests`. §9.2–9.4 require a richer chain (Patient
+    // with `description`/`weight` properties, `core:add`/`core:divide`
+    // operators) before the Rule 19 NbE check can run; the compile
+    // tests below pin the lowering shape regardless.
+
+    #[test]
+    fn d37_worked_example_9_1_take_side_b() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:project";
+            merge_comorphism ex:patient_take_b for ex:Patient {
+                (a, b, opt) => b
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 2, "inline form emits lambda + comorphism");
+        // Synthesised lambda: outermost binder is `a`, body chain
+        // terminates in a Var resource pointing at `b`.
+        let lambda = &resources[0];
+        assert!(lambda
+            .id()
+            .unwrap()
+            .as_str()
+            .starts_with("urn:eigenius:auto:lambda:"));
+        // Comorphism: pinned for the Patient class, points at the
+        // synthesised lambda.
+        let comorphism = &resources[1];
+        assert_eq!(
+            comorphism.id().unwrap().as_str(),
+            "urn:project:patient_take_b"
+        );
+        assert_eq!(
+            comorphism
+                .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
+                .and_then(|v| v.as_iri_str()),
+            Some("urn:project:Patient")
+        );
+    }
+
+    #[test]
+    fn d37_worked_example_9_2_field_merge() {
+        // Take A's description and B's weight, build a fresh
+        // Patient. Uses `Construct` (Σ-introduction) + `Project`
+        // (Σ-elimination via `a.description`).
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:project";
+
+            merge_comorphism ex:patient_merge_fields for ex:Patient {
+                (a, b, opt) => Construct ex:Patient {
+                    ex:description = a.ex:description,
+                    ex:weight      = b.ex:weight
+                }
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 2);
+        let comorphism = &resources[1];
+        assert_eq!(
+            comorphism.id().unwrap().as_str(),
+            "urn:project:patient_merge_fields"
+        );
+    }
+
+    #[test]
+    fn d37_worked_example_9_3_arithmetic_average() {
+        // Average a's and b's weight via chain-committed
+        // `core:add` + `core:divide` operators. Uses `Apply` over
+        // those operator IRIs.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:project";
+
+            merge_comorphism ex:patient_avg_weight for ex:Patient {
+                (a, b, opt) => Construct ex:Patient {
+                    ex:description = a.ex:description,
+                    ex:weight      = core:divide(core:add(a.ex:weight, b.ex:weight), 2.0)
+                }
+            }
+            "#,
+        );
+        assert_eq!(resources.len(), 2);
+        let comorphism = &resources[1];
+        assert_eq!(
+            comorphism.id().unwrap().as_str(),
+            "urn:project:patient_avg_weight"
+        );
+    }
+
+    #[test]
+    fn d37_worked_example_9_4_ancestor_aware() {
+        // Match over Option<Patient> for the ancestor argument,
+        // branching on whether the ancestor disagrees with A. Uses
+        // `Match` over the `Option` inductive's two constructors.
+        //
+        // The ESL compile pass (Phase 11b) requires constructors
+        // referenced in `match` arms to be declared via a `data`
+        // block in the *same file*. `Option` is committed in the
+        // core ontology rather than re-declared per file, so the
+        // worked example needs a local `data` shadowing for the
+        // compile-time ctor lookup to find `some` / `none`.
+        // Lifting that restriction (so chain-committed inductives'
+        // constructors are reachable from `match`) is tracked as a
+        // separate ESL extension; until then the worked example
+        // declares Option locally to exercise the lowering path.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:project";
+
+            data ex:Option(A : core:Set) {
+                none,
+                some(A),
+            }
+
+            merge_comorphism ex:patient_ancestor_aware for ex:Patient {
+                (a, b, opt) => match opt {
+                    some(ancestor) -> a;
+                    none -> a;
+                }
+            }
+            "#,
+        );
+        // 3 resources: the local Option `data` decl + lambda + comorphism.
+        assert!(
+            resources.len() >= 2,
+            "expected at least lambda + comorphism, got {} resources",
+            resources.len()
+        );
+        let comorphism = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .is_some_and(|i| i.as_str() == "urn:project:patient_ancestor_aware")
+            })
+            .expect("comorphism resource should be present");
+        assert_eq!(
+            comorphism
+                .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
+                .and_then(|v| v.as_iri_str()),
+            Some("urn:project:Patient")
         );
     }
 }

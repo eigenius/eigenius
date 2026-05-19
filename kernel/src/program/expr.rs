@@ -73,6 +73,136 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
     Ok((term, typ))
 }
 
+/// D37 §5.1 — decode a `program:type` value into a Mini-TT `Exp`.
+///
+/// The Pi-type for a standalone Lambda resource lives on its
+/// `urn:eigenius:program:type` slot. The slot can hold any of these
+/// shapes (matching what `compile_type_expr` in the ESL compiler
+/// emits for `pi`, `Arrow`, and class-reference type expressions):
+///
+/// - `Value::ResourceRef(iri)` — a class IRI (the leaf type).
+///   Resolves through the layer chain via `resolve_class_type`.
+/// - `Value::String(iri-str)` — same as ResourceRef, with the IRI
+///   in string form (the pre-canonicalisation shape).
+/// - `Value::Embedded(r)` with `is_a` of `TypeBinderArrow` — a
+///   value-typed Pi binder `pi name : kind. body`. Recursively
+///   decodes the kind + body.
+/// - `Value::Embedded(r)` with `is_a` of `InductiveArgType` — a
+///   parametric class application like `Option<A>`. Resolves
+///   through the layer chain.
+/// - `Value::Embedded(r)` with `is_a` of `TypeArrow` — a non-
+///   dependent arrow `A -> B`, lowered to an anonymous-binder Pi.
+///
+/// Returns the Mini-TT `Exp` ready for evaluation via
+/// `nbe::eval::eval` and subsequent use as a checking type by
+/// `nbe::check::check`.
+pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> {
+    use crate::ontology::well_known as wk;
+    match value {
+        Value::ResourceRef(iri) => {
+            let val = resolve_class_type(iri, layer)?;
+            Ok(crate::nbe::readback::readback_val(0, &val))
+        }
+        Value::String(s) => {
+            let iri = Iri::parse(s)
+                .map_err(|e| format!("decode_program_type: invalid type IRI '{s}': {e}"))?;
+            let val = resolve_class_type(&iri, layer)?;
+            Ok(crate::nbe::readback::readback_val(0, &val))
+        }
+        Value::Embedded(r) => {
+            let is_a: Vec<String> = r.is_a().iter().map(|i| i.as_str().to_string()).collect();
+            if is_a.iter().any(|s| s == wk::TYPE_BINDER_ARROW) {
+                let name = match r.get(&Iri::parse(wk::BINDER_NAME).unwrap()) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err("TypeBinderArrow missing `binder_name`".to_string()),
+                };
+                let kind_value = r
+                    .get(&Iri::parse(wk::BINDER_KIND).unwrap())
+                    .ok_or_else(|| "TypeBinderArrow missing `binder_kind`".to_string())?;
+                let body_value = r
+                    .get(&Iri::parse(wk::BINDER_BODY).unwrap())
+                    .ok_or_else(|| "TypeBinderArrow missing `binder_body`".to_string())?;
+                let kind_exp = decode_program_type(kind_value, layer)?;
+                let body_exp = decode_program_type(body_value, layer)?;
+                Ok(Exp::Pi(
+                    Patt::Var(name),
+                    Box::new(kind_exp),
+                    Box::new(body_exp),
+                ))
+            } else if is_a.iter().any(|s| s == wk::TYPE_ARROW) {
+                let dom_value = r
+                    .get(&Iri::parse(wk::ARROW_DOMAIN).unwrap())
+                    .ok_or_else(|| "TypeArrow missing `arrow_domain`".to_string())?;
+                let cod_value = r
+                    .get(&Iri::parse(wk::ARROW_CODOMAIN).unwrap())
+                    .ok_or_else(|| "TypeArrow missing `arrow_codomain`".to_string())?;
+                let dom_exp = decode_program_type(dom_value, layer)?;
+                let cod_exp = decode_program_type(cod_value, layer)?;
+                Ok(Exp::Pi(Patt::Unit, Box::new(dom_exp), Box::new(cod_exp)))
+            } else if is_a.iter().any(|s| s == wk::INDUCTIVE_ARG_TYPE) {
+                // Parametric type — e.g., `Option<Patient>`. Mirrors
+                // `decode_arg_type` in `program::ground` but without
+                // the self-reference machinery (D37 type-resources
+                // don't self-reference). Emit `Exp::InductiveType`
+                // directly with a name-only stub decl and recursively-
+                // decoded args; the type checker resolves the stub
+                // by name at use time.
+                let type_name = match r.get(&Iri::parse(wk::TYPE_NAME).unwrap()) {
+                    Some(Value::String(s)) => s.clone(),
+                    Some(Value::ResourceRef(i)) => i.as_str().to_string(),
+                    _ => return Err("InductiveArgType missing `type_name`".to_string()),
+                };
+                let class_iri = Iri::parse(&type_name).map_err(|e| {
+                    format!("InductiveArgType type_name '{type_name}' invalid IRI: {e}")
+                })?;
+                let type_args_arr = match r.get(&Iri::parse(wk::TYPE_ARGS).unwrap()) {
+                    Some(Value::Array(a)) => a.clone(),
+                    None => Vec::new(),
+                    Some(_) => {
+                        return Err("InductiveArgType `type_args` must be an array".to_string());
+                    }
+                };
+                let resource_arc = layer.resolve(&class_iri).ok_or_else(|| {
+                    format!(
+                        "InductiveArgType type_name '{type_name}' does not resolve in layer chain"
+                    )
+                })?;
+                let resource: &Resource = &resource_arc;
+                if !is_inductive_type(resource) {
+                    // Not an inductive — fall back to a plain class
+                    // reference. This handles class IRIs that happen
+                    // to be wrapped in an InductiveArgType node with
+                    // no type args.
+                    let val = resolve_class_type(&class_iri, layer)?;
+                    return Ok(crate::nbe::readback::readback_val(0, &val));
+                }
+                let name_of_iri = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => class_iri.local_name().to_string(),
+                };
+                let stub = Arc::new(InductiveDecl {
+                    name: name_of_iri,
+                    params: Vec::new(),
+                    sort: Exp::Set,
+                    ctors: Vec::new(),
+                });
+                let sub_args: Result<Vec<Exp>, String> = type_args_arr
+                    .iter()
+                    .map(|a| decode_program_type(a, layer))
+                    .collect();
+                Ok(Exp::InductiveType(stub, sub_args?))
+            } else {
+                Err(format!(
+                    "decode_program_type: unrecognised embedded type-resource shape with is_a={is_a:?}"
+                ))
+            }
+        }
+        other => Err(format!(
+            "decode_program_type: unrecognised value shape: {other:?}"
+        )),
+    }
+}
+
 /// Parse an expression resource into a Mini-TT term.
 pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let is_a = resource.is_a();

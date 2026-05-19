@@ -47,14 +47,15 @@
   {
     "@id": "urn:eigenius:program:Lambda",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Anonymous function: λ parameter : parameter_type. body.",
+    "urn:eigenius:core:description": "Anonymous function: λ parameter : parameter_type. body. Standalone (top-level) Lambda resources carry their full Pi-type via `urn:eigenius:program:type`; the validator commit-time-checks the body against it (D37 §5.1). Embedded lambdas inside `program` bodies omit `type` and have their signature inferred from the surrounding Pi during program elaboration.",
     "urn:eigenius:core:short_name": "Lambda",
     "urn:eigenius:core:requires": [
       "urn:eigenius:program:parameter",
       "urn:eigenius:program:body"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:program:parameter_type"
+      "urn:eigenius:program:parameter_type",
+      "urn:eigenius:program:type"
     ]
   },
   {
@@ -204,11 +205,10 @@
   {
     "@id": "urn:eigenius:program:type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Declared type annotation in a Let binding.",
+    "urn:eigenius:core:description": "Declared type annotation. On a `Let`, the value's type — a class reference (existing usage). On a standalone `Lambda` (D37 §6.1), the lambda's full Pi-type — a `TypeBinderArrow` chain that the validator commit-time-checks the body against. Optional on embedded lambdas (where the type is inferred from the surrounding Pi during program elaboration); required on top-level Lambda resources used as `MergeComorphism` transformations. No `class_types` narrowing because the property is polymorphic over both shapes — Rule 19 (D37 §5.1) dispatches on the value's structure.",
     "urn:eigenius:core:short_name": "type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:domain": ["urn:eigenius:program:Let"]
+    "urn:eigenius:core:domain": ["urn:eigenius:program:Let", "urn:eigenius:program:Lambda"]
   },
   {
     "@id": "urn:eigenius:program:value",

@@ -6,7 +6,7 @@ If you have the docker stack up (`docker compose up -d`), you already have the n
 
 ![The Eigenius notebook — top of the patent-analysis demo](../assets/eigenius_notebook_ux.png)
 
-This chapter is the operational reference for the notebook UX. The TypeScript SDK that powers it (and that you can use programmatically from outside the notebook) gets its own chapter — see [chapter 15](15-typescript-sdk.md).
+This chapter is the operational reference for the notebook UX. Chain operations get their own chapters — see [chapter 15 — Tags, branches, and history](15-tags-branches-history.md) for the workspace panels that drive them and [chapter 16 — Merge resolution](16-merge-resolution.md) for the merge surface. The TypeScript SDK that powers the notebook (and that you can use programmatically from outside it) is documented in [chapter 17](17-typescript-sdk.md).
 
 ## 14.1. What's in a notebook
 
@@ -169,7 +169,7 @@ notebooks/
 └── package.json                  # @eigenius/client + Fluent UI v9 + CodeMirror
 ```
 
-The SDK consumed by the notebook is a `file:` workspace dep on [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) — see [chapter 15](15-typescript-sdk.md).
+The SDK consumed by the notebook is a `file:` workspace dep on [`clients/eigenius-ts/`](../../../clients/eigenius-ts/) — see [chapter 17](17-typescript-sdk.md).
 
 ## 14.8. CI
 
@@ -193,8 +193,10 @@ The test assumes the orchestrator stack is already up at `http://localhost:8080`
 ## 14.9. Design references
 
 - [**D22** — Notebook UX and TypeScript SDK](../../design/d22-notebook-and-typescript-sdk.md) — the spec this guide describes
-- [**chapter 15** — TypeScript SDK](15-typescript-sdk.md) — the programmatic API the notebook is built on, also usable from your own code
+- [**chapter 15** — Tags, branches, and history](15-tags-branches-history.md) — the workspace panels that drive named refs + chain navigation
+- [**chapter 16** — Merge resolution](16-merge-resolution.md) — picking a per-conflict strategy, the cascade gate, and the resolution flow
+- [**chapter 17** — TypeScript SDK](17-typescript-sdk.md) — the programmatic API the notebook is built on, also usable from your own code
 
 ---
 
-Next: **[15. TypeScript SDK →](15-typescript-sdk.md)**
+Next: **[15. Tags, branches, and history →](15-tags-branches-history.md)**

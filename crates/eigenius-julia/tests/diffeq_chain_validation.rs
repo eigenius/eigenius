@@ -75,7 +75,7 @@ fn diffeq_ontology_and_institution_validate_cleanly() {
         );
     }
 
-    let validator = eigenius_kernel::validation::Validator::new(ctx.head());
+    let validator = eigenius_kernel::validation::Validator::new(std::sync::Arc::clone(ctx.head()));
     let errors = validator.validate();
     assert!(
         errors.is_empty(),

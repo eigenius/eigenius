@@ -11,7 +11,9 @@ If you're new: read chapters 1–5 sequentially, then jump to **[chapter 14 — 
 The most-used reference chapters are:
 
 - **[14. Notebook](14-notebook.md)** — the React notebook UX, served by the orchestrator at `http://localhost:8080/notebooks/`
-- **[15. TypeScript SDK](15-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
+- **[15. Tags, branches, and history](15-tags-branches-history.md)** — the workspace panels that drive named refs and chain navigation
+- **[16. Merge resolution](16-merge-resolution.md)** — picking a per-conflict strategy, the cascade gate, provenance records
+- **[17. TypeScript SDK](17-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
 - **[4. CLI reference](04-cli-reference.md)** — every `eigenius` subcommand
 - **[6. Database management](06-database-management.md)** — durable mode, exports, backups
 - **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the sandboxed extension surface
@@ -48,9 +50,13 @@ The most-used reference chapters are:
 
 14. **[Notebook](14-notebook.md)** — the React SPA the orchestrator serves at `/notebooks/`. Cell types (markdown / esl / eigenql / typescript / program-run / chart), the file format, publish-to-layer, the patent-analysis and kinase-institutions demos, KaTeX math rendering.
 
-15. **[TypeScript SDK](15-typescript-sdk.md)** — `@eigenius/client` and the `Eigen` class. The SDK that powers the notebook, also usable from your own code. Five-line examples for inspect / query / load / runProgramByIri / layerTopology / publishNotebook.
+15. **[Tags, branches, and history](15-tags-branches-history.md)** — the workspace rail's chain destinations: Branches (switch / create / delete), Tags (immutable named refs that pin against GC), History (chain walker + time-travel read-pin). The BranchBar at the top, the create-branch dialog's four start-from modes, mental model of mutable vs. immutable.
 
-16. **[Appendix](16-appendix.md)** — environment variables, file locations, source index, related documents.
+16. **[Merge resolution](16-merge-resolution.md)** — folding one branch into another when contributions conflict. The six-state flow (loading → picking → previewing → acknowledging → committing → done), the four strategies (Witness / Rename / SchemaQuotient / Restructure with KeepBoth/KeepOne/KeepNeither sub-flavours), the cascade gate, merge-resolution provenance records, off-span witness discovery, worked examples, CLI mirror.
+
+17. **[TypeScript SDK](17-typescript-sdk.md)** — `@eigenius/client` and the `Eigen` class. The SDK that powers the notebook, also usable from your own code. Five-line examples for inspect / query / load / runProgramByIri / layerTopology / publishNotebook.
+
+18. **[Appendix](18-appendix.md)** — environment variables, file locations, source index, related documents.
 
 ## Julia institution tutorials
 

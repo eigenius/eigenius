@@ -276,7 +276,7 @@ impl ExecutionContext {
         let new_layer = Arc::new(working.build(self.storage.clone()));
 
         // Validate the new layer
-        let validator = Validator::new(&new_layer);
+        let validator = Validator::new(Arc::clone(&new_layer));
         let errors = validator.validate();
         if !errors.is_empty() {
             // Validation failed — restore working layer state
@@ -328,7 +328,7 @@ impl ExecutionContext {
 
         // Structural validation first — institutions assume well-formed
         // morphism resources (D14 §9.1).
-        let validator = Validator::new(&new_layer);
+        let validator = Validator::new(Arc::clone(&new_layer));
         let errors = validator.validate();
         if !errors.is_empty() {
             return Err(ContextError::validation_failed(errors));

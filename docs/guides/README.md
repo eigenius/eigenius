@@ -35,7 +35,9 @@ For most users, the notebook is the most accessible way to use the platform. A R
 </p>
 
 → **[Platform guide chapter 14 — Notebook](platform/14-notebook.md)** for the full reference.
-→ **[Platform guide chapter 15 — TypeScript SDK](platform/15-typescript-sdk.md)** if you want to drive the kernel programmatically with the same `Eigen` class the notebook uses.
+→ **[Platform guide chapter 15 — Tags, branches, and history](platform/15-tags-branches-history.md)** for the chain-navigation panels.
+→ **[Platform guide chapter 16 — Merge resolution](platform/16-merge-resolution.md)** for folding one branch into another when contributions conflict.
+→ **[Platform guide chapter 17 — TypeScript SDK](platform/17-typescript-sdk.md)** if you want to drive the kernel programmatically with the same `Eigen` class the notebook uses.
 
 ## User guides
 
@@ -45,9 +47,9 @@ Five task-first guides, grounded in the implementation. Every claim links to the
 
 How to install, run, manage, and extend the platform: the CLI, the kernel server, the orchestrator, RocksDB persistence, WASM components and institutions, the runtime substrate (Julia v1), deployment via Docker Compose or Azure ContainerApps, the notebook UX, the TypeScript SDK.
 
-**Sixteen chapters covering**: installation, build/test workflow, CLI reference (every `eigenius` subcommand), running locally (three-terminal model + Docker Compose), database management (`serve --db`, drift refusal, exports), the orchestrator (LLM dispatch + MCP server + substrate addon), four end-to-end demo walkthroughs, building WASM components (pure / read / IO levels), building WASM institutions, the runtime substrate (`mirror create → env build → env create → institution install` flow), deployment, troubleshooting, environment-variable and source-file index, the React notebook (cell types + file format + publish-to-layer + patent and kinase-institutions demos + KaTeX), the TypeScript SDK (`@eigenius/client` API + worked examples). Plus per-Julia-institution slow-walk tutorials under [`platform/julia-institutions/`](platform/julia-institutions/).
+**Eighteen chapters covering**: installation, build/test workflow, CLI reference (every `eigenius` subcommand), running locally (three-terminal model + Docker Compose), database management (`serve --db`, drift refusal, exports), the orchestrator (LLM dispatch + MCP server + substrate addon), four end-to-end demo walkthroughs, building WASM components (pure / read / IO levels), building WASM institutions, the runtime substrate (`mirror create → env build → env create → institution install` flow), deployment, troubleshooting, the React notebook (cell types + file format + publish-to-layer + patent and kinase-institutions demos + KaTeX), tags / branches / history in the notebook, merge resolution (all strategies + cascade gate + provenance records), the TypeScript SDK (`@eigenius/client` API + worked examples), environment-variable and source-file index. Plus per-Julia-institution slow-walk tutorials under [`platform/julia-institutions/`](platform/julia-institutions/).
 
-Most important chapters: **[14. Notebook](platform/14-notebook.md)** + **[15. TypeScript SDK](platform/15-typescript-sdk.md)** for the typical first-touch UX, **[4. CLI reference](platform/04-cli-reference.md)** for everyday CLI operations, **[9. Building WASM components](platform/09-wasm-components.md)** + **[10. Building WASM institutions](platform/10-wasm-institutions.md)** for sandboxed extensions, and **[11. Runtime substrate](platform/11-runtime-substrate.md)** for language-runtime-hosted institutions.
+Most important chapters: **[14. Notebook](platform/14-notebook.md)** + **[17. TypeScript SDK](platform/17-typescript-sdk.md)** for the typical first-touch UX, **[15. Tags, branches, and history](platform/15-tags-branches-history.md)** + **[16. Merge resolution](platform/16-merge-resolution.md)** for collaborative chain work, **[4. CLI reference](platform/04-cli-reference.md)** for everyday CLI operations, **[9. Building WASM components](platform/09-wasm-components.md)** + **[10. Building WASM institutions](platform/10-wasm-institutions.md)** for sandboxed extensions, and **[11. Runtime substrate](platform/11-runtime-substrate.md)** for language-runtime-hosted institutions.
 
 ### [ESL — Eigenius Surface Language →](esl/README.md)
 

@@ -119,7 +119,7 @@ fn symbolics_to_intervals_comorphism_validates_cleanly() {
     }
 
     // The validator must accept the whole chain without errors.
-    let validator = eigenius_kernel::validation::Validator::new(ctx.head());
+    let validator = eigenius_kernel::validation::Validator::new(std::sync::Arc::clone(ctx.head()));
     let errors = validator.validate();
     assert!(
         errors.is_empty(),

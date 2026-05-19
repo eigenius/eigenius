@@ -325,7 +325,7 @@ pub fn commit_layer(
     backend: &dyn PersistentBackend,
 ) -> Result<Arc<Layer>, CommitError> {
     let layer = Arc::new(builder.build(storage));
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(CommitError::Validation(errors));
@@ -417,7 +417,7 @@ pub fn commit_layer_with_cache(
     }
 
     // Cache miss: standard validate + store, then insert.
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(CommitError::Validation(errors));
@@ -436,7 +436,7 @@ fn commit_without_cache(
     layer: Arc<Layer>,
     backend: &dyn PersistentBackend,
 ) -> Result<AnchoredCommitOutcome, CommitError> {
-    let validator = Validator::new(&layer);
+    let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
         return Err(CommitError::Validation(errors));
@@ -548,6 +548,102 @@ pub fn update_branch(
                 }
             }
         }
+    }
+}
+
+/// Fold `source_tip` into the branch named `target`.
+///
+/// Unlike [`update_branch`], this does **not** assume `source_tip` is
+/// built on top of the target's current tip. It computes the LCA of
+/// the two tips and routes between three outcomes:
+///
+/// - `LCA == target_tip` → `source_tip` descends from the target —
+///   advance the branch to `source_tip` (true fast-forward).
+/// - `LCA == source_tip` → the target already includes `source_tip` —
+///   no-op fast-forward.
+/// - Otherwise → genuinely divergent: dispatch to
+///   [`merge_independent_heads`]. On disjoint contributions, build a
+///   multi-parent merge layer and CAS the branch; on overlap, return
+///   `NeedsWitnessedMerge` with `source_tip` as `orphan_head` (the
+///   D36 resolution flow feeds this in as `candidate_head`).
+///
+/// `update_branch`'s CAS shortcut is correct for cell-commit callers
+/// (the cell pipeline guarantees `new_head` descends from
+/// `expected_old_head`) but destructive for cross-branch merges where
+/// `source_tip` can be a sibling head touching the same IRIs as the
+/// target. Use this function for the cross-branch case.
+///
+/// Holds the same process-wide `branch_lock` as `update_branch` so
+/// the two operations serialise correctly when both run concurrently.
+pub fn merge_branch_tips(
+    target: &str,
+    source_tip: LayerId,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<UpdateOutcome, BranchUpdateError> {
+    if !is_valid_branch_name(target) {
+        return Err(BranchUpdateError::InvalidBranchName(target.to_string()));
+    }
+
+    let _guard = branch_lock().lock().expect("branch lock poisoned");
+
+    let target_tip = backend
+        .get_branch(target)
+        .map_err(BranchUpdateError::Storage)?
+        .ok_or_else(|| {
+            BranchUpdateError::Storage(StorageError::Internal(format!(
+                "merge_branch_tips: target branch {target:?} not found"
+            )))
+        })?;
+
+    if target_tip == source_tip {
+        return Ok(UpdateOutcome::FastForward);
+    }
+
+    let topology = backend
+        .load_topology()
+        .map_err(BranchUpdateError::Storage)?;
+    let lca = find_lca(&[target_tip.clone(), source_tip.clone()], &topology).ok_or_else(|| {
+        BranchUpdateError::Storage(StorageError::Internal(
+            "merge_branch_tips: target and source share no common ancestor".into(),
+        ))
+    })?;
+
+    if lca == target_tip {
+        backend
+            .put_branch(target, &source_tip)
+            .map_err(BranchUpdateError::Storage)?;
+        return Ok(UpdateOutcome::FastForward);
+    }
+    if lca == source_tip {
+        return Ok(UpdateOutcome::FastForward);
+    }
+
+    match merge_independent_heads(
+        vec![target_tip.clone(), source_tip.clone()],
+        storage,
+        backend,
+    ) {
+        Ok(MergeOutcome::Merged { merge_layer }) => {
+            backend
+                .put_branch(target, merge_layer.id())
+                .map_err(BranchUpdateError::Storage)?;
+            Ok(UpdateOutcome::TrivialMerge {
+                merge_layer: merge_layer.id().clone(),
+            })
+        }
+        Ok(MergeOutcome::Conflict { conflicting_iris }) => Ok(UpdateOutcome::NeedsWitnessedMerge {
+            current_head: target_tip,
+            conflicting_iris,
+            orphan_head: source_tip,
+        }),
+        Err(MergeError::Storage(e)) => Err(BranchUpdateError::Storage(e)),
+        Err(MergeError::InvalidHeads(msg)) => Err(BranchUpdateError::Storage(
+            StorageError::Internal(format!("merge during merge_branch_tips: {msg}")),
+        )),
+        Err(MergeError::Validation(v)) => Err(BranchUpdateError::Storage(StorageError::Internal(
+            format!("merge layer failed validation ({} errors)", v.len()),
+        ))),
     }
 }
 
@@ -1305,6 +1401,158 @@ mod tests {
         assert_eq!(merge_handle.parents.len(), 2);
         assert!(merge_handle.parents.contains(a.id()));
         assert!(merge_handle.parents.contains(b.id()));
+    }
+
+    // --- merge_branch_tips: cross-branch merge ---
+
+    /// Regression: two sibling branches both touching the same IRI
+    /// must produce `NeedsWitnessedMerge` from the cross-branch merge
+    /// surface — never a silent fast-forward overwrite. The old
+    /// `merge_branches` server handler routed through `update_branch`,
+    /// which took the CAS-shortcut and unconditionally advanced the
+    /// target to the source tip when the caller's `expected_old_head`
+    /// matched. That destroyed the target's history.
+    #[test]
+    fn merge_branch_tips_conflict_returns_needs_witnessed_merge() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        update_branch(
+            "main",
+            None,
+            root.id().clone(),
+            ConflictPolicy::AllowTrivial,
+            storage.clone(),
+            &backend,
+        )
+        .unwrap();
+
+        let conflict_iri = "urn:eigenius:example:contested";
+        let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        let mut r_a = Resource::new(iri(conflict_iri));
+        r_a.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("from a".into()),
+        );
+        a_b.add_resource(r_a).unwrap();
+        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+
+        let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
+        let mut r_b = Resource::new(iri(conflict_iri));
+        r_b.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("from b".into()),
+        );
+        b_b.add_resource(r_b).unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+
+        // Advance `main` to `a`. Both `a` and `b` are siblings off `root`,
+        // both touching `conflict_iri` with different values.
+        backend.put_branch("main", a.id()).unwrap();
+
+        let outcome = merge_branch_tips("main", b.id().clone(), storage.clone(), &backend).unwrap();
+        match outcome {
+            UpdateOutcome::NeedsWitnessedMerge {
+                current_head,
+                conflicting_iris,
+                orphan_head,
+            } => {
+                assert_eq!(current_head, *a.id());
+                assert_eq!(orphan_head, *b.id());
+                assert_eq!(conflicting_iris, vec![iri(conflict_iri)]);
+            }
+            other => panic!("expected NeedsWitnessedMerge, got {other:?}"),
+        }
+
+        // Target branch unchanged — this is the load-bearing assertion:
+        // the old code would have overwritten `main` to point at `b`.
+        assert_eq!(backend.get_branch("main").unwrap(), Some(a.id().clone()));
+    }
+
+    /// Source tip is a descendant of the target tip — the merge surface
+    /// fast-forwards the target.
+    #[test]
+    fn merge_branch_tips_fast_forwards_when_source_descends_from_target() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut child_b = LayerBuilder::new("child", Some(Arc::clone(&root)));
+        child_b
+            .add_resource(make_resource("urn:eigenius:example:c"))
+            .unwrap();
+        let child = commit_layer(child_b, storage.clone(), &backend).unwrap();
+
+        backend.put_branch("main", root.id()).unwrap();
+
+        let outcome =
+            merge_branch_tips("main", child.id().clone(), storage.clone(), &backend).unwrap();
+        assert_eq!(outcome, UpdateOutcome::FastForward);
+        assert_eq!(
+            backend.get_branch("main").unwrap(),
+            Some(child.id().clone())
+        );
+    }
+
+    /// Target already includes the source tip in its history — no-op
+    /// fast-forward, branch ref unchanged.
+    #[test]
+    fn merge_branch_tips_noop_when_target_already_includes_source() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut child_b = LayerBuilder::new("child", Some(Arc::clone(&root)));
+        child_b
+            .add_resource(make_resource("urn:eigenius:example:c"))
+            .unwrap();
+        let child = commit_layer(child_b, storage.clone(), &backend).unwrap();
+
+        backend.put_branch("main", child.id()).unwrap();
+
+        let outcome =
+            merge_branch_tips("main", root.id().clone(), storage.clone(), &backend).unwrap();
+        assert_eq!(outcome, UpdateOutcome::FastForward);
+        // Branch unchanged — target was already ahead of source.
+        assert_eq!(
+            backend.get_branch("main").unwrap(),
+            Some(child.id().clone())
+        );
+    }
+
+    /// Disjoint sibling contributions — both branches advanced by
+    /// non-overlapping IRIs — produce a multi-parent merge layer and
+    /// the target branch points at it.
+    #[test]
+    fn merge_branch_tips_disjoint_produces_trivial_merge() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let root = commit_root(&backend, "root", &storage);
+
+        let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
+        a_b.add_resource(make_resource("urn:eigenius:example:a"))
+            .unwrap();
+        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+
+        let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
+        b_b.add_resource(make_resource("urn:eigenius:example:b"))
+            .unwrap();
+        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+
+        backend.put_branch("main", a.id()).unwrap();
+
+        let outcome = merge_branch_tips("main", b.id().clone(), storage.clone(), &backend).unwrap();
+        let merge_id = match outcome {
+            UpdateOutcome::TrivialMerge { merge_layer } => merge_layer,
+            other => panic!("expected TrivialMerge, got {other:?}"),
+        };
+        assert_eq!(backend.get_branch("main").unwrap(), Some(merge_id.clone()));
+        let topo = backend.load_topology().unwrap();
+        let handle = topo.get_layer(&merge_id).expect("merge in topology");
+        assert_eq!(handle.parents.len(), 2);
+        assert!(handle.parents.contains(a.id()));
+        assert!(handle.parents.contains(b.id()));
     }
 
     // --- 14e-ii: find_lca + iri_sources_since primitives ---
