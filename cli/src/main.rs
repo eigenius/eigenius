@@ -2374,6 +2374,7 @@ async fn remote_db_merge_preview(
         branch: branch.to_string(),
         candidate_head: candidate.to_string(),
         resolutions,
+        witness_search_branches: Vec::new(),
     };
     match client.preview_cascade(req).await {
         Ok(response) => {
@@ -2442,6 +2443,7 @@ async fn remote_db_merge_resolve(
         candidate_head: candidate.to_string(),
         resolutions,
         acknowledgments: acks,
+        witness_search_branches: Vec::new(),
     };
     match client.submit_resolution(req).await {
         Ok(response) => {

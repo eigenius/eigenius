@@ -60,6 +60,13 @@ export type MergeResolutionState =
      * the Preview button stays disabled until every conflict has
      * a non-undefined value. */
     resolutions: Record<string, MergeResolutionWire | undefined>;
+    /** D38 §4 — extra branches the resolver should search for
+     * comorphism references on `Witness` resolutions. Empty array
+     * = span-only (the pre-D38 default). Names accumulate as the
+     * user expands the WitnessEditor's "Search additional branches"
+     * disclosure and adds entries. Threaded into the eventual
+     * `previewCascade` + `submitResolution` calls. */
+    witnessSearchBranches: string[];
     /** Race-recovery diff banner content (D36 §11). Populated
      * after `BRANCH_CAS_RACE` recovery; cleared on the next user
      * action. */
@@ -73,6 +80,7 @@ export type MergeResolutionState =
     branchTip: string;
     conflicts: TypedConflictWire[];
     resolutions: Record<string, MergeResolutionWire>;
+    witnessSearchBranches: string[];
   }
   | {
     kind: "acknowledging";
@@ -82,6 +90,7 @@ export type MergeResolutionState =
     branchTip: string;
     conflicts: TypedConflictWire[];
     resolutions: Record<string, MergeResolutionWire>;
+    witnessSearchBranches: string[];
     preview: CascadeItemWire[];
     /** Ack state keyed by item_id (deterministic across re-previews
      * per D20 §8). */
@@ -95,6 +104,7 @@ export type MergeResolutionState =
     branchTip: string;
     conflicts: TypedConflictWire[];
     resolutions: Record<string, MergeResolutionWire>;
+    witnessSearchBranches: string[];
     preview: CascadeItemWire[];
     acknowledged: Record<string, boolean>;
   }

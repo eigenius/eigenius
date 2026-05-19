@@ -701,5 +701,128 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:MergeComorphism"]
+  },
+
+  {
+    "@id": "urn:eigenius:core:MergeResolutionRecord",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Chain-resident audit record of how a single conflict was resolved inside a merge layer (D38 §3). Committed alongside the resolved bodies by `commit_resolutions_as_merge_layer`, one record per conflict, so the merge layer's reasoning becomes inspectable through ordinary EigenQL queries without re-running the classifier. Required slots pin the strategy + conflict id; per-strategy optional slots capture the strategy's specific choices (witness IRI, rename direction, quotient kind, restructure parent). Synthesised `@id` uses content-hash form `urn:eigenius:auto:merge-record:<sha256>` so deterministic resolutions of the same conflict produce the same record IRI across runs.",
+    "urn:eigenius:core:short_name": "MergeResolutionRecord",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:merge_record_conflict_id",
+      "urn:eigenius:core:merge_record_strategy"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_conflict_id",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The classifier-emitted conflict id (D38 §3.1). Opaque-string shape matching `ConflictId`'s wire form (e.g., `iri_collision:urn:project:patient_42`) so a reader can correlate the record with a fresh `PreviewCascade` run against an earlier chain state.",
+    "urn:eigenius:core:short_name": "merge_record_conflict_id",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_strategy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Name of the resolution strategy applied. One of `Witness`, `Rename`, `SchemaQuotient`, `Restructure` — mirroring the `MergeResolution` enum variants. Per-strategy detail lives in the optional `merge_record_*` slots; the strategy name lets a reader pre-filter without inspecting the full record body.",
+    "urn:eigenius:core:short_name": "merge_record_strategy",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_branch_a_source_layer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Hex layer id of the layer that contributed branch A's body at the conflict IRI. Absent when the conflict shape has no single-IRI per-branch body (e.g., cycle-shaped conflicts).",
+    "urn:eigenius:core:short_name": "merge_record_branch_a_source_layer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_branch_b_source_layer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Hex layer id of the layer that contributed branch B's body at the conflict IRI. Absent for cycle-shaped conflicts.",
+    "urn:eigenius:core:short_name": "merge_record_branch_b_source_layer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_ancestor_source_layer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Hex layer id of the ancestor's body at the conflict IRI. Absent for IRIs that didn't exist at the LCA (one-sided additions).",
+    "urn:eigenius:core:short_name": "merge_record_ancestor_source_layer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_witness",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `Witness` strategy: IRI of the `MergeComorphism` that was applied. The comorphism resource is copied into the same merge layer (D38 §3.2) so the IRI always resolves on the merge layer's own chain regardless of GC of the source branch.",
+    "urn:eigenius:core:short_name": "merge_record_witness",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_witness_source_layer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Hex layer id of the layer the witness was originally committed on, before the copy into the merge layer (D38 §3.2). Preserves the authoring-time attribution for audit purposes.",
+    "urn:eigenius:core:short_name": "merge_record_witness_source_layer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_rename_side",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `Rename` strategy: `a` or `b`, identifying which side of the merge span the rename was applied to.",
+    "urn:eigenius:core:short_name": "merge_record_rename_side",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_rename_from_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `Rename` strategy: IRI being renamed away from on the renamed side.",
+    "urn:eigenius:core:short_name": "merge_record_rename_from_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_rename_to_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `Rename` strategy: new IRI the renamed-side resource is committed under in the merge layer.",
+    "urn:eigenius:core:short_name": "merge_record_rename_to_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_quotient_kind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `SchemaQuotient` strategy: one of `KeepBoth`, `KeepOne`, `KeepNeither` — the quotient flavour applied.",
+    "urn:eigenius:core:short_name": "merge_record_quotient_kind",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_quotient_winner",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `SchemaQuotient` strategy with `KeepOne` quotient kind: `a` or `b`, identifying the surviving side.",
+    "urn:eigenius:core:short_name": "merge_record_quotient_winner",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_restructure_new_parent",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `Restructure` strategy: IRI of the introduced common parent class.",
+    "urn:eigenius:core:short_name": "merge_record_restructure_new_parent",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+  {
+    "@id": "urn:eigenius:core:merge_record_restructure_affected_class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Set for `Restructure` strategy: IRI of the class whose contradictory `subclass_of` arrows motivated the restructure.",
+    "urn:eigenius:core:short_name": "merge_record_restructure_affected_class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
   }
 ]

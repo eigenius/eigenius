@@ -412,6 +412,13 @@ export interface NotebookState {
     resolution: MergeResolutionWire | undefined,
   ) => void;
   /**
+   * D38 §4 — update the witness-search-branches list. Only the
+   * `picking` state can change this; later transitions snapshot
+   * the value into the next state so subsequent `previewCascade`
+   * / `submitResolution` calls carry it.
+   */
+  setWitnessSearchBranches: (branches: string[]) => void;
+  /**
    * Transition picking → previewing → acknowledging by calling
    * `previewCascade`. No-op if not all conflicts have a resolution
    * picked. Short-circuits straight to `committing` if the cascade
@@ -548,6 +555,10 @@ async function runPrepareMerge(
   for (const id of conflictIds) {
     if (priorResolutions[id] !== undefined) resolutions[id] = priorResolutions[id];
   }
+  // D38 §4 — preserve any search-branch picks across race recovery
+  // for the same session.
+  const priorWitnessSearchBranches: string[] =
+    prior.kind === "picking" ? prior.witnessSearchBranches : [];
 
   const raceDiff = previousConflicts !== null
     ? diffConflictIds(previousConflicts, conflictIds)
@@ -560,6 +571,7 @@ async function runPrepareMerge(
     branchTip: resp.branchTip,
     conflicts: resp.conflicts,
     resolutions,
+    witnessSearchBranches: priorWitnessSearchBranches,
     raceDiff: raceDiff && (raceDiff.added.length > 0 || raceDiff.removed.length > 0)
       ? raceDiff
       : undefined,
@@ -852,6 +864,27 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     persistMergeResolution(next);
   },
 
+  setWitnessSearchBranches(branches) {
+    const current = get().mergeResolution;
+    if (current.kind !== "picking") return;
+    // Trim + dedupe so the picker can normalize freely without
+    // bloating the wire payload.
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const raw of branches) {
+      const trimmed = raw.trim();
+      if (trimmed === "" || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      normalized.push(trimmed);
+    }
+    const next: MergeResolutionState = {
+      ...current,
+      witnessSearchBranches: normalized,
+    };
+    set({ mergeResolution: next });
+    persistMergeResolution(next);
+  },
+
   async previewMergeCascade(eigen) {
     const current = get().mergeResolution;
     if (current.kind !== "picking") return;
@@ -877,6 +910,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         },
         {},
       ),
+      witnessSearchBranches: current.witnessSearchBranches,
     };
     set({ mergeResolution: previewing });
     persistMergeResolution(previewing);
@@ -887,6 +921,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         current.branch,
         current.candidateHead,
         resolutions,
+        current.witnessSearchBranches,
       );
     } catch (e) {
       const errored: MergeResolutionState = {
@@ -936,6 +971,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         branchTip: current.branchTip,
         conflicts: current.conflicts,
         resolutions: previewing.resolutions,
+        witnessSearchBranches: current.witnessSearchBranches,
         preview: [],
         acknowledged: {},
       };
@@ -964,6 +1000,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       branchTip: current.branchTip,
       conflicts: current.conflicts,
       resolutions: previewing.resolutions,
+      witnessSearchBranches: current.witnessSearchBranches,
       preview: resp.items,
       acknowledged,
     };
@@ -1002,6 +1039,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       branchTip: current.branchTip,
       conflicts: current.conflicts,
       resolutions: current.resolutions,
+      witnessSearchBranches: current.witnessSearchBranches,
       preview: current.preview,
       acknowledged: current.acknowledged,
     };
@@ -1015,6 +1053,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         current.candidateHead,
         resolutions,
         acks,
+        current.witnessSearchBranches,
       );
     } catch (e) {
       const errored: MergeResolutionState = {

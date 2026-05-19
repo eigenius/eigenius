@@ -54,6 +54,38 @@ pub const MERGE_TARGET_CLASS: &str = "urn:eigenius:core:merge_target_class";
 /// resources.
 pub const PROGRAM_TYPE: &str = "urn:eigenius:program:type";
 
+// --- Merge resolution records (D38 §3) ---
+//
+// One `MergeResolutionRecord` resource is committed alongside the
+// resolved bodies in every merge layer, one record per resolved
+// conflict. Required slots pin the strategy + conflict id; per-strategy
+// optional slots capture the strategy-specific choices. For Witness
+// resolutions the comorphism + transformation Lambda are also copied
+// into the merge layer at their original IRIs so the record's pointer
+// is guaranteed to resolve on the merge layer's own chain (D38 §3.2).
+
+pub const MERGE_RESOLUTION_RECORD: &str = "urn:eigenius:core:MergeResolutionRecord";
+pub const MERGE_RECORD_CONFLICT_ID: &str = "urn:eigenius:core:merge_record_conflict_id";
+pub const MERGE_RECORD_STRATEGY: &str = "urn:eigenius:core:merge_record_strategy";
+pub const MERGE_RECORD_BRANCH_A_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_branch_a_source_layer";
+pub const MERGE_RECORD_BRANCH_B_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_branch_b_source_layer";
+pub const MERGE_RECORD_ANCESTOR_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_ancestor_source_layer";
+pub const MERGE_RECORD_WITNESS: &str = "urn:eigenius:core:merge_record_witness";
+pub const MERGE_RECORD_WITNESS_SOURCE_LAYER: &str =
+    "urn:eigenius:core:merge_record_witness_source_layer";
+pub const MERGE_RECORD_RENAME_SIDE: &str = "urn:eigenius:core:merge_record_rename_side";
+pub const MERGE_RECORD_RENAME_FROM_IRI: &str = "urn:eigenius:core:merge_record_rename_from_iri";
+pub const MERGE_RECORD_RENAME_TO_IRI: &str = "urn:eigenius:core:merge_record_rename_to_iri";
+pub const MERGE_RECORD_QUOTIENT_KIND: &str = "urn:eigenius:core:merge_record_quotient_kind";
+pub const MERGE_RECORD_QUOTIENT_WINNER: &str = "urn:eigenius:core:merge_record_quotient_winner";
+pub const MERGE_RECORD_RESTRUCTURE_NEW_PARENT: &str =
+    "urn:eigenius:core:merge_record_restructure_new_parent";
+pub const MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS: &str =
+    "urn:eigenius:core:merge_record_restructure_affected_class";
+
 /// Canonical optional/maybe inductive (Phase 15b step 3, D20 §6.1).
 /// Used by `MergeComorphism` to type the optional ancestor argument
 /// of a `(A, A, Option<A>) -> A` witness signature.

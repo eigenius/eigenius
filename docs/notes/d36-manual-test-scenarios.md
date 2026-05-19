@@ -371,7 +371,7 @@ Revert the threshold change before continuing other scenarios.
 
 **Tests.** §15 in-app docs affordance.
 
-**Steps.** Open any picker (Scenario 1 setup), click **Strategy reference** in the picker header. Expect a new tab to `https://github.com/anthropic-experimental/eigenius/blob/main/docs/guides/platform/11-merge-resolution.md`.
+**Steps.** Open any picker (Scenario 1 setup), click **Strategy reference** in the picker header. Expect a new tab to `https://eigenius.io/`.
 
 ---
 
@@ -388,6 +388,81 @@ Revert the threshold change before continuing other scenarios.
    - `[merge-resolution] commit-success { state: "done", mergeLayerShort }`
 4. Drive a Cancel from `picking`. Expect `[merge-resolution] cancel`.
 5. Drive an error path (Scenario 7). Expect `[merge-resolution] error { errorKind, rpc }`.
+
+---
+
+## Scenario 15 — Provenance records in the Layer Inspector (D38 §3)
+
+**Tests.** D38 PR 1 end-to-end: `MergeResolutionRecord` resources are committed alongside the resolved bodies and surface in the History panel's Layer Inspector.
+
+**Branch setup.** Any successful merge run leaves a record per resolved conflict on the merge layer. Easiest path: re-run **Scenario 1** (IRI-collision rename) end-to-end and capture the resulting merge-layer id.
+
+**Steps.**
+1. Drive Scenario 1 to a successful merge. Note the merge-layer id from the `done` card.
+2. Open the History panel. Locate the merge layer in the timeline — its name is `merge:<head_a>+<head_b>`.
+3. Expand the Layer Inspector for that layer. Among the layer's contributions you should see a resource at IRI `urn:eigenius:auto:merge-record:<sha256>`.
+4. Inspect that resource. Expect:
+   - `is_a` includes `urn:eigenius:core:MergeResolutionRecord`.
+   - `merge_record_strategy = "Rename"`.
+   - `merge_record_conflict_id` matches the conflict id the classifier emitted (e.g. `iri_collision:urn:project:Patient`).
+   - `merge_record_rename_side`, `merge_record_rename_from_iri`, `merge_record_rename_to_iri` populated with the picker's choices.
+   - `merge_record_branch_a_source_layer` / `_branch_b_source_layer` are present (cycle-shaped conflicts wouldn't carry these — but Scenario 1's IriCollision does).
+5. Optional EigenQL query — the chain-resident records are also queryable:
+
+   ```eigenql
+   USING "urn:eigenius:core:MergeResolutionRecord"
+
+   MATCH MergeResolutionRecord(?r) {
+       "urn:eigenius:core:merge_record_conflict_id": ?conflict,
+       "urn:eigenius:core:merge_record_strategy":    ?strategy
+   }
+   RETURN [] { record: ?r, conflict: ?conflict, strategy: ?strategy }
+   ORDER BY ?conflict
+   ```
+
+   Expect one row per resolved conflict across the chain's merge history.
+
+**Per-strategy variants.** Re-run with Scenario 2 (KeepOne), Scenario 3 (KeepNeither), Scenario 5 (Restructure), Scenario 6 (Witness) to verify each strategy's optional slots:
+- KeepOne: `merge_record_quotient_kind = "KeepOne"` + `merge_record_quotient_winner`.
+- KeepNeither: `merge_record_quotient_kind = "KeepNeither"` (no winner).
+- Restructure: `merge_record_restructure_new_parent` + `merge_record_restructure_affected_class`.
+- Witness: `merge_record_witness` (comorphism IRI) + `merge_record_witness_source_layer` (the original committing layer's id).
+
+**Idempotency check.** Re-running the same resolution against the same span (re-driving from the picker, picking the same strategy + parameters) must produce a merge layer with the same id. The record's `@id` is content-hashed (`urn:eigenius:auto:merge-record:<sha256>`), so identical resolutions deduplicate naturally.
+
+---
+
+## Scenario 16 — Witness on a sibling branch (D38 §4)
+
+**Tests.** D38 PR 2 end-to-end: `WitnessEditor`'s "Search additional branches" disclosure surfaces witnesses on branches outside the merge span; the kernel's fourth-tier walk applies them; the off-span witness gets copied into the merge layer (D38 §3.2 step-4 off-span path) so the merge layer stays self-contained.
+
+**Branch setup.**
+
+1. Re-run Scenario 6's setup through step 3 (so both `s6-a` and `s6-b` exist with `patient_42` and a weight conflict), but **skip the witness cell on `s6-a`** — we want the witness to live elsewhere.
+2. Create a new branch `witness-library` off `d36-base`. On it, run the witness cell from Scenario 6 step 4 (`merge_comorphism project:patient_take_b for project:Patient { (a, b, opt) => b }`). Tag this commit if you want a stable name; otherwise the branch ref alone is enough.
+3. Switch back to `s6-a` (the merge target).
+
+**Resolution.**
+
+1. Open the Merge rail. Source = `s6-b`, target = `s6-a`. Drive to the picker. One conflict on `urn:project:patient_42`, kind = `IriCollision`.
+2. Pick **Witness**. The Combobox is empty — `patient_take_b` lives on `witness-library`, not on `s6-a`'s chain.
+3. Click **▸ Search additional branches** (below the Combobox). Type `witness-library` and press Enter (or click Add).
+4. The Combobox re-queries. Expect: `patient_take_b` now appears as the single option.
+5. Select it. Click **Preview cascade** (empty cascade expected). Click **Commit merge**.
+6. Expect the merge to succeed and `urn:project:patient_42` to resolve to weight 80.0 on `s6-a` (branch B's body, per the `λa.λb.λopt.b` witness).
+
+**Off-span copy verification.**
+
+1. Note the merge-layer id from the `done` card. Open the History panel's Layer Inspector for that layer.
+2. Among the layer's contributions you should see both:
+   - The `MergeComorphism` resource at `urn:project:patient_take_b` — copied from `witness-library` into the merge layer per D38 §3.2's off-span guard.
+   - The synthesised transformation `Lambda` at `urn:eigenius:auto:lambda:<sha256>` — same.
+3. Inspect the `MergeResolutionRecord` for the conflict. `merge_record_witness_source_layer` should be the `witness-library` tip's layer id (the *original* committing layer, preserved after the copy).
+4. **GC stability sanity check.** Delete the `witness-library` branch ref (`eigenius db branch delete witness-library` or via the Branches panel). Re-open the merge layer's Layer Inspector. The `MergeComorphism` and Lambda are still resolvable through the merge layer — the off-span copy made the merge layer self-contained.
+
+**In-span no-copy sanity check (contrast with above).** Re-run Scenario 6 verbatim (witness on `s6-a`, the merge target — *in* the span). After the merge commits, open the merge layer's Layer Inspector and confirm the witness IRI is **not** in the layer's own contributions — the merge layer reaches it through its parent chain instead. D38 §3.2's guard skips the duplication for in-span witnesses (transitively pinned by reachability).
+
+**Stale-branch tolerance.** With the picker open and the scope set to a name that doesn't exist (`bogus-branch`), the query silently skips it — the Combobox still surfaces whatever's reachable from the default scope + any valid extras. No hard error.
 
 ---
 

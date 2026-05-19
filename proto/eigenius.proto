@@ -1093,6 +1093,14 @@ message SubmitResolutionRequest {
   // preview the resolutions would generate, or the kernel returns
   // `INCOMPLETE_ACKNOWLEDGMENTS`.
   repeated CascadeAckWire acknowledgments = 4;
+  // D38 §4.1 — additional branches the resolver should consult when
+  // looking up `comorphism_iri` references on `Witness` resolutions.
+  // Each entry is a branch name (or a tag name). Searched in declared
+  // order after the merge span's sources and the ancestor chain.
+  // Class-equality enforcement applies regardless of where the witness
+  // was found. Unknown entries are silently skipped so the surface
+  // tolerates a stale set after a branch is deleted.
+  repeated string witness_search_branches = 5;
 }
 
 message SubmitResolutionResponse {
@@ -1175,6 +1183,10 @@ message PreviewCascadeRequest {
   // Tentative resolutions to preview. Empty is legal — the cascade
   // for an empty resolution set is empty.
   repeated MergeResolutionWire resolutions = 3;
+  // D38 §4.1 — same shape as `SubmitResolutionRequest`. The preview
+  // must accept the same scope as submit so the cascade computed
+  // here matches what the eventual commit will produce.
+  repeated string witness_search_branches = 4;
 }
 
 message PreviewCascadeResponse {

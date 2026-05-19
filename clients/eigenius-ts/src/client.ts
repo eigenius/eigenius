@@ -779,12 +779,14 @@ export class Eigen {
     branch: string,
     candidateHead: string,
     resolutions: MergeResolutionWire[],
+    witnessSearchBranches: string[] = [],
   ): Promise<PreviewCascadeResponse> {
     return await this.kernel.previewCascade(
       create(PreviewCascadeRequestSchema, {
         branch,
         candidateHead,
         resolutions,
+        witnessSearchBranches,
       }),
     );
   }
@@ -801,6 +803,7 @@ export class Eigen {
     candidateHead: string,
     resolutions: MergeResolutionWire[],
     acknowledgments: CascadeAckWire[],
+    witnessSearchBranches: string[] = [],
   ): Promise<SubmitResolutionResponse> {
     return await this.kernel.submitResolution(
       create(SubmitResolutionRequestSchema, {
@@ -808,6 +811,7 @@ export class Eigen {
         candidateHead,
         resolutions,
         acknowledgments,
+        witnessSearchBranches,
       }),
     );
   }

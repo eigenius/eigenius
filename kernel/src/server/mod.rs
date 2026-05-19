@@ -3501,10 +3501,20 @@ impl EigeniusKernel for EigeniusService {
 
         // Apply the resolutions and commit the merge layer.
         let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(backend));
+        // D38 §4 — caller-supplied search-branch scope for the witness
+        // resolver's fourth-tier walk. Empty list means span-only
+        // (the pre-D38 default).
+        let extra_branches: Vec<String> = req
+            .witness_search_branches
+            .iter()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .collect();
         let merge_layer_id = match crate::layer::merge::merge_with_resolutions(
             &span,
             resolutions,
             acks,
+            extra_branches,
             storage.clone(),
             backend.as_ref(),
         ) {

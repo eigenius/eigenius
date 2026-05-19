@@ -38,7 +38,7 @@ D37 covers:
 - Polymorphic lambdas (type-level parameters). v1 of D37 ships monomorphic lambdas — `take_b` for `Patient` and `take_b` for `Visit` are two declarations. The polymorphism extension is sketched in §10.3 with its compile-side and validator-side gaps; the kernel's NbE machinery is already there (universes + Pi-binders over `Set`). The v1 → v2 boundary is strictly additive — every monomorphic witness committed in v1 remains valid in v2.
 - Bounded quantification (`lambda<A extends ClassWithWeight>`). A consequence of unbounded polymorphism's shape-preserving restriction (see §10.3.4); requires its own design effort around subtyping or row-types.
 - Pattern-matching ergonomic surface beyond what `program` already supports. `Match` over `Option` is needed for the ancestor argument and is already in the program AST; D37 reuses it without redesign.
-- Visual witness-authoring UI in the notebook. The picker (Combobox of applicable comorphisms) is in scope; the builder is deferred to a separate D38-style design that revisits the broader resolution-strategy UX (see §10.6).
+- Visual witness-authoring UI in the notebook. The picker (Combobox of applicable comorphisms) is in scope; the builder is deferred to a separate design that revisits the broader resolution-strategy UX (see §10.6). That UX work is now scoped as **D39** — the D38 slot was reallocated to merge provenance + witness discovery scope (see [D38](d38-merge-provenance-and-witness-discovery.md)).
 - Anything specific to the institution-layer `Comorphism` (the cross-fibre translation witness). That shares the lambda foundation but lives in its own surface design.
 
 ### 1.3 Expressiveness of witness bodies
@@ -545,7 +545,7 @@ Every existing `program` declaration already supports embedded lambdas in its bo
 
 **Decided:** D37 v1 ships only the **picker** UI for selecting already-committed witnesses (§7.1). Authoring goes through ESL cells. A richer visual builder is deferred and will land alongside a broader redesign of the resolution-strategy UX.
 
-The current merge UI has six strategy radios with kind-specific editors and is already non-trivial to reason about as the conflict-kind taxonomy grows. Layering a witness-construction builder on top of the current shape would compound the complexity. A subsequent design (provisionally **D38 — Resolution strategy UX, second pass**) should consolidate:
+The current merge UI has six strategy radios with kind-specific editors and is already non-trivial to reason about as the conflict-kind taxonomy grows. Layering a witness-construction builder on top of the current shape would compound the complexity. A subsequent design (provisionally **D39 — Resolution strategy UX, second pass**; the D38 slot is taken by [D38 — Merge provenance and witness discovery](d38-merge-provenance-and-witness-discovery.md)) should consolidate:
 
 - Strategy applicability surfacing (when each strategy makes sense given the conflict kind, beyond the current "greyed-out" hint).
 - Per-strategy authoring affordances — including a visual witness builder that emits ESL into a sibling cell.

@@ -57,7 +57,7 @@ import { CascadePreviewPane } from "./CascadePreviewPane";
  * constant so future hosting changes are one-line edits.
  */
 const MERGE_RESOLUTION_GUIDE_URL =
-  "https://github.com/anthropic-experimental/eigenius/blob/main/docs/guides/platform/11-merge-resolution.md";
+  "https://eigenius.io/";
 
 const useStyles = makeStyles({
   root: {

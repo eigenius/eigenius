@@ -36,7 +36,7 @@
  * branch-level wrapper is exposed.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Body1,
   Button,
@@ -151,23 +151,34 @@ export function MergePanel() {
     (s) => s.setPendingMergeSource,
   );
 
+  // Sensible target default: pick `main` if it exists and isn't the
+  // source, otherwise the first branch that isn't the source. The
+  // user always re-selects intentionally, but a non-empty default
+  // means the first preview click works without a fiddly setup.
+  // Factored out so both the initial setup and the post-resolution
+  // reset can compute it consistently.
+  const computeDefaultTarget = (
+    src: string,
+    brs: readonly { name: string }[] | null,
+  ): string => {
+    if (!brs) return src === "main" ? "" : "main";
+    if (src !== "main" && brs.some((b) => b.name === "main")) {
+      return "main";
+    }
+    return brs.find((b) => b.name !== src)?.name ?? "";
+  };
+
   // `pendingMergeSource` is a one-shot hint from BranchesPanel's
   // "Merge into…" action; consume it on mount so a later visit
   // doesn't keep pre-filling a stale source.
   const [source, setSource] = useState<string>(
     pendingMergeSource ?? activeBranch,
   );
-  // Sensible target default: pick `main` if it exists and isn't the
-  // source, otherwise the first branch that isn't the source. The
-  // user always re-selects intentionally, but a non-empty default
-  // means the first preview click works without a fiddly setup.
-  const initialTarget = useMemo(() => {
-    if (!branches) return source === "main" ? "" : "main";
-    if (source !== "main" && branches.some((b) => b.name === "main")) {
-      return "main";
-    }
-    return branches.find((b) => b.name !== source)?.name ?? "";
-  }, [branches, source]);
+  const initialTarget = useMemo(
+    () => computeDefaultTarget(source, branches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const [target, setTarget] = useState<string>(initialTarget);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [mergeState, setMergeState] = useState<MergeState>({ kind: "idle" });
@@ -192,6 +203,29 @@ export function MergePanel() {
     setPreview({ kind: "idle" });
     setMergeState({ kind: "idle" });
   }, [source, target]);
+
+  // Reset the form when a resolution session ends (committed via the
+  // `done` card → Close, or cancelled at any state). Without this
+  // the panel returns the user to a stale source/target + preview/
+  // result snapshot from before the resolution started; a fresh
+  // form matches the "new workflow" mental model.
+  const resolutionKind = useNotebookStore((s) => s.mergeResolution.kind);
+  const prevResolutionOpen = useRef(resolutionKind !== "closed");
+  useEffect(() => {
+    const isOpen = resolutionKind !== "closed";
+    if (prevResolutionOpen.current && !isOpen) {
+      const freshSource = activeBranch;
+      setSource(freshSource);
+      setTarget(computeDefaultTarget(freshSource, branches));
+      // preview + mergeState reset via the [source, target] effect
+      // above; setting them explicitly here keeps the post-reset
+      // render free of a flicker where the old preview/result is
+      // still visible against the new source/target pair.
+      setPreview({ kind: "idle" });
+      setMergeState({ kind: "idle" });
+    }
+    prevResolutionOpen.current = isOpen;
+  }, [resolutionKind, activeBranch, branches]);
 
   const onPreview = async () => {
     if (!source || !target || source === target) return;
@@ -251,14 +285,13 @@ export function MergePanel() {
   // into resolution mode and hosts `MergeResolutionFlow` instead of
   // the explicit source/target merge UI. The two modes are mutually
   // exclusive within a session.
-  const resolutionState = useNotebookStore((s) => s.mergeResolution);
-  if (resolutionState.kind !== "closed") {
+  if (resolutionKind !== "closed") {
     return (
       <div className={styles.root}>
         <div className={styles.header}>
           <Merge20Regular />
           <Subtitle1 as="h2">
-            Merge — {resolutionState.kind === "done"
+            Merge — {resolutionKind === "done"
               ? "committed"
               : "resolving conflicts"}
           </Subtitle1>

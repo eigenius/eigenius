@@ -1047,6 +1047,7 @@ pub fn merge_with_resolutions(
     span: &MergeSpan,
     resolutions: Vec<MergeResolution>,
     acknowledgments: Vec<CascadeAck>,
+    extra_branches: Vec<String>,
     storage: crate::layer::LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<MergeOutcome, MergeError> {
@@ -1077,6 +1078,7 @@ pub fn merge_with_resolutions(
         &resolutions,
         &acknowledgments,
         &layer_name,
+        &extra_branches,
         storage,
         backend,
     )?;
@@ -1106,6 +1108,7 @@ pub fn resolve_merge_comorphism(
     iri: &Iri,
     expected_class: &Iri,
     span: &MergeSpan,
+    extra_branches: &[String],
     topology: &LayerTopology,
     backend: &dyn PersistentBackend,
 ) -> Result<MergeComorphismHandle, MergeError> {
@@ -1115,16 +1118,39 @@ pub fn resolve_merge_comorphism(
     let merge_target_class_iri =
         Iri::parse(wk::MERGE_TARGET_CLASS).expect("MERGE_TARGET_CLASS IRI");
 
-    // Search both branches' contributions before falling back to the
-    // ancestor's chain. v1 doesn't require the comorphism to live
-    // strictly under the ancestor — D20 §6.1 leaves the chain
-    // location open as long as the resource is reachable from the
-    // merge span. A comorphism committed on a branch is just as
-    // valid as one on the ancestor.
-    let resource_loc = find_in_span_chain(iri, span, topology, backend)
-        .map_err(MergeError::Storage)?
-        .ok_or_else(|| MergeError::MergeComorphismNotFound(iri.clone()))?;
-    let (source_layer, resource) = resource_loc;
+    // D20 §6.1 + D38 §4: four-tier search. Each branch's contributions
+    // and the ancestor chain are the canonical locations. The
+    // `extra_branches` list is consulted last so an unscoped witness
+    // on a sibling branch can't shadow a "real" witness reachable
+    // from the merge span; users opt into broader scope by naming
+    // the branches.
+    let mut resource_loc: Option<(LayerId, Resource)> =
+        find_in_span_chain(iri, span, topology, backend).map_err(MergeError::Storage)?;
+    if resource_loc.is_none() {
+        for branch_name in extra_branches {
+            // Skip blank entries — the wire surface tolerates a
+            // possibly-empty trim from the picker UI.
+            if branch_name.is_empty() {
+                continue;
+            }
+            let branch_tip = match backend
+                .get_branch(branch_name)
+                .map_err(MergeError::Storage)?
+            {
+                Some(tip) => tip,
+                None => continue, // unknown / deleted branch — silently skip
+            };
+            if let Some((layer_id, resource)) =
+                find_iri_in_chain(&branch_tip, iri, topology, backend)
+                    .map_err(MergeError::Storage)?
+            {
+                resource_loc = Some((layer_id, resource));
+                break;
+            }
+        }
+    }
+    let (source_layer, resource) =
+        resource_loc.ok_or_else(|| MergeError::MergeComorphismNotFound(iri.clone()))?;
 
     if !resource.is_instance_of(&merge_comorphism_iri) {
         let is_a_iri = Iri::parse(wk::IS_A).expect("IS_A IRI");
@@ -2442,6 +2468,7 @@ pub fn commit_resolutions_as_merge_layer(
     resolutions: &[MergeResolution],
     acknowledgments: &[CascadeAck],
     name: &str,
+    extra_branches: &[String],
     storage: crate::layer::LayerStorage,
     backend: &dyn PersistentBackend,
 ) -> Result<std::sync::Arc<crate::layer::Layer>, MergeError> {
@@ -2613,8 +2640,14 @@ pub fn commit_resolutions_as_merge_layer(
                         .map_err(MergeError::Storage)?
                         .map(|(_, r)| r);
 
-                let handle =
-                    resolve_merge_comorphism(comorphism, &class, span, &topology, backend)?;
+                let handle = resolve_merge_comorphism(
+                    comorphism,
+                    &class,
+                    span,
+                    extra_branches,
+                    &topology,
+                    backend,
+                )?;
                 let mut merged = apply_witness_resolution(
                     &handle,
                     &class,
@@ -2629,9 +2662,91 @@ pub fn commit_resolutions_as_merge_layer(
                 // drops the `@id`); re-attach the conflict IRI so
                 // the layer commit places the merged body at the
                 // right key.
-                merged.set_id(Some(conflict_iri));
+                merged.set_id(Some(conflict_iri.clone()));
                 builder
                     .add_resource(merged)
+                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+
+                // D38 §3.2 step 4: copy the comorphism resource +
+                // its transformation Lambda into the merge layer so
+                // the provenance record's `merge_record_witness`
+                // pointer is guaranteed to resolve on the merge
+                // layer's own chain.
+                //
+                // Guard: only copy when the resource isn't already
+                // reachable through the merge layer's parentage. The
+                // merge layer's parents are both branch tips; their
+                // chains reach back to the ancestor, so anything in
+                // `sources_a` / `sources_b` / the ancestor's chain
+                // (the merge span) is transitively pinned by the
+                // merge layer's reachability already. Duplicating
+                // into the contributions would waste storage with
+                // no GC benefit. The off-span case — a witness on
+                // a branch outside the span, surfaced via D38 §4's
+                // `witness_search_branches` (PR 2) — is the one
+                // that genuinely needs the copy: those source
+                // branches aren't part of the merge layer's
+                // parentage, so without the contribution the
+                // record's IRI could go dangling if the source
+                // branch is later deleted.
+                //
+                // Both writes (when emitted) are idempotent: the
+                // bodies are deterministic and `LayerBuilder::add_resource`
+                // is an upsert keyed by IRI, so re-committing the
+                // same Witness resolution produces the same merge-
+                // layer hash.
+                if find_in_span_chain(&handle.iri, span, &topology, backend)
+                    .map_err(MergeError::Storage)?
+                    .is_none()
+                {
+                    let comorphism_body = backend
+                        .try_load_resource(&handle.source_layer, &handle.iri)
+                        .map_err(MergeError::Storage)?
+                        .ok_or_else(|| {
+                            MergeError::Storage(StorageError::NotFound(format!(
+                                "comorphism {} not loadable from source layer {}",
+                                handle.iri, handle.source_layer
+                            )))
+                        })?;
+                    builder
+                        .add_resource(comorphism_body)
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                }
+                if find_in_span_chain(&handle.transformation, span, &topology, backend)
+                    .map_err(MergeError::Storage)?
+                    .is_none()
+                {
+                    let (_, transformation_body) = find_iri_in_chain(
+                        &handle.source_layer,
+                        &handle.transformation,
+                        &topology,
+                        backend,
+                    )
+                    .map_err(MergeError::Storage)?
+                    .ok_or_else(|| MergeError::TransformationNotFound {
+                        comorphism: handle.iri.clone(),
+                        transformation: handle.transformation.clone(),
+                    })?;
+                    builder
+                        .add_resource(transformation_body)
+                        .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
+                }
+
+                // D38 §3.1 — emit the provenance record. Witness
+                // strategy carries `merge_record_witness` (comorphism
+                // IRI) and `merge_record_witness_source_layer` (the
+                // original-author attribution, preserved after the
+                // copy above).
+                let record = build_merge_resolution_record(
+                    target,
+                    resolution,
+                    span,
+                    &topology,
+                    backend,
+                    Some(&handle.source_layer),
+                )?;
+                builder
+                    .add_resource(record)
                     .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
             }
             MergeResolution::Rename {
@@ -2689,6 +2804,18 @@ pub fn commit_resolutions_as_merge_layer(
                         .tombstone(old_iri.clone())
                         .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
                 }
+
+                let target = conflict_by_id
+                    .get(resolution_conflict_id(resolution))
+                    .ok_or_else(|| {
+                        MergeError::ConflictNotFound(resolution_conflict_id(resolution).clone())
+                    })?;
+                let record = build_merge_resolution_record(
+                    target, resolution, span, &topology, backend, None,
+                )?;
+                builder
+                    .add_resource(record)
+                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
             }
             MergeResolution::SchemaQuotient { conflict, quotient } => {
                 let target = conflict_by_id
@@ -2785,6 +2912,13 @@ pub fn commit_resolutions_as_merge_layer(
                         );
                     }
                 }
+
+                let record = build_merge_resolution_record(
+                    target, resolution, span, &topology, backend, None,
+                )?;
+                builder
+                    .add_resource(record)
+                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
             }
             MergeResolution::Restructure { conflict, spec } => {
                 // Re-validate + apply. The Restructure spec's
@@ -2846,6 +2980,16 @@ pub fn commit_resolutions_as_merge_layer(
                         .add_resource(body)
                         .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
                 }
+
+                let target = conflict_by_id
+                    .get(conflict)
+                    .ok_or_else(|| MergeError::ConflictNotFound(conflict.clone()))?;
+                let record = build_merge_resolution_record(
+                    target, resolution, span, &topology, backend, None,
+                )?;
+                builder
+                    .add_resource(record)
+                    .map_err(|e| MergeError::LayerBuild(e.to_string()))?;
             }
         }
     }
@@ -2942,6 +3086,201 @@ fn witness_target_class(
         }
     }
     Ok(None)
+}
+
+/// Build a `MergeResolutionRecord` resource for a single resolved
+/// conflict (D38 §3). One record is committed per resolution by
+/// [`commit_resolutions_as_merge_layer`]. The record's `@id` is the
+/// content-hash of its canonical Eigon-CBOR with `@id` cleared —
+/// deterministic resolutions of the same conflict produce the same
+/// record IRI across runs.
+///
+/// `witness_source_layer` is set only for `Witness` resolutions; the
+/// commit path threads in `handle.source_layer` so the original
+/// authoring attribution survives the witness copy into the merge
+/// layer (D38 §3.2).
+fn build_merge_resolution_record(
+    conflict: &TypedConflict,
+    resolution: &MergeResolution,
+    span: &MergeSpan,
+    topology: &LayerTopology,
+    backend: &dyn PersistentBackend,
+    witness_source_layer: Option<&LayerId>,
+) -> Result<Resource, MergeError> {
+    use crate::ontology::resource::Value;
+
+    let mut record = Resource::new_embedded();
+    record.set(
+        Iri::parse(wk::IS_A).expect("IS_A IRI"),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk::MERGE_RESOLUTION_RECORD).expect("MERGE_RESOLUTION_RECORD IRI"),
+        )]),
+    );
+    record.set(
+        Iri::parse(wk::MERGE_RECORD_CONFLICT_ID).expect("MERGE_RECORD_CONFLICT_ID IRI"),
+        Value::String(conflict.id.0.clone()),
+    );
+    record.set(
+        Iri::parse(wk::MERGE_RECORD_STRATEGY).expect("MERGE_RECORD_STRATEGY IRI"),
+        Value::String(merge_resolution_strategy_name(resolution).to_string()),
+    );
+
+    // Branch / ancestor source-layer slots — populated when the
+    // conflict has a single primary IRI for which per-side bodies
+    // exist. Cycle-shaped conflicts (InheritanceCycle) involve
+    // multiple IRIs across both branches; for those the slots stay
+    // absent.
+    if let Some(target_iri) = primary_record_iri(resolution, &conflict.kind) {
+        if let Some(layer_id) = span.sources_a.get(target_iri) {
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_BRANCH_A_SOURCE_LAYER)
+                    .expect("MERGE_RECORD_BRANCH_A_SOURCE_LAYER IRI"),
+                Value::String(layer_id.to_string()),
+            );
+        }
+        if let Some(layer_id) = span.sources_b.get(target_iri) {
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_BRANCH_B_SOURCE_LAYER)
+                    .expect("MERGE_RECORD_BRANCH_B_SOURCE_LAYER IRI"),
+                Value::String(layer_id.to_string()),
+            );
+        }
+        if let Some((ancestor_layer, _)) =
+            find_iri_in_chain(&span.ancestor, target_iri, topology, backend)
+                .map_err(MergeError::Storage)?
+        {
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_ANCESTOR_SOURCE_LAYER)
+                    .expect("MERGE_RECORD_ANCESTOR_SOURCE_LAYER IRI"),
+                Value::String(ancestor_layer.to_string()),
+            );
+        }
+    }
+
+    match resolution {
+        MergeResolution::Witness { comorphism, .. } => {
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_WITNESS).expect("MERGE_RECORD_WITNESS IRI"),
+                Value::ResourceRef(comorphism.clone()),
+            );
+            if let Some(layer_id) = witness_source_layer {
+                record.set(
+                    Iri::parse(wk::MERGE_RECORD_WITNESS_SOURCE_LAYER)
+                        .expect("MERGE_RECORD_WITNESS_SOURCE_LAYER IRI"),
+                    Value::String(layer_id.to_string()),
+                );
+            }
+        }
+        MergeResolution::Rename {
+            side,
+            old_iri,
+            new_iri,
+            ..
+        } => {
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_RENAME_SIDE).expect("MERGE_RECORD_RENAME_SIDE IRI"),
+                Value::String(side_label(*side).to_string()),
+            );
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_RENAME_FROM_IRI)
+                    .expect("MERGE_RECORD_RENAME_FROM_IRI IRI"),
+                Value::ResourceRef(old_iri.clone()),
+            );
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_RENAME_TO_IRI).expect("MERGE_RECORD_RENAME_TO_IRI IRI"),
+                Value::ResourceRef(new_iri.clone()),
+            );
+        }
+        MergeResolution::SchemaQuotient { quotient, .. } => {
+            let (kind_name, winner) = match quotient {
+                SchemaQuotient::KeepBoth => ("KeepBoth", None),
+                SchemaQuotient::KeepOne { winner } => ("KeepOne", Some(*winner)),
+                SchemaQuotient::KeepNeither => ("KeepNeither", None),
+            };
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_QUOTIENT_KIND).expect("MERGE_RECORD_QUOTIENT_KIND IRI"),
+                Value::String(kind_name.to_string()),
+            );
+            if let Some(winner) = winner {
+                record.set(
+                    Iri::parse(wk::MERGE_RECORD_QUOTIENT_WINNER)
+                        .expect("MERGE_RECORD_QUOTIENT_WINNER IRI"),
+                    Value::String(side_label(winner).to_string()),
+                );
+            }
+        }
+        MergeResolution::Restructure { spec, .. } => {
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)
+                    .expect("MERGE_RECORD_RESTRUCTURE_NEW_PARENT IRI"),
+                Value::ResourceRef(spec.new_parent.clone()),
+            );
+            record.set(
+                Iri::parse(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)
+                    .expect("MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS IRI"),
+                Value::ResourceRef(spec.affected_class.clone()),
+            );
+        }
+    }
+
+    record.set_id(Some(compute_merge_record_iri(&record)));
+    Ok(record)
+}
+
+/// Strategy-name string for `merge_record_strategy`. Mirrors the
+/// `MergeResolution` variant names.
+fn merge_resolution_strategy_name(resolution: &MergeResolution) -> &'static str {
+    match resolution {
+        MergeResolution::Witness { .. } => "Witness",
+        MergeResolution::Rename { .. } => "Rename",
+        MergeResolution::SchemaQuotient { .. } => "SchemaQuotient",
+        MergeResolution::Restructure { .. } => "Restructure",
+    }
+}
+
+/// Short label for a `Side` value used in record fields
+/// (`merge_record_rename_side`, `merge_record_quotient_winner`).
+fn side_label(side: Side) -> &'static str {
+    match side {
+        Side::A => "a",
+        Side::B => "b",
+    }
+}
+
+/// Choose the IRI whose branch source layers go in
+/// `merge_record_branch_*_source_layer`. For single-IRI conflicts
+/// this is the conflict's target IRI; for Rename it's the renamed-
+/// from IRI (the conflict point); for Restructure it's the affected
+/// class. Returns `None` for cycle-shaped conflicts that have no
+/// single primary IRI.
+fn primary_record_iri<'a>(
+    resolution: &'a MergeResolution,
+    kind: &'a ConflictKind,
+) -> Option<&'a Iri> {
+    match resolution {
+        MergeResolution::Witness { .. } => witness_target_iri(kind),
+        MergeResolution::Rename { old_iri, .. } => Some(old_iri),
+        MergeResolution::SchemaQuotient { .. } => witness_target_iri(kind),
+        MergeResolution::Restructure { spec, .. } => Some(&spec.affected_class),
+    }
+}
+
+/// Compute the content-hash `@id` for a `MergeResolutionRecord`
+/// (D38 §3.1). Mirrors `compute_witness_lambda_iri` in
+/// `esl/compile.rs`: serialize the canonical Eigon-CBOR of the
+/// resource with `@id` cleared, hash with SHA-256, format as
+/// `urn:eigenius:auto:merge-record:<hex>`. Deterministic across
+/// runs so re-commits of identical resolutions produce identical
+/// IRIs.
+fn compute_merge_record_iri(resource: &Resource) -> Iri {
+    use sha2::{Digest, Sha256};
+    let mut canonical = resource.clone();
+    canonical.set_id(None);
+    let bytes = crate::ontology::eigon_cbor::serialize_resource(&canonical);
+    let digest = Sha256::digest(&bytes);
+    let hex = format!("{digest:x}");
+    Iri::parse(&format!("urn:eigenius:auto:merge-record:{hex}"))
+        .expect("synthesised merge-record IRI must be valid")
 }
 
 /// Load the most-recent body for a class IRI somewhere in the merge
@@ -3796,6 +4135,7 @@ mod tests {
             &span,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
@@ -3868,6 +4208,7 @@ mod tests {
                 comorphism: iri("urn:test:witness"),
             }],
             Vec::new(),
+            Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
@@ -3895,6 +4236,7 @@ mod tests {
                 conflict: conflict_id,
                 comorphism: iri("urn:test:missing_witness"),
             }],
+            Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
@@ -3926,6 +4268,7 @@ mod tests {
                 conflict: conflict_id,
                 comorphism: iri("urn:test:not_a_witness"),
             }],
+            Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
@@ -3980,6 +4323,7 @@ mod tests {
                 comorphism: iri("urn:test:wrong_class_witness"),
             }],
             Vec::new(),
+            Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
@@ -4024,6 +4368,7 @@ mod tests {
                 comorphism: iri("urn:test:no_class_witness"),
             }],
             Vec::new(),
+            Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
@@ -4060,6 +4405,7 @@ mod tests {
                 conflict: conflict_id,
                 comorphism: iri("urn:test:witness"),
             }],
+            Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
@@ -4104,6 +4450,7 @@ mod tests {
                 conflict: conflict_id,
                 comorphism: iri("urn:test:malformed_witness"),
             }],
+            Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
@@ -4224,11 +4571,207 @@ mod tests {
             &iri(witness_iri),
             &iri("urn:test:Patient"),
             &span,
+            &[],
             &topology,
             &*backend,
         )
         .unwrap();
         (span, backend, handle, storage)
+    }
+
+    /// D38 §4 off-span fixture. Builds the same IriCollision span as
+    /// `build_witness_fixture` but commits the `MergeComorphism` +
+    /// transformation Lambda on a separate `witness-library` branch
+    /// rooted at the merge span's ancestor — so neither resource is
+    /// reachable from the merge span itself, and the resolver only
+    /// finds the comorphism if `extra_branches = ["witness-library"]`
+    /// is supplied. Registers the branch ref via `put_branch` so the
+    /// resolver's `backend.get_branch(...)` call returns the tip.
+    fn build_witness_fixture_offspan(
+        body: Resource,
+    ) -> (
+        MergeSpan,
+        std::sync::Arc<MemoryPersistentBackend>,
+        Iri, // witness IRI (caller passes via extra_branches lookup)
+        crate::layer::LayerStorage,
+    ) {
+        use std::sync::Arc;
+        let transformation_iri = "urn:test:term:identity_b_offspan";
+        let witness_iri = "urn:test:witness_offspan";
+
+        let inner_opt = make_lambda_resource("opt", body);
+        let inner_b = make_lambda_resource("b", inner_opt);
+        let transformation = {
+            let lam = make_lambda_resource("a", inner_b);
+            let mut r = Resource::new(Iri::parse(transformation_iri).unwrap());
+            for (k, v) in lam.properties() {
+                r.set(k.clone(), v.clone());
+            }
+            r
+        };
+        let witness = make_resource(
+            witness_iri,
+            &[wk::MERGE_COMORPHISM],
+            &[
+                (
+                    wk::MERGE_TRANSFORMATION,
+                    Value::ResourceRef(iri(transformation_iri)),
+                ),
+                (
+                    wk::MERGE_TARGET_CLASS,
+                    Value::ResourceRef(iri("urn:test:Patient")),
+                ),
+            ],
+        );
+
+        let backend: Arc<MemoryPersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let backend_dyn: Arc<dyn crate::storage::PersistentBackend> = backend.clone();
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend_dyn));
+
+        // Ancestor — empty (no witness, no resources). The branches
+        // diverge from here.
+        let ancestor = Arc::new(LayerBuilder::new("ancestor", None).build(storage.clone()));
+        backend.store_layer(&ancestor).unwrap();
+
+        // Branch A / Branch B — patient_42 with different weights,
+        // producing the IriCollision the witness will resolve.
+        let mut a_builder = LayerBuilder::new("branch_a", Some(Arc::clone(&ancestor)));
+        a_builder
+            .add_resource(make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[("urn:test:weight", Value::Integer(75))],
+            ))
+            .unwrap();
+        let head_a = Arc::new(a_builder.build(storage.clone()));
+        backend.store_layer(&head_a).unwrap();
+
+        let mut b_builder = LayerBuilder::new("branch_b", Some(Arc::clone(&ancestor)));
+        b_builder
+            .add_resource(make_resource(
+                "urn:test:patient_42",
+                &["urn:test:Patient"],
+                &[("urn:test:weight", Value::Integer(76))],
+            ))
+            .unwrap();
+        let head_b = Arc::new(b_builder.build(storage.clone()));
+        backend.store_layer(&head_b).unwrap();
+
+        // Witness-library — separate sibling branch holding the
+        // comorphism + transformation. Not reachable from the merge
+        // span (sources_a / sources_b / ancestor's chain).
+        let mut lib_builder = LayerBuilder::new("witness-library", Some(Arc::clone(&ancestor)));
+        lib_builder.add_resource(transformation).unwrap();
+        lib_builder.add_resource(witness).unwrap();
+        let lib_head = Arc::new(lib_builder.build(storage.clone()));
+        backend.store_layer(&lib_head).unwrap();
+        backend
+            .put_branch("witness-library", lib_head.id())
+            .unwrap();
+
+        let topology = backend.load_topology().unwrap();
+        let sources_a =
+            crate::lattice::iri_sources_since(head_a.id(), ancestor.id(), &topology, &*backend)
+                .unwrap();
+        let sources_b =
+            crate::lattice::iri_sources_since(head_b.id(), ancestor.id(), &topology, &*backend)
+                .unwrap();
+
+        let span = MergeSpan {
+            ancestor: ancestor.id().clone(),
+            head_a: head_a.id().clone(),
+            head_b: head_b.id().clone(),
+            sources_a,
+            sources_b,
+        };
+        (span, backend, iri(witness_iri), storage)
+    }
+
+    #[test]
+    fn witness_off_span_resolved_via_extra_branches() {
+        // D38 §4: a `MergeComorphism` committed on `witness-library`
+        // (a branch outside the merge span) is invisible to the
+        // span-only walk but reachable when the caller names that
+        // branch in `extra_branches`.
+        let (span, backend, witness_iri, _storage) =
+            build_witness_fixture_offspan(make_var_resource("b"));
+        let topology = backend.load_topology().unwrap();
+
+        // Span-only search misses it.
+        let span_only = resolve_merge_comorphism(
+            &witness_iri,
+            &iri("urn:test:Patient"),
+            &span,
+            &[],
+            &topology,
+            &*backend,
+        );
+        assert!(
+            matches!(span_only, Err(MergeError::MergeComorphismNotFound(_))),
+            "span-only search must miss the off-span witness, got {span_only:?}",
+        );
+
+        // With the search branch, the fourth-tier walk finds it.
+        let with_scope = resolve_merge_comorphism(
+            &witness_iri,
+            &iri("urn:test:Patient"),
+            &span,
+            &["witness-library".to_string()],
+            &topology,
+            &*backend,
+        )
+        .expect("extra_branches must surface the off-span witness");
+        assert_eq!(with_scope.iri, witness_iri);
+    }
+
+    #[test]
+    fn witness_off_span_unknown_branch_silently_skipped() {
+        // Unknown branch names in `extra_branches` are skipped
+        // (best-effort search). The error stays `MergeComorphismNotFound`
+        // rather than turning into a per-branch lookup error — a
+        // stale picker state shouldn't promote to a hard failure.
+        let (span, backend, witness_iri, _storage) =
+            build_witness_fixture_offspan(make_var_resource("b"));
+        let topology = backend.load_topology().unwrap();
+        let result = resolve_merge_comorphism(
+            &witness_iri,
+            &iri("urn:test:Patient"),
+            &span,
+            &["does-not-exist".to_string()],
+            &topology,
+            &*backend,
+        );
+        assert!(
+            matches!(result, Err(MergeError::MergeComorphismNotFound(_))),
+            "unknown branch must be skipped silently, got {result:?}",
+        );
+    }
+
+    #[test]
+    fn witness_off_span_wrong_class_still_rejected() {
+        // The fourth-tier search relaxes *where* the witness can
+        // live, not which witnesses are valid. A class mismatch
+        // must still surface as `MergeComorphismWrongClass`.
+        let (span, backend, witness_iri, _storage) =
+            build_witness_fixture_offspan(make_var_resource("b"));
+        let topology = backend.load_topology().unwrap();
+        let result = resolve_merge_comorphism(
+            &witness_iri,
+            &iri("urn:test:Visit"), // wrong class
+            &span,
+            &["witness-library".to_string()],
+            &topology,
+            &*backend,
+        );
+        match result {
+            Err(MergeError::MergeComorphismWrongClass {
+                expected, actual, ..
+            }) => {
+                assert_eq!(expected.as_str(), "urn:test:Visit");
+                assert_eq!(actual.as_str(), "urn:test:Patient");
+            }
+            other => panic!("expected MergeComorphismWrongClass, got {other:?}"),
+        }
     }
 
     /// Same as [`build_span`] but threads an `Arc<MemoryPersistentBackend>`
@@ -4414,6 +4957,7 @@ mod tests {
             &iri(witness_iri),
             &iri("urn:test:Patient"),
             &span,
+            &[],
             &topology,
             &*backend,
         )
@@ -4488,6 +5032,7 @@ mod tests {
             &iri(witness_iri),
             &iri("urn:test:Patient"),
             &span,
+            &[],
             &topology,
             &*backend,
         )
@@ -4883,7 +5428,14 @@ mod tests {
             old_iri: iri(patient_iri),
             new_iri: iri(renamed_iri),
         }];
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), storage, &*backend);
+        let result = merge_with_resolutions(
+            &span,
+            resolutions,
+            Vec::new(),
+            Vec::new(),
+            storage,
+            &*backend,
+        );
         match result {
             Err(MergeError::ConflictNotFound(id)) => {
                 assert_eq!(id, conflict);
@@ -5040,6 +5592,7 @@ mod tests {
             &span,
             resolutions,
             Vec::new(),
+            Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
@@ -5064,6 +5617,7 @@ mod tests {
         let result = merge_with_resolutions(
             &span,
             resolutions,
+            Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
@@ -5090,6 +5644,7 @@ mod tests {
         let result = merge_with_resolutions(
             &span,
             resolutions,
+            Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
@@ -5406,6 +5961,7 @@ mod tests {
             &span,
             resolutions,
             Vec::new(),
+            Vec::new(),
             crate::layer::LayerStorage::in_memory(),
             &backend,
         );
@@ -5464,6 +6020,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:restructure_animal",
+            &[],
             storage,
             &*backend,
         )
@@ -5767,7 +6324,14 @@ mod tests {
             new_iri: iri("urn:project:billing:Patient"),
         }];
         // No acks supplied — gate must reject.
-        let result = merge_with_resolutions(&span, resolutions, Vec::new(), storage, &*backend);
+        let result = merge_with_resolutions(
+            &span,
+            resolutions,
+            Vec::new(),
+            Vec::new(),
+            storage,
+            &*backend,
+        );
         match result {
             Err(MergeError::IncompleteAcknowledgments { missing }) => {
                 assert_eq!(missing.len(), 1);
@@ -5817,7 +6381,14 @@ mod tests {
         // Open-world classifier doesn't surface IriCollision for
         // disjoint branches, so the dispatch reports
         // ConflictNotFound after the gate passes.
-        let result = merge_with_resolutions(&span, vec![resolution], acks, storage, &*backend);
+        let result = merge_with_resolutions(
+            &span,
+            vec![resolution],
+            acks,
+            Vec::new(),
+            storage,
+            &*backend,
+        );
         match result {
             Err(MergeError::ConflictNotFound(id)) => assert_eq!(id, conflict_id),
             other => panic!("expected ConflictNotFound after gate, got {other:?}"),
@@ -5863,6 +6434,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:patient_test",
+            &[],
             storage.clone(),
             &*backend,
         )
@@ -5940,6 +6512,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:should_not_build",
+            &[],
             storage,
             &*backend,
         );
@@ -5971,6 +6544,7 @@ mod tests {
                 comorphism: handle.iri.clone(),
             }],
             Vec::new(),
+            Vec::new(),
             storage,
             &*backend,
         );
@@ -5994,6 +6568,422 @@ mod tests {
                 assert_eq!(parents, expected);
             }
             other => panic!("expected Merged with real layer id, got {other:?}"),
+        }
+    }
+
+    // ─── D38 §3 — Merge resolution records ──────────────────────────────────
+
+    /// Find the single MergeResolutionRecord defined directly in
+    /// `merge_layer` and return a clone of its resolved body. Panics
+    /// if zero or more than one record IRI is defined — the tests
+    /// assume one-record-per-resolution. Resolves through the layer
+    /// chain rather than reading `local_resources` so the assertions
+    /// run against the same shape clients see (post canonicalisation).
+    fn single_record_in(merge_layer: &crate::layer::Layer) -> Resource {
+        let record_iris: Vec<Iri> = merge_layer
+            .defined_iris()
+            .iter()
+            .filter(|i| i.as_str().starts_with("urn:eigenius:auto:merge-record:"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            record_iris.len(),
+            1,
+            "expected exactly one merge-record IRI in merge layer; got {record_iris:?}"
+        );
+        let body = merge_layer
+            .resolve(&record_iris[0])
+            .expect("record IRI must resolve");
+        (*body).clone()
+    }
+
+    #[test]
+    fn merge_records_witness_emits_record_with_strategy_fields() {
+        // D38 §3: a Witness resolution emits a `MergeResolutionRecord`
+        // with `strategy = "Witness"`, `witness = <comorphism IRI>`,
+        // and `witness_source_layer` carrying the original committing
+        // layer id.
+        let (span, backend, handle, storage) = build_witness_fixture(make_var_resource("b"));
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let comorphism_source_layer = handle.source_layer.to_string();
+
+        let resolutions = vec![MergeResolution::Witness {
+            conflict: conflict_id.clone(),
+            comorphism: handle.iri.clone(),
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:record_witness",
+            &[],
+            storage,
+            &*backend,
+        )
+        .expect("witness commit");
+
+        let record = single_record_in(&merge_layer);
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_STRATEGY))
+                .and_then(|v| v.as_str()),
+            Some("Witness"),
+        );
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_CONFLICT_ID))
+                .and_then(|v| v.as_str()),
+            Some(conflict_id.0.as_str()),
+        );
+        match record.get(&iri(wk::MERGE_RECORD_WITNESS)) {
+            Some(Value::ResourceRef(r)) => assert_eq!(r, &handle.iri),
+            other => panic!("merge_record_witness should be a ResourceRef, got {other:?}"),
+        }
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_WITNESS_SOURCE_LAYER))
+                .and_then(|v| v.as_str()),
+            Some(comorphism_source_layer.as_str()),
+        );
+    }
+
+    #[test]
+    fn merge_records_witness_off_span_copies_into_merge_layer() {
+        // D38 §3.2 step-4 guard, off-span branch: when the witness
+        // lives outside the merge span (reached via the fourth-tier
+        // `extra_branches` walk), the commit path copies both the
+        // comorphism and its transformation Lambda into the merge
+        // layer's contributions at their original IRIs — so the
+        // resolution trace stays resolvable even if the source
+        // branch is later deleted. Also pins that `merge_record_witness_source_layer`
+        // captures the original-author attribution.
+        let (span, backend, witness_iri, storage) =
+            build_witness_fixture_offspan(make_var_resource("b"));
+        let topology = backend.load_topology().unwrap();
+        let comorphism_source_layer = backend
+            .get_branch("witness-library")
+            .unwrap()
+            .expect("witness-library branch should be registered");
+
+        // Confirm the resolver can find the witness via extra_branches.
+        let extra = vec!["witness-library".to_string()];
+        let _ = resolve_merge_comorphism(
+            &witness_iri,
+            &iri("urn:test:Patient"),
+            &span,
+            &extra,
+            &topology,
+            &*backend,
+        )
+        .expect("off-span resolve must succeed with extra_branches");
+
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::Witness {
+            conflict: conflict_id,
+            comorphism: witness_iri.clone(),
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:off_span_copy",
+            &extra,
+            storage,
+            &*backend,
+        )
+        .expect("off-span witness commit");
+
+        // The off-span comorphism + its transformation are now
+        // contributions of the merge layer — guarantees the merge
+        // layer is self-contained if `witness-library` is deleted.
+        assert!(
+            merge_layer.defined_iris().contains(&witness_iri),
+            "off-span comorphism should be copied into the merge layer's contributions"
+        );
+        let transformation_iri = iri("urn:test:term:identity_b_offspan");
+        assert!(
+            merge_layer.defined_iris().contains(&transformation_iri),
+            "off-span transformation should be copied into the merge layer's contributions"
+        );
+
+        // Record carries the source-layer attribution.
+        let record = single_record_in(&merge_layer);
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_WITNESS_SOURCE_LAYER))
+                .and_then(|v| v.as_str()),
+            Some(comorphism_source_layer.to_string().as_str()),
+        );
+    }
+
+    #[test]
+    fn merge_records_witness_in_span_skips_copy_but_stays_resolvable() {
+        // D38 §3.2 guard: when the comorphism + transformation are
+        // reachable through the merge span (sources_a / sources_b /
+        // ancestor chain), the commit path skips the copy — the
+        // merge layer's parent chain already pins them transitively,
+        // so a contribution would just duplicate the body. The
+        // `merge_record_witness` pointer must still resolve through
+        // the merge layer (via the parent walk). In `build_witness_fixture`
+        // the comorphism + transformation both live on the ancestor,
+        // i.e., in-span, so neither should appear in `defined_iris`.
+        let (span, backend, handle, storage) = build_witness_fixture(make_var_resource("b"));
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+
+        let resolutions = vec![MergeResolution::Witness {
+            conflict: conflict_id,
+            comorphism: handle.iri.clone(),
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:in_span_skip_copy",
+            &[],
+            storage,
+            &*backend,
+        )
+        .expect("witness commit");
+
+        assert!(
+            !merge_layer.defined_iris().contains(&handle.iri),
+            "in-span comorphism should not be duplicated into the merge layer's contributions"
+        );
+        assert!(
+            !merge_layer.defined_iris().contains(&handle.transformation),
+            "in-span transformation should not be duplicated into the merge layer's contributions"
+        );
+        assert!(
+            merge_layer.resolve(&handle.iri).is_some(),
+            "comorphism must still resolve through the merge layer's parent chain"
+        );
+        assert!(
+            merge_layer.resolve(&handle.transformation).is_some(),
+            "transformation must still resolve through the merge layer's parent chain"
+        );
+    }
+
+    #[test]
+    fn merge_records_witness_recommit_is_idempotent() {
+        // Re-committing the same Witness resolution against the same
+        // span yields a merge layer with the same id. The record's
+        // `@id` is content-hashed, the witness copy is content-keyed,
+        // and the merged body is deterministic — all three are
+        // covered by the same hash-equality assertion.
+        let (span, backend, handle, storage) = build_witness_fixture(make_var_resource("b"));
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::Witness {
+            conflict: conflict_id,
+            comorphism: handle.iri.clone(),
+        }];
+
+        let layer_a = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:idempotent_witness",
+            &[],
+            storage.clone(),
+            &*backend,
+        )
+        .expect("first commit");
+        let layer_b = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:idempotent_witness",
+            &[],
+            storage,
+            &*backend,
+        )
+        .expect("second commit");
+        assert_eq!(
+            layer_a.id(),
+            layer_b.id(),
+            "re-committing the same Witness resolution must produce the same merge-layer id",
+        );
+    }
+
+    #[test]
+    fn merge_records_rename_emits_record_with_strategy_fields() {
+        // Rename records carry rename_side / rename_from_iri /
+        // rename_to_iri alongside the base required slots.
+        let patient_iri = "urn:project:Patient";
+        let renamed_iri = "urn:project:billing:Patient";
+        let (span, backend, storage) = build_span_arc(
+            Vec::new(),
+            vec![make_resource(
+                patient_iri,
+                &[wk::CLASS],
+                &[("urn:project:label", Value::String("A".to_string()))],
+            )],
+            vec![make_resource(
+                patient_iri,
+                &[wk::CLASS],
+                &[("urn:project:label", Value::String("B".to_string()))],
+            )],
+        );
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::Rename {
+            conflict: conflict_id.clone(),
+            side: Side::A,
+            old_iri: iri(patient_iri),
+            new_iri: iri(renamed_iri),
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:record_rename",
+            &[],
+            storage,
+            &*backend,
+        )
+        .expect("rename commit");
+
+        let record = single_record_in(&merge_layer);
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_STRATEGY))
+                .and_then(|v| v.as_str()),
+            Some("Rename"),
+        );
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_RENAME_SIDE))
+                .and_then(|v| v.as_str()),
+            Some("a"),
+        );
+        match record.get(&iri(wk::MERGE_RECORD_RENAME_FROM_IRI)) {
+            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), patient_iri),
+            other => panic!("rename_from_iri should be ResourceRef, got {other:?}"),
+        }
+        match record.get(&iri(wk::MERGE_RECORD_RENAME_TO_IRI)) {
+            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), renamed_iri),
+            other => panic!("rename_to_iri should be ResourceRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_records_quotient_keep_one_emits_kind_and_winner() {
+        // KeepOne records carry `quotient_kind = "KeepOne"` plus
+        // `quotient_winner` ("a" / "b"). KeepNeither carries only
+        // the kind.
+        let body_a = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(1))],
+        );
+        let body_b = make_resource(
+            "urn:test:X",
+            &["urn:test:Thing"],
+            &[("urn:test:weight", Value::Integer(2))],
+        );
+        let (span, backend, storage) = build_span_arc(Vec::new(), vec![body_a], vec![body_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::SchemaQuotient {
+            conflict: conflict_id,
+            quotient: SchemaQuotient::KeepOne { winner: Side::B },
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:record_quotient",
+            &[],
+            storage,
+            &*backend,
+        )
+        .expect("quotient commit");
+
+        let record = single_record_in(&merge_layer);
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_STRATEGY))
+                .and_then(|v| v.as_str()),
+            Some("SchemaQuotient"),
+        );
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_QUOTIENT_KIND))
+                .and_then(|v| v.as_str()),
+            Some("KeepOne"),
+        );
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_QUOTIENT_WINNER))
+                .and_then(|v| v.as_str()),
+            Some("b"),
+        );
+    }
+
+    #[test]
+    fn merge_records_restructure_emits_new_parent_and_affected() {
+        // Restructure records carry restructure_new_parent +
+        // restructure_affected_class.
+        let mammal = make_resource("urn:test:Mammal", &[wk::CLASS], &[]);
+        let reptile = make_resource("urn:test:Reptile", &[wk::CLASS], &[]);
+        let dog_a = make_resource(
+            "urn:test:Dog",
+            &[wk::CLASS],
+            &[(
+                wk::PARENT_CLASSES,
+                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+            )],
+        );
+        let dog_b = make_resource(
+            "urn:test:Dog",
+            &[wk::CLASS],
+            &[(
+                wk::PARENT_CLASSES,
+                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+            )],
+        );
+        let (span, backend, storage) =
+            build_span_arc(vec![mammal, reptile], vec![dog_a], vec![dog_b]);
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
+        let conflict_id = conflicts[0].id.clone();
+        let resolutions = vec![MergeResolution::Restructure {
+            conflict: conflict_id,
+            spec: RestructureSpec {
+                affected_class: iri("urn:test:Dog"),
+                new_parent: iri("urn:test:Animal"),
+                new_parent_def: Some(animal_class_def()),
+                classes_under_new: vec![iri("urn:test:Mammal"), iri("urn:test:Reptile")],
+                affected_class_under_new: true,
+            },
+        }];
+        let merge_layer = commit_resolutions_as_merge_layer(
+            &span,
+            &resolutions,
+            &[],
+            "merge:record_restructure",
+            &[],
+            storage,
+            &*backend,
+        )
+        .expect("restructure commit");
+
+        let record = single_record_in(&merge_layer);
+        assert_eq!(
+            record
+                .get(&iri(wk::MERGE_RECORD_STRATEGY))
+                .and_then(|v| v.as_str()),
+            Some("Restructure"),
+        );
+        match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)) {
+            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), "urn:test:Animal"),
+            other => panic!("restructure_new_parent should be ResourceRef, got {other:?}"),
+        }
+        match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)) {
+            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), "urn:test:Dog"),
+            other => panic!("restructure_affected_class should be ResourceRef, got {other:?}"),
         }
     }
 
@@ -6033,6 +7023,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:rename_collision",
+            &[],
             storage,
             &*backend,
         )
@@ -6116,6 +7107,7 @@ mod tests {
             &resolutions,
             &acks,
             "merge:rename_rewrite",
+            &[],
             storage,
             &*backend,
         )
@@ -6261,6 +7253,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:keep_neither",
+            &[],
             storage,
             &*backend,
         )
@@ -6307,6 +7300,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:keep_neither_ancestor",
+            &[],
             storage,
             &*backend,
         )
@@ -6351,6 +7345,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:keep_one",
+            &[],
             storage,
             &*backend,
         )
@@ -6414,6 +7409,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:full_view",
+            &[],
             storage,
             &*backend,
         )
@@ -6471,6 +7467,7 @@ mod tests {
             &resolutions,
             &[],
             "merge:partial",
+            &[],
             storage,
             &*backend,
         );

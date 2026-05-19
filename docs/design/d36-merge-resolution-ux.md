@@ -763,6 +763,6 @@ When `committing → done` resolves a conflict that started as a cell-commit fai
 
 `KeepBoth` is rendered in `QuotientEditor` even when no current conflict kind admits it (none do in v1). The radio is disabled with an inline "not applicable to this conflict" explanation. Teaching the user that the strategy exists and clarifying the structural reason it doesn't apply is worth the UI surface; hiding it entirely would be mysterious and would create a discontinuity if a future taxonomy admits it. Already reflected in §6.5.
 
-### 15.6 Resolution attribution: deferred
+### 15.6 Resolution attribution: closed by D38
 
-A merge layer committed via resolution has the same identity shape as a layer committed via cell execution. Differentiating them in the History view is future work — not blocking D36. The merge layer's name (passed as the `name` parameter to `commit_resolutions_as_merge_layer`) carries `"merge:..."` already, which the History panel can render specifically when the resolution-attribution feature lands.
+A merge layer committed via resolution has the same identity shape as a layer committed via cell execution. The wider attribution problem — *which strategy resolved each conflict, which witness was applied, which branch contributed each conflicting body* — is closed by [D38 — Merge provenance and witness discovery](d38-merge-provenance-and-witness-discovery.md): `commit_resolutions_as_merge_layer` now commits a `MergeResolutionRecord` resource per resolved conflict alongside the resolved bodies, queryable via ordinary EigenQL. The History panel's existing per-layer resource list surfaces the records automatically; a polished "resolution trace" view is D39's territory (UX, second pass).
