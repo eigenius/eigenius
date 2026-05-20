@@ -1,0 +1,35 @@
+[package]
+name = "eigenius-lean"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as an in-process proof checker; the kernel binary registers a LeanInstitution that dispatches proof_check verdicts through this crate. See D28, Phase 20a."
+
+[dependencies]
+# Lean term checker. Read the export directly and call
+# `ExportFile::check_all_declars` in-process per D28 §2.3 (no IPC,
+# verdict is a function call). Catching its panics with
+# `std::panic::catch_unwind` is the documented contract for v1.
+#
+# Pinned to a commit SHA rather than a tag because upstream's last
+# published tag (v0.3.2) predates the `Option<Vec<String>>` shape on
+# `Config::permitted_axioms` / `pp_declars` and the
+# `unknown_pp_declar_hard_error` field that `check_proof` relies on.
+# `6d2f037` is the last master commit before the `proj_of_prop` fix
+# (PR #19), which keeps `test_resources/ProjFromProp/export` (our
+# vendored broken-proof fixture) producing the expected `infer_proj
+# prop` panic.
+nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "6d2f037" }
+
+# `eigenius-kernel` will be wired in 20a.4 when `LeanInstitution`
+# implements `Institution`. Phase 20a.3 stays lib-only — no kernel dep
+# yet, no `Institution` trait references, no chain-mirror translator.
+
+thiserror.workspace = true
+
+# `check_proof` takes `&[u8]` but nanoda's `Config::to_export_file`
+# only accepts a `PathBuf`. Until upstream takes a `Reader`, we stage
+# the bytes into a tempfile per call — that hop lives in the public
+# API path, so the dep belongs in `[dependencies]`, not dev-deps.
+tempfile = "3"
