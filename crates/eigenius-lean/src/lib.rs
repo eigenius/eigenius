@@ -31,6 +31,11 @@
 //! in [`eigenius-lean-runtime`](../eigenius-lean-runtime/) (Phase
 //! 20a.5+).
 
+pub mod chain_mirror;
 pub mod checker;
+pub mod institution;
+pub mod startup;
 
+pub use chain_mirror::{bytes_to_lean_expr, ChainMirrorError};
 pub use checker::{check_proof, CheckError, Verdict};
+pub use institution::LeanInstitution;

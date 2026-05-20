@@ -3914,15 +3914,18 @@ mod tests {
     /// → runtime → formulas → lean-expressions → <this test layer>.
     fn build_lean_expr_layer() -> Arc<Layer> {
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap with lean-expressions layer");
-        // `ctx.head()` is the notebook layer; `ctx.head().parent()` is
-        // lean-expressions. Either works as the parent for this test —
-        // we anchor to lean-expressions directly to keep the chain
-        // tightly focused (no notebook ontology bleed into the value
-        // type-check).
+        // After Phase 20a.4 the chain is:
+        //   notebook → lean-institution → lean-expressions → formulas → …
+        // We anchor at lean-institution (`ctx.head().parent()`) so the
+        // test layer has both the lean:LeanExpr InductiveTypes
+        // (resolved through `lean-expressions`) and the
+        // institution-side classes (LeanProofTerm etc.) reachable —
+        // notebook would also work, but anchoring above it keeps the
+        // chain focused.
         let lean_layer = Arc::clone(
             ctx.head()
                 .parent()
-                .expect("head has lean-expressions parent"),
+                .expect("head has lean-institution parent"),
         );
 
         let mut builder = LayerBuilder::new("test_lean_expr", Some(lean_layer));
@@ -4071,7 +4074,7 @@ mod tests {
         let lean_layer = Arc::clone(
             ctx.head()
                 .parent()
-                .expect("head has lean-expressions parent"),
+                .expect("head has lean-institution parent"),
         );
 
         let mut builder = LayerBuilder::new("test_lean_expr_resource", Some(lean_layer));

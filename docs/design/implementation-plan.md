@@ -2037,7 +2037,7 @@ Runs in parallel with 20a.0.
 
 #### Phase 20a.4 — `LeanInstitution: Institution` impl + chain-mirror translator (~1 week)
 
-**Goal.** Wire the verification side into the kernel: `LeanInstitution` implements `Institution`, registers via 20a.1's `InProcessInstitutionRegistry`, dispatches `proof_check` through 20a.3's `check_proof`. Includes the bytes → `lean:LeanExpr` translator per D40 — invoked at commit time to populate the `proposition` field on `LeanProofTerm` resources.
+**Goal.** Wire the verification side into the kernel: `LeanInstitution` implements `Institution`, registers via 20a.1's `InProcessInstitutionRegistry`, dispatches `proof_check` through 20a.3's `check_proof`. Also ships the bytes → `lean:LeanExpr` translator per D40 — a standalone authoring-side utility, *not* called from `query` (the institution always verifies via the bytes; chain-mirroring is a separate visibility concern for whoever constructs the `LeanProofTerm` resource).
 
 **Correspondence check stub.** This sub-milestone ships with a *stub* correspondence check that always passes (returns `Verdict::Holds` as long as nanoda accepts the proof). Real correspondence lands in 20a.7 once the mirror generator (20a.6) is wired. The stub lets the end-to-end smoke test fire here without blocking on the authoring + mirror path.
 
@@ -2045,7 +2045,7 @@ Runs in parallel with 20a.0.
 
 **Files created.**
 - `crates/eigenius-lean/src/institution.rs` — `LeanInstitution: Institution` impl. `query` dispatches `urn:eigenius:lean:proof_check` to 20a.3's `check_proof` (correspondence check stubbed); `extract_typed` handles `ef_lean_proof_payload`.
-- `crates/eigenius-lean/src/chain_mirror.rs` — bytes → `lean:LeanExpr` translator (D40-conformant). Used by `LeanInstitution::query` at commit time to back-fill the `proposition` field if the caller didn't supply it.
+- `crates/eigenius-lean/src/chain_mirror.rs` — bytes → `lean:LeanExpr` translator (D40-conformant). Standalone `pub fn`; the smoke test calls it directly to derive a `proposition` value before committing the `LeanProofTerm`. Production callers (20a.5 authoring runtime, future CLI subcommand) invoke it during proof bundling. Not on the verification path — `LeanInstitution::query` never invokes it because the institution always operates on the raw bytes.
 - `crates/eigenius-lean/src/startup.rs` — `pub fn register(service: &EigeniusService)` hook called from [`cli/src/main.rs`](../../cli/src/main.rs)'s `serve` subcommand path. Wraps `LeanInstitution::new(...)` in an `Arc` and calls `service.register_in_process_institution(...)` (Phase 20a.1's API). Verification-side code links into the **kernel binary** ([`cli/`](../../cli/)) — not the Deno orchestrator — so the verdict is a direct function call inside the kernel process, not a gRPC round-trip widening the TCB (per D28 §2.3 / §10.2).
 - `crates/eigenius-lean/tests/end_to_end_smoke.rs` — commits a `LeanProofTerm` with hand-crafted bytes + a stubbed `mirror_iri` + `claim_iri`; asserts the resource lands tagged *verified*.
 - `ontologies/lean/lean-institution.eigon.json` — the `Institution` resource, ExportFormats (`ef_lean_proof_payload`, `ef_lean_environment_summary`), QueryClasses (`qc_proof_check` AutoOnLoad+OnDemand + the OnDemand cluster), and the `LeanProofTerm` / `LeanProofPayload` / `LeanAxiomList` / etc. resource classes.
@@ -2056,7 +2056,7 @@ Runs in parallel with 20a.0.
 
 **Tasks.**
 1. `LeanInstitution::query` procedure-dispatch table: `proof_check` → 20a.3's `check_proof` + stubbed correspondence; `which_axioms`, `proof_size`, `env_diff`, `discover_dependencies`, `discover_reductions` initially return `NotImplemented` (light up opportunistically — they share the dispatch table).
-2. Chain-mirror translator: walk nanoda's parsed `Expr` tree, emit chain-CBOR `lean:LeanExpr` values per D40. Smoke test: same toy proof from 20a.3, decoded into a chain-mirrored proposition, committed alongside the resource.
+2. Chain-mirror translator: standalone `pub fn` that walks nanoda's parsed `Expr` tree and emits chain-CBOR `lean:LeanExpr` values per D40. Independent of the verification path. Round-trip test: bytes → `lean:LeanExpr` value → `serialize_resource` is deterministic.
 3. End-to-end test: AutoOnLoad fires, institution dispatches, returns `Holds`, kernel tags *verified*. Uses a hand-crafted `LeanPackageMirror` resource (just a placeholder; correspondence check is stubbed so its content doesn't matter for this test).
 
 **Acceptance.**

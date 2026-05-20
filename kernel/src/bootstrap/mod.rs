@@ -175,7 +175,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads six ontology layers: core → program → reflection → institution → runtime → notebook.
+/// Loads nine ontology layers: core → program → reflection → institution → runtime → formulas → lean-expressions → lean-institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -255,10 +255,26 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // lean-institution layer (Phase 20a.4 / D28) — declares the
+    // Lean 4 verification institution and its v1 surface:
+    // LeanProofTerm / LeanProofPayload / LeanAxiomList resource
+    // classes, the qc_proof_check QueryClass (AutoOnLoad + OnDemand
+    // over LeanProofTerm → Verdict), and the ef_lean_proof_payload
+    // ExportFormat. Sits above lean-expressions because the
+    // `proposition` property on LeanProofTerm is typed
+    // `core:inductive` over `lean:LeanExpr` (D40 §3.5) and needs the
+    // chain-mirrored expression InductiveTypes already resolvable.
+    let lean_institution = load_layer(
+        "lean-institution",
+        include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
+        Some(lean_expressions),
+        storage.clone(),
+    )?;
+
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(lean_expressions),
+        Some(lean_institution),
         storage.clone(),
     )?;
 
@@ -459,7 +475,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 8] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 9] {
     [
         (
             "core",
@@ -488,6 +504,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 8] {
         (
             "lean-expressions",
             include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
+        ),
+        (
+            "lean-institution",
+            include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
         ),
         (
             "notebook",
@@ -631,14 +651,18 @@ mod tests {
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
         // Head is the notebook layer
-        // (on top of lean-expressions → formulas → runtime → institution →
-        // reflection → program → core).
+        // (on top of lean-institution → lean-expressions → formulas →
+        // runtime → institution → reflection → program → core).
         // formulas inserted at Phase 19d.0.d / D32 §4 so FormulaTerm
         // and the operator catalog ride above the runtime substrate
         // ontology. lean-expressions inserted at Phase 20a.2 / D40
         // for the chain-mirrored Lean expression form.
+        // lean-institution inserted at Phase 20a.4 / D28 to declare
+        // the LeanProofTerm class + qc_proof_check QueryClass.
         assert!(!ctx.head().is_root());
-        let lean_expressions = ctx.head().parent().unwrap();
+        let lean_institution = ctx.head().parent().unwrap();
+        assert!(!lean_institution.is_root());
+        let lean_expressions = lean_institution.parent().unwrap();
         assert!(!lean_expressions.is_root());
         let formulas = lean_expressions.parent().unwrap();
         assert!(!formulas.is_root());

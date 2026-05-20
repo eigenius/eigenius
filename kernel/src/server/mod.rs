@@ -4789,6 +4789,7 @@ pub async fn start_server(
     port: u16,
     orchestrator_endpoint: Option<&str>,
     backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
+    in_process_institutions: Vec<Arc<dyn crate::institution::runtime::Institution>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -4861,6 +4862,21 @@ pub async fn start_server(
                 "WASM rehydrate produced an error"
             );
         }
+    }
+
+    // Phase 20a.1+: pre-register every in-process institution the
+    // binary links (Lean today, future verification institutions
+    // tomorrow). Must happen before the institution-index rebuild so
+    // the chain-scan registration pass sees them when it walks
+    // `runtime: in_process` declarations.
+    for institution in in_process_institutions {
+        tracing::info!(
+            { field::OPERATION } = operation::CAPABILITY_INSTALL,
+            { field::INSTITUTION_IRI } = %institution.institution_iri(),
+            host = "in_process",
+            "registered in-process institution"
+        );
+        service.register_in_process_institution(institution);
     }
 
     // Build the D14 institution index from the bootstrap / rehydrated

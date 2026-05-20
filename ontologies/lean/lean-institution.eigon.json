@@ -1,0 +1,146 @@
+[
+  {
+    "@id": "urn:eigenius:lean:lean_institution",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:lean:lean_institution",
+    "urn:eigenius:institution:institution_name": "Lean 4",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:in_process",
+    "urn:eigenius:core:description": "Lean 4 verification institution (D28). Verifies proof terms in-process via a vendored nanoda_lib type checker linked into the kernel binary. Verdicts are a direct function call — no IPC, no orchestrator round-trip — bounding the verification TCB to nanoda's acceptance."
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanProofPayload",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "LeanProofPayload",
+    "urn:eigenius:core:description": "Verbatim `lean4export`-format JSON bytes for one Lean environment. May contain many declarations; the LeanProofTerm referencing this payload picks the specific theorem via its `target_name`. Treated as opaque by the chain; nanoda is the sole reader on the verification path.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:lean:payload_bytes"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:lean:payload_bytes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "payload_bytes",
+    "urn:eigenius:core:description": "Verbatim `lean4export` JSON content (newline-delimited JSON, semver 3.1.x). Stored as a UTF-8 string — the format is text-native; no base64 envelope.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProofPayload"]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanProofTerm",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "LeanProofTerm",
+    "urn:eigenius:core:description": "A Lean 4 proof of a specific theorem. References a LeanProofPayload (the export bytes containing the proof) and names the target theorem. `proposition` (chain-mirrored type per D40) and the correspondence anchors (`mirror_iri`, `claim_iri`) are recommended — present means the chain can introspect what's been proved and the proof discharges an Eigon claim; absent means the LeanProofTerm is verified in isolation and not yet pinned to a chain-level claim.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:lean:proof_payload",
+      "urn:eigenius:lean:target_name"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:lean:proposition",
+      "urn:eigenius:lean:mirror_iri",
+      "urn:eigenius:lean:claim_iri"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:lean:proof_payload",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "proof_payload",
+    "urn:eigenius:core:description": "Reference to the LeanProofPayload carrying the export bytes that contain this proof.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:lean:LeanProofPayload"],
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProofTerm"]
+  },
+  {
+    "@id": "urn:eigenius:lean:target_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target_name",
+    "urn:eigenius:core:description": "Fully-qualified Lean name of the theorem this LeanProofTerm asserts is proved (e.g. `Mathlib.Topology.foo`). Must be a declaration name declared in the referenced LeanProofPayload — the AutoOnLoad verification check rejects the load if the name is absent.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProofTerm"]
+  },
+  {
+    "@id": "urn:eigenius:lean:proposition",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "proposition",
+    "urn:eigenius:core:description": "Chain-mirrored Lean type of the target theorem (D40) — a `lean:LeanExpr` tagged-dict tree the chain can introspect. Computed at authoring time by the bytes → LeanExpr translator in `eigenius-lean`; not derived during verification (the institution operates on the raw bytes).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:lean:LeanExpr"],
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProofTerm"]
+  },
+  {
+    "@id": "urn:eigenius:lean:mirror_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "mirror_iri",
+    "urn:eigenius:core:description": "IRI of the LeanPackageMirror that anchors `proposition` back to a generated Lean mirror of an Eigon class (D28 §5.5). Consumed by the three-part correspondence check landing in 20a.7. Until then, the value is recorded as authoring intent but not type-gated against a real LeanPackageMirror resource (deferred to avoid forcing the 20a.6 dep into 20a.4).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProofTerm"]
+  },
+  {
+    "@id": "urn:eigenius:lean:claim_iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "claim_iri",
+    "urn:eigenius:core:description": "IRI of the Eigon claim resource that this LeanProofTerm discharges. Recorded for provenance + 20a.7 correspondence. Open IRI shape — gating against a class lands once the claim ontology stabilises.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanProofTerm"]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanAxiomList",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "LeanAxiomList",
+    "urn:eigenius:core:description": "Output class for `qc_which_axioms` OnDemand queries: the set of Lean axiom names that a LeanProofTerm transitively depends on. v1 returns NotImplemented; the class is declared so the OnDemand IRI is bound and the QueryClass schema is complete.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:lean:axiom_names"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:lean:axiom_names",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_names",
+    "urn:eigenius:core:description": "Fully-qualified Lean names of the axioms the proof transitively depends on. Empty list means the proof is axiom-free (modulo Lean's built-in primitives — `Quot.sound`, `propext`, etc. — which the allowlist policy on the LeanEnvironment decides whether to count).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanAxiomList"]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:ef_lean_proof_payload",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:core:short_name": "ef_lean_proof_payload",
+    "urn:eigenius:core:description": "Extracts the verbatim export bytes from a LeanProofTerm via its referenced LeanProofPayload. Payload type is `core:string` — the JSON content is text-native; consumers parse it themselves (typically by passing it back to `check_proof` or to the chain-mirror translator).",
+    "urn:eigenius:institution:from_class": "urn:eigenius:lean:LeanProofTerm",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:core:string",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:lean:lean_institution",
+    "urn:eigenius:institution:procedure": "urn:eigenius:lean:proc:extract_proof_payload"
+  },
+
+  {
+    "@id": "urn:eigenius:lean:qc_proof_check",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_proof_check",
+    "urn:eigenius:core:description": "Verify a LeanProofTerm: parse its referenced payload, run nanoda's type-checker over every declaration, confirm the target name is present, return Verdict (D28 §6.1). Both dispatch roles apply — AutoOnLoad fires on every Load that introduces a new LeanProofTerm (rejecting the Load if Verdict is Fails); OnDemand permits explicit re-verification via FIBER without re-loading.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:lean:LeanProofTerm",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load",
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:lean:proc:proof_check",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:lean:lean_institution"
+  },
+  {
+    "@id": "urn:eigenius:lean:qc_which_axioms",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "qc_which_axioms",
+    "urn:eigenius:core:description": "OnDemand introspection: list axioms a LeanProofTerm transitively depends on. v1 returns NotImplemented; the QueryClass is declared so the procedure IRI is bound, lets the LeanInstitution dispatch table reject unrecognised procedures cleanly, and reserves the schema for the eventual implementation.",
+    "urn:eigenius:institution:query_class": "urn:eigenius:lean:LeanProofTerm",
+    "urn:eigenius:institution:result_class": "urn:eigenius:lean:LeanAxiomList",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:lean:proc:which_axioms",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:lean:lean_institution"
+  }
+]

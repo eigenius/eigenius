@@ -840,6 +840,7 @@ dependencies = [
  "eigenius-config",
  "eigenius-julia",
  "eigenius-kernel",
+ "eigenius-lean",
  "eigenius-runtime-substrate",
  "eigenius-storage-rocksdb",
  "futures",
@@ -904,7 +905,9 @@ dependencies = [
 name = "eigenius-lean"
 version = "0.1.0"
 dependencies = [
+ "eigenius-kernel",
  "nanoda_lib",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
 ]

@@ -22,11 +22,13 @@ description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as
 # prop` panic.
 nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "6d2f037" }
 
-# `eigenius-kernel` will be wired in 20a.4 when `LeanInstitution`
-# implements `Institution`. Phase 20a.3 stays lib-only — no kernel dep
-# yet, no `Institution` trait references, no chain-mirror translator.
+# Kernel dep wired in 20a.4: `LeanInstitution` implements
+# `kernel::institution::Institution`; the chain-mirror translator
+# produces `kernel::ontology::Resource` / `Value::Json` trees per D40.
+eigenius-kernel = { path = "../../kernel" }
 
 thiserror.workspace = true
+serde_json.workspace = true
 
 # `check_proof` takes `&[u8]` but nanoda's `Config::to_export_file`
 # only accepts a `PathBuf`. Until upstream takes a `Reader`, we stage

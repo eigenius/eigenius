@@ -14,6 +14,11 @@ eigenius-storage-rocksdb = { path = "../storage/rocksdb" }
 # 19a.5.a: pulled in for the JuliaMirrorGenerator; the CLI runs mirror
 # generation client-side via a RemoteChainAccessor over gRPC.
 eigenius-julia = { path = "../crates/eigenius-julia" }
+# 20a.4: the kernel binary links the Lean verification institution
+# directly. `LeanInstitution::query` runs in-process — no IPC, no
+# orchestrator round-trip — so the verification TCB stays bounded by
+# nanoda's acceptance (D28 §2.3 / §10.2).
+eigenius-lean = { path = "../crates/eigenius-lean" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
 eigenius-config = { path = "../crates/eigenius-config" }
 clap = { version = "4", features = ["derive", "env"] }
