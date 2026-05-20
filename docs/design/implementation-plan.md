@@ -95,7 +95,7 @@ The build is organized into phases. Each phase produces a working system that ca
 | 17 | Chain Consolidation | ✓ | Squash a contiguous ancestral range into a resolve-equivalent layer; at-head + below-head modes; resolve redirects per D25 §12.8; preserve-history vs reclaim modes; GC reachability through redirects; bloom-cache eviction; cost-estimation dry-run. `db consolidate-summary` (diagnostic enumeration) tracked as a follow-up |
 | 18 | Runtime Substrate | ✓ | `LanguageRuntime` trait + parent ontology; spawn-per-invocation Job lifecycle (`JobSpawner` / `DockerJobSpawner`); image-build pipeline via `buildah`; CBOR + RFC 8746 wire format; Julia hello-world capstone (18d); CBOR consolidation across kernel ↔ orchestrator (18e). Service lifecycle shipped under 19a alongside Julia |
 | 19 | Julia Institutions | 19a ✓, 19d.0 ✓, 19d ✓, 19e ✓, 19f ✓ (HiGHS), 19f.1 ✓, 19g ✓, 19h ✓, 19h.1 ✓ | First concrete substrate instance; `eigon-julia-gen`; reference institutions: Symbolics/MTK, JuMP, IntervalArithmetic, Catalyst, DiffEq (ODEs); Catalyst → DiffEq + Symbolics → JuMP comorphisms live |
-| 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment`) + in-process verification (nanoda_lib); first *verified*-tier institution |
+| 20 | Lean 4 Verification Institution | | Substrate-hosted authoring (`lean4export`, `LeanMirrorGenerator`, `LeanEnvironment`) + in-process verification (nanoda_lib); first `InProcess`-runtime-kind institution; first *verified*-tier institution. Two landings per D28 §11: 20a complete first institution, 20b Mathlib-scale operational |
 | 21 | Life-Science Worked Examples | | I_Dock / I_ADMET / I_Assay / I_PK end-to-end via Julia institutions + comorphisms; EIG-0042 cross-fiber discrepancy notebook |
 
 ---
@@ -1893,70 +1893,348 @@ A multi-row FIBER with `INTO` (whose IRI is fixed across rows) is rejected at ev
 
 ## Phase 20 — Lean 4 Verification Institution
 
-**Goal:** Register Lean 4 as Eigenius's first verification institution under D14, contributing the *verified* epistemic level. Authoring-side workflows (`lean4export`, `eigon-ffi-gen`, `LeanEnvironment` instantiation) run on the runtime substrate; the verification side (proof-term re-check via nanoda_lib) stays in-process for trust-surface reasons. Future verification institutions (Rocq, Isabelle/HOL, SMT checkers) follow the same factoring.
+**Goal:** Register Lean 4 as Eigenius's first verification institution under D14, contributing the *verified* epistemic level. Authoring-side workflows (`lean4export`, `LeanMirrorGenerator`, `LeanEnvironment` instantiation) run on the runtime substrate; the verification side (proof-term re-check via `nanoda_lib`) stays in-process for trust-surface reasons. First institution registered with `runtime: in_process` — the `InProcess` `RuntimeKind` is defined ([kernel/src/institution/registry.rs:46](../../kernel/src/institution/registry.rs#L46)) but has no registration path yet, so the kernel side gets one new piece of plumbing. Future verification institutions (Rocq, Isabelle/HOL, SMT checkers) follow the same factoring.
 
-**Duration estimate:** 14–18 weeks total, five internal milestones aligned with [D28](d28-lean-4-as-institution.md) §11.
+**Structure:** two landings per [D28](d28-lean-4-as-institution.md) §11 — `20a` (the complete first Lean institution, integrated; no PoC-without-correspondence intermediate per D28 §11.1) and `20b` (Mathlib-scale operational landing per D28 §11.2). Phase 20a's sub-milestones (20a.0 design lane through 20a.8 capstone) follow the Phase 19a shape but compress because the substrate, mirror-generator pattern, and runtime-kind taxonomy are all settled.
 
-**Prerequisites:** Phase 11b (inductive types — Lean's primary export shape; an institution can't re-check proofs about inductive structures Mini-TT can't represent), Phase 12 (D14 — Lean is registered as a D14 institution), Phase 18 (runtime substrate — authoring side runs here), Phase 19a (substrate validated against Julia first; Lean is the second forcing function on the substrate's abstractions).
+**Duration estimate:** ~5–7 weeks for 20a across three lanes with significant parallelism; 20b sized by the consumer that asks for it.
+
+**Prerequisites:**
+- Phase 11b (inductive types) — both the chain-mirrored `lean:LeanExpr` ontology and the `Verdict`-shaped result need them.
+- Phase 12 (D14) — Lean is registered as a D14 institution.
+- Phase 18 (runtime substrate) — authoring side runs on it.
+- Phase 19a (substrate validated against Julia first; Lean is the second forcing function on the substrate's abstractions and the first consumer of the `InProcess` runtime kind).
 
 **Drives:** [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md).
 
-### Phase 20a — Proof of concept (~3 weeks)
+**Sibling specs landing in 20a:** [D30 — Eigon → Lean Faithful Translation](d30-eigon-to-lean-faithful-translation.md) (sibling to [D29](d29-eigon-julia-mirror-spec.md)) and [D40 — Chain-Mirrored Lean Expressions](d40-chain-mirrored-lean-expressions.md) (sibling to [D32](d32-chain-mirrored-mini-tt-inductives.md)).
 
-- `eigenius-lean` crate with the verification side: nanoda_lib wrapper, the `Institution` trait skeleton, `extract_typed` for `ef_lean_proof_payload`, `query` dispatching `urn:eigenius:lean:proof_check` to nanoda_lib.
-- `eigenius-lean-runtime` crate (or sibling within `eigenius-lean`) with the authoring side: `LanguageRuntime` impl, Dockerfile fragments installing `elan` + pinned Lean toolchain + Lake, worker bootstrap exposing `lean4export` as an RPC entry point.
-- `Institution`, ExportFormat, `qc_proof_check` QueryClass declarations land as ordinary chain resources.
-- Toy propositions only (no `EigonFFI` yet — propositions stated about primitive types).
-- Demonstrates: a `LeanProofTerm` resource enters the chain, AutoOnLoad fires, nanoda_lib re-checks, `Verdict::Holds` admits the resource and tags it *verified*.
+### Phase 20a — First complete Lean institution (~5–7 weeks)
 
-### Phase 20b — `EigonFFI`, the generator, and real propositions (~5 weeks)
+A single integrated landing per D28 §11.1 — the full architectural commitment from "Eigenius's verified epistemic level" through to a committed resource so tagged. No phased intermediate that ships misleading semantics; the correspondence check (D28 §5.5) is the load-bearing piece, so it lands in the same phase as the verification dispatch.
 
-- `eigon-ffi-gen` deterministic generator implementation. Faithful-translation specification authored in parallel as a design doc (D30).
-- Generator runs as a substrate component (`RunEigonFFIGen`, against a `lean-tools` `LeanEnvironment` image) — its determinism and content-hash provenance ride on the substrate's image-pinning.
-- First generated `EigonFFI` library mirroring Core Ontology types.
-- Three-part correspondence check (D28 §5.5): proof validity, mirror correspondence, anchor consistency. Becomes the body of `urn:eigenius:lean:proof_check`'s handler.
-- `qc_which_axioms`, `qc_proof_size`, `qc_environment_diff` OnDemand QueryClasses land opportunistically.
+Three parallel lanes, eight sub-milestones, capstone test at the end. Lane structure:
 
-### Phase 20c — Integration hardening + checker operational maturity (~3 weeks)
+- **Design lane** (20a.0, 20a.0b) — D40 + D30 specs. Authoring; no code. ~1.5 weeks, runs first.
+- **Kernel + chain-mirror lane** (20a.1 → 20a.2 → 20a.3 → 20a.4) — `InProcess` dispatch, Lean ontology, nanoda integration, Institution trait impl. ~2.5 weeks, runs after design.
+- **Authoring + correspondence lane** (20a.5 → 20a.6 → 20a.7) — `LanguageRuntime` impl, mirror generator, correspondence check. ~2.5 weeks, overlaps with the kernel lane once 20a.0b is settled.
+- **Capstone** (20a.8) — end-to-end test tying every preceding sub-milestone into one passing test. ~3 days.
 
-- In-process `LeanEnvironment` cache (the verification-side cache holding nanoda_lib's parsed environments; substrate-side worker-pool caching for the authoring side already exists from Phase 18c).
-- Performance profiling against realistic proof sizes; trace-cache policy tuning.
-- Upstream-tracking protocol with nanoda_lib (how Eigenius follows Lean kernel changes propagated through nanoda_lib; version-pinning discipline).
-- Optional: introduction of Lean4Lean as a secondary cross-checker per the Venn-diagram soundness argument.
+#### Phase 20a.0 — D40 spec (chain-mirrored Lean expressions, ~3 days)
 
-### Phase 20d — Mathlib-dependent proofs (~5 weeks)
+**Goal.** Author [D40](d40-chain-mirrored-lean-expressions.md) — the chain-resident inductive specification for Lean's expression form. Sibling to D32 (FormulaTerm) but Lean-flavoured. No code; design-doc work.
 
-- Extension of `EigonFFI` and environment management to support proofs depending on Mathlib.
-- Environment-diff tooling beyond image-digest equality.
-- Resource-bound enforcement at production scale.
+**Scope.**
+- `lean:LeanExpr` InductiveType, 10 ctors mirroring nanoda's `Expr` minus `Local` (committed proofs are closed terms; the `Local` variant only exists during nanoda's traversal). Ctors: `Var`, `Sort`, `Const`, `App`, `Pi`, `Lambda`, `Let`, `Proj`, `StringLit`, `NatLit`. Each ctor's argument shape pinned to mirror nanoda's `Expr` arm structurally.
+- `lean:LeanLevel` InductiveType: `Zero`, `Succ`, `Max`, `IMax`, `Param`.
+- `lean:LeanName` InductiveType: `Anon`, `Str`, `Num`.
+- Encoder/decoder semantics: deterministic translation between nanoda's parsed `Expr` and the chain-CBOR shape.
+- Version discipline: how `lean4export` semver bumps interact with the spec; what's load-bearing for forward compatibility.
 
-### Phase 20e — Production hardening (open-ended)
+**Acceptance.**
+- D40 v1 committed to `docs/design/`.
+- Review verifies every nanoda `Expr` variant maps to a `lean:LeanExpr` ctor (modulo the `Local` omission), every universe form maps to a `lean:LeanLevel` ctor, every name shape to a `lean:LeanName` ctor.
 
-- WASM sandboxing of the verification-side checker if benchmarks justify it (D28 §8.3).
-- Full error-diagnostic preservation through the verdict trail.
-- Audit tooling that walks the closed audit chain (D28 §5.7).
-- Regulatory-facing query surfaces.
+---
 
-### Phase 20 — Open questions (carried from D28)
+#### Phase 20a.0b — D30 spec (faithful translation Eigon → Lean, ~4 days)
 
-- `verified_in` witness extension (D28 §12 question 9 / `life-science-requirements.md` §16.4) — defer until a concrete consumer asks for it.
-- Axiom allow-list policy (D28 §12 question 2) — pick the standard set (`propext`, `Classical.choice`, `Quot.sound`, `Lean.trustCompiler`) for v1; per-deployment override later.
-- Parallel verification institutions (D28 §12 question 5) — when Rocq or Isabelle/HOL land, dispatch by explicit IRI; user-level preference is post-v1.
+**Goal.** Author [D30](d30-eigon-to-lean-faithful-translation.md) — the EigonFFI mirror specification. Sibling to D29 (Julia mirror spec); same structural role, Lean-flavoured.
+
+Runs in parallel with 20a.0.
+
+**Scope.**
+- Conformance levels (v1 supported subset, planned extensions).
+- Mirror package layout (Lake project structure, module file shape, EigonFFI naming convention).
+- Closure walk (same algorithm as D29: structural references through `arg_types`, `class_types`, `allows_only`).
+- Faithful type translation:
+  - Eigon class with required properties → Lean `structure` with required fields.
+  - Subclass relationship → Lean coercion instance.
+  - `data_type: resource` → field type is the referenced class's mirror structure.
+  - Primitive types → Lean equivalents (`Int`, `Float` → `Float`, `String`, `Bool`).
+  - Format constraints (regex, date, IRI pattern) → refinement predicates or structure-validity theorems where Lean-expressible.
+- Determinism contract.
+- Integrity chain (generator content hash, source layer reference).
+
+**Acceptance.**
+- D30 v1 committed to `docs/design/`.
+
+---
+
+#### Phase 20a.1 — Kernel `InProcess` runtime kind registration path (~2 days)
+
+**Goal.** Wire the third branch of the kernel's institution-registration logic alongside `Wasm` and `External`. Not Lean-specific — this unlocks any future in-process institution.
+
+**Files created.**
+- `kernel/src/institution/in_process_registry.rs` — `InProcessInstitutionRegistry`: a process-global registry of `Box<dyn Institution>` instances keyed by IRI, populated at orchestrator startup. Sibling to `InstitutionRuntime` (which is the dispatch target — the in-process registry feeds into it during chain scan).
+- `kernel/src/institution/in_process_registry/test_echo.rs` — a trivial `EchoInstitution` stub returning `Verdict::Holds` for any input. Lets 20a.1 ship a registration-path test without needing Lean yet.
+
+**Files modified.**
+- `kernel/src/institution/runtime.rs` — exposes a `register_in_process(...)` startup-hook entry that wraps `InstitutionRuntime::register`.
+- `kernel/src/capability/registration.rs` (or a new sibling file) — `build_in_process_institution_runtime` walks the chain for `Institution` resources with `runtime: in_process`, looks each up in the `InProcessInstitutionRegistry`, registers into `InstitutionRuntime`. Surfaces a clean error if a chain-declared `in_process` institution has no registered impl (rather than silently dropping it, which is the External path's behaviour when `--orchestrator` is missing).
+- `kernel/src/server/mod.rs` — startup wires the in-process registry into the institution-registration pass; emits a `tracing::warn!` when chain-declared `in_process` institutions lack a registered impl, mirroring the existing External warning at [server/mod.rs:1210-1216](../../kernel/src/server/mod.rs#L1210-L1216).
+
+**Tasks.**
+1. `InProcessInstitutionRegistry` struct + thread-safe registration API.
+2. Third branch in the registration logic — for each `Institution` resource with `runtime: in_process`, look up the impl, register or error.
+3. Test harness: a `EchoInstitution` registers via the startup-hook, chain commits a declaration with `runtime: in_process`, end-to-end test confirms an AutoOnLoad QueryClass fires + returns the echo response.
+
+**Acceptance.**
+- `cargo test -p eigenius-kernel --lib in_process` passes.
+- Chain-declared `in_process` institution dispatches correctly through the standard `InstitutionRuntime` path.
+- A chain-declared `in_process` institution with no registered impl surfaces a clean warning + the institution is excluded from the dispatchable set (parallel to the External-without-orchestrator case).
+
+---
+
+#### Phase 20a.2 — Lean ontology: chain-mirrored expressions (~2 days)
+
+**Goal.** Land the `lean:LeanExpr` / `LeanLevel` / `LeanName` chain inductives per the 20a.0 spec. Smoke-tested by hand-encoding a tiny Lean expression as a chain value and round-tripping it through commit + inspect.
+
+**Prerequisite:** 20a.0 (D40 spec).
+
+**Files created.**
+- `ontologies/lean/lean-expressions.eigon.json` — the three chain InductiveTypes per D40.
+
+**Files modified.**
+- `kernel/src/bootstrap/` — register `lean-expressions.eigon.json` as a bootstrap layer (or add to the per-environment ontology load path; both are reasonable).
+
+**Tasks.**
+1. Author the InductiveType declarations per D40 — `lean:LeanExpr` (10 ctors), `lean:LeanLevel` (5 ctors), `lean:LeanName` (3 ctors).
+2. Smoke-test: hand-encode the term `λ x : Nat, x` as a chain-CBOR `lean:LeanExpr` value, commit, inspect, confirm round-trip.
+
+**Acceptance.**
+- Chain commit + inspect of the smoke-test value passes.
+- Type-checker accepts the hand-encoded values (no `AllowedValueViolation` / `ClassTypeMismatch`).
+
+---
+
+#### Phase 20a.3 — `eigenius-lean` crate skeleton + nanoda integration (~3 days)
+
+**Goal.** Stand up the verification-side crate with nanoda_lib as a Cargo dep. Exposes a `check_proof(bytes, target_name, env_iri) -> Verdict` function with no chain integration yet — lib-test only.
+
+**Independent of 20a.1 and 20a.2** — can start in parallel.
+
+**Files created.**
+- `crates/eigenius-lean/Cargo.toml` — new workspace member. Deps: `nanoda_lib` (path = "../../references/nanoda_lib"), `eigenius-kernel`, `serde_json`, `cbor`, `thiserror`.
+- `crates/eigenius-lean/src/lib.rs` — public surface.
+- `crates/eigenius-lean/src/checker.rs` — `check_proof` function wrapping nanoda's parse + check.
+- `crates/eigenius-lean/tests/toy_check_test.rs` — lib-test against a hand-rolled toy proof file (e.g. `theorem foo : True := trivial`).
+- `crates/eigenius-lean/test_resources/toy_proof.json` — a `lean4export`-format JSON file produced by running `lean4export` on a hand-written Lean project. Vendored for offline reproducibility.
+
+**Files modified.**
+- Workspace `Cargo.toml` — add `crates/eigenius-lean` member.
+
+**Tasks.**
+1. Crate scaffold (`Cargo.toml`, `lib.rs`, license header).
+2. `check_proof` API: accepts the verbatim export bytes, the target Theorem name, and an axiom allowlist (from the eventual `LeanEnvironment`). Parses via nanoda's `Parser::new`, runs the check, returns a structured `Verdict` enum (`Holds` | `Fails { diagnostic }`).
+3. Vendor a hand-built toy proof JSON; lib-test confirms `check_proof` admits it; a second test confirms a deliberately-broken proof returns `Fails` with `ProofDoesNotCheck`.
+
+**Acceptance.**
+- `cargo test -p eigenius-lean` passes.
+- Toy proof admitted; broken proof rejected with structured diagnostic.
+
+---
+
+#### Phase 20a.4 — `LeanInstitution: Institution` impl + chain-mirror translator (~1 week)
+
+**Goal.** Wire the verification side into the kernel: `LeanInstitution` implements `Institution`, registers via 20a.1's `InProcessInstitutionRegistry`, dispatches `proof_check` through 20a.3's `check_proof`. Includes the bytes → `lean:LeanExpr` translator per D40 — invoked at commit time to populate the `proposition` field on `LeanProofTerm` resources.
+
+**Correspondence check stub.** This sub-milestone ships with a *stub* correspondence check that always passes (returns `Verdict::Holds` as long as nanoda accepts the proof). Real correspondence lands in 20a.7 once the mirror generator (20a.6) is wired. The stub lets the end-to-end smoke test fire here without blocking on the authoring + mirror path.
+
+**Prerequisites:** 20a.1, 20a.2, 20a.3.
+
+**Files created.**
+- `crates/eigenius-lean/src/institution.rs` — `LeanInstitution: Institution` impl. `query` dispatches `urn:eigenius:lean:proof_check` to 20a.3's `check_proof` (correspondence check stubbed); `extract_typed` handles `ef_lean_proof_payload`.
+- `crates/eigenius-lean/src/chain_mirror.rs` — bytes → `lean:LeanExpr` translator (D40-conformant). Used by `LeanInstitution::query` at commit time to back-fill the `proposition` field if the caller didn't supply it.
+- `crates/eigenius-lean/src/startup.rs` — `pub fn register(registry: &mut InProcessInstitutionRegistry)` hook for the orchestrator.
+- `crates/eigenius-lean/tests/end_to_end_smoke.rs` — commits a `LeanProofTerm` with hand-crafted bytes + a stubbed `mirror_iri` + `claim_iri`; asserts the resource lands tagged *verified*.
+- `ontologies/lean/lean-institution.eigon.json` — the `Institution` resource, ExportFormats (`ef_lean_proof_payload`, `ef_lean_environment_summary`), QueryClasses (`qc_proof_check` AutoOnLoad+OnDemand + the OnDemand cluster), and the `LeanProofTerm` / `LeanProofPayload` / `LeanAxiomList` / etc. resource classes.
+
+**Files modified.**
+- The orchestrator's startup code — calls `eigenius_lean::startup::register(...)`.
+
+**Tasks.**
+1. `LeanInstitution::query` procedure-dispatch table: `proof_check` → 20a.3's `check_proof` + stubbed correspondence; `which_axioms`, `proof_size`, `env_diff`, `discover_dependencies`, `discover_reductions` initially return `NotImplemented` (light up opportunistically — they share the dispatch table).
+2. Chain-mirror translator: walk nanoda's parsed `Expr` tree, emit chain-CBOR `lean:LeanExpr` values per D40. Smoke test: same toy proof from 20a.3, decoded into a chain-mirrored proposition, committed alongside the resource.
+3. End-to-end test: AutoOnLoad fires, institution dispatches, returns `Holds`, kernel tags *verified*. Uses a hand-crafted `LeanPackageMirror` resource (just a placeholder; correspondence check is stubbed so its content doesn't matter for this test).
+
+**Acceptance.**
+- `cargo test -p eigenius-lean --test end_to_end_smoke` passes — the toy `LeanProofTerm` lands as *verified*.
+- Chain-mirror translator round-trips: bytes → `lean:LeanExpr` value → `serialize_resource` produces a deterministic CBOR encoding.
+
+---
+
+#### Phase 20a.5 — `eigenius-lean-runtime` authoring side (~1 week)
+
+**Goal.** Stand up the authoring-side crate: `LanguageRuntime` impl for Lean, Dockerfile fragments, worker bootstrap, the first `LeanEnvironment` image with Lean toolchain + Lake (no Mathlib yet — that's 20b). Mirrors the shape of `eigenius-julia` ([crates/eigenius-julia/](../../crates/eigenius-julia/)).
+
+**Independent of 20a.2/20a.3/20a.4** — can run in parallel once 20a.0b is settled (Dockerfile + worker bootstrap don't depend on the verification side).
+
+**Files created.**
+- `crates/eigenius-lean-runtime/Cargo.toml`.
+- `crates/eigenius-lean-runtime/src/lib.rs`.
+- `crates/eigenius-lean-runtime/src/runtime.rs` — `LeanLanguageRuntime: LanguageRuntime`. `language_id() = "lean"`, `build_environment_image` delegates to the substrate's builder with Lean-specific fragments, `run_script` dispatches to a Lake-driven worker, `call_method` lights up against declared `RuntimeMethodSignature`s (`lean_export` initially).
+- `crates/eigenius-lean-runtime/src/dockerfile.rs` — Dockerfile fragments: `elan` install, pinned Lean toolchain (`elan toolchain install <version>`), Lake, worker binary copy, env-var stamping.
+- `crates/eigenius-lean-runtime/src/conventions.rs` — shared constants (manifest-hash file path, env-var names) so Rust + Lake sides don't drift.
+- `lean/runtime-worker/Lake/` (or `lakefile.lean`) — the Lake project for the worker binary.
+- `lean/runtime-worker/Worker/Main.lean` — the worker binary. Thin Lake-driven Lean program handling CBOR-framed RPC over UDS (same protocol Julia's worker uses). Three verbs: `health`, `lean_export` (wraps `lean4export` against a `LeanProject` resource and returns the bytes), `dispatch_method` (call a Lean function declared as a `RuntimeMethodSignature`).
+- `ontologies/lean/lean-runtime-classes.eigon.json` — `LeanProject` (subclass of `RuntimePackage`), `LeanPackage` (subclass of `RuntimePackage`), `LeanPackagePin` (subclass of `RuntimePackagePin`), `LeanEnvironment` (subclass of `RuntimeEnvironment`; adds `lean_permitted_axioms`, `lean_unpermitted_axiom_hard_error`, `lake_lockfile_hash`).
+- `crates/eigenius-lean-runtime/tests/lean_export_test.rs` — end-to-end: build a `LeanEnvironment` image, run `lean_export` against a hand-rolled `LeanProject` containing a toy proof, confirm the returned bytes round-trip through 20a.3's `check_proof`.
+
+**Files modified.**
+- Workspace `Cargo.toml`.
+
+**Tasks.**
+1. Crate scaffold + Dockerfile fragments. Use `elan` to install a specific Lean toolchain version, copy the worker binary into the image, stamp env-var metadata.
+2. Lake-driven worker binary: CBOR-framed RPC over UDS per the substrate's protocol; `lean_export` verb wraps `lean4export` invocation; `dispatch_method` verb supports method-signature dispatch for later QueryClasses.
+3. `LeanProject`-subclass resource declarations.
+4. `LeanEnvironment` subclass declaration with the new `lean_permitted_axioms` properties (default `["propext", "Classical.choice", "Quot.sound", "Lean.trustCompiler"]`).
+5. End-to-end test: substrate-driven `lean_export` returns bytes; bytes round-trip through 20a.3.
+
+**Acceptance.**
+- Image build succeeds (or is skipped if Docker isn't available; gate behind `--features docker-spawner` like Julia does).
+- `lean_export` round-trip test passes against the test environment.
+
+---
+
+#### Phase 20a.6 — `LeanMirrorGenerator` + first EigonFFI library (~1 week)
+
+**Goal.** Implement the Lean mirror generator per D30 as substrate Rust code (matching D27/D29 pattern). Substrate's image-build pipeline invokes it; first generated EigonFFI library mirrors Core ontology classes; the library commits as a `LeanPackageMirror` resource baked into the `LeanEnvironment` image from 20a.5.
+
+**Prerequisites:** 20a.0b (D30 spec), 20a.5 (env image to bake into).
+
+**Files created.**
+- `crates/eigenius-lean-runtime/src/mirror_gen.rs` — `LeanMirrorGenerator: MirrorGenerator` impl. Walks the chain's ontology layer, emits Lean source matching D30, commits the result as a `LeanPackageMirror` resource, returns the precompiled artifact for the image-build pipeline to bake in.
+- `crates/eigenius-lean-runtime/src/mirror_gen/structure_emitter.rs` — emits Lean `structure` declarations from class declarations per D30.
+- `crates/eigenius-lean-runtime/src/mirror_gen/codec_emitter.rs` — emits decode/encode helpers per class.
+- `crates/eigenius-lean-runtime/src/mirror_gen/validator_emitter.rs` — emits constructor-level format-constraint refinement predicates (where Lean-expressible).
+- `lean/common/EigeniusLeanCommon/lakefile.lean` — shared Lake package providing helpers the generated code calls (analogous to Julia's `EigeniusJuliaCommon`).
+- `lean/common/EigeniusLeanCommon/src/EigeniusLeanCommon.lean`.
+- `crates/eigenius-lean-runtime/tests/mirror_gen_test.rs` — golden-file tests against the Core ontology; confirms the generated Lean source compiles via Lake.
+
+**Files modified.**
+- `crates/eigenius-lean-runtime/src/runtime.rs` — `build_environment_image` invokes `LeanMirrorGenerator::generate` for the env's mirror class list, copies the generated source into the build context, commits the `LeanPackageMirror` resource alongside the image digest.
+
+**Tasks.**
+1. Closure walker (mirror of Julia's): visit `arg_types`, `class_types`, `allows_only` from seed classes, collect the structural closure.
+2. Source emitters per D30's faithful-translation specification.
+3. Image-build integration: the build pipeline writes the generated source into the build context; Lake precompiles; the resulting `.olean` files are baked into the env image.
+4. Golden-file test: regenerate the Core mirror, diff against the checked-in golden, assert byte-equality.
+
+**Acceptance.**
+- Golden-file test passes (deterministic generation).
+- The generated EigonFFI library compiles cleanly via Lake.
+- The `LeanPackageMirror` resource lands in the chain with the right content hashes.
+
+---
+
+#### Phase 20a.7 — Three-part correspondence check (~4 days)
+
+**Goal.** Replace 20a.4's stubbed correspondence check with the real D28 §5.5 implementation. Reads the `LeanPackageMirror` resource referenced by the `LeanProofTerm`, walks the mirror anchor, confirms structural correspondence between the mirror type used in the proposition and the claim's Eigon class.
+
+**Prerequisites:** 20a.4, 20a.6.
+
+**Files modified.**
+- `crates/eigenius-lean/src/institution.rs` — replaces the correspondence stub with the three-part check:
+  1. **Proof validity** — already passing from 20a.3's `check_proof`.
+  2. **Mirror correspondence** — resolve the `mirror_iri`, read the `LeanPackageMirror`'s anchor (`source_layer`, `mirrored_classes`), verify the layer is ancestral-to-or-identical-with the claim's `claim_layer_hash`, confirm the proposition's mirror type corresponds structurally to the claim's class.
+  3. **Anchor consistency** — verify the mirror's declared `library_content_hash` matches its actual content; confirm `source_layer` resolves.
+- `crates/eigenius-lean/tests/correspondence_test.rs` — new tests:
+  - Happy path: proof against a current-mirror class passes.
+  - Compositionality regression: proof against an L₀ mirror remains valid for a claim in L₁ ⊒ L₀ when L₁ doesn't modify the mirrored classes; rejected with `FFIVersionMismatch` when L₁ does modify them.
+  - Anchor-consistency failure: mirror with a tampered `library_content_hash` rejects.
+
+**Acceptance.**
+- All `correspondence_test` cases pass.
+- `LeanProofTerm`s landing with malformed `mirror_iri` / `claim_layer_hash` produce structured `Verdict::Fails` diagnostics (`PropositionMismatch`, `FFIVersionMismatch`, etc., per D28 §9.1).
+
+---
+
+#### Phase 20a.8 — End-to-end test (capstone, ~3 days)
+
+**Goal.** A small but real Eigon claim verified through the integrated stack. Tests every preceding sub-milestone against one passing scenario.
+
+**Prerequisites:** 20a.4, 20a.7.
+
+**Scenario.** A chain-side class with one required numeric property — pick a Core-mirrored class or commit a test class (`urn:test:Patient` with `urn:test:weight: float`). Commit an instance with a specific value. Run a Lean project that:
+1. Imports the generated EigonFFI library (containing the mirrored `EigonFFI.Patient` structure).
+2. States a proposition: e.g. `∀ p : EigonFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10` (or any small inequality that compiles).
+3. Proves it (one-line `omega` or `linarith` suffices).
+4. Exports via `lean4export`.
+
+Commit the resulting `LeanProofTerm` resource pointing at the chain-side `Patient` instance. AutoOnLoad fires, nanoda re-checks, correspondence check passes, the resource lands tagged *verified*.
+
+**Files created.**
+- `lean/research/capstone-proof/lakefile.lean` — the Lean project.
+- `lean/research/capstone-proof/Capstone.lean` — the proof.
+- `crates/eigenius-lean/tests/capstone_test.rs` — drives the full flow: substrate builds the env image, runs `lean_export` against the capstone project, commits the resulting `LeanProofTerm`, asserts the AutoOnLoad sequence completes with the resource tagged *verified*.
+
+**Acceptance.**
+- `cargo test -p eigenius-lean --test capstone_test` passes against the docker-substrate-backed test fixture.
+- The closed audit chain is walkable end-to-end: from the *verified* claim through `LeanProofTerm` → `RuntimeInvocation` provenance (`lean_export`) → `LeanPackageMirror` → `LeanEnvironment` → image digest. Documented as a walk-through in the test's docstring.
+
+---
+
+### Phase 20b — Mathlib-scale operational landing
+
+**Goal.** Extend the integrated foundation from 20a to Mathlib-dependent proofs. Distinct landing because Mathlib's concerns are operational, not design — the architecture from 20a is unchanged.
+
+**Triggered by a consumer ask, not architecturally required.** Scope sized to that consumer when they appear; bullet list below is the canonical scope per D28 §11.2.
+
+**Scope.**
+- Image-build pipeline work for Mathlib's footprint (multi-gigabyte; needs incremental layer caching, `.olean` deduplication).
+- Mathlib `LeanEnvironment` image with the full library installed.
+- nanoda parsed-environment cache tuning — Mathlib's environment is large enough that the default LRU policy needs calibration.
+- Resource-bound discipline (`max_wall_time_ms`, `max_memory_bytes`) calibrated against realistic Mathlib proofs.
+- EigonFFI mirror generation against the broader ontology surfaces Mathlib proofs naturally reference (real-analysis classes, linear-algebra classes, etc.).
+- `qc_environment_diff` structured implementation if the coarse "different image digests" view isn't enough for the consumer's audit needs.
+
+**Acceptance.** A Mathlib-dependent proof for a representative claim re-checks within configured wall-clock + memory bounds; the verdict reproduces deterministically across runs.
+
+---
+
+### Phase 20 — Post-landing enhancements (not phases)
+
+Per D28 §11.3 — self-contained pieces of work that layer onto the integrated foundation without changing its shape. None of these are phase-shaped; each is triggered by a specific need.
+
+- **Lean4Lean as secondary cross-checker.** Soundness multiplier per the Venn-diagram argument (D28 §8.1). Wired as an alternate `check_proof` backend; `qc_proof_check` runs both and flags disagreements.
+- **WASM-sandboxed checker.** Only if benchmarks justify it (D28 §8.2). Requires nanoda to compile cleanly to WASM and the WASM capability sandbox to handle Mathlib-scale memory.
+- **Bidirectional Lean ↔ Julia bridge.** First concrete cross-institution Comorphism involving Lean ([D27 §6.2](d27-julia-institutions.md#62-verification-of-intervalarithmetic-outputs--concrete-d14-comorphism)). Requires EigonFFI to mirror `formulas:FormulaTerm` so a Lean proposition can quantify over FormulaTerm values; once that exists, the Comorphism is a clean identity-on-`FormulaTerm` plumbing job.
+- **Verified-status type extension** (D28 §12 question 4 / `life-science-requirements.md` §16.4) — kernel extension to express verification status in the type system. Non-trivial Mini-TT extension; defer until a concrete pipeline consumer asks for it.
+
+### Phase 20 — Open questions (per D28 v2 §12)
+
+The original D28 carried nine open questions; D28 v2 resolved five structurally. Four remain:
+
+1. **Axiom allowlist policy.** The mechanism is in place (nanoda's allowlist, declared on `LeanEnvironment`, D28 §7.1). Default `["propext", "Classical.choice", "Quot.sound", "Lean.trustCompiler"]` for v1. Whether to include `Classical.choice` by default is the live policy question — some deployments reject `Classical`-dependent proofs entirely. Decide before 20a.5 (the env image lands the default).
+2. **Lean-version upgrade policy.** When new Lean / Mathlib versions arrive, what's the promotion process? Automatic with regression testing, or manual review? The substrate's image-digest model means an upgrade is structurally just a new content-addressed `LeanEnvironment`. The question is governance, not mechanism. Decide before 20b.
+3. **Parallel verification institutions.** If Rocq lands, dispatch by user preference / contract / explicit IRI? Defer until Rocq is real.
+4. **Kernel extension for verification status in types** (D28 v1 question #9). Defer until the first pipeline that would benefit asks for it.
 
 ### Phase 20 — Test plan
 
-- Toy proof end-to-end (Phase 20a): a `LeanProofTerm` resource for `1 + 1 = 2` enters the chain, AutoOnLoad fires, nanoda_lib admits, kernel tags *verified*.
-- `EigonFFI`-anchored proof (Phase 20b): a proof about a Core Ontology resource, with `mirror_reference` and `claim_layer_hash` populated, exercises the three-part correspondence check.
-- Compositionality regression: a proof anchored to layer L₀ remains valid for a claim in layer L₁ ⊒ L₀ when L₁ doesn't modify the mirrored classes; rejected when L₁ modifies them.
-- Mathlib-scale proof (Phase 20d): a proof depending on Mathlib lemmas re-checks within configured wall-clock and memory bounds.
-- Lean4Lean cross-check (Phase 20c, optional): both checkers agree on a sample of proofs; disagreements flagged.
+- **20a.1.** Echo-stub in-process institution registers via the startup-hook, AutoOnLoad fires through `InstitutionRuntime`, returns the echo response.
+- **20a.2.** Chain commit + inspect round-trip of a hand-encoded `lean:LeanExpr` value.
+- **20a.3.** Toy proof JSON admitted by nanoda; deliberately broken proof rejected with structured diagnostic.
+- **20a.4.** Toy `LeanProofTerm` resource lands tagged *verified*. Chain-mirror translator produces deterministic CBOR.
+- **20a.5.** Substrate-driven `lean_export` against a hand-rolled `LeanProject` returns bytes that round-trip through 20a.3's checker.
+- **20a.6.** Golden-file test on the Core EigonFFI mirror passes; Lake compiles the generated source.
+- **20a.7.** Happy-path correspondence + compositionality regression (anchor-ancestral and anchor-divergent cases) + anchor-consistency failure each produce the right verdict.
+- **20a.8.** Capstone — full audit chain walkable end-to-end against a real proposition.
+- **20b.** A representative Mathlib-dependent proof re-checks within configured bounds.
 
 ### Phase 20 — References
 
-- [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md) — full specification
-- [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate the authoring side runs on
-- D14 — institution protocol
-- D30 (to be written) — Faithful translation specification for `eigon-ffi-gen`
+- [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md) — full specification (v2: two-landing structure, in-process runtime kind, verbatim bytes + chain-mirrored propositions).
+- [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate the authoring side runs on.
+- [D27 — Julia Institutions](d27-julia-institutions.md) — the multi-institution precedent.
+- [D29 — Eigon → Julia Faithful Translation](d29-eigon-julia-mirror-spec.md) — D30's sibling-pattern reference.
+- [D32 — Chain-Mirrored Mini-TT Inductives](d32-chain-mirrored-mini-tt-inductives.md) — D40's sibling-pattern reference.
+- [D14 — Institution Realisation](d14-institution-realisation.md) — institution protocol.
+- D30 (to be written in 20a.0b) — Eigon → Lean faithful translation specification.
+- D40 (to be written in 20a.0) — Chain-mirrored Lean expressions specification.
+- `references/nanoda_lib/` — vendored Lean term checker.
+- [Type Checking in Lean 4](https://ammkrn.github.io/type_checking_in_lean4/) — nanoda's accompanying specification book.
 
 ---
 
@@ -2029,13 +2307,14 @@ The following design documents must be written and reviewed before the phase tha
 | D25 | **Chain Consolidation** | **DRAFT** — `docs/design/d25-chain-consolidation.md`. Linear-range chain consolidation: collapse a contiguous ancestral range `[from..to]` into one resolve-equivalent layer with `parent = from.parent`. Top-of-stack algorithm (head→root walk, single-pass linear in defined-IRI count). Atomic commit per D23 §6.3. Resolve-equivalence under head substitution as the load-bearing invariant. Trace-pin refusal policy in v1 (re-pointing and invalidation deferred to v2). Refuses to consolidate across merge nodes in v1; v2 sketches multi-parent consolidation that preserves Phase 15 resolution decisions via `consolidated_resolutions` records. Bloom-cache eviction for collapsed layers. Sub-milestones 17a–17e. Distinct from merge (combines branches) and GC (drops unreachable layers). | Phase 17 | Draft |
 | D26 | **Runtime Substrate** | **DRAFT** — `docs/design/d26-runtime-substrate.md`. Language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. `LanguageRuntime` trait, parent ontology classes (`RuntimeScript`, `RuntimePackage`, `RuntimeEnvironment`, `RuntimePackageMirror`, `RuntimeInvocation`, `RuntimeMethodSignature`, `RuntimePackagePin`), image-vs-graph boundary, deterministic image-build pipeline with digest capture, worker pool + sandbox, mirror-anchor compositionality, `RunRuntimeScript` / `CallRuntimeMethod` substrate components. Cross-language wire format = CBOR + RFC 8746 typed-array tags. | Phase 18 | Draft |
 | D27 | **Julia Institutions** | **DRAFT** — `docs/design/d27-julia-institutions.md`. First concrete substrate instance plus reference institutions wrapping Julia libraries under D14. `JuliaScript` / `JuliaPackage` / `JuliaEnvironment` / `JuliaPackageMirror` / `JuliaInvocation` / `JuliaMethodSignature` / `JuliaPackagePin` subclasses. `eigon-julia-gen` mirror generator. Five reference institutions: `Symbolics`/`ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` (ODEs). Future Lean / Julia bridge sketch (interval-bound proof obligations). | Phase 19 | Draft |
-| D28 | **Lean 4 as Verification Institution** | **DRAFT** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` / `LeanEnvironment` / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. `EigonFFI` static-mirror generator (`eigon-ffi-gen`) anchored to ontology layer. Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, `eigon-ffi-gen`, environment images) + in-process verification side (nanoda_lib re-check). | Phase 20 | Draft |
+| D28 | **Lean 4 as Verification Institution** | **DRAFT v2** — `docs/design/d28-lean-4-as-institution.md`. Lean 4 as Eigenius's first verification institution under D14. `LeanProofTerm` resource (verbatim Lean export bytes + chain-mirrored proposition) / `LeanEnvironment` (carries axiom allowlist + image digest) / `LeanProject` / `LeanPackage` / `LeanPackageMirror` resource classes. Chain-mirrored `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` inductives (D40). EigonFFI static-mirror generator implemented as substrate Rust code (D30). Three-part correspondence check (proof validity + mirror correspondence + anchor consistency). Substrate-hosted authoring side (`lean4export`, mirror generator, environment images) + in-process verification side (nanoda_lib re-check) via the new `InProcess` runtime kind. Two landings per §11: 20a complete first institution, 20b Mathlib-scale operational. | Phase 20 | Draft v2 |
 | D29 | **Faithful Translation Specification — `eigon-julia-gen`** | The mapping from Eigon class structure to Julia struct / abstract-type-hierarchy / constructor-validation form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary. | Phase 19a.4 (v1.2 draft) | Draft v1.2 |
-| D30 | **Faithful Translation Specification — `eigon-ffi-gen`** | The mapping from Eigon class structure to Lean type / coercion-instance / refinement-condition form. Pinned per generator version; the load-bearing TCB artifact alongside the generator binary and nanoda_lib. | Phase 20b | 10–14 pages |
+| D30 | **Faithful Translation Specification — Eigon → Lean** | Sibling to D29. The mapping from Eigon class structure to Lean `structure` / coercion-instance / refinement-predicate form. Pinned per generator version; the load-bearing TCB artifact alongside nanoda_lib. The mirror generator itself is substrate Rust code (matching the D27/D29 pattern), not a separately-runnable binary — auditability comes from the deterministic output spec. | Phase 20a.0b | 10–14 pages |
 | D31 | **External Institution Authoring & Dispatch Lifecycle** | The end-to-end lifecycle for institutions whose `runtime` is `external`: mirror generation CLI, institution registration, kernel-emits-request / orchestrator-services-IO dispatch routing. Generator-agnostic; per-language faithful-translation specs (D29 / D30 / D32) plug in independently. Implementation milestone: Phase 19a.5 (framework) + Phase 19a.6 (IntervalArithmetic, the framework's integration test). | Phase 19a.5 (v1.1 draft) | Draft v1.1 |
 | D32 | **Faithful Translation Specification — `eigon-rust-gen`** | The mapping from Eigon class structure to Rust struct / trait / impl form for WASM institution authoring. Tracked in [#41](https://github.com/eigenius/eigenius/issues/41). | TBD | Planned |
 | D33 | **Partial-Order Chains and Commutativity-Aware Semantics** | **DRAFT** — `docs/design/d33-partial-order-chains.md`. Reframes the chain as a partial order of layers rather than a sequence; two-hash identity (position vs content) generalises D25 §11.0; supporting-layer property indexes "what this layer depends on"; **anchored-commit cache** (the v1 deliverable — content-addressed commit reuse keyed on `(content_hash, supporting_content_hash)`) generalises the notebook cell-output reuse pattern to any deterministic content generator. Partial-order operations (linearization-independent reads, distributed-execution forward compatibility) sketched for v2. Anchored-commit cache shipped in support of D34 §6 cell-cache visibility; invalidation on consolidation wired in D34 Phase 6. Full v1 storage path under Phase 20. | Phase 20 | Draft |
 | D34 | **Notebook Chain Workspace** | **COMPLETED** — `docs/design/d34-notebook-chain-workspace.md`. Rail-based workspace shell on top of D22 exposing every kernel chain surface a working operator needs. Eleven phases (§16) — branch picker, branches / history / tags / merge / compaction / tasks / institutions / topology / GC / health rail destinations. Forced kernel gaps §G.1–§G.8: `MergeInfo` honesty fix, tag storage + RPCs (with tag-rooted GC), `MergeBranches` / `PreviewMerge`, `EstimateGc` / `RunGc`, `branch_advanced` consumer surface, branch-scoped cursored history (§G.6, deferred), `^auto-` prefix reservation (§G.7, deferred), enriched `InstitutionInfo` (§G.8). Cross-cutting kernel fixes uncovered during the rollout: `branch_contexts` cache invalidation on consolidation, anchored-commit cache invalidation on consolidation per D33 §3, per-layer `byte_size` on `LayerHandle` for GC reclaim estimates. | Concurrent with Phase 12+ (track parallel to D22) | Done |
+| D40 | **Chain-Mirrored Lean Expressions** | Sibling to D32 (chain-mirrored Mini-TT inductives + FormulaTerm). The `lean:LeanExpr` (10 ctors mirroring nanoda's `Expr` minus `Local`) / `lean:LeanLevel` (5 ctors) / `lean:LeanName` (3 ctors) chain InductiveTypes. Deterministic encoder/decoder semantics between nanoda's parsed `Expr` and the chain-CBOR shape. Version discipline against `lean4export` semver. The queryable-proposition counterpart to the verbatim proof-term bytes carried by `LeanProofTerm`. | Phase 20a.0 | 8–12 pages |
 
 **Reference documents** (analysis rather than specification):
 
