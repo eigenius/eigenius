@@ -175,7 +175,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads nine ontology layers: core → program → reflection → institution → runtime → formulas → lean-expressions → lean-institution → notebook.
+/// Loads ten ontology layers: core → program → reflection → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -255,19 +255,35 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // lean-runtime-classes layer (Phase 20a.5a / D28 §10.3) —
+    // declares the authoring-side resource classes the Lean
+    // language runtime owns: `LeanProject` / `LeanPackage` (subclasses
+    // of `RuntimePackage`), `LeanPackagePin` (subclass of
+    // `RuntimePackagePin`), and `LeanEnvironment` (subclass of
+    // `RuntimeEnvironment` with `lean_permitted_axioms` /
+    // `lean_unpermitted_axiom_hard_error` / `lake_lockfile_hash`).
+    // Sits above `lean-expressions` purely for organisational
+    // grouping (all Lean ontology layers cluster here); the
+    // technical dependency is on `runtime` further down.
+    let lean_runtime_classes = load_layer(
+        "lean-runtime-classes",
+        include_str!("../../../ontologies/lean/lean-runtime-classes.eigon.json"),
+        Some(lean_expressions),
+        storage.clone(),
+    )?;
+
     // lean-institution layer (Phase 20a.4 / D28) — declares the
     // Lean 4 verification institution and its v1 surface:
     // LeanProofTerm / LeanProofPayload / LeanAxiomList resource
     // classes, the qc_proof_check QueryClass (AutoOnLoad + OnDemand
     // over LeanProofTerm → Verdict), and the ef_lean_proof_payload
-    // ExportFormat. Sits above lean-expressions because the
-    // `proposition` property on LeanProofTerm is typed
-    // `core:inductive` over `lean:LeanExpr` (D40 §3.5) and needs the
-    // chain-mirrored expression InductiveTypes already resolvable.
+    // ExportFormat. Sits above lean-runtime-classes so future
+    // additions (e.g. a LeanProofTerm.environment property
+    // referencing `lean:LeanEnvironment`) resolve cleanly.
     let lean_institution = load_layer(
         "lean-institution",
         include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
-        Some(lean_expressions),
+        Some(lean_runtime_classes),
         storage.clone(),
     )?;
 
@@ -475,7 +491,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 9] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 10] {
     [
         (
             "core",
@@ -504,6 +520,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 9] {
         (
             "lean-expressions",
             include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
+        ),
+        (
+            "lean-runtime-classes",
+            include_str!("../../../ontologies/lean/lean-runtime-classes.eigon.json"),
         ),
         (
             "lean-institution",
@@ -651,18 +671,23 @@ mod tests {
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
         // Head is the notebook layer
-        // (on top of lean-institution → lean-expressions → formulas →
-        // runtime → institution → reflection → program → core).
+        // (on top of lean-institution → lean-runtime-classes →
+        // lean-expressions → formulas → runtime → institution →
+        // reflection → program → core).
         // formulas inserted at Phase 19d.0.d / D32 §4 so FormulaTerm
         // and the operator catalog ride above the runtime substrate
         // ontology. lean-expressions inserted at Phase 20a.2 / D40
         // for the chain-mirrored Lean expression form.
+        // lean-runtime-classes inserted at Phase 20a.5a / D28 §10.3
+        // to declare LeanProject / LeanEnvironment subclasses.
         // lean-institution inserted at Phase 20a.4 / D28 to declare
         // the LeanProofTerm class + qc_proof_check QueryClass.
         assert!(!ctx.head().is_root());
         let lean_institution = ctx.head().parent().unwrap();
         assert!(!lean_institution.is_root());
-        let lean_expressions = lean_institution.parent().unwrap();
+        let lean_runtime_classes = lean_institution.parent().unwrap();
+        assert!(!lean_runtime_classes.is_root());
+        let lean_expressions = lean_runtime_classes.parent().unwrap();
         assert!(!lean_expressions.is_root());
         let formulas = lean_expressions.parent().unwrap();
         assert!(!formulas.is_root());

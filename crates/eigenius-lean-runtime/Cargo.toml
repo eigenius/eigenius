@@ -1,0 +1,24 @@
+[package]
+name = "eigenius-lean-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Authoring-side Lean 4 language runtime for the Eigenius substrate. Implements LanguageRuntime; bakes a Lake-driven worker + elan-pinned Lean toolchain into a deterministic OCI image. See D28 §10.3, Phase 20a.5."
+
+[features]
+default = []
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+# 20a.5b will need `docker-spawner` for the image-build + lean_export
+# end-to-end test. 20a.5a stays on the default feature set so the
+# crate compiles without Docker in scope; flipping it on in the next
+# sub-milestone is one line.
+eigenius-runtime-substrate = { path = "../runtime-substrate" }
+serde.workspace = true
+serde_bytes = "0.11"
+serde_json.workspace = true
+ciborium = "0.2"
+sha2 = "0.10"
+thiserror.workspace = true

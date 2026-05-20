@@ -6,6 +6,7 @@ members = [
     "crates/runtime-substrate",
     "crates/eigenius-julia",
     "crates/eigenius-lean",
+    "crates/eigenius-lean-runtime",
     "crates/wasm-runtime",
     "sdk/wasm-sdk",
     "storage/tikv",
