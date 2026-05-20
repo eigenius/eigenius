@@ -257,7 +257,7 @@
   {
     "@id": "urn:eigenius:core:class_types",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Allowed classes for resource, resource_array, or inductive property values. For `data_type: core:resource(_array)` the listed IRIs must be `core:Class` references (instances must be subclasses); for `data_type: core:inductive` the listed IRI must be a `core:InductiveType` reference (D32 §3.5).",
+    "urn:eigenius:core:description": "Allowed types for resource, resource_array, or inductive property values. Each listed IRI is either a `core:Class` (the value is a ResourceRef/Embedded whose `is_a` must match — possibly transitively via `subclass_of`) or a `core:InductiveType` (the value is a `Value::Json` tagged-dict tree `{ \"ctor\": ..., \"args\": [...] }` validated against the type's ctors and arg_types). When the entry is an InductiveType the list must hold exactly one IRI — inductive values are uniquely typed (D32 §3.5). For `data_type: core:resource(_array)` either form is admissible; for `data_type: core:inductive` only the singleton InductiveType form is admissible.",
     "urn:eigenius:core:short_name": "class_types",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
     "urn:eigenius:core:class_types": [

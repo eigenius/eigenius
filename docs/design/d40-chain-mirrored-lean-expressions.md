@@ -27,7 +27,7 @@ The mirror is **propositions only** (the target Theorem's *type*), not whole pro
 
 3. **Re-checking is bytes-only.** nanoda parses the verbatim export bytes. The chain-mirrored proposition is for *queries and audits*, never for re-checking. Treating proofs the same way as propositions would tempt future code to re-check from the mirror — a soundness hazard the design explicitly forecloses.
 
-So D40 specifies three chain inductives: `lean:LeanExpr` (the proposition shape), `lean:LeanLevel` (universe levels appearing in `Sort`), `lean:LeanName` (Lean's dotted-name hierarchy used by `Const` references). The `LeanProofTerm.proposition` field carries a `lean:LeanExpr` value; nanoda's `Expr` decodes into it; queries walk it.
+So D40 specifies four chain inductives: `lean:LeanExpr` (the proposition shape), `lean:LeanLevel` (universe levels appearing in `Sort`), `lean:LeanLevelList` (the cons-list carrier for `Const`'s universe-instantiation array — §3.3), and `lean:LeanName` (Lean's dotted-name hierarchy used by `Const` references). The `LeanProofTerm.proposition` field carries a `lean:LeanExpr` value; nanoda's `Expr` decodes into it; queries walk it.
 
 ### 1.3 Why D40 is not D32
 
@@ -76,7 +76,7 @@ D32 established the pattern: chain InductiveTypes are declared as `core:Inductiv
 
 D40 uses this surface directly. The three new InductiveTypes (`lean:LeanExpr`, `lean:LeanLevel`, `lean:LeanName`) commit to a `urn:eigenius:lean:` ontology layer alongside the institution's other declarations (D28 §10.3). They participate in the standard validator + mirror generation pipeline — no new chain mechanics.
 
-## 3. Design — the three inductives
+## 3. Design — the four inductives
 
 We build up bottom-up: `lean:LeanName` is the simplest, depends on nothing; `lean:LeanLevel` depends on `lean:LeanName` (`Param` carries a name); `lean:LeanExpr` depends on both.
 
@@ -164,7 +164,34 @@ Ctor shapes:
 | `Level.IMax` | `left: LeanLevel`, `right: LeanLevel` | `Level::IMax(LevelPtr, LevelPtr)` |
 | `Level.Param` | `name: LeanName` | `Level::Param(NamePtr)` |
 
-### 3.3 `lean:LeanExpr`
+### 3.3 `lean:LeanLevelList` — cons-list carrier for `Const.levels`
+
+A standalone two-ctor inductive that carries the universe-instantiation list on `LeanExpr.Const`. The early draft of D40 proposed `Const.levels: core:value_array<lean:LeanLevel>`, but Phase 20a.2's implementation work surfaced that the chain's `core:element_type` property is constrained to primitive types (`allows_only: [string, integer, float, boolean, json]`, per [`ontologies/core/core-ontology.json`](../../ontologies/core/core-ontology.json) §element_type) — a value-array of inductive elements wouldn't validate. The clean alternative is a chain-side cons-list inductive, declared inside `lean-expressions` itself.
+
+```json
+{
+  "@id": "urn:eigenius:lean:LeanLevelList",
+  "core:is_a": ["core:InductiveType"],
+  "core:short_name": "LeanLevelList",
+  "core:description":
+    "Cons-list carrier for the universe-instantiation array on `LeanExpr.Const`. Two ctors — `Nil` and `Cons(head: LeanLevel, tail: LeanLevelList)`.",
+  "core:ctors": [
+    "urn:eigenius:lean:ctor:LevelList.Nil",
+    "urn:eigenius:lean:ctor:LevelList.Cons"
+  ]
+}
+```
+
+Ctor shapes:
+
+| Ctor | Args | Mirrors |
+|---|---|---|
+| `LevelList.Nil` | (none) | empty `LevelsPtr` |
+| `LevelList.Cons` | `head: LeanLevel`, `tail: LeanLevelList` | `LevelsPtr` element prepend |
+
+The translator (§4.1) converts between this cons-list and nanoda's flat `Arc<[LevelPtr]>` shape via `iter().rev().fold(Nil, |acc, l| Cons(l, acc))` and the reverse. The encoding overhead — N+1 nested `Cons` resources per N-element universe list — is bounded by Lean's typical usage: most consts carry 0 universe parameters (`Nil`), some carry 1 (`Cons(u, Nil)`), few carry 2+. Even Mathlib-scale propositions rarely exceed depth-3 universe lists.
+
+### 3.4 `lean:LeanExpr`
 
 The main inductive. **Ten ctors**, mirroring nanoda's `Expr` minus `Local`.
 
@@ -198,7 +225,7 @@ Ctor shapes:
 |---|---|---|
 | `Expr.Var` | `dbj_idx: integer` | `Expr::Var { dbj_idx }` |
 | `Expr.Sort` | `level: LeanLevel` | `Expr::Sort { level }` |
-| `Expr.Const` | `name: LeanName`, `levels: value_array<LeanLevel>` | `Expr::Const { name, levels }` |
+| `Expr.Const` | `name: LeanName`, `levels: LeanLevelList` | `Expr::Const { name, levels }` |
 | `Expr.App` | `fun: LeanExpr`, `arg: LeanExpr` | `Expr::App { fun, arg }` |
 | `Expr.Pi` | `binder_name: LeanName`, `binder_style: string`, `binder_type: LeanExpr`, `body: LeanExpr` | `Expr::Pi { ... }` |
 | `Expr.Lambda` | `binder_name: LeanName`, `binder_style: string`, `binder_type: LeanExpr`, `body: LeanExpr` | `Expr::Lambda { ... }` |
@@ -213,17 +240,17 @@ Notes on field-shape choices:
 - **`binder_style` is `core:string`**, one of `default` / `implicit` / `strictImplicit` / `instImplicit`. The enum is small and chain-side enumerable; v1 carries it as a tagged string for simplicity. A future spec version may promote it to a named inductive (`lean:LeanBinderStyle`) when a cross-institution use case calls for typed discrimination on binder style.
 - **`NatLit.value` is `core:string`** (decimal digits), not `core:integer`. Lean's `NatLit` carries arbitrary-precision naturals via nanoda's `BigUintPtr` (`num_bigint::BigUint`); the chain's `core:integer` is `i64` and overflow's a real concern (`Nat` values in mathematical proofs routinely exceed `i64::MAX`). The string-of-digits encoding is unambiguous and round-trips losslessly. Validators enforce `^[0-9]+$` syntax.
 - **`StringLit.value` is `core:string`** — passed through verbatim. The chain's CBOR encoding is UTF-8 so Lean's UTF-8 string literals round-trip identity. (Lean does allow embedded null bytes in `String`s; nanoda preserves them via `StringPtr`. The chain's CBOR carries arbitrary UTF-8 byte sequences including nulls.)
-- **`Const.levels` is `core:value_array` with `element_type: lean:LeanLevel`.** A Const reference with no universe parameters has an empty array. The order matters (Lean's universe-instantiation is positional).
+- **`Const.levels` is `lean:LeanLevelList`** (a chain-side cons-list inductive, §3.3) rather than `core:value_array<LeanLevel>`. A Const reference with no universe parameters encodes as `Nil`. The order matters (Lean's universe-instantiation is positional) and the cons-list preserves it.
 
-### 3.4 Why `BinderStyle` is a string, not an inductive
+### 3.5 Why `BinderStyle` is a string, not an inductive
 
 Lean's binder styles are presentation-only (pretty-printer + elaborator preference); they don't affect type-checking. nanoda parses and preserves them, but they're never load-bearing for soundness. Encoding the style as a `core:string` keeps the proposition shape small (one field rather than a `Sum`-like inductive nested in every binder) and matches how the export format itself stores the style (a JSON string).
 
 The string must be one of `"default"`, `"implicit"`, `"strictImplicit"`, `"instImplicit"`. Decoders enforce membership; unknown styles produce `LeanExprValidationError::UnknownBinderStyle`.
 
-### 3.5 Recursive self-reference
+### 3.6 Recursive self-reference
 
-Each of `lean:LeanName`, `lean:LeanLevel`, `lean:LeanExpr` references itself in some ctor arg's `core:type_name`. This is permitted by the chain's inductive-value validator (D32 §3.3 — `type_name` resolves to the parent inductive's own IRI = recursion). The three inductives also reference each other across the build-up direction (`Sort` carries `LeanLevel`; `Const` carries both `LeanName` and a list of `LeanLevel`); these cross-references are valid because the resolution order has `LeanName` and `LeanLevel` declared before `LeanExpr` (the ontology layer's commit order is `LeanName → LeanLevel → LeanExpr`, per the closure walker's topological order).
+Each of `lean:LeanName`, `lean:LeanLevel`, `lean:LeanLevelList`, `lean:LeanExpr` references itself in some ctor arg's `core:type_name`. This is permitted by the chain's inductive-value validator (D32 §3.3 — `type_name` resolves to the parent inductive's own IRI = recursion). The four inductives also reference each other across the build-up direction (`Sort` carries `LeanLevel`; `LeanLevelList.Cons` carries `LeanLevel` + `LeanLevelList`; `Const` carries both `LeanName` and `LeanLevelList`); these cross-references are valid because the resolution order has `LeanName` and `LeanLevel` declared before `LeanLevelList`, and all three before `LeanExpr` (the ontology layer's commit order is `LeanName → LeanLevel → LeanLevelList → LeanExpr`, per the closure walker's topological order).
 
 ## 4. Encoder/decoder semantics
 
@@ -391,7 +418,7 @@ Lean's `Let` has a `nondep` flag distinguishing dependent let-bindings (whose bo
 
 ### 8.3 Single ontology layer per institution (settled)
 
-The three inductives (`lean:LeanName`, `lean:LeanLevel`, `lean:LeanExpr`) commit to the Lean institution's ontology layer alongside `LeanProofTerm`, `LeanEnvironment`, etc. (D28 §10.3 → `ontologies/lean/lean-institution.eigon.json`). Splitting into a separate `ontologies/lean/lean-expressions.eigon.json` is an organisational choice (and reasonable for clarity); they ship in the same Phase 20a.2 milestone.
+The four inductives (`lean:LeanName`, `lean:LeanLevel`, `lean:LeanLevelList`, `lean:LeanExpr`) commit to a dedicated `ontologies/lean/lean-expressions.eigon.json` ontology layer (Phase 20a.2). The layer sits in the kernel's bootstrap chain (between `formulas` and `notebook` per [`kernel/src/bootstrap/mod.rs`](../../kernel/src/bootstrap/mod.rs)) so chain-resident `lean:LeanExpr` values type-check at commit time without requiring the Lean institution itself to be registered. The institution declaration (`LeanProofTerm`, `LeanEnvironment`, etc., per D28 §10.3) lives in a separate `ontologies/lean/lean-institution.eigon.json` layer that's *not* bootstrap-loaded — it's applied when the Lean institution is registered.
 
 **Trigger to revisit:** if a non-Lean institution wants to consume `lean:LeanExpr` independently, the layer might split out. No such consumer exists in v1.
 

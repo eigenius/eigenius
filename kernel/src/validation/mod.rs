@@ -450,12 +450,35 @@ impl Validator {
                 // the property def is missing or its data_type isn't
                 // resolvable) — flag it as a type mismatch rather
                 // than silently accepting a non-canonical shape.
-                matches!(value, Value::ResourceRef(_) | Value::Embedded(_))
+                //
+                // When `class_types` declares an `InductiveType`, also
+                // accept `Value::Json` — the tagged-dict carrier for
+                // inductive values. The deeper structural check
+                // (ctor / arg_types) runs in `check_class_types`,
+                // mirroring the `core:inductive` split.
+                if self.class_types_inductive_target(prop_def).is_some() {
+                    matches!(
+                        value,
+                        Value::ResourceRef(_) | Value::Embedded(_) | Value::Json(_)
+                    )
+                } else {
+                    matches!(value, Value::ResourceRef(_) | Value::Embedded(_))
+                }
             }
             wk::RESOURCE_ARRAY => match value {
-                Value::Array(arr) => arr
-                    .iter()
-                    .all(|v| matches!(v, Value::ResourceRef(_) | Value::Embedded(_))),
+                Value::Array(arr) => {
+                    if self.class_types_inductive_target(prop_def).is_some() {
+                        arr.iter().all(|v| {
+                            matches!(
+                                v,
+                                Value::ResourceRef(_) | Value::Embedded(_) | Value::Json(_)
+                            )
+                        })
+                    } else {
+                        arr.iter()
+                            .all(|v| matches!(v, Value::ResourceRef(_) | Value::Embedded(_)))
+                    }
+                }
                 _ => false,
             },
             wk::VALUE_ARRAY => matches!(value, Value::Array(_)),
@@ -667,6 +690,15 @@ impl Validator {
     }
 
     /// Rule 8: Class type checking.
+    ///
+    /// `class_types` may name either a `Class` (the historical case —
+    /// the value must be a ResourceRef/Embedded whose `is_a` matches)
+    /// or an `InductiveType` (Option A unification — the value is a
+    /// tagged-dict tree carried by `Value::Json`, and we dispatch to
+    /// the inductive walker). Per the singleton constraint that
+    /// already applies to `data_type: core:inductive`, an
+    /// InductiveType `class_types` must be the sole entry; mixed
+    /// Class/InductiveType lists are not a defined shape.
     fn check_class_types(
         &self,
         prop_def: &Resource,
@@ -681,6 +713,52 @@ impl Validator {
 
         if allowed_classes.is_empty() {
             return vec![];
+        }
+
+        // InductiveType branch: walk the tagged-dict tree(s).
+        // Skipping non-Json elements here is intentional — wire-shape
+        // (`check_type`) handles whether a Ref/Embedded is admissible
+        // for the property's data_type; deep class-membership of
+        // stored inductive instances is not a v1 use case.
+        //
+        // For `data_type: core:inductive`, `check_inductive_value`
+        // (rule 16) owns the walk + the singleton precondition; we
+        // defer to it to avoid duplicate diagnostics.
+        let dt_is_inductive = self
+            .get_data_type_str(prop_def)
+            .map(|dt| dt == wk::INDUCTIVE)
+            .unwrap_or(false);
+        if !dt_is_inductive {
+            if let Some(inductive_type) = self.class_types_inductive_target(prop_def) {
+                let mut errors = Vec::new();
+                match value {
+                    Value::Json(_) => {
+                        self.walk_inductive_value(
+                            value,
+                            &inductive_type,
+                            prop_iri.as_str().to_string(),
+                            res_id,
+                            &mut errors,
+                        );
+                    }
+                    Value::Array(arr) => {
+                        for (i, v) in arr.iter().enumerate() {
+                            if matches!(v, Value::Json(_)) {
+                                let path = format!("{prop_iri}[{i}]");
+                                self.walk_inductive_value(
+                                    v,
+                                    &inductive_type,
+                                    path,
+                                    res_id,
+                                    &mut errors,
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return errors;
+            }
         }
 
         let allowed_refs: Vec<&Iri> = allowed_classes.iter().collect();
@@ -867,6 +945,25 @@ impl Validator {
             .get(&iri(wk::DATA_TYPE_PROP))
             .and_then(|v| v.as_iri())
             .map(|i| i.as_str().to_string())
+    }
+
+    /// Resolve `class_types` to an `InductiveType` resource when the
+    /// property declares exactly one entry pointing to one. Returns
+    /// `None` for the Class case (the original `class_types`
+    /// semantics) and for mixed/empty lists. Powers the Option A
+    /// unification across `core:resource`, `core:resource_array`,
+    /// and (implicitly, via the singleton constraint) `core:inductive`.
+    fn class_types_inductive_target(&self, prop_def: &Resource) -> Option<Arc<Resource>> {
+        let class_iris = prop_def.get(&iri(wk::CLASS_TYPES))?.as_iri_array();
+        if class_iris.len() != 1 {
+            return None;
+        }
+        let target = self.layer.resolve(&class_iris[0])?;
+        if target.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
+            Some(target)
+        } else {
+            None
+        }
     }
 
     /// Rule 14: Class-definition reference integrity (eigenius#26).
@@ -3803,6 +3900,347 @@ mod tests {
         assert!(
             !arity_errors.is_empty(),
             "expected an OperatorArityMismatch for over-applied `neg`; got {errors:?}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Phase 20a.2 — D40 chain-mirrored Lean expressions
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build a layer chain rooted at the embedded bootstrap (which now
+    /// carries `lean:LeanExpr` + siblings per D40) plus a property
+    /// `proposition_value : core:inductive` typed at `lean:LeanExpr`.
+    /// The chain looks like: core → program → reflection → institution
+    /// → runtime → formulas → lean-expressions → <this test layer>.
+    fn build_lean_expr_layer() -> Arc<Layer> {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap with lean-expressions layer");
+        // `ctx.head()` is the notebook layer; `ctx.head().parent()` is
+        // lean-expressions. Either works as the parent for this test —
+        // we anchor to lean-expressions directly to keep the chain
+        // tightly focused (no notebook ontology bleed into the value
+        // type-check).
+        let lean_layer = Arc::clone(
+            ctx.head()
+                .parent()
+                .expect("head has lean-expressions parent"),
+        );
+
+        let mut builder = LayerBuilder::new("test_lean_expr", Some(lean_layer));
+        let prop = make_resource(
+            "urn:eigenius:test:proposition_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("proposition_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:lean:LeanExpr"))]),
+                ),
+            ],
+        );
+        builder.add_resource(prop).unwrap();
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    /// `Lambda { binder_name = Str(Anon, "x"), binder_style = "default",
+    ///           binder_type = Const(Str(Anon, "Nat"), Nil),
+    ///           body = Var(0) }`
+    /// ≈ `λ x : Nat, x` — the smallest non-trivial closed Lean term.
+    fn lambda_x_in_nat() -> serde_json::Value {
+        let anon = serde_json::json!({"ctor": "Anon"});
+        let name_x = serde_json::json!({
+            "ctor": "Str",
+            "args": [anon.clone(), "x"]
+        });
+        let name_nat = serde_json::json!({
+            "ctor": "Str",
+            "args": [anon.clone(), "Nat"]
+        });
+        let nil = serde_json::json!({"ctor": "Nil"});
+        serde_json::json!({
+            "ctor": "Lambda",
+            "args": [
+                name_x,
+                "default",
+                {
+                    "ctor": "Const",
+                    "args": [name_nat, nil]
+                },
+                {"ctor": "Var", "args": [0]}
+            ]
+        })
+    }
+
+    #[test]
+    fn lean_expr_lambda_x_in_nat_validates() {
+        // Phase 20a.2 acceptance test: a hand-encoded `λ x : Nat, x`
+        // value commits cleanly against the chain-mirrored LeanExpr
+        // ontology — the chain-side type-check walks the tagged-dict
+        // shape, dispatches on each ctor name, and recurses into
+        // child arguments through LeanName / LeanLevelList / LeanExpr.
+        // No validator errors means the inductive-value walker
+        // successfully resolved every cross-reference and the
+        // ontology layer is structurally consistent.
+        let layer = build_lean_expr_layer();
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:p1",
+            vec![(
+                "urn:eigenius:test:proposition_value",
+                Value::Json(lambda_x_in_nat()),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let inductive_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
+            .collect();
+        assert!(
+            inductive_errors.is_empty(),
+            "well-formed `λ x : Nat, x` must validate as a lean:LeanExpr; got {inductive_errors:?}"
+        );
+    }
+
+    #[test]
+    fn lean_expr_unknown_ctor_rejected() {
+        // A value with a ctor name the LeanExpr inductive doesn't
+        // declare must surface as `InductiveValueMismatch` — exercises
+        // the per-ctor lookup in `walk_inductive_value`.
+        let bogus = serde_json::json!({
+            "ctor": "MetaVar",
+            "args": [42]
+        });
+        let layer = build_lean_expr_layer();
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:bad_ctor",
+            vec![("urn:eigenius:test:proposition_value", Value::Json(bogus))],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let inductive_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
+            .collect();
+        assert!(
+            !inductive_errors.is_empty(),
+            "unknown ctor `MetaVar` must trigger an InductiveValueMismatch; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn lean_expr_resolves_lean_layer_inductives() {
+        // Sanity check: after bootstrap, every LeanExpr-related
+        // InductiveType is reachable from the head as
+        // `is_instance_of(core:InductiveType)`. Catches typos in the
+        // ontology JSON or missing entries in the layer chain.
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let head = Arc::clone(ctx.head());
+        for ind_iri in &[
+            "urn:eigenius:lean:LeanName",
+            "urn:eigenius:lean:LeanLevel",
+            "urn:eigenius:lean:LeanLevelList",
+            "urn:eigenius:lean:LeanExpr",
+        ] {
+            let parsed = iri(ind_iri);
+            let resolved = head.resolve(&parsed).unwrap_or_else(|| {
+                panic!("`{ind_iri}` should resolve from the bootstrap chain head")
+            });
+            assert!(
+                resolved.is_instance_of(&iri(wk::INDUCTIVE_TYPE)),
+                "`{ind_iri}` should be an InductiveType"
+            );
+        }
+    }
+
+    /// Build a layer with a property `proposition_value` whose
+    /// `data_type` is the caller-supplied IRI and whose `class_types`
+    /// references `lean:LeanExpr`. Powers the Option A tests that
+    /// exercise `core:resource` / `core:resource_array` carrying
+    /// inductive values without going through `core:inductive`.
+    fn build_lean_expr_property_layer(data_type_iri: &str) -> Arc<Layer> {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap with lean-expressions layer");
+        let lean_layer = Arc::clone(
+            ctx.head()
+                .parent()
+                .expect("head has lean-expressions parent"),
+        );
+
+        let mut builder = LayerBuilder::new("test_lean_expr_resource", Some(lean_layer));
+        let prop = make_resource(
+            "urn:eigenius:test:proposition_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("proposition_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(data_type_iri))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:lean:LeanExpr"))]),
+                ),
+            ],
+        );
+        builder.add_resource(prop).unwrap();
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    /// Option A: `data_type: core:resource` with an `InductiveType`
+    /// `class_types` accepts a single `Value::Json` carrying the
+    /// inductive value, and the validator walks it the same way as
+    /// `data_type: core:inductive`.
+    #[test]
+    fn option_a_resource_with_inductive_class_types_accepts_json() {
+        let layer = build_lean_expr_property_layer(wk::RESOURCE);
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:p_single",
+            vec![(
+                "urn:eigenius:test:proposition_value",
+                Value::Json(lambda_x_in_nat()),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        assert!(
+            errors.is_empty(),
+            "`resource` + InductiveType class_types must accept a well-formed Json value; got {errors:?}"
+        );
+    }
+
+    /// Option A: `data_type: core:resource_array` with an
+    /// `InductiveType` `class_types` accepts an `Array` of
+    /// `Value::Json` elements; each element is walked against the
+    /// declared inductive.
+    #[test]
+    fn option_a_resource_array_with_inductive_class_types_accepts_json_array() {
+        let layer = build_lean_expr_property_layer(wk::RESOURCE_ARRAY);
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:p_array",
+            vec![(
+                "urn:eigenius:test:proposition_value",
+                Value::Array(vec![
+                    Value::Json(lambda_x_in_nat()),
+                    Value::Json(lambda_x_in_nat()),
+                ]),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        assert!(
+            errors.is_empty(),
+            "`resource_array` + InductiveType class_types must accept Array<Json>; got {errors:?}"
+        );
+    }
+
+    /// Option A: malformed inductive value in a `resource_array`
+    /// element surfaces as `InductiveValueMismatch` with a structured
+    /// path indicating the bad index — the dispatch in
+    /// `check_class_types` walks each Json element.
+    #[test]
+    fn option_a_resource_array_with_bad_ctor_rejects() {
+        let layer = build_lean_expr_property_layer(wk::RESOURCE_ARRAY);
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let bogus = serde_json::json!({"ctor": "DoesNotExist", "args": []});
+        let holder = make_resource(
+            "urn:eigenius:test:p_array_bad",
+            vec![(
+                "urn:eigenius:test:proposition_value",
+                Value::Array(vec![Value::Json(lambda_x_in_nat()), Value::Json(bogus)]),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let inductive_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
+            .collect();
+        assert!(
+            !inductive_errors.is_empty(),
+            "bad ctor in array must surface as InductiveValueMismatch; got {errors:?}"
+        );
+        let saw_index_path = inductive_errors.iter().any(|e| e.message.contains("[1]"));
+        assert!(
+            saw_index_path,
+            "error message should reference the failing array index `[1]`; got {inductive_errors:?}"
+        );
+    }
+
+    /// Regression: a `resource_array` property with a Class
+    /// `class_types` still rejects a `Value::Json` element at the
+    /// wire-shape check — Option A only loosens the gate when
+    /// `class_types` resolves to an `InductiveType`.
+    #[test]
+    fn option_a_resource_array_with_class_class_types_rejects_json() {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let head = Arc::clone(ctx.head());
+
+        let mut builder = LayerBuilder::new("test_class_array", Some(head));
+        // Declare a small Class so class_types resolves.
+        let some_class = make_resource(
+            "urn:eigenius:test:SomeClass",
+            vec![(
+                wk::IS_A,
+                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            )],
+        );
+        let prop = make_resource(
+            "urn:eigenius:test:class_array_prop",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("class_array_prop".into())),
+                (
+                    wk::DATA_TYPE_PROP,
+                    Value::ResourceRef(iri(wk::RESOURCE_ARRAY)),
+                ),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:SomeClass"))]),
+                ),
+            ],
+        );
+        builder.add_resource(some_class).unwrap();
+        builder.add_resource(prop).unwrap();
+        let lay = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut top = LayerBuilder::new("test_top", Some(lay));
+        let holder = make_resource(
+            "urn:eigenius:test:p_class",
+            vec![(
+                "urn:eigenius:test:class_array_prop",
+                Value::Array(vec![Value::Json(serde_json::json!({"ctor": "Whatever"}))]),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let type_mismatches: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::TypeMismatch)
+            .collect();
+        assert!(
+            !type_mismatches.is_empty(),
+            "Class class_types must keep rejecting Json elements at the wire-shape gate; got {errors:?}"
         );
     }
 

@@ -431,30 +431,38 @@ The institution registers by committing its `Institution`, ExportFormat, and Que
 ### 10.1 Kernel-side changes
 
 - **`InProcess` runtime kind dispatch** — the variant is defined ([kernel/src/institution/registry.rs:46](../../kernel/src/institution/registry.rs#L46)) and parsed from chain resources, but no registration path populates the `InstitutionRuntime` from in-process Rust crates. The first landing wires:
-  - A statically-registered in-process institution registry (sibling to `InstitutionRuntime`, populated at orchestrator startup by `eigenius-lean::register(...)`).
+  - A statically-registered in-process institution registry (sibling to `InstitutionRuntime`, populated at *kernel-binary* startup by `eigenius-lean::register(...)` — see §10.2 for the binary-split rationale).
   - A third branch in `build_institution_runtime` (alongside Wasm and External) for each `Institution` resource with `runtime: in_process`: look up the IRI in the in-process registry, register it into `InstitutionRuntime`, surface a clean error if missing.
 - The kernel's D14 institution registry picks up the Lean institution's declarations from chain scan automatically. No Lean-specific kernel code beyond the dispatch wiring above.
 
-### 10.2 Orchestrator-side additions
+### 10.2 Crates and where they link
 
-Three new crates:
+Three new crates. **Two binaries** end up hosting them, and the split is load-bearing for the trust posture (§2.3): the verification side links into the kernel binary, the authoring side links into the orchestrator binary.
 
-- **`eigenius-lean`** (verification side). Houses:
+- **`eigenius-lean`** (verification side — links into the **kernel binary** at [`cli/`](../../cli/)). Houses:
   - The nanoda_lib dependency (vendored at [`references/nanoda_lib/`](../../references/nanoda_lib/)).
   - The chain-mirror translator (Lean `Expr` ↔ chain-mirrored `lean:LeanExpr`).
   - The EigonFFI correspondence logic.
   - The in-process environment cache (parsed nanoda `Env` LRU).
   - The D14 `Institution` trait implementation (`LeanInstitution`).
-  - The `register(&mut InProcessRegistry)` startup hook called from the orchestrator's `main.rs`.
-- **`eigenius-lean-runtime`** (authoring side). Houses:
+  - The `register(&service)` startup hook called from the kernel binary's `serve` subcommand path at [`cli/src/main.rs`](../../cli/src/main.rs), which builds the `EigeniusService` and registers `LeanInstitution` into the service's `InProcessInstitutionRegistry` (Phase 20a.1's [`kernel/src/institution/in_process_registry.rs`](../../kernel/src/institution/in_process_registry.rs)) *before* the tonic gRPC server starts accepting requests.
+- **`eigenius-lean-runtime`** (authoring side — links into the **Deno orchestrator binary** via the napi-rs Rust addon at [`orchestration/runtime-substrate-native/`](../../orchestration/runtime-substrate-native/), same shape Julia uses today via [`crates/eigenius-julia`](../../crates/eigenius-julia/)). Houses:
   - The `LanguageRuntime` trait implementation (`LeanLanguageRuntime`).
   - Dockerfile fragments installing `elan` + the pinned Lean toolchain + Lake + Mathlib (matching D26 §9.2).
   - The worker bootstrap (`LeanWorker.jl`-equivalent — a thin Lake-driven binary handling CBOR-framed RPC for `lean_export` and method-call dispatch).
   - The `MirrorGenerator` trait implementation (`LeanMirrorGenerator`) — substrate Rust code that emits Lean source for the seed-class closure.
   - The `LeanProject` / `LeanPackage` / `LeanPackagePin` resource subclass declarations.
-- **`eigenius-lean-chain-mirror`** (optional split — could live inside `eigenius-lean`). Houses the `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` ontology + the deterministic encoder/decoder. The institution's `query` handler invokes it at commit time to populate the `proposition` field.
+- **`eigenius-lean-chain-mirror`** (optional split — could live inside `eigenius-lean`; if split, links into the **kernel binary** alongside `eigenius-lean`). Houses the `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` ontology + the deterministic encoder/decoder. The institution's `query` handler invokes it at commit time to populate the `proposition` field.
 
-Registration with the kernel's `InstitutionRuntime` (verification side) and with the substrate's `LanguageRuntime` registry (authoring side) lives in the orchestrator's startup code.
+**Why the split matters.** The kernel does not link `eigenius-runtime-substrate` ([`kernel/Cargo.toml`](../../kernel/Cargo.toml) confirms — no substrate dep) and reaches substrate-hosted runtimes only via outbound `DispatchExternal` gRPC to the orchestrator. Putting `eigenius-lean` into the orchestrator's napi addon instead of the kernel binary would force verification through kernel → gRPC → orchestrator → napi → nanoda — widening the verification TCB to include the gRPC layer and the TS handler. The whole point of `runtime: in_process` (§2.1's Option B) is that the verdict is a *direct function call* away from the kernel's institution dispatch. So:
+
+- Verification side ⇒ in the kernel binary.
+- Authoring side ⇒ in the orchestrator (where substrate dispatch already lives).
+
+Registration in code:
+
+- **Verification side** — at kernel startup, [`cli/src/main.rs`](../../cli/src/main.rs)'s `serve` path calls `service.register_in_process_institution(Arc::new(eigenius_lean::LeanInstitution::new(...)))` before `service.into_server().serve(...)`.
+- **Authoring side** — at orchestrator startup, [`orchestration/src/main.ts`](../../orchestration/src/main.ts) calls `substrateAddon.registerLeanLanguageRuntime(workerProjectDir, baseImageRef, depotPath)`, matching the existing `registerJuliaLanguageRuntime` pattern.
 
 ### 10.3 Ontology additions
 

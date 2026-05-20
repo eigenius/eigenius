@@ -240,10 +240,25 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // lean-expressions layer (Phase 20a.2 / D40) — chain-mirrored
+    // Lean expression form: LeanName + LeanLevel + LeanLevelList +
+    // LeanExpr InductiveTypes. Foundational shapes the Lean
+    // verification institution's LeanProofTerm.proposition field
+    // refers to. Lives in the bootstrap chain so subsequent
+    // committed resources (LeanProofTerm instances, the
+    // Lean-institution ontology layer) can reference these types
+    // without needing the Lean institution to be registered first.
+    let lean_expressions = load_layer(
+        "lean-expressions",
+        include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
+        Some(formulas),
+        storage.clone(),
+    )?;
+
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(formulas),
+        Some(lean_expressions),
         storage.clone(),
     )?;
 
@@ -444,7 +459,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 7] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 8] {
     [
         (
             "core",
@@ -469,6 +484,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 7] {
         (
             "formulas",
             include_str!("../../../ontologies/formulas/formulas-ontology.json"),
+        ),
+        (
+            "lean-expressions",
+            include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
         ),
         (
             "notebook",
@@ -612,12 +631,16 @@ mod tests {
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
         // Head is the notebook layer
-        // (on top of formulas → runtime → institution → reflection → program → core).
+        // (on top of lean-expressions → formulas → runtime → institution →
+        // reflection → program → core).
         // formulas inserted at Phase 19d.0.d / D32 §4 so FormulaTerm
         // and the operator catalog ride above the runtime substrate
-        // ontology.
+        // ontology. lean-expressions inserted at Phase 20a.2 / D40
+        // for the chain-mirrored Lean expression form.
         assert!(!ctx.head().is_root());
-        let formulas = ctx.head().parent().unwrap();
+        let lean_expressions = ctx.head().parent().unwrap();
+        assert!(!lean_expressions.is_root());
+        let formulas = lean_expressions.parent().unwrap();
         assert!(!formulas.is_root());
         let runtime = formulas.parent().unwrap();
         assert!(!runtime.is_root());

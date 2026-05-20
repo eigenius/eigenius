@@ -1966,7 +1966,7 @@ Runs in parallel with 20a.0.
 **Goal.** Wire the third branch of the kernel's institution-registration logic alongside `Wasm` and `External`. Not Lean-specific — this unlocks any future in-process institution.
 
 **Files created.**
-- `kernel/src/institution/in_process_registry.rs` — `InProcessInstitutionRegistry`: a process-global registry of `Box<dyn Institution>` instances keyed by IRI, populated at orchestrator startup. Sibling to `InstitutionRuntime` (which is the dispatch target — the in-process registry feeds into it during chain scan).
+- `kernel/src/institution/in_process_registry.rs` — `InProcessInstitutionRegistry`: a process-global registry of `Arc<dyn Institution>` instances keyed by IRI, populated at kernel-binary startup (see Phase 20a.4 for the call site; the orchestrator process is Deno and links the substrate via napi-rs, *not* the kernel's verification path). Sibling to `InstitutionRuntime` (which is the dispatch target — the in-process registry feeds into it during chain scan).
 - `kernel/src/institution/in_process_registry/test_echo.rs` — a trivial `EchoInstitution` stub returning `Verdict::Holds` for any input. Lets 20a.1 ship a registration-path test without needing Lean yet.
 
 **Files modified.**
@@ -2046,12 +2046,13 @@ Runs in parallel with 20a.0.
 **Files created.**
 - `crates/eigenius-lean/src/institution.rs` — `LeanInstitution: Institution` impl. `query` dispatches `urn:eigenius:lean:proof_check` to 20a.3's `check_proof` (correspondence check stubbed); `extract_typed` handles `ef_lean_proof_payload`.
 - `crates/eigenius-lean/src/chain_mirror.rs` — bytes → `lean:LeanExpr` translator (D40-conformant). Used by `LeanInstitution::query` at commit time to back-fill the `proposition` field if the caller didn't supply it.
-- `crates/eigenius-lean/src/startup.rs` — `pub fn register(registry: &mut InProcessInstitutionRegistry)` hook for the orchestrator.
+- `crates/eigenius-lean/src/startup.rs` — `pub fn register(service: &EigeniusService)` hook called from [`cli/src/main.rs`](../../cli/src/main.rs)'s `serve` subcommand path. Wraps `LeanInstitution::new(...)` in an `Arc` and calls `service.register_in_process_institution(...)` (Phase 20a.1's API). Verification-side code links into the **kernel binary** ([`cli/`](../../cli/)) — not the Deno orchestrator — so the verdict is a direct function call inside the kernel process, not a gRPC round-trip widening the TCB (per D28 §2.3 / §10.2).
 - `crates/eigenius-lean/tests/end_to_end_smoke.rs` — commits a `LeanProofTerm` with hand-crafted bytes + a stubbed `mirror_iri` + `claim_iri`; asserts the resource lands tagged *verified*.
 - `ontologies/lean/lean-institution.eigon.json` — the `Institution` resource, ExportFormats (`ef_lean_proof_payload`, `ef_lean_environment_summary`), QueryClasses (`qc_proof_check` AutoOnLoad+OnDemand + the OnDemand cluster), and the `LeanProofTerm` / `LeanProofPayload` / `LeanAxiomList` / etc. resource classes.
 
 **Files modified.**
-- The orchestrator's startup code — calls `eigenius_lean::startup::register(...)`.
+- [`cli/Cargo.toml`](../../cli/Cargo.toml) — add `eigenius-lean = { path = "../crates/eigenius-lean" }`.
+- [`cli/src/main.rs`](../../cli/src/main.rs) — in the `serve` subcommand path, after constructing the `EigeniusService` and before calling `service.into_server().serve(...)`, call `eigenius_lean::startup::register(&service)`.
 
 **Tasks.**
 1. `LeanInstitution::query` procedure-dispatch table: `proof_check` → 20a.3's `check_proof` + stubbed correspondence; `which_axioms`, `proof_size`, `env_diff`, `discover_dependencies`, `discover_reductions` initially return `NotImplemented` (light up opportunistically — they share the dispatch table).
@@ -2082,7 +2083,11 @@ Runs in parallel with 20a.0.
 - `crates/eigenius-lean-runtime/tests/lean_export_test.rs` — end-to-end: build a `LeanEnvironment` image, run `lean_export` against a hand-rolled `LeanProject` containing a toy proof, confirm the returned bytes round-trip through 20a.3's `check_proof`.
 
 **Files modified.**
-- Workspace `Cargo.toml`.
+- Workspace `Cargo.toml` — add `crates/eigenius-lean-runtime` member.
+- [`orchestration/runtime-substrate-native/Cargo.toml`](../../orchestration/runtime-substrate-native/Cargo.toml) — add `eigenius-lean-runtime = { path = "../../crates/eigenius-lean-runtime" }`. The authoring-side runtime links into the **Deno orchestrator binary** via the napi-rs addon, same way [`eigenius-julia`](../../crates/eigenius-julia/) does today.
+- [`orchestration/runtime-substrate-native/src/lib.rs`](../../orchestration/runtime-substrate-native/src/lib.rs) — add `register_lean_language_runtime(...)` napi export mirroring the existing `register_julia_language_runtime` shape.
+- [`orchestration/src/runtime/loadAddon.ts`](../../orchestration/src/runtime/loadAddon.ts) — declare the `registerLeanLanguageRuntime(...)` method on the `RuntimeSubstrateAddon` interface.
+- [`orchestration/src/main.ts`](../../orchestration/src/main.ts) — at startup, call `substrateAddon.registerLeanLanguageRuntime(workerProjectDir, baseImageRef, depotPath)`, mirroring the existing `registerJuliaLanguageRuntime` block.
 
 **Tasks.**
 1. Crate scaffold + Dockerfile fragments. Use `elan` to install a specific Lean toolchain version, copy the worker binary into the image, stamp env-var metadata.
