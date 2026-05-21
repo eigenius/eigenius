@@ -13,6 +13,14 @@ description = "Worker-side substrate protocol shim for the Lean language runtime
 # while Lean-side authoring is still pending.
 crate-type = ["cdylib", "rlib"]
 
+[build-dependencies]
+# Compiles `c/lean_bridge.c` — a small C wrapper exposing lean.h's
+# `static inline` functions (lean_alloc_sarray, lean_sarray_cptr,
+# lean_io_result_mk_ok, …) as proper linkable symbols Rust can
+# extern-declare. Lean's runtime header is inline-heavy (~560 inline
+# functions in lean.h); without thunks we'd have no symbol to bind.
+cc = "1"
+
 [dependencies]
 eigenius-runtime-substrate = { path = "../runtime-substrate" }
 # `dispatch_method_request` decodes the `MethodInvocation` carried in

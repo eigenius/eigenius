@@ -930,6 +930,7 @@ dependencies = [
 name = "eigenius-lean-worker"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "ciborium",
  "eigenius-runtime-substrate",
  "serde",
