@@ -60,6 +60,10 @@ size_t ei_lean_unbox(EiLeanObj *o) {
     return lean_unbox((lean_object *)o);
 }
 
+EiLeanObj *ei_lean_box_usize(size_t v) {
+    return (EiLeanObj *)lean_box_usize(v);
+}
+
 EiLeanExternalClass *ei_lean_register_external_class(EiLeanFinalizeProc finalize,
                                                     EiLeanForeachProc foreach) {
     /* Lean's `lean_external_foreach_proc` takes

@@ -12,23 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! Phase 20a.5b.2 capstone: spawn the Lake-built Lean worker
-//! binary, connect over UDS as the substrate-side client, drive
-//! the protocol through Health + DispatchMethod{lean_export} +
-//! Evict, and verify each round-trip.
+//! Phase 20a.5b end-to-end tests: spawn the Lake-built Lean worker,
+//! drive it through the substrate protocol, and (in the real
+//! `lean_export` case) round-trip the worker's output bytes
+//! through nanoda's `check_proof` to confirm verdict consistency.
 //!
-//! The Rust cdylib + C bridge + Lean `@[extern]` declarations are
-//! all exercised by this single test — if it passes, the FFI
-//! plumbing is wired correctly end to end.
+//! All tests are `#[ignore]`'d by default since they need:
+//! - `lean-runtime-worker` Lake binary built (`lake build` under
+//!   `lean/runtime-worker/`)
+//! - the local Lean toolchain on `PATH` (`elan` shims)
+//! - the vendored `lean4export` Lake project's `.lake/build/bin/`
+//!   populated (the test lazily runs `lake build` against the
+//!   vendor on first invocation)
 //!
-//! ## Why this is `#[ignore]`'d by default
-//!
-//! The test requires the Lake-built worker binary at
-//! `lean/runtime-worker/.lake/build/bin/lean-runtime-worker` —
-//! which in turn requires Lean + Lake on `PATH` and a `lake build`
-//! to have run. CI without a Lean toolchain shouldn't fail on this;
-//! the `#[ignore]` keeps the test out of the default workspace
-//! check. Run explicitly via:
+//! Run via:
 //!
 //! ```text
 //! cargo test -p eigenius-lean-worker --test lean_worker_e2e -- --ignored
@@ -41,28 +38,91 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use eigenius_kernel::ontology::eigon_cbor;
+use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_lean::{check_proof, Verdict};
 use eigenius_runtime_substrate::rpc::client::WorkerRpcClient;
 use eigenius_runtime_substrate::rpc::method::MethodInvocation;
 use eigenius_runtime_substrate::rpc::protocol::{Request, Response, TargetKind};
 
-/// Locate the Lake-built worker binary. Returns `None` if it
-/// hasn't been built — the test self-skips in that case rather
-/// than asserting on a missing artifact.
+// ---------------------------------------------------------------------------
+// Path discovery + helpers
+// ---------------------------------------------------------------------------
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent() // crates/
+        .unwrap()
+        .parent() // workspace root
+        .unwrap()
+        .to_path_buf()
+}
+
 fn locate_worker_binary() -> Option<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // crates/eigenius-lean-worker/
-    let workspace_root = manifest_dir.parent()?.parent()?; // crates/ -> root
-    let candidate = workspace_root
+    let p = workspace_root()
         .join("lean")
         .join("runtime-worker")
         .join(".lake")
         .join("build")
         .join("bin")
         .join("lean-runtime-worker");
-    if candidate.exists() {
-        Some(candidate)
-    } else {
-        None
+    p.exists().then_some(p)
+}
+
+fn vendored_lean4export_path() -> PathBuf {
+    workspace_root()
+        .join("lean")
+        .join("runtime-worker")
+        .join("vendor")
+        .join("lean4export")
+}
+
+/// Lazily build the vendored lean4export so the test's
+/// `lake exe lean4export` invocation finds a cached binary.
+/// Idempotent — `lake build` is a no-op when the artifacts are
+/// already current.
+///
+/// Returns `Ok(())` only when the binary is verified at
+/// `vendor/lean4export/.lake/build/bin/lean4export`. Any earlier
+/// failure (lake not on PATH, missing vendor dir) propagates as an
+/// `Err` so the caller can skip the test cleanly.
+fn ensure_lean4export_built() -> Result<(), String> {
+    let vendor = vendored_lean4export_path();
+    if !vendor.exists() {
+        return Err(format!(
+            "vendored lean4export not found at {}",
+            vendor.display()
+        ));
     }
+    let binary = vendor
+        .join(".lake")
+        .join("build")
+        .join("bin")
+        .join("lean4export");
+    if binary.exists() {
+        return Ok(());
+    }
+    let output = Command::new("lake")
+        .arg("build")
+        .current_dir(&vendor)
+        .output()
+        .map_err(|e| format!("`lake build` (vendor) failed to spawn: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "`lake build` (vendor) exited {:?}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    if !binary.exists() {
+        return Err(format!(
+            "lake build succeeded but lean4export binary still missing at {}",
+            binary.display()
+        ));
+    }
+    Ok(())
 }
 
 fn unique_uds_path() -> PathBuf {
@@ -77,16 +137,15 @@ fn unique_uds_path() -> PathBuf {
     path
 }
 
-/// Spawn the worker binary with the given UDS path as argv[1].
-/// Returns the child handle so the test can clean up. Inherits
-/// stderr so the worker's `IO.eprintln` diagnostics surface in
-/// the test output.
 fn spawn_worker(binary: &PathBuf, uds_path: &PathBuf) -> Child {
     Command::new(binary)
         .arg(uds_path)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::inherit())
+        // Inherit stderr so the worker's `IO.eprintln` diagnostics
+        // surface in `cargo test --nocapture` output — invaluable
+        // when the worker dies unexpectedly during dispatch.
+        .stderr(std::process::Stdio::inherit())
         .spawn()
         .expect("spawn lean-runtime-worker")
 }
@@ -109,8 +168,6 @@ fn connect_with_retry(path: &std::path::Path) -> UnixStream {
     }
 }
 
-/// Wait for the child to exit, with a timeout. Returns the exit
-/// status; kills the child on timeout to avoid leaking processes.
 fn wait_for_exit(child: &mut Child, timeout: Duration) -> std::process::ExitStatus {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -124,9 +181,104 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> std::process::ExitStat
     child.wait().expect("wait after kill")
 }
 
+// ---------------------------------------------------------------------------
+// LeanProject CBOR construction
+// ---------------------------------------------------------------------------
+
+const LEAN_PROJECT_IRI: &str = "urn:eigenius:lean:LeanProject";
+const PROP_IS_A: &str = "urn:eigenius:core:is_a";
+const PROP_LAKEFILE: &str = "urn:eigenius:lean:lakefile";
+const PROP_LAKE_MANIFEST: &str = "urn:eigenius:lean:lake_manifest";
+const PROP_SOURCE_TREE: &str = "urn:eigenius:runtime:source_tree";
+
+/// Build a minimal `LeanProject` Eigon-CBOR resource carrying a
+/// single-theorem Lean project. The lakefile depends on the
+/// vendored `lean4export` via an absolute path; the
+/// `lake-manifest.json` matches what `lake update` produces for
+/// the same shape.
+fn make_lean_project_cbor(target_theorem_source: &str) -> Vec<u8> {
+    let vendor = vendored_lean4export_path();
+    let vendor_str = vendor
+        .to_str()
+        .expect("vendor path must be UTF-8")
+        .to_string();
+
+    let lakefile = format!(
+        "name = \"TestProject\"\n\
+         defaultTargets = [\"TestProject\"]\n\
+         \n\
+         [[lean_lib]]\n\
+         name = \"TestProject\"\n\
+         \n\
+         [[require]]\n\
+         name = \"lean4export\"\n\
+         path = \"{vendor_str}\"\n"
+    );
+
+    let lake_manifest = format!(
+        "{{\"version\": \"1.1.0\",\n \
+         \"packagesDir\": \".lake/packages\",\n \
+         \"packages\":\n \
+         [{{\"type\": \"path\",\n   \
+         \"scope\": \"\",\n   \
+         \"name\": \"lean4export\",\n   \
+         \"manifestFile\": \"lake-manifest.json\",\n   \
+         \"inherited\": false,\n   \
+         \"dir\": \"{vendor_str}\",\n   \
+         \"configFile\": \"lakefile.toml\"}}],\n \
+         \"name\": \"TestProject\",\n \
+         \"lakeDir\": \".lake\"}}"
+    );
+
+    let source_tree = serde_json::json!([
+        {
+            "path": "TestProject.lean",
+            "content_base64": base64::engine::general_purpose::STANDARD
+                .encode("import TestProject.Foo\n"),
+        },
+        {
+            "path": "TestProject/Foo.lean",
+            "content_base64": base64::engine::general_purpose::STANDARD
+                .encode(target_theorem_source),
+        },
+    ]);
+
+    let mut r = Resource::new(Iri::parse("urn:eigenius:test:lean_project_1").unwrap());
+    r.set(
+        Iri::parse(PROP_IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(LEAN_PROJECT_IRI).unwrap(),
+        )]),
+    );
+    r.set(Iri::parse(PROP_LAKEFILE).unwrap(), Value::String(lakefile));
+    r.set(
+        Iri::parse(PROP_LAKE_MANIFEST).unwrap(),
+        Value::String(lake_manifest),
+    );
+    r.set(
+        Iri::parse(PROP_SOURCE_TREE).unwrap(),
+        Value::Json(source_tree),
+    );
+    eigon_cbor::serialize_resource(&r)
+}
+
+fn encode_method_invocation(function_name: &str) -> serde_bytes::ByteBuf {
+    let mi = MethodInvocation {
+        function_name: function_name.to_string(),
+        signature_iri: format!("urn:eigenius:test:lean:methods:{function_name}"),
+    };
+    let mut buf = Vec::new();
+    ciborium::into_writer(&mi, &mut buf).expect("encode");
+    serde_bytes::ByteBuf::from(buf)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[test]
 #[ignore = "requires lake-built worker binary; run with --ignored after `lake build`"]
-fn lean_worker_round_trips_health_dispatch_evict() {
+fn lean_worker_round_trips_health_evict() {
     let binary = match locate_worker_binary() {
         Some(p) => p,
         None => {
@@ -137,56 +289,153 @@ fn lean_worker_round_trips_health_dispatch_evict() {
             return;
         }
     };
-
     let uds_path = unique_uds_path();
     let mut child = spawn_worker(&binary, &uds_path);
 
-    // Connect (worker is binding + accepting in parallel).
     let stream = connect_with_retry(&uds_path);
     let mut client = WorkerRpcClient::new(stream);
 
-    // --- Health round-trip ---
     let health = client.call(&Request::Health).expect("health");
-    match health {
-        Response::Health(_) => {}
+    assert!(matches!(health, Response::Health(_)));
+
+    let evicted = client.call(&Request::Evict).expect("evict");
+    assert!(matches!(evicted, Response::Evicted));
+    drop(client);
+
+    let status = wait_for_exit(&mut child, Duration::from_secs(5));
+    assert!(status.success(), "worker should exit cleanly: {status:?}");
+    let _ = std::fs::remove_file(&uds_path);
+}
+
+#[test]
+#[ignore = "requires lake-built worker binary + vendored lean4export; run with --ignored"]
+fn lean_worker_real_lean_export_round_trips_through_check_proof() {
+    let binary = match locate_worker_binary() {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "Lake-built worker binary not found — skipping. \
+                 Run `(cd lean/runtime-worker && lake build)` first."
+            );
+            return;
+        }
+    };
+    if let Err(e) = ensure_lean4export_built() {
+        eprintln!("lean4export pre-build failed: {e} — skipping");
+        return;
+    }
+
+    let uds_path = unique_uds_path();
+    let mut child = spawn_worker(&binary, &uds_path);
+    let stream = connect_with_retry(&uds_path);
+    let mut client = WorkerRpcClient::new(stream);
+
+    // Build a real LeanProject with `theorem foo : True := True.intro`
+    // and dispatch lean_export against `TestProject.Foo` (the module)
+    // pinned to constant `foo`. The worker stages files, runs `lake
+    // build` + `lake exe lean4export TestProject.Foo -- foo`, returns
+    // the export bytes (≈1.6 KB; without the pinned constant
+    // lean4export dumps the entire transitive env at ≈324 MB).
+    let project_cbor = make_lean_project_cbor("theorem foo : True := True.intro\n");
+    let target_module = b"TestProject.Foo".to_vec();
+    let target_constant = b"foo".to_vec();
+
+    let dispatch = client
+        .call(&Request::DispatchMethod {
+            invocation_id: "e2e-export-1".to_string(),
+            target_kind: TargetKind::Method,
+            target: encode_method_invocation("lean_export"),
+            inputs: vec![
+                serde_bytes::ByteBuf::from(project_cbor),
+                serde_bytes::ByteBuf::from(target_module),
+                serde_bytes::ByteBuf::from(target_constant),
+            ],
+        })
+        .expect("dispatch");
+
+    let export_bytes = match dispatch {
+        Response::DispatchOk { output, .. } => output.into_vec(),
+        Response::DispatchFailed {
+            error_kind,
+            message,
+            ..
+        } => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("worker failed lean_export: {error_kind}: {message}");
+        }
         other => {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("expected Response::Health, got {other:?}");
+            panic!("unexpected response: {other:?}");
+        }
+    };
+
+    assert!(
+        !export_bytes.is_empty(),
+        "lean_export should produce non-empty bytes"
+    );
+    assert!(
+        std::str::from_utf8(&export_bytes)
+            .ok()
+            .map(|s| s.starts_with("{\"meta\":"))
+            .unwrap_or(false),
+        "lean_export output should start with the lean4export metadata line"
+    );
+
+    // Round-trip: feed the exported bytes to nanoda's check_proof
+    // with target "foo" and assert Holds. This is the real
+    // verification proof the milestone is named for.
+    let verdict = check_proof(&export_bytes, "foo", &[]).expect("check_proof infrastructure");
+    match verdict {
+        Verdict::Holds => {}
+        Verdict::Fails { diagnostic } => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("nanoda rejected the exported proof: {diagnostic}");
         }
     }
 
-    // --- DispatchMethod{lean_export} round-trip ---
-    // The Lean handler stub returns DispatchFailed{not_implemented}
-    // for 20a.5b.2; we verify that exact shape so the routing
-    // path is confirmed (function_name decoded Rust-side, passed
-    // through FFI to Lean, Lean dispatched to runLeanExport,
-    // Lean called sendDispatchFailed, response wire-encoded).
-    let mi = MethodInvocation {
-        function_name: "lean_export".to_string(),
-        signature_iri: "urn:eigenius:test:lean:methods:lean_export".to_string(),
+    let _ = client.call(&Request::Evict);
+    drop(client);
+    let _ = wait_for_exit(&mut child, Duration::from_secs(5));
+    let _ = std::fs::remove_file(&uds_path);
+}
+
+#[test]
+#[ignore = "requires lake-built worker binary; run with --ignored after `lake build`"]
+fn lean_worker_lean_export_with_no_inputs_fails_cleanly() {
+    // The Lean handler requires `inputs = [LeanProject, target_module]`.
+    // Without inputs, the dispatch should fail with a descriptive
+    // diagnostic — not crash, not stall.
+    let binary = match locate_worker_binary() {
+        Some(p) => p,
+        None => return,
     };
-    let mut target_cbor = Vec::new();
-    ciborium::into_writer(&mi, &mut target_cbor).expect("encode");
-    let dispatch = client
+    let uds_path = unique_uds_path();
+    let mut child = spawn_worker(&binary, &uds_path);
+    let stream = connect_with_retry(&uds_path);
+    let mut client = WorkerRpcClient::new(stream);
+
+    let resp = client
         .call(&Request::DispatchMethod {
-            invocation_id: "e2e-inv-1".to_string(),
+            invocation_id: "e2e-export-no-inputs".to_string(),
             target_kind: TargetKind::Method,
-            target: serde_bytes::ByteBuf::from(target_cbor),
+            target: encode_method_invocation("lean_export"),
             inputs: vec![],
         })
         .expect("dispatch");
-    match dispatch {
+
+    match resp {
         Response::DispatchFailed {
-            invocation_id,
             error_kind,
             message,
+            ..
         } => {
-            assert_eq!(invocation_id, "e2e-inv-1");
-            assert_eq!(error_kind, "not_implemented");
+            assert_eq!(error_kind, "lean_export_failed");
             assert!(
-                message.contains("20a.5b.3"),
-                "expected Lean's 20a.5b.3-pending diagnostic, got: {message}"
+                message.contains("requires inputs"),
+                "expected the missing-inputs diagnostic, got: {message}"
             );
         }
         other => {
@@ -196,49 +445,29 @@ fn lean_worker_round_trips_health_dispatch_evict() {
         }
     }
 
-    // --- Evict round-trip + clean exit ---
-    let evicted = client.call(&Request::Evict).expect("evict");
-    assert!(matches!(evicted, Response::Evicted));
+    let _ = client.call(&Request::Evict);
     drop(client);
-
-    let status = wait_for_exit(&mut child, Duration::from_secs(5));
-    assert!(
-        status.success(),
-        "worker should exit cleanly after Evict; got {status:?}"
-    );
-
+    let _ = wait_for_exit(&mut child, Duration::from_secs(5));
     let _ = std::fs::remove_file(&uds_path);
 }
 
 #[test]
 #[ignore = "requires lake-built worker binary; run with --ignored after `lake build`"]
 fn lean_worker_unknown_function_routes_to_dispatch_failed() {
-    // Confirms the Lean side reads `function_name` from the FFI
-    // accessor, compares against "lean_export", and falls through
-    // to the unknown-function DispatchFailed branch. Tightens
-    // coverage on the `requestFunctionName` → `asString` →
-    // string-compare path.
     let binary = match locate_worker_binary() {
         Some(p) => p,
         None => return,
     };
-
     let uds_path = unique_uds_path();
     let mut child = spawn_worker(&binary, &uds_path);
     let stream = connect_with_retry(&uds_path);
     let mut client = WorkerRpcClient::new(stream);
 
-    let mi = MethodInvocation {
-        function_name: "compute_some_user_thing".to_string(),
-        signature_iri: "urn:eigenius:test:lean:methods:user_thing".to_string(),
-    };
-    let mut target_cbor = Vec::new();
-    ciborium::into_writer(&mi, &mut target_cbor).expect("encode");
     let resp = client
         .call(&Request::DispatchMethod {
-            invocation_id: "e2e-inv-2".to_string(),
+            invocation_id: "e2e-unknown".to_string(),
             target_kind: TargetKind::Method,
-            target: serde_bytes::ByteBuf::from(target_cbor),
+            target: encode_method_invocation("compute_some_user_thing"),
             inputs: vec![],
         })
         .expect("dispatch");
@@ -249,10 +478,7 @@ fn lean_worker_unknown_function_routes_to_dispatch_failed() {
             ..
         } => {
             assert_eq!(error_kind, "not_implemented");
-            assert!(
-                message.contains("compute_some_user_thing"),
-                "expected message to name the unknown function, got: {message}"
-            );
+            assert!(message.contains("compute_some_user_thing"));
         }
         other => {
             let _ = child.kill();
@@ -260,7 +486,6 @@ fn lean_worker_unknown_function_routes_to_dispatch_failed() {
             panic!("expected DispatchFailed, got {other:?}");
         }
     }
-
     let _ = client.call(&Request::Evict);
     drop(client);
     let _ = wait_for_exit(&mut child, Duration::from_secs(5));

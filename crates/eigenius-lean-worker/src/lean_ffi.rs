@@ -53,9 +53,9 @@ use crate::{
 };
 
 use crate::lean_sys::{
-    ei_lean_alloc_byte_array, ei_lean_alloc_external, ei_lean_box, ei_lean_get_external_data,
-    ei_lean_io_result_mk_ok, ei_lean_register_external_class, ei_lean_sarray_cptr,
-    ei_lean_sarray_size, LeanExternalClass, LeanObj,
+    ei_lean_alloc_byte_array, ei_lean_alloc_external, ei_lean_box, ei_lean_box_usize,
+    ei_lean_get_external_data, ei_lean_io_result_mk_ok, ei_lean_register_external_class,
+    ei_lean_sarray_cptr, ei_lean_sarray_size, LeanExternalClass, LeanObj,
 };
 
 // ---------------------------------------------------------------------------
@@ -160,11 +160,22 @@ unsafe fn unit_lean_result() -> *mut LeanObj {
     unsafe { ei_lean_io_result_mk_ok(unit) }
 }
 
-/// Wrap an integer scalar in `IO α` for whichever scalar type
-/// Lean expects (`Int32`, `UInt32`, `USize`, …). All use the
-/// boxed-scalar representation when wrapped inside `IO`.
-unsafe fn scalar_lean_result(value: usize) -> *mut LeanObj {
+/// Wrap an `Int32` / `UInt32` scalar in `IO α`. On 64-bit
+/// platforms these fit in a tagged pointer; `lean_box` does the
+/// right thing.
+unsafe fn scalar_uint32_lean_result(value: usize) -> *mut LeanObj {
     let scalar = unsafe { ei_lean_box(value) };
+    unsafe { ei_lean_io_result_mk_ok(scalar) }
+}
+
+/// Wrap a `USize` scalar in `IO USize`. USize is 64-bit on 64-bit
+/// platforms and doesn't fit a tagged pointer — Lean's
+/// `lean_unbox_usize` reads from a heap-allocated ctor's scalar
+/// payload, not from a tagged pointer. So we must use
+/// `lean_box_usize` (a separate inline that allocates the ctor)
+/// rather than the small-integer `lean_box`.
+unsafe fn scalar_usize_lean_result(value: usize) -> *mut LeanObj {
+    let scalar = unsafe { ei_lean_box_usize(value) };
     unsafe { ei_lean_io_result_mk_ok(scalar) }
 }
 
@@ -198,10 +209,7 @@ unsafe fn handle_from_lean(obj: *mut LeanObj) -> *mut WorkerHandle {
 /// handle that "looks valid" from Lean) is acceptable because
 /// `worker_next_request_kind` is null-safe.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ei_lean_worker_listen(
-    path: *mut LeanObj,
-    _io_world: *mut LeanObj,
-) -> *mut LeanObj {
+pub unsafe extern "C" fn ei_lean_worker_listen(path: *mut LeanObj) -> *mut LeanObj {
     let path_slice = unsafe { lean_byte_array_view(path) };
     let handle = unsafe { worker_listen(path_slice.as_ptr(), path_slice.len()) };
     let external = unsafe { ei_lean_alloc_external(worker_handle_class(), handle as *mut c_void) };
@@ -222,7 +230,6 @@ pub unsafe extern "C" fn ei_lean_worker_listen(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ei_lean_worker_next_request_kind(
     handle_obj: *mut LeanObj,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let kind = unsafe { worker_next_request_kind(handle) };
@@ -232,7 +239,7 @@ pub unsafe extern "C" fn ei_lean_worker_next_request_kind(
     // (the error variants) round-trip because `i32 as usize` on
     // two's-complement preserves the bit pattern, and Lean reads
     // it back as an Int32 via the same convention.
-    unsafe { scalar_lean_result(kind as u32 as usize) }
+    unsafe { scalar_uint32_lean_result(kind as u32 as usize) }
 }
 
 /// Generate accessor wrappers. Each delegates to the matching
@@ -241,10 +248,7 @@ pub unsafe extern "C" fn ei_lean_worker_next_request_kind(
 macro_rules! lean_ffi_accessor {
     ($lean_name:ident, $rust_name:ident) => {
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn $lean_name(
-            handle_obj: *mut LeanObj,
-            _io_world: *mut LeanObj,
-        ) -> *mut LeanObj {
+        pub unsafe extern "C" fn $lean_name(handle_obj: *mut LeanObj) -> *mut LeanObj {
             let handle = unsafe { handle_from_lean(handle_obj) };
             let owned = unsafe { $rust_name(handle) };
             unsafe { accessor_lean_result(owned) }
@@ -277,14 +281,19 @@ lean_ffi_accessor!(
 
 /// Lean signature:
 /// `@[extern "ei_lean_worker_request_input_count"] opaque requestInputCount (h : @& WorkerHandle) : IO USize`
+///
+/// Lean's compiled C ABI for `IO α`-returning externs *does not*
+/// pass the `IO.RealWorld` token through — it's compiled away
+/// before the FFI call. Hence the single-argument signature (the
+/// borrowed handle); the wrapper code in
+/// `.lake/build/ir/Worker/Ffi.c` matches this shape.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ei_lean_worker_request_input_count(
     handle_obj: *mut LeanObj,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let count = unsafe { worker_request_input_count(handle) };
-    unsafe { scalar_lean_result(count) }
+    unsafe { scalar_usize_lean_result(count) }
 }
 
 /// Lean signature:
@@ -297,7 +306,6 @@ pub unsafe extern "C" fn ei_lean_worker_request_input_count(
 pub unsafe extern "C" fn ei_lean_worker_request_input(
     handle_obj: *mut LeanObj,
     index: usize,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let owned = unsafe { worker_request_input(handle, index) };
@@ -311,10 +319,7 @@ pub unsafe extern "C" fn ei_lean_worker_request_input(
 /// Lean signature:
 /// `@[extern "ei_lean_worker_send_health"] opaque sendHealth (h : @& WorkerHandle) : IO Unit`
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ei_lean_worker_send_health(
-    handle_obj: *mut LeanObj,
-    _io_world: *mut LeanObj,
-) -> *mut LeanObj {
+pub unsafe extern "C" fn ei_lean_worker_send_health(handle_obj: *mut LeanObj) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let _ = unsafe { worker_send_health(handle) };
     unsafe { unit_lean_result() }
@@ -328,7 +333,6 @@ pub unsafe extern "C" fn ei_lean_worker_send_health(
 pub unsafe extern "C" fn ei_lean_worker_send_instantiated(
     handle_obj: *mut LeanObj,
     ready: u8,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let _ = unsafe { worker_send_instantiated(handle, ready != 0) };
@@ -341,7 +345,6 @@ pub unsafe extern "C" fn ei_lean_worker_send_instantiated(
 pub unsafe extern "C" fn ei_lean_worker_send_mirror_registered(
     handle_obj: *mut LeanObj,
     mirror_iri: *mut LeanObj,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let iri_slice = unsafe { lean_byte_array_view(mirror_iri) };
@@ -356,7 +359,6 @@ pub unsafe extern "C" fn ei_lean_worker_send_dispatch_ok(
     handle_obj: *mut LeanObj,
     output: *mut LeanObj,
     dispatched_to: *mut LeanObj,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let output_slice = unsafe { lean_byte_array_view(output) };
@@ -378,7 +380,6 @@ pub unsafe extern "C" fn ei_lean_worker_send_dispatch_failed(
     handle_obj: *mut LeanObj,
     error_kind: *mut LeanObj,
     message: *mut LeanObj,
-    _io_world: *mut LeanObj,
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let error_kind_slice = unsafe { lean_byte_array_view(error_kind) };
@@ -396,11 +397,69 @@ pub unsafe extern "C" fn ei_lean_worker_send_dispatch_failed(
 /// Lean signature:
 /// `@[extern "ei_lean_worker_send_evicted"] opaque sendEvicted (h : @& WorkerHandle) : IO Unit`
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ei_lean_worker_send_evicted(
-    handle_obj: *mut LeanObj,
-    _io_world: *mut LeanObj,
-) -> *mut LeanObj {
+pub unsafe extern "C" fn ei_lean_worker_send_evicted(handle_obj: *mut LeanObj) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let _ = unsafe { worker_send_evicted(handle) };
     unsafe { unit_lean_result() }
+}
+
+// ---------------------------------------------------------------------------
+// LeanProject staging — Lean-side entry into the worker's
+// `lean_project` module.
+// ---------------------------------------------------------------------------
+
+/// Lean signature:
+/// `@[extern "ei_lean_worker_stage_lean_project"] opaque stageLeanProject (h : @& WorkerHandle) (inputIdx : USize) (destDir : @& ByteArray) : IO ByteArray`
+///
+/// Reads `input[inputIdx]` (a `LeanProject` Eigon-CBOR resource),
+/// decodes it via [`crate::lean_project::stage_lean_project`], and
+/// materialises the project's files under `destDir` (UTF-8 path).
+///
+/// **Return value semantics**: empty `ByteArray` = success;
+/// non-empty = UTF-8 error message. The Lean side checks
+/// `result.size == 0` for the success case and uses the bytes as
+/// the diagnostic for `DispatchFailed` otherwise.
+///
+/// Empty-success is a deliberate convention — it lets the FFI
+/// shape stay `IO ByteArray` (a single Lean-friendly POD return)
+/// rather than `IO (Except String Unit)` which would require Lean
+/// runtime types we'd have to construct from Rust.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ei_lean_worker_stage_lean_project(
+    handle_obj: *mut LeanObj,
+    input_idx: usize,
+    dest_dir: *mut LeanObj,
+) -> *mut LeanObj {
+    let handle = unsafe { handle_from_lean(handle_obj) };
+    let input_owned = unsafe { crate::worker_request_input(handle, input_idx) };
+
+    let dest_dir_slice = unsafe { lean_byte_array_view(dest_dir) };
+    let dest_dir_str = match std::str::from_utf8(dest_dir_slice) {
+        Ok(s) => s,
+        Err(_) => {
+            unsafe { crate::worker_free_owned_bytes(input_owned) };
+            return unsafe {
+                accessor_lean_result(crate::OwnedBytes::from_string(
+                    "destDir is not valid UTF-8".to_string(),
+                ))
+            };
+        }
+    };
+
+    let input_view = if input_owned.is_empty() {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(input_owned.ptr, input_owned.len) }
+    };
+
+    let result =
+        crate::lean_project::stage_lean_project(input_view, std::path::Path::new(dest_dir_str));
+
+    unsafe { crate::worker_free_owned_bytes(input_owned) };
+
+    let response = match result {
+        Ok(()) => crate::OwnedBytes::empty(),
+        Err(e) => crate::OwnedBytes::from_string(e.to_string()),
+    };
+    unsafe { accessor_lean_result(response) }
 }

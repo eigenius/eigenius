@@ -92,12 +92,23 @@ EiLeanObj *ei_lean_io_mk_world(void);
 /* --- Scalars (box / unbox) ------------------------------------- */
 
 /* Box a small unsigned integer as a Lean object (tagged-pointer
- * representation). Used for `Bool`/`UInt8`/etc. return values. */
+ * representation). Used for `Bool` / `UInt8` / `UInt32` / etc.
+ * (anything that fits in a tagged pointer). */
 EiLeanObj *ei_lean_box(size_t n);
 
 /* Unbox a scalar Lean object. Caller asserts the object is a
  * boxed small integer (the kind returned by `ei_lean_box`). */
 size_t ei_lean_unbox(EiLeanObj *o);
+
+/* Box a `USize` value. Lean's `USize` is 64-bit on 64-bit
+ * platforms and doesn't fit in a tagged pointer; the boxed
+ * representation is a heap-allocated constructor with the scalar
+ * stored at offset 0 (zero object fields, 8-byte scalar payload).
+ *
+ * Required for `IO USize` extern returns: Lean's generated
+ * unwrapping code does `lean_ctor_get_usize(o, 0)` which expects
+ * the heap-ctor layout, *not* a tagged pointer. */
+EiLeanObj *ei_lean_box_usize(size_t v);
 
 /* --- External objects (opaque-handle pattern) ------------------ */
 

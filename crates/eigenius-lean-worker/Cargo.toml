@@ -23,11 +23,40 @@ cc = "1"
 
 [dependencies]
 eigenius-runtime-substrate = { path = "../runtime-substrate" }
+# `lean_export` staging decodes the `LeanProject` Eigon-CBOR resource
+# (input[0] on a DispatchMethod) into its component files
+# (lakefile + lake_manifest + source_tree) using the kernel's
+# canonical Eigon-CBOR parser. The transitive dep brings in some
+# weight; revisit if cdylib size becomes a concern (the Lean
+# worker process is short-lived and not size-sensitive in v1).
+eigenius-kernel = { path = "../../kernel" }
 # `dispatch_method_request` decodes the `MethodInvocation` carried in
 # `Request::DispatchMethod` to route between the lean_export and
 # dispatch_method Lean handlers; ciborium is the substrate's own CBOR
 # codec so the dep is consistent across both sides of the wire.
 ciborium = "0.2"
+# Base64-decode the per-file `content_base64` entries in a
+# `LeanProject.source_tree` JSON array.
+base64 = "0.22"
 serde.workspace = true
 serde_bytes = "0.11"
+serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# Staging tests need a temp dir to assert against. The production
+# code path doesn't allocate temp dirs in Rust — the Lean side
+# manages temp-dir lifecycle via `IO.FS` — so tempfile stays in
+# dev-deps.
+tempfile = "3"
+# `lean_worker_e2e` round-trips the worker's `lean_export` output
+# through nanoda's `check_proof` to confirm the exported bytes are
+# a valid Lean export. The verification crate is a sibling under
+# `crates/eigenius-lean/`.
+eigenius-lean = { path = "../eigenius-lean" }
+# `base64` re-encodes Lean source bytes into the `LeanProject`
+# `source_tree` JSON. Already a regular dep for `lean_project`'s
+# decoding side, but cargo's dep table doesn't auto-share between
+# `[dependencies]` and `[dev-dependencies]`; listing here keeps
+# the test deps explicit.
+base64 = "0.22"

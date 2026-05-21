@@ -79,6 +79,8 @@ unsafe extern "C" {
 
     pub fn ei_lean_unbox(o: *mut LeanObj) -> usize;
 
+    pub fn ei_lean_box_usize(v: usize) -> *mut LeanObj;
+
     // ----- External objects ---------------------------------------
 
     pub fn ei_lean_register_external_class(

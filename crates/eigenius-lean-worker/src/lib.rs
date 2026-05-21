@@ -74,6 +74,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 pub mod lean_ffi;
+pub mod lean_project;
 pub mod lean_sys;
 
 use std::os::unix::net::{UnixListener, UnixStream};

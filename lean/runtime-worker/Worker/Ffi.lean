@@ -187,4 +187,18 @@ opaque sendDispatchFailed (h : @& WorkerHandle) (errorKind : @& ByteArray)
 @[extern "ei_lean_worker_send_evicted"]
 opaque sendEvicted (h : @& WorkerHandle) : IO Unit
 
+/-! ## LeanProject staging
+
+Decode `input[inputIdx]` as a `LeanProject` Eigon-CBOR resource and
+materialise its files (`lakefile.toml` / `lakefile.lean`,
+`lake-manifest.json`, `lean-toolchain`, and each `source_tree`
+entry) under `destDir`.
+
+Returns an empty `ByteArray` on success, or a UTF-8 error message
+on failure — the polling loop checks `result.size == 0` and emits
+`DispatchFailed` carrying the bytes if non-empty. -/
+@[extern "ei_lean_worker_stage_lean_project"]
+opaque stageLeanProject (h : @& WorkerHandle) (inputIdx : USize)
+    (destDir : @& ByteArray) : IO ByteArray
+
 end Worker.Ffi

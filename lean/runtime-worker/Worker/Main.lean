@@ -78,25 +78,116 @@ function names. -/
 @[inline] def asString (b : ByteArray) : String :=
   String.fromUTF8! b
 
-/-- The lean_export handler stub. 20a.5b.3 will replace this with
-the real flow:
+/-- Mint a unique temporary directory under `$TMPDIR` (or `/tmp`)
+for one `lean_export` invocation. Uses the worker's PID + the
+caller's counter so concurrent invocations on the same worker
+don't collide.
 
-1. Read the `LeanProject` resource from `requestInput h 0` (CBOR-
-   encoded by the substrate via the kernel's eigon_cbor codec).
-2. Decode the project's `lakefile.lean` / `lake-manifest.json` /
-   `source_tree` fields.
-3. Stage the files under a temp directory.
-4. Spawn `lake exe lean4export` via `IO.Process.spawn`.
-5. Read the resulting export file, return its bytes as the
-   `DispatchOk.output` payload.
+We don't use Lean's `IO.FS.createTempDirectory` because Lean 4.29
+doesn't expose one — Lake's own tooling builds this from scratch
+when it needs it. Our impl is intentionally small: generate a
+path, `IO.FS.createDirAll`, return the path. The caller cleans up
+with `IO.FS.removeDirAll` after `lake` exits. -/
+def mintTempDir (counter : Nat) : IO System.FilePath := do
+  let baseDir ← match ← IO.getEnv "TMPDIR" with
+    | some d => pure (System.FilePath.mk d)
+    | none => pure (System.FilePath.mk "/tmp")
+  let pid ← IO.Process.getPID
+  let path := baseDir / s!"eigenius-lean-export-{pid}-{counter}"
+  IO.FS.createDirAll path
+  return path
 
-For 20a.5b.2 we reply with a clearly-marked failure so a
-substrate-side smoke test can see the routing land end-to-end
-without depending on a working Lake invocation. -/
+/-- Capture stdout + stderr from a child process. Returns
+`(exitCode, stdout, stderr)`. Used to drive `lake build` /
+`lake exe lean4export`. -/
+def captureProcess (cmd : String) (args : Array String) (cwd : System.FilePath) :
+    IO (UInt32 × ByteArray × ByteArray) := do
+  let output ← IO.Process.output {
+    cmd := cmd
+    args := args
+    cwd := some cwd.toString
+  }
+  return (output.exitCode, output.stdout.toUTF8, output.stderr.toUTF8)
+
+/-- Process-local counter used to disambiguate temp-dir paths
+across concurrent `lean_export` invocations on the same worker. -/
+initialize tempDirCounter : IO.Ref Nat ← IO.mkRef 0
+
+/-- Real `lean_export` handler (Phase 20a.5b.3).
+
+Flow:
+1. Mint a temp dir.
+2. Read `input[1]` as the target module name (UTF-8 bytes).
+3. Stage the `LeanProject` (from `input[0]`) into the temp dir via
+   [`Worker.Ffi.stageLeanProject`].
+4. Run `lake build` to compile the project's sources.
+5. Run `lake exe lean4export <Module>` to dump the environment.
+6. Send the captured stdout as `DispatchOk.output`.
+7. Clean up the temp dir.
+
+Each failure point emits `DispatchFailed` with a clear
+`error_kind` — `not_implemented` is reserved for handlers that
+don't exist at all; here we use `lean_export_failed` for any of
+the staging / build / export steps. -/
 def runLeanExport (h : WorkerHandle) : IO Unit := do
-  let errorKind := asBytes "not_implemented"
-  let message := asBytes "lean_export shell-out lands in Phase 20a.5b.3 — Rust FFI bridge is wired but the Lake invocation isn't yet"
-  sendDispatchFailed h errorKind message
+  -- 1. Temp dir.
+  let counter ← tempDirCounter.modifyGet (fun n => (n, n + 1))
+  let tempDir ← try
+    mintTempDir counter
+  catch e =>
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes s!"failed to create temp dir: {e.toString}")
+    return
+
+  -- 2. Target module + constant name from input[1] + input[2].
+  -- (input[0] is the LeanProject.) Without an explicit constant
+  -- name, `lake exe lean4export <Module>` dumps the entire
+  -- imported environment — hundreds of MB for any project that
+  -- imports Lean stdlib. Requiring the caller to pin a constant
+  -- keeps the export bounded.
+  let inputCount ← requestInputCount h
+  if inputCount < 3 then
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes s!"lean_export requires inputs=[LeanProject, targetModule, targetConstant]; got {inputCount} inputs")
+    IO.FS.removeDirAll tempDir
+    return
+  let targetModule := asString (← requestInput h 1)
+  let targetConstant := asString (← requestInput h 2)
+
+  -- 3. Stage the project files to disk.
+  let stagingError ← stageLeanProject h 0 (asBytes tempDir.toString)
+  if stagingError.size != 0 then
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes s!"staging failed: {asString stagingError}")
+    IO.FS.removeDirAll tempDir
+    return
+
+  -- 4. lake build compiles the project's sources so lean4export
+  -- has .olean artifacts to read from.
+  let (buildExit, _buildStdout, buildStderr) ← captureProcess "lake" #["build"] tempDir
+  if buildExit != 0 then
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes s!"lake build failed (exit {buildExit}): {asString buildStderr}")
+    IO.FS.removeDirAll tempDir
+    return
+
+  -- 5. `lake exe lean4export <Module> -- <Constant>` — the `--`
+  -- separates lean4export's module-name args from its
+  -- constant-name args; without an explicit constant, lean4export
+  -- dumps the entire imported environment.
+  let (exportExit, exportStdout, exportStderr) ←
+    captureProcess "lake" #["exe", "lean4export", targetModule, "--", targetConstant] tempDir
+  if exportExit != 0 then
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes s!"lake exe lean4export failed (exit {exportExit}): {asString exportStderr}")
+    IO.FS.removeDirAll tempDir
+    return
+
+  -- 6. Send the export bytes back to the substrate.
+  sendDispatchOk h exportStdout (ByteArray.mk #[])
+
+  -- 7. Clean up the temp dir.
+  IO.FS.removeDirAll tempDir
 
 /-- Dispatch table for `Request::DispatchMethod`. Lean reads
 `function_name` from the in-flight slot and routes to the matching

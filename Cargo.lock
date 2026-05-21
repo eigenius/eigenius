@@ -930,11 +930,16 @@ dependencies = [
 name = "eigenius-lean-worker"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "cc",
  "ciborium",
+ "eigenius-kernel",
+ "eigenius-lean",
  "eigenius-runtime-substrate",
  "serde",
  "serde_bytes",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
