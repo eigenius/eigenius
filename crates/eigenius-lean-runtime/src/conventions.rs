@@ -172,12 +172,12 @@ pub const ELAN_HOME: &str = "/opt/elan";
 /// that unit. Bumping this constant is a deliberate version
 /// migration (re-builds every downstream image).
 ///
-/// Selected to match the version `references/nanoda_lib`'s vendored
-/// `ProjFromProp/export` fixture was produced against
-/// (`4.27.0-rc1`). A future pre-20a.5b iteration may align this with
-/// a stable release — the only constraint is `>=4.0.0` (the
-/// `lean4export` JSON format semver 3.1.x window).
-pub const LEAN_TOOLCHAIN_VERSION: &str = "leanprover/lean4:v4.27.0";
+/// Aligned with [`lean/runtime-worker/lean-toolchain`](../../lean/runtime-worker/lean-toolchain).
+/// The constraint is `>=4.0.0` (the `lean4export` JSON format
+/// semver 3.1.x window); we pin to the locally-installed stable
+/// release so the image-build pipeline and local-dev Lake workflow
+/// resolve identically.
+pub const LEAN_TOOLCHAIN_VERSION: &str = "leanprover/lean4:v4.29.1";
 
 // ---------------------------------------------------------------------------
 // Timeouts.
