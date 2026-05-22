@@ -85,5 +85,19 @@
     "urn:eigenius:core:description": "SHA-256 hex digest of the `lake-manifest.json` baked into the `LeanEnvironment` image. Captured separately from the OCI image digest so a query can verify the lockfile didn't drift between image build and dispatch time without unpacking the image — the lockfile pin is the determinism anchor on the Lean dependency side, parallel to how the toolchain version pins the runtime side.",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:lean:LeanEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:lean:module_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "module_name",
+    "urn:eigenius:core:description": "Fully-qualified Lean module name (e.g. `TestProject.Foo` or `Mathlib.Topology.Basic`). Carried on the `target_module` input Resource to the `lean_export` worker verb — the dispatch ships every call_method input as an Eigon-CBOR Resource and the Lake worker reads this property to know which module to dump via `lake exe lean4export`.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:lean:constant_name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "constant_name",
+    "urn:eigenius:core:description": "Unqualified Lean declaration name (e.g. `foo`, `add_zero`). Carried on the `target_constant` input Resource to the `lean_export` worker verb — pinning a single constant keeps the export bounded (otherwise `lake exe lean4export <Module>` dumps the entire transitive imported environment, which is hundreds of MB for any project importing Lean stdlib).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   }
 ]

@@ -44,12 +44,13 @@ use std::ffi::c_void;
 use std::sync::OnceLock;
 
 use crate::{
-    worker_close, worker_free_owned_bytes, worker_listen, worker_next_request_kind,
-    worker_request_env_iri, worker_request_function_name, worker_request_image_digest,
-    worker_request_input, worker_request_input_count, worker_request_invocation_id,
-    worker_request_library_content, worker_request_mirror_iri, worker_request_signature_iri,
-    worker_send_dispatch_failed, worker_send_dispatch_ok, worker_send_evicted, worker_send_health,
-    worker_send_instantiated, worker_send_mirror_registered, Bytes, OwnedBytes, WorkerHandle,
+    worker_close, worker_decode_eigon_string_property, worker_free_owned_bytes, worker_listen,
+    worker_next_request_kind, worker_request_env_iri, worker_request_function_name,
+    worker_request_image_digest, worker_request_input, worker_request_input_count,
+    worker_request_invocation_id, worker_request_library_content, worker_request_mirror_iri,
+    worker_request_signature_iri, worker_send_dispatch_failed, worker_send_dispatch_ok,
+    worker_send_evicted, worker_send_health, worker_send_instantiated,
+    worker_send_mirror_registered, Bytes, OwnedBytes, WorkerHandle,
 };
 
 use crate::lean_sys::{
@@ -221,6 +222,22 @@ pub unsafe extern "C" fn ei_lean_worker_listen(path: *mut LeanObj) -> *mut LeanO
 // ---------------------------------------------------------------------------
 
 /// Lean signature:
+/// `@[extern "ei_lean_worker_accept_next"] opaque acceptNext (h : @& WorkerHandle) : IO Int32`
+///
+/// Close the current substrate connection and accept the next one
+/// on the bound listener. Returns 0 on success, non-zero on
+/// accept failure. See [`crate::worker_accept_next`] for the
+/// per-RPC connection-loop rationale.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ei_lean_worker_accept_next(handle_obj: *mut LeanObj) -> *mut LeanObj {
+    let handle = unsafe { handle_from_lean(handle_obj) };
+    let rc = unsafe { crate::worker_accept_next(handle) };
+    // Same bit-preserving widening as `next_request_kind` — Lean's
+    // Int32 round-trips through `i32 as u32 as usize`.
+    unsafe { scalar_uint32_lean_result(rc as u32 as usize) }
+}
+
+/// Lean signature:
 /// `@[extern "ei_lean_worker_next_request_kind"] opaque nextRequestKind (h : @& WorkerHandle) : IO Int32`
 ///
 /// Blocks until the next request frame arrives, decodes it into
@@ -309,6 +326,42 @@ pub unsafe extern "C" fn ei_lean_worker_request_input(
 ) -> *mut LeanObj {
     let handle = unsafe { handle_from_lean(handle_obj) };
     let owned = unsafe { worker_request_input(handle, index) };
+    unsafe { accessor_lean_result(owned) }
+}
+
+// ---------------------------------------------------------------------------
+// Eigon-CBOR decoders
+// ---------------------------------------------------------------------------
+
+/// Lean signature:
+/// `@[extern "ei_lean_worker_decode_eigon_string_property"]`
+/// `opaque decodeEigonStringProperty (cbor : @& ByteArray) (propertyIri : @& ByteArray) : IO ByteArray`
+///
+/// Pure decode helper — no [`WorkerHandle`] involved. Parses the
+/// `cbor` argument as an Eigon Resource and returns the UTF-8 bytes
+/// of `propertyIri` if present as a string property. Empty bytes
+/// on any failure (decode error, property absent, value not a
+/// string); the caller is expected to dispatch a `DispatchFailed`
+/// in that case.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ei_lean_worker_decode_eigon_string_property(
+    cbor_obj: *mut LeanObj,
+    property_iri_obj: *mut LeanObj,
+) -> *mut LeanObj {
+    let cbor_slice = unsafe { lean_byte_array_view(cbor_obj) };
+    let iri_slice = unsafe { lean_byte_array_view(property_iri_obj) };
+    let owned = unsafe {
+        worker_decode_eigon_string_property(
+            Bytes {
+                ptr: cbor_slice.as_ptr(),
+                len: cbor_slice.len(),
+            },
+            Bytes {
+                ptr: iri_slice.as_ptr(),
+                len: iri_slice.len(),
+            },
+        )
+    };
     unsafe { accessor_lean_result(owned) }
 }
 

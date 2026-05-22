@@ -235,6 +235,15 @@ pub enum ExitCode {
 /// keeps the same pointer across many `worker_next_request_kind` /
 /// `worker_send_*` round-trips.
 pub struct WorkerHandle {
+    /// The bound listener — kept on the handle so a single worker
+    /// process can accept multiple substrate-side connections
+    /// across its lifetime (D26 §8.1 Service-mode lifecycle). The
+    /// substrate opens a fresh UDS connection per RPC (Health and
+    /// DispatchMethod are separate dials); each accept on the
+    /// listener becomes the new value of `stream`. `None` in unit
+    /// tests where the stream is constructed from an in-process
+    /// `UnixStream::pair` and no listener exists.
+    listener: Option<UnixListener>,
     stream: UnixStream,
     in_flight: Option<InFlightRequest>,
 }
@@ -297,6 +306,21 @@ pub unsafe extern "C" fn worker_listen(
         }
     };
 
+    // Open up the socket so a non-root host process can connect when
+    // the worker runs as root inside a container with the tempdir
+    // bind-mounted. UnixListener::bind defaults to mode 0o755 (no
+    // world-write), which blocks the substrate's client-side connect
+    // with `Permission denied`. Matches JuliaWorker.jl's
+    // `chmod(uds_path, 0o666)` after `listen`.
+    #[cfg(unix)]
+    if let Err(e) = std::fs::set_permissions(
+        path,
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o666),
+    ) {
+        eprintln!("eigenius-lean-worker: failed to chmod 0o666 on `{path_str}`: {e}");
+        return std::ptr::null_mut();
+    }
+
     let (stream, _addr) = match listener.accept() {
         Ok(pair) => pair,
         Err(e) => {
@@ -306,10 +330,47 @@ pub unsafe extern "C" fn worker_listen(
     };
 
     let handle = Box::new(WorkerHandle {
+        listener: Some(listener),
         stream,
         in_flight: None,
     });
     Box::into_raw(handle)
+}
+
+/// Drop the current `stream` and accept the next substrate-side
+/// connection on the bound listener. Lean's `runLoop` invokes this
+/// when the peer closes a connection (substrate uses one connection
+/// per RPC) so the worker stays alive for the next dispatch instead
+/// of exiting on every `Health` or `DispatchMethod` round-trip.
+/// Returns `0` on success, non-zero on accept failure.
+///
+/// # Safety
+///
+/// `handle` must point at a live [`WorkerHandle`] previously returned
+/// by [`worker_listen`] and not yet freed via [`worker_close`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn worker_accept_next(handle: *mut WorkerHandle) -> i32 {
+    if handle.is_null() {
+        return 1;
+    }
+    let h = unsafe { &mut *handle };
+    let Some(listener) = h.listener.as_ref() else {
+        eprintln!("eigenius-lean-worker: accept_next called on handle without listener");
+        return 3;
+    };
+    // Clear any in-flight slot from the previous connection so a
+    // request reader on the new stream doesn't see stale state.
+    h.in_flight = None;
+    match listener.accept() {
+        Ok((stream, _addr)) => {
+            h.stream = stream;
+            0
+        }
+        Err(e) => {
+            eprintln!("eigenius-lean-worker: accept_next failed: {e}");
+            2
+        }
+    }
 }
 
 /// Free a [`WorkerHandle`]. Drops the underlying [`UnixStream`]
@@ -586,6 +647,57 @@ pub unsafe extern "C" fn worker_request_input(h: *mut WorkerHandle, index: usize
 }
 
 // ---------------------------------------------------------------------------
+// Eigon-CBOR decoders exposed to Lean.
+//
+// The cdylib hosts the workspace's Eigon-CBOR codec so the Lake worker
+// can read structured Eigon Resources off the wire without teaching
+// Lean a parallel CBOR implementation. The substrate ships every
+// `call_method` input as `eigon_cbor::serialize_resource(...)`; the
+// worker uses these helpers to pull individual property values out of
+// the resulting bytes inside its dispatch handlers.
+// ---------------------------------------------------------------------------
+
+/// Parse `cbor` as an Eigon Resource and return the UTF-8 bytes of its
+/// `property_iri` string property. Returns an empty `OwnedBytes` when:
+///
+/// - the bytes don't decode as a Resource (lenient parse path),
+/// - `property_iri` is malformed,
+/// - the property is absent on the resource, or
+/// - the property's value isn't a `Value::String` (numbers, arrays,
+///   nested resources, etc. all surface as empty).
+///
+/// The empty-on-failure shape matches the existing accessor pattern
+/// (`worker_request_*`) — callers inspect the returned ByteArray's
+/// size and dispatch a `DispatchFailed` themselves if the value is
+/// missing. The cdylib stays decoupled from the worker's error
+/// surface this way.
+///
+/// # Safety
+///
+/// Standard FFI contract: both `cbor` and `property_iri` must point
+/// at memory the caller owns for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn worker_decode_eigon_string_property(
+    cbor: Bytes,
+    property_iri: Bytes,
+) -> OwnedBytes {
+    let cbor_bytes = unsafe { cbor.as_slice() };
+    let iri_bytes = unsafe { property_iri.as_slice() };
+    decode_eigon_string_property(cbor_bytes, iri_bytes)
+        .map(OwnedBytes::from_vec)
+        .unwrap_or_else(OwnedBytes::empty)
+}
+
+fn decode_eigon_string_property(cbor: &[u8], property_iri: &[u8]) -> Option<Vec<u8>> {
+    let iri_str = std::str::from_utf8(property_iri).ok()?;
+    let iri = eigenius_kernel::ontology::iri::Iri::parse(iri_str).ok()?;
+    let resource = eigenius_kernel::ontology::eigon_cbor::parse_resource_lenient(cbor).ok()?;
+    let value = resource.get(&iri)?;
+    let s = value.as_str()?;
+    Some(s.as_bytes().to_vec())
+}
+
+// ---------------------------------------------------------------------------
 // Send helpers. Each builds the appropriate Response, writes the
 // frame, and clears the in-flight slot.
 // ---------------------------------------------------------------------------
@@ -826,6 +938,7 @@ mod tests {
     /// the UDS bind for in-process unit tests. Exposed only here.
     fn handle_for_test(stream: UnixStream) -> Box<WorkerHandle> {
         Box::new(WorkerHandle {
+            listener: None,
             stream,
             in_flight: None,
         })

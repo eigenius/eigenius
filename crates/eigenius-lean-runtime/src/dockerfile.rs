@@ -34,7 +34,10 @@
 //! `julia:1.12-bookworm`, so `install_runtime` does the
 //! elan-plus-toolchain install itself against a generic Debian base.
 
-use crate::conventions::{ELAN_HOME, LEAN_TOOLCHAIN_VERSION, WORKER_PROJECT_DIR};
+use crate::conventions::{
+    ELAN_HOME, LD_SO_CONF_PATH, LEAN4EXPORT_IN_IMAGE, LEAN_TOOLCHAIN_VERSION, WORKER_BIN_PATH,
+    WORKER_LIB_DIR,
+};
 use eigenius_runtime_substrate::types::DockerfileFragments;
 
 /// Path the substrate composer materialises included packages under
@@ -68,41 +71,30 @@ pub struct LeanImagePlan {
 /// Debian-slim base (the substrate composer's default) with:
 ///
 /// 1. `install_runtime`: install `elan`, pin the Lean toolchain
-///    version, install `git` + `curl` (needed to fetch Lean
-///    dependencies via `lake update`). `elan` is fetched non-
+///    version, install `git` + `curl` (needed by `lake exe
+///    lean4export` at dispatch time and for `lake build` of the
+///    vendored `lean4export` below). `elan` is fetched non-
 ///    interactively into [`crate::conventions::ELAN_HOME`].
-/// 2. `install_packages`: drive `lake update` + `lake build` against
-///    the worker's project to materialise the lockfile-pinned
-///    Lean dependencies. Reads from `lakefile.lean` +
-///    `lake-manifest.json` that the substrate composer has staged
-///    under [`crate::conventions::WORKER_PROJECT_DIR`]. Handler
-///    packages get a follow-up `lake build` each, in declaration
-///    order.
+/// 2. `install_packages`: register [`crate::conventions::WORKER_LIB_DIR`]
+///    with the glibc dynamic linker (via `/etc/ld.so.conf.d/` +
+///    `ldconfig`) so the worker binary's host-side `DT_RUNPATH`
+///    is silently bypassed by `ld.so.cache`, then `lake build` the
+///    vendored `lean4export` so first dispatch reuses the cached
+///    binary. The worker binary itself is staged via
+///    [`LanguageAssetCopy`] entries the runtime crate emits — it's
+///    pre-built on the host and COPY'd in, not built in the image.
 /// 3. `install_mirror`: empty in 20a.5a — the
 ///    [`LeanMirrorGenerator`] lands in 20a.6 and will provision a
 ///    generated EigonFFI library here.
-/// 4. `bootstrap_command`: launch the Lake worker binary as PID 1
-///    inside the container. v1 invokes `lake exe lean-runtime-worker`
-///    — the actual worker binary lands in 20a.5b; the bootstrap
-///    command is recorded here so the Dockerfile composer's spec
-///    test (which inspects the fragment shape) sees the production
-///    target from day one.
+/// 4. `bootstrap_command`: launch the pre-built worker binary as PID 1.
+///    The worker reads its UDS path from `EIGENIUS_TEST_WORKER_UDS`
+///    (set by the substrate spawner) so no CMD args are needed.
 pub fn lean_dockerfile_fragments(plan: &LeanImagePlan) -> DockerfileFragments {
     DockerfileFragments {
         install_runtime: install_runtime_lines(),
         install_packages: install_packages_lines(plan),
         install_mirror: install_mirror_lines(plan),
-        bootstrap_command: vec![
-            // Lake's `exe` form invokes a built binary declared in
-            // `lakefile.lean`. The worker project (lean/runtime-worker/)
-            // declares `lean_exe lean-runtime-worker := …`; the
-            // resulting binary handles CBOR-framed RPC over UDS.
-            "lake".to_string(),
-            "--dir".to_string(),
-            WORKER_PROJECT_DIR.to_string(),
-            "exe".to_string(),
-            "lean-runtime-worker".to_string(),
-        ],
+        bootstrap_command: vec![WORKER_BIN_PATH.to_string()],
     }
 }
 
@@ -131,13 +123,30 @@ fn install_runtime_lines() -> Vec<String> {
 }
 
 fn install_packages_lines(plan: &LeanImagePlan) -> Vec<String> {
-    // Single RUN so the lockfile resolution + worker build land in
-    // one layer; matches Julia's `Pkg.instantiate(); Pkg.precompile()`
-    // discipline. `lake update --keep-toolchain` resolves the
-    // manifest, then `lake build` precompiles the worker target.
+    // Single RUN so dynamic-linker registration + lean4export
+    // pre-build land in one layer.
+    //
+    // 1. Write `/etc/ld.so.conf.d/eigenius-lean.conf` carrying the
+    //    cdylib directory and run `ldconfig` so the dynamic linker
+    //    finds `libeigenius_lean_worker.so` when the worker binary
+    //    starts. The worker's `DT_RUNPATH` was stamped by the
+    //    host-side `cargo build` and points at the host workspace —
+    //    it doesn't resolve inside the container, but `ld.so.cache`
+    //    is consulted *before* `DT_RUNPATH` by glibc, so the cache
+    //    entry wins and the stale RUNPATH is silently bypassed.
+    //
+    // 2. `lake build` the vendored lean4export so its compiled
+    //    binary lands in this layer's cache. First-dispatch
+    //    `lake exe lean4export` from a staged `LeanProject` then
+    //    reuses the cached binary instead of recompiling
+    //    (~5-10 s saved per dispatch). The lean4export source tree
+    //    is staged at [`LEAN4EXPORT_IN_IMAGE`] by the COPY
+    //    directives the runtime crate's `ensure_image` emits as
+    //    `LanguageAssetCopy` entries.
     let mut script = format!(
-        "cd {WORKER_PROJECT_DIR} \
-            && lake update --keep-toolchain \
+        "echo {WORKER_LIB_DIR} > {LD_SO_CONF_PATH} \
+            && ldconfig \
+            && cd {LEAN4EXPORT_IN_IMAGE} \
             && lake build"
     );
     // Handler packages — each is its own Lake project under
@@ -183,13 +192,40 @@ mod tests {
     }
 
     #[test]
-    fn default_plan_runs_lake_update_and_build() {
+    fn default_plan_registers_cdylib_and_builds_lean4export() {
         let f = lean_dockerfile_fragments(&LeanImagePlan::default());
         assert_eq!(f.install_packages.len(), 1);
         let line = &f.install_packages[0];
-        assert!(line.contains("lake update"));
+        // The worker binary's stale host-side DT_RUNPATH only gets
+        // silently bypassed if ldconfig's cache carries WORKER_LIB_DIR.
+        // A regression that drops the conf file or skips ldconfig
+        // would surface as the worker failing to find its cdylib at
+        // PID-1 startup — pin both.
+        assert!(line.contains(LD_SO_CONF_PATH));
+        assert!(line.contains(WORKER_LIB_DIR));
+        assert!(line.contains("ldconfig"));
+        // lean4export still needs to be pre-built so first dispatch
+        // doesn't pay the ~5-10 s compile cost.
+        assert!(line.contains(LEAN4EXPORT_IN_IMAGE));
         assert!(line.contains("lake build"));
-        assert!(line.contains(WORKER_PROJECT_DIR));
+    }
+
+    #[test]
+    fn install_packages_registers_cdylib_before_running_lake() {
+        // ldconfig must run before any `lake build` step — Lake's
+        // own compilation pipeline doesn't pull in our cdylib, but
+        // ordering this way keeps the script readable: linker
+        // setup first, build steps after.
+        let f = lean_dockerfile_fragments(&LeanImagePlan::default());
+        let line = &f.install_packages[0];
+        let ldconfig_pos = line.find("ldconfig").expect("ldconfig in install_packages");
+        let lake_build_pos = line
+            .find("lake build")
+            .expect("lake build in install_packages");
+        assert!(
+            ldconfig_pos < lake_build_pos,
+            "ldconfig registration must precede lake build steps"
+        );
     }
 
     #[test]
@@ -221,20 +257,11 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_command_runs_lake_exe_worker() {
+    fn bootstrap_command_runs_prebuilt_worker_binary() {
         let f = lean_dockerfile_fragments(&LeanImagePlan::default());
-        // The bootstrap command is the worker entry point — pinning
-        // this assertion catches an accidental rename of the Lake
-        // executable target landing in 20a.5b.
-        assert!(
-            f.bootstrap_command.iter().any(|s| s == "lake"),
-            "bootstrap must invoke `lake`"
-        );
-        assert!(
-            f.bootstrap_command
-                .iter()
-                .any(|s| s == "lean-runtime-worker"),
-            "bootstrap must target the `lean-runtime-worker` Lake exe declared in lakefile.lean"
-        );
+        // The worker binary is COPY'd in pre-built — bootstrap
+        // invokes it directly rather than going through `lake exe`,
+        // which would require an in-image build environment.
+        assert_eq!(f.bootstrap_command, vec![WORKER_BIN_PATH.to_string()]);
     }
 }

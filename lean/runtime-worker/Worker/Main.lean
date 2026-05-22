@@ -55,15 +55,26 @@ namespace Worker.Main
 
 open Worker.Ffi
 
-/-- Read the worker's UDS path from argv or fall back to an env
-var, with a final temp-dir default for ad-hoc local testing. -/
+/-- Read the worker's UDS path. Lookup order:
+1. argv[0] — explicit override (the e2e tests use this).
+2. `EIGENIUS_TEST_WORKER_UDS` — the substrate's universal worker
+   UDS env var (set by both `LocalServiceSpawner` and
+   `DockerServiceSpawner`). Both Julia's worker and the substrate's
+   reference test worker read this same name; consistent across
+   languages.
+3. `EIGENIUS_LEAN_WORKER_UDS_PATH` — Lean-specific fallback for
+   ad-hoc invocations.
+4. A temp-dir default for the most casual local testing. -/
 def resolveUdsPath (args : List String) : IO String := do
   match args with
   | path :: _ => return path
   | [] =>
-    match ← IO.getEnv "EIGENIUS_LEAN_WORKER_UDS_PATH" with
+    match ← IO.getEnv "EIGENIUS_TEST_WORKER_UDS" with
     | some path => return path
-    | none => return "/tmp/eigenius-lean-worker.sock"
+    | none =>
+      match ← IO.getEnv "EIGENIUS_LEAN_WORKER_UDS_PATH" with
+      | some path => return path
+      | none => return "/tmp/eigenius-lean-worker.sock"
 
 /-- Convert a Lean `String` to a `ByteArray` for FFI use. Lean's
 stdlib provides `String.toUTF8` for this — alias here so the
@@ -140,19 +151,39 @@ def runLeanExport (h : WorkerHandle) : IO Unit := do
     return
 
   -- 2. Target module + constant name from input[1] + input[2].
-  -- (input[0] is the LeanProject.) Without an explicit constant
-  -- name, `lake exe lean4export <Module>` dumps the entire
-  -- imported environment — hundreds of MB for any project that
-  -- imports Lean stdlib. Requiring the caller to pin a constant
-  -- keeps the export bounded.
+  -- (input[0] is the LeanProject.) Each input ships as an
+  -- Eigon-CBOR Resource (the cross-runtime wire format the
+  -- substrate uses for every `call_method` input); we ask the
+  -- cdylib's Eigon decoder to extract the relevant string
+  -- property out of each. Without an explicit constant name,
+  -- `lake exe lean4export <Module>` dumps the entire imported
+  -- environment — hundreds of MB for any project that imports
+  -- Lean stdlib. Requiring the caller to pin a constant keeps
+  -- the export bounded.
   let inputCount ← requestInputCount h
   if inputCount < 3 then
     sendDispatchFailed h (asBytes "lean_export_failed")
       (asBytes s!"lean_export requires inputs=[LeanProject, targetModule, targetConstant]; got {inputCount} inputs")
     IO.FS.removeDirAll tempDir
     return
-  let targetModule := asString (← requestInput h 1)
-  let targetConstant := asString (← requestInput h 2)
+  let moduleCbor ← requestInput h 1
+  let moduleBytes ← decodeEigonStringProperty moduleCbor
+    (asBytes "urn:eigenius:lean:module_name")
+  if moduleBytes.size == 0 then
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes "lean_export input[1] missing `urn:eigenius:lean:module_name` string property")
+    IO.FS.removeDirAll tempDir
+    return
+  let targetModule := asString moduleBytes
+  let constantCbor ← requestInput h 2
+  let constantBytes ← decodeEigonStringProperty constantCbor
+    (asBytes "urn:eigenius:lean:constant_name")
+  if constantBytes.size == 0 then
+    sendDispatchFailed h (asBytes "lean_export_failed")
+      (asBytes "lean_export input[2] missing `urn:eigenius:lean:constant_name` string property")
+    IO.FS.removeDirAll tempDir
+    return
+  let targetConstant := asString constantBytes
 
   -- 3. Stage the project files to disk.
   let stagingError ← stageLeanProject h 0 (asBytes tempDir.toString)
@@ -256,10 +287,28 @@ partial def runLoop (h : WorkerHandle) : IO Unit := do
     )
     sendDispatchFailed h errorKind message
     runLoop h
-  else if kind == kindClosed || kind == kindTransportError then
-    -- Peer closed cleanly or transport broke. Nothing to send;
-    -- exit the loop.
-    return
+  else if kind == kindClosed then
+    -- Peer closed cleanly. The substrate opens one UDS connection
+    -- per RPC (Health and DispatchMethod are separate dials per
+    -- D26 §8.1), so an EOF here means "this RPC is done, wait for
+    -- the next." Accept the next connection on the same listener
+    -- and loop back; a non-zero acceptNext return means the
+    -- listener itself is dead and the worker should exit.
+    let rc ← acceptNext h
+    if rc != 0 then
+      IO.eprintln s!"eigenius-lean-worker: acceptNext returned {rc}; exiting"
+      return
+    runLoop h
+  else if kind == kindTransportError then
+    -- CBOR decode or I/O failure on the current connection. Same
+    -- recovery as a clean close: roll over to the next connection.
+    -- A transport-level error on one RPC shouldn't tear down the
+    -- worker — the next RPC is a fresh frame on a fresh stream.
+    let rc ← acceptNext h
+    if rc != 0 then
+      IO.eprintln s!"eigenius-lean-worker: acceptNext (after transport error) returned {rc}; exiting"
+      return
+    runLoop h
   else
     IO.eprintln s!"eigenius-lean-worker: unknown request kind {kind}; exiting"
     return

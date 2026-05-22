@@ -11,14 +11,19 @@ default = []
 
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
-# 20a.5b will need `docker-spawner` for the image-build + lean_export
-# end-to-end test. 20a.5a stays on the default feature set so the
-# crate compiles without Docker in scope; flipping it on in the next
-# sub-milestone is one line.
-eigenius-runtime-substrate = { path = "../runtime-substrate" }
+# `docker-spawner` lights up the BuildahImageBuilder + DockerServiceSpawner
+# integration the runtime drives in 20a.5b.4 — mirrors eigenius-julia.
+eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }
 serde.workspace = true
 serde_bytes = "0.11"
 serde_json.workspace = true
 ciborium = "0.2"
 sha2 = "0.10"
 thiserror.workspace = true
+
+[dev-dependencies]
+# The Docker-mode e2e test base64-encodes a tiny synthetic Lean source
+# tree into a `LeanProject` resource. Standalone dep (not workspace)
+# because it's only used in tests — matches the eigenius-lean-worker
+# crate's own dev-dependency.
+base64 = "0.22"

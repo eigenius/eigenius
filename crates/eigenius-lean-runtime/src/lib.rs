@@ -55,4 +55,4 @@ pub mod dockerfile;
 pub mod runtime;
 
 pub use dockerfile::{lean_dockerfile_fragments, LeanImagePlan};
-pub use runtime::LeanLanguageRuntime;
+pub use runtime::{build_target_constant, build_target_module, LeanLanguageRuntime};

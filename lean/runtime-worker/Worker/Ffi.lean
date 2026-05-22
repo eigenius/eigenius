@@ -81,6 +81,18 @@ clean up Lean's external-object wrapper. -/
 @[extern "ei_lean_worker_listen"]
 opaque listen (path : @& ByteArray) : IO WorkerHandle
 
+/-- Close the current substrate connection and accept the next one
+on the bound listener — same handle, same UDS. The substrate
+opens a fresh UDS connection per RPC (Health and DispatchMethod
+are separate dials in D26 §8.1 Service mode), so the worker has
+to loop back to accept after each peer close.
+
+Returns `0` on success, non-zero on accept failure. A non-zero
+return generally means the listener is dead and the worker
+should exit. -/
+@[extern "ei_lean_worker_accept_next"]
+opaque acceptNext (h : @& WorkerHandle) : IO Int32
+
 /-- Block until the next substrate request arrives, decode it
 into the worker's in-flight slot, and return the verb
 discriminator as an `Int32`.
@@ -151,6 +163,26 @@ opaque requestInputCount (h : @& WorkerHandle) : IO USize
 out of range. -/
 @[extern "ei_lean_worker_request_input"]
 opaque requestInput (h : @& WorkerHandle) (idx : USize) : IO ByteArray
+
+/-! ## Eigon-CBOR decoders
+
+The substrate ships every `call_method` input as Eigon-CBOR. The
+cdylib hosts the workspace's Eigon-CBOR codec; these externs let
+the worker pull individual property values out of those bytes
+without re-implementing CBOR on the Lean side. -/
+
+/-- Parse `cbor` as an Eigon Resource and return the UTF-8 bytes of
+its `propertyIri` string property. Empty `ByteArray` on any
+failure: the bytes don't decode as a Resource, `propertyIri` is
+malformed, the property is absent, or the value isn't a string
+(numbers / arrays / nested resources all surface as empty).
+
+The caller should treat an empty return as "input doesn't carry
+the expected property" and dispatch a `DispatchFailed` with a
+descriptive error_kind. -/
+@[extern "ei_lean_worker_decode_eigon_string_property"]
+opaque decodeEigonStringProperty (cbor : @& ByteArray)
+    (propertyIri : @& ByteArray) : IO ByteArray
 
 /-! ## Senders
 

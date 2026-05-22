@@ -134,6 +134,21 @@ pub const PROP_LEAN_UNPERMITTED_AXIOM_HARD_ERROR: &str =
 /// and the Rust dispatcher don't drift on the verb's input shape.
 pub const PROP_PROJECT_REF: &str = "urn:eigenius:lean:project_ref";
 
+/// Fully-qualified Lean module name (e.g. `TestProject.Foo`).
+/// Carried on the `target_module` input Resource to the `lean_export`
+/// worker verb — the dispatch ships every `call_method` input as an
+/// Eigon-CBOR Resource and the Lake worker reads this property to
+/// know which module to dump via `lake exe lean4export`.
+pub const PROP_MODULE_NAME: &str = "urn:eigenius:lean:module_name";
+
+/// Unqualified Lean declaration name (e.g. `foo`). Carried on the
+/// `target_constant` input Resource to the `lean_export` worker
+/// verb — pinning a single constant keeps the export bounded
+/// (otherwise `lake exe lean4export <Module>` dumps the entire
+/// transitive imported environment, which is hundreds of MB for
+/// any project importing Lean stdlib).
+pub const PROP_CONSTANT_NAME: &str = "urn:eigenius:lean:constant_name";
+
 // ---------------------------------------------------------------------------
 // Default policy values referenced from the Dockerfile + runtime.
 // ---------------------------------------------------------------------------
@@ -154,30 +169,66 @@ pub const DEFAULT_LEAN_PERMITTED_AXIOMS: &[&str] = &[
 // bootstrap and stamped by the Dockerfile composer.
 // ---------------------------------------------------------------------------
 
-/// In-image path where the worker's Lake project (lakefile.lean +
-/// lake-manifest.json + Worker/Main.lean) is copied. Bound by the
-/// Dockerfile composer (see [`crate::dockerfile`]) and read by the
-/// worker's bootstrap command (`lake exe lean-runtime-worker`).
-pub const WORKER_PROJECT_DIR: &str = "/opt/eigenius/lean-worker";
-
 /// In-image path where `elan` installs the pinned Lean toolchain.
 /// Re-exposed so the runtime can stamp PATH-equivalent diagnostics
 /// without duplicating the Dockerfile composer's view of the world.
 pub const ELAN_HOME: &str = "/opt/elan";
 
-/// Pinned Lean toolchain version baked into the image. Captured as a
-/// constant rather than a configurable input because changing the
-/// toolchain changes the image digest — a `LeanEnvironment` is the
-/// unit of pinned reproducibility, and the toolchain pin is part of
-/// that unit. Bumping this constant is a deliberate version
-/// migration (re-builds every downstream image).
+/// In-image path of the vendored `lean4export` Lake project. The
+/// Dockerfile composer COPYs `lean/runtime-worker/vendor/lean4export/`
+/// here and pre-builds it so first-invocation `lake exe lean4export`
+/// from a staged `LeanProject` doesn't re-compile lean4export
+/// (would add ~5-10 s per invocation).
 ///
-/// Aligned with [`lean/runtime-worker/lean-toolchain`](../../lean/runtime-worker/lean-toolchain).
+/// `LeanProject` resources committed to the chain for verification
+/// against this image reference this path as their `lean4export`
+/// require dep — the orchestrator's env-create flow substitutes the
+/// path into the lakefile string at commit time, mirroring how the
+/// local-mode test computes an absolute path via `workspace_root`.
+pub const LEAN4EXPORT_IN_IMAGE: &str = "/opt/lean4export";
+
+/// In-image directory holding the Rust cdylib
+/// (`libeigenius_lean_worker.so`) the worker binary links against.
+/// Registered with the glibc dynamic linker via an
+/// `ld.so.conf.d` entry + `ldconfig` so the worker binary's stale
+/// host-side `DT_RUNPATH` is silently bypassed by `ld.so.cache`.
+pub const WORKER_LIB_DIR: &str = "/opt/eigenius/lib";
+
+/// In-image directory holding the Lake-built worker binary
+/// (`lean-runtime-worker`). The worker is pre-built on the host and
+/// COPY'd into the image rather than rebuilt inside the image —
+/// rebuilding would require either templating the worker's
+/// `lakefile.lean` with image-specific link args (the cdylib lives
+/// in `target/debug/` on the host but needs `/opt/eigenius/lib/` in
+/// the image) or carrying the entire Rust toolchain into the image
+/// purely to link the worker. Pre-build sidesteps both.
+pub const WORKER_BIN_DIR: &str = "/opt/eigenius/bin";
+
+/// In-image absolute path of the pre-built worker binary. The image's
+/// `CMD` invokes this directly; the worker reads its UDS path from
+/// the `EIGENIUS_TEST_WORKER_UDS` env var the spawner sets.
+pub const WORKER_BIN_PATH: &str = "/opt/eigenius/bin/lean-runtime-worker";
+
+/// In-image path of the `ld.so.conf.d` snippet registering
+/// [`WORKER_LIB_DIR`] with the glibc dynamic linker. Written by
+/// `install_packages` and committed to `ld.so.cache` via the
+/// subsequent `ldconfig` invocation in the same RUN step.
+pub const LD_SO_CONF_PATH: &str = "/etc/ld.so.conf.d/eigenius-lean.conf";
+
+/// Pinned Lean toolchain version baked into the image. The single
+/// source of truth is
+/// [`lean/runtime-worker/lean-toolchain`](../../lean/runtime-worker/lean-toolchain) —
+/// elan reads that file natively for local Lake invocations, and
+/// this crate's `build.rs` reads the same file at compile time and
+/// emits `EIGENIUS_LEAN_TOOLCHAIN_VERSION` so the Dockerfile
+/// composer (and any other Rust-side caller) sees the identical
+/// version. Bumping the pinned toolchain is a one-line edit to
+/// `lean-toolchain` — the next `cargo build` re-stamps this const
+/// and triggers a rebuild of every downstream image.
+///
 /// The constraint is `>=4.0.0` (the `lean4export` JSON format
-/// semver 3.1.x window); we pin to the locally-installed stable
-/// release so the image-build pipeline and local-dev Lake workflow
-/// resolve identically.
-pub const LEAN_TOOLCHAIN_VERSION: &str = "leanprover/lean4:v4.29.1";
+/// semver 3.1.x window).
+pub const LEAN_TOOLCHAIN_VERSION: &str = env!("EIGENIUS_LEAN_TOOLCHAIN_VERSION");
 
 // ---------------------------------------------------------------------------
 // Timeouts.

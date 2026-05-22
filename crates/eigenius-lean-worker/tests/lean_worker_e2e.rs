@@ -272,6 +272,19 @@ fn encode_method_invocation(function_name: &str) -> serde_bytes::ByteBuf {
     serde_bytes::ByteBuf::from(buf)
 }
 
+/// Build an Eigon-CBOR-encoded embedded Resource carrying a single
+/// string property — the wire shape the Lake worker's
+/// `decodeEigonStringProperty` reads for `lean_export`'s
+/// `target_module` / `target_constant` inputs.
+fn encode_string_property_resource(property_iri: &str, value: &str) -> Vec<u8> {
+    let mut r = Resource::new_embedded();
+    r.set(
+        Iri::parse(property_iri).expect("static property IRI"),
+        Value::String(value.to_string()),
+    );
+    eigon_cbor::serialize_resource(&r)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -337,8 +350,13 @@ fn lean_worker_real_lean_export_round_trips_through_check_proof() {
     // the export bytes (≈1.6 KB; without the pinned constant
     // lean4export dumps the entire transitive env at ≈324 MB).
     let project_cbor = make_lean_project_cbor("theorem foo : True := True.intro\n");
-    let target_module = b"TestProject.Foo".to_vec();
-    let target_constant = b"foo".to_vec();
+    // Each input is an Eigon-CBOR Resource (the wire format every
+    // `call_method` input takes). The Lake worker decodes each one
+    // via its cdylib's `decodeEigonStringProperty` to read the
+    // `module_name` / `constant_name` property out of inputs 1 and 2.
+    let target_module =
+        encode_string_property_resource("urn:eigenius:lean:module_name", "TestProject.Foo");
+    let target_constant = encode_string_property_resource("urn:eigenius:lean:constant_name", "foo");
 
     let dispatch = client
         .call(&Request::DispatchMethod {
