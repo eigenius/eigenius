@@ -52,6 +52,7 @@
 
 pub mod conventions;
 pub mod dockerfile;
+pub mod mirror_gen;
 pub mod runtime;
 
 pub use dockerfile::{lean_dockerfile_fragments, LeanImagePlan};

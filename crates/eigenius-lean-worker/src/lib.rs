@@ -1388,4 +1388,150 @@ mod tests {
         assert_eq!(back, v);
         unsafe { worker_free_owned_bytes(owned) };
     }
+
+    // -----------------------------------------------------------------
+    // `worker_decode_eigon_string_property` — Eigon-CBOR decode helper
+    //
+    // The Lake worker calls this through the FFI to read string
+    // properties off `call_method` input Resources (see
+    // `runLeanExport`). The decode behaviour is the contract:
+    //
+    //   - Success: returns the UTF-8 bytes of the matched string
+    //     property.
+    //   - Any failure (decode error, property absent, value not a
+    //     string, IRI malformed): returns empty `OwnedBytes`. The
+    //     Lake worker treats empty as "missing input shape" and
+    //     dispatches a `DispatchFailed`.
+    //
+    // These tests exercise the failure paths directly so a future
+    // refactor that accidentally changes the empty-on-failure
+    // contract gets caught here instead of from a confusing
+    // dispatch-level error.
+    // -----------------------------------------------------------------
+
+    fn decode_via_internal(cbor: &[u8], iri: &[u8]) -> Option<Vec<u8>> {
+        decode_eigon_string_property(cbor, iri)
+    }
+
+    fn encoded_resource_with_string(iri: &str, value: &str) -> Vec<u8> {
+        use eigenius_kernel::ontology::eigon_cbor;
+        use eigenius_kernel::ontology::iri::Iri;
+        use eigenius_kernel::ontology::resource::{Resource, Value};
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse(iri).expect("static IRI"),
+            Value::String(value.to_string()),
+        );
+        eigon_cbor::serialize_resource(&r)
+    }
+
+    #[test]
+    fn decode_eigon_string_property_round_trips_present_string() {
+        // The happy path: caller serialises a Resource carrying a
+        // string property, decoder returns the value bytes. This
+        // pins the wire contract the Lake worker depends on for
+        // every `call_method` dispatch.
+        let cbor = encoded_resource_with_string("urn:eigenius:lean:module_name", "TestProject.Foo");
+        let bytes = decode_via_internal(&cbor, b"urn:eigenius:lean:module_name")
+            .expect("present property must decode");
+        assert_eq!(bytes, b"TestProject.Foo");
+    }
+
+    #[test]
+    fn decode_eigon_string_property_returns_none_when_property_absent() {
+        // Resource has `module_name`; caller asks for `constant_name`.
+        // No match → None → the FFI surface emits empty OwnedBytes →
+        // the Lake worker treats it as the standard "missing input"
+        // condition.
+        let cbor = encoded_resource_with_string("urn:eigenius:lean:module_name", "TestProject.Foo");
+        assert!(decode_via_internal(&cbor, b"urn:eigenius:lean:constant_name").is_none());
+    }
+
+    #[test]
+    fn decode_eigon_string_property_returns_none_for_non_string_value() {
+        // Same property name, but the value is an integer instead of
+        // a string. The decoder is intentionally strict: only
+        // `Value::String` round-trips through; arrays, integers,
+        // resource refs etc. surface as None so the worker doesn't
+        // accidentally interpret raw bytes from another shape.
+        use eigenius_kernel::ontology::eigon_cbor;
+        use eigenius_kernel::ontology::iri::Iri;
+        use eigenius_kernel::ontology::resource::{Resource, Value};
+        let mut r = Resource::new_embedded();
+        r.set(
+            Iri::parse("urn:eigenius:lean:module_name").unwrap(),
+            Value::Integer(42),
+        );
+        let cbor = eigon_cbor::serialize_resource(&r);
+        assert!(decode_via_internal(&cbor, b"urn:eigenius:lean:module_name").is_none());
+    }
+
+    #[test]
+    fn decode_eigon_string_property_returns_none_for_malformed_cbor() {
+        // Garbage bytes that aren't CBOR at all. `parse_resource_lenient`
+        // rejects → None.
+        let garbage = b"this is not CBOR";
+        assert!(decode_via_internal(garbage, b"urn:eigenius:lean:module_name").is_none());
+    }
+
+    #[test]
+    fn decode_eigon_string_property_returns_none_for_malformed_iri() {
+        // The property IRI bytes aren't a valid IRI. The decoder
+        // catches it before touching the resource — bad IRI ≠ missing
+        // property semantically, but the empty-bytes surface keeps the
+        // failure mode uniform from the worker's perspective.
+        let cbor = encoded_resource_with_string("urn:eigenius:lean:module_name", "TestProject.Foo");
+        // Spaces aren't allowed in IRIs per RFC 3987 — Iri::parse rejects.
+        assert!(decode_via_internal(&cbor, b"not a valid iri").is_none());
+    }
+
+    #[test]
+    fn decode_eigon_string_property_returns_none_for_non_utf8_iri() {
+        // The property IRI must be valid UTF-8 for `Iri::parse` to
+        // even see it; raw 0xFF bytes fail the from_utf8 check and
+        // bail before touching the CBOR.
+        let cbor = encoded_resource_with_string("urn:eigenius:lean:module_name", "TestProject.Foo");
+        let invalid_utf8 = [0xFFu8, 0xFE, 0xFD];
+        assert!(decode_via_internal(&cbor, &invalid_utf8).is_none());
+    }
+
+    #[test]
+    fn decode_eigon_string_property_ffi_returns_empty_on_failure() {
+        // Cover the FFI wrapper itself — the Option<Vec<u8>>-to-
+        // OwnedBytes conversion. A missing property must produce an
+        // *empty* OwnedBytes (not null, not garbage); the FFI's
+        // empty contract is what `accessor_lean_result` translates
+        // into a zero-length Lean ByteArray, which is what the
+        // Lake worker tests for via `bytes.size == 0`.
+        let cbor = encoded_resource_with_string("urn:eigenius:lean:module_name", "TestProject.Foo");
+        let owned = unsafe {
+            worker_decode_eigon_string_property(
+                Bytes::from_slice(&cbor),
+                Bytes::from_slice(b"urn:eigenius:lean:constant_name"),
+            )
+        };
+        assert!(
+            owned.is_empty(),
+            "missing property must surface as empty OwnedBytes"
+        );
+        unsafe { worker_free_owned_bytes(owned) };
+    }
+
+    #[test]
+    fn decode_eigon_string_property_ffi_returns_value_bytes_on_match() {
+        // Mirror of the happy path through the FFI surface — pins
+        // that the Bytes/OwnedBytes plumbing doesn't drop or
+        // corrupt the value bytes between the internal decoder and
+        // the FFI return.
+        let cbor = encoded_resource_with_string("urn:eigenius:lean:constant_name", "foo");
+        let owned = unsafe {
+            worker_decode_eigon_string_property(
+                Bytes::from_slice(&cbor),
+                Bytes::from_slice(b"urn:eigenius:lean:constant_name"),
+            )
+        };
+        let bytes = unsafe { slice::from_raw_parts(owned.ptr, owned.len) }.to_vec();
+        assert_eq!(bytes, b"foo");
+        unsafe { worker_free_owned_bytes(owned) };
+    }
 }
