@@ -186,6 +186,218 @@ impl MirrorGenerator for LeanMirrorGenerator {
 // land alongside the orchestrator-side commit pipeline).
 pub use module_assembler::{derive_mirror_iri, library_content_hash, AssembledFile};
 
+// ---------------------------------------------------------------------------
+// Chain commit — `mirror_to_resource`
+// ---------------------------------------------------------------------------
+
+/// Built-in name the generator stamps on every `LeanPackageMirror`
+/// resource's `short_name` property. Pinned because v1's package
+/// layout (D30 §2) emits a fixed-name Lake package.
+const TARGET_PACKAGE_NAME: &str = "EigeniusFFI";
+
+/// The language tag the Lean mirror commits under
+/// `runtime:language`. Matches the `LeanLanguageRuntime`'s
+/// `language_id`.
+const LANGUAGE_LEAN_TAG: &str = "lean";
+
+// Substrate-pinned property IRIs the chain commit reads. Kept
+// local to mirror Julia's pattern — diffing the two lists
+// surfaces drift between language runtimes.
+
+const CLASS_RUNTIME_PACKAGE_MIRROR: &str = "urn:eigenius:runtime:RuntimePackageMirror";
+const PROP_IS_A_IRI: &str = "urn:eigenius:core:is_a";
+const PROP_SHORT_NAME_IRI: &str = "urn:eigenius:core:short_name";
+const PROP_DESCRIPTION_IRI: &str = "urn:eigenius:core:description";
+const PROP_MIRROR_LANGUAGE: &str = "urn:eigenius:runtime:language";
+const PROP_MIRROR_SOURCE_LAYER: &str = "urn:eigenius:runtime:source_layer";
+const PROP_MIRROR_GEN_ID: &str = "urn:eigenius:runtime:generator_identifier";
+const PROP_MIRROR_GEN_VERSION: &str = "urn:eigenius:runtime:generator_version";
+const PROP_MIRROR_GEN_CONTENT_HASH: &str = "urn:eigenius:runtime:generator_content_hash";
+const PROP_MIRROR_LIB_CONTENT_HASH: &str = "urn:eigenius:runtime:library_content_hash";
+const PROP_MIRROR_LIB_CONTENT: &str = "urn:eigenius:runtime:library_content";
+const PROP_MIRRORED_CLASSES: &str = "urn:eigenius:runtime:mirrored_classes";
+const PROP_MIRROR_GENERATED_AT: &str = "urn:eigenius:runtime:generated_at";
+
+/// Commit a generated mirror output as a `LeanPackageMirror`
+/// Resource ready for chain insertion. Pins the D30 §10.2
+/// integrity chain (`generator_identifier`, `generator_version`,
+/// `generator_content_hash`, `library_content_hash`) plus the
+/// substrate's mirror-archive JSON shape that
+/// `runtime-substrate::image_build::context::MirrorMaterialization`
+/// decodes at image-build time.
+///
+/// `generated_at` is caller-supplied so deterministic tests can
+/// pin a constant timestamp; production callers stamp the wall
+/// clock. The Resource's `@id` derives from the library content
+/// hash via [`derive_mirror_iri`] — byte-identical mirrors land at
+/// the same IRI, enabling chain dedupe.
+pub fn mirror_to_resource(
+    generator: &dyn MirrorGenerator,
+    output: &MirrorGenerationOutput,
+    source_layer: &Iri,
+    generated_at: Option<&str>,
+) -> Resource {
+    use eigenius_kernel::ontology::resource::Value;
+
+    let content_hash = compute_library_content_hash(&output.library);
+    let library_json = library_content_to_json(&output.library);
+    let mirror_iri = derive_mirror_iri(&content_hash);
+
+    let mut r = Resource::new(mirror_iri);
+    r.set(
+        Iri::parse(PROP_IS_A_IRI).expect("static IRI"),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(CLASS_RUNTIME_PACKAGE_MIRROR).expect("static IRI"),
+        )]),
+    );
+    r.set(
+        Iri::parse(PROP_SHORT_NAME_IRI).expect("static IRI"),
+        Value::String(TARGET_PACKAGE_NAME.to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_DESCRIPTION_IRI).expect("static IRI"),
+        Value::String(format!(
+            "Generated Lean mirror covering {} class(es) from {}.",
+            output.mirrored_classes.len(),
+            source_layer.as_str()
+        )),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_LANGUAGE).expect("static IRI"),
+        Value::String(LANGUAGE_LEAN_TAG.to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_SOURCE_LAYER).expect("static IRI"),
+        Value::String(source_layer.as_str().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_GEN_ID).expect("static IRI"),
+        Value::String(generator.generator_identifier().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_GEN_VERSION).expect("static IRI"),
+        Value::String(generator.generator_version().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_GEN_CONTENT_HASH).expect("static IRI"),
+        Value::String(generator.generator_content_hash().to_string()),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_LIB_CONTENT_HASH).expect("static IRI"),
+        Value::String(content_hash),
+    );
+    r.set(
+        Iri::parse(PROP_MIRROR_LIB_CONTENT).expect("static IRI"),
+        Value::Json(library_json),
+    );
+    r.set(
+        Iri::parse(PROP_MIRRORED_CLASSES).expect("static IRI"),
+        Value::Array(
+            output
+                .mirrored_classes
+                .iter()
+                .cloned()
+                .map(Value::ResourceRef)
+                .collect(),
+        ),
+    );
+    if let Some(ts) = generated_at {
+        r.set(
+            Iri::parse(PROP_MIRROR_GENERATED_AT).expect("static IRI"),
+            Value::String(ts.to_string()),
+        );
+    }
+    r
+}
+
+/// SHA-256 of the library archive's bytes. For `Embedded` libraries,
+/// re-uses [`library_content_hash`] (the substrate-side
+/// length-prefixed framing); for `External` libraries, returns the
+/// caller-supplied content hash unchanged.
+fn compute_library_content_hash(library: &LibraryContent) -> String {
+    match library {
+        LibraryContent::Embedded(files) => {
+            let assembled: Vec<AssembledFile> = files
+                .iter()
+                .map(|f| AssembledFile {
+                    path: f.path.clone(),
+                    content: f.content.clone(),
+                })
+                .collect();
+            library_content_hash(&assembled)
+        }
+        LibraryContent::External { content_hash, .. } => content_hash.clone(),
+    }
+}
+
+/// Encode the library archive as the JSON shape the substrate's
+/// `MirrorMaterialization` decoder accepts. Per
+/// `runtime-substrate::mirror_generator::LibraryContent::Embedded`,
+/// the shape is `{"kind": "embedded", "files": [{"path", "content_b64"}]}`.
+/// Files are sorted by path so the JSON itself is deterministic.
+fn library_content_to_json(library: &LibraryContent) -> serde_json::Value {
+    match library {
+        LibraryContent::Embedded(files) => {
+            let mut sorted: Vec<&LibraryFile> = files.iter().collect();
+            sorted.sort_by(|a, b| a.path.cmp(&b.path));
+            let arr: Vec<serde_json::Value> = sorted
+                .into_iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "path": f.path,
+                        "content_b64": base64_encode(&f.content),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "kind": "embedded",
+                "files": arr,
+            })
+        }
+        LibraryContent::External {
+            reference,
+            content_hash,
+        } => serde_json::json!({
+            "kind": "external",
+            "reference": reference,
+            "content_hash": content_hash,
+        }),
+    }
+}
+
+/// Hand-rolled RFC 4648 §4 base64 encoder — same shape as Julia's
+/// mirror_gen carries, kept local so the crate keeps a tight dep
+/// set.
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let b = &bytes[i..i + 3];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 0x3f) as usize] as char);
+        out.push(ALPHABET[(n & 0x3f) as usize] as char);
+        i += 3;
+    }
+    let rem = bytes.len() - i;
+    if rem == 1 {
+        let n = (bytes[i] as u32) << 16;
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 0x3f) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
 /// Emit one class's full per-class block — `structure` + `CoeOut`
 /// instances + `decodeC` + `encodeC` — separated by single blank
 /// lines per D30 §6. Public so the Lake-build integration test
@@ -1699,6 +1911,246 @@ mod tests {
             }
             _ => panic!("expected Embedded libraries"),
         }
+    }
+
+    // ─── mirror_to_resource ─────────────────────────────────────────
+
+    #[test]
+    fn mirror_to_resource_carries_integrity_chain_properties() {
+        // The chain-committed `LeanPackageMirror` must carry every
+        // property the substrate's mirror-materialisation expects:
+        // language tag, generator identity triple, library content
+        // hash + archive, mirrored classes (D30 §10.2).
+        use eigenius_kernel::ontology::resource::Value;
+
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource(
+            "urn:test:Person",
+            "Person",
+            &[],
+            &["urn:test:name"],
+            &[],
+        ));
+        chain.insert(property_resource(
+            "urn:test:name",
+            "name",
+            CORE_STRING,
+            &[],
+            None,
+        ));
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:Person")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+
+        let g = LeanMirrorGenerator::new();
+        let out = g.generate(&req).expect("generate");
+        let resource = mirror_to_resource(&g, &out, &layer, Some("1970-01-01T00:00:00Z"));
+
+        for prop in [
+            PROP_IS_A_IRI,
+            PROP_SHORT_NAME_IRI,
+            PROP_DESCRIPTION_IRI,
+            PROP_MIRROR_LANGUAGE,
+            PROP_MIRROR_SOURCE_LAYER,
+            PROP_MIRROR_GEN_ID,
+            PROP_MIRROR_GEN_VERSION,
+            PROP_MIRROR_GEN_CONTENT_HASH,
+            PROP_MIRROR_LIB_CONTENT_HASH,
+            PROP_MIRROR_LIB_CONTENT,
+            PROP_MIRRORED_CLASSES,
+            PROP_MIRROR_GENERATED_AT,
+        ] {
+            assert!(
+                resource.get(&Iri::parse(prop).unwrap()).is_some(),
+                "LeanPackageMirror is missing required property `{prop}`"
+            );
+        }
+
+        // language tag = "lean".
+        assert_eq!(
+            resource
+                .get(&Iri::parse(PROP_MIRROR_LANGUAGE).unwrap())
+                .and_then(Value::as_str),
+            Some("lean")
+        );
+        // short_name pinned to "EigeniusFFI".
+        assert_eq!(
+            resource
+                .get(&Iri::parse(PROP_SHORT_NAME_IRI).unwrap())
+                .and_then(Value::as_str),
+            Some(TARGET_PACKAGE_NAME)
+        );
+        // Generator identifier triple matches the impl.
+        assert_eq!(
+            resource
+                .get(&Iri::parse(PROP_MIRROR_GEN_ID).unwrap())
+                .and_then(Value::as_str),
+            Some(GENERATOR_ID)
+        );
+        // content_hash is sha256:<64-hex>.
+        let h = resource
+            .get(&Iri::parse(PROP_MIRROR_LIB_CONTENT_HASH).unwrap())
+            .and_then(Value::as_str)
+            .unwrap();
+        assert!(h.starts_with("sha256:"));
+        assert_eq!(h.len(), "sha256:".len() + 64);
+    }
+
+    #[test]
+    fn mirror_to_resource_id_derives_from_content_hash() {
+        // Two byte-identical mirror runs produce identical IRIs —
+        // chain dedupe at the commit layer (D30 §10.3).
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource(
+            "urn:test:Person",
+            "Person",
+            &[],
+            &["urn:test:name"],
+            &[],
+        ));
+        chain.insert(property_resource(
+            "urn:test:name",
+            "name",
+            CORE_STRING,
+            &[],
+            None,
+        ));
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:Person")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let g = LeanMirrorGenerator::new();
+        let a = g.generate(&req).expect("a");
+        let b = g.generate(&req).expect("b");
+        let r_a = mirror_to_resource(&g, &a, &layer, None);
+        let r_b = mirror_to_resource(&g, &b, &layer, None);
+        assert_eq!(r_a.id(), r_b.id());
+        let id_str = r_a.id().unwrap().as_str();
+        assert!(id_str.starts_with("urn:eigenius:runtime:mirror:lean:"));
+    }
+
+    #[test]
+    fn mirror_to_resource_library_content_round_trips_through_substrate_decoder() {
+        // The library_content JSON must be the shape the
+        // substrate's mirror-materialiser decodes — `{"kind": "embedded",
+        // "files": [{"path", "content_b64"}]}`. Round-trip the JSON
+        // through base64 to confirm the bytes the materialiser
+        // would write equal the bytes the generator produced.
+        use eigenius_kernel::ontology::resource::Value;
+
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource(
+            "urn:test:Person",
+            "Person",
+            &[],
+            &["urn:test:name"],
+            &[],
+        ));
+        chain.insert(property_resource(
+            "urn:test:name",
+            "name",
+            CORE_STRING,
+            &[],
+            None,
+        ));
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:Person")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let g = LeanMirrorGenerator::new();
+        let out = g.generate(&req).expect("generate");
+        let resource = mirror_to_resource(&g, &out, &layer, None);
+
+        let lib_value = resource
+            .get(&Iri::parse(PROP_MIRROR_LIB_CONTENT).unwrap())
+            .expect("library_content present");
+        let lib_json = match lib_value {
+            Value::Json(v) => v,
+            other => panic!("library_content must be JSON, got {other:?}"),
+        };
+        assert_eq!(lib_json["kind"], "embedded");
+        let files = lib_json["files"].as_array().expect("files array");
+        // The four-file package: lakefile, lean-toolchain, Basic, Mirror.
+        // Sorted by path → EigeniusFFI/Basic.lean, EigeniusFFI/Mirror.lean,
+        // lakefile.lean, lean-toolchain.
+        let paths: Vec<&str> = files
+            .iter()
+            .filter_map(|f| f.get("path").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "EigeniusFFI/Basic.lean",
+                "EigeniusFFI/Mirror.lean",
+                "lakefile.lean",
+                "lean-toolchain",
+            ]
+        );
+        // base64 of "lakefile.lean"'s content must decode to the
+        // assembler's lakefile output bytes. Sanity-check the round-trip.
+        let lakefile_entry = files
+            .iter()
+            .find(|f| f.get("path").and_then(|v| v.as_str()) == Some("lakefile.lean"))
+            .expect("lakefile entry");
+        let b64 = lakefile_entry["content_b64"].as_str().expect("b64");
+        // Round-trip: decode the b64 back to bytes and confirm it
+        // includes the pinned package directive.
+        let decoded = base64_decode_for_test(b64);
+        let decoded_str = std::str::from_utf8(&decoded).expect("utf8");
+        assert!(decoded_str.contains("package EigeniusFFI"));
+    }
+
+    /// Hand-rolled base64 decoder for tests — symmetric inverse of
+    /// the `base64_encode` helper in the module body.
+    fn base64_decode_for_test(s: &str) -> Vec<u8> {
+        fn v(c: u8) -> Option<u8> {
+            match c {
+                b'A'..=b'Z' => Some(c - b'A'),
+                b'a'..=b'z' => Some(c - b'a' + 26),
+                b'0'..=b'9' => Some(c - b'0' + 52),
+                b'+' => Some(62),
+                b'/' => Some(63),
+                _ => None,
+            }
+        }
+        let bytes: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+        let mut i = 0;
+        while i + 4 <= bytes.len() {
+            let pad = bytes[i..i + 4].iter().filter(|&&b| b == b'=').count();
+            let v0 = v(bytes[i]).unwrap_or(0);
+            let v1 = v(bytes[i + 1]).unwrap_or(0);
+            let v2 = if bytes[i + 2] == b'=' {
+                0
+            } else {
+                v(bytes[i + 2]).unwrap_or(0)
+            };
+            let v3 = if bytes[i + 3] == b'=' {
+                0
+            } else {
+                v(bytes[i + 3]).unwrap_or(0)
+            };
+            let n = ((v0 as u32) << 18) | ((v1 as u32) << 12) | ((v2 as u32) << 6) | (v3 as u32);
+            out.push((n >> 16) as u8);
+            if pad < 2 {
+                out.push((n >> 8) as u8);
+            }
+            if pad < 1 {
+                out.push(n as u8);
+            }
+            i += 4;
+        }
+        out
     }
 
     #[test]

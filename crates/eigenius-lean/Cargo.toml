@@ -30,6 +30,12 @@ eigenius-kernel = { path = "../../kernel" }
 thiserror.workspace = true
 serde_json.workspace = true
 
+# D28 §5.5 anchor-consistency check recomputes the
+# `library_content_hash` over a mirror's embedded archive and
+# compares to the declared value. Matches the substrate-side
+# digest in `eigenius-lean-runtime::mirror_gen::library_content_hash`.
+sha2 = "0.10"
+
 # `check_proof` takes `&[u8]` but nanoda's `Config::to_export_file`
 # only accepts a `PathBuf`. Until upstream takes a `Reader`, we stage
 # the bytes into a tempfile per call — that hop lives in the public
