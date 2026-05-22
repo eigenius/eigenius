@@ -123,8 +123,16 @@ fn mirror_config(path: &std::path::Path) -> Config {
         use_stdin: false,
         permitted_axioms: None,
         unpermitted_axiom_hard_error: false,
-        nat_extension: false,
-        string_extension: false,
+        // Allow Nat + String literal extensions in the parsed
+        // environment. The translator only walks the resulting Expr
+        // trees (it never runs nanoda's type-checker), and modern
+        // Lean stdlib uses these literal forms freely — even small
+        // numeric proofs pull `0` / `1` Nat literals through the
+        // `OfScientific` / `OfNat` instance chain. Disabling them
+        // would force the translator to reject perfectly ordinary
+        // export bytes.
+        nat_extension: true,
+        string_extension: true,
         pp_declars: None,
         pp_options: PpOptions::default(),
         unknown_pp_declar_hard_error: false,

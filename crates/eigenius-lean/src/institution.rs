@@ -276,8 +276,19 @@ impl Institution for LeanInstitution {
 /// resulting `Verdict` into a chain-shaped `Verdict::Holds | Fails`
 /// resource.
 ///
-/// Empty axiom allowlist for v1 — `LeanEnvironment.permitted_axioms`
-/// integration arrives with the authoring runtime (20a.5).
+/// Default axiom allowlist when the `LeanProofTerm` doesn't anchor
+/// to a `LeanEnvironment` that pins one. Matches D28 §7.1 — Lean's
+/// four trust-the-compiler axioms. Even a trivial proof through
+/// modern Lean stdlib pulls `Classical.choice` (via `Subtype`'s
+/// projection helpers), so empty-allowlist is a footgun for any
+/// real proof; the canonical default catches that case.
+const DEFAULT_LEAN_AXIOMS: &[&str] = &[
+    "propext",
+    "Classical.choice",
+    "Quot.sound",
+    "Lean.trustCompiler",
+];
+
 fn do_proof_check(
     input: &Resource,
     ctx: &ExecutionContext,
@@ -294,7 +305,17 @@ fn do_proof_check(
         })?
         .to_string();
 
-    let verdict = check_proof(bytes.as_bytes(), &target_name, &[])
+    // v1 uses the canonical default allowlist (D28 §7.1). When the
+    // `LeanProofTerm` carries an `environment_iri` (D28 §6.3) the
+    // institution will read that env's `lean_permitted_axioms`
+    // property and use it instead — that wiring lands when the
+    // authoring runtime's env-resource flow into the kernel
+    // commit pipeline (currently the env IRI isn't on the chain).
+    let permitted_axioms: Vec<String> = DEFAULT_LEAN_AXIOMS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    let verdict = check_proof(bytes.as_bytes(), &target_name, &permitted_axioms)
         .map_err(|e| InstitutionError::ComputationFailed(format!("nanoda check_proof: {e}")))?;
 
     // Check 1 (proof validity) decided — short-circuit on nanoda

@@ -95,8 +95,17 @@ pub fn check_proof(
         use_stdin: false,
         permitted_axioms: Some(permitted_axioms.to_vec()),
         unpermitted_axiom_hard_error: true,
-        nat_extension: false,
-        string_extension: false,
+        // Allow Nat + String literal extensions during checking.
+        // Any proof against modern Lean stdlib pulls these through
+        // the `OfNat` / `OfScientific` instance chain even when the
+        // user's source mentions no literals directly (e.g. `0.0`
+        // expands to `OfScientific.ofScientific 0 …`). The
+        // checker's literal-extension config is a parser knob, not
+        // an axiom-acceptance one — turning it on doesn't widen the
+        // soundness surface; it's just nanoda's way of saying "the
+        // proof carries a primitive literal you didn't pre-declare".
+        nat_extension: true,
+        string_extension: true,
         // The parser uses `pp_declars` + `unknown_pp_declar_hard_error`
         // as a precondition check: if the export doesn't declare
         // `target_name`, `to_export_file` returns Err. We never
