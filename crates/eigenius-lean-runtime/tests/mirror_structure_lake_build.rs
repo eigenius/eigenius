@@ -133,12 +133,15 @@ namespace TestMirror
 export EigeniusLeanCommon (
   EigeniusUnion
   EigenValidationError
-  validateMinValue
-  validateMaxValue
+  validateMinValueFloat
+  validateMaxValueFloat
+  validateMinValueInt
+  validateMaxValueInt
   validateMinLength
   validateMaxLength
   validatePattern
   validateFormat
+  validateOptional
   decodeRequiredPrim
   decodeOptionalPrim
   decodeRequiredResource
@@ -344,6 +347,60 @@ fn primitive_property(iri_str: &str, short: &str, data_type: &str) -> Resource {
     r
 }
 
+/// Build a property resource carrying numeric `min_value` /
+/// `max_value` constraints.
+fn ranged_property(
+    iri_str: &str,
+    short: &str,
+    data_type: &str,
+    min_value: Option<f64>,
+    max_value: Option<f64>,
+) -> Resource {
+    let mut r = primitive_property(iri_str, short, data_type);
+    if let Some(v) = min_value {
+        r.set(iri("urn:eigenius:core:min_value"), Value::Float(v));
+    }
+    if let Some(v) = max_value {
+        r.set(iri("urn:eigenius:core:max_value"), Value::Float(v));
+    }
+    r
+}
+
+/// Build a property resource carrying string-length + pattern +
+/// format constraints — exercises every D30 §9.2 runtime check.
+fn string_constrained_property(
+    iri_str: &str,
+    short: &str,
+    min_length: Option<u64>,
+    max_length: Option<u64>,
+    pattern: Option<&str>,
+    format_iri: Option<&str>,
+) -> Resource {
+    let mut r = primitive_property(iri_str, short, "urn:eigenius:core:string");
+    if let Some(n) = min_length {
+        r.set(
+            iri("urn:eigenius:core:min_length"),
+            Value::Integer(n as i64),
+        );
+    }
+    if let Some(n) = max_length {
+        r.set(
+            iri("urn:eigenius:core:max_length"),
+            Value::Integer(n as i64),
+        );
+    }
+    if let Some(p) = pattern {
+        r.set(
+            iri("urn:eigenius:core:pattern"),
+            Value::String(p.to_string()),
+        );
+    }
+    if let Some(f) = format_iri {
+        r.set(iri("urn:eigenius:core:format"), Value::ResourceRef(iri(f)));
+    }
+    r
+}
+
 fn classref_property(iri_str: &str, short: &str, class_iri: &str) -> Resource {
     let mut r = Resource::new(iri(iri_str));
     r.set(
@@ -409,6 +466,54 @@ fn full_pipeline_primitive_class_compiles_under_lake() {
     let work = fresh_workdir("e2e-primitive");
     write_lake_project(&work, &body);
     run_lake_build(&work).expect("primitive end-to-end mirror must lake-build");
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[test]
+#[ignore = "requires lake + a built EigeniusLeanCommon olean cache"]
+fn full_pipeline_constraints_compile_under_lake() {
+    if !is_lake_available() {
+        eprintln!("lake unavailable — skipping");
+        return;
+    }
+    // Single class with one constrained field of each kind covered
+    // by D30 §9: Float with min/max range, Int with range, String
+    // with length + pattern + format. The emitter's validator
+    // chain has to compose every kind in the spec-mandated order
+    // and the generated source has to lake-build against the real
+    // EigeniusLeanCommon helpers.
+    let mut chain = InMemoryChain::new();
+    chain.insert(class_resource(
+        "urn:test:Sample",
+        "Sample",
+        &["urn:test:weight", "urn:test:count", "urn:test:name"],
+    ));
+    chain.insert(ranged_property(
+        "urn:test:weight",
+        "weight",
+        "urn:eigenius:core:float",
+        Some(0.0),
+        Some(100.0),
+    ));
+    chain.insert(ranged_property(
+        "urn:test:count",
+        "count",
+        "urn:eigenius:core:integer",
+        Some(1.0),
+        Some(10.0),
+    ));
+    chain.insert(string_constrained_property(
+        "urn:test:name",
+        "name",
+        Some(1),
+        Some(64),
+        Some("^[A-Za-z][A-Za-z0-9_-]*$"),
+        Some("urn:eigenius:core:formats:iri"),
+    ));
+    let body = emit_mirror_body(&chain, &[iri("urn:test:Sample")]);
+    let work = fresh_workdir("e2e-constraints");
+    write_lake_project(&work, &body);
+    run_lake_build(&work).expect("constraints end-to-end mirror must lake-build");
     let _ = std::fs::remove_dir_all(&work);
 }
 

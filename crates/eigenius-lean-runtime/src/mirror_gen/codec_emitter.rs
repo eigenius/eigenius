@@ -56,9 +56,11 @@
 //! the registry at the file footer.
 
 use super::structure_emitter::{render_lean_type, ClassNameLookup};
-use super::{ClassDecl, LeanType, PropertyDecl};
+use super::{ClassDecl, LeanType, PropertyConstraints, PropertyDecl};
 use eigenius_kernel::ontology::iri::Iri;
 use std::collections::BTreeMap;
+
+const CORE_FORMATS_PREFIX: &str = "urn:eigenius:core:formats:";
 
 /// Emit the per-class codec block: blank line, `decodeC`, blank
 /// line, `encodeC`, trailing newline. Caller (the module
@@ -209,6 +211,13 @@ fn push_required_field_decode(
             ));
         }
     }
+    // D30 §9 — chain validator calls in the spec-mandated order
+    // after the raw value lands. Each successive `let fname ←` shadows
+    // the prior binding, so the final `fname` carries the validated
+    // value through to the constructor.
+    for call in constraint_calls(class_name, prop, fname) {
+        out.push_str(&format!("  let {fname} ← {call}\n"));
+    }
 }
 
 fn push_optional_field_decode(
@@ -225,6 +234,13 @@ fn push_optional_field_decode(
             out.push_str(&format!(
                 "  let {fname} ← decodeOptionalPrim (α := {ty}) j \"{iri}\"\n"
             ));
+            // Same constraint chain as required, lifted through
+            // `validateOptional` so `none` short-circuits.
+            for call in constraint_calls(class_name, prop, "v") {
+                out.push_str(&format!(
+                    "  let {fname} ← validateOptional {fname} (fun v => {call})\n"
+                ));
+            }
         }
         LeanType::ClassRef(class_iri) => {
             let cls = lookup_or_panic(lookup, class_iri);
@@ -509,6 +525,142 @@ fn lookup_or_panic(lookup: &ClassNameLookup, iri: &Iri) -> String {
 fn parent_bind_name(parent_name: &str) -> String {
     format!("parent_{parent_name}")
 }
+
+// ---------------------------------------------------------------------------
+// D30 §9 — constraint validator chain rendering
+// ---------------------------------------------------------------------------
+
+/// Render the chain of validator calls a constraint-carrying field
+/// needs after its raw decode. `value_var` is the Lean variable
+/// name the validator reads from — the field's own short_name for
+/// required fields, `"v"` for optional fields where the call
+/// appears inside a `validateOptional … fun v => …` lambda.
+///
+/// Order matches D30 §9.1: min-value, max-value, min-length,
+/// max-length. §9.2's pattern and format land after the length
+/// checks (string-shape narrows progressively); each validator
+/// passes its input through unchanged on success, so chaining is
+/// just successive `let`-binds in the decoder body.
+///
+/// Returns an empty vec when the property has no constraints.
+fn constraint_calls(class_name: &str, prop: &PropertyDecl, value_var: &str) -> Vec<String> {
+    let mut calls = Vec::new();
+    let constraints = &prop.constraints;
+    if constraints.is_empty() {
+        return calls;
+    }
+    let field_ctx = format!("\"{class_name}.{}\"", prop.short_name);
+
+    // Numeric checks — dispatch on the field's static type so the
+    // validator's parameter type matches (D30 §9.3: integer fields
+    // use the Int variant, not a Float cast).
+    if let Some(lo) = constraints.min_value {
+        match &prop.lean_type {
+            LeanType::Float => calls.push(format!(
+                "validateMinValueFloat {field_ctx} {value_var} {}",
+                lean_float_literal(lo)
+            )),
+            LeanType::Int => calls.push(format!(
+                "validateMinValueInt {field_ctx} {value_var} {}",
+                lo as i64
+            )),
+            _ => {} // min_value on a non-numeric field is meaningless; chain-side validator catches.
+        }
+    }
+    if let Some(hi) = constraints.max_value {
+        match &prop.lean_type {
+            LeanType::Float => calls.push(format!(
+                "validateMaxValueFloat {field_ctx} {value_var} {}",
+                lean_float_literal(hi)
+            )),
+            LeanType::Int => calls.push(format!(
+                "validateMaxValueInt {field_ctx} {value_var} {}",
+                hi as i64
+            )),
+            _ => {}
+        }
+    }
+
+    // Length + pattern + format — string-shaped (D30 §9.6 codepoint
+    // length discipline). Apply only when the field's static type
+    // is `String`; for lists we'd need a list-length validator
+    // (deferred to v1.x — chain-side already enforces).
+    if matches!(prop.lean_type, LeanType::String) {
+        if let Some(lo) = constraints.min_length {
+            calls.push(format!("validateMinLength {field_ctx} {value_var} {lo}"));
+        }
+        if let Some(hi) = constraints.max_length {
+            calls.push(format!("validateMaxLength {field_ctx} {value_var} {hi}"));
+        }
+        if let Some(pattern) = &constraints.pattern {
+            calls.push(format!(
+                "validatePattern {field_ctx} {value_var} \"{}\"",
+                lean_string_escape(pattern)
+            ));
+        }
+        if let Some(format_iri) = &constraints.format {
+            calls.push(format!(
+                "validateFormat {field_ctx} {value_var} {}",
+                lean_format_symbol(format_iri)
+            ));
+        }
+    }
+
+    calls
+}
+
+/// Render an `f64` as a Lean `Float` literal (D30 §9.3 — `0` → `0.0`,
+/// `100.0` stays `100.0`, `0.5` stays `0.5`). Rust's `{:?}` on
+/// `f64` produces a decimal representation with at least one
+/// fractional digit, which matches Lean's `Float` literal syntax.
+fn lean_float_literal(v: f64) -> String {
+    format!("{v:?}")
+}
+
+/// Escape a chain-side pattern string for Lean's double-quoted
+/// string literal syntax. Backslashes are doubled, double quotes
+/// are escaped, control characters use Lean's escape sequences.
+///
+/// D30 §9.4 also pinned `\$` ("because Lean's string macros
+/// recognise `$` for antiquotation"); we deliberately diverge from
+/// that point because Lean 4's *plain* string-literal lexer (which
+/// is what the emitter targets) rejects `\$` as an invalid escape.
+/// `$` only has antiquotation semantics inside the `s!"..."`
+/// interpolation form, which the emitter doesn't use. Spec
+/// erratum filed for D30 v1.x.
+fn lean_string_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Render a `core:format` IRI as a Lean `Name`-typed argument to
+/// `validateFormat` (D30 §9.5).
+/// `urn:eigenius:core:formats:<name>` → `` `<name> `` (a Name
+/// literal); any other IRI → `Name.mkSimple "<full IRI>"`. The
+/// validator's parameter type is `Name`, so both forms unify.
+fn lean_format_symbol(format_iri: &str) -> String {
+    if let Some(stripped) = format_iri.strip_prefix(CORE_FORMATS_PREFIX) {
+        // Bare-name literal — Lean's `` ` `` syntax produces a `Name`
+        // whose ToString prints just `<name>`.
+        format!("`{stripped}")
+    } else {
+        format!("(Name.mkSimple \"{format_iri}\")")
+    }
+}
+
+#[allow(dead_code)]
+fn _drop_unused_property_constraints_warning(_pc: &PropertyConstraints) {}
 
 #[cfg(test)]
 mod tests {
@@ -832,6 +984,228 @@ mod tests {
         assert!(out.contains("match c.contributor with"));
         assert!(out.contains("| EigeniusUnion.inl x => encodeApple x"));
         assert!(out.contains("| EigeniusUnion.inr (EigeniusUnion.inl x) => encodeZebra x"));
+    }
+
+    // ─── Constraint validator chain (D30 §9) ───────────────────────
+
+    fn prop_with_constraints(short: &str, ty: LeanType, c: PropertyConstraints) -> PropertyDecl {
+        let mut p = prop(short, ty);
+        p.constraints = c;
+        p
+    }
+
+    #[test]
+    fn constraint_emits_no_calls_for_unconstrained_property() {
+        let c = cls(
+            "Person",
+            vec![],
+            vec![prop("name", LeanType::String)],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        // No validator calls land in the decoder body — only the
+        // raw decode.
+        assert!(!out.contains("validateMinValue"));
+        assert!(!out.contains("validateMaxValue"));
+        assert!(!out.contains("validateMinLength"));
+        assert!(!out.contains("validateMaxLength"));
+        assert!(!out.contains("validatePattern"));
+        assert!(!out.contains("validateFormat"));
+    }
+
+    #[test]
+    fn constraint_min_value_on_float_emits_float_validator_with_decimal_literal() {
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "weight",
+                LeanType::Float,
+                PropertyConstraints {
+                    min_value: Some(0.0),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        // D30 §9.3: `0` rendered as `0.0` (Float literal).
+        assert!(out.contains("let weight ← validateMinValueFloat \"Sample.weight\" weight 0.0"));
+    }
+
+    #[test]
+    fn constraint_min_max_value_on_int_emits_int_validators_with_int_literals() {
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "count",
+                LeanType::Int,
+                PropertyConstraints {
+                    min_value: Some(1.0),
+                    max_value: Some(100.0),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        // Int dispatch — bypasses the Float-cast pattern.
+        assert!(out.contains("validateMinValueInt \"Sample.count\" count 1"));
+        assert!(out.contains("validateMaxValueInt \"Sample.count\" count 100"));
+    }
+
+    #[test]
+    fn constraint_order_is_min_value_max_value_min_length_max_length_pattern_format() {
+        // D30 §9.1 fixes the emit order. min_value applies only to
+        // numeric types and length checks only to strings; this
+        // test uses a String field to cover the length/pattern/format
+        // chain. Numeric ordering is covered in the previous test.
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "name",
+                LeanType::String,
+                PropertyConstraints {
+                    min_length: Some(1),
+                    max_length: Some(100),
+                    pattern: Some("[A-Z][a-z]+".to_string()),
+                    format: Some("urn:eigenius:core:formats:iri".to_string()),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        let min_len = out.find("validateMinLength").expect("min_length");
+        let max_len = out.find("validateMaxLength").expect("max_length");
+        let pat = out.find("validatePattern").expect("pattern");
+        let fmt = out.find("validateFormat").expect("format");
+        assert!(
+            min_len < max_len && max_len < pat && pat < fmt,
+            "D30 §9: length → pattern → format ordering not preserved"
+        );
+    }
+
+    #[test]
+    fn constraint_pattern_string_is_lean_escaped() {
+        // Original pattern: `^foo\\".*$\n`
+        //   - Rust source `\\\\` → one runtime `\\` (two chars: backslash, backslash)
+        //     wait, that's `\\` (two chars in source = two backslashes in runtime).
+        //     Actually Rust `"\\\\"` = 2 backslashes at runtime.
+        //   - Then `"` (one quote)
+        //   - Then `.*$\n` (literal chars + newline)
+        // After Lean escape:
+        //   - `\\` runtime → `\\\\` in source string (each `\` doubled to `\\`)
+        //   - `"` → `\"`
+        //   - `$` → `$` (NOT escaped — see comment in `lean_string_escape`)
+        //   - `\n` (LF) → `\n` (escape sequence)
+        let pattern = "^foo\\\\\".*$\n";
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "name",
+                LeanType::String,
+                PropertyConstraints {
+                    pattern: Some(pattern.to_string()),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        // The expected Lean source literal is `"^foo\\\\\".*$\n"` —
+        // four backslash-chars-in-source for two runtime backslashes,
+        // `\"` for the quote, plain `$`, `\n` for LF.
+        let expected_in_source = "\"^foo\\\\\\\\\\\".*$\\n\"";
+        assert!(
+            out.contains(expected_in_source),
+            "expected escape sequence not found.\nexpected literal: {expected_in_source}\ngot:\n{out}"
+        );
+    }
+
+    #[test]
+    fn constraint_format_with_core_prefix_renders_bare_name_literal() {
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "url",
+                LeanType::String,
+                PropertyConstraints {
+                    format: Some("urn:eigenius:core:formats:iri".to_string()),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        // D30 §9.5: known core format → backtick Name literal.
+        assert!(out.contains("validateFormat \"Sample.url\" url `iri"));
+    }
+
+    #[test]
+    fn constraint_format_outside_core_prefix_renders_name_mksimple() {
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "ext",
+                LeanType::String,
+                PropertyConstraints {
+                    format: Some("urn:project:custom:phone".to_string()),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        // D30 §9.5: other IRI → `Name.mkSimple "<full IRI>"`.
+        assert!(out.contains(
+            "validateFormat \"Sample.ext\" ext (Name.mkSimple \"urn:project:custom:phone\")"
+        ));
+    }
+
+    #[test]
+    fn constraint_on_optional_field_lifts_through_validate_optional() {
+        // Recommended (Option-typed) field with a constraint —
+        // each validator wraps in `validateOptional fname (fun v => …)`
+        // so `none` short-circuits.
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![],
+            vec![prop_with_constraints(
+                "weight",
+                LeanType::Float,
+                PropertyConstraints {
+                    min_value: Some(0.0),
+                    ..Default::default()
+                },
+            )],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        assert!(out.contains(
+            "let weight ← validateOptional weight (fun v => validateMinValueFloat \"Sample.weight\" v 0.0)"
+        ));
     }
 
     #[test]

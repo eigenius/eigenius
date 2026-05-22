@@ -63,32 +63,52 @@ matches what `decodeC` in the generated mirror chains over with
 `>>= fun _ => …`. -/
 abbrev EigenValidation (α : Type) := Except EigenValidationError α
 
-/-- `core:min_value` refinement check. Returns the value unchanged on
-success; raises on out-of-range. NaN comparison follows IEEE 754 —
-`NaN < bound` and `NaN ≥ bound` are both false, so NaN fails
-*both* min and max checks. (D30 §9.6.) -/
-def validateMinValue (field : String) (v : Float) (lo : Float) : EigenValidation Float :=
-  if v ≥ lo then .ok v
-  else .error { field, reason := s!"value {v} below min_value {lo}" }
+/-- `core:min_value` check for `Float`-typed fields. Returns the
+value unchanged on success; raises on out-of-range. NaN comparison
+follows IEEE 754 — `NaN < bound` and `NaN ≥ bound` are both false,
+so NaN fails *both* min and max checks. (D30 §9.6.)
 
-/-- `core:max_value` refinement check. Same NaN policy as
-`validateMinValue`. -/
-def validateMaxValue (field : String) (v : Float) (hi : Float) : EigenValidation Float :=
+D30 §9.1 envisions a refinement-typed surface (`{ x : Float // x ≥ lo }`);
+v1 lifts the check to the decoder body only, so the field's static
+type stays `Float`. Refinement-typed fields land with the D30 v1.x
+emitter pass. -/
+def validateMinValueFloat (field : String) (v : Float) (lo : Float) : Except String Float :=
+  if v ≥ lo then .ok v
+  else .error s!"{field}: value {v} below min_value {lo}"
+
+/-- `core:max_value` check for `Float`-typed fields. Same NaN
+policy as [`validateMinValueFloat`]. -/
+def validateMaxValueFloat (field : String) (v : Float) (hi : Float) : Except String Float :=
   if v ≤ hi then .ok v
-  else .error { field, reason := s!"value {v} above max_value {hi}" }
+  else .error s!"{field}: value {v} above max_value {hi}"
+
+/-- `core:min_value` for `Int`-typed fields. D30 §9.3 says integer
+range constraints "fall back to Float-cast comparison", but lifting
+through Float can lose precision for large Ints — v1 ships a
+type-preserving Int comparator instead. The chain-side validator
+that ran *before* the value reached the mirror has the same
+discipline. -/
+def validateMinValueInt (field : String) (v : Int) (lo : Int) : Except String Int :=
+  if v ≥ lo then .ok v
+  else .error s!"{field}: value {v} below min_value {lo}"
+
+/-- `core:max_value` for `Int`-typed fields. -/
+def validateMaxValueInt (field : String) (v : Int) (hi : Int) : Except String Int :=
+  if v ≤ hi then .ok v
+  else .error s!"{field}: value {v} above max_value {hi}"
 
 /-- `core:min_length` check for strings. Lean's `String.length` counts
 codepoints, not bytes — chain authors targeting byte-length must use
 `core:pattern` instead (D30 §9.6). -/
-def validateMinLength (field : String) (s : String) (lo : Nat) : EigenValidation String :=
+def validateMinLength (field : String) (s : String) (lo : Nat) : Except String String :=
   if s.length ≥ lo then .ok s
-  else .error { field, reason := s!"length {s.length} below min_length {lo}" }
+  else .error s!"{field}: length {s.length} below min_length {lo}"
 
 /-- `core:max_length` check for strings. Same codepoint-not-byte
 discipline as `validateMinLength`. -/
-def validateMaxLength (field : String) (s : String) (hi : Nat) : EigenValidation String :=
+def validateMaxLength (field : String) (s : String) (hi : Nat) : Except String String :=
   if s.length ≤ hi then .ok s
-  else .error { field, reason := s!"length {s.length} above max_length {hi}" }
+  else .error s!"{field}: length {s.length} above max_length {hi}"
 
 /-- `core:pattern` check — fully-anchored regex match.
 
@@ -108,7 +128,7 @@ verification surface, it only loses one layer of defence-in-depth.
 A failing-closed alternative would reject everything (spec-correct,
 useless in practice); a feature-flag would let downstream
 deployments opt in once they pull in a regex dep. v2 settles this. -/
-def validatePattern (_field : String) (s : String) (_pattern : String) : EigenValidation String :=
+def validatePattern (_field : String) (s : String) (_pattern : String) : Except String String :=
   -- TODO(D30 v1.x): wire to a real anchored-match implementation
   -- once the spec settles on a regex library dependency.
   .ok s
@@ -126,10 +146,22 @@ of a downstream proof depends on it.
 The kernel-side validator already runs every chain-side
 constraint before a value lands in a mirror, so a permissive
 Lean-side check is defence-in-depth only, not the soundness floor. -/
-def validateFormat (_field : String) (s : String) (_format : Name) : EigenValidation String :=
+def validateFormat (_field : String) (s : String) (_format : Name) : Except String String :=
   -- TODO(D30 v1.x): per-format check arms (`date`, `datetime`,
   -- `time`, `iri`, `uuid`, `regex`).
   .ok s
+
+/-- Optional-field validator combinator. Threads a per-field
+validator through `Option`-typed values: `none` passes through
+unchanged; `some v` invokes the validator on the inner value and
+re-wraps. Used by the codec emitter to apply numeric/length/
+pattern/format checks to recommended fields without duplicating
+the `match` boilerplate at every call site. -/
+def validateOptional {α : Type} (opt : Option α) (validator : α → Except String α) :
+    Except String (Option α) :=
+  match opt with
+  | some v => (validator v).map some
+  | none => .ok none
 
 /-- N-ary polymorphic-class field type — the Lean translation of an
 Eigon property with `class_types` cardinality ≥ 2 (D30 §4.3).
