@@ -142,6 +142,8 @@ export EigeniusLeanCommon (
   validatePattern
   validateFormat
   validateOptional
+  withRefinement
+  withOptionalRefinement
   decodeRequiredPrim
   decodeOptionalPrim
   decodeRequiredResource

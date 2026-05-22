@@ -55,7 +55,7 @@
 //! produce the per-class block, and the module assembler stitches
 //! the registry at the file footer.
 
-use super::structure_emitter::{render_lean_type, ClassNameLookup};
+use super::structure_emitter::{refinement_predicate, render_lean_type, ClassNameLookup};
 use super::{ClassDecl, LeanType, PropertyConstraints, PropertyDecl};
 use eigenius_kernel::ontology::iri::Iri;
 use std::collections::BTreeMap;
@@ -211,12 +211,30 @@ fn push_required_field_decode(
             ));
         }
     }
-    // D30 §9 — chain validator calls in the spec-mandated order
-    // after the raw value lands. Each successive `let fname ←` shadows
-    // the prior binding, so the final `fname` carries the validated
-    // value through to the constructor.
-    for call in constraint_calls(class_name, prop, fname) {
-        out.push_str(&format!("  let {fname} ← {call}\n"));
+    // D30 §9 constraint chain.
+    //
+    // - §9.1: min/max value/length constraints lift into a
+    //   refinement-typed subtype (`{ x : T // pred }`). The
+    //   decoder constructs the subtype value via `withRefinement`
+    //   in a single bind that shadows the raw value.
+    // - §9.2: pattern + format constraints stay runtime-only.
+    //   On refined fields they read `field.val`; on unrefined
+    //   string fields they shadow the binding (validator returns
+    //   the value unchanged on success).
+    if let Some(pred) = refinement_predicate(prop) {
+        let err_msg = refinement_error_message(class_name, prop);
+        out.push_str(&format!(
+            "  let {fname} ← withRefinement (fun x => {pred}) {fname} \"{err_msg}\"\n"
+        ));
+        for call in runtime_check_calls(class_name, prop, &format!("{fname}.val")) {
+            // Side-effect: discard the validator's String return;
+            // the refined `fname` already has the correct type.
+            out.push_str(&format!("  let _ ← {call}\n"));
+        }
+    } else {
+        for call in runtime_check_calls(class_name, prop, fname) {
+            out.push_str(&format!("  let {fname} ← {call}\n"));
+        }
     }
 }
 
@@ -234,12 +252,28 @@ fn push_optional_field_decode(
             out.push_str(&format!(
                 "  let {fname} ← decodeOptionalPrim (α := {ty}) j \"{iri}\"\n"
             ));
-            // Same constraint chain as required, lifted through
-            // `validateOptional` so `none` short-circuits.
-            for call in constraint_calls(class_name, prop, "v") {
+            if let Some(pred) = refinement_predicate(prop) {
+                let err_msg = refinement_error_message(class_name, prop);
                 out.push_str(&format!(
-                    "  let {fname} ← validateOptional {fname} (fun v => {call})\n"
+                    "  let {fname} ← withOptionalRefinement (fun x => {pred}) {fname} \"{err_msg}\"\n"
                 ));
+                // Runtime checks on the inner `.val`, threaded
+                // through `validateOptional` so `none` short-circuits.
+                // Wrap each call in `(call).map (fun _ => v)` to
+                // preserve the refined inner type.
+                for call in runtime_check_calls(class_name, prop, "v.val") {
+                    out.push_str(&format!(
+                        "  let {fname} ← validateOptional {fname} (fun v => ({call}).map (fun _ => v))\n"
+                    ));
+                }
+            } else {
+                // Unrefined: validators that return the value
+                // chain naturally through `validateOptional`.
+                for call in runtime_check_calls(class_name, prop, "v") {
+                    out.push_str(&format!(
+                        "  let {fname} ← validateOptional {fname} (fun v => {call})\n"
+                    ));
+                }
             }
         }
         LeanType::ClassRef(class_iri) => {
@@ -393,14 +427,26 @@ fn push_field_encode(
 ) {
     let fname = &prop.short_name;
     let iri = prop.property_iri.as_str();
-    let value_expr = encode_value_expr(&format!("c.{fname}"), &prop.lean_type, lookup);
+    // D30 §9.1 — refinement-typed fields carry their underlying
+    // value at `.val`. The encoder unwraps before handing to
+    // `Lean.toJson` (or the per-class encoder); the structural
+    // refinement on a `Subtype` doesn't have a `ToJson` instance,
+    // and even if it did the JSON form would echo the bare value.
+    let refined = refinement_predicate(prop).is_some();
 
     if optional {
+        let inner_var = if refined { "v.val" } else { "v" };
         out.push_str(&format!(
             "    ++ (match c.{fname} with | some v => [(\"{iri}\", {})] | none => [])\n",
-            encode_value_expr("v", &prop.lean_type, lookup)
+            encode_value_expr(inner_var, &prop.lean_type, lookup)
         ));
     } else {
+        let var = if refined {
+            format!("c.{fname}.val")
+        } else {
+            format!("c.{fname}")
+        };
+        let value_expr = encode_value_expr(&var, &prop.lean_type, lookup);
         out.push_str(&format!("    ++ [(\"{iri}\", {value_expr})]\n"));
     }
 }
@@ -530,68 +576,26 @@ fn parent_bind_name(parent_name: &str) -> String {
 // D30 §9 — constraint validator chain rendering
 // ---------------------------------------------------------------------------
 
-/// Render the chain of validator calls a constraint-carrying field
-/// needs after its raw decode. `value_var` is the Lean variable
-/// name the validator reads from — the field's own short_name for
-/// required fields, `"v"` for optional fields where the call
-/// appears inside a `validateOptional … fun v => …` lambda.
+/// Render the chain of *runtime* validator calls (D30 §9.2 —
+/// pattern + format) a constrained field needs after its raw decode
+/// (and refinement-typed lift, when applicable). `value_var` is the
+/// Lean variable name the validator reads from — the field's own
+/// short_name for unrefined required fields, `"v"` for optional
+/// fields inside a `validateOptional … fun v => …` lambda, or
+/// `"<fname>.val"` / `"v.val"` for the refined cases.
 ///
-/// Order matches D30 §9.1: min-value, max-value, min-length,
-/// max-length. §9.2's pattern and format land after the length
-/// checks (string-shape narrows progressively); each validator
-/// passes its input through unchanged on success, so chaining is
-/// just successive `let`-binds in the decoder body.
+/// Numeric and length constraints (D30 §9.1) do **not** appear here —
+/// they're lifted into the refinement subtype via
+/// `refinement_predicate` + `withRefinement`. Order within this
+/// chain: pattern, then format.
 ///
-/// Returns an empty vec when the property has no constraints.
-fn constraint_calls(class_name: &str, prop: &PropertyDecl, value_var: &str) -> Vec<String> {
+/// Returns an empty vec when the property has no runtime checks.
+fn runtime_check_calls(class_name: &str, prop: &PropertyDecl, value_var: &str) -> Vec<String> {
     let mut calls = Vec::new();
     let constraints = &prop.constraints;
-    if constraints.is_empty() {
-        return calls;
-    }
     let field_ctx = format!("\"{class_name}.{}\"", prop.short_name);
 
-    // Numeric checks — dispatch on the field's static type so the
-    // validator's parameter type matches (D30 §9.3: integer fields
-    // use the Int variant, not a Float cast).
-    if let Some(lo) = constraints.min_value {
-        match &prop.lean_type {
-            LeanType::Float => calls.push(format!(
-                "validateMinValueFloat {field_ctx} {value_var} {}",
-                lean_float_literal(lo)
-            )),
-            LeanType::Int => calls.push(format!(
-                "validateMinValueInt {field_ctx} {value_var} {}",
-                lo as i64
-            )),
-            _ => {} // min_value on a non-numeric field is meaningless; chain-side validator catches.
-        }
-    }
-    if let Some(hi) = constraints.max_value {
-        match &prop.lean_type {
-            LeanType::Float => calls.push(format!(
-                "validateMaxValueFloat {field_ctx} {value_var} {}",
-                lean_float_literal(hi)
-            )),
-            LeanType::Int => calls.push(format!(
-                "validateMaxValueInt {field_ctx} {value_var} {}",
-                hi as i64
-            )),
-            _ => {}
-        }
-    }
-
-    // Length + pattern + format — string-shaped (D30 §9.6 codepoint
-    // length discipline). Apply only when the field's static type
-    // is `String`; for lists we'd need a list-length validator
-    // (deferred to v1.x — chain-side already enforces).
     if matches!(prop.lean_type, LeanType::String) {
-        if let Some(lo) = constraints.min_length {
-            calls.push(format!("validateMinLength {field_ctx} {value_var} {lo}"));
-        }
-        if let Some(hi) = constraints.max_length {
-            calls.push(format!("validateMaxLength {field_ctx} {value_var} {hi}"));
-        }
         if let Some(pattern) = &constraints.pattern {
             calls.push(format!(
                 "validatePattern {field_ctx} {value_var} \"{}\"",
@@ -607,6 +611,59 @@ fn constraint_calls(class_name: &str, prop: &PropertyDecl, value_var: &str) -> V
     }
 
     calls
+}
+
+/// Build the error message string for a `withRefinement` call.
+/// Describes the failing constraint surface for the decoded value
+/// so production diagnostics point at the chain-side cause without
+/// re-reading the spec. Format: `<ClassName>.<fieldName>: out of
+/// range [lo, hi] / wrong length / …` — matches the D30 §8.1
+/// per-field error shape.
+fn refinement_error_message(class_name: &str, prop: &PropertyDecl) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let c = &prop.constraints;
+    let is_numeric = matches!(prop.lean_type, LeanType::Float | LeanType::Int);
+    if is_numeric && (c.min_value.is_some() || c.max_value.is_some()) {
+        let lo = c
+            .min_value
+            .map(|v| {
+                if matches!(prop.lean_type, LeanType::Int) {
+                    format!("{}", v as i64)
+                } else {
+                    lean_float_literal(v)
+                }
+            })
+            .unwrap_or_else(|| "-∞".to_string());
+        let hi = c
+            .max_value
+            .map(|v| {
+                if matches!(prop.lean_type, LeanType::Int) {
+                    format!("{}", v as i64)
+                } else {
+                    lean_float_literal(v)
+                }
+            })
+            .unwrap_or_else(|| "∞".to_string());
+        parts.push(format!("out of range [{lo}, {hi}]"));
+    }
+    let is_string = matches!(prop.lean_type, LeanType::String);
+    if is_string && (c.min_length.is_some() || c.max_length.is_some()) {
+        let lo = c
+            .min_length
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "0".to_string());
+        let hi = c
+            .max_length
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "∞".to_string());
+        parts.push(format!("length out of range [{lo}, {hi}]"));
+    }
+    let body = if parts.is_empty() {
+        "refinement failed".to_string()
+    } else {
+        parts.join("; ")
+    };
+    format!("{class_name}.{}: {body}", prop.short_name)
 }
 
 /// Render an `f64` as a Lean `Float` literal (D30 §9.3 — `0` → `0.0`,
@@ -1016,7 +1073,10 @@ mod tests {
     }
 
     #[test]
-    fn constraint_min_value_on_float_emits_float_validator_with_decimal_literal() {
+    fn constraint_min_value_on_float_lifts_to_refinement_predicate() {
+        // D30 §9.1: min_value on Float becomes a refinement-typed
+        // subtype. The decoder swaps the validateMinValueFloat
+        // chain for a single `withRefinement` call.
         let c = cls(
             "Sample",
             vec![],
@@ -1033,12 +1093,23 @@ mod tests {
         let decls = decls_for(vec![c.clone()]);
         let lookup = lookup_for(&decls);
         let out = emit_codec_block(&c, &decls, &lookup);
-        // D30 §9.3: `0` rendered as `0.0` (Float literal).
-        assert!(out.contains("let weight ← validateMinValueFloat \"Sample.weight\" weight 0.0"));
+        // The validator-chain form must NOT appear — it's been
+        // replaced by the refinement-typed subtype.
+        assert!(
+            !out.contains("validateMinValueFloat"),
+            "min_value should land as a refinement predicate, not a runtime validator"
+        );
+        // The withRefinement call carries the predicate.
+        assert!(out.contains(
+            "let weight ← withRefinement (fun x => 0.0 ≤ x) weight \"Sample.weight: out of range [0.0, ∞]\""
+        ));
     }
 
     #[test]
-    fn constraint_min_max_value_on_int_emits_int_validators_with_int_literals() {
+    fn constraint_min_max_value_on_int_lifts_to_int_refinement() {
+        // Int range constraints lift to `{ x : Int // lo ≤ x ∧ x ≤ hi }`.
+        // D30 §9.3 — no Float-cast through Int; the predicate uses
+        // Int comparisons natively.
         let c = cls(
             "Sample",
             vec![],
@@ -1056,17 +1127,20 @@ mod tests {
         let decls = decls_for(vec![c.clone()]);
         let lookup = lookup_for(&decls);
         let out = emit_codec_block(&c, &decls, &lookup);
-        // Int dispatch — bypasses the Float-cast pattern.
-        assert!(out.contains("validateMinValueInt \"Sample.count\" count 1"));
-        assert!(out.contains("validateMaxValueInt \"Sample.count\" count 100"));
+        assert!(
+            !out.contains("validateMinValueInt") && !out.contains("validateMaxValueInt"),
+            "Int range constraints should be refinement predicates"
+        );
+        assert!(out.contains(
+            "let count ← withRefinement (fun x => 1 ≤ x ∧ x ≤ 100) count \"Sample.count: out of range [1, 100]\""
+        ));
     }
 
     #[test]
-    fn constraint_order_is_min_value_max_value_min_length_max_length_pattern_format() {
-        // D30 §9.1 fixes the emit order. min_value applies only to
-        // numeric types and length checks only to strings; this
-        // test uses a String field to cover the length/pattern/format
-        // chain. Numeric ordering is covered in the previous test.
+    fn constraint_string_length_lifts_to_refinement_pattern_format_stay_runtime() {
+        // D30 §9.1: min/max_length lift to refinement predicates
+        // on `x.length`. §9.2: pattern + format stay runtime, run
+        // after the refinement on `field.val`.
         let c = cls(
             "Sample",
             vec![],
@@ -1086,14 +1160,76 @@ mod tests {
         let decls = decls_for(vec![c.clone()]);
         let lookup = lookup_for(&decls);
         let out = emit_codec_block(&c, &decls, &lookup);
-        let min_len = out.find("validateMinLength").expect("min_length");
-        let max_len = out.find("validateMaxLength").expect("max_length");
+        // Length constraints lifted into the refinement.
+        assert!(
+            !out.contains("validateMinLength") && !out.contains("validateMaxLength"),
+            "length constraints should be refinement predicates"
+        );
+        assert!(out.contains(
+            "let name ← withRefinement (fun x => 1 ≤ x.length ∧ x.length ≤ 100) name \"Sample.name: length out of range [1, 100]\""
+        ));
+        // Pattern + format still runtime — on .val of the refined value.
+        assert!(out.contains("let _ ← validatePattern \"Sample.name\" name.val "));
+        assert!(out.contains("let _ ← validateFormat \"Sample.name\" name.val `iri"));
         let pat = out.find("validatePattern").expect("pattern");
         let fmt = out.find("validateFormat").expect("format");
+        let refine = out.find("withRefinement").expect("refinement comes first");
         assert!(
-            min_len < max_len && max_len < pat && pat < fmt,
-            "D30 §9: length → pattern → format ordering not preserved"
+            refine < pat && pat < fmt,
+            "ordering: refinement → pattern → format"
         );
+    }
+
+    #[test]
+    fn constraint_pattern_only_without_refinement_stays_runtime_validator() {
+        // Pattern with no length/range constraint → no refinement
+        // lift; the runtime validator stays as a shadowing bind.
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "tag",
+                LeanType::String,
+                PropertyConstraints {
+                    pattern: Some("[a-z]+".to_string()),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        assert!(!out.contains("withRefinement"), "no refinement applies");
+        // Pattern shadows the binding rather than reading `.val`.
+        assert!(out.contains("let tag ← validatePattern \"Sample.tag\" tag "));
+    }
+
+    #[test]
+    fn constraint_refinement_renders_field_type_as_subtype() {
+        // The structure declaration must wrap the field type in
+        // `{ x : T // pred }` whenever a refinement applies.
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![prop_with_constraints(
+                "weight",
+                LeanType::Float,
+                PropertyConstraints {
+                    min_value: Some(0.0),
+                    max_value: Some(100.0),
+                    ..Default::default()
+                },
+            )],
+            vec![],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = crate::mirror_gen::emit_class_block(&c, &decls, &lookup);
+        // structure field: refinement subtype.
+        assert!(out.contains("  weight : { x : Float // 0.0 ≤ x ∧ x ≤ 100.0 }\n"));
+        // encoder: project .val.
+        assert!(out.contains(", Lean.toJson c.weight.val"));
     }
 
     #[test]
@@ -1183,10 +1319,10 @@ mod tests {
     }
 
     #[test]
-    fn constraint_on_optional_field_lifts_through_validate_optional() {
-        // Recommended (Option-typed) field with a constraint —
-        // each validator wraps in `validateOptional fname (fun v => …)`
-        // so `none` short-circuits.
+    fn constraint_on_optional_refined_field_uses_with_optional_refinement() {
+        // Recommended (Option-typed) field with a refinable
+        // constraint — `withOptionalRefinement` short-circuits on
+        // `none` and constructs the refined subtype on `some`.
         let c = cls(
             "Sample",
             vec![],
@@ -1204,7 +1340,34 @@ mod tests {
         let lookup = lookup_for(&decls);
         let out = emit_codec_block(&c, &decls, &lookup);
         assert!(out.contains(
-            "let weight ← validateOptional weight (fun v => validateMinValueFloat \"Sample.weight\" v 0.0)"
+            "let weight ← withOptionalRefinement (fun x => 0.0 ≤ x) weight \"Sample.weight: out of range [0.0, ∞]\""
+        ));
+    }
+
+    #[test]
+    fn constraint_on_optional_unrefined_field_uses_validate_optional() {
+        // Pattern with no refinement — falls back to the original
+        // `validateOptional fname (fun v => validatePattern …)`
+        // form so `none` short-circuits and the value type stays
+        // bare `String`.
+        let c = cls(
+            "Sample",
+            vec![],
+            vec![],
+            vec![prop_with_constraints(
+                "tag",
+                LeanType::String,
+                PropertyConstraints {
+                    pattern: Some("[a-z]+".to_string()),
+                    ..Default::default()
+                },
+            )],
+        );
+        let decls = decls_for(vec![c.clone()]);
+        let lookup = lookup_for(&decls);
+        let out = emit_codec_block(&c, &decls, &lookup);
+        assert!(out.contains(
+            "let tag ← validateOptional tag (fun v => validatePattern \"Sample.tag\" v "
         ));
     }
 

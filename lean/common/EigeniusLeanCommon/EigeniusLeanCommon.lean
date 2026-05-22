@@ -163,6 +163,33 @@ def validateOptional {α : Type} (opt : Option α) (validator : α → Except St
   | some v => (validator v).map some
   | none => .ok none
 
+/-- Construct a refinement-typed subtype value from a raw value +
+predicate (D30 §9.1). Returns the subtype `{ x : α // p x }` on
+success or a flat-string error on failure. The predicate is
+reconstructed at the call site as a Lean lambda; `DecidablePred p`
+instance search resolves automatically for the predicates the
+emitter generates — Lean's stdlib has `Decidable` instances on
+`≤` / `≥` for `Float`, `Int`, and `Nat`, plus `And.decidable` for
+conjunctions.
+
+The emitter calls this once per refinement-constrained field
+instead of chaining `validateMinValueFloat` / `validateMaxValueFloat`
+/ `validateMinLength` / `validateMaxLength`. Pattern + format
+checks (D30 §9.2) remain runtime-only and run on `.val` after
+the refinement is established. -/
+def withRefinement {α : Type} (p : α → Prop) [DecidablePred p]
+    (v : α) (errMsg : String) : Except String { x : α // p x } :=
+  if h : p v then .ok ⟨v, h⟩ else .error errMsg
+
+/-- Optional-field variant of [`withRefinement`]. `none` passes
+through; `some v` runs the refinement check and re-wraps. -/
+def withOptionalRefinement {α : Type} (p : α → Prop) [DecidablePred p]
+    (v : Option α) (errMsg : String) :
+    Except String (Option { x : α // p x }) :=
+  match v with
+  | some x => (withRefinement p x errMsg).map some
+  | none => .ok none
+
 /-- N-ary polymorphic-class field type — the Lean translation of an
 Eigon property with `class_types` cardinality ≥ 2 (D30 §4.3).
 

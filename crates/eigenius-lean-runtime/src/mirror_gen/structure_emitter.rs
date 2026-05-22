@@ -45,6 +45,68 @@ use super::{ClassDecl, LeanType, PropertyDecl};
 use eigenius_kernel::ontology::iri::Iri;
 use std::collections::BTreeMap;
 
+/// Render the Lean predicate body of a refinement subtype for a
+/// constraint-carrying property — `0.0 ≤ x ∧ x ≤ 100.0` shape.
+/// Returns `None` when the property has no constraints that lift
+/// to refinements (D30 §9.1: min/max value for numerics,
+/// min/max length for strings; pattern/format stay runtime-only
+/// per §9.2).
+///
+/// Predicate ordering follows D30 §9.1: min-value, max-value,
+/// min-length, max-length. Pinned in the rendered output so the
+/// emitter's structure-decl and codec-decl render in lockstep.
+pub(crate) fn refinement_predicate(prop: &PropertyDecl) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let c = &prop.constraints;
+    if let Some(lo) = c.min_value {
+        match &prop.lean_type {
+            LeanType::Float => parts.push(format!("{} ≤ x", float_literal(lo))),
+            LeanType::Int => parts.push(format!("{} ≤ x", lo as i64)),
+            _ => {}
+        }
+    }
+    if let Some(hi) = c.max_value {
+        match &prop.lean_type {
+            LeanType::Float => parts.push(format!("x ≤ {}", float_literal(hi))),
+            LeanType::Int => parts.push(format!("x ≤ {}", hi as i64)),
+            _ => {}
+        }
+    }
+    if matches!(prop.lean_type, LeanType::String) {
+        if let Some(lo) = c.min_length {
+            parts.push(format!("{lo} ≤ x.length"));
+        }
+        if let Some(hi) = c.max_length {
+            parts.push(format!("x.length ≤ {hi}"));
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" ∧ "))
+    }
+}
+
+/// Render the field type for `prop`. Wraps in `{ x : T // pred }`
+/// when a refinement applies; otherwise returns the bare
+/// `render_lean_type` output.
+pub(crate) fn render_field_type(prop: &PropertyDecl, lookup: &ClassNameLookup) -> String {
+    let base = render_lean_type(&prop.lean_type, lookup);
+    match refinement_predicate(prop) {
+        Some(pred) => format!("{{ x : {base} // {pred} }}"),
+        None => base,
+    }
+}
+
+/// Float-literal renderer shared between emitters — duplicates the
+/// `lean_float_literal` in `codec_emitter` so each module is
+/// self-contained against `PropertyDecl` access patterns. Rust's
+/// `{:?}` on `f64` keeps a fractional digit so `0` renders as
+/// `0.0` (Lean Float literal syntax, D30 §9.3).
+fn float_literal(v: f64) -> String {
+    format!("{v:?}")
+}
+
 /// Lookup from class IRI to Lean `short_name`. Built by the
 /// generator once and threaded into every emitter step so type
 /// rendering doesn't re-walk the resolution layer.
@@ -161,9 +223,13 @@ fn push_field(out: &mut String, prop: &PropertyDecl, lookup: &ClassNameLookup, o
     out.push_str("  ");
     out.push_str(&prop.short_name);
     out.push_str(" : ");
-    let ty = render_lean_type(&prop.lean_type, lookup);
+    // D30 §9.1 — refinement-constrained fields render as a subtype
+    // (`{ x : T // pred }`) at the structure-declaration level.
+    // `render_field_type` returns the bare type when no refinement
+    // applies, so unconstrained fields keep the v1 shape.
+    let ty = render_field_type(prop, lookup);
     if optional {
-        out.push_str(&format!("Option {} := none", ty));
+        out.push_str(&format!("Option ({}) := none", ty));
     } else {
         out.push_str(&ty);
     }
@@ -324,7 +390,10 @@ mod tests {
         );
         let lookup = lookup_for(&[&c]);
         let out = emit_structure_block(&c, &lookup);
-        assert!(out.contains("  nickname : Option String := none\n"));
+        // Parens around the inner type so compound forms like
+        // `List String` / `{ x : T // pred }` parse correctly when
+        // composed with `Option …`.
+        assert!(out.contains("  nickname : Option (String) := none\n"));
     }
 
     #[test]
