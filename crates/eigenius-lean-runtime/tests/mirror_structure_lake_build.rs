@@ -47,10 +47,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_lean_runtime::mirror_gen::{
-    build_decls, class_name_lookup, emit_class_block, topological_emit_order,
+    build_decls, class_name_lookup, emit_class_block, topological_emit_order, LeanMirrorGenerator,
 };
 use eigenius_runtime_substrate::chain::ChainAccessor;
-use eigenius_runtime_substrate::mirror_generator::MirrorGenerationRequest;
+use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, MirrorGenerator};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -517,6 +517,137 @@ fn full_pipeline_constraints_compile_under_lake() {
     write_lake_project(&work, &body);
     run_lake_build(&work).expect("constraints end-to-end mirror must lake-build");
     let _ = std::fs::remove_dir_all(&work);
+}
+
+/// Drive the full `LeanMirrorGenerator::generate` pipeline against
+/// a synthetic chain, materialise the four emitted files (lakefile,
+/// toolchain, Basic, Mirror) verbatim into a workdir, and run
+/// `lake build`. Differs from `emit_mirror_body`-based tests in
+/// that:
+///  - the lakefile is the assembler's output, not the test's hand
+///    -written shell (so the path-vs-git require form, the
+///    `EigeniusLeanCommon` tag pin, etc. all flow from
+///    `module_assembler`);
+///  - we rewrite the `require EigeniusLeanCommon from git "…" @ "…"`
+///    line to `from "<local path>"` so the Lake build doesn't try to
+///    fetch the package over the network. The path substitution is
+///    test-fixture only — production builds resolve the git ref
+///    against a registry mirror baked into the env image.
+fn run_full_pipeline_under_lake(chain: &InMemoryChain, seed: &[Iri], label: &str) {
+    let layer = iri("urn:test:layer");
+    let request = MirrorGenerationRequest {
+        source_layer: &layer,
+        seed_classes: seed,
+        chain,
+    };
+    let g = LeanMirrorGenerator::new();
+    let output = g.generate(&request).expect("generate");
+
+    let work = fresh_workdir(label);
+
+    // The assembler emits the lakefile with a git-resolved require;
+    // rewrite it to a path-resolved require for the offline test
+    // run. The substitution preserves all other bytes so the rest
+    // of the integrity chain (library_content_hash) still matches
+    // what production would produce.
+    let common_path = eigenius_lean_common_dir();
+    let common_str = common_path
+        .to_str()
+        .expect("EigeniusLeanCommon path must be UTF-8");
+    let path_require = format!("require EigeniusLeanCommon from \"{common_str}\"\n  ");
+
+    let eigenius_runtime_substrate::mirror_generator::LibraryContent::Embedded(files) =
+        &output.library
+    else {
+        panic!("expected Embedded library");
+    };
+    for file in files {
+        let dest = work.join(&file.path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
+        let mut bytes = file.content.clone();
+        if file.path == "lakefile.lean" {
+            // Replace the git require with a local-path require so
+            // the test doesn't depend on a Git remote.
+            let src = String::from_utf8(bytes).expect("utf8 lakefile");
+            let rewritten = src.replace(
+                "require EigeniusLeanCommon from git\n  \"https://github.com/eigenius/EigeniusLeanCommon.git\" @ \"v0.1.0\"\n",
+                &path_require,
+            );
+            bytes = rewritten.into_bytes();
+        }
+        std::fs::write(&dest, bytes).expect("write file");
+    }
+
+    run_lake_build(&work).expect("full-pipeline mirror must lake-build");
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[test]
+#[ignore = "requires lake + a built EigeniusLeanCommon olean cache"]
+fn full_pipeline_generate_lake_builds_primitive_class() {
+    if !is_lake_available() {
+        eprintln!("lake unavailable — skipping");
+        return;
+    }
+    // Smallest end-to-end run through `LeanMirrorGenerator::generate`.
+    // Verifies the four-file package assembled by `module_assembler`
+    // is itself a buildable Lake project.
+    let mut chain = InMemoryChain::new();
+    chain.insert(class_resource(
+        "urn:test:Person",
+        "Person",
+        &["urn:test:name"],
+    ));
+    chain.insert(primitive_property(
+        "urn:test:name",
+        "name",
+        "urn:eigenius:core:string",
+    ));
+    run_full_pipeline_under_lake(&chain, &[iri("urn:test:Person")], "e2e-generate-primitive");
+}
+
+#[test]
+#[ignore = "requires lake + a built EigeniusLeanCommon olean cache"]
+fn full_pipeline_generate_lake_builds_with_refinement_constraints() {
+    if !is_lake_available() {
+        eprintln!("lake unavailable — skipping");
+        return;
+    }
+    // End-to-end with refinement-typed fields — confirms the
+    // assembler stitches the structure emitter's `{ x : T // pred }`
+    // forms + the codec emitter's `withRefinement` calls into a
+    // package Lake actually accepts.
+    let mut chain = InMemoryChain::new();
+    chain.insert(class_resource(
+        "urn:test:Sample",
+        "Sample",
+        &["urn:test:weight", "urn:test:count", "urn:test:name"],
+    ));
+    chain.insert(ranged_property(
+        "urn:test:weight",
+        "weight",
+        "urn:eigenius:core:float",
+        Some(0.0),
+        Some(100.0),
+    ));
+    chain.insert(ranged_property(
+        "urn:test:count",
+        "count",
+        "urn:eigenius:core:integer",
+        Some(1.0),
+        Some(10.0),
+    ));
+    chain.insert(string_constrained_property(
+        "urn:test:name",
+        "name",
+        Some(1),
+        Some(64),
+        Some("^[A-Za-z][A-Za-z0-9_-]*$"),
+        Some("urn:eigenius:core:formats:iri"),
+    ));
+    run_full_pipeline_under_lake(&chain, &[iri("urn:test:Sample")], "e2e-generate-refinement");
 }
 
 #[test]

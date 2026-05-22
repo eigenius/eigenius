@@ -70,7 +70,121 @@ use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, Mirr
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod codec_emitter;
+pub(crate) mod module_assembler;
 pub(crate) mod structure_emitter;
+
+use eigenius_runtime_substrate::mirror_generator::{
+    LibraryContent, LibraryFile, MirrorGenerationOutput, MirrorGenerator,
+};
+use std::sync::OnceLock;
+
+/// Stable identifier the mirror generator stamps on every emitted
+/// `LeanPackageMirror` resource (D30 §10.2). Pinned across versions —
+/// the identifier names the generator, not its release.
+const GENERATOR_ID: &str = "eigon-ffi-gen";
+
+/// Production `LanguageRuntime`-driven entry point for the Lean
+/// mirror generator. Stateless across calls — every `generate()`
+/// re-walks the supplied chain — but the per-instance content
+/// hash is cached once at construction so successive `generate()`s
+/// avoid the SHA-256 recompute.
+pub struct LeanMirrorGenerator {
+    version: &'static str,
+    content_hash: OnceLock<String>,
+}
+
+impl LeanMirrorGenerator {
+    pub fn new() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION"),
+            content_hash: OnceLock::new(),
+        }
+    }
+
+    /// Compute (and cache) the v1 placeholder generator-content
+    /// hash. D30 §10.2: until we wire up a real binary hash, derive
+    /// the value from `(generator_id, version)` so the
+    /// integrity-chain shape matches the ontology's pinned regex
+    /// (`^sha256:[a-f0-9]{64}$`).
+    fn compute_content_hash(&self) -> &str {
+        self.content_hash.get_or_init(|| {
+            use sha2::Digest;
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(GENERATOR_ID.as_bytes());
+            hasher.update(b":");
+            hasher.update(self.version.as_bytes());
+            format!("sha256:{:x}", hasher.finalize())
+        })
+    }
+}
+
+impl Default for LeanMirrorGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MirrorGenerator for LeanMirrorGenerator {
+    fn generator_identifier(&self) -> &str {
+        GENERATOR_ID
+    }
+
+    fn generator_version(&self) -> &str {
+        self.version
+    }
+
+    fn generator_content_hash(&self) -> &str {
+        self.compute_content_hash()
+    }
+
+    fn generate(
+        &self,
+        request: &MirrorGenerationRequest,
+    ) -> Result<MirrorGenerationOutput, MirrorGeneratorError> {
+        // Pipeline: closure walk → resolution → topological sort →
+        // module assembly. Each stage's failure surface is its own;
+        // the trait impl is just plumbing.
+        let decls = build_decls(request)?;
+        let lookup = class_name_lookup(&decls);
+        let order = topological_emit_order(&decls)?;
+        let files = module_assembler::assemble_mirror_package(
+            &decls,
+            &order,
+            &lookup,
+            request.source_layer,
+            crate::conventions::LEAN_TOOLCHAIN_VERSION,
+        );
+
+        // Convert local `AssembledFile`s to the substrate-typed
+        // `LibraryFile`s at the API boundary. The two structs are
+        // path+content twins; the duplication keeps the assembler
+        // module testable without dragging in the substrate's mirror
+        // type at unit-test time.
+        let library_files: Vec<LibraryFile> = files
+            .into_iter()
+            .map(|f| LibraryFile {
+                path: f.path,
+                content: f.content,
+            })
+            .collect();
+
+        // D30 §10.1: mirrored_classes sorted by IRI for determinism.
+        // `topological_emit_order` returns ordering for emission;
+        // the resource-level list is independently sorted.
+        let mut mirrored: Vec<Iri> = decls.keys().cloned().collect();
+        mirrored.sort();
+
+        Ok(MirrorGenerationOutput {
+            mirrored_classes: mirrored,
+            library: LibraryContent::Embedded(library_files),
+        })
+    }
+}
+
+// Re-export the integrity helpers + identifier for callers that need
+// to round-trip a mirror through the chain (mirror_to_resource etc.
+// land alongside the orchestrator-side commit pipeline).
+pub use module_assembler::{derive_mirror_iri, library_content_hash, AssembledFile};
 
 /// Emit one class's full per-class block — `structure` + `CoeOut`
 /// instances + `decodeC` + `encodeC` — separated by single blank
@@ -1458,6 +1572,152 @@ mod tests {
                 );
             }
             other => panic!("expected Union, got {other:?}"),
+        }
+    }
+
+    // ─── LeanMirrorGenerator trait impl ─────────────────────────────
+
+    use eigenius_runtime_substrate::mirror_generator::{LibraryContent, MirrorGenerator};
+
+    #[test]
+    fn generator_identifier_is_eigon_ffi_gen() {
+        let g = LeanMirrorGenerator::new();
+        assert_eq!(g.generator_identifier(), GENERATOR_ID);
+        assert_eq!(g.generator_identifier(), "eigon-ffi-gen");
+    }
+
+    #[test]
+    fn generator_version_tracks_crate_version() {
+        let g = LeanMirrorGenerator::new();
+        assert_eq!(g.generator_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn generator_content_hash_matches_pinned_shape_and_caches() {
+        let g = LeanMirrorGenerator::new();
+        let h1 = g.generator_content_hash().to_string();
+        assert!(h1.starts_with("sha256:"));
+        assert_eq!(h1.len(), "sha256:".len() + 64);
+        // Second call returns the cached value (OnceLock).
+        let h2 = g.generator_content_hash();
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn generate_returns_embedded_library_with_four_files() {
+        // Smallest non-trivial pipeline run: one class with one
+        // primitive field. Exercises closure → resolve → topological
+        // sort → assembly + the full file-list shape.
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource(
+            "urn:test:Person",
+            "Person",
+            &[],
+            &["urn:test:name"],
+            &[],
+        ));
+        chain.insert(property_resource(
+            "urn:test:name",
+            "name",
+            CORE_STRING,
+            &[],
+            None,
+        ));
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:Person")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+
+        let g = LeanMirrorGenerator::new();
+        let out = g.generate(&req).expect("generate");
+        assert_eq!(out.mirrored_classes, vec![iri("urn:test:Person")]);
+        let LibraryContent::Embedded(files) = &out.library else {
+            panic!("expected Embedded library");
+        };
+        // D30 §2 — the four files in declaration order.
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "lakefile.lean",
+                "lean-toolchain",
+                "EigeniusFFI/Basic.lean",
+                "EigeniusFFI/Mirror.lean",
+            ]
+        );
+        // Spot-check that the Mirror module body actually contains
+        // the Person structure + decoder + encoder.
+        let mirror = files
+            .iter()
+            .find(|f| f.path == "EigeniusFFI/Mirror.lean")
+            .expect("mirror file");
+        let body = std::str::from_utf8(&mirror.content).expect("utf8");
+        assert!(body.contains("structure Person where"));
+        assert!(body.contains("def decodePerson"));
+        assert!(body.contains("def encodePerson"));
+        assert!(body.contains("def eigeniusDecoders"));
+    }
+
+    #[test]
+    fn generate_is_deterministic_across_invocations() {
+        // Same chain + seed must produce byte-identical library
+        // archives. D30 §10.1 — the load-bearing precondition for
+        // content-addressed integrity.
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource(
+            "urn:test:Person",
+            "Person",
+            &[],
+            &["urn:test:name"],
+            &[],
+        ));
+        chain.insert(property_resource(
+            "urn:test:name",
+            "name",
+            CORE_STRING,
+            &[],
+            None,
+        ));
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:Person")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+
+        let g = LeanMirrorGenerator::new();
+        let a = g.generate(&req).expect("generate a");
+        let b = g.generate(&req).expect("generate b");
+        assert_eq!(a.mirrored_classes, b.mirrored_classes);
+        match (&a.library, &b.library) {
+            (LibraryContent::Embedded(fa), LibraryContent::Embedded(fb)) => {
+                assert_eq!(fa, fb, "library archives must be byte-identical");
+            }
+            _ => panic!("expected Embedded libraries"),
+        }
+    }
+
+    #[test]
+    fn generate_propagates_unknown_class_error() {
+        // Seed references a class not in the chain — the trait
+        // impl must surface UnknownClass, not panic.
+        let chain = InMemoryChain::new();
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:missing")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let g = LeanMirrorGenerator::new();
+        match g.generate(&req) {
+            Err(MirrorGeneratorError::UnknownClass(s)) => assert_eq!(s, "urn:test:missing"),
+            Err(other) => panic!("expected UnknownClass, got {other:?}"),
+            Ok(_) => panic!("expected error for missing seed class"),
         }
     }
 }
