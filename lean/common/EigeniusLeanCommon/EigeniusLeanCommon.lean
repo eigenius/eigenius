@@ -174,4 +174,84 @@ private def reprPos : {ts : List Type} → EigeniusUnion ts → String
 instance : Repr (EigeniusUnion ts) where
   reprPrec u _ := Std.Format.text s!"EigeniusUnion.{reprPos u}"
 
+/-! ## Codec helpers
+
+The generator emits `decodeC` / `encodeC` functions per class
+(D30 §8). To keep the emitted bodies compact and readable, the
+boilerplate around `Json.getObjValAs?` / `Json.getObjVal?` lives in
+hand-authored helpers below — the emitter generates one call per
+field instead of an inline `match` block. -/
+
+open Lean (Json FromJson ToJson toJson fromJson?)
+
+/-- Decode a required primitive-typed field. Wraps
+`Json.getObjValAs?` with a D30 §8.1-shaped error message
+(`<ClassName>.<fieldName>: missing or wrong type`). -/
+def decodeRequiredPrim {α : Type} [FromJson α]
+    (j : Json) (className : String) (propIri : String) (fieldName : String) :
+    Except String α :=
+  (j.getObjValAs? α propIri).mapError fun _ =>
+    s!"{className}.{fieldName}: missing or wrong type"
+
+/-- Decode an optional primitive-typed field. Absent property →
+`none`; present-but-wrong-type → the underlying error (the
+recommended-field semantics in D30 §4.1 say "absent" means
+"default to none", but a present field with the wrong shape is
+still a decode failure). -/
+def decodeOptionalPrim {α : Type} [FromJson α]
+    (j : Json) (propIri : String) : Except String (Option α) :=
+  match j.getObjVal? propIri with
+  | .ok jv => (fromJson? jv).map some
+  | .error _ => .ok none
+
+/-- Decode a required resource-typed field. Caller passes the
+inner class's decoder. Same error shape as
+[`decodeRequiredPrim`]. -/
+def decodeRequiredResource {α : Type}
+    (j : Json) (className : String) (propIri : String) (fieldName : String)
+    (inner : Json → Except String α) : Except String α := do
+  let jv ← (j.getObjVal? propIri).mapError fun _ =>
+    s!"{className}.{fieldName}: missing or wrong type"
+  inner jv
+
+/-- Decode an optional resource-typed field. Same absent vs.
+present-but-broken policy as [`decodeOptionalPrim`]. -/
+def decodeOptionalResource {α : Type}
+    (j : Json) (propIri : String)
+    (inner : Json → Except String α) : Except String (Option α) :=
+  match j.getObjVal? propIri with
+  | .ok jv => (inner jv).map some
+  | .error _ => .ok none
+
+/-- Decode a `core:value_array` field — a JSON array of
+primitive values. Returns a `List α`; the emitter converts to
+`List` rather than `Array` to match D30 §4's table. -/
+def decodeRequiredPrimList {α : Type} [FromJson α]
+    (j : Json) (className : String) (propIri : String) (fieldName : String) :
+    Except String (List α) := do
+  let arr ← (j.getObjValAs? (Array α) propIri).mapError fun _ =>
+    s!"{className}.{fieldName}: missing or wrong type"
+  .ok arr.toList
+
+/-- Decode a `core:resource_array` field with a singleton
+`class_types` — a JSON array of embedded resources, each
+decoded via `inner`. -/
+def decodeRequiredResourceList {α : Type}
+    (j : Json) (className : String) (propIri : String) (fieldName : String)
+    (inner : Json → Except String α) : Except String (List α) := do
+  let arr ← (j.getObjValAs? (Array Json) propIri).mapError fun _ =>
+    s!"{className}.{fieldName}: missing or wrong type"
+  arr.toList.mapM inner
+
+/-- Read the `is_a[0]` discriminator off an embedded resource —
+the dispatch key for `EigeniusUnion` decoders (D30 §8.3). Returns
+the IRI string; errors descriptively when `is_a` is missing,
+malformed, or empty. -/
+def isAHead (j : Json) (context : String) : Except String String := do
+  let arr ← (j.getObjValAs? (Array String) "urn:eigenius:core:is_a").mapError fun _ =>
+    s!"{context}: `is_a` missing or not a string array"
+  match arr[0]? with
+  | some s => .ok s
+  | none => .error s!"{context}: `is_a` is empty"
+
 end EigeniusLeanCommon

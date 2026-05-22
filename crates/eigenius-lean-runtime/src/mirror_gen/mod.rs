@@ -69,7 +69,54 @@ use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, MirrorGeneratorError};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(crate) mod codec_emitter;
 pub(crate) mod structure_emitter;
+
+/// Emit one class's full per-class block — `structure` + `CoeOut`
+/// instances + `decodeC` + `encodeC` — separated by single blank
+/// lines per D30 §6. Public so the Lake-build integration test
+/// drives the real emitters end-to-end; the module-assembly layer
+/// will call this same function for each class in the topological
+/// order.
+///
+/// `decls` must contain every class transitively referenced by
+/// `decl` (the result of `walk_closure` + `resolve_class_declarations`);
+/// `lookup` is the IRI→`short_name` table over the same set.
+pub fn emit_class_block(
+    decl: &ClassDecl,
+    decls: &BTreeMap<Iri, ClassDecl>,
+    lookup: &structure_emitter::ClassNameLookup,
+) -> String {
+    let mut out = structure_emitter::emit_structure_block(decl, lookup);
+    out.push_str(&codec_emitter::emit_codec_block(decl, decls, lookup));
+    out
+}
+
+/// Build the `IRI → short_name` table the emitter consumes.
+/// Public for the same reasons as [`emit_class_block`].
+pub fn class_name_lookup(decls: &BTreeMap<Iri, ClassDecl>) -> structure_emitter::ClassNameLookup {
+    structure_emitter::class_name_lookup(decls)
+}
+
+/// Public re-export of the closure walker — drives the resolution
+/// pipeline from a `MirrorGenerationRequest`. The integration test
+/// uses this to build the `decls` map; the eventual trait impl
+/// will call it the same way.
+pub fn build_decls(
+    request: &MirrorGenerationRequest,
+) -> Result<BTreeMap<Iri, ClassDecl>, MirrorGeneratorError> {
+    let closure = walk_closure(request)?;
+    resolve_class_declarations(request, &closure)
+}
+
+/// Public re-export of the topological sort — orders the resolved
+/// `decls` for emission. Cycles in `class_types` references surface
+/// as `UnrepresentableClass`.
+pub fn topological_emit_order(
+    decls: &BTreeMap<Iri, ClassDecl>,
+) -> Result<Vec<Iri>, MirrorGeneratorError> {
+    topological_order(decls)
+}
 
 // ---------------------------------------------------------------------------
 // Property IRI constants — pinned by the core ontology + D30 spec.
@@ -118,7 +165,7 @@ const RESERVED_ID_FIELD: &str = "_id";
 /// type — every D30 §4 row is one variant. The emitter dispatches on
 /// this and never re-parses the original `data_type` IRI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LeanType {
+pub enum LeanType {
     String,
     Int,
     Float,
@@ -164,7 +211,7 @@ impl LeanType {
 /// the bare type or a refinement subtype, and whether the decoder
 /// chains in `validatePattern` / `validateFormat` calls.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct PropertyConstraints {
+pub struct PropertyConstraints {
     pub min_value: Option<f64>,
     pub max_value: Option<f64>,
     pub min_length: Option<u64>,
@@ -187,7 +234,7 @@ impl PropertyConstraints {
 /// One property on a class, after all `class_types` IRIs have been
 /// resolved against the closure and the type has been classified.
 #[derive(Debug, Clone)]
-pub(crate) struct PropertyDecl {
+pub struct PropertyDecl {
     /// Chain-side property IRI (used by the decoder's `getObjValAs?`
     /// lookup; this is the JSON key).
     pub property_iri: Iri,
@@ -207,7 +254,7 @@ pub(crate) struct PropertyDecl {
 /// here — they're transitively materialised at emit time via the
 /// `extends` clause).
 #[derive(Debug, Clone)]
-pub(crate) struct ClassDecl {
+pub struct ClassDecl {
     pub class_iri: Iri,
     /// `core:short_name` — the Lean structure name. Validated to be
     /// a capital-first Lean identifier at resolution time.

@@ -30,19 +30,27 @@
 //! CI sandboxes without elan. Run with
 //! `cargo test -p eigenius-lean-runtime --test mirror_structure_lake_build -- --ignored`.
 
-// The structure_emitter module is `pub(crate)`, so the crate's
-// integration-test target can't reach it. We test through the
-// re-exposed pieces (closure walker + structure emit) via the
-// dev-only test harness below. Until a richer public API stabilises,
-// integration tests use the unit-test entry point — `cargo test
-// --lib` already covers the textual shape, and this file's value is
-// the round-trip through Lake.
+// The early structure-shape tests below use *hand-rolled* Lean
+// bodies that mirror the emitter's expected output, so a drift in
+// the emitter surfaces here too (the unit tests pin shape; this
+// file pins compile). The codec round-trip tests further down
+// drive the real emitters end-to-end through the public
+// `mirror_gen::*` surface.
 
 #![cfg(test)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_lean_runtime::mirror_gen::{
+    build_decls, class_name_lookup, emit_class_block, topological_emit_order,
+};
+use eigenius_runtime_substrate::chain::ChainAccessor;
+use eigenius_runtime_substrate::mirror_generator::MirrorGenerationRequest;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -111,13 +119,34 @@ lean_lib TestMirror where
 
     let basic = r#"-- Auto-generated.
 import EigeniusLeanCommon
-open EigeniusLeanCommon
 
 namespace TestMirror
 
--- Re-export the EigeniusUnion type so the generated Mirror module
--- can name it unqualified inside the `TestMirror` namespace.
-export EigeniusLeanCommon (EigeniusUnion)
+-- The mirror module emits unqualified calls to the helpers defined
+-- in EigeniusLeanCommon. Re-export them into this namespace so
+-- `Mirror.lean` — which inhabits `namespace TestMirror` — can name
+-- them without `EigeniusLeanCommon.` prefix.
+--
+-- The production emitter's Basic.lean (D30 §2.3) emits the same
+-- export list against the EigeniusFFI namespace; this fixture
+-- mirrors that contract.
+export EigeniusLeanCommon (
+  EigeniusUnion
+  EigenValidationError
+  validateMinValue
+  validateMaxValue
+  validateMinLength
+  validateMaxLength
+  validatePattern
+  validateFormat
+  decodeRequiredPrim
+  decodeOptionalPrim
+  decodeRequiredResource
+  decodeOptionalResource
+  decodeRequiredPrimList
+  decodeRequiredResourceList
+  isAHead
+)
 
 end TestMirror
 "#;
@@ -234,6 +263,186 @@ fn subclass_with_coercion_compiles_under_lake() {
     let work = fresh_workdir("subclass");
     write_lake_project(&work, &handwritten_subclass_with_coercion());
     run_lake_build(&work).expect("subclass with coercion must lake-build");
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+// ─── End-to-end test driven through the real emitters ──────────────
+//
+// These tests build a synthetic chain, run `build_decls` +
+// `topological_emit_order` + `emit_class_block` for each class,
+// splice the concatenated output into a Lake project, and run
+// `lake build`. Drift between the unit-test substring assertions and
+// the actual Lean syntax surfaces here.
+
+/// Minimal in-memory chain — same shape the unit tests use.
+struct InMemoryChain {
+    resources: HashMap<Iri, Resource>,
+}
+
+impl InMemoryChain {
+    fn new() -> Self {
+        Self {
+            resources: HashMap::new(),
+        }
+    }
+    fn insert(&mut self, r: Resource) {
+        self.resources.insert(
+            r.id()
+                .expect("synthetic chain entries must carry an IRI")
+                .clone(),
+            r,
+        );
+    }
+}
+
+impl ChainAccessor for InMemoryChain {
+    fn resolve(&self, _claim_layer: &Iri, target: &Iri) -> Option<Resource> {
+        self.resources.get(target).cloned()
+    }
+    fn is_ancestor_or_equal(&self, _: &Iri, _: &Iri) -> bool {
+        true
+    }
+    fn class_unchanged_between(&self, _: &Iri, _: &Iri, _: &Iri) -> bool {
+        true
+    }
+}
+
+fn iri(s: &str) -> Iri {
+    Iri::parse(s).expect("test IRI")
+}
+
+fn class_resource(iri_str: &str, short: &str, requires: &[&str]) -> Resource {
+    let mut r = Resource::new(iri(iri_str));
+    r.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String(short.to_string()),
+    );
+    if !requires.is_empty() {
+        r.set(
+            iri("urn:eigenius:core:requires"),
+            Value::Array(
+                requires
+                    .iter()
+                    .map(|p| Value::ResourceRef(iri(p)))
+                    .collect(),
+            ),
+        );
+    }
+    r
+}
+
+fn primitive_property(iri_str: &str, short: &str, data_type: &str) -> Resource {
+    let mut r = Resource::new(iri(iri_str));
+    r.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String(short.to_string()),
+    );
+    r.set(
+        iri("urn:eigenius:core:data_type"),
+        Value::ResourceRef(iri(data_type)),
+    );
+    r
+}
+
+fn classref_property(iri_str: &str, short: &str, class_iri: &str) -> Resource {
+    let mut r = Resource::new(iri(iri_str));
+    r.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String(short.to_string()),
+    );
+    r.set(
+        iri("urn:eigenius:core:data_type"),
+        Value::ResourceRef(iri("urn:eigenius:core:resource")),
+    );
+    r.set(
+        iri("urn:eigenius:core:class_types"),
+        Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+    );
+    r
+}
+
+/// Drive the real `mirror_gen` pipeline against a chain + seed,
+/// return the concatenated per-class blocks ready to splice into a
+/// Mirror module's namespace body.
+fn emit_mirror_body(chain: &InMemoryChain, seed: &[Iri]) -> String {
+    let layer = iri("urn:test:layer");
+    let request = MirrorGenerationRequest {
+        source_layer: &layer,
+        seed_classes: seed,
+        chain,
+    };
+    let decls = build_decls(&request).expect("build_decls");
+    let lookup = class_name_lookup(&decls);
+    let order = topological_emit_order(&decls).expect("topological order");
+    let mut body = String::new();
+    for (idx, iri) in order.iter().enumerate() {
+        let decl = decls.get(iri).expect("decl");
+        if idx > 0 {
+            body.push('\n');
+        }
+        body.push_str(&emit_class_block(decl, &decls, &lookup));
+    }
+    body
+}
+
+#[test]
+#[ignore = "requires lake + a built EigeniusLeanCommon olean cache"]
+fn full_pipeline_primitive_class_compiles_under_lake() {
+    if !is_lake_available() {
+        eprintln!("lake unavailable — skipping");
+        return;
+    }
+    // One class with one required String field — exercises the
+    // smallest non-empty path through structure + decoder + encoder.
+    let mut chain = InMemoryChain::new();
+    chain.insert(class_resource(
+        "urn:test:Person",
+        "Person",
+        &["urn:test:name"],
+    ));
+    chain.insert(primitive_property(
+        "urn:test:name",
+        "name",
+        "urn:eigenius:core:string",
+    ));
+    let body = emit_mirror_body(&chain, &[iri("urn:test:Person")]);
+    let work = fresh_workdir("e2e-primitive");
+    write_lake_project(&work, &body);
+    run_lake_build(&work).expect("primitive end-to-end mirror must lake-build");
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[test]
+#[ignore = "requires lake + a built EigeniusLeanCommon olean cache"]
+fn full_pipeline_classref_compiles_under_lake() {
+    if !is_lake_available() {
+        eprintln!("lake unavailable — skipping");
+        return;
+    }
+    // Doc → Person classref. Tests that the topological order puts
+    // Person before Doc and that the cross-class decoder/encoder
+    // dispatch (`decodePerson`/`encodePerson`) resolves.
+    let mut chain = InMemoryChain::new();
+    chain.insert(class_resource(
+        "urn:test:Person",
+        "Person",
+        &["urn:test:p_name"],
+    ));
+    chain.insert(primitive_property(
+        "urn:test:p_name",
+        "name",
+        "urn:eigenius:core:string",
+    ));
+    chain.insert(class_resource("urn:test:Doc", "Doc", &["urn:test:author"]));
+    chain.insert(classref_property(
+        "urn:test:author",
+        "author",
+        "urn:test:Person",
+    ));
+    let body = emit_mirror_body(&chain, &[iri("urn:test:Doc")]);
+    let work = fresh_workdir("e2e-classref");
+    write_lake_project(&work, &body);
+    run_lake_build(&work).expect("classref end-to-end mirror must lake-build");
     let _ = std::fs::remove_dir_all(&work);
 }
 

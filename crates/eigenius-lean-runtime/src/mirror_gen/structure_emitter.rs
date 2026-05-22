@@ -48,7 +48,7 @@ use std::collections::BTreeMap;
 /// Lookup from class IRI to Lean `short_name`. Built by the
 /// generator once and threaded into every emitter step so type
 /// rendering doesn't re-walk the resolution layer.
-pub(crate) type ClassNameLookup = BTreeMap<Iri, String>;
+pub type ClassNameLookup = BTreeMap<Iri, String>;
 
 /// Build the IRI→`short_name` lookup table from a set of resolved
 /// declarations. Convenience for tests and the eventual top-level
