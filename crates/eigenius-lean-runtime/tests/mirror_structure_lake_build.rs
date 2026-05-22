@@ -572,7 +572,7 @@ fn run_full_pipeline_under_lake(chain: &InMemoryChain, seed: &[Iri], label: &str
             // the test doesn't depend on a Git remote.
             let src = String::from_utf8(bytes).expect("utf8 lakefile");
             let rewritten = src.replace(
-                "require EigeniusLeanCommon from git\n  \"https://github.com/eigenius/EigeniusLeanCommon.git\" @ \"v0.1.0\"\n",
+                "require EigeniusLeanCommon from git \"https://github.com/eigenius/EigeniusLeanCommon.git\" @ \"v0.1.0\"\n",
                 &path_require,
             );
             bytes = rewritten.into_bytes();

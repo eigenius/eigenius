@@ -35,8 +35,8 @@
 //! elan-plus-toolchain install itself against a generic Debian base.
 
 use crate::conventions::{
-    ELAN_HOME, LD_SO_CONF_PATH, LEAN4EXPORT_IN_IMAGE, LEAN_TOOLCHAIN_VERSION, WORKER_BIN_PATH,
-    WORKER_LIB_DIR,
+    ELAN_HOME, LD_SO_CONF_PATH, LEAN4EXPORT_IN_IMAGE, LEAN_COMMON_IN_IMAGE, LEAN_TOOLCHAIN_VERSION,
+    MIRROR_IN_IMAGE, WORKER_BIN_PATH, WORKER_LIB_DIR,
 };
 use eigenius_runtime_substrate::types::DockerfileFragments;
 
@@ -163,13 +163,31 @@ fn install_packages_lines(plan: &LeanImagePlan) -> Vec<String> {
     vec![format!("RUN {script}")]
 }
 
-fn install_mirror_lines(_plan: &LeanImagePlan) -> Vec<String> {
-    // 20a.6 lights this up: the LeanMirrorGenerator will produce an
-    // EigonFFI library archive that the substrate composer COPYs
-    // under `/opt/eigenius/mirror/`; this section will then `lake
-    // develop` it into the worker's project and `lake build` for
-    // precompilation. Empty in 20a.5a.
-    vec![]
+fn install_mirror_lines(plan: &LeanImagePlan) -> Vec<String> {
+    if !plan.include_mirror {
+        return vec![];
+    }
+    // D30 §2.1 commits the mirror's lakefile with a git-require
+    // pointing at upstream EigeniusLeanCommon. For in-image
+    // dispatch we need an offline build, so rewrite that line to
+    // point at the baked copy at `LEAN_COMMON_IN_IMAGE` before
+    // running `lake build`. The single-line require form
+    // (module_assembler::lakefile_content) keeps the sed
+    // substitution one-shot — no multi-line awk gymnastics.
+    //
+    // `lake build` then compiles every `lean_lib` declared in the
+    // mirror's lakefile (`EigeniusFFI.Basic` + `EigeniusFFI.Mirror`).
+    // The resulting `.olean` files land under
+    // `<MIRROR_IN_IMAGE>/.lake/build/lib/lean/` and are resolvable
+    // by downstream user-side `LeanProject`s that `require
+    // EigeniusFFI` against the mirror.
+    let script = format!(
+        "sed -i 's|^require EigeniusLeanCommon from git.*|require EigeniusLeanCommon from \"{LEAN_COMMON_IN_IMAGE}\"|' {MIRROR_IN_IMAGE}/lakefile.lean \
+            && cd {MIRROR_IN_IMAGE} \
+            && lake update --keep-toolchain \
+            && lake build"
+    );
+    vec![format!("RUN {script}")]
 }
 
 #[cfg(test)]
@@ -229,15 +247,51 @@ mod tests {
     }
 
     #[test]
-    fn install_mirror_empty_until_20a6() {
-        // The mirror section stays empty for 20a.5a even when the
-        // plan opts in — the field is reserved so 20a.6 can flip the
-        // bit without changing the public API.
+    fn install_mirror_empty_when_no_mirror_planned() {
+        // No mirror → no install_mirror step. The substrate
+        // composer also skips the `COPY mirror/` directive in this
+        // case (gated on `has_mirror`); the dockerfile fragment
+        // shape stays minimal for mirrorless deployments.
+        let f = lean_dockerfile_fragments(&LeanImagePlan {
+            include_mirror: false,
+            handler_packages: Vec::new(),
+        });
+        assert!(f.install_mirror.is_empty());
+    }
+
+    #[test]
+    fn install_mirror_rewrites_lakefile_and_lake_builds_when_mirror_planned() {
+        // 20a.6.x: when a mirror is baked, the install_mirror step
+        // (a) rewrites the chain-committed git-require to a
+        // path-require pointing at the baked EigeniusLeanCommon
+        // and (b) runs `lake build` so the mirror's .olean files
+        // land in the image's layer cache. Both steps must appear
+        // in the single RUN line (one layer per logical action,
+        // matching the rest of the dockerfile fragment discipline).
         let f = lean_dockerfile_fragments(&LeanImagePlan {
             include_mirror: true,
             handler_packages: Vec::new(),
         });
-        assert!(f.install_mirror.is_empty());
+        assert_eq!(
+            f.install_mirror.len(),
+            1,
+            "single RUN line for layer-cache stability"
+        );
+        let line = &f.install_mirror[0];
+        // sed substitution of the lakefile's require — anchors on
+        // the line prefix so a stray match elsewhere in the file
+        // doesn't get rewritten.
+        assert!(line.contains("sed -i 's|^require EigeniusLeanCommon from git.*|"));
+        assert!(line.contains(LEAN_COMMON_IN_IMAGE));
+        assert!(line.contains(&format!("{MIRROR_IN_IMAGE}/lakefile.lean")));
+        // Build invocation.
+        assert!(line.contains(&format!("cd {MIRROR_IN_IMAGE}")));
+        assert!(line.contains("lake build"));
+        // sed precedes lake build — rewrite has to happen first or
+        // lake will try to resolve the git require over the wire.
+        let sed_pos = line.find("sed -i").expect("sed step");
+        let build_pos = line.find("lake build").expect("lake build step");
+        assert!(sed_pos < build_pos);
     }
 
     #[test]

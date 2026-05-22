@@ -4,8 +4,8 @@ open Lake DSL
 
 package EigeniusFFI where
 
-require EigeniusLeanCommon from git
-  "https://github.com/eigenius/EigeniusLeanCommon.git" @ "v0.1.0"
+require EigeniusLeanCommon from git "https://github.com/eigenius/EigeniusLeanCommon.git" @ "v0.1.0"
 
+@[default_target]
 lean_lib EigeniusFFI where
   roots := #[`EigeniusFFI.Basic, `EigeniusFFI.Mirror]

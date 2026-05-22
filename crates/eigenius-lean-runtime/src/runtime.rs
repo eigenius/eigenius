@@ -95,6 +95,13 @@ pub struct LeanLanguageRuntime {
     /// The image-build pipeline COPYs these bytes into the image
     /// under [`WORKER_LIB_DIR`].
     cdylib_path: PathBuf,
+    /// Host path to the `lean/common/EigeniusLeanCommon/` directory —
+    /// the hand-authored Lake package that the chain-committed mirror's
+    /// generated lakefile depends on. Staged into the image under
+    /// `LEAN_COMMON_IN_IMAGE` so the install_mirror step can rewrite
+    /// the mirror's git-require to a path-require resolvable offline.
+    /// Only read when a mirror is supplied to `build_environment_image`.
+    lean_common_dir: PathBuf,
     base_image_ref: String,
     image_tag: String,
     cached_digest: OnceLock<ImageDigest>,
@@ -139,6 +146,7 @@ impl LeanLanguageRuntime {
     pub fn new(
         project_dir: PathBuf,
         cdylib_path: PathBuf,
+        lean_common_dir: PathBuf,
         base_image_ref: impl Into<String>,
         spawner: Arc<dyn ServiceSpawner>,
         depot_path: PathBuf,
@@ -159,6 +167,7 @@ impl LeanLanguageRuntime {
             spawner,
             project_dir,
             cdylib_path,
+            lean_common_dir,
             base_image_ref: base,
             image_tag,
             cached_digest: OnceLock::new(),
@@ -334,6 +343,30 @@ impl LeanLanguageRuntime {
                 content: content.clone(),
                 mode: None,
             });
+        }
+
+        // EigeniusLeanCommon source tree → LEAN_COMMON_IN_IMAGE.
+        // Only staged when a mirror is baked, because the install
+        // step that consumes it (lake-building the mirror against a
+        // path-require) only runs in that case. Skipping the stage
+        // for mirrorless deployments keeps the image lean.
+        if has_mirror {
+            for (rel, content) in collect_lean_common_tree(&self.lean_common_dir)? {
+                let src = PathBuf::from("lean-common").join(&rel);
+                asset_copies.push(LanguageAssetCopy {
+                    source: src.clone(),
+                    destination: format!(
+                        "{}/{}",
+                        crate::conventions::LEAN_COMMON_IN_IMAGE,
+                        path_to_posix(&rel)
+                    ),
+                });
+                language_assets.push(LanguageAsset {
+                    source: src,
+                    content,
+                    mode: None,
+                });
+            }
         }
 
         let dockerfile = compose_dockerfile(&DockerfileSpec {
@@ -703,6 +736,27 @@ fn collect_lean4export_tree(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, B
     if out.is_empty() {
         return Err(BuildError::BuildInputUnavailable(format!(
             "lean4export source dir `{}` is empty after filtering",
+            root.display()
+        )));
+    }
+    Ok(out)
+}
+
+/// Walk the host-side `lean/common/EigeniusLeanCommon/` tree.
+/// Same filtering as the lean4export walker — drops `.lake/` build
+/// cache and similar non-source dirs.
+fn collect_lean_common_tree(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, BuildError> {
+    if !root.is_dir() {
+        return Err(BuildError::BuildInputUnavailable(format!(
+            "EigeniusLeanCommon source dir `{}` does not exist or is not a directory",
+            root.display()
+        )));
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out)?;
+    if out.is_empty() {
+        return Err(BuildError::BuildInputUnavailable(format!(
+            "EigeniusLeanCommon source dir `{}` is empty after filtering",
             root.display()
         )));
     }
@@ -1095,6 +1149,7 @@ mod tests {
         LeanLanguageRuntime::new(
             PathBuf::from("/tmp/lean-runtime-worker-test"),
             PathBuf::from("/tmp/libeigenius_lean_worker.so"),
+            PathBuf::from("/tmp/EigeniusLeanCommon"),
             "debian:bookworm-slim",
             spawner,
             PathBuf::from("/tmp/depot"),

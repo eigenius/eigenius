@@ -194,6 +194,21 @@ pub const LEAN4EXPORT_IN_IMAGE: &str = "/opt/lean4export";
 /// host-side `DT_RUNPATH` is silently bypassed by `ld.so.cache`.
 pub const WORKER_LIB_DIR: &str = "/opt/eigenius/lib";
 
+/// In-image directory holding the hand-authored `EigeniusLeanCommon`
+/// Lake package. The substrate composer COPYs the host-side
+/// `lean/common/EigeniusLeanCommon/` tree here so the generated
+/// mirror's lakefile (which `require`s EigeniusLeanCommon) can
+/// resolve the dependency offline — the install_mirror step
+/// rewrites the chain-committed git-require to a path-require
+/// pointing at this location before invoking `lake build`.
+pub const LEAN_COMMON_IN_IMAGE: &str = "/opt/eigenius/lean-common/EigeniusLeanCommon";
+
+/// In-image directory the substrate composer materialises a staged
+/// `LeanPackageMirror` archive into (D26 §9.2 — `COPY mirror/
+/// /opt/eigenius/mirror/`). The install_mirror step `cd`s here to
+/// rewrite the lakefile and run `lake build`.
+pub const MIRROR_IN_IMAGE: &str = "/opt/eigenius/mirror";
+
 /// In-image directory holding the Lake-built worker binary
 /// (`lean-runtime-worker`). The worker is pre-built on the host and
 /// COPY'd into the image rather than rebuilt inside the image —

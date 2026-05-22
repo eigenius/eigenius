@@ -44,22 +44,14 @@
 //! ## Update workflow
 //!
 //! When the emitter intentionally changes:
-//! 1. Run the test, see the diff in the failure output.
-//! 2. Inspect the new bytes for correctness.
-//! 3. Overwrite the golden file: `cargo test -p eigenius-lean-runtime
-//!    --test mirror_golden_test -- --nocapture` with the
-//!    `EIGENIUS_UPDATE_GOLDEN=1` env var set rewrites them in place.
 //!
-//! 1. Run the test, see the diff in the failure output.
-//! cargo test -p eigenius-lean-runtime --test mirror_golden_test
-//!
-//! 2. Inspect the new bytes for correctness (manually read the
-//!    failure diff or peek at what the emitter would produce).
-//!
-//! 3. Accept the new output:
-//! EIGENIUS_UPDATE_GOLDEN=1 cargo test -p eigenius-lean-runtime --test mirror_golden_test
-//!
-//! 4. Commit the updated tests/golden/ files alongside the
+//! 1. Run the test, see the diff in the failure output:
+//!    `cargo test -p eigenius-lean-runtime --test mirror_golden_test`.
+//! 2. Inspect the new bytes for correctness — read the failure
+//!    diff or run the test with `--nocapture` to peek.
+//! 3. Accept the new output by re-running with the update env var:
+//!    `EIGENIUS_UPDATE_GOLDEN=1 cargo test -p eigenius-lean-runtime --test mirror_golden_test`.
+//! 4. Commit the updated `tests/golden/` files alongside the
 //!    emitter change. The diff is the audit trail for the spec
 //!    deviation (if any).
 
@@ -445,7 +437,7 @@ fn fixture_golden_lake_builds() {
         let src = std::fs::read_to_string(golden_path(rel)).expect("read golden");
         let body = if rel == "lakefile.lean" {
             src.replace(
-                "require EigeniusLeanCommon from git\n  \"https://github.com/eigenius/EigeniusLeanCommon.git\" @ \"v0.1.0\"\n",
+                "require EigeniusLeanCommon from git \"https://github.com/eigenius/EigeniusLeanCommon.git\" @ \"v0.1.0\"\n",
                 &path_require,
             )
         } else {

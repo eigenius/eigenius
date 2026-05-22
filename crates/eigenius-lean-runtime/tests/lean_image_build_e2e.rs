@@ -35,8 +35,11 @@ use base64::Engine as _;
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_lean_runtime::mirror_gen::{mirror_to_resource, LeanMirrorGenerator};
 use eigenius_lean_runtime::{build_target_constant, build_target_module, LeanLanguageRuntime};
+use eigenius_runtime_substrate::chain::ChainAccessor;
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, MirrorGenerator};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -86,6 +89,17 @@ fn lean_project_dir() -> PathBuf {
         .join("runtime-worker")
         .canonicalize()
         .expect("lean/runtime-worker/ must exist relative to eigenius-lean-runtime's Cargo.toml")
+}
+
+fn lean_common_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("lean")
+        .join("common")
+        .join("EigeniusLeanCommon")
+        .canonicalize()
+        .expect("lean/common/EigeniusLeanCommon/ must exist relative to the crate's Cargo.toml")
 }
 
 fn cdylib_path() -> PathBuf {
@@ -306,6 +320,7 @@ fn lean_env_image_dispatches_lean_export_round_trip() {
     let runtime = Arc::new(LeanLanguageRuntime::new(
         lean_project_dir(),
         cdylib_path(),
+        lean_common_dir(),
         pinned_base,
         spawner.clone(),
         depot.clone(),
@@ -374,6 +389,195 @@ fn lean_env_image_dispatches_lean_export_round_trip() {
     assert!(
         output_text.contains("\"foo\""),
         "lean_export ndjson must mention the pinned constant `foo`"
+    );
+
+    let _ = runtime.drain();
+    let _ = std::fs::remove_dir_all(&depot);
+}
+
+// ─── Mirror-baking Docker e2e (Phase 20a.6.x) ──────────────────────
+
+/// Minimal in-memory chain for the mirror-baking test. Carries a
+/// single class declaration so `LeanMirrorGenerator` has something
+/// to mirror.
+struct MirrorTestChain {
+    resources: std::collections::HashMap<Iri, Resource>,
+}
+
+impl MirrorTestChain {
+    fn for_patient() -> Self {
+        let mut resources = std::collections::HashMap::new();
+        let class_iri = iri("urn:eigenius:test:image_mirror:Patient");
+        let mut cls = Resource::new(class_iri.clone());
+        cls.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("Patient".into()),
+        );
+        cls.set(
+            iri("urn:eigenius:core:requires"),
+            Value::Array(vec![Value::ResourceRef(iri(
+                "urn:eigenius:test:image_mirror:weight",
+            ))]),
+        );
+        resources.insert(class_iri, cls);
+
+        let prop_iri = iri("urn:eigenius:test:image_mirror:weight");
+        let mut prop = Resource::new(prop_iri.clone());
+        prop.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("weight".into()),
+        );
+        prop.set(
+            iri("urn:eigenius:core:data_type"),
+            Value::ResourceRef(iri("urn:eigenius:core:float")),
+        );
+        resources.insert(prop_iri, prop);
+        Self { resources }
+    }
+}
+
+impl ChainAccessor for MirrorTestChain {
+    fn resolve(&self, _claim_layer: &Iri, target: &Iri) -> Option<Resource> {
+        self.resources.get(target).cloned()
+    }
+    fn is_ancestor_or_equal(&self, _: &Iri, _: &Iri) -> bool {
+        true
+    }
+    fn class_unchanged_between(&self, _: &Iri, _: &Iri, _: &Iri) -> bool {
+        true
+    }
+}
+
+/// Inspect the built image's filesystem layer to confirm
+/// `install_mirror` produced compiled `.olean` files. `docker run
+/// --rm <image> sh -c "ls <path>"` is the cheapest way to ask
+/// without standing up a worker.
+fn list_image_path(image_tag: &str, path: &str) -> Result<String, String> {
+    let out = std::process::Command::new("docker")
+        .args(["run", "--rm", "--entrypoint", "ls", image_tag, "-1", path])
+        .output()
+        .map_err(|e| format!("docker run failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "docker run exited {}: stdout={}, stderr={}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// End-to-end: build an env image with a mirror baked in, assert
+/// the install_mirror step rewrote the lakefile + lake-built the
+/// mirror to .olean files. Closes the Phase 20a.6.x production
+/// gap — chain-committed mirrors are usable inside the image
+/// without dispatch-time compilation.
+#[ignore = "heavy E2E: full Lean env image build with mirror baked in"]
+#[test]
+fn lean_env_image_with_baked_mirror_lake_builds_the_mirror_in_image() {
+    if let Some(reason) = skip_unless_full_environment() {
+        eprintln!("skipping 20a.6.x mirror-bake e2e: {reason}");
+        return;
+    }
+    let pinned_base = match ensure_base_image_pinned() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("skipping (could not pin base image): {e}");
+            return;
+        }
+    };
+
+    // Generate a mirror for a synthetic Patient class via the real
+    // LeanMirrorGenerator. The mirror's lakefile carries the
+    // chain-committed git-require for EigeniusLeanCommon; the
+    // install_mirror step rewrites that to a path-require pointing
+    // at the baked copy at LEAN_COMMON_IN_IMAGE.
+    let chain = MirrorTestChain::for_patient();
+    let layer_iri = iri("urn:eigenius:test:image_mirror:layer");
+    let seed = vec![iri("urn:eigenius:test:image_mirror:Patient")];
+    let generator = LeanMirrorGenerator::new();
+    let mirror_output = generator
+        .generate(&MirrorGenerationRequest {
+            source_layer: &layer_iri,
+            seed_classes: &seed,
+            chain: &chain,
+        })
+        .expect("mirror generation");
+    let mirror_resource = mirror_to_resource(&generator, &mirror_output, &layer_iri, None);
+
+    let depot = fresh_depot("e2e-mirror");
+    let spawner = match eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
+        eigenius_runtime_substrate::spawner::DockerSpawnerConfig::new(depot.clone()),
+    ) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!("skipping (DockerServiceSpawner construction failed): {e}");
+            return;
+        }
+    };
+
+    let runtime = Arc::new(LeanLanguageRuntime::new(
+        lean_project_dir(),
+        cdylib_path(),
+        lean_common_dir(),
+        pinned_base,
+        spawner.clone(),
+        depot.clone(),
+    ));
+
+    let env = Resource::new_embedded();
+    let runtime_for_build: Box<dyn eigenius_runtime_substrate::language_runtime::LanguageRuntime> =
+        Box::new(runtime.clone());
+    let digest = match runtime_for_build.build_environment_image(&env, &[], Some(&mirror_resource))
+    {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = runtime.drain();
+            let _ = std::fs::remove_dir_all(&depot);
+            panic!("build_environment_image (with mirror): {e}");
+        }
+    };
+    assert!(digest.as_str().starts_with("sha256:"));
+
+    // Confirm the lake-build step landed compiled output where the
+    // worker can find it. Two assertions:
+    //
+    //   (a) `EigeniusLeanCommon.olean` lives under the baked
+    //       EigeniusLeanCommon dir — proves the lean-common stage
+    //       wasn't dropped + lake compiled it as a transitive dep
+    //       during the mirror build.
+    //
+    //   (b) The mirror's own `.olean` files (EigeniusFFI.Basic +
+    //       EigeniusFFI.Mirror) live under the mirror's
+    //       `.lake/build/lib/lean/EigeniusFFI/` — proves the sed
+    //       rewrite worked and lake produced output.
+    //
+    // Both checks shell out to `docker run --rm <image> ls <path>`
+    // which is the cheapest "did the in-image build succeed?" probe.
+    let image_tag = "eigenius-lean-dockeriolibrarydebiansha:latest";
+    let common_oleans = list_image_path(
+        image_tag,
+        "/opt/eigenius/lean-common/EigeniusLeanCommon/.lake/build/lib/lean",
+    )
+    .expect("list common .oleans");
+    assert!(
+        common_oleans.contains("EigeniusLeanCommon.olean"),
+        "EigeniusLeanCommon must lake-build during install_mirror; got listing:\n{common_oleans}"
+    );
+
+    let mirror_oleans = list_image_path(
+        image_tag,
+        "/opt/eigenius/mirror/.lake/build/lib/lean/EigeniusFFI",
+    )
+    .expect("list mirror .oleans");
+    assert!(
+        mirror_oleans.contains("Basic.olean"),
+        "EigeniusFFI.Basic must lake-build; got listing:\n{mirror_oleans}"
+    );
+    assert!(
+        mirror_oleans.contains("Mirror.olean"),
+        "EigeniusFFI.Mirror must lake-build; got listing:\n{mirror_oleans}"
     );
 
     let _ = runtime.drain();
