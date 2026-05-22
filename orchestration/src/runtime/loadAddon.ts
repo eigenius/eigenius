@@ -61,6 +61,26 @@ export interface RuntimeSubstrateAddon {
     depotPath: string,
   ): void;
 
+  /** Register the Lean language runtime under language_id="lean".
+   * `workerProjectDir` points at `lean/runtime-worker/` (the directory
+   * containing `lakefile.lean`, the worker Lake project, and the
+   * vendored `lean4export/` tree). `cdylibPath` is the host path to
+   * `libeigenius_lean_worker.so` the worker binary dynamically links
+   * against. `leanCommonDir` points at `lean/common/EigeniusLeanCommon/`
+   * — the hand-authored Lake package that generated mirrors depend on;
+   * staged into the image so the in-image lake-build of the mirror
+   * can resolve `require EigeniusLeanCommon` offline (Phase 20a.6.x).
+   * `baseImageRef` is the digest-pinned base image. `depotPath` is
+   * the shared host/container path (same constraint as the Julia
+   * variant). Phase 20a.5 wiring. */
+  registerLeanLanguageRuntime(
+    workerProjectDir: string,
+    cdylibPath: string,
+    leanCommonDir: string,
+    baseImageRef: string,
+    depotPath: string,
+  ): void;
+
   /** Dispatch a `RunRuntimeScript` invocation. Both args are
    * Eigon-CBOR `Buffer`s; returns the output Resource and a partial
    * `RuntimeInvocation` Resource (Phase 18c.5 / D26 §5.5) carrying the

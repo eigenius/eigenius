@@ -51,6 +51,7 @@
 
 use eigenius_config::Loader as ConfigLoader;
 use eigenius_julia::JuliaLanguageRuntime;
+use eigenius_lean_runtime::LeanLanguageRuntime;
 use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
 use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
 use eigenius_runtime_substrate::spawner::DockerSpawnerConfig;
@@ -149,6 +150,55 @@ pub fn register_julia_language_runtime(
         .map_err(|e| into_napi_err(format!("DockerServiceSpawner::new: {e}")))?;
     let runtime = JuliaLanguageRuntime::new(
         PathBuf::from(worker_project_dir),
+        base_image_ref,
+        Arc::new(spawner),
+        depot,
+    );
+    let mut d = dispatcher().lock().map_err(lock_err)?;
+    d.register_language_runtime(Box::new(runtime))
+        .map_err(into_napi_err)
+}
+
+/// Register the [`LeanLanguageRuntime`] under language_id="lean".
+/// Idempotent within a process — calling twice surfaces an explicit
+/// `RegistryError::AlreadyRegistered`.
+///
+/// `worker_project_dir` points at `lean/runtime-worker/` (the directory
+/// containing `lakefile.lean`, the worker Lake project, and the
+/// vendored `lean4export/` tree) — copied into the orchestrator image
+/// at build time. `cdylib_path` is the host path to
+/// `libeigenius_lean_worker.so` the worker binary dynamically links
+/// against. `lean_common_dir` points at `lean/common/EigeniusLeanCommon/`
+/// — the hand-authored Lake package that generated mirrors depend on;
+/// staged into the image so the in-image lake-build of the mirror can
+/// resolve `require EigeniusLeanCommon` offline (Phase 20a.6.x).
+/// `base_image_ref` is the digest-pinned Debian-slim (or equivalent)
+/// base image the Lean toolchain is installed onto. `depot_path` is
+/// the shared host/container path used for substrate artifacts and
+/// worker UDS sockets — must match the orchestrator's bind-mount in
+/// `docker-compose.yml` so DooD-spawned worker containers see the same
+/// path the orchestrator wrote (D26 §9.5).
+#[napi]
+pub fn register_lean_language_runtime(
+    worker_project_dir: String,
+    cdylib_path: String,
+    lean_common_dir: String,
+    base_image_ref: String,
+    depot_path: String,
+) -> Result<()> {
+    let config = ConfigLoader::new()
+        .load()
+        .map_err(|e| into_napi_err(format!("eigenius-config load: {e}")))?;
+
+    let depot = PathBuf::from(&depot_path);
+    let spawner_config =
+        DockerSpawnerConfig::from_substrate_config(depot.clone(), &config.substrate);
+    let spawner = DockerServiceSpawner::new(spawner_config)
+        .map_err(|e| into_napi_err(format!("DockerServiceSpawner::new: {e}")))?;
+    let runtime = LeanLanguageRuntime::new(
+        PathBuf::from(worker_project_dir),
+        PathBuf::from(cdylib_path),
+        PathBuf::from(lean_common_dir),
         base_image_ref,
         Arc::new(spawner),
         depot,
