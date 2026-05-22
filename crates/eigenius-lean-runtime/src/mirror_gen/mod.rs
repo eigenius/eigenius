@@ -58,12 +58,6 @@
 //! type compatibility, pattern/format rendering) but the pre-emit
 //! pipeline catches every error D30 §11.1 enumerates.
 
-// The foundation pieces here (types, closure walk, resolver,
-// topological sort) are exercised in the module's own unit tests
-// but not yet wired into a public trait impl — that lands in the
-// next emitter milestone, at which point this allow can come off.
-#![allow(dead_code)]
-
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, MirrorGeneratorError};
@@ -544,17 +538,6 @@ pub struct PropertyConstraints {
     pub max_length: Option<u64>,
     pub pattern: Option<String>,
     pub format: Option<String>,
-}
-
-impl PropertyConstraints {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.min_value.is_none()
-            && self.max_value.is_none()
-            && self.min_length.is_none()
-            && self.max_length.is_none()
-            && self.pattern.is_none()
-            && self.format.is_none()
-    }
 }
 
 /// One property on a class, after all `class_types` IRIs have been

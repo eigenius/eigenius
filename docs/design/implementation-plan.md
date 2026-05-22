@@ -2205,16 +2205,14 @@ Per D28 §11.3 — self-contained pieces of work that layer onto the integrated 
 - **Lean4Lean as secondary cross-checker.** Soundness multiplier per the Venn-diagram argument (D28 §8.1). Wired as an alternate `check_proof` backend; `qc_proof_check` runs both and flags disagreements.
 - **WASM-sandboxed checker.** Only if benchmarks justify it (D28 §8.2). Requires nanoda to compile cleanly to WASM and the WASM capability sandbox to handle Mathlib-scale memory.
 - **Bidirectional Lean ↔ Julia bridge.** First concrete cross-institution Comorphism involving Lean ([D27 §6.2](d27-julia-institutions.md#62-verification-of-intervalarithmetic-outputs--concrete-d14-comorphism)). Requires EigonFFI to mirror `formulas:FormulaTerm` so a Lean proposition can quantify over FormulaTerm values; once that exists, the Comorphism is a clean identity-on-`FormulaTerm` plumbing job.
-- **Verified-status type extension** (D28 §12 question 4 / `life-science-requirements.md` §16.4) — kernel extension to express verification status in the type system. Non-trivial Mini-TT extension; defer until a concrete pipeline consumer asks for it.
+- **Verified-status type extension** (D28 §12 remaining question / `life-science-requirements.md` §16.4) — kernel extension to express verification status in the type system. Non-trivial Mini-TT extension; defer until a concrete pipeline consumer asks for it.
 
 ### Phase 20 — Open questions (per D28 v2 §12)
 
-The original D28 carried nine open questions; D28 v2 resolved five structurally. Four remain:
+The original D28 carried nine open questions; D28 v2 resolved five structurally and Phase 20a closed two more (axiom allowlist default and Lean-version upgrade policy — see [d28-lean-4-as-institution.md §12](d28-lean-4-as-institution.md#12-open-questions) "Resolved at end of Phase 20a"). Two remain:
 
-1. **Axiom allowlist policy.** The mechanism is in place (nanoda's allowlist, declared on `LeanEnvironment`, D28 §7.1). Default `["propext", "Classical.choice", "Quot.sound", "Lean.trustCompiler"]` for v1. Whether to include `Classical.choice` by default is the live policy question — some deployments reject `Classical`-dependent proofs entirely. Decide before 20a.5 (the env image lands the default).
-2. **Lean-version upgrade policy.** When new Lean / Mathlib versions arrive, what's the promotion process? Automatic with regression testing, or manual review? The substrate's image-digest model means an upgrade is structurally just a new content-addressed `LeanEnvironment`. The question is governance, not mechanism. Decide before 20b.
-3. **Parallel verification institutions.** If Rocq lands, dispatch by user preference / contract / explicit IRI? Defer until Rocq is real.
-4. **Kernel extension for verification status in types** (D28 v1 question #9). Defer until the first pipeline that would benefit asks for it.
+1. **Parallel verification institutions.** If Rocq lands, dispatch by user preference / contract / explicit IRI? Defer until Rocq is real.
+2. **Kernel extension for verification status in types** (D28 v1 question #9). Defer until the first pipeline that would benefit asks for it.
 
 ### Phase 20 — Test plan
 
