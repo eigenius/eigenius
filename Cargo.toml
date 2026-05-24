@@ -27,6 +27,16 @@ exclude = [
     "orchestration/native",
     "spikes/napi-rs-async",
 ]
+# `eigenius-lean-worker`'s build.rs (`crates/eigenius-lean-worker/build.rs`)
+# compiles a C bridge against Lean's `lean.h`, which ships with the Lean
+# toolchain via elan. Devs and CI runners that build the workspace must
+# have `lean` on PATH (or `EIGENIUS_LEAN_INCLUDE_DIR` / `LEAN_SYSROOT`
+# pointing at an installed toolchain). The CI workflow at
+# `.github/workflows/ci.yml` installs elan + the pinned toolchain via
+# the `lean-toolchain` file at `lean/runtime-worker/lean-toolchain`
+# before running cargo. Local devs typically have elan installed
+# already to author Lake projects; the version in `lean-toolchain`
+# is what `elan` will install on first use.
 
 [workspace.package]
 version = "0.1.0"

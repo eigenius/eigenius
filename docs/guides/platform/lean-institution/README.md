@@ -152,6 +152,28 @@ The pinned Lean toolchain lives at [`lean/runtime-worker/lean-toolchain`](../../
 
 Upgrades are manual, not automatic — the substrate's image-digest model makes every toolchain change a new content-addressed `LeanEnvironment`, so existing verified proofs stay valid against their original env digest. Auto-bump would fragment the env-digest space silently. The full upgrade checklist is at [`docs/notes/lean-toolchain-upgrade.md`](../../../notes/lean-toolchain-upgrade.md); follow it whenever bumping.
 
+## Lean toolchain prerequisite
+
+The substrate's Lake-driven worker (`lean/runtime-worker/`) depends on a Rust cdylib (`libeigenius_lean_worker.so`) built from [`crates/eigenius-lean-worker/`](../../../../crates/eigenius-lean-worker/). The crate is a regular workspace member, but its `build.rs` compiles a C bridge against Lean's `lean.h` to talk to the Lean runtime — `lean.h` ships with the Lean toolchain via elan, not with system packages, so **any host that builds the workspace needs elan + the pinned toolchain installed**.
+
+Install elan (one-time) per the standard Lean instructions:
+
+```sh
+curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+```
+
+The pinned toolchain version lives at [`lean/runtime-worker/lean-toolchain`](../../../../lean/runtime-worker/lean-toolchain) (single source of truth — same file the Dockerfile composer bakes into env images). Elan will install it automatically the first time anything reads that file, or you can pre-install:
+
+```sh
+elan toolchain install $(cat lean/runtime-worker/lean-toolchain)
+```
+
+The build.rs ([`crates/eigenius-lean-worker/build.rs`](../../../../crates/eigenius-lean-worker/build.rs)) discovers `lean.h` via, in order: `EIGENIUS_LEAN_INCLUDE_DIR` env var (explicit override), `LEAN_SYSROOT` env var (set by Lake during builds), or `lean --print-prefix` from PATH (the typical dev-host path).
+
+CI installs elan in the workflow at [`.github/workflows/ci.yml`](../../../../.github/workflows/ci.yml) so `cargo clippy --workspace --all-targets` and `cargo test --workspace` cleanly build everything including the worker cdylib.
+
+The full e2e test ([`crates/eigenius-lean-runtime/tests/lean_image_build_e2e.rs`](../../../../crates/eigenius-lean-runtime/tests/lean_image_build_e2e.rs)) is `#[ignore]` because it also needs Docker + buildah for the env-image step; run with `cargo test -p eigenius-lean-runtime --test lean_image_build_e2e -- --ignored` when verifying changes to the substrate's image-build pipeline.
+
 ## Performance shape
 
 A single-theorem proof of the capstone shape (one `omega` against `Float` ordering, transitively pulling in `Subtype` / `Classical.choice` / `LE.le.toLT` and the EigeniusFFI.Patient structure) exports to ~9 kLoC of JSON (~200 KB). `nanoda_lib` re-checks it in under a second on a modern laptop. The integration test [`crates/eigenius-lean/tests/capstone_test.rs`](../../../../crates/eigenius-lean/tests/capstone_test.rs) is `#[ignore]` because of that cost; run with `-- --ignored` when verifying changes touching the institution.
