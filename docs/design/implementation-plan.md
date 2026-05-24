@@ -1909,7 +1909,7 @@ A multi-row FIBER with `INTO` (whose IRI is fixed across rows) is rejected at ev
 
 **Sibling specs landing in 20a:** [D30 — Eigon → Lean Faithful Translation](d30-eigon-to-lean-faithful-translation.md) (sibling to [D29](d29-eigon-julia-mirror-spec.md)) and [D40 — Chain-Mirrored Lean Expressions](d40-chain-mirrored-lean-expressions.md) (sibling to [D32](d32-chain-mirrored-mini-tt-inductives.md)).
 
-### Phase 20a — First complete Lean institution (~5–7 weeks)
+### Phase 20a — First complete Lean institution ✓ (landed)
 
 A single integrated landing per D28 §11.1 — the full architectural commitment from "Eigenius's verified epistemic level" through to a committed resource so tagged. No phased intermediate that ships misleading semantics; the correspondence check (D28 §5.5) is the load-bearing piece, so it lands in the same phase as the verification dispatch.
 

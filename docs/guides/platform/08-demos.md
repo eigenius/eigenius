@@ -136,7 +136,39 @@ Both paths use the same `commit_with_validation` machinery — comorphism-transl
 
 The per-institution slow-walks under [`platform/julia-institutions/`](julia-institutions/) cover each piece in isolation; the kinase notebook is the one place the whole stack runs together against a single chain.
 
-## 8.5. Running the demos as smoke tests
+## 8.5. `lean-verification` — Lean 4 verification audit chain
+
+Source: [`notebooks/examples/lean-verification-setup.sh`](../../../notebooks/examples/lean-verification-setup.sh) and [`notebooks/examples/lean-verification.json`](../../../notebooks/examples/lean-verification.json).
+
+The end-to-end demo for the platform's first verification institution ([chapter 11](11-runtime-substrate.md) + the Lean institution tutorial under [`platform/lean-institution/`](lean-institution/)). Loads a chain layer carrying a [`LeanProofTerm`](../../design/d28-lean-4-as-institution.md#63-the-leanproofterm-resource--verbatim-bytes--chain-mirrored-proposition) backed by a real `lean4export` payload — the proven theorem is `∀ p : EigeniusFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10`, proved by `omega` against `Float`'s ordering. AutoOnLoad fires the three-part correspondence check at commit time and produces a `Verdict::Holds` resource. The notebook then walks the closed audit chain D28 §5.7 promises.
+
+```bash
+EIGENIUS_MOCK_LLM=true docker compose up -d
+./notebooks/examples/lean-verification-setup.sh
+
+# Then in a browser: http://localhost:8080/notebooks/
+# Import notebooks/examples/lean-verification.json and Run All.
+```
+
+The five resources the setup loads — Patient class, Patient instance, `LeanPackageMirror` (audit anchor with embedded Lake project archive + content-addressed hash), `LeanProofPayload` (the `lean4export` bytes), `LeanProofTerm` (proposition + cross-references) — plus the AutoOnLoad-generated `Verdict` form the closed cycle the notebook walks:
+
+```text
+Patient class ← claim instance ← LeanProofTerm → proof bytes
+                                         ↓
+                                  LeanPackageMirror
+                                  ↓             ↓
+                            source_layer    mirrored_classes → Patient class
+                                                ↑
+Verdict (ctor = Holds) ──────── verdict_subject ┘
+```
+
+Every byte that went into the verification — Lake project sources, the toolchain pin, the verbatim `lean4export` JSON, the chain-side class declaration, the source layer the mirror anchors to — sits on the chain as a typed, queryable, content-addressed resource. A consumer who wants to reproduce the verdict can pull the archive from `library_content`, fetch the toolchain pinned by `lean-toolchain`, run `lake build && lake exe lean4export`, and re-check the output against the stored bytes.
+
+Verification is **in-process** ([`crates/eigenius-lean/`](../../../crates/eigenius-lean/)) via `nanoda_lib` — no orchestrator round-trip, no IPC, no Docker container spawn. The verdict is a direct function call inside the kernel binary, which keeps the TCB small (D28 §2.3).
+
+Regeneration: when the Lean toolchain or the capstone proof changes, regenerate the fixture with `cargo run -p eigenius-lean --example gen_verification_demo`. Toolchain bumps follow the checklist at [`docs/notes/lean-toolchain-upgrade.md`](../../notes/lean-toolchain-upgrade.md).
+
+## 8.6. Running the demos as smoke tests
 
 Each demo exits 0 on success and non-zero on any step failure. They're suitable as part of CI or pre-deployment verification:
 
