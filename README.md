@@ -48,8 +48,24 @@ Eigenius's key features include:
   Two cross-institution comorphisms over the shared `FormulaTerm` representation are
   wired and tested end-to-end: Catalyst → DiffEq (reaction-network compilation to ODE
   problems) and Symbolics → JuMP (symbolic-objective framing into optimisation
-  problems, demonstrated by a kinase Ki-fit). Still pending in this surface:
-  [Lean-4 as theorem prover](docs/design/d28-lean-4-as-institution.md).
+  problems, demonstrated by a kinase Ki-fit).
+
+- **Lean 4 as verification institution** ([D28](docs/design/d28-lean-4-as-institution.md))
+  contributing the *verified* epistemic level. Authoring side runs on the
+  runtime substrate (`lean4export` against a pinned `LeanEnvironment` image);
+  the verification side stays in-process via [`nanoda_lib`](https://github.com/ammkrn/nanoda_lib)
+  for trust-surface reasons (no IPC, verdict is a direct function call). The
+  full audit chain D28 §5.7 promises is queryable end-to-end:
+  `LeanProofTerm` → verbatim `lean4export` bytes → `LeanPackageMirror`
+  (audit anchor with content-addressed [archive hash](docs/design/d30-eigon-to-lean-faithful-translation.md))
+  → `LeanEnvironment` → image digest → mirrored chain class. The three-part
+  correspondence check (proof validity + mirror correspondence +
+  anchor consistency) runs at commit time via AutoOnLoad; a passing
+  proof lands a `Verdict::Holds` resource on the chain so the
+  *verified* tag is itself a typed, queryable resource. The
+  capstone notebook ([`notebooks/examples/lean-verification.json`](notebooks/examples/lean-verification.json))
+  walks the audit chain backward from the verdict to the chain-side
+  `Patient` class the proof discharges a claim about.
 
 ## The notebook — start here
 
@@ -80,7 +96,7 @@ Four task-first guides plus a consolidated bibliography, all grounded in the imp
 
 Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
 
-## Current Status: Phases 0–11e + D22 Notebook & SDK + D14 Institution Realisation + D26/D29/D31 Runtime Substrate + D32 Formula Language Complete
+## Current Status: Phases 0–11e + D22 Notebook & SDK + D14 Institution Realisation + D26/D29/D31 Runtime Substrate + D32 Formula Language + D28/D30/D40 Lean 4 Verification Institution Complete
 
 The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
 
@@ -116,6 +132,7 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Reinsert comorphism reify outputs into the chain as first-class resources (D14 §9.3): ESL programs invoke comorphisms as qualified-name function calls (`comorphisms:foo(input)` lowers to `Exp::InstitutionInvoke`) with output committed at a deterministic content-hash IRI; EigenQL `FIBER ... AS ?var INTO "<iri>"` commits the response at a caller-named IRI
 - Host institutions in language-runtime sibling containers via the runtime substrate ([chapter 11](docs/guides/platform/11-runtime-substrate.md), D26/D29/D31): `eigenius mirror create → env build → env create → institution install` lifecycle; mirror generator's closure walker auto-discovers cross-institution classes from `RuntimeMethodSignature.input_types` / `output_type`; long-lived per-image worker pools dispatched via Eigon-CBOR over UDS
 - Run five v1 Julia institutions end-to-end ([D27](docs/design/d27-julia-institutions.md), tutorials under [`platform/julia-institutions/`](docs/guides/platform/julia-institutions/)): [`Symbolics`](https://juliasymbolics.org/), [`IntervalArithmetic`](https://juliaintervals.github.io/), [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/), [`OrdinaryDiffEq`](https://docs.sciml.ai/DiffEqDocs/stable/), [`JuMP+HiGHS`](https://jump.dev/) — plus three cross-institution comorphisms (Symbolics → IntervalArithmetic, Catalyst → DiffEq, Symbolics → JuMP) all sharing `formulas:FormulaTerm` as the typed payload
+- Verify Lean 4 proofs through the platform's first verification institution ([D28](docs/design/d28-lean-4-as-institution.md), [D30](docs/design/d30-eigon-to-lean-faithful-translation.md), [D40](docs/design/d40-chain-mirrored-lean-expressions.md), tutorial at [`platform/lean-institution/`](docs/guides/platform/lean-institution/)): `LeanProofTerm` resources carry verbatim `lean4export` bytes + a chain-mirrored proposition ([`lean:LeanExpr`](docs/design/d40-chain-mirrored-lean-expressions.md)) + an audit anchor pointing at the `LeanPackageMirror` they were proved against. AutoOnLoad dispatches the three-part correspondence check (D28 §5.5) — proof validity via `nanoda_lib`, mirror correspondence between proposition's `EigeniusFFI.*` references and chain class declarations, anchor-consistency hash. Verification is in-process (no orchestrator round-trip, no IPC) so the verdict is a direct function call inside the kernel binary. The capstone notebook ([`notebooks/examples/lean-verification.json`](notebooks/examples/lean-verification.json)) walks the closed audit chain end-to-end from verdict → proof term → mirror → ontology class
 - Author typed expression trees in ESL via the `formula(...)` Pratt-parsed sublanguage (D32) — `formula((x + 0) * 1)` lowers to a chain-resident `FormulaTerm` value that the validator type-checks against an on-chain operator catalog with declared `Pi`-spine signatures
 - Run locally via three terminals or Docker Compose
 - Drive the platform from a React notebook (six cell types: markdown, ESL, EigenQL, TypeScript, program-run, and form-based chart cells covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area; auto-rendered outputs; layer-stack and per-layer topology graph visualisations; cell-order Run / Run-from-here / Run-to-here with stale markers; collapse/expand; content-addressed publish-to-layer with a queryable Open dialog; bundled into the orchestrator image and served at `/notebooks/`)
@@ -143,6 +160,8 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
 Phase 19 complete (19a–19i): D26 runtime substrate landed end-to-end with the Julia v1 instantiation (D27 — five worked institutions: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS); D29 mirror generator with closure walker; D31 install lifecycle; D32 formula language as Mini-TT fragment with the ESL `formula(...)` sublanguage; comorphism chain reinsertion (D14 §9.3) wired through both ESL `Exp::InstitutionInvoke` and EigenQL `FIBER ... INTO`. The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](notebooks/examples/kinase-institutions.json)) exercises the entire stack end-to-end.
+
+Phase 20a complete (20a.0–20a.8): the first verification institution. D28 Lean 4 institution landed end-to-end through the substrate's authoring side (`lean4export` against pinned `LeanEnvironment` images) and an in-process verification side (`nanoda_lib` re-check with axiom-allowlist enforcement); D40 chain-mirrored `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` inductives; D30 faithful translation spec with the substrate `LeanMirrorGenerator` producing baked `EigeniusFFI` Lake packages; three-part correspondence check (D28 §5.5) wired through AutoOnLoad. The lean-verification notebook ([`notebooks/examples/lean-verification.json`](notebooks/examples/lean-verification.json)) walks the closed audit chain D28 §5.7 promises. Phase 20b (Mathlib-scale operational landing per D28 §11.2) is consumer-triggered; not architecturally required.
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 

@@ -2,6 +2,11 @@
 /target/
 **/*.rs.bk
 
+# Lake (Lean build tool) — build artifacts only. lakefile.lean,
+# lean-toolchain, and lake-manifest.json are committed as source +
+# lockfile.
+**/.lake/
+
 # Node (buf codegen plugins)
 node_modules/
 /package-lock.json

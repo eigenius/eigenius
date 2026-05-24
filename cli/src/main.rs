@@ -1336,7 +1336,19 @@ async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>) {
         None => None,
     };
 
-    if let Err(e) = eigenius_kernel::server::start_server(port, orchestrator, backend).await {
+    // 20a.4: link in-process verification institutions the kernel
+    // binary ships. `start_server` registers each before rebuilding
+    // the institution index, so AutoOnLoad QueryClasses declared on
+    // the bootstrapped chain dispatch into the matching Rust impl as
+    // a direct function call (per D28 §2.3 / §10.2).
+    let in_process_institutions: Vec<
+        std::sync::Arc<dyn eigenius_kernel::institution::runtime::Institution>,
+    > = vec![eigenius_lean::LeanInstitution::arc()];
+
+    if let Err(e) =
+        eigenius_kernel::server::start_server(port, orchestrator, backend, in_process_institutions)
+            .await
+    {
         eprintln!("Server error: {e}");
         std::process::exit(1);
     }

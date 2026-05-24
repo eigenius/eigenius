@@ -154,6 +154,47 @@ pub trait Institution: Send + Sync {
     }
 }
 
+/// Blanket impl so `Arc<I>` is itself an `Institution` whenever `I` is.
+///
+/// Lets `Phase 20a`'s in-process registry hold institutions as shared
+/// `Arc<dyn Institution>`s and re-register a fresh boxed wrapper into
+/// [`InstitutionRuntime`] each time the chain is re-walked, without
+/// reconstructing per-institution state (e.g. an in-process Lean
+/// checker's parsed-environment cache). Mirrors the same pattern
+/// [`crate::runtime_substrate::LanguageRuntime`] uses.
+impl<I: Institution + ?Sized> Institution for std::sync::Arc<I> {
+    fn institution_iri(&self) -> &Iri {
+        (**self).institution_iri()
+    }
+
+    fn extract_typed(
+        &self,
+        procedure_iri: &Iri,
+        resource: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<Val, InstitutionError> {
+        (**self).extract_typed(procedure_iri, resource, ctx)
+    }
+
+    fn reify(
+        &self,
+        procedure_iri: &Iri,
+        value: &Val,
+        ctx: &ExecutionContext,
+    ) -> Result<Resource, InstitutionError> {
+        (**self).reify(procedure_iri, value, ctx)
+    }
+
+    fn query(
+        &self,
+        procedure_iri: &Iri,
+        input: &Resource,
+        ctx: &ExecutionContext,
+    ) -> Result<QueryOutcome, InstitutionError> {
+        (**self).query(procedure_iri, input, ctx)
+    }
+}
+
 /// Registry of institution implementations keyed by institution IRI.
 ///
 /// The runtime is the dispatch table for kernel ↔ institution calls.

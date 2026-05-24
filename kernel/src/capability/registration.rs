@@ -32,7 +32,8 @@
 use super::external_institution::{ExternalInstitution, ExternalQueryHandler};
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
 use super::wasm_institution_d14::WasmInstitution;
-use crate::institution::registry::InstitutionIndex;
+use crate::institution::in_process_registry::InProcessInstitutionRegistry;
+use crate::institution::registry::{InstitutionIndex, RuntimeKind};
 use crate::institution::runtime::{Institution, InstitutionRuntime};
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
@@ -563,6 +564,61 @@ pub fn register_external_institutions(
     }
 }
 
+/// Walk the chain for D14 Institution declarations whose `runtime` is
+/// `urn:eigenius:institution:runtimes:in_process` (D28 §2.3) and
+/// register the matching pre-registered impl from
+/// `in_process_registry` into `runtime`. Phase 20a.1.
+///
+/// Unlike the WASM and External paths, the institution implementation
+/// itself is **not** constructed from chain data — it's Rust code
+/// linked into the orchestrator binary and pre-registered at startup
+/// by each in-process institution crate. The chain-scan pass just
+/// dispatches: for every `runtime: in_process` declaration, look up
+/// the IRI in `in_process_registry`, register the looked-up `Arc<dyn
+/// Institution>` into `runtime`.
+///
+/// Chain-declared `in_process` institutions that have no matching
+/// pre-registered impl produce a `RegistrationError` — the
+/// declaration is malformed (or the in-process crate isn't linked
+/// into this build), and silently dropping it would surface as
+/// unrelated `NotImplemented` errors at dispatch time.
+pub fn register_in_process_institutions(
+    index: &InstitutionIndex,
+    runtime: &mut InstitutionRuntime,
+    in_process_registry: &InProcessInstitutionRegistry,
+    report: &mut RegistrationReport,
+) {
+    for entry in index.institutions() {
+        if entry.runtime != Some(RuntimeKind::InProcess) {
+            continue;
+        }
+        match in_process_registry.get(&entry.iri) {
+            Some(arc_inst) => {
+                let registered_iri = entry.iri.as_str().to_string();
+                // Wrap the Arc<dyn Institution> in a Box via the
+                // blanket impl on Arc<I>. Each rebuild gets a fresh
+                // Box but the underlying Arc is shared with the
+                // process-global registry — no per-rebuild state
+                // reconstruction.
+                runtime.replace(Box::new(arc_inst));
+                report.institutions_registered.push(registered_iri);
+            }
+            None => {
+                report.errors.push(RegistrationError {
+                    resource_iri: entry.iri.as_str().to_string(),
+                    message: format!(
+                        "chain declares `runtime: in_process` for institution `{}` but no \
+                         matching impl is registered in this build's \
+                         InProcessInstitutionRegistry — link the appropriate \
+                         in-process institution crate or change the declaration's runtime",
+                        entry.iri
+                    ),
+                });
+            }
+        }
+    }
+}
+
 fn resolve_via_layer(layer: &Layer, iri: &Iri) -> Option<Arc<Resource>> {
     layer.resolve(iri)
 }
@@ -829,5 +885,154 @@ mod tests {
     #[test]
     fn hex_prefix_decoding() {
         assert_eq!(decode_wasm_binary("hex:48656c6c6f").unwrap(), b"Hello");
+    }
+
+    // ─── Phase 20a.1 — InProcess runtime kind registration ───────────────
+
+    use crate::institution::in_process_registry::{EchoInstitution, InProcessInstitutionRegistry};
+    use crate::institution::registry::InstitutionIndex;
+    use crate::institution::runtime::{Institution, InstitutionRuntime};
+    use crate::layer::LayerBuilder;
+    use crate::ontology::resource::{Resource, Value};
+    use std::sync::Arc;
+
+    /// Build a tiny layer carrying one Institution resource declaring
+    /// the supplied IRI with `runtime: in_process`. Used by the
+    /// in-process registration tests below.
+    fn layer_with_in_process_institution(iri: &str) -> Arc<crate::layer::Layer> {
+        let inst_iri = Iri::parse(iri).expect("test IRI");
+        let mut inst = Resource::new(inst_iri.clone());
+        inst.set(
+            Iri::parse(wk::IS_A).expect("IS_A IRI"),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse("urn:eigenius:institution:Institution").expect("IRI"),
+            )]),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_iri").expect("IRI"),
+            Value::String(iri.to_string()),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_name").expect("IRI"),
+            Value::String("Echo".to_string()),
+        );
+        inst.set(
+            Iri::parse(wk::RUNTIME).expect("RUNTIME IRI"),
+            Value::ResourceRef(Iri::parse(wk::RUNTIME_IN_PROCESS).expect("RUNTIME_IN_PROCESS IRI")),
+        );
+        let mut b = LayerBuilder::new("in_process_test", None);
+        b.add_resource(inst).unwrap();
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn in_process_registration_succeeds_when_impl_is_pre_registered() {
+        let iri_str = "urn:eigenius:test:echo_in_process";
+        let layer = layer_with_in_process_institution(iri_str);
+        let (index, errs) = InstitutionIndex::from_layer(&layer);
+        assert!(errs.is_empty(), "unexpected index errors: {errs:?}");
+
+        // Pre-register the EchoInstitution impl as a statically-linked
+        // institution crate would.
+        let in_process = InProcessInstitutionRegistry::new();
+        let echo: Arc<dyn Institution> =
+            Arc::new(EchoInstitution::new(Iri::parse(iri_str).unwrap()));
+        in_process.register(echo);
+
+        let mut runtime = InstitutionRuntime::new();
+        let mut report = RegistrationReport::default();
+        register_in_process_institutions(&index, &mut runtime, &in_process, &mut report);
+
+        assert!(
+            report.errors.is_empty(),
+            "unexpected report errors: {:?}",
+            report.errors
+        );
+        assert_eq!(
+            report.institutions_registered,
+            vec![iri_str.to_string()],
+            "exactly one institution should land in the report's registered list"
+        );
+
+        // The dispatchable runtime must carry the institution under
+        // the declared IRI.
+        let registered = runtime
+            .get(&Iri::parse(iri_str).unwrap())
+            .expect("EchoInstitution should be in the InstitutionRuntime");
+        assert_eq!(registered.institution_iri().as_str(), iri_str);
+    }
+
+    #[test]
+    fn in_process_registration_errors_when_impl_is_missing() {
+        let iri_str = "urn:eigenius:test:nothing_registered_for_this_iri";
+        let layer = layer_with_in_process_institution(iri_str);
+        let (index, errs) = InstitutionIndex::from_layer(&layer);
+        assert!(errs.is_empty());
+
+        // Empty registry — no impl pre-registered.
+        let in_process = InProcessInstitutionRegistry::new();
+        let mut runtime = InstitutionRuntime::new();
+        let mut report = RegistrationReport::default();
+        register_in_process_institutions(&index, &mut runtime, &in_process, &mut report);
+
+        assert!(
+            report.errors.iter().any(|e| e.resource_iri == iri_str
+                && e.message.contains("no matching impl is registered")),
+            "expected a registration error naming the missing impl; got {:?}",
+            report.errors
+        );
+        assert!(
+            report.institutions_registered.is_empty(),
+            "no institution should land in the registered list"
+        );
+        assert!(
+            runtime.get(&Iri::parse(iri_str).unwrap()).is_none(),
+            "InstitutionRuntime should not carry the malformed declaration"
+        );
+    }
+
+    #[test]
+    fn in_process_registration_ignores_wasm_and_external_institutions() {
+        // Construct a layer with a `runtime: wasm` institution and
+        // verify the in-process pass skips it (Wasm has its own
+        // registration path).
+        let wasm_iri = "urn:eigenius:test:wasm_inst";
+        let mut inst = Resource::new(Iri::parse(wasm_iri).unwrap());
+        inst.set(
+            Iri::parse(wk::IS_A).expect("IS_A IRI"),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse("urn:eigenius:institution:Institution").unwrap(),
+            )]),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_iri").unwrap(),
+            Value::String(wasm_iri.to_string()),
+        );
+        inst.set(
+            Iri::parse("urn:eigenius:institution:institution_name").unwrap(),
+            Value::String("Wasm".to_string()),
+        );
+        inst.set(
+            Iri::parse(wk::RUNTIME).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::RUNTIME_WASM).unwrap()),
+        );
+        let mut b = LayerBuilder::new("wasm_only", None);
+        b.add_resource(inst).unwrap();
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let (index, errs) = InstitutionIndex::from_layer(&layer);
+        assert!(errs.is_empty());
+
+        let in_process = InProcessInstitutionRegistry::new();
+        let mut runtime = InstitutionRuntime::new();
+        let mut report = RegistrationReport::default();
+        register_in_process_institutions(&index, &mut runtime, &in_process, &mut report);
+
+        assert!(
+            report.errors.is_empty(),
+            "wasm institutions should be skipped silently"
+        );
+        assert!(report.institutions_registered.is_empty());
+        assert!(runtime.get(&Iri::parse(wasm_iri).unwrap()).is_none());
     }
 }

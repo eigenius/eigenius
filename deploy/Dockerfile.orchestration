@@ -68,6 +68,13 @@ COPY orchestration/runtime-substrate-native/ orchestration/runtime-substrate-nat
 # at compile time, so the directory must exist in the build context even
 # though the addon itself only uses Rust crates.
 COPY julia/ julia/
+# eigenius-lean-runtime's build.rs reads `lean/runtime-worker/lean-toolchain`
+# (the workspace's single source of truth for the Lean toolchain version,
+# propagated to the Rust side via the `EIGENIUS_LEAN_TOOLCHAIN_VERSION`
+# cfg-env). Mirror of the julia/ requirement above — this addon links
+# the authoring-side Lean runtime so the orchestrator can drive Lean
+# image builds (Phase 20a.5 wiring).
+COPY lean/ lean/
 
 WORKDIR /build/orchestration/runtime-substrate-native
 RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund

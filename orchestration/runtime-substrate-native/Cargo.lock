@@ -606,11 +606,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-lean-runtime"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "eigenius-orchestrator-runtime-substrate"
 version = "0.1.0"
 dependencies = [
  "eigenius-config",
  "eigenius-julia",
+ "eigenius-lean-runtime",
  "eigenius-runtime-substrate",
  "napi",
  "napi-build",

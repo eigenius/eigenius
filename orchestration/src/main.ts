@@ -78,6 +78,21 @@ const JULIA_WORKER_PROJECT_DIR = Deno.env.get(
 const JULIA_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_JULIA_BASE_IMAGE_REF");
 const JULIA_DEPOT_PATH = Deno.env.get("EIGENIUS_JULIA_DEPOT_PATH");
 
+/** Configuration for the Lean language runtime. All five must be set
+ * for Lean to register; if any is missing the runtime stays
+ * unregistered and Lean dispatches surface a typed `UnknownLanguage`
+ * error. The substrate path is wider than Julia's because Lean stages
+ * three host-side artifacts: the Lake worker project, the cdylib the
+ * worker links against, and the EigeniusLeanCommon Lake package the
+ * generated mirrors depend on. Phase 20a.5 wiring. */
+const LEAN_WORKER_PROJECT_DIR = Deno.env.get(
+  "EIGENIUS_LEAN_WORKER_PROJECT_DIR",
+);
+const LEAN_CDYLIB_PATH = Deno.env.get("EIGENIUS_LEAN_CDYLIB_PATH");
+const LEAN_COMMON_DIR = Deno.env.get("EIGENIUS_LEAN_COMMON_DIR");
+const LEAN_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_LEAN_BASE_IMAGE_REF");
+const LEAN_DEPOT_PATH = Deno.env.get("EIGENIUS_LEAN_DEPOT_PATH");
+
 function main() {
   // Install the structured-logging subscriber before anything else
   // emits an event. Reads `EIGENIUS_LOG_LEVEL` and
@@ -182,6 +197,40 @@ function main() {
           "failed to register JuliaLanguageRuntime",
           {
             error_kind: "julia_runtime_register_failed",
+            error_message: e instanceof Error ? e.message : String(e),
+          },
+        );
+      }
+    }
+    if (
+      LEAN_WORKER_PROJECT_DIR && LEAN_CDYLIB_PATH && LEAN_COMMON_DIR &&
+      LEAN_BASE_IMAGE_REF && LEAN_DEPOT_PATH
+    ) {
+      try {
+        substrateAddon.registerLeanLanguageRuntime(
+          LEAN_WORKER_PROJECT_DIR,
+          LEAN_CDYLIB_PATH,
+          LEAN_COMMON_DIR,
+          LEAN_BASE_IMAGE_REF,
+          LEAN_DEPOT_PATH,
+        );
+        log.info(
+          operation.COMPONENT_REGISTER,
+          "registered LeanLanguageRuntime",
+          {
+            worker_project_dir: LEAN_WORKER_PROJECT_DIR,
+            cdylib_path: LEAN_CDYLIB_PATH,
+            lean_common_dir: LEAN_COMMON_DIR,
+            base_image_ref: LEAN_BASE_IMAGE_REF,
+            depot_path: LEAN_DEPOT_PATH,
+          },
+        );
+      } catch (e) {
+        log.warn(
+          operation.COMPONENT_REGISTER,
+          "failed to register LeanLanguageRuntime",
+          {
+            error_kind: "lean_runtime_register_failed",
             error_message: e instanceof Error ? e.message : String(e),
           },
         );

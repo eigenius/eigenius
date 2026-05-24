@@ -1,0 +1,29 @@
+[package]
+name = "eigenius-lean-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Authoring-side Lean 4 language runtime for the Eigenius substrate. Implements LanguageRuntime; bakes a Lake-driven worker + elan-pinned Lean toolchain into a deterministic OCI image. See D28 §10.3, Phase 20a.5."
+
+[features]
+default = []
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+# `docker-spawner` lights up the BuildahImageBuilder + DockerServiceSpawner
+# integration the runtime drives in 20a.5b.4 — mirrors eigenius-julia.
+eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }
+serde.workspace = true
+serde_bytes = "0.11"
+serde_json.workspace = true
+ciborium = "0.2"
+sha2 = "0.10"
+thiserror.workspace = true
+
+[dev-dependencies]
+# The Docker-mode e2e test base64-encodes a tiny synthetic Lean source
+# tree into a `LeanProject` resource. Standalone dep (not workspace)
+# because it's only used in tests — matches the eigenius-lean-worker
+# crate's own dev-dependency.
+base64 = "0.22"

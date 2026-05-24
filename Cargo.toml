@@ -5,6 +5,9 @@ members = [
     "crates/eigenius-config",
     "crates/runtime-substrate",
     "crates/eigenius-julia",
+    "crates/eigenius-lean",
+    "crates/eigenius-lean-runtime",
+    "crates/eigenius-lean-worker",
     "crates/wasm-runtime",
     "sdk/wasm-sdk",
     "storage/tikv",
@@ -24,6 +27,16 @@ exclude = [
     "orchestration/native",
     "spikes/napi-rs-async",
 ]
+# `eigenius-lean-worker`'s build.rs (`crates/eigenius-lean-worker/build.rs`)
+# compiles a C bridge against Lean's `lean.h`, which ships with the Lean
+# toolchain via elan. Devs and CI runners that build the workspace must
+# have `lean` on PATH (or `EIGENIUS_LEAN_INCLUDE_DIR` / `LEAN_SYSROOT`
+# pointing at an installed toolchain). The CI workflow at
+# `.github/workflows/ci.yml` installs elan + the pinned toolchain via
+# the `lean-toolchain` file at `lean/runtime-worker/lean-toolchain`
+# before running cargo. Local devs typically have elan installed
+# already to author Lake projects; the version in `lean-toolchain`
+# is what `elan` will install on first use.
 
 [workspace.package]
 version = "0.1.0"
@@ -40,6 +53,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio = { version = "1", features = ["full"] }
 tonic = "0.12"
+# `tonic-web` lets the kernel speak the gRPC-Web wire protocol over
+# HTTP/1.1 in addition to native gRPC over HTTP/2 — same RPC surface,
+# different transport. The orchestrator's `KernelClient` (running in
+# Deno) uses gRPC-Web through Deno's native `fetch()` rather than
+# `node:http2`'s polyfill, which has multi-second per-request latency
+# spikes and session-reuse hangs that make notebook-driven queries
+# unusable. Tonic-web is a transparent middleware wrapper — same
+# tonic service, same gRPC semantics; the kernel handles both clients
+# (CLI uses HTTP/2 gRPC, orchestrator uses HTTP/1.1 gRPC-Web) from a
+# single socket.
+tonic-web = "0.12"
 prost = "0.13"
 uuid = { version = "1", features = ["v4", "serde"] }
 

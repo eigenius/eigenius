@@ -33,6 +33,7 @@ services:
       - "50051:50051"
     environment:
       - EIGENIUS_ORCHESTRATOR_ENDPOINT=http://orchestrator:8080
+      - RUST_LOG=${RUST_LOG:-info}
     command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db"]
     volumes:
       - eigenius_db:/var/lib/eigenius/db
@@ -58,6 +59,7 @@ services:
       - EIGENIUS_ORCHESTRATOR_PORT=8080
       - EIGENIUS_MOCK_LLM=${EIGENIUS_MOCK_LLM:-false}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - EIGENIUS_LOG_LEVEL=${EIGENIUS_LOG_LEVEL:-info}
     volumes:
       # Docker-out-of-Docker (DooD): the orchestrator's substrate
       # spawns Julia worker containers via the host's Docker daemon,

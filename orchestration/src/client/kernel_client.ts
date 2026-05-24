@@ -22,7 +22,7 @@
  */
 
 import { createClient } from "@connectrpc/connect";
-import { createGrpcTransport } from "@connectrpc/connect-node";
+import { createGrpcWebTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
 import {
   EigeniusKernel,
@@ -90,8 +90,25 @@ export class KernelClient {
 
   constructor(endpoint: string) {
     this.endpoint = endpoint;
-    const transport = createGrpcTransport({
+    // Use gRPC-Web over HTTP/1.1 instead of native gRPC over HTTP/2.
+    // The kernel speaks both — it's wrapped in `tonic_web::enable(...)`
+    // at the serve entry point, with `accept_http1(true)` on the
+    // tonic builder. The reason we don't use `createGrpcTransport`
+    // (HTTP/2 native): Deno's `node:http2` polyfill that connect-node
+    // depends on has multi-second per-request latency and session-
+    // reuse hangs, making notebook-driven queries unusable. gRPC-Web
+    // routes through Deno's native `fetch()` (HTTP/1.1) which works
+    // correctly. Same RPC surface, same wire-level semantics; the
+    // only difference is the transport encoding (gRPC-Web's
+    // length-prefixed frames over HTTP/1.1 chunked vs gRPC's HTTP/2
+    // streams).
+    const transport = createGrpcWebTransport({
       baseUrl: endpoint,
+      // Force HTTP/1.1 — connect-node v2 defaults to HTTP/2 for
+      // gRPC-Web too (via the same `node:http2` polyfill), which
+      // defeats the purpose of switching. With `"1.1"`, the transport
+      // uses `node:http`'s `request()` which Deno polyfills cleanly.
+      httpVersion: "1.1",
     });
     this.client = createClient(EigeniusKernel, transport);
   }
