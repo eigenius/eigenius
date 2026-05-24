@@ -4912,13 +4912,22 @@ pub async fn start_server(
 
     // Raise gRPC message size limits to 128 MB to accommodate WASM component
     // binaries (which are base64-encoded and can be multiple MB).
+    //
+    // `tonic_web::enable(...)` wraps the service so it accepts the
+    // gRPC-Web wire protocol (HTTP/1.1) alongside native gRPC
+    // (HTTP/2). The orchestrator's Deno-side `KernelClient` uses
+    // gRPC-Web through `fetch()` to avoid `node:http2`'s slow /
+    // session-reuse-hanging behaviour. CLI / kernel-binary clients
+    // continue to use native gRPC. `accept_http1(true)` is required
+    // for the HTTP/1.1 handshake — tonic's default is HTTP/2-only.
     tonic::transport::Server::builder()
-        .add_service(
+        .accept_http1(true)
+        .add_service(tonic_web::enable(
             service
                 .into_server()
                 .max_decoding_message_size(128 * 1024 * 1024)
                 .max_encoding_message_size(128 * 1024 * 1024),
-        )
+        ))
         .serve(addr)
         .await?;
 

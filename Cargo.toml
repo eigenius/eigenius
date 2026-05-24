@@ -43,6 +43,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio = { version = "1", features = ["full"] }
 tonic = "0.12"
+# `tonic-web` lets the kernel speak the gRPC-Web wire protocol over
+# HTTP/1.1 in addition to native gRPC over HTTP/2 — same RPC surface,
+# different transport. The orchestrator's `KernelClient` (running in
+# Deno) uses gRPC-Web through Deno's native `fetch()` rather than
+# `node:http2`'s polyfill, which has multi-second per-request latency
+# spikes and session-reuse hangs that make notebook-driven queries
+# unusable. Tonic-web is a transparent middleware wrapper — same
+# tonic service, same gRPC semantics; the kernel handles both clients
+# (CLI uses HTTP/2 gRPC, orchestrator uses HTTP/1.1 gRPC-Web) from a
+# single socket.
+tonic-web = "0.12"
 prost = "0.13"
 uuid = { version = "1", features = ["v4", "serde"] }
 

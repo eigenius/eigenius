@@ -167,6 +167,14 @@ pub mod iris {
     pub(crate) const MIRROR_NAMESPACE: &str = "EigeniusFFI";
 }
 
+/// IRI scheme prefix for wrapping a hex `LayerId` into a valid
+/// `urn:eigenius:core:formats:iri`-conforming string. Used by
+/// `RuntimePackageMirror.source_layer` and the institution's
+/// ancestry check (D28 §5.5). Two-way mapping: stripping this
+/// prefix from a stored `source_layer` value yields the hex form
+/// the layer chain stores directly on `Layer::id()`.
+const LAYER_IRI_PREFIX: &str = "urn:eigenius:layer:";
+
 /// In-process Lean 4 verification institution.
 ///
 /// Stateless — every `query` call parses the proof from scratch via
@@ -486,9 +494,30 @@ fn check_mirror_anchor_reachable(mirror: &Resource, ctx: &ExecutionContext) -> O
         }
     };
 
+    // `source_layer` may be one of three shapes, accumulated by
+    // convention:
+    //   (a) Bare hex `LayerId` string (the historical pattern used by
+    //       capstone_test + correspondence_test).
+    //   (b) Layer name (set when the substrate names its working
+    //       layer something semantically meaningful).
+    //   (c) `urn:eigenius:layer:<hex>` IRI form (required by the
+    //       ontology's `format = urn:eigenius:core:formats:iri`
+    //       constraint on `RuntimePackageMirror.source_layer`;
+    //       Eigon-JSON loads going through `commit_with_validation`
+    //       reject (a) and (b) at format-check time).
+    //
+    // We accept all three so existing in-process tests and the
+    // documented IRI-form fixture both pass through the same check.
+    let stripped_hex = source_layer
+        .strip_prefix(LAYER_IRI_PREFIX)
+        .map(str::to_string);
     let mut cur = Some(ctx.head().clone());
     while let Some(layer) = cur {
-        if layer.id().to_string() == source_layer || layer.name() == source_layer {
+        let hex_id = layer.id().to_string();
+        if hex_id == source_layer
+            || layer.name() == source_layer
+            || stripped_hex.as_deref() == Some(hex_id.as_str())
+        {
             return None;
         }
         cur = layer.parent().cloned();

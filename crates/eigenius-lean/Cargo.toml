@@ -41,3 +41,17 @@ sha2 = "0.10"
 # the bytes into a tempfile per call — that hop lives in the public
 # API path, so the dep belongs in `[dependencies]`, not dev-deps.
 tempfile = "3"
+
+[dev-dependencies]
+# The notebook-fixture generator (examples/gen_verification_demo.rs)
+# uses the canonical `mirror_to_resource` helper from the substrate's
+# Lean runtime so the generated mirror carries every required property
+# the chain validator enforces. Dev-only — the verification side
+# (production API of this crate) doesn't depend on the authoring
+# runtime. Avoids drift between the fixture and what a real
+# generator-driven commit pipeline would emit.
+eigenius-lean-runtime = { path = "../eigenius-lean-runtime" }
+# `MirrorGenerationOutput::library` carries a `LibraryContent::Embedded`
+# value, whose entries are `LibraryFile { path, content }`. The
+# generator binary stages the capstone Lake project into one.
+eigenius-runtime-substrate = { path = "../runtime-substrate" }

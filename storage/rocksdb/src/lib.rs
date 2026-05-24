@@ -714,8 +714,20 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         // so the build-time `extend_layer` already wrote them to RocksDB.
         // No duplicate population here.
 
+        // Sync write: layer commits are durability-critical. The kernel
+        // writes the layer + branch CAS sequentially, and a verdict
+        // resource committed via AutoOnLoad must survive a SIGKILL'd
+        // restart (the audit-chain promise of D28 §5.7). RocksDB's
+        // default async-WAL-flush mode lets writes return before the
+        // WAL fsyncs, opening a sub-second window where a forced kill
+        // loses the just-committed layer. `sync = true` makes the WAL
+        // fsync inline. Per-commit latency cost is ~10ms on local disk —
+        // dwarfed by the nanoda proof-check costs we already accept on
+        // institution-gated commits.
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
         self.db
-            .write(batch)
+            .write_opt(batch, &write_opts)
             .map_err(|e| StorageError::Internal(format!("store_layer batch: {e}")))?;
         Ok(id)
     }
@@ -861,9 +873,18 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn put_branch(&self, name: &str, id: &LayerId) -> Result<(), StorageError> {
+        // Sync write: the branch ref is the entry point for every chain
+        // walk. A `put_branch` returning ok without the WAL fsync'd
+        // means a SIGKILL'd restart sees the *old* branch ref — the
+        // newly-committed layer (already stored via `store_layer` with
+        // sync, above) becomes an unreachable orphan, and the audit
+        // chain's `verified` claims silently disappear (D28 §5.7).
+        // Same ~10ms latency cost as the `store_layer` sync write.
         let key = format!("{BRANCH_PREFIX}{name}");
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
         self.db
-            .put(key.as_bytes(), hex::encode(id.0))
+            .put_opt(key.as_bytes(), hex::encode(id.0), &write_opts)
             .map_err(|e| StorageError::Internal(format!("put_branch: {e}")))
     }
 
