@@ -531,6 +531,13 @@ pub struct EigeniusService {
     /// institution IRI. Populated when D14-shaped WASM institutions
     /// are installed (B3+ wiring); otherwise empty.
     institution_runtime: Arc<RwLock<Arc<crate::institution::runtime::InstitutionRuntime>>>,
+    /// Process-global registry of in-process institution
+    /// implementations (Phase 20a.1, D28). Statically-linked
+    /// institution crates (e.g. `eigenius-lean`) pre-register their
+    /// `Institution` impl here at orchestrator startup, and the
+    /// chain-scan registration pass looks them up by IRI when it
+    /// encounters `runtime: in_process` declarations.
+    in_process_registry: Arc<crate::institution::in_process_registry::InProcessInstitutionRegistry>,
     /// Optional persistent backend. When present, committed layers,
     /// the seed manifest, and trace state all live here; absent means
     /// the server is in-memory-only (the pre-Phase-9a behaviour).
@@ -587,6 +594,9 @@ impl EigeniusService {
             institution_runtime: Arc::new(RwLock::new(Arc::new(
                 crate::institution::runtime::InstitutionRuntime::new(),
             ))),
+            in_process_registry: Arc::new(
+                crate::institution::in_process_registry::InProcessInstitutionRegistry::new(),
+            ),
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -633,6 +643,9 @@ impl EigeniusService {
             institution_runtime: Arc::new(RwLock::new(Arc::new(
                 crate::institution::runtime::InstitutionRuntime::new(),
             ))),
+            in_process_registry: Arc::new(
+                crate::institution::in_process_registry::InProcessInstitutionRegistry::new(),
+            ),
             backend: Some(backend),
             task_store: Some(task_store),
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -657,6 +670,22 @@ impl EigeniusService {
         self
     }
 
+    /// Pre-register an in-process institution implementation (Phase
+    /// 20a.1, D28). Statically-linked institution crates call this at
+    /// orchestrator startup, *before* the kernel server begins serving
+    /// requests, so the chain-scan registration pass can look the
+    /// impl up by IRI when it encounters a `runtime: in_process`
+    /// declaration.
+    ///
+    /// Idempotent: re-registering the same IRI replaces the prior
+    /// entry, matching the runtime's `replace` discipline.
+    pub fn register_in_process_institution(
+        &self,
+        institution: Arc<dyn crate::institution::runtime::Institution>,
+    ) {
+        self.in_process_registry.register(institution);
+    }
+
     /// Create a new service with a custom component registry and trace store.
     pub fn with_trace_store(
         components: ComponentRegistry,
@@ -673,6 +702,9 @@ impl EigeniusService {
             institution_runtime: Arc::new(RwLock::new(Arc::new(
                 crate::institution::runtime::InstitutionRuntime::new(),
             ))),
+            in_process_registry: Arc::new(
+                crate::institution::in_process_registry::InProcessInstitutionRegistry::new(),
+            ),
             backend: None,
             task_store: None,
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
@@ -1186,7 +1218,8 @@ impl EigeniusService {
         *self.institution_index.write().await = Arc::clone(&idx_arc);
 
         // Rebuild the runtime from chain-declared WASM institutions,
-        // then layer in any external-runtime institutions (D31 §5).
+        // then layer in any external-runtime institutions (D31 §5),
+        // then layer in any in-process institutions (D28 Phase 20a.1).
         let (mut runtime, mut report) =
             crate::capability::registration::build_wasm_institution_runtime(layer);
         if let Some(client) = self.orchestrator_client.as_ref() {
@@ -1215,6 +1248,12 @@ impl EigeniusService {
                 );
             }
         }
+        crate::capability::registration::register_in_process_institutions(
+            idx_arc.as_ref(),
+            &mut runtime,
+            self.in_process_registry.as_ref(),
+            &mut report,
+        );
         for err in &report.errors {
             tracing::warn!(
                 { field::OPERATION } = operation::INSTITUTION_REGISTER,
@@ -4750,6 +4789,7 @@ pub async fn start_server(
     port: u16,
     orchestrator_endpoint: Option<&str>,
     backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
+    in_process_institutions: Vec<Arc<dyn crate::institution::runtime::Institution>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -4824,6 +4864,21 @@ pub async fn start_server(
         }
     }
 
+    // Phase 20a.1+: pre-register every in-process institution the
+    // binary links (Lean today, future verification institutions
+    // tomorrow). Must happen before the institution-index rebuild so
+    // the chain-scan registration pass sees them when it walks
+    // `runtime: in_process` declarations.
+    for institution in in_process_institutions {
+        tracing::info!(
+            { field::OPERATION } = operation::CAPABILITY_INSTALL,
+            { field::INSTITUTION_IRI } = %institution.institution_iri(),
+            host = "in_process",
+            "registered in-process institution"
+        );
+        service.register_in_process_institution(institution);
+    }
+
     // Build the D14 institution index from the bootstrap / rehydrated
     // chain so subsequent Loads dispatch AutoOnLoad QueryClasses
     // declared in the persisted chain.
@@ -4857,13 +4912,22 @@ pub async fn start_server(
 
     // Raise gRPC message size limits to 128 MB to accommodate WASM component
     // binaries (which are base64-encoded and can be multiple MB).
+    //
+    // `tonic_web::enable(...)` wraps the service so it accepts the
+    // gRPC-Web wire protocol (HTTP/1.1) alongside native gRPC
+    // (HTTP/2). The orchestrator's Deno-side `KernelClient` uses
+    // gRPC-Web through `fetch()` to avoid `node:http2`'s slow /
+    // session-reuse-hanging behaviour. CLI / kernel-binary clients
+    // continue to use native gRPC. `accept_http1(true)` is required
+    // for the HTTP/1.1 handshake — tonic's default is HTTP/2-only.
     tonic::transport::Server::builder()
-        .add_service(
+        .accept_http1(true)
+        .add_service(tonic_web::enable(
             service
                 .into_server()
                 .max_decoding_message_size(128 * 1024 * 1024)
                 .max_encoding_message_size(128 * 1024 * 1024),
-        )
+        ))
         .serve(addr)
         .await?;
 

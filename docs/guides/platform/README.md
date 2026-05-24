@@ -19,6 +19,7 @@ The most-used reference chapters are:
 - **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the sandboxed extension surface
 - **[11. Runtime substrate](11-runtime-substrate.md)** — the language-runtime extension surface (Julia in v1)
 - **[`julia-institutions/`](julia-institutions/)** — slow-walk tutorials for each of the v1 Julia institutions
+- **[`lean-institution/`](lean-institution/)** — the platform's first verification institution: Lean 4 in-process via `nanoda_lib`
 
 ## Chapters
 
@@ -64,6 +65,20 @@ Slow-walk tutorials for the five v1 Julia institutions live in
 [`julia-institutions/`](julia-institutions/). Read the
 [intervals tutorial](julia-institutions/intervals-institution-tutorial.md)
 first for the substrate plumbing slow-walk; then the others go domain-specific.
+
+## Lean institution tutorial
+
+The platform's first verification institution (D28). In-process via
+`nanoda_lib` for the verification side; substrate-hosted for the
+authoring side. Walks the closed audit chain D28 §5.7 promises against
+the [`lean-verification`](../../../notebooks/examples/lean-verification.json)
+notebook. See [`lean-institution/`](lean-institution/).
+
+When bumping the pinned Lean toolchain, follow the checklist at
+[`docs/notes/lean-toolchain-upgrade.md`](../../notes/lean-toolchain-upgrade.md)
+— the substrate's image-digest model treats every toolchain change as
+a new content-addressed `LeanEnvironment`, so existing verified proofs
+stay valid against their original env digest.
 
 ## Related documents
 

@@ -1,0 +1,57 @@
+[package]
+name = "eigenius-lean"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as an in-process proof checker; the kernel binary registers a LeanInstitution that dispatches proof_check verdicts through this crate. See D28, Phase 20a."
+
+[dependencies]
+# Lean term checker. Read the export directly and call
+# `ExportFile::check_all_declars` in-process per D28 §2.3 (no IPC,
+# verdict is a function call). Catching its panics with
+# `std::panic::catch_unwind` is the documented contract for v1.
+#
+# Pinned to a commit SHA rather than a tag because upstream's last
+# published tag (v0.3.2) predates the `Option<Vec<String>>` shape on
+# `Config::permitted_axioms` / `pp_declars` and the
+# `unknown_pp_declar_hard_error` field that `check_proof` relies on.
+# `6d2f037` is the last master commit before the `proj_of_prop` fix
+# (PR #19), which keeps `test_resources/ProjFromProp/export` (our
+# vendored broken-proof fixture) producing the expected `infer_proj
+# prop` panic.
+nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "6d2f037" }
+
+# Kernel dep wired in 20a.4: `LeanInstitution` implements
+# `kernel::institution::Institution`; the chain-mirror translator
+# produces `kernel::ontology::Resource` / `Value::Json` trees per D40.
+eigenius-kernel = { path = "../../kernel" }
+
+thiserror.workspace = true
+serde_json.workspace = true
+
+# D28 §5.5 anchor-consistency check recomputes the
+# `library_content_hash` over a mirror's embedded archive and
+# compares to the declared value. Matches the substrate-side
+# digest in `eigenius-lean-runtime::mirror_gen::library_content_hash`.
+sha2 = "0.10"
+
+# `check_proof` takes `&[u8]` but nanoda's `Config::to_export_file`
+# only accepts a `PathBuf`. Until upstream takes a `Reader`, we stage
+# the bytes into a tempfile per call — that hop lives in the public
+# API path, so the dep belongs in `[dependencies]`, not dev-deps.
+tempfile = "3"
+
+[dev-dependencies]
+# The notebook-fixture generator (examples/gen_verification_demo.rs)
+# uses the canonical `mirror_to_resource` helper from the substrate's
+# Lean runtime so the generated mirror carries every required property
+# the chain validator enforces. Dev-only — the verification side
+# (production API of this crate) doesn't depend on the authoring
+# runtime. Avoids drift between the fixture and what a real
+# generator-driven commit pipeline would emit.
+eigenius-lean-runtime = { path = "../eigenius-lean-runtime" }
+# `MirrorGenerationOutput::library` carries a `LibraryContent::Embedded`
+# value, whose entries are `LibraryFile { path, content }`. The
+# generator binary stages the capstone Lake project into one.
+eigenius-runtime-substrate = { path = "../runtime-substrate" }

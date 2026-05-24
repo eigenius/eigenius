@@ -20,6 +20,38 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
 
+      # The `eigenius-lean-worker` crate's build.rs compiles a C bridge
+      # against Lean's `lean.h` to talk to the Lean runtime. `lean.h`
+      # ships with the Lean toolchain via elan, not with system packages,
+      # so CI has to install elan + the pinned toolchain before running
+      # cargo. The toolchain version is read from
+      # `lean/runtime-worker/lean-toolchain` (the workspace's single
+      # source of truth — same file the Dockerfile composer bakes into
+      # env images). See `docs/notes/lean-toolchain-upgrade.md` for the
+      # upgrade discipline.
+      - name: Install elan + pinned Lean toolchain
+        run: |
+          set -euo pipefail
+          # Download and install elan (Lean's toolchain manager). The
+          # `--default-toolchain none` flag avoids pulling a fallback
+          # toolchain — we install the pinned version explicitly below.
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.elan/bin:$PATH"
+          # Install the toolchain pinned by the workspace's
+          # `lean-toolchain` file. `elan` would do this on first use,
+          # but doing it explicitly here keeps the install step's
+          # caching/timing surface visible.
+          TOOLCHAIN=$(cat lean/runtime-worker/lean-toolchain)
+          echo "Installing Lean toolchain: $TOOLCHAIN"
+          elan toolchain install "$TOOLCHAIN"
+          elan default "$TOOLCHAIN"
+          # Verify `lean.h` is reachable — the build.rs's discovery path.
+          PREFIX=$(lean --print-prefix)
+          echo "Lean prefix: $PREFIX"
+          test -f "$PREFIX/include/lean/lean.h"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

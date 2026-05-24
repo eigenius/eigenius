@@ -17,7 +17,7 @@ The platform maintains four epistemic categories:
 
 For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
 
-**Current status:** Phases 0–11e + D22 complete; Phase 12 in progress. The platform is operational end-to-end — kernel, orchestrator, LLM integration, and CLI connected via gRPC; type-checked programs with dependent types, sized inductives and codata; **institution dispatch under D14** (declarations as ontology resources, the three-method `Institution` trait, triadic comorphisms, Verdict-typed Decidable QueryClasses, FIBER param coercion, auto-registration of WASM institutions from chain scan); the React notebook + TypeScript SDK; durable RocksDB persistence; WASM-sandboxed extensions; deployable via Docker Compose. See the [implementation plan](../design/implementation-plan.md) for the full phased build plan and the [top-level README](https://github.com/eigenius/eigenius#readme) for the live capability list.
+**Current status:** Phases 0–11e + D22 (notebook) + D34 (chain workspace) + D14 (institution realisation) + D26/D29/D31 (runtime substrate) + D32 (formula language) + D28/D30/D40 (Lean 4 verification institution) complete. The platform is operational end-to-end — kernel, orchestrator, LLM integration, and CLI connected via gRPC; type-checked programs with dependent types, sized inductives and codata; **institution dispatch under D14** (declarations as ontology resources, the three-method `Institution` trait, triadic comorphisms, Verdict-typed Decidable QueryClasses, FIBER param coercion, auto-registration of WASM institutions from chain scan); the runtime substrate hosting five Julia institutions and the in-process Lean 4 verification institution; the React notebook + TypeScript SDK; durable RocksDB persistence with sync-write durability for layer/branch commits; WASM-sandboxed extensions; deployable via Docker Compose. See the [implementation plan](../design/implementation-plan.md) for the full phased build plan and the [top-level README](https://github.com/eigenius/eigenius#readme) for the live capability list.
 
 > This is still a very early stage of this project. Anticipate
 > features not working or missing functionality overall. Our goal
@@ -105,6 +105,8 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D27 Julia Institutions](../design/d27-julia-institutions.md) — the v1 Julia institution suite, complementary to the per-institution tutorials under [`platform/julia-institutions/`](platform/julia-institutions/)
 - [D32 Chain-mirrored Mini-TT inductives](../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec, complementary to the formula guide
 
-The full set (plus standalone notes including [D28 Lean 4 as Verification Institution](../design/d28-lean-4-as-institution.md)) lives at [`docs/design/`](../design/).
+- [D28 Lean 4 as Verification Institution](../design/d28-lean-4-as-institution.md), [D30 Eigon → Lean Faithful Translation](../design/d30-eigon-to-lean-faithful-translation.md), [D40 Chain-Mirrored Lean Expressions](../design/d40-chain-mirrored-lean-expressions.md) — the first verification institution, walked through in [`platform/lean-institution/`](platform/lean-institution/)
+
+The full design-document set lives at [`docs/design/`](../design/).
 
 Source code: [github.com/eigenius/eigenius](https://github.com/eigenius/eigenius).

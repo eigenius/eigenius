@@ -53,7 +53,7 @@ This is the path to use when iterating on the notebook itself.
 
 ## 14.3. Bundled example notebooks
 
-Two example notebooks ship with the repository. The patent-analysis demo is what loads on first start; both are importable via the **Open…** button.
+Three example notebooks ship with the repository. The patent-analysis demo is what loads on first start; all three are importable via the **Imprt…** button.
 
 ### Patent-analysis demo
 
@@ -80,6 +80,14 @@ Cells 13–18 exercise both surfaces of the comorphism chain-reinsertion contrac
 - EigenQL `FIBER ... AS ?var INTO "<iri>"` — output commits at a caller-named IRI.
 
 See [chapter 8 §8.4](08-demos.md#84-kinase-institutions--multi-institution-julia-stack) for the storyline overview and the per-institution walkthroughs under [`platform/julia-institutions/`](julia-institutions/) for one-at-a-time slow-walks.
+
+### Lean-verification demo
+
+[`notebooks/examples/lean-verification.json`](../../../notebooks/examples/lean-verification.json). The showcase for the platform's first verification institution. Walks the closed audit chain D28 §5.7 promises — verdict → proof term → mirror anchor → mirrored class — for a real Lean 4 proof of `∀ p : EigeniusFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10`. Setup script: [`notebooks/examples/lean-verification-setup.sh`](../../../notebooks/examples/lean-verification-setup.sh) (fast — the Lean institution runs in-process so no Docker / Lake / env-image build is needed at notebook-load time).
+
+Ten cells alternating markdown (audit-chain narrative) and EigenQL (one query per step backward through the chain). The first EigenQL cell finds the `Verdict::Holds` resource AutoOnLoad produced; subsequent cells trace the cross-references back to the chain-side Patient class declaration.
+
+See [chapter 8 §8.5](08-demos.md#85-lean-verification--lean-4-verification-audit-chain) for the storyline overview and [`platform/lean-institution/`](lean-institution/) for the in-process verification-side slow-walk.
 
 ### Markdown maths
 

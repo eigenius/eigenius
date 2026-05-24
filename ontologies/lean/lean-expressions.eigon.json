@@ -1,0 +1,331 @@
+[
+  {
+    "@id": "urn:eigenius:lean:LeanName",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "LeanName",
+    "urn:eigenius:core:description": "Mirror of Lean's hierarchical name. Mirrors nanoda's `Name` shape one-for-one (references/nanoda_lib/src/name.rs). Names are formed from `Anon` (the empty name) plus a sequence of string or numeric suffix applications: `Foo.bar` is `Str(Str(Anon, \"Foo\"), \"bar\")`; `Foo.42` is `Num(Str(Anon, \"Foo\"), 42)`. See D40 §3.1.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Anon"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Str",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "prefix",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "suffix",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Num",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "prefix",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "suffix",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanLevel",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "LeanLevel",
+    "urn:eigenius:core:description": "Mirror of Lean's universe level. Mirrors nanoda's `Level` shape one-for-one (references/nanoda_lib/src/level.rs). `Zero` is `Sort 0`'s level (the prop universe lives at `Sort Zero`); `Succ u` lifts; `Max`/`IMax` compose (IMax models `if v=0 then 0 else Max(u,v)` for impredicative `Prop`); `Param` introduces a universe-level variable used by universe-polymorphic constants. See D40 §3.2.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Zero"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Succ",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "base",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Max",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "IMax",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Param",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanLevelList",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "LeanLevelList",
+    "urn:eigenius:core:description": "Cons-list carrier for the universe-instantiation array on `LeanExpr.Const`. Two ctors — `Nil` and `Cons(head: LeanLevel, tail: LeanLevelList)`. Carries `Const`'s positional universe parameters in source order: a `Const` with no universe params encodes as `Nil`; `Const \"List\" [u]` encodes as `Cons(u, Nil)`; `Const \"PProd\" [u, v]` as `Cons(u, Cons(v, Nil))`. v1 uses a cons-list rather than `core:value_array<LeanLevel>` because the chain's `core:element_type` is constrained to primitive types (`core:allows_only: [string, integer, float, boolean, json]`), so a value-array of inductive elements wouldn't validate. The translator (D40 §4.1, eigenius-lean Phase 20a.4) converts to/from nanoda's flat `Arc<[LevelPtr]>` shape via `iter().rev().fold(Nil, |acc, l| Cons(l, acc))` and back.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Nil"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Cons",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "head",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "tail",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevelList"
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:lean:LeanExpr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "LeanExpr",
+    "urn:eigenius:core:description": "Mirror of Lean's expression form, minus `Local` (closed terms only — `Local` is fabricated by nanoda during traversal and never crosses the institution boundary; see D40 §3.3). Mirrors nanoda's `Expr` ctors one-for-one otherwise (references/nanoda_lib/src/expr.rs). Ten ctors: `Var` (de Bruijn bound variable), `Sort` (universe expression), `Const` (named environment reference with universe instantiation), `App`, `Pi`, `Lambda`, `Let`, `Proj` (structure projection), `StringLit`, `NatLit`. `binder_style` is a tagged-string field (`default` / `implicit` / `strictImplicit` / `instImplicit`) — presentation-only, not load-bearing for soundness, so v1 doesn't promote it to a named inductive. `NatLit.value` is `core:string` (decimal digits) rather than `core:integer` because Lean's `NatLit` is arbitrary-precision (nanoda's `BigUintPtr` / `num_bigint::BigUint`) and chain `core:integer` is `i64`.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Var",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dbj_idx",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Sort",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "level",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevel"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Const",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "levels",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanLevelList"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "App",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "fun",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "arg",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pi",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_name",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_style",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_type",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Lambda",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_name",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_style",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_type",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Let",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_name",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "binder_type",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "val",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "nondep",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:boolean"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Proj",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ty_name",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanName"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "idx",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "structure",
+            "urn:eigenius:core:type_name": "urn:eigenius:lean:LeanExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "StringLit",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "NatLit",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "meta": {
+    "title": "Lean verification — walking the audit chain",
+    "description": "A small but real Eigon claim — that a Patient's weight is non-negative implies weight + 10 ≥ 10 — discharged by a Lean 4 proof and verified end-to-end through the kernel's AutoOnLoad path. The notebook walks the closed audit chain D28 §5.7 promises: from the verdict back through the proof term, mirror anchor, mirrored classes, and ultimately the chain-side Patient class the claim is about.",
+    "created": "2026-05-22T00:00:00Z",
+    "modified": "2026-05-22T00:00:00Z",
+    "eigenius_version": "0.1.0"
+  },
+  "cells": [
+    {
+      "id": "lv00-0000-4000-8000-000000000001",
+      "type": "markdown",
+      "source": "# Lean verification — walking the audit chain\n\nWhen a `LeanProofTerm` resource lands in the chain, the kernel's AutoOnLoad dispatcher fires `qc_proof_check` against the `LeanInstitution`. The institution runs the three-part correspondence check D28 §5.5 specifies — **proof validity** (nanoda_lib re-checks the verbatim `lean4export` bytes), **mirror correspondence** (the proposition's `EigeniusFFI.Patient` reference maps back to the chain-side `Patient` class), and **anchor consistency** (the mirror's declared content hash matches the actual archive bytes). When all three pass, a `Verdict::Holds` resource materialises on the chain alongside the proof term.\n\nThis notebook walks that **closed audit chain**, the load-bearing claim of D28 §5.7: from the published verdict backward through every property that anchored it, all the way to the chain-side ontology class the proof is *about*.\n\n## What's been committed\n\nThe setup script (`./notebooks/examples/lean-verification-setup.sh`) loaded a single Eigon-JSON fixture carrying five resources:\n\n| IRI | Class | Role |\n|---|---|---|\n| `urn:eigenius:demo:lean:Patient` | `Class` | Chain-side ontology class |\n| `urn:eigenius:demo:lean:patient_1` | `Patient` | The Eigon claim (instance the proof is *about*) |\n| `urn:eigenius:demo:lean:mirror` | `LeanPackageMirror` | Audit anchor — the Lake project that produced the proof |\n| `urn:eigenius:demo:lean:proof_payload` | `LeanProofPayload` | Verbatim `lean4export` bytes (≈ 9 kLoC of JSON) |\n| `urn:eigenius:demo:lean:proof_term` | `LeanProofTerm` | Wires payload + mirror + claim together |\n\nAutoOnLoad fired on the proof term at commit time; the next cell shows the verdict it produced.\n\n## The proposition being verified\n\n```text\ntheorem patient_weight_nonneg :\n  ∀ p : EigeniusFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10\n```\n\nA closed term over the `EigeniusFFI.Patient` mirror structure, proved by `omega` against `Float`'s ordering. The proof bytes (under `crates/eigenius-lean/test_resources/capstone_proof.json`) and the Lake project (`lean/research/capstone-proof/`) were authored once and committed as the demo's load-bearing fixture.\n\n## What to look for\n\nEach cell below walks one *backward* edge in the audit chain. The point is that every claim of correctness traces, through resources Eigenius can serve, to the inputs that justified it — proof bytes, ontology classes, environment configuration. Nothing in the chain is *trusted*; everything is *anchored*."
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000002",
+      "type": "markdown",
+      "source": "## Step 1 — the verdict\n\nDoes the chain hold a `Verdict::Holds` for `urn:eigenius:demo:lean:proof_term`?\n\nIf this returns a row with `ctor = \"Holds\"`, the proof passed every check D28 §5.5 specifies. The `verdict_iri` in the row is the chain-committed Verdict resource the next steps will pivot on."
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000003",
+      "type": "eigenql",
+      "source": "// Phase 1 — the verdict resource. AutoOnLoad fired `qc_proof_check`\n// against the LeanInstitution as the LeanProofTerm landed; the\n// kernel committed a Verdict resource alongside it (`build_verdict_resource`\n// in `kernel::institution::dispatch`). `verdict_subject` is the IRI\n// of the resource the verdict is *about*; `ctor_name` is one of\n// `\"Holds\"`, `\"Fails\"`, `\"Undecidable\"`.\n\nMATCH \"urn:eigenius:institution:Verdict\"(?v) {\n    \"urn:eigenius:institution:verdict_subject\": ?subject,\n    \"urn:eigenius:core:ctor_name\":              ?ctor\n}\nWHERE ?subject = \"urn:eigenius:demo:lean:proof_term\"\nRETURN [] {\n    verdict_iri: ?v,\n    ctor:        ?ctor\n}\n"
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000004",
+      "type": "markdown",
+      "source": "## Step 2 — the proof term\n\nThe verdict's `verdict_subject` is a `LeanProofTerm` resource. It carries four properties the correspondence check reads:\n\n- `target_name` — the Lean declaration name (`patient_weight_nonneg`) that nanoda is asked to re-check.\n- `claim_iri` — the chain-side resource the proof is discharging a claim *about* (the `patient_1` instance).\n- `mirror_iri` — the `LeanPackageMirror` anchoring this proof to a specific Lake project + toolchain version.\n- `proposition` — the chain-mirrored Lean expression (`lean:LeanExpr`) representing the proven theorem's *type*; the proof bytes' inferred type must structurally match this, otherwise the verdict is `PropositionMismatch`.\n\nThis cell pulls the first three. The proposition is a deeply nested inductive-value tree; we'll show it as a JSON cell in the next step."
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000005",
+      "type": "eigenql",
+      "source": "MATCH \"urn:eigenius:lean:LeanProofTerm\"(?t) {\n    \"urn:eigenius:lean:target_name\": ?theorem,\n    \"urn:eigenius:lean:claim_iri\":   ?claim,\n    \"urn:eigenius:lean:mirror_iri\":  ?mirror\n}\nWHERE ?t = \"urn:eigenius:demo:lean:proof_term\"\nRETURN [] {\n    proof_term: ?t,\n    theorem:    ?theorem,\n    claim:      ?claim,\n    mirror:     ?mirror\n}\n"
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000006",
+      "type": "markdown",
+      "source": "## Step 3 — the mirror anchor\n\nThe proof term's `mirror_iri` points at a `LeanPackageMirror` resource — the load-bearing **audit anchor** for the verification. Per D28 §5.5 and D30 §10, the mirror carries:\n\n- `source_layer` — the chain layer where the mirrored classes were authored. The mirror correspondence check verifies this layer is ancestral to the claim's layer (the demo uses the bootstrap head, which is a universal ancestor — so any claim layer descends from it).\n- `library_content_hash` — SHA-256 over a length-prefixed framing of the archive's path-sorted files (D30 §10.2). The kernel rehashes the embedded archive and compares; tamper detection passes only if the value matches the recomputed digest.\n- `library_content` — the actual archive bytes embedded as `{kind: \"embedded\", files: [{path, content_b64}, …]}`. Four files for this demo: `lakefile.lean`, `lean-toolchain`, `EigeniusFFI.lean`, `Capstone.lean`.\n- `mirrored_classes` — which chain-side classes the mirror translates. Structural correspondence walks the proposition's `Const` references and asks: do they map back to one of these?"
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000007",
+      "type": "eigenql",
+      "source": "MATCH \"urn:eigenius:runtime:RuntimePackageMirror\"(?m) {\n    \"urn:eigenius:runtime:source_layer\":          ?source_layer,\n    \"urn:eigenius:runtime:library_content_hash\":  ?lib_hash,\n    \"urn:eigenius:runtime:mirrored_classes\":      ?mirrored\n}\nWHERE ?m = \"urn:eigenius:demo:lean:mirror\"\nRETURN [] {\n    mirror:       ?m,\n    source_layer: ?source_layer,\n    library_hash: ?lib_hash,\n    mirrors:      ?mirrored\n}\n"
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000008",
+      "type": "markdown",
+      "source": "## Step 4 — the chain-side claim\n\nThe proof term's `claim_iri` points at a chain-side resource of class `Patient`. The mirror's `mirrored_classes` list includes that same `Patient` class — that's how the structural correspondence check closes the loop between the proof (which references `EigeniusFFI.Patient` in Lean) and the chain claim (which is an instance of `urn:eigenius:demo:lean:Patient`).\n\nThis cell shows both: the instance (`patient_1`, the claim itself) and the class declaration it's an instance of. The class's `short_name = \"Patient\"` is the string that nanoda's printer would format the `Const` reference as — and it matches the mirror's `EigeniusFFI.Patient` (case- and segment-identical after the namespace prefix). That match is what the substrate's structural correspondence check (`crates/eigenius-lean/src/institution.rs::structural_correspondence_matches`) validates."
+    },
+    {
+      "id": "lv00-0000-4000-8000-000000000009",
+      "type": "eigenql",
+      "source": "// The Patient class — the chain-side type the claim is an instance of.\nMATCH \"urn:eigenius:core:Class\"(?c) {\n    \"urn:eigenius:core:short_name\": ?name\n}\nWHERE ?c = \"urn:eigenius:demo:lean:Patient\"\nRETURN [] {\n    class:      ?c,\n    short_name: ?name\n}\n"
+    },
+    {
+      "id": "lv00-0000-4000-8000-00000000000a",
+      "type": "markdown",
+      "source": "## Step 5 — the closed audit chain\n\nThe four queries above traced the verdict backward to its ontology root. Read forward, the chain is:\n\n```text\nurn:eigenius:demo:lean:Patient                    [Class — the ontology root]\n  ↑ is_a\nurn:eigenius:demo:lean:patient_1                  [Patient — the Eigon claim]\n  ↑ claim_iri\nurn:eigenius:demo:lean:proof_term                 [LeanProofTerm — proof + proposition + anchors]\n  │ ↑ proof_payload\n  │  urn:eigenius:demo:lean:proof_payload         [LeanProofPayload — lean4export bytes (verbatim)]\n  │ ↑ mirror_iri\n  │  urn:eigenius:demo:lean:mirror                [LeanPackageMirror — audit anchor]\n  │  │ ↑ source_layer\n  │  │  <bootstrap head layer>                    [universal ancestor of every claim layer]\n  │  │ ↑ library_content_hash\n  │  │  sha256:af662f...d6510e                    [tamper-detection anchor over the embedded archive]\n  │  │ ↑ library_content.files[]\n  │  │  Capstone.lean, EigeniusFFI.lean,          [the actual Lake project — every byte that produced the proof]\n  │  │  lakefile.lean, lean-toolchain\n  │  ↑ mirrored_classes\n  │   urn:eigenius:demo:lean:Patient              [back to the ontology root — closing the cycle]\n  ↑ verdict_subject\nurn:eigenius:institution:Verdict(\"Holds\")         [the verdict — D28 §5.7 closure]\n```\n\n## What this proves\n\nThe verdict was not a black-box assertion. Every byte that went into the verification — the Lake project sources, the toolchain pin, the verbatim `lean4export` JSON, the chain-side class declaration, the source layer the mirror anchors to — sits on the chain as a typed resource, queryable, content-addressed. A consumer who wants to reproduce the verdict can pull the archive bytes from `library_content`, fetch the toolchain pinned by `lean-toolchain`, run `lake build && lake exe lean4export`, and re-check the output against the stored bytes (D28 §5.7's reproducibility contract).\n\nThe Lean toolchain version and `library_content_hash` together pin the verification context: a toolchain bump produces a new `LeanPackageMirror` with a new hash and a new IRI, leaving the old mirror — and any verdicts anchored to it — exactly as they were. This is the same content-addressed posture D26 §7 prescribes for the substrate as a whole, applied to the verification side.\n\n## Related\n\n- **Architecture.** D28 §5.5 (three-part correspondence check), D28 §5.7 (closed audit chain), D28 §6.3 (`LeanProofTerm` shape), D30 §10.2 (`library_content_hash` framing), D40 (chain-mirrored Lean expressions).\n- **Implementation.** `crates/eigenius-lean/src/institution.rs` (the institution's `query` dispatch), `crates/eigenius-lean/src/checker.rs` (nanoda integration), `crates/eigenius-lean/src/chain_mirror.rs` (proposition translator).\n- **Reproducing the fixture.** `cargo run -p eigenius-lean --example gen_verification_demo` regenerates `lean-verification-demo.eigon.json` from the capstone proof bytes + Lake project sources. The upgrade checklist at `docs/notes/lean-toolchain-upgrade.md` calls out when to re-run."
+    }
+  ]
+}
