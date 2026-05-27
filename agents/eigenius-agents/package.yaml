@@ -1,0 +1,18 @@
+apiVersion: spring.voyage/v1
+kind: Package
+name: eigenius-agents
+description: Eigenius agentic-development team — software-engineer and program-manager agents operating on the Eigenius repository under a design-first workflow.
+version: 0.1.0
+
+# Directory layout is the manifest: this package ships exactly the artefacts
+# discovered under `units/` and `templates/`. The `eigenius-agents` unit is
+# the package's single top-level activatable; its engineer and PM agent
+# members are stamped inline from the templates here.
+
+# Package-level execution default: the umbrella unit (which does not pin
+# its own image) inherits the Claude Code base image from Spring Voyage.
+# Agent members stamped from the templates use the templates' own image
+# (`eigenius/agent-engineer:dev`) — built from `eng/agent-image/` after
+# Phase 3 of the setup plan.
+execution:
+  image: ghcr.io/cvoya-com/spring-voyage-claude-code-base:latest
