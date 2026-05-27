@@ -14,5 +14,8 @@ version: 0.1.0
 # Agent members stamped from the templates use the templates' own image
 # (`eigenius/agent-engineer:dev`) — built from `eng/agent-image/` after
 # Phase 3 of the setup plan.
+# Spring Voyage has only published pre-releases so far (no stable cut),
+# so `:latest` does not exist on GHCR. Pinning to the current pre-release;
+# bump when SV cuts a stable release.
 execution:
-  image: ghcr.io/cvoya-com/spring-voyage-claude-code-base:latest
+  image: ghcr.io/cvoya-com/spring-voyage-claude-code-base:0.0.0-rc.20260513.4

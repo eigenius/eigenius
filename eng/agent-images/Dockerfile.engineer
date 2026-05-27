@@ -1,0 +1,123 @@
+# syntax=docker/dockerfile:1.7
+#
+# Eigenius — eigenius/agent-engineer
+#
+# Role: Software Engineering (generalist that dispatches to repository
+#       personas under `.claude/agents/`).
+# Unit: Eigenius Agents (see agents/eigenius-agents/).
+#
+# Bundles on top of spring-voyage-agent-base:
+#   - Claude Code CLI   — Anthropic's claude-code launcher
+#   - Rust stable       — cargo build / test / clippy / fmt at the
+#                         Eigenius workspace root
+#   - gh CLI            — issue / PR work via the unit's GitHub App
+#
+# Deferred (add as the workload demands; image-size cost is real):
+#   - Julia              area:institution Julia work
+#   - elan + Lean 4      area:institution Lean work, area:verification-lean4
+#   - Deno               area:orchestrator work
+#   - Verus              area:verification-verus work
+#   - Playwright deps    area:notebook e2e (Node 22 + npm are already in
+#                        the base image)
+#
+# Node 22 + npm are inherited from spring-voyage-agent-base and are not
+# re-installed here.
+#
+# Conforms to ADR-0027 BYOI path 1: ENTRYPOINT is inherited unchanged
+# from spring-voyage-agent-base (tini → node sidecar); do NOT override
+# it here.
+#
+# Build (from any directory — Dockerfile uses no build context):
+#
+#     docker build \
+#       -f /home/hm/src/eigenius/eng/agent-images/Dockerfile.engineer \
+#       -t eigenius/agent-engineer:dev \
+#       /tmp/empty-context           # an empty dir; nothing is COPYed
+
+# Spring Voyage has only published pre-releases so far (no stable cut), so
+# the `:latest` tag does not exist on GHCR. Pinning to the current
+# pre-release. Bump this when SV cuts a stable release.
+ARG AGENT_BASE_IMAGE=ghcr.io/cvoya-com/spring-voyage-agent-base:0.0.0-rc.20260513.4
+ARG CLAUDE_CODE_VERSION=2.1.98
+ARG RUST_TOOLCHAIN=stable
+ARG GH_CLI_VERSION=2.92.0
+
+FROM ${AGENT_BASE_IMAGE}
+
+# Re-declare ARGs after FROM so they are in scope for RUN steps below.
+ARG CLAUDE_CODE_VERSION
+ARG RUST_TOOLCHAIN
+ARG GH_CLI_VERSION
+
+USER root
+
+# ---- Claude Code CLI -------------------------------------------------------
+# Skip Playwright browser download here — the engineer image does not yet
+# include Playwright (deferred until area:notebook e2e demand surfaces).
+RUN export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+ && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && command -v claude >/dev/null \
+ && claude --version
+
+# ---- Rust stable + clippy + rustfmt ---------------------------------------
+# Install via rustup (the upstream-blessed path for Debian/Ubuntu without
+# a distro-pinned recent Rust). rustup lands in /usr/local so cargo / rustc
+# are available system-wide; profile=minimal keeps the image small.
+#
+# `build-essential`, `pkg-config`, and `libssl-dev` cover the common native
+# build deps Eigenius's workspace pulls in transitively (proc-macros,
+# anything that statically links against `openssl`, etc.). If Eigenius
+# accumulates crates that need `cmake`, `clang`, `protobuf-compiler`, or
+# additional system libs, append them here.
+ARG RUSTUP_HOME=/usr/local/rustup
+ARG CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=${RUSTUP_HOME} \
+    CARGO_HOME=${CARGO_HOME} \
+    PATH=${CARGO_HOME}/bin:${PATH}
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl \
+      ca-certificates \
+      build-essential \
+      pkg-config \
+      libssl-dev \
+      git \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \
+ && chmod +x /tmp/rustup-init.sh \
+ && /tmp/rustup-init.sh -y \
+      --default-toolchain "${RUST_TOOLCHAIN}" \
+      --profile minimal \
+      --no-modify-path \
+ && rm /tmp/rustup-init.sh \
+ && rustup component add clippy rustfmt \
+ && chmod -R a+rwX "${CARGO_HOME}" "${RUSTUP_HOME}" \
+ && cargo --version \
+ && rustc --version \
+ && cargo clippy --version \
+ && cargo fmt --version
+
+# ---- gh CLI ----------------------------------------------------------------
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/* \
+ && gh --version
+
+USER agent
+
+# ---- labels ----------------------------------------------------------------
+LABEL org.opencontainers.image.title="eigenius-agent-engineer" \
+      org.opencontainers.image.description="Software-engineering role image for the Eigenius Agents unit. Bundles Claude Code CLI, Rust stable (cargo, clippy, rustfmt), and gh CLI on top of spring-voyage-agent-base." \
+      org.opencontainers.image.source="https://github.com/eigenius/eigenius" \
+      com.eigenius.agent.claude-code-version="${CLAUDE_CODE_VERSION}" \
+      com.eigenius.agent.rust-toolchain="${RUST_TOOLCHAIN}" \
+      com.eigenius.agent.gh-cli-version="${GH_CLI_VERSION}"
+
+# Entrypoint inherited from spring-voyage-agent-base (tini → node sidecar).
+# ADR-0027 BYOI path 1: do NOT override ENTRYPOINT here.
