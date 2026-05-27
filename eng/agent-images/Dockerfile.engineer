@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # Eigenius — eigenius/agent-engineer
 #
 # Role: Software Engineering (generalist that dispatches to repository
@@ -41,6 +39,11 @@ ARG AGENT_BASE_IMAGE=ghcr.io/cvoya-com/spring-voyage-agent-base:0.0.0-rc.2026051
 ARG CLAUDE_CODE_VERSION=2.1.98
 ARG RUST_TOOLCHAIN=stable
 ARG GH_CLI_VERSION=2.92.0
+ARG DENO_VERSION=2.4.5
+# Julia: pin to the version that resolved julia/runtime-worker/Manifest.toml.
+ARG JULIA_VERSION=1.12.6
+# Lean: pin to the toolchain in lean/runtime-worker/lean-toolchain.
+ARG LEAN_TOOLCHAIN=leanprover/lean4:v4.29.1
 
 FROM ${AGENT_BASE_IMAGE}
 
@@ -48,6 +51,9 @@ FROM ${AGENT_BASE_IMAGE}
 ARG CLAUDE_CODE_VERSION
 ARG RUST_TOOLCHAIN
 ARG GH_CLI_VERSION
+ARG DENO_VERSION
+ARG JULIA_VERSION
+ARG LEAN_TOOLCHAIN
 
 USER root
 
@@ -66,9 +72,10 @@ RUN export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
 #
 # `build-essential`, `pkg-config`, and `libssl-dev` cover the common native
 # build deps Eigenius's workspace pulls in transitively (proc-macros,
-# anything that statically links against `openssl`, etc.). If Eigenius
-# accumulates crates that need `cmake`, `clang`, `protobuf-compiler`, or
-# additional system libs, append them here.
+# anything that statically links against `openssl`, etc.). `protobuf-compiler`
+# is required by `kernel/build.rs` — it invokes `tonic-build` against
+# `proto/eigenius.proto`. If Eigenius accumulates crates that need `cmake`,
+# `clang`, or additional system libs, append them here.
 ARG RUSTUP_HOME=/usr/local/rustup
 ARG CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=${RUSTUP_HOME} \
@@ -83,6 +90,7 @@ RUN apt-get update \
       pkg-config \
       libssl-dev \
       git \
+      protobuf-compiler \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \
  && chmod +x /tmp/rustup-init.sh \
@@ -109,15 +117,76 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
  && rm -rf /var/lib/apt/lists/* \
  && gh --version
 
+# ---- Deno (for area:orchestrator — `deno check / lint / fmt / test`) -------
+# Direct binary download. The orchestrator at orchestration/ is Deno-based
+# (deno.json declares the run/test/lint tasks). Pinned to a specific
+# version; bump deliberately.
+#
+# Multi-arch note: only the x86_64 release URL is wired in for now. When
+# adding arm64 support, branch on dpkg --print-architecture and pull
+# `deno-aarch64-unknown-linux-gnu.zip` instead.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends unzip \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
+      -o /tmp/deno.zip \
+ && unzip /tmp/deno.zip -d /usr/local/bin/ \
+ && rm /tmp/deno.zip \
+ && chmod +x /usr/local/bin/deno \
+ && deno --version
+
+# ---- Julia (for area:institution Julia workers) ---------------------------
+# Direct binary download from julialang-s3 rather than juliaup. Juliaup's
+# HTTP client uses a tight default read-timeout that consistently fails on
+# slow or throttled paths to the S3 endpoint; curl with a generous
+# --max-time + --retry is more robust. The tarball is ~276 MB. Single
+# pinned version is fine here — the agent does not need juliaup's
+# multi-version management.
+ENV JULIA_HOME=/usr/local/julia \
+    PATH=/usr/local/julia/bin:${PATH}
+RUN JULIA_MINOR=$(echo "${JULIA_VERSION}" | cut -d. -f1-2) \
+ && curl -fL --max-time 900 --retry 3 --retry-delay 10 \
+      "https://julialang-s3.julialang.org/bin/linux/x64/${JULIA_MINOR}/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" \
+      -o /tmp/julia.tar.gz \
+ && mkdir -p /usr/local/julia \
+ && tar -xzf /tmp/julia.tar.gz -C /usr/local/julia --strip-components=1 \
+ && rm /tmp/julia.tar.gz \
+ && chmod -R a+rX /usr/local/julia \
+ && julia --version
+
+# ---- elan + Lean 4 (for area:institution Lean workers, area:verification-lean4) ----
+# elan installs the Lean toolchain pinned in lean/runtime-worker/lean-toolchain.
+# `eigenius-lean-worker`'s build.rs (`crates/eigenius-lean-worker/build.rs`)
+# shells out to `lean --print-prefix` to discover `lean.h`; PATH below makes
+# the elan-managed `lean` binary available to that lookup.
+#
+# Eagerly install the pinned toolchain so the first agent turn doesn't
+# pay the ~700 MB download cost.
+ENV ELAN_HOME=/usr/local/elan \
+    PATH=/usr/local/elan/bin:${PATH}
+RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+      -o /tmp/elan-init.sh \
+ && chmod +x /tmp/elan-init.sh \
+ && /tmp/elan-init.sh -y \
+      --default-toolchain "${LEAN_TOOLCHAIN}" \
+      --no-modify-path \
+ && rm /tmp/elan-init.sh \
+ && chmod -R a+rwX "${ELAN_HOME}" \
+ && lean --version \
+ && lake --version
+
 USER agent
 
 # ---- labels ----------------------------------------------------------------
 LABEL org.opencontainers.image.title="eigenius-agent-engineer" \
-      org.opencontainers.image.description="Software-engineering role image for the Eigenius Agents unit. Bundles Claude Code CLI, Rust stable (cargo, clippy, rustfmt), and gh CLI on top of spring-voyage-agent-base." \
+      org.opencontainers.image.description="Software-engineering role image for the Eigenius Agents unit. Bundles Claude Code CLI, Rust stable (cargo, clippy, rustfmt), gh CLI, Deno, Julia, and elan + Lean 4 on top of spring-voyage-agent-base." \
       org.opencontainers.image.source="https://github.com/eigenius/eigenius" \
       com.eigenius.agent.claude-code-version="${CLAUDE_CODE_VERSION}" \
       com.eigenius.agent.rust-toolchain="${RUST_TOOLCHAIN}" \
-      com.eigenius.agent.gh-cli-version="${GH_CLI_VERSION}"
+      com.eigenius.agent.gh-cli-version="${GH_CLI_VERSION}" \
+      com.eigenius.agent.deno-version="${DENO_VERSION}" \
+      com.eigenius.agent.julia-version="${JULIA_VERSION}" \
+      com.eigenius.agent.lean-toolchain="${LEAN_TOOLCHAIN}"
 
 # Entrypoint inherited from spring-voyage-agent-base (tini → node sidecar).
 # ADR-0027 BYOI path 1: do NOT override ENTRYPOINT here.
