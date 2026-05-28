@@ -46,7 +46,7 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::lattice::commit_layer;
+use eigenius_kernel::lattice::commit_layer_default;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -117,7 +117,7 @@ async fn load_after_concurrent_conflicting_commit_reports_needs_witnessed_merge(
     a_builder
         .add_resource(widget("from concurrent client A"))
         .unwrap();
-    let layer_a = commit_layer(a_builder, storage.clone(), backend.as_ref())
+    let layer_a = commit_layer_default(a_builder, storage.clone(), backend.as_ref())
         .expect("commit_layer A succeeds");
 
     // Advance the branch ref to L_A out-of-band. The service's cached

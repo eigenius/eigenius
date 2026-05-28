@@ -366,7 +366,7 @@ fn current_time_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lattice::{commit_layer, update_branch, ConflictPolicy};
+    use crate::lattice::{commit_layer_default, update_branch, ConflictPolicy};
     use crate::layer::{LayerBuilder, LayerStorage};
     use crate::ontology::iri::Iri;
     use crate::ontology::resource::{Resource, Value};
@@ -394,7 +394,7 @@ mod tests {
         let mut b = LayerBuilder::new("root", None);
         b.add_resource(make_resource("urn:eigenius:core:r"))
             .unwrap();
-        commit_layer(b, storage.clone(), backend).unwrap()
+        commit_layer_default(b, storage.clone(), backend).unwrap()
     }
 
     /// Helper: commit a child layer above `parent`.
@@ -407,7 +407,7 @@ mod tests {
     ) -> Arc<crate::layer::Layer> {
         let mut b = LayerBuilder::new(name, Some(parent));
         b.add_resource(make_resource(iri_str)).unwrap();
-        commit_layer(b, storage.clone(), backend).unwrap()
+        commit_layer_default(b, storage.clone(), backend).unwrap()
     }
 
     /// Aggressive config that skips no layers — for tests where the

@@ -699,6 +699,7 @@ impl std::error::Error for LayerError {}
 /// addressed `LayerId` and produces an immutable `Layer`. Phase 14e:
 /// supports N parents for trivial-merge layers via
 /// `LayerBuilder::with_parents`.
+#[derive(Clone)]
 pub struct LayerBuilder {
     name: String,
     resources: BTreeMap<Iri, Resource>,

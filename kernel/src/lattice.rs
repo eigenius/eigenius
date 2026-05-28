@@ -67,8 +67,13 @@ fn is_valid_branch_name(name: &str) -> bool {
 /// Errors from `commit_layer`.
 #[derive(Debug)]
 pub enum CommitError {
-    /// The candidate layer failed validation against its parent chain.
-    Validation(Vec<ValidationError>),
+    /// One or more resources failed validation. `errors` is truncated to
+    /// the policy's `max_violations` cap; `total_violations` reports the
+    /// true count so callers can surface "showing X of Y."
+    Validation {
+        errors: Vec<ValidationError>,
+        total_violations: usize,
+    },
     /// Storage backend reported an error during the commit write.
     Storage(StorageError),
     /// The builder rejected a resource (e.g., core-namespace violation
@@ -76,25 +81,133 @@ pub enum CommitError {
     /// callers; the lattice doesn't generate these itself but propagates
     /// them when the builder is constructed inline.
     Layer(LayerError),
+    /// A working-set collection hit its capacity cap mid-commit. The
+    /// commit was abandoned; nothing was written. Caller can either
+    /// raise the cap (build a larger `CommitWorkingSet`) or back off.
+    WorkingSetExhausted(crate::validation::WorkingSetExhausted),
+    /// `CommitPolicy::CascadeTombstone` reached an iteration where it
+    /// would have to tombstone an IRI the new layer itself defines, or
+    /// where the cascade tombstones invalidated one of the new layer's
+    /// own resources. Cascade can only suppress *lower-layer* IRIs;
+    /// the caller is asking us to *add* their content, not remove it.
+    /// The commit was abandoned; nothing was written.
+    ///
+    /// `errors` are the new-layer violations that triggered the abort.
+    /// `cascade_tombstones` is the set the cascade had already
+    /// accumulated when it hit the breakage — useful for the caller
+    /// to see "you'd have to also explicitly tombstone these N IRIs
+    /// to make this commit work."
+    CascadeAbort {
+        iterations: u32,
+        cascade_tombstones: std::collections::BTreeSet<Iri>,
+        errors: Vec<ValidationError>,
+        total_violations: usize,
+    },
 }
 
 impl std::fmt::Display for CommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CommitError::Validation(errs) => {
-                writeln!(f, "validation failed with {} error(s):", errs.len())?;
-                for e in errs {
+            CommitError::Validation {
+                errors,
+                total_violations,
+            } => {
+                writeln!(
+                    f,
+                    "validation failed with {total_violations} error(s){}:",
+                    if *total_violations > errors.len() {
+                        format!(" (showing first {})", errors.len())
+                    } else {
+                        String::new()
+                    }
+                )?;
+                for e in errors {
                     writeln!(f, "  {e}")?;
                 }
                 Ok(())
             }
             CommitError::Storage(e) => write!(f, "storage error during commit: {e}"),
             CommitError::Layer(e) => write!(f, "layer build error: {e}"),
+            CommitError::WorkingSetExhausted(e) => {
+                write!(f, "commit aborted: {e}")
+            }
+            CommitError::CascadeAbort {
+                iterations,
+                cascade_tombstones,
+                errors,
+                total_violations,
+            } => {
+                writeln!(
+                    f,
+                    "cascade aborted after {iterations} iteration(s); \
+                     {total_violations} new-layer violation(s){}; \
+                     cascade had accumulated {} tombstone(s) before abort:",
+                    if *total_violations > errors.len() {
+                        format!(" (showing first {})", errors.len())
+                    } else {
+                        String::new()
+                    },
+                    cascade_tombstones.len()
+                )?;
+                for e in errors {
+                    writeln!(f, "  {e}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
 
 impl std::error::Error for CommitError {}
+
+/// Policy that controls how `commit_layer` handles violations
+/// discovered during the retroactive validation pass (i.e., when the
+/// new layer's effect on lower-layer resources causes them to fail
+/// validation).
+///
+/// The retroactive pass itself lands in Phase 2; this enum defines
+/// the contract that pass will obey.
+#[derive(Debug, Clone)]
+pub enum CommitPolicy {
+    /// Reject the commit if any retroactive violation is found. Up to
+    /// `max_violations` errors are surfaced; the rest are counted but
+    /// dropped (see [`CommitError::Validation::total_violations`]).
+    Reject { max_violations: usize },
+    /// Tombstone violating lower-layer resources iteratively until no
+    /// further resources are invalid. Each tombstone may cascade — a
+    /// resource that referenced the tombstoned IRI now also violates
+    /// and joins the tombstone set. The cascade aborts (rejects the
+    /// commit) if it would tombstone an IRI that the new layer
+    /// itself defines, since the caller is asking us to *add* that
+    /// IRI, not remove it.
+    CascadeTombstone,
+}
+
+impl Default for CommitPolicy {
+    fn default() -> Self {
+        Self::Reject {
+            max_violations: 100,
+        }
+    }
+}
+
+/// Result of a successful `commit_layer`.
+#[derive(Debug)]
+pub struct CommitOutcome {
+    /// The newly-committed layer. Either freshly created from the
+    /// builder (most cases) or the same layer plus a cascade-added
+    /// tombstone set (under [`CommitPolicy::CascadeTombstone`]).
+    pub layer: Arc<Layer>,
+    /// IRIs the cascade tombstoned in addition to whatever the
+    /// caller's builder already tombstoned. Always empty under
+    /// `CommitPolicy::Reject`. Always empty in Phase 1 (the
+    /// retroactive pass + cascade arrives in Phase 2/3).
+    pub cascade_tombstones: std::collections::BTreeSet<Iri>,
+    /// Number of fixpoint iterations the cascade needed. `0` means
+    /// no cascade ran (either because the policy was `Reject` or
+    /// because no retroactive violations were found).
+    pub cascade_iterations: u32,
+}
 
 /// Outcome of an `update_branch` call.
 ///
@@ -365,26 +478,243 @@ pub fn with_branch_lock<R>(f: impl FnOnce() -> R) -> R {
 ///
 /// Builds the `Layer` from `builder` (which already carries its parent
 /// reference and accumulated resources), validates it against the
-/// resolved chain, and persists it via the backend's atomic
-/// `store_layer`. Returns the new `Arc<Layer>`. Does **not** touch any
-/// branch ref — call `update_branch` separately to advance a branch
-/// pointer.
+/// resolved chain (per-new-layer Rules 1–19), runs the retroactive
+/// validation pass against lower-layer resources affected by the new
+/// content per `policy`, and persists via the backend's atomic
+/// `store_layer`. Does **not** touch any branch ref — call
+/// `update_branch` separately.
 ///
-/// `storage` flows into `LayerBuilder::build` and is the cache /
-/// backend bundle the returned layer uses for resolves.
+/// `working_set` holds the scratch collections the retroactive pass
+/// uses. Callers driving many commits should reuse one via
+/// [`crate::validation::CommitWorkingSetPool`]; single-shot callers
+/// can pass a fresh `CommitWorkingSet::in_memory()`.
+///
+/// **Phase 1 note.** The retroactive validation pass is not yet
+/// implemented; the policy and working set are accepted but
+/// `cascade_tombstones` / `cascade_iterations` always come back empty
+/// /zero. Phase 2 wires the Reject pass; Phase 3 wires CascadeTombstone.
 pub fn commit_layer(
     builder: LayerBuilder,
     storage: LayerStorage,
     backend: &dyn PersistentBackend,
-) -> Result<Arc<Layer>, CommitError> {
-    let layer = Arc::new(builder.build(storage));
-    let validator = Validator::new(Arc::clone(&layer));
-    let errors = validator.validate();
-    if !errors.is_empty() {
-        return Err(CommitError::Validation(errors));
+    policy: CommitPolicy,
+    working_set: &mut crate::validation::CommitWorkingSet,
+) -> Result<CommitOutcome, CommitError> {
+    // Build initial layer. Clone the builder so we keep the original
+    // for the cascade path's per-iteration rebuilds. Reject path
+    // doesn't need the clone but the cost is one BTreeMap clone +
+    // a few Arc bumps — negligible vs. the validation work that
+    // dwarfs it.
+    let initial_layer = Arc::new(builder.clone().build(storage.clone()));
+
+    // 1. Per-new-layer validation on the user's content as committed.
+    //    A malformed initial layer rejects regardless of policy — the
+    //    cascade can't fix violations the caller themselves caused.
+    let validator = Validator::new(Arc::clone(&initial_layer));
+    let new_layer_errors = validator.validate();
+    if !new_layer_errors.is_empty() {
+        let total = new_layer_errors.len();
+        let max = match &policy {
+            CommitPolicy::Reject { max_violations } => *max_violations,
+            // Cascade can't tombstone new-layer resources, so the
+            // commit must reject. Use a generous cap so the user sees
+            // every error.
+            CommitPolicy::CascadeTombstone => usize::MAX,
+        };
+        let mut errors = new_layer_errors;
+        errors.truncate(max);
+        return Err(CommitError::Validation {
+            errors,
+            total_violations: total,
+        });
+    }
+
+    // 2. Dispatch to the policy-specific path.
+    match policy {
+        CommitPolicy::Reject { max_violations } => {
+            commit_reject_path(initial_layer, working_set, max_violations, backend)
+        }
+        CommitPolicy::CascadeTombstone => {
+            commit_cascade_path(builder, initial_layer, storage, working_set, backend)
+        }
+    }
+}
+
+/// Reject path: single retroactive pass, surface violations if any.
+fn commit_reject_path(
+    layer: Arc<Layer>,
+    ws: &mut crate::validation::CommitWorkingSet,
+    max_violations: usize,
+    backend: &dyn PersistentBackend,
+) -> Result<CommitOutcome, CommitError> {
+    crate::validation::retroactive_validate(&layer, ws)
+        .map_err(CommitError::WorkingSetExhausted)?;
+    if !ws.violations.is_empty() {
+        let drained = ws.violations.drain(max_violations);
+        return Err(CommitError::Validation {
+            errors: drained.errors,
+            total_violations: drained.total,
+        });
     }
     backend.store_layer(&layer).map_err(CommitError::Storage)?;
-    Ok(layer)
+    Ok(CommitOutcome {
+        layer,
+        cascade_tombstones: std::collections::BTreeSet::new(),
+        cascade_iterations: 0,
+    })
+}
+
+/// CascadeTombstone path: fixpoint loop, adding tombstones for
+/// every violating lower-layer IRI until no more violations arise.
+/// Aborts if any iteration would invalidate a new-layer resource.
+fn commit_cascade_path(
+    original_builder: LayerBuilder,
+    initial_layer: Arc<Layer>,
+    storage: LayerStorage,
+    ws: &mut crate::validation::CommitWorkingSet,
+    backend: &dyn PersistentBackend,
+) -> Result<CommitOutcome, CommitError> {
+    use crate::validation::ValidationError;
+    let mut current_layer = initial_layer;
+    let mut iterations: u32 = 0;
+
+    loop {
+        iterations += 1;
+
+        // Reset per-iteration state but preserve the cumulative
+        // cascade_tombstones set.
+        ws.pending.clear();
+        ws.revalidated.clear();
+        ws.violations.clear();
+
+        crate::validation::retroactive_validate(&current_layer, ws)
+            .map_err(CommitError::WorkingSetExhausted)?;
+
+        if ws.violations.is_empty() {
+            break; // Fixpoint reached.
+        }
+
+        // Partition violations: those on new-layer IRIs (cascade
+        // breakage — abort) vs lower-layer IRIs (tombstone candidates).
+        let drained = ws.violations.drain(usize::MAX);
+        let new_layer_defined: std::collections::BTreeSet<Iri> =
+            current_layer.defined_iris().clone();
+        let mut breakage: Vec<ValidationError> = Vec::new();
+        let mut new_tombs: Vec<Iri> = Vec::new();
+        for err in drained.errors {
+            match &err.resource_id {
+                Some(iri) if new_layer_defined.contains(iri) => {
+                    breakage.push(err);
+                }
+                Some(iri) if !ws.cascade_tombstones.contains(iri) => {
+                    new_tombs.push(iri.clone());
+                }
+                // Already cascade-tombstoned (shouldn't happen because
+                // the resource would resolve to None after tombstone
+                // and not surface violations), or violation without
+                // resource_id (defensive — skip).
+                _ => {}
+            }
+        }
+
+        if !breakage.is_empty() {
+            let cascade_set: std::collections::BTreeSet<Iri> =
+                ws.cascade_tombstones.iter().collect();
+            let total = breakage.len();
+            return Err(CommitError::CascadeAbort {
+                iterations,
+                cascade_tombstones: cascade_set,
+                errors: breakage,
+                total_violations: total,
+            });
+        }
+
+        if new_tombs.is_empty() {
+            // No progress — every violation was on an already-tombstoned
+            // or unidentified resource. Treat as fixpoint to avoid
+            // infinite looping; the next per-new-layer revalidation
+            // below catches anything genuinely broken.
+            break;
+        }
+
+        // Accumulate cascade tombstones.
+        for iri in new_tombs {
+            ws.cascade_tombstones
+                .insert(iri)
+                .map_err(CommitError::WorkingSetExhausted)?;
+        }
+
+        // Rebuild the layer with the accumulated cascade tombstones
+        // applied on top of the user's original builder state.
+        let mut iter_builder = original_builder.clone();
+        for tomb_iri in ws.cascade_tombstones.iter() {
+            // `tombstone` is idempotent on the underlying BTreeSet, so
+            // re-adding the same IRI across iterations is a no-op. The
+            // guard against tombstoning a new-layer-defined IRI is
+            // handled by the breakage check above.
+            iter_builder
+                .tombstone(tomb_iri)
+                .map_err(CommitError::Layer)?;
+        }
+        current_layer = Arc::new(iter_builder.build(storage.clone()));
+
+        // Re-validate the new layer's own resources after the rebuild.
+        // The cascade tombstones may have invalidated new-layer
+        // resources that reference now-suppressed IRIs (e.g., a
+        // new-layer resource's `is_a` pointed at a class the cascade
+        // just tombstoned). That's new-layer breakage by another path
+        // — surface as CascadeAbort.
+        let validator = Validator::new(Arc::clone(&current_layer));
+        let new_errs = validator.validate();
+        if !new_errs.is_empty() {
+            let cascade_set: std::collections::BTreeSet<Iri> =
+                ws.cascade_tombstones.iter().collect();
+            let total = new_errs.len();
+            return Err(CommitError::CascadeAbort {
+                iterations,
+                cascade_tombstones: cascade_set,
+                errors: new_errs,
+                total_violations: total,
+            });
+        }
+    }
+
+    // Fixpoint reached. Persist the final layer.
+    backend
+        .store_layer(&current_layer)
+        .map_err(CommitError::Storage)?;
+    let cascade_set: std::collections::BTreeSet<Iri> = ws.cascade_tombstones.iter().collect();
+    Ok(CommitOutcome {
+        layer: current_layer,
+        cascade_tombstones: cascade_set,
+        cascade_iterations: iterations,
+    })
+}
+
+/// Convenience wrapper: commits with [`CommitPolicy::default()`] and a
+/// freshly-allocated in-memory working set, returning just the
+/// `Arc<Layer>` for callers that don't need the full outcome.
+///
+/// Equivalent to:
+///
+/// ```text
+/// let mut ws = crate::validation::CommitWorkingSet::in_memory();
+/// commit_layer(builder, storage, backend, CommitPolicy::default(), &mut ws)
+///     .map(|outcome| outcome.layer)
+/// ```
+///
+/// Suitable for tests, bootstrap, CLI commands, and any caller that
+/// doesn't care about policy or cascade results. The gRPC server and
+/// other long-running callers should use [`commit_layer`] directly
+/// with a pooled working set.
+pub fn commit_layer_default(
+    builder: LayerBuilder,
+    storage: LayerStorage,
+    backend: &dyn PersistentBackend,
+) -> Result<Arc<Layer>, CommitError> {
+    let mut ws = crate::validation::CommitWorkingSet::in_memory();
+    commit_layer(builder, storage, backend, CommitPolicy::default(), &mut ws)
+        .map(|outcome| outcome.layer)
 }
 
 /// Outcome of [`commit_layer_with_cache`] (D33 §6 / Phase 20c).
@@ -473,7 +803,11 @@ pub fn commit_layer_with_cache(
     let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
-        return Err(CommitError::Validation(errors));
+        let total = errors.len();
+        return Err(CommitError::Validation {
+            errors,
+            total_violations: total,
+        });
     }
     backend.store_layer(&layer).map_err(CommitError::Storage)?;
     backend
@@ -492,7 +826,11 @@ fn commit_without_cache(
     let validator = Validator::new(Arc::clone(&layer));
     let errors = validator.validate();
     if !errors.is_empty() {
-        return Err(CommitError::Validation(errors));
+        let total = errors.len();
+        return Err(CommitError::Validation {
+            errors,
+            total_violations: total,
+        });
     }
     backend.store_layer(&layer).map_err(CommitError::Storage)?;
     Ok(AnchoredCommitOutcome::Miss { layer })
@@ -1333,10 +1671,21 @@ pub fn merge_independent_heads(
             .expect("builder accepts tombstone (post-conflict check)");
     }
 
-    let merge_layer = commit_layer(builder, storage, backend).map_err(|e| match e {
-        CommitError::Validation(v) => MergeError::Validation(v),
+    let merge_layer = commit_layer_default(builder, storage, backend).map_err(|e| match e {
+        CommitError::Validation { errors, .. } => MergeError::Validation(errors),
         CommitError::Storage(s) => MergeError::Storage(s),
         CommitError::Layer(_) => unreachable!("builder errors handled above"),
+        CommitError::WorkingSetExhausted(e) => {
+            MergeError::Storage(StorageError::Internal(format!("merge commit: {e}")))
+        }
+        CommitError::CascadeAbort { .. } => {
+            // commit_layer_default uses CommitPolicy::Reject — cascade
+            // path isn't reachable here. Treat as Storage::Internal in
+            // case the default ever changes.
+            MergeError::Storage(StorageError::Internal(
+                "merge commit produced unexpected CascadeAbort".into(),
+            ))
+        }
     })?;
 
     Ok(MergeOutcome::Merged { merge_layer })
@@ -1373,7 +1722,7 @@ mod tests {
         let mut b = LayerBuilder::new(name, None);
         b.add_resource(make_resource("urn:eigenius:core:r"))
             .unwrap();
-        commit_layer(b, storage.clone(), backend).unwrap()
+        commit_layer_default(b, storage.clone(), backend).unwrap()
     }
 
     #[test]
@@ -1448,7 +1797,7 @@ mod tests {
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer(child_b, storage.clone(), &backend).unwrap();
+        let child = commit_layer_default(child_b, storage.clone(), &backend).unwrap();
 
         let outcome = update_branch(
             "main",
@@ -1496,7 +1845,7 @@ mod tests {
             Value::String("from a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
@@ -1505,7 +1854,7 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         // Advance branch to `a`.
         update_branch(
@@ -1569,12 +1918,12 @@ mod tests {
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         update_branch(
             "main",
@@ -1630,7 +1979,7 @@ mod tests {
             Value::String("v_root".into()),
         );
         root_b.add_resource(root_resource).unwrap();
-        let root = commit_layer(root_b, storage.clone(), &backend).unwrap();
+        let root = commit_layer_default(root_b, storage.clone(), &backend).unwrap();
 
         update_branch(
             "main",
@@ -1645,13 +1994,13 @@ mod tests {
         // Branch A: tombstones demo:X.
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.tombstone(iri("urn:eigenius:demo:X")).unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         // Branch B: adds an unrelated IRI, leaves demo:X alone.
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:demo:Y"))
             .unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         // Advance branch to A.
         update_branch(
@@ -1711,7 +2060,7 @@ mod tests {
             Value::String("v_root".into()),
         );
         root_b.add_resource(root_resource).unwrap();
-        let root = commit_layer(root_b, storage.clone(), &backend).unwrap();
+        let root = commit_layer_default(root_b, storage.clone(), &backend).unwrap();
 
         update_branch(
             "main",
@@ -1726,7 +2075,7 @@ mod tests {
         // Branch A: tombstones demo:X.
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.tombstone(iri("urn:eigenius:demo:X")).unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         // Branch B: redefines demo:X with a different body.
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
@@ -1736,7 +2085,7 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(x_b).unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         update_branch(
             "main",
@@ -1800,7 +2149,7 @@ mod tests {
             Value::String("from a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
@@ -1809,7 +2158,7 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         // Advance `main` to `a`. Both `a` and `b` are siblings off `root`,
         // both touching `conflict_iri` with different values.
@@ -1846,7 +2195,7 @@ mod tests {
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer(child_b, storage.clone(), &backend).unwrap();
+        let child = commit_layer_default(child_b, storage.clone(), &backend).unwrap();
 
         backend.put_branch("main", root.id()).unwrap();
 
@@ -1871,7 +2220,7 @@ mod tests {
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer(child_b, storage.clone(), &backend).unwrap();
+        let child = commit_layer_default(child_b, storage.clone(), &backend).unwrap();
 
         backend.put_branch("main", child.id()).unwrap();
 
@@ -1897,12 +2246,12 @@ mod tests {
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         backend.put_branch("main", a.id()).unwrap();
 
@@ -1931,17 +2280,17 @@ mod tests {
         let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
         ab.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(ab, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(ab, storage.clone(), &backend).unwrap();
 
         let mut bb = LayerBuilder::new("b", Some(Arc::clone(&a)));
         bb.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(bb, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(bb, storage.clone(), &backend).unwrap();
 
         let mut cb = LayerBuilder::new("c", Some(Arc::clone(&b)));
         cb.add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let c = commit_layer(cb, storage.clone(), &backend).unwrap();
+        let c = commit_layer_default(cb, storage.clone(), &backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
         assert_eq!(
@@ -1965,12 +2314,12 @@ mod tests {
         let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
         ab.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(ab, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(ab, storage.clone(), &backend).unwrap();
 
         let mut bb = LayerBuilder::new("b", Some(Arc::clone(&root)));
         bb.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(bb, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(bb, storage.clone(), &backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
         assert_eq!(
@@ -1989,14 +2338,14 @@ mod tests {
         let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
         ab.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(ab, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(ab, storage.clone(), &backend).unwrap();
 
         let mut leaves = Vec::new();
         for tag in ["x", "y", "z"] {
             let mut lb = LayerBuilder::new(tag, Some(Arc::clone(&a)));
             lb.add_resource(make_resource(&format!("urn:eigenius:example:{tag}")))
                 .unwrap();
-            leaves.push(commit_layer(lb, storage.clone(), &backend).unwrap());
+            leaves.push(commit_layer_default(lb, storage.clone(), &backend).unwrap());
         }
 
         let heads: Vec<LayerId> = leaves.iter().map(|l| l.id().clone()).collect();
@@ -2016,13 +2365,13 @@ mod tests {
         mid_b
             .add_resource(make_resource("urn:eigenius:example:m"))
             .unwrap();
-        let mid = commit_layer(mid_b, storage.clone(), &backend).unwrap();
+        let mid = commit_layer_default(mid_b, storage.clone(), &backend).unwrap();
 
         let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
         tip_b
             .add_resource(make_resource("urn:eigenius:example:t"))
             .unwrap();
-        let tip = commit_layer(tip_b, storage.clone(), &backend).unwrap();
+        let tip = commit_layer_default(tip_b, storage.clone(), &backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
         let sources = iri_sources_since(tip.id(), root.id(), &topo, &backend).unwrap();
@@ -2045,7 +2394,7 @@ mod tests {
             Value::String("v1".into()),
         );
         mid_b.add_resource(r).unwrap();
-        let mid = commit_layer(mid_b, storage.clone(), &backend).unwrap();
+        let mid = commit_layer_default(mid_b, storage.clone(), &backend).unwrap();
 
         let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
         let mut r2 = Resource::new(iri("urn:eigenius:example:x"));
@@ -2054,7 +2403,7 @@ mod tests {
             Value::String("v2".into()),
         );
         tip_b.add_resource(r2).unwrap();
-        let tip = commit_layer(tip_b, storage.clone(), &backend).unwrap();
+        let tip = commit_layer_default(tip_b, storage.clone(), &backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
         let sources = iri_sources_since(tip.id(), root.id(), &topo, &backend).unwrap();
@@ -2076,7 +2425,7 @@ mod tests {
             let mut b = LayerBuilder::new(tag, Some(Arc::clone(&root)));
             b.add_resource(make_resource(&format!("urn:eigenius:result:{tag}")))
                 .unwrap();
-            heads.push(commit_layer(b, storage.clone(), &backend).unwrap());
+            heads.push(commit_layer_default(b, storage.clone(), &backend).unwrap());
         }
         let head_ids: Vec<LayerId> = heads.iter().map(|h| h.id().clone()).collect();
 
@@ -2122,7 +2471,7 @@ mod tests {
             Value::String("a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
@@ -2131,7 +2480,7 @@ mod tests {
             Value::String("b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         let outcome = merge_independent_heads(
             vec![a.id().clone(), b.id().clone()],
@@ -2180,7 +2529,7 @@ mod tests {
             Value::String("from a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri("urn:eigenius:example:b"));
@@ -2189,7 +2538,7 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
 
         let outcome = merge_independent_heads(
             vec![a.id().clone(), b.id().clone()],
@@ -2237,7 +2586,7 @@ mod tests {
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
         update_branch(
             "main",
             Some(root.id().clone()),
@@ -2252,7 +2601,7 @@ mod tests {
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
         let err = update_branch(
             "main",
             Some(root.id().clone()),
@@ -2343,12 +2692,12 @@ mod tests {
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer(a_b, storage.clone(), backend.as_ref()).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), backend.as_ref()).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer(b_b, storage.clone(), backend.as_ref()).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), backend.as_ref()).unwrap();
 
         let backend_a = Arc::clone(&backend);
         let storage_a = storage.clone();
@@ -2709,7 +3058,7 @@ mod tests {
     ) -> Arc<Layer> {
         let mut b = LayerBuilder::new(name, Some(parent));
         b.add_resource(make_resource(iri_str)).unwrap();
-        commit_layer(b, storage.clone(), backend).unwrap()
+        commit_layer_default(b, storage.clone(), backend).unwrap()
     }
 
     // ─── 20c anchored-commit cache wrapper ─────────────────────────────────
@@ -2726,7 +3075,7 @@ mod tests {
         let mut b = LayerBuilder::new(name, None);
         b.add_resource(make_resource("urn:eigenius:core:description"))
             .unwrap();
-        commit_layer(b, storage.clone(), backend).unwrap()
+        commit_layer_default(b, storage.clone(), backend).unwrap()
     }
 
     /// Build a cell-style layer (parent + one demo resource that
@@ -2843,25 +3192,25 @@ mod tests {
             .unwrap();
         rb_a.add_resource(make_resource("urn:eigenius:demo:a_marker"))
             .unwrap();
-        let root_a = commit_layer(rb_a, storage.clone(), &backend).unwrap();
+        let root_a = commit_layer_default(rb_a, storage.clone(), &backend).unwrap();
 
         let mut rb_b = LayerBuilder::new("root_b", None);
         rb_b.add_resource(make_resource("urn:eigenius:core:description"))
             .unwrap();
         rb_b.add_resource(make_resource("urn:eigenius:demo:b_marker"))
             .unwrap();
-        let root_b = commit_layer(rb_b, storage.clone(), &backend).unwrap();
+        let root_b = commit_layer_default(rb_b, storage.clone(), &backend).unwrap();
         assert_ne!(root_a.id(), root_b.id());
 
         let mut sb_a = LayerBuilder::new("support", Some(Arc::clone(&root_a)));
         sb_a.add_resource(make_resource("urn:eigenius:demo:Marker"))
             .unwrap();
-        let support_a = commit_layer(sb_a, storage.clone(), &backend).unwrap();
+        let support_a = commit_layer_default(sb_a, storage.clone(), &backend).unwrap();
 
         let mut sb_b = LayerBuilder::new("support", Some(Arc::clone(&root_b)));
         sb_b.add_resource(make_resource("urn:eigenius:demo:Marker"))
             .unwrap();
-        let support_b = commit_layer(sb_b, storage.clone(), &backend).unwrap();
+        let support_b = commit_layer_default(sb_b, storage.clone(), &backend).unwrap();
 
         // Pre-condition: same content_hash, different position
         // (different parent chains).

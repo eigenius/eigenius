@@ -129,7 +129,12 @@ pub fn is_indexable_predicate(layer: &Layer, predicate: &Iri) -> bool {
         Some(def) => def,
         None => return false,
     };
-    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
+    // `as_iri_str` accepts both `Value::String` (pre-canonicalisation
+    // shape) and `Value::ResourceRef` (post-canonicalisation shape).
+    // Using `as_str` here was a pre-existing bug that broke the
+    // index for every chain that round-tripped through
+    // `canonicalise_resource_refs` — i.e., every production chain.
+    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) {
         Some(t) => t,
         None => return false,
     };
@@ -188,7 +193,10 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 Some(def) => def,
                 None => continue,
             };
-            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
+            // `as_iri_str` covers both `Value::String` and
+            // `Value::ResourceRef` shapes — see the matching comment in
+            // `is_indexable_predicate`.
+            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) {
                 Some(t) => t,
                 None => continue,
             };

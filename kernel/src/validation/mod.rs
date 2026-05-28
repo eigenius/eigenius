@@ -17,6 +17,16 @@
 //! Validates resources in a layer against definitions reachable through
 //! the parent chain. Implements all validation rules from D1 §5.4.
 
+pub mod retroactive;
+pub mod working_set;
+
+pub use retroactive::retroactive_validate;
+pub use working_set::{
+    CommitWorkingSet, CommitWorkingSetPool, DrainedViolations, InMemoryIriQueue, InMemoryIriSet,
+    InMemoryViolationCollector, IriQueue, IriSet, PooledWorkingSet, ViolationCollector,
+    WorkingSetExhausted, DEFAULT_WORKING_SET_CAP,
+};
+
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
