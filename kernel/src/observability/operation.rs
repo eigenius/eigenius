@@ -109,3 +109,21 @@ pub const TASK_CHECKPOINT: &str = "kernel.task.checkpoint";
 pub const SERVER_START: &str = "kernel.server.start";
 pub const SERVER_SHUTDOWN: &str = "kernel.server.shutdown";
 pub const BOOTSTRAP_LOAD: &str = "kernel.bootstrap.load";
+
+// --- GC phases ---
+//
+// One event per phase per `collect` / `estimate` call. Lets dashboards
+// distinguish "topology load took 200 ms" from "mark phase took 200 ms"
+// from "sweep phase took 200 ms" without ad-hoc parsing.
+//
+// `GC_LOAD_TOPOLOGY` carries the topology size as `field::COUNT`
+// (layer count) and `field::SIZE_BYTES` (sum of `LayerHandle.byte_size`
+// — proxy for the topology's on-disk cost; in-memory cost is
+// proportional). Use these to track the tripwires documented at
+// [`crate::gc`]: when layer count crosses ~500k or `load_topology`
+// p99 exceeds ~100 ms, time to revisit consolidation and (eventually)
+// streaming topology iteration.
+
+pub const GC_LOAD_TOPOLOGY: &str = "kernel.gc.load_topology";
+pub const GC_MARK: &str = "kernel.gc.mark";
+pub const GC_SWEEP: &str = "kernel.gc.sweep";

@@ -67,9 +67,10 @@
 //!   follows when there's a workload to justify it.
 
 use crate::layer::{BloomCache, LayerId, LayerTopology, RedirectEntry, ResourceCache};
+use crate::observability::{field, operation};
 use crate::storage::{PersistentBackend, StorageError};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Roots from which reachability is computed. Anything transitively
 /// reachable through `LayerHandle.parents` from any layer in any of
@@ -191,20 +192,25 @@ pub fn collect(
     // triple is mutually consistent — every branch head exists in
     // the topology snapshot and every redirect's source layer is
     // present in (or manufacturable from) the topology.
+    let load_started = Instant::now();
     let (topology, redirects): (LayerTopology, Vec<RedirectEntry>) =
         crate::lattice::with_branch_lock(|| {
             let topo = backend.load_topology()?;
             let redirects = backend.list_redirects()?;
             Ok::<_, StorageError>((topo, redirects))
         })?;
+    emit_load_topology_metrics(&topology, load_started.elapsed());
 
     // Step 2: mark phase. BFS from roots through topology.parents
     // with redirect-following per D25 §12.8.1(d).
+    let mark_started = Instant::now();
     let reachable = mark_reachable(&roots, &topology, &redirects);
+    emit_mark_metrics(reachable.len() as u64, mark_started.elapsed());
 
     // Step 3: sweep phase. Iterate every layer in the topology; if
     // not in reachable and old enough, delete. Counters tally what
     // happened.
+    let sweep_started = Instant::now();
     let now_ms = current_time_millis();
     let min_age_ms = config.min_age.as_millis() as i64;
     let mut stats = SweepStats {
@@ -235,6 +241,7 @@ pub fn collect(
         stats.layers_swept += 1;
         stats.bytes_reclaimable += handle.byte_size;
     }
+    emit_sweep_metrics(&stats, sweep_started.elapsed());
 
     Ok(stats)
 }
@@ -254,14 +261,20 @@ pub fn estimate(
     config: &GcConfig,
     backend: &dyn PersistentBackend,
 ) -> Result<SweepStats, StorageError> {
+    let load_started = Instant::now();
     let (topology, redirects): (LayerTopology, Vec<RedirectEntry>) =
         crate::lattice::with_branch_lock(|| {
             let topo = backend.load_topology()?;
             let redirects = backend.list_redirects()?;
             Ok::<_, StorageError>((topo, redirects))
         })?;
+    emit_load_topology_metrics(&topology, load_started.elapsed());
 
+    let mark_started = Instant::now();
     let reachable = mark_reachable(&roots, &topology, &redirects);
+    emit_mark_metrics(reachable.len() as u64, mark_started.elapsed());
+
+    let sweep_started = Instant::now();
     let now_ms = current_time_millis();
     let min_age_ms = config.min_age.as_millis() as i64;
     let mut stats = SweepStats {
@@ -282,6 +295,10 @@ pub fn estimate(
         // bytes that a real sweep would reclaim.
         stats.bytes_reclaimable += handle.byte_size;
     }
+    // `estimate` doesn't delete; the sweep phase here is just the
+    // classification loop. We still emit the metric so dashboards see
+    // the same per-phase shape as `collect` for trend comparison.
+    emit_sweep_metrics(&stats, sweep_started.elapsed());
     Ok(stats)
 }
 
@@ -361,6 +378,45 @@ fn current_time_millis() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Emit the per-pass topology metrics. `count` is the layer count;
+/// `size_bytes` is the sum of every handle's `byte_size` (encoded
+/// resource bytes across the topology — a proxy for "how much state
+/// the chain has accumulated"). In-memory cost is proportional but
+/// smaller per handle; if a dashboard needs exact RSS, infer it from
+/// `count` (struct overhead is bounded per handle).
+fn emit_load_topology_metrics(topology: &LayerTopology, elapsed: Duration) {
+    let layer_count = topology.layer_count() as u64;
+    let handle_bytes_total: u64 = topology.iter_layers().map(|h| h.byte_size).sum();
+    tracing::info!(
+        { field::OPERATION } = operation::GC_LOAD_TOPOLOGY,
+        { field::COUNT } = layer_count,
+        { field::SIZE_BYTES } = handle_bytes_total,
+        { field::LATENCY_MS } = elapsed.as_millis() as u64,
+        "GC topology loaded"
+    );
+}
+
+fn emit_mark_metrics(reachable_count: u64, elapsed: Duration) {
+    tracing::info!(
+        { field::OPERATION } = operation::GC_MARK,
+        { field::COUNT } = reachable_count,
+        { field::LATENCY_MS } = elapsed.as_millis() as u64,
+        "GC mark phase complete"
+    );
+}
+
+fn emit_sweep_metrics(stats: &SweepStats, elapsed: Duration) {
+    tracing::info!(
+        { field::OPERATION } = operation::GC_SWEEP,
+        { field::COUNT } = stats.layers_swept,
+        { field::SIZE_BYTES } = stats.bytes_reclaimable,
+        { field::LATENCY_MS } = elapsed.as_millis() as u64,
+        layers_unreachable = stats.layers_unreachable,
+        layers_protected_by_age = stats.layers_protected_by_age,
+        "GC sweep phase complete"
+    );
 }
 
 #[cfg(test)]
