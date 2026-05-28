@@ -43,8 +43,8 @@ use crate::layer::{Layer, LayerBuilder, LayerError, LayerId, LayerStorage, Layer
 use crate::ontology::iri::Iri;
 use crate::storage::{PersistentBackend, StorageError};
 use crate::validation::{ValidationError, Validator};
-use std::collections::{BTreeSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Ref-name validation: matches `[A-Za-z0-9_-]+`, max 256 chars.
 ///
@@ -185,13 +185,45 @@ impl std::fmt::Display for BranchUpdateError {
 
 impl std::error::Error for BranchUpdateError {}
 
-/// Process-wide branch CAS lock. v1 uses a single mutex — see module
-/// docs for why. Lazily initialised on first use; `update_branch` is
-/// the only caller, so contention is bounded by the surface area.
-fn branch_lock() -> &'static Mutex<()> {
+/// Process-wide *snapshot* gate. Held in:
+///
+/// - **read mode** by per-branch CAS operations (`update_branch`,
+///   `prune_branch`, `merge_branch_tips`). Multiple operations on
+///   *different* branches proceed concurrently — read locks are
+///   shared. Two operations on the same branch then serialize on
+///   that branch's per-branch lock (see [`branch_slot`]).
+/// - **write mode** by snapshot operations ([`with_branch_lock`]).
+///   Blocks all in-flight per-branch CAS until released. GC's mark
+///   phase uses this to read every branch ref atomically.
+///
+/// The gate gives `with_branch_lock` a coherent view *without*
+/// requiring it to acquire every per-branch lock individually —
+/// cheaper and immune to "new branch created mid-snapshot" races.
+fn snapshot_gate() -> &'static RwLock<()> {
     use std::sync::OnceLock;
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+    static GATE: OnceLock<RwLock<()>> = OnceLock::new();
+    GATE.get_or_init(|| RwLock::new(()))
+}
+
+/// Per-branch CAS slot. Lazily created on first reference; subsequent
+/// lookups hit the same `Arc<Mutex<()>>` so concurrent operations on
+/// the same branch serialize. Operations on different branches get
+/// different slots and run in parallel.
+///
+/// The outer `Mutex<HashMap>` is contended only during slot creation
+/// and lookup (microseconds); per-branch CAS holds the inner slot's
+/// `Mutex<()>` for the duration of its sync work (~10ms RocksDB
+/// fsync).
+fn branch_slot(name: &str) -> Arc<Mutex<()>> {
+    use std::sync::OnceLock;
+    static SLOTS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let slots = SLOTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = slots.lock().expect("branch slot map poisoned");
+    Arc::clone(
+        guard
+            .entry(name.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(()))),
+    )
 }
 
 /// Outcome of `prune_branch`.
@@ -271,7 +303,14 @@ pub fn prune_branch(
         return Err(PruneError::InvalidBranchName(name.to_string()));
     }
 
-    let _guard = branch_lock().lock().expect("branch lock poisoned");
+    // Per-branch CAS pattern: snapshot gate in read mode (lets
+    // concurrent prunes/updates on *other* branches proceed) +
+    // exclusive per-branch lock for this branch.
+    let _snapshot = snapshot_gate()
+        .read()
+        .expect("snapshot gate poisoned (read)");
+    let slot = branch_slot(name);
+    let _guard = slot.lock().expect("branch slot poisoned");
 
     let head = match backend.get_branch(name).map_err(PruneError::Storage)? {
         Some(h) => h,
@@ -294,17 +333,31 @@ pub fn prune_branch(
     })
 }
 
-/// Run `f` while holding the branch lock. Phase 14f's GC uses this to
-/// take a consistent snapshot of branch refs at the start of its mark
-/// phase — no `update_branch` can be in flight while `f` runs, so the
-/// snapshot is coherent across all branches. The lock is released
-/// when `f` returns; GC's mark + sweep work happens outside the lock
-/// (concurrent commits and updates are safe per the min-age contract).
+/// Run `f` while holding the snapshot gate in exclusive (write) mode.
+/// Phase 14f's GC uses this to take a consistent snapshot of branch
+/// refs at the start of its mark phase — no `update_branch`,
+/// `prune_branch`, or `merge_branch_tips` can be in flight while `f`
+/// runs, so the snapshot is coherent across all branches. The gate is
+/// released when `f` returns; GC's mark + sweep work happens outside
+/// the gate (concurrent commits and updates are safe per the min-age
+/// contract).
 ///
 /// `f` should be brief (read branch refs into memory, return). Long
-/// work inside the closure blocks all `update_branch` calls.
+/// work inside the closure blocks all per-branch CAS operations.
+///
+/// **Why a write-mode lock instead of acquiring every per-branch
+/// lock.** A snapshot needs an instant where *no* per-branch CAS is
+/// partway through. The write-mode acquisition of the snapshot gate
+/// gives that for free: in-flight CAS operations hold the gate in
+/// read mode, so they all drain before the write-mode acquisition
+/// completes, and new CAS attempts block on the pending writer until
+/// `f` returns. Iterating per-branch locks instead would race against
+/// "branch created mid-snapshot" — a new branch's lock didn't exist
+/// at iteration start, so the snapshot would miss its CAS.
 pub fn with_branch_lock<R>(f: impl FnOnce() -> R) -> R {
-    let _guard = branch_lock().lock().expect("branch lock poisoned");
+    let _guard = snapshot_gate()
+        .write()
+        .expect("snapshot gate poisoned (write)");
     f()
 }
 
@@ -458,10 +511,14 @@ fn commit_without_cache(
 /// FastForward and StrictFastForward paths don't use it; pass any
 /// valid storage (typically `LayerStorage::with_persistent(backend)`).
 ///
-/// **Concurrency.** Acquires a process-wide branch mutex so concurrent
-/// `update_branch` calls serialise. The caller's task runtime can be
-/// async; this function is sync because the branch lock is sync and
-/// branches are mutated rarely (commits, not reads).
+/// **Concurrency.** Two-level locking: takes the snapshot gate in
+/// read mode (shared with other branches' updates; only blocks during
+/// a GC snapshot) and the per-branch CAS slot in exclusive mode.
+/// Concurrent `update_branch` calls on *different* branches proceed
+/// in parallel; concurrent calls on the *same* branch serialize.
+/// The function is sync because the locks are sync; gRPC handlers
+/// wrap the call in `tokio::task::spawn_blocking` to keep tokio
+/// worker threads off the disk-I/O critical path.
 pub fn update_branch(
     name: &str,
     expected_old_head: Option<LayerId>,
@@ -474,8 +531,12 @@ pub fn update_branch(
         return Err(BranchUpdateError::InvalidBranchName(name.to_string()));
     }
 
-    // Per-branch CAS via the global branch lock.
-    let _guard = branch_lock().lock().expect("branch lock poisoned");
+    // Snapshot gate (shared) + per-branch CAS slot (exclusive).
+    let _snapshot = snapshot_gate()
+        .read()
+        .expect("snapshot gate poisoned (read)");
+    let slot = branch_slot(name);
+    let _guard = slot.lock().expect("branch slot poisoned");
 
     let actual = backend
         .get_branch(name)
@@ -573,8 +634,11 @@ pub fn update_branch(
 /// `source_tip` can be a sibling head touching the same IRIs as the
 /// target. Use this function for the cross-branch case.
 ///
-/// Holds the same process-wide `branch_lock` as `update_branch` so
-/// the two operations serialise correctly when both run concurrently.
+/// Takes the same two-level lock as [`update_branch`] (snapshot gate
+/// read + per-branch CAS slot on `target`). Concurrent
+/// `merge_branch_tips` calls into different target branches proceed
+/// in parallel; into the same target branch they serialize. GC's
+/// `with_branch_lock` blocks both.
 pub fn merge_branch_tips(
     target: &str,
     source_tip: LayerId,
@@ -585,7 +649,11 @@ pub fn merge_branch_tips(
         return Err(BranchUpdateError::InvalidBranchName(target.to_string()));
     }
 
-    let _guard = branch_lock().lock().expect("branch lock poisoned");
+    let _snapshot = snapshot_gate()
+        .read()
+        .expect("snapshot gate poisoned (read)");
+    let slot = branch_slot(target);
+    let _guard = slot.lock().expect("branch slot poisoned");
 
     let target_tip = backend
         .get_branch(target)
@@ -2341,6 +2409,126 @@ mod tests {
         assert!(
             final_head != *a.id() && final_head != *b.id(),
             "branch should point at the merge layer, not a or b"
+        );
+    }
+
+    /// Two per-branch CAS critical sections on **different** branches
+    /// must execute concurrently — they hold the snapshot gate in
+    /// shared (read) mode and disjoint per-branch slots, so neither
+    /// blocks the other. Pre-fix (single global mutex) would
+    /// serialize them; this test asserts the time windows overlap.
+    #[test]
+    fn per_branch_locks_run_concurrently_on_distinct_branches() {
+        use std::sync::Barrier;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let barrier = Arc::new(Barrier::new(2));
+        let entered_main: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        let exited_main: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        let entered_feat: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        let exited_feat: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+        let spawn_for = |branch: &'static str,
+                         entered: Arc<Mutex<Option<Instant>>>,
+                         exited: Arc<Mutex<Option<Instant>>>,
+                         barrier: Arc<Barrier>| {
+            thread::spawn(move || {
+                barrier.wait();
+                let snapshot = snapshot_gate().read().expect("gate poisoned");
+                let slot = branch_slot(branch);
+                let _guard = slot.lock().expect("slot poisoned");
+                *entered.lock().unwrap() = Some(Instant::now());
+                thread::sleep(Duration::from_millis(60));
+                *exited.lock().unwrap() = Some(Instant::now());
+                drop(snapshot);
+            })
+        };
+
+        let t_main = spawn_for(
+            "main",
+            Arc::clone(&entered_main),
+            Arc::clone(&exited_main),
+            Arc::clone(&barrier),
+        );
+        let t_feat = spawn_for(
+            "feature",
+            Arc::clone(&entered_feat),
+            Arc::clone(&exited_feat),
+            Arc::clone(&barrier),
+        );
+
+        t_main.join().unwrap();
+        t_feat.join().unwrap();
+
+        let em = entered_main.lock().unwrap().unwrap();
+        let xm = exited_main.lock().unwrap().unwrap();
+        let ef = entered_feat.lock().unwrap().unwrap();
+        let xf = exited_feat.lock().unwrap().unwrap();
+
+        // Windows overlap iff one entered before the other exited.
+        let overlap = em <= xf && ef <= xm;
+        assert!(
+            overlap,
+            "distinct-branch CAS slots must run in parallel \
+             (entered_main={em:?}, exited_main={xm:?}, \
+              entered_feature={ef:?}, exited_feature={xf:?})"
+        );
+    }
+
+    /// `with_branch_lock` (snapshot gate in write mode) blocks all
+    /// in-flight per-branch CAS until it returns. Tested by spawning
+    /// an `update_branch` thread that pauses inside its critical
+    /// section, then asserting `with_branch_lock` only enters after
+    /// the CAS thread releases.
+    #[test]
+    fn with_branch_lock_blocks_per_branch_updates() {
+        use std::sync::Barrier;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let barrier = Arc::new(Barrier::new(2));
+        let update_entered: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        let update_released: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+        let b1 = Arc::clone(&barrier);
+        let ue = Arc::clone(&update_entered);
+        let ur = Arc::clone(&update_released);
+        let updater = thread::spawn(move || {
+            b1.wait();
+            let snapshot = snapshot_gate().read().expect("gate poisoned");
+            let slot = branch_slot("main");
+            let _guard = slot.lock().expect("slot poisoned");
+            *ue.lock().unwrap() = Some(Instant::now());
+            // Hold the slot for a measurable window.
+            thread::sleep(Duration::from_millis(100));
+            *ur.lock().unwrap() = Some(Instant::now());
+            drop(snapshot);
+        });
+
+        // Give the updater a moment to acquire its locks.
+        thread::sleep(Duration::from_millis(20));
+        barrier.wait();
+        // Updater is now in flight.
+        thread::sleep(Duration::from_millis(20));
+
+        let snapshot_taken = Instant::now();
+        let entered_snapshot = with_branch_lock(Instant::now);
+
+        updater.join().unwrap();
+
+        let released = update_released.lock().unwrap().unwrap();
+
+        assert!(
+            entered_snapshot >= released,
+            "snapshot must enter after the updater releases (entered={entered_snapshot:?}, \
+             released={released:?})"
+        );
+        // Sanity: the wait was non-trivial (we actually blocked).
+        let wait = entered_snapshot.duration_since(snapshot_taken);
+        assert!(
+            wait >= Duration::from_millis(20),
+            "expected to block ≥20ms waiting for the updater; got {wait:?}"
         );
     }
 

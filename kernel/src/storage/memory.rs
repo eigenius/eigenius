@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! In-memory `PersistentBackend` for kernel-side tests.
+//! In-memory `PersistentBackend` — the reference implementation.
 //!
-//! Kernel internal tests can't dev-dep on `eigenius-storage-rocksdb`
-//! because that would create a Cargo dev-dep cycle (storage-rocksdb
-//! depends on the kernel lib), producing two compilations of the kernel
-//! and breaking trait-object upcasts. Real-backend coverage already
-//! lives in `storage/rocksdb/tests/` and `storage/rocksdb/src/lib.rs`'s
-//! `cbor_coverage_tests` module — kernel tests just need a faithful
-//! in-memory `PersistentBackend` to exercise kernel logic.
+//! Stores every backend surface (topology, blooms, branches, tags,
+//! resources, meta, redirects, anchored-commit cache, content-hash
+//! index, triple index, traces) in `BTreeMap`s. Used by kernel tests
+//! to exercise the chain machinery without spinning up RocksDB, and
+//! by the storage-backend cross-validation harness as the *reference*
+//! that the RocksDB-backed `RocksStore` is checked against. Behavior
+//! is exact for the trait contract; CBOR-encoding correctness is out
+//! of scope (no encoding happens in-memory).
 //!
-//! `MemoryPersistentBackend` is that fixture. It implements every method
-//! on `PersistentBackend` (and the supertrait `ResourceBackend`) over
-//! `BTreeMap`s. Behavior matches `RocksStore` to the extent the trait
-//! contract specifies; CBOR-correctness behavior is out of scope here
-//! (no encoding happens in-memory).
-
-#![cfg(test)]
+//! **Trade-offs vs. `RocksStore`.** No persistence (lost on process
+//! exit). No fsync. No compaction overhead. Single-process only.
+//! Production deployments use `RocksStore`; development, tests, and
+//! reference-implementation comparisons use this.
 
 use crate::layer::{
     BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex,
@@ -41,12 +39,8 @@ use crate::storage::{BatchOp, ChainInfo, PersistentBackend, ResourceBackend, Sto
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
-/// In-memory `PersistentBackend` for kernel-side tests.
-///
-/// Stores everything in `BTreeMap`s. Construction is `MemoryPersistentBackend::new()`;
-/// no configuration. Tests build one and pass it as the backend Arc through
-/// the same paths production passes `Arc<RocksStore>`.
-pub(crate) struct MemoryPersistentBackend {
+/// In-memory `PersistentBackend`. See module docs.
+pub struct MemoryPersistentBackend {
     inner: RwLock<MemoryState>,
     traces: InMemoryTraceStore,
     triple_index: Arc<MemoryTripleIndex>,
@@ -94,6 +88,12 @@ struct MemoryState {
     /// regeneration) can reuse the existing layer without
     /// re-committing.
     anchored_commits: BTreeMap<(ContentHash, ContentHash), LayerId>,
+}
+
+impl Default for MemoryPersistentBackend {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MemoryPersistentBackend {
