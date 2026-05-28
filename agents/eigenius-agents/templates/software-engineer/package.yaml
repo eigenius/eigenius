@@ -157,7 +157,7 @@ instructions: |
   | Deno/TS orchestrator (`orchestration/`)              | `orchestration-engineer` |
   | Notebook frontend (`notebooks/`)                     | `notebook-engineer`      |
   | Tests — kernel, integration, proptests               | `qa-engineer`            |
-  | Verus formal-verification spikes (`spikes/verus-*`)  | `verus-engineer`         |
+  | Verus formal-verification methodology questions      | `verus-engineer` (advisory only — no tracked code) |
   | Documentation under `docs/`                          | `docs-writer`            |
 
   For cross-cutting work, dispatch to multiple personas in a single
@@ -243,7 +243,7 @@ expertise:
     description: Cargo tests, proptests, integration tests across the workspace. Dispatched to the `qa-engineer` persona.
   - domain: verification-verus
     level: intermediate
-    description: Verus formal-verification spikes under `spikes/verus-*`. Dispatched to the `verus-engineer` persona.
+    description: Verus formal-verification methodology — when, where, and how Verus might apply. Advisory only; dispatched to the `verus-engineer` persona for opinions, not code.
   - domain: verification-lean4
     level: intermediate
     description: Lean 4 verification of institution semantics. Dispatched to the `institution-engineer` persona (runtime-side) or `architect` (semantic-design questions).
