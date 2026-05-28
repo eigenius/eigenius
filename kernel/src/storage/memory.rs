@@ -243,7 +243,10 @@ impl PersistentBackend for MemoryPersistentBackend {
         };
         // Build the bloom outside the lock (it's a hash-heavy loop) and
         // insert it together with the rest of the layer's state.
-        let bloom = BloomFilter::for_iris(layer.defined_iris());
+        // Bloom covers `defined ∪ tombstoned` so chain-walkers (e.g.
+        // `Layer::resolve`, `is_shadowed`) can use it as the master
+        // "consult this layer" gate (D23 §5.2).
+        let bloom = BloomFilter::for_layer(layer.defined_iris(), layer.tombstoned_iris());
 
         let content_hash = layer.content_hash().clone();
 

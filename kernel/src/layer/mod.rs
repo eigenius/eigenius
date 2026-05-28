@@ -510,19 +510,26 @@ impl Layer {
 
     /// Resolve a resource by IRI, walking the parent chain head→root.
     ///
-    /// Phase 14b: at each layer, consults the cached per-layer shadowing
-    /// bloom (D23 §5.2). If `bloom.might_contain(iri)` returns false, the
-    /// layer is skipped without consulting the cache, backend, or
-    /// `defined_iris` set — this is the optimization that lets resolve
-    /// stay fast as chain depth grows. On a positive (or absent) bloom,
-    /// falls through to `get_resource`. Returns the first match
-    /// (topmost layer wins).
+    /// At each layer, consults the cached per-layer shadowing bloom
+    /// (D23 §5.2) as the master "should I consult this layer at all"
+    /// gate. The bloom is built from `defined_iris ∪ tombstoned_iris`
+    /// ([`BloomFilter::for_layer`]) so a `false` return guarantees the
+    /// layer has nothing to say about this IRI — neither a body nor a
+    /// suppression. On a positive (or absent — defensively treated as
+    /// maybe-present) bloom, the walk distinguishes:
     ///
-    /// Iterative rather than recursive so the bloom-cache `Result` doesn't
-    /// have to thread through a recursive call chain. If the bloom cache
-    /// returns an error or no entry, treats the layer as "maybe present"
-    /// (defensive — better one extra probe than skipping a defining
-    /// layer).
+    /// - **Tombstone** (`tombstoned_iris.contains(iri)`): D20 §6.2 /
+    ///   §6.3 (15g step 3) short-circuits the walk. The IRI is
+    ///   "removed from view" at this layer; we stop and return `None`.
+    ///   A layer that simultaneously tombstones and defines the same
+    ///   IRI is rejected by `LayerBuilder`, so this branch is
+    ///   unambiguous when reached.
+    /// - **Definition** (`get_resource` hit): return the body. Topmost
+    ///   layer wins.
+    /// - **False positive**: keep walking parents.
+    ///
+    /// Iterative rather than recursive so the bloom-cache `Result`
+    /// doesn't have to thread through a recursive call chain.
     pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
         let mut current: Option<&Layer> = Some(self);
         let mut visited: BTreeSet<LayerId> = BTreeSet::new();
@@ -540,23 +547,31 @@ impl Layer {
                     continue;
                 }
             }
-            // D20 §6.2 / §6.3 (15g step 3): a tombstone short-circuits
-            // the walk. The IRI is "removed from view" at this layer;
-            // we don't probe its content and we don't continue up the
-            // parent chain. A layer that simultaneously tombstones and
-            // defines the same IRI is rejected by `LayerBuilder`, so
-            // this branch is unambiguous when reached.
-            if layer.tombstoned_iris.contains(iri) {
-                return None;
-            }
+            // Bloom is the master gate: a `false` return means the
+            // layer modifies nothing for this IRI (no body, no
+            // tombstone). Skip without consulting the resource cache
+            // or `tombstoned_iris`.
             let maybe_present = match layer.storage.bloom_cache.get_or_load(&layer.id) {
                 Ok(Some(bloom)) => bloom.might_contain(iri),
                 _ => true,
             };
-            if maybe_present {
-                if let Some(r) = layer.get_resource(iri) {
-                    return Some(r);
-                }
+            if !maybe_present {
+                current = layer.parents.first().map(|p| p.as_ref());
+                continue;
+            }
+            // Bloom says maybe-present — the layer modifies visibility
+            // of this IRI (or it's a bloom false-positive). Check
+            // tombstone first: if present, the parent chain is hidden
+            // from this layer downward. `LayerBuilder`'s
+            // `TombstoneCollidesWithResource` rejection makes
+            // tombstone-and-define mutually exclusive at the same
+            // layer, so the order of these two checks is structural,
+            // not preferential.
+            if layer.tombstoned_iris.contains(iri) {
+                return None;
+            }
+            if let Some(r) = layer.get_resource(iri) {
+                return Some(r);
             }
             current = layer.parents.first().map(|p| p.as_ref());
         }
@@ -617,6 +632,16 @@ impl Layer {
                     current = Some(target.as_ref());
                     continue;
                 }
+            }
+            // Tombstones at this layer mask any parent-side body for
+            // the same IRI (D20 §6.2 / §6.3, 15g step 3). Marking
+            // them as already-seen makes the parent walk skip them,
+            // so the merged view drops "removed from view" IRIs.
+            // Matches the `resolve` / `resolve_all` short-circuit so
+            // the single-resource and all-resources views agree on
+            // which IRIs are reachable.
+            for tomb in &layer.tombstoned_iris {
+                seen.insert(tomb.clone());
             }
             for iri in &layer.defined_iris {
                 if seen.insert(iri.clone()) {
@@ -799,7 +824,7 @@ impl LayerBuilder {
         // canonicalisation pass.
         canonicalise_resource_refs(&mut self.resources, &self.parents);
 
-        let content_hash = compute_content_hash(&self.resources);
+        let content_hash = compute_content_hash(&self.resources, &self.tombstoned_iris);
         let id = compute_position_hash(&content_hash, &self.parents);
         let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
         // Supporting layer (D33 §4.3). Computed against the builder's
@@ -819,10 +844,14 @@ impl LayerBuilder {
                 .put(key, Arc::new(resource), CacheTier::Active);
         }
         // Pre-populate the bloom cache. Same bloom value the persistent
-        // backend will write on commit (deterministic from `defined_iris`),
-        // so if the layer is later loaded from disk the cached bloom and
-        // on-disk bloom match.
-        let bloom = BloomFilter::for_iris(&defined_iris);
+        // backend will write on commit (deterministic from the
+        // `defined_iris ∪ tombstoned_iris` union), so if the layer is
+        // later loaded from disk the cached bloom and on-disk bloom
+        // match. Including tombstones lets `Layer::resolve` use the
+        // bloom as the master "consult this layer" gate (D23 §5.2):
+        // a `false` from `might_contain` means the layer has nothing
+        // to say about the IRI — neither a body nor a suppression.
+        let bloom = BloomFilter::for_layer(&defined_iris, &self.tombstoned_iris);
         storage.bloom_cache.put(id.clone(), Arc::new(bloom));
         let layer = Layer {
             id,
@@ -871,25 +900,59 @@ impl LayerBuilder {
     }
 }
 
-/// Compute the content-only hash of a resource set.
+/// Compute the content-only hash of a layer's visibility state.
 ///
-/// Hash domain: `b"content:v1:"` (domain separator) ‖ for each
-/// `(iri, resource)` pair in IRI-sorted order, the IRI bytes followed
-/// by `canonical_eigon_cbor(resource)`. The result identifies the
-/// chain *content* independent of where in the DAG the content was
-/// committed: see [`ContentHash`].
+/// Hash domain: `b"content:v1:"` (domain separator) followed by two
+/// sections:
+///
+/// 1. **Resources**: section marker `b"::resources::"`, then the
+///    resource count as a little-endian `u64`, then for each
+///    `(iri, resource)` pair in IRI-sorted order the IRI bytes
+///    followed by `canonical_eigon_cbor(resource)`.
+/// 2. **Tombstones** (D20 §6.2 / §6.3, 15g step 3): section marker
+///    `b"::tombstones::"`, then the tombstone count as a
+///    little-endian `u64`, then each tombstoned IRI's bytes in
+///    IRI-sorted order, each followed by a `\0` segment terminator.
+///
+/// Including tombstones is structural: two layers with identical
+/// resources but different tombstones produce different visible
+/// chains, so they must not dedup as "same content" in the
+/// anchored-commit cache or `lookup_by_content_hash`. Every layer
+/// hashes both sections unconditionally — a layer with no tombstones
+/// still contributes its empty count, which makes the hash a true
+/// function of `(resources, tombstones)` rather than an
+/// opportunistic addition.
 ///
 /// This pairs with [`compute_position_hash`] which folds the content
 /// hash together with the sorted parent ids to produce the position
 /// hash that addresses the layer's slot in the DAG.
-pub fn compute_content_hash(resources: &BTreeMap<Iri, Resource>) -> ContentHash {
+pub fn compute_content_hash(
+    resources: &BTreeMap<Iri, Resource>,
+    tombstoned_iris: &BTreeSet<Iri>,
+) -> ContentHash {
     let mut hasher = Sha256::new();
     hasher.update(b"content:v1:");
-    // Resource content in IRI-sorted order (BTreeMap iteration).
+
+    // Resource section.
+    hasher.update(b"::resources::");
+    hasher.update((resources.len() as u64).to_le_bytes());
     for (iri, resource) in resources {
         hasher.update(iri.as_str().as_bytes());
         hasher.update(crate::ontology::eigon_cbor::canonicalize(resource));
     }
+
+    // Tombstone section. IRI-sorted via BTreeSet iteration. Each
+    // entry is bounded by a `\0` terminator so concatenations of
+    // distinct IRI lists can't accidentally produce identical hash
+    // inputs (defense-in-depth — SHA-256 collision-resistance is the
+    // real guarantee).
+    hasher.update(b"::tombstones::");
+    hasher.update((tombstoned_iris.len() as u64).to_le_bytes());
+    for iri in tombstoned_iris {
+        hasher.update(iri.as_str().as_bytes());
+        hasher.update(b"\0");
+    }
+
     let hash = hasher.finalize();
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(&hash);
@@ -1327,6 +1390,45 @@ mod tests {
         assert_eq!(all.len(), 3); // A, B from root + C from child
     }
 
+    /// Regression: `iter_all_resources` must agree with `resolve` /
+    /// `resolve_all` about reachability. A tombstone at a layer hides
+    /// the parent's body for that IRI; the merged-view iterator must
+    /// skip the tombstoned IRI even though it's still defined in a
+    /// parent layer. Pre-fix, the iterator yielded the parent's body
+    /// while `resolve` returned `None` — a structural inconsistency
+    /// between the two views.
+    #[test]
+    fn iter_all_resources_respects_tombstones() {
+        let storage = test_storage();
+        // Root defines two IRIs. Child tombstones one of them.
+        let mut root_builder = LayerBuilder::new("root", None);
+        root_builder
+            .add_resource(make_resource("urn:eigenius:example:keep", vec![]))
+            .unwrap();
+        root_builder
+            .add_resource(make_resource("urn:eigenius:example:remove", vec![]))
+            .unwrap();
+        let root = Arc::new(root_builder.build(storage.clone()));
+
+        let mut child_builder = LayerBuilder::new("child", Some(root));
+        child_builder
+            .tombstone(iri("urn:eigenius:example:remove"))
+            .unwrap();
+        let child = child_builder.build(storage);
+
+        // resolve_all and the merged-view iterator must agree the
+        // tombstoned IRI is removed from view.
+        assert!(child.resolve(&iri("urn:eigenius:example:remove")).is_none());
+        let all: Vec<_> = child.iter_all_resources().collect();
+        let iris: BTreeSet<&str> = all.iter().map(|(i, _)| i.as_str()).collect();
+        assert!(iris.contains("urn:eigenius:example:keep"));
+        assert!(
+            !iris.contains("urn:eigenius:example:remove"),
+            "tombstoned IRI must not appear in iter_all_resources \
+             (would otherwise disagree with resolve)"
+        );
+    }
+
     #[test]
     fn resolve_all_returns_both_layers() {
         let storage = test_storage();
@@ -1606,6 +1708,62 @@ mod tests {
 
         assert_eq!(c1.content_hash(), c2.content_hash());
         assert_ne!(c1.id(), c2.id());
+    }
+
+    /// Tombstones are part of layer content. Two layers with
+    /// identical resources but different tombstone sets must produce
+    /// different content hashes — otherwise the anchored-commit cache
+    /// and `lookup_by_content_hash` would dedup layers that have
+    /// observably different visibility (one hides an IRI from view,
+    /// the other doesn't). Symmetric case to the resource-difference
+    /// content-hash distinction.
+    #[test]
+    fn tombstones_participate_in_content_hash() {
+        let storage = test_storage();
+        // Root defines two IRIs both children may tombstone.
+        let mut root_b = LayerBuilder::new("root", None);
+        root_b
+            .add_resource(make_resource("urn:eigenius:demo:X", vec![]))
+            .unwrap();
+        root_b
+            .add_resource(make_resource("urn:eigenius:demo:Y", vec![]))
+            .unwrap();
+        let root = Arc::new(root_b.build(storage.clone()));
+
+        let make_child = |tombstone: Option<&str>| -> Layer {
+            let mut b = LayerBuilder::new("child", Some(Arc::clone(&root)));
+            b.add_resource(make_resource("urn:eigenius:demo:Z", vec![]))
+                .unwrap();
+            if let Some(t) = tombstone {
+                b.tombstone(iri(t)).unwrap();
+            }
+            b.build(storage.clone())
+        };
+
+        let no_tomb = make_child(None);
+        let tomb_x = make_child(Some("urn:eigenius:demo:X"));
+        let tomb_y = make_child(Some("urn:eigenius:demo:Y"));
+
+        // Same resources, different tombstone sets → different content
+        // hashes (and therefore different position hashes too, since
+        // position folds content).
+        assert_ne!(
+            no_tomb.content_hash(),
+            tomb_x.content_hash(),
+            "adding a tombstone must change the content hash"
+        );
+        assert_ne!(
+            tomb_x.content_hash(),
+            tomb_y.content_hash(),
+            "tombstoning a different IRI must change the content hash"
+        );
+        assert_ne!(no_tomb.id(), tomb_x.id());
+
+        // But re-building the same layer (same resources + same
+        // tombstones) is still deterministic.
+        let tomb_x_again = make_child(Some("urn:eigenius:demo:X"));
+        assert_eq!(tomb_x.content_hash(), tomb_x_again.content_hash());
+        assert_eq!(tomb_x.id(), tomb_x_again.id());
     }
 
     /// Layer name is metadata-only: two layers with the same resources

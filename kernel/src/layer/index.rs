@@ -510,13 +510,28 @@ pub fn collect_ancestors(head: &Layer) -> BTreeSet<LayerId> {
     visited
 }
 
-/// Bloom-walk shadow check: is `subject` redefined in any ancestor of
-/// `head` other than `defining_layer` itself?
+/// Bloom-walk shadow check: is `subject`'s visibility modified by any
+/// ancestor of `head` other than `defining_layer` itself?
 ///
 /// Walks `head` and its ancestors via parent pointers; for each visited
 /// layer (skipping `defining_layer`) consults the per-layer shadowing
-/// bloom and falls through to `get_resource` on a positive bloom. The
-/// first confirmed hit returns `true`.
+/// bloom and falls through to a tombstone-or-definition check on a
+/// positive bloom. The first confirmed hit returns `true`.
+///
+/// **Shadowing events.** Two kinds of higher-up changes shadow the
+/// candidate `(subject, defining_layer)`:
+/// - **Redefinition** — a higher layer defines `subject` with a body.
+///   `Layer::resolve(subject)` from `head` would return that body
+///   instead of `defining_layer`'s.
+/// - **Tombstone** (D20 §6.2 / §6.3, 15g step 3) — a higher layer
+///   tombstones `subject`. `Layer::resolve(subject)` from `head`
+///   short-circuits at the tombstone and returns `None`.
+///
+/// Either case means the indexed entry at `defining_layer` is not
+/// observable from `head`, so the EigenQL `scan_chain` caller drops it.
+/// The per-layer shadowing bloom (`BloomFilter::for_layer`) covers
+/// both kinds of changes — built from `defined ∪ tombstoned` —
+/// so the bloom-skip fast path is safe to use here too.
 ///
 /// **Multi-parent care.** With Phase 14e merges, the walk may visit
 /// layers parallel to `defining_layer` (e.g., the other branch of a
@@ -532,7 +547,7 @@ pub fn is_shadowed(head: &Layer, defining_layer: &LayerId, subject: &Iri) -> boo
         return false;
     }
     // Probe head, then BFS its parents via Arc clones.
-    if layer_might_define(head, subject) {
+    if layer_changes_visibility(head, subject) {
         return true;
     }
     let mut visited = BTreeSet::<LayerId>::new();
@@ -551,7 +566,7 @@ pub fn is_shadowed(head: &Layer, defining_layer: &LayerId, subject: &Iri) -> boo
             // shadow a candidate at `defining_layer`.
             continue;
         }
-        if layer_might_define(&layer, subject) {
+        if layer_changes_visibility(&layer, subject) {
             return true;
         }
         for parent in layer.parents() {
@@ -561,12 +576,19 @@ pub fn is_shadowed(head: &Layer, defining_layer: &LayerId, subject: &Iri) -> boo
     false
 }
 
-fn layer_might_define(layer: &Layer, subject: &Iri) -> bool {
+/// True if `layer` changes the visibility of `subject` — either by
+/// defining a body or by tombstoning a parent's body. The per-layer
+/// shadowing bloom is consulted first as a fast-skip; on a positive
+/// bloom the explicit checks decide.
+fn layer_changes_visibility(layer: &Layer, subject: &Iri) -> bool {
     let maybe_present = match layer.bloom_cache().get_or_load(layer.id()) {
         Ok(Some(bloom)) => bloom.might_contain(subject),
         _ => true, // Defensive: missing bloom → treat as maybe-present.
     };
-    maybe_present && layer.get_resource(subject).is_some()
+    if !maybe_present {
+        return false;
+    }
+    layer.tombstoned_iris().contains(subject) || layer.get_resource(subject).is_some()
 }
 
 /// Indexed scan over the layer chain rooted at `head`. Returns every
@@ -1117,6 +1139,71 @@ mod tests {
         // At head=main, rex is_a Dog (no shadow).
         let dogs_at_main = scan_chain(&main, &iri(wk::IS_A), &iri("urn:eigenius:test:Dog"));
         assert_eq!(dogs_at_main, vec![iri("urn:eigenius:test:rex")]);
+    }
+
+    /// A higher-up tombstone shadows an indexed subject just as a
+    /// redefinition does — `Layer::resolve(subject)` from `head`
+    /// short-circuits at the tombstone, so the indexed entry at the
+    /// defining layer is not observable. EigenQL's `scan_chain` must
+    /// drop the candidate. Without tombstone-awareness in
+    /// `layer_changes_visibility` (formerly `layer_might_define`),
+    /// `is_shadowed` would falsely return `false` here because the
+    /// tombstoning layer's `defined_iris` is empty for the subject.
+    #[test]
+    fn tombstone_shadows_indexed_subject() {
+        let storage = LayerStorage::in_memory();
+        let mut core_builder = LayerBuilder::new("core", None);
+        core_builder
+            .add_resource(property_def(wk::IS_A, wk::RESOURCE_ARRAY))
+            .unwrap();
+        let core = Arc::new(core_builder.build(storage.clone()));
+        let owned = extract_indexable_triples(&core);
+        storage
+            .triple_index
+            .extend_layer(
+                core.id(),
+                &owned.iter().map(|t| t.as_borrowed()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+
+        // base: defines rex is_a Dog
+        let mut base_builder = LayerBuilder::new("base", Some(Arc::clone(&core)));
+        let mut rex_dog = Resource::new(iri("urn:eigenius:test:rex"));
+        rex_dog.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String("urn:eigenius:test:Dog".into())]),
+        );
+        base_builder.add_resource(rex_dog).unwrap();
+        let base = Arc::new(base_builder.build(storage.clone()));
+        let owned = extract_indexable_triples(&base);
+        storage
+            .triple_index
+            .extend_layer(
+                base.id(),
+                &owned.iter().map(|t| t.as_borrowed()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+
+        // head: tombstones rex (removes it from view)
+        let mut head_builder = LayerBuilder::new("head", Some(Arc::clone(&base)));
+        head_builder
+            .tombstone(iri("urn:eigenius:test:rex"))
+            .unwrap();
+        let head = Arc::new(head_builder.build(storage.clone()));
+
+        // Sanity: resolve at head returns None.
+        assert!(head.resolve(&iri("urn:eigenius:test:rex")).is_none());
+        // EigenQL's scan_chain must agree: rex is shadowed by the
+        // tombstone at head, so the indexed entry at base drops out.
+        let dogs = scan_chain(&head, &iri(wk::IS_A), &iri("urn:eigenius:test:Dog"));
+        assert!(
+            dogs.is_empty(),
+            "tombstone at head must shadow base's indexed entry; got {:?}",
+            dogs
+        );
+
+        // And `is_shadowed` reports true for the candidate.
+        assert!(is_shadowed(&head, base.id(), &iri("urn:eigenius:test:rex")));
     }
 
     #[test]

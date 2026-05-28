@@ -665,7 +665,7 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             // round-trip preserves them through `load_chain_from`.
             tombstoned_iris: layer.tombstoned_iris().clone(),
         };
-        let bloom = BloomFilter::for_iris(layer.defined_iris());
+        let bloom = BloomFilter::for_layer(layer.defined_iris(), layer.tombstoned_iris());
 
         // Encode CBOR payloads outside the batch — encoding is CPU work
         // and can fail; no point holding the batch while computing.
