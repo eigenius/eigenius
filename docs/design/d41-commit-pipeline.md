@@ -84,7 +84,7 @@ All phases live in `kernel/src/commit/phases.rs`. The phase set:
 ### 3.2 `structural_validate`
 
 - **Reads:** `state.layer`, `state.storage`.
-- **Writes:** nothing on the happy path; returns `CommitError::ValidationFailed` otherwise.
+- **Writes:** nothing on the happy path; returns `CommitError::Validation { errors, total_violations }` otherwise.
 - **Emits:** nothing.
 - Runs `Validator::validate` against the just-built layer. This is the structural check (referential integrity, type shape, constraint satisfaction at the level of `Decidable-QC`).
 
@@ -100,10 +100,21 @@ All phases live in `kernel/src/commit/phases.rs`. The phase set:
 
 - **Reads:** `state.layer`, `state.institutions`, `state.storage`.
 - **Writes:** `state.dispatched_verdicts`, `state.provenance_resources`.
-- **Emits:** queues a `LayerEmission { name: "verdict_provenance", pipeline: StructuralFollowup, … }` if any AutoOnLoad QueryClass produced verdicts on a Holds / Undecidable path.
-- The D14 / D31 institution gate. For each AutoOnLoad institution declaration covering an IRI committed by the new layer, dispatches the gate; collects the resulting `Verdict` / `RuntimeInvocation` pairs into `state.provenance_resources`; collects the verdict summary into `state.dispatched_verdicts` for surfacing to the handler.
-- Failure on a `Fails` verdict short-circuits with `CommitError::ValidationFailed { provenance_layer: … }` (mirroring today's shape from `commit_with_validation`).
+- **Emits:** queues exactly one `LayerEmission { name: "verdict_provenance", pipeline: StructuralFollowup, kind: EmissionKind::Sibling, resources, tombstones: empty }` whenever any verdict was produced — **regardless of reading** (Holds, Undecidable, *and* Fails). The emission is queued *before* the phase decides whether to return `Ok` or `Err`.
+- The D14 / D31 institution gate. For each AutoOnLoad institution declaration covering an IRI committed by the new layer, dispatches the gate; for every dispatch that produced a verdict (any reading), generates a `RuntimeInvocation` + `Verdict` resource pair into a local accumulator that becomes the emission's `resources`. The accumulator also flows into `state.dispatched_verdicts` for surfacing to the handler.
+- Returns `Err(CommitError::Validation { errors, total_violations })` if any verdict was `Fails`, where `errors` carries one entry per `Fails` dispatch. Returns `Ok(Continue)` otherwise.
 - Phase is absent unless `state.institutions` is `Some` — the pipeline kind controls whether it runs.
+
+The structural framing here matters and supersedes the earlier draft. AutoOnLoad does not produce a "rejection provenance layer" only on `Fails`. Per D31 §6.3, AutoOnLoad **always** produces verdict provenance — one `RuntimeInvocation` + `Verdict` resource pair per dispatched QueryClass, for every verdict reading. The split is in routing, not in production:
+
+- On `Holds` / `Undecidable`: the audit layer commits as a follow-up to the user layer.
+- On `Fails`: the audit layer commits *in lieu of* the user layer — the user layer is rejected, the audit lands anyway.
+
+Both are the same emission, queued the same way, with the same `EmissionKind::Sibling`. The orchestrator's drain loop is what makes the routing fall out naturally (§6.1): `Sibling` emissions are preserved when their queuing pipeline returns `Err`, while `Child` emissions are discarded. The phase itself only has to do one thing: queue the audit unconditionally and let the drain do the routing.
+
+**On the shape of `CommitError`.** The `autoonload_dispatch` phase's `Err` does not carry the audit layer; the audit travels via `Sibling` emission. This keeps `CommitError` shape narrow and routes provenance through the same channel as all other follow-up layers. There is no `CommitError::ValidationFailed { provenance_layer }` variant — the lattice's existing `CommitError::Validation { errors, total_violations }` is sufficient because audit routing is orthogonal to the error: `Sibling` emissions carry the audit, the error carries the `Fails`. Phase 2 of D41 implementation re-exports `lattice::CommitError` from `commit::Error` unchanged.
+
+**Why `Sibling` is the only emission kind warranting always-commit content.** Of the seven rejection causes the pipeline can produce (structural-validation failure, retroactive violation, cascade abort, AutoOnLoad `Fails`, persist I/O error, `NeedsWitnessedMerge`, pipeline-internal error), only AutoOnLoad `Fails` produces durable institutional facts worth anchoring to the chain. The other six produce only error responses to the caller. Institutional dispatch creates the fact "institution X dispatched against subject Y, returned `Fails` because Z, at time T" — and future chain inspection (audit queries, retroactive replays, regulatory review) wants that fact present regardless of whether the user-layer commit succeeded. User errors, chain-incompatibility errors, I/O, and concurrency taxonomy don't carry that property.
 
 ### 3.5 `persist`
 
@@ -138,11 +149,13 @@ pub struct HookOutcome {
 
 **Concrete hooks today.**
 
-- `register_wasm_components` — `didPersist` hook on the `with_institutions` pipeline. Reads the just-persisted user layer (the WASM components are part of its content), registers components against the institution runtime, and queues a `LayerEmission { name: "institution_classes", pipeline: StructuralFollowup, … }` carrying the registered classes for the institution-classes follow-up layer. Lifts the logic currently in `register_wasm_from_layer` ([`kernel/src/server/mod.rs:2201`](../../kernel/src/server/mod.rs)). The handler today calls `register_wasm_from_layer` and manually constructs the institution-classes follow-up layer; under D41 the hook does both. Errors registering components are recorded on `state.hook_errors`; the user-layer commit stands either way.
+- `register_wasm_components` — `didPersist` hook on the `with_institutions` pipeline. Reads the just-persisted user layer (the WASM components are part of its content), registers components against the institution runtime, and queues a `LayerEmission { name: "institution_classes", pipeline: StructuralFollowup, kind: EmissionKind::Child, … }` carrying the registered classes for the institution-classes follow-up layer. Lifts the logic currently in `register_wasm_from_layer` ([`kernel/src/server/mod.rs:2201`](../../kernel/src/server/mod.rs)). The handler today calls `register_wasm_from_layer` and manually constructs the institution-classes follow-up layer; under D41 the hook does both. Errors registering components are recorded on `state.hook_errors`; the user-layer commit stands either way.
 
 - `rebuild_institution_index` — `didDrain` hook on the orchestrator. Runs once after the FIFO drain completes, with the final top layer in hand. Replaces today's three intra-Load rebuild calls ([`server/mod.rs:2191`](../../kernel/src/server/mod.rs), [`server/mod.rs:2197`](../../kernel/src/server/mod.rs), [`server/mod.rs:2232`](../../kernel/src/server/mod.rs)). The collapse from three rebuilds to one is semantically equivalent because nothing inside a single Load actually consumes the rebuilt index; only the *next* RPC's `InstitutionContext` snapshot reads it. Errors here are recorded on `MultiLayerOutcome.drain_hook_errors`.
 
 **Why best-effort, non-unwinding is structurally correct.** Once `persist` has returned `branch_advanced = true`, the layer is on disk and reachable from the branch tip. Treating a downstream registration failure as a commit failure would either (a) lie to the storage layer by pretending the layer isn't there, or (b) require a transactional retract that the persistent backend does not support. Surfacing the error and letting the commit stand is the only honest shape: the layer is durable, the hook side-effect is not, and callers see both facts.
+
+**Hooks queue `Child` emissions exclusively.** By current design, all always-commit (`Sibling`) content originates from *phases*, not hooks. The structural reason: hooks only run after `persist` succeeded, so by the time a hook queues an emission, the parent layer is already on disk and the `Child` semantics are the right ones — drain if and only if the parent landed (which it did). There is no shape in which a hook would want `Sibling` routing, because a hook never runs in a context where the parent did not land. The phase-only origin of `Sibling` emissions is enforced socially (by code review) rather than by the type system; a future hook that violates this invariant would still drain correctly under `Ok` paths but its `Sibling` routing would be dead semantics.
 
 ## 4. `CommitState` arena
 
@@ -213,15 +226,31 @@ impl CommitPipeline {
 Pipeline run signature:
 
 ```rust
+pub struct PipelineRunOk {
+    pub outcome: LayerCommitOutcome,
+}
+
+pub struct PipelineRunErr {
+    pub error:             CommitError,
+    /// Sibling emissions queued by phases that ran before the failing
+    /// phase. Surfaced separately from `CommitError` so the audit
+    /// routing channel stays uniform across `Ok` and `Err` returns:
+    /// the orchestrator handles `Sibling` emissions the same way in
+    /// both cases (re-queue at depth 0, parent at `ctx.head`), and the
+    /// error itself is unchanged from the lattice's existing
+    /// `CommitError::Validation { ... }`.
+    pub sibling_emissions: Vec<LayerEmission>,
+}
+
 pub fn run(
     &self,
     builder: LayerBuilder,
     cfg: PipelineConfig<'_>,
     ws: &mut CommitWorkingSet,
-) -> Result<LayerCommitOutcome, CommitError>;
+) -> Result<PipelineRunOk, PipelineRunErr>;
 ```
 
-`PipelineConfig` carries the inputs that vary per orchestrator invocation but stay constant across pipeline runs in one orchestrator call: the persister, branch name, policy, optional institution context, and a reference to the storage view. The pipeline's `run` constructs a fresh `CommitState`, opens a `COMMIT_PIPELINE_RUN` span, walks the phase array, runs the `did_persist` hook list under a `COMMIT_DID_PERSIST` span if and only if the `persist` phase set `branch_advanced = true`, and constructs the `LayerCommitOutcome` from the accumulators (including `hook_errors`).
+`PipelineConfig` carries the inputs that vary per orchestrator invocation but stay constant across pipeline runs in one orchestrator call: the persister, branch name, policy, optional institution context, and a reference to the storage view. The pipeline's `run` constructs a fresh `CommitState`, opens a `COMMIT_PIPELINE_RUN` span, walks the phase array, runs the `did_persist` hook list under a `COMMIT_DID_PERSIST` span if and only if the `persist` phase set `branch_advanced = true`, and constructs the `LayerCommitOutcome` from the accumulators (including `hook_errors`). On `Err` from any phase, the run halts the phase walk, skips `did_persist` hooks, and partitions `state.emissions` by `EmissionKind`: `Sibling` entries are surfaced via `PipelineRunErr.sibling_emissions`; `Child` entries are dropped (their intended parent did not land).
 
 The pipeline run is the granularity at which `tracing` spans are scoped. Within the run, individual phase telemetry uses `tracing::info!` with the per-phase operation constant (§12).
 
@@ -251,8 +280,26 @@ impl CommitOrchestrator<'_> {
 pub struct LayerEmission {
     pub name:       &'static str,    // "verdict_provenance", "institution_classes", ...
     pub pipeline:   PipelineKind,
+    pub kind:       EmissionKind,
     pub resources:  Vec<Resource>,
     pub tombstones: BTreeSet<Iri>,
+}
+
+pub enum EmissionKind {
+    /// Drained iff the emission's parent emission's pipeline run
+    /// returned `Ok` and `branch_advanced = true`. Parent of the
+    /// queued layer is the freshly-landed parent layer. This is the
+    /// default and matches every emission today (institution-classes
+    /// follow-up, etc.).
+    Child,
+    /// Drained unconditionally — even if the queuing pipeline's
+    /// outer commit returned `Err`. Parent of the queued layer is
+    /// `ctx.head` at drain time (the head as it stood when the
+    /// queuing emission *started*, not the failed-to-advance layer).
+    /// Used for audit-anchor content that must land regardless of
+    /// whether the gated commit succeeded — today only the AutoOnLoad
+    /// `Verdict` + `RuntimeInvocation` provenance.
+    Sibling,
 }
 
 pub enum PipelineKind {
@@ -263,6 +310,8 @@ pub enum PipelineKind {
 }
 ```
 
+`EmissionKind` distinguishes two routing modes for follow-up layers. The vast majority of follow-up content is `Child`: it only makes sense after its parent has successfully landed (e.g., the `institution_classes` follow-up off a user layer is meaningless if the user layer was rejected). A small, structurally identified category is `Sibling`: always-commit content that anchors institutional facts to the chain regardless of whether the gated user-layer commit succeeded. Today the sole `Sibling` emission is the AutoOnLoad `verdict_provenance` layer — see §3.4 for the rationale.
+
 ### 6.1 Drain algorithm
 
 The orchestrator owns a FIFO queue of `(depth, LayerEmission)`. Pseudocode:
@@ -272,6 +321,7 @@ queue ← [(0, root)]
 outcomes ← []
 working_set ← pool.acquire()
 last_advanced ← ctx.head()
+first_err ← None
 
 while queue not empty:
     (depth, emission) ← queue.pop_front()
@@ -279,39 +329,70 @@ while queue not empty:
     if depth >= MAX_EMISSION_DEPTH:
         return Err(CommitError::EmissionDepthExceeded { name: emission.name, depth })
 
-    builder ← ctx.take_working(emission.name)           // fresh, parented at ctx.head()
+    pre_run_head ← ctx.head()                            // for Sibling parenting on Err
+    builder ← ctx.take_working(emission.name)            // fresh, parented at ctx.head()
     for r in emission.resources:  builder.add(r)
     for t in emission.tombstones: builder.tombstone(t)
 
     pipeline ← canned_for(emission.pipeline)
     cfg ← PipelineConfig { persister, branch, policy, institutions, storage: ctx.storage_view() }
-    outcome ← pipeline.run(builder, cfg, &mut working_set)?
+    result ← pipeline.run(builder, cfg, &mut working_set)
     //                                  ^ pipeline.run internally executes
     //                                    pipeline.did_persist hooks if and only
     //                                    if the persist phase set
     //                                    branch_advanced = true. Hook errors
     //                                    land on state.hook_errors and flow
-    //                                    into outcome.hook_errors. Hooks may
-    //                                    push to state.emissions, which the
-    //                                    orchestrator picks up below.
+    //                                    into outcome.hook_errors. On Err,
+    //                                    pipeline.run returns PipelineRunErr,
+    //                                    which partitions state.emissions and
+    //                                    surfaces only the Sibling subset
+    //                                    (queued by phases that ran before
+    //                                    the failing phase — notably
+    //                                    autoonload_dispatch's verdict_
+    //                                    provenance Sibling).
 
-    if outcome.persist.branch_advanced:
-        ctx.advance_head(outcome.layer.clone(), emission.name)
-        last_advanced ← outcome.layer.clone()
-        for child in outcome.emissions:
-            queue.push_back((depth + 1, child))
-    else:
-        ctx.revert_head(last_advanced.clone())
-        // descendants of this emission are dropped: their parent didn't land.
-        // older sibling emissions in the queue remain valid because their
-        // parent is `last_advanced`, which is still in storage.
-        // didPersist hooks were not run for this pipeline (see §6.5).
+    match result:
+        Ok(PipelineRunOk { outcome }) if outcome.persist.branch_advanced:
+            ctx.advance_head(outcome.layer.clone(), emission.name)
+            last_advanced ← outcome.layer.clone()
+            // Child and Sibling alike — when the parent landed, the
+            // routing distinction is irrelevant; both drain as children.
+            for child in outcome.emissions:
+                queue.push_back((depth + 1, child))
+            outcomes.push(outcome)
 
-    outcomes.push(outcome)
+        Ok(PipelineRunOk { outcome }) /* !branch_advanced */:
+            ctx.revert_head(last_advanced.clone())
+            // descendants are dropped: their parent didn't land.
+            // older sibling emissions in the queue remain valid because their
+            // parent is `last_advanced`, which is still in storage.
+            // didPersist hooks were not run for this pipeline (see §6.5).
+            // !branch_advanced is *not* a rejection — see §6.4. Sibling
+            // emissions sitting on outcome.emissions are also dropped (see
+            // §6.4 for why audit content has no semantic home in the
+            // !branch_advanced case).
+            outcomes.push(outcome)
+
+        Err(PipelineRunErr { error, sibling_emissions }):
+            // Rescue Sibling emissions queued by phases that ran before
+            // the failing phase. ctx.head did not advance (this pipeline
+            // failed), so pre_run_head == ctx.head() now. Re-queue at
+            // depth 0; the next iteration's builder will parent them at
+            // ctx.head(), which is pre_run_head.
+            for sib in sibling_emissions:
+                queue.push_back((0, sib))
+            // Child emissions from the failed run were already partitioned
+            // off and dropped by pipeline.run.
+            first_err ← first_err.or(Some(error))
+            // Continue draining so rescued Siblings (and any Children
+            // they queue) get committed before we return the error.
 
 pool.release(working_set)
 
-// Post-drain hook stage (§6.5).
+if first_err is Some(e):
+    return Err(e)
+
+// Post-drain hook stage (§6.5). Only runs on the all-Ok path.
 multi ← MultiLayerOutcome { layers: outcomes, drain_hook_errors: vec![] }
 drain_state ← DrainState { top_layer: last_advanced.clone(), multi: &mut multi, ctx }
 for hook in self.did_drain:
@@ -323,21 +404,27 @@ return Ok(multi)
 
 The `didPersist` hooks are executed inside `pipeline.run` (not in the orchestrator loop body) so that pipelines remain self-contained: a pipeline knows its phases and its hooks together. The orchestrator only needs to know the result. Hooks **do not run** when persist did not advance the branch — there is no successfully-persisted layer to hook off, and any side-effect the hook performs would attach to a layer that isn't there.
 
+**The `Err` arm is the heart of the AutoOnLoad-`Fails` audit path.** When `autoonload_dispatch` returns `Err` on a `Fails` verdict, the persist phase never runs, so the user layer is not on disk — but `autoonload_dispatch` queued the `verdict_provenance` Sibling emission *before* returning `Err`. The drain loop rescues it, re-queues it at depth 0 parented at the (unchanged) `ctx.head`, and processes it as a normal `StructuralFollowup` pipeline run. That follow-up pipeline persists the audit layer, advances `ctx.head` to the audit layer, and lands the institutional fact on the chain. After the drain finishes, the orchestrator returns the original `Err` to the caller, but the audit has landed.
+
+The same `Err` arm covers structural-validation failures, retroactive violations, cascade aborts, persist I/O errors, and `NeedsWitnessedMerge` (when surfaced as Err) — none of those phases queue Sibling emissions, so the rescue loop is a no-op and the drain ends with an error response and no audit content. That asymmetry is by design (see §3.4).
+
 ### 6.2 Ordering — FIFO across siblings
 
 Emissions queued from the same pipeline run drain in the order they were queued. For the canonical Load flow within a single `with_institutions` pipeline run:
 
-1. The `autoonload_dispatch` phase runs first and queues `verdict_provenance`.
-2. The `register_wasm_components` `didPersist` hook runs after `persist` succeeds and queues `institution_classes`.
+1. The `autoonload_dispatch` phase runs first and queues `verdict_provenance` as a `Sibling`.
+2. The `register_wasm_components` `didPersist` hook runs after `persist` succeeds and queues `institution_classes` as a `Child`.
 
 The FIFO order matches today's `user → provenance → institution_classes` sequence in the Load handler. This is not accidental — it's what makes the orchestrator a behaviour-preserving refactor of the existing handler logic. Phases queue before hooks because hooks only run after `persist`, and `persist` is the last phase.
+
+`Sibling` emissions rescued on `Err` (§6.1) are inserted at the back of the queue, preserving FIFO with whatever else is pending. Any successfully-queued `Child` emissions from earlier in the drain still process before the rescued `Sibling`. In the canonical `Load`-with-`Fails` flow there are no earlier `Child` emissions pending (the user-layer pipeline failed before the `register_wasm_components` hook could run, so no `institution_classes` got queued), and the rescued `Sibling` is the only thing in the queue. But the FIFO invariant holds either way: provenance commits before institution_classes if both happen, matching today's ordering.
 
 ### 6.3 Depth cap — `MAX_EMISSION_DEPTH = 4`
 
 Termination has two arguments:
 
-- **Static, by construction.** Only `with_institutions` emits. The two emission sites (the `autoonload_dispatch` phase and the `register_wasm_components` `didPersist` hook) both target `StructuralFollowup` pipelines. `StructuralFollowup` does not include any emitting phase or hook. `WithRetroactive` likewise does not. Today, depth is at most 1.
-- **Dynamic safety net.** `MAX_EMISSION_DEPTH = 4` catches a future bug where a phase or hook is added to a followup pipeline and produces emissions. The cap is generous (today's depth is 1; conceivable near-future is 2–3, e.g. an institution-classes layer triggers a follow-up validation that itself emits). Hitting the cap produces a structured `CommitError::EmissionDepthExceeded { name, depth }` that names the offending emission for debuggability.
+- **Static, by construction.** Only `with_institutions` emits. The two emission sites (the `autoonload_dispatch` phase and the `register_wasm_components` `didPersist` hook) both target `StructuralFollowup` pipelines. `StructuralFollowup` does not include any emitting phase or hook. `WithRetroactive` likewise does not. Today, depth is at most 1 on the `Ok` path. On the `Err`-with-Sibling-rescue path, the rescued Sibling is re-queued at depth 0 and runs `StructuralFollowup`, which itself emits nothing — so depth is still at most 1 on that path too.
+- **Dynamic safety net.** `MAX_EMISSION_DEPTH = 4` catches a future bug where a phase or hook is added to a followup pipeline and produces emissions. The cap is generous (today's depth is 1; conceivable near-future is 2–3, e.g. an institution-classes layer triggers a follow-up validation that itself emits, or an audit-classes follow-up off the audit layer — architecturally fine, just not a thing today). Sibling emissions can themselves queue Child emissions; those count toward depth from their Sibling root (the Sibling is depth 0; its Child is depth 1). Hitting the cap produces a structured `CommitError::EmissionDepthExceeded { name, depth }` that names the offending emission for debuggability.
 
 ### 6.4 Revert semantics
 
@@ -348,6 +435,13 @@ When a pipeline's persist phase reports `branch_advanced = false` (anchored-comm
 - **`ctx.head` is restored exactly once per drain.** The `last_advanced` variable tracks the most recent successfully-advanced layer; revert points there. Repeated reverts in a single drain (multiple consecutive non-advancing emissions) all point at the same `last_advanced` — there is no compounding state.
 
 This is a direct replacement for the three near-identical revert blocks in today's Load handler, with the additional property that the revert is centralised — adding a new commit-shaped RPC does not require re-implementing the revert.
+
+**`!branch_advanced` is not a rejection.** A different-position cache hit (D33 §6) or `NeedsWitnessedMerge` (D34 §G.1) is a no-op CAS outcome, not a structural or institutional failure. The pipeline ran cleanly through all its phases, including `autoonload_dispatch`; `persist` merely observed that the branch tip moved or that an anchored cache entry already covered this content. The semantic difference from a rejection is:
+
+- A rejection (`Err`) means some phase decided the commit must not stand — structural-validation failure, retroactive violation, AutoOnLoad `Fails`, cascade abort, I/O error. The user-layer commit is being refused.
+- A no-op (`!branch_advanced`) means the commit's content is either already on the chain or pending witnessed-merge resolution. Nothing was refused.
+
+Because no rejection occurred, no institutional fact worth auditing was created. **`Sibling` emissions are *not* drained on `!branch_advanced`** — only on `Ok`-with-`branch_advanced` (where they queue as children of the landed layer) or on `Err` (where they are rescued and re-rooted, §6.1). If `autoonload_dispatch` had already populated `state.emissions` with a `verdict_provenance` Sibling before persist returned `!branch_advanced`, those entries are visible on `outcome.emissions` but the orchestrator does not enqueue them — same fate as the Child emissions on this branch. The audit content has no semantic home in the `!branch_advanced` case: the layer being audited is either already present (so duplicate provenance is noise) or pending witnessed-merge (so provenance attached to an un-merged state is incoherent). The distinction matters: a different-position cache hit doesn't represent an institutional fact worth auditing; an AutoOnLoad `Fails` does.
 
 ### 6.5 Post-drain hook stage
 
@@ -456,7 +550,8 @@ kernel/src/commit/
   state.rs        -- CommitState arena, DrainState
   phases.rs       -- the five phase functions
   hooks.rs        -- DidPersistHook, DidDrainHook, HookOutcome, the two concrete hooks
-  orchestrator.rs -- CommitOrchestrator + drain loop + post-drain hook stage
+  orchestrator.rs -- CommitOrchestrator + drain loop + post-drain hook stage,
+                     LayerEmission, EmissionKind
   persister.rs    -- LayerPersister trait, PersistedLayerInfo
   outcome.rs      -- LayerCommitOutcome, MultiLayerOutcome, CommitError
 ```

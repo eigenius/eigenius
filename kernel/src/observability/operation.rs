@@ -65,6 +65,26 @@ pub const RPC_RUN_GC: &str = "kernel.rpc.run_gc";
 pub const LAYER_COMMIT: &str = "kernel.layer.commit";
 pub const LAYER_TOPOLOGY: &str = "kernel.layer.topology";
 
+// --- Commit pipeline (D41 §12) ---
+//
+// Phase events: `tracing::info!` with the corresponding constant.
+// `COMMIT_CASCADE` fires once per cascade fixpoint iteration from
+// inside `retroactive_with_cascade`.
+//
+// Hook + run spans: `tracing::info_span!` opened by the pipeline /
+// orchestrator around the hook list or the entire drain.
+
+pub const COMMIT_BUILD: &str = "kernel.commit.build";
+pub const COMMIT_STRUCTURAL_VALIDATE: &str = "kernel.commit.structural_validate";
+pub const COMMIT_RETROACTIVE: &str = "kernel.commit.retroactive";
+pub const COMMIT_CASCADE: &str = "kernel.commit.cascade";
+pub const COMMIT_AUTOONLOAD: &str = "kernel.commit.autoonload";
+pub const COMMIT_PERSIST: &str = "kernel.commit.persist";
+pub const COMMIT_DID_PERSIST: &str = "kernel.commit.did_persist";
+pub const COMMIT_DID_DRAIN: &str = "kernel.commit.did_drain";
+pub const COMMIT_PIPELINE_RUN: &str = "kernel.commit.pipeline_run";
+pub const COMMIT_ORCHESTRATOR_RUN: &str = "kernel.commit.orchestrator_run";
+
 // --- Validation ---
 
 pub const VALIDATE_RESOURCE: &str = "kernel.validate.resource";
