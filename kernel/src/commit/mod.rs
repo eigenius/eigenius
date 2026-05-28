@@ -66,7 +66,7 @@ pub use hooks::{
 };
 pub use orchestrator::{CommitOrchestrator, MAX_EMISSION_DEPTH};
 pub use outcome::{DispatchEntry, LayerCommitOutcome, LayerEmission, MultiLayerOutcome};
-pub use persister::{LayerPersister, PersistedLayerInfo};
+pub use persister::{BackendStorePersister, LayerPersister, PersistedLayerInfo};
 pub use phases::{
     autoonload_dispatch, build, persist, retroactive_with_cascade, structural_validate,
 };

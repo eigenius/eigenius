@@ -76,6 +76,16 @@ pub enum CommitError {
     },
     /// Storage backend reported an error during the commit write.
     Storage(StorageError),
+    /// The commit pipeline's [`crate::commit::LayerPersister`] returned
+    /// an error. The new pipeline's persist seam (D41 §7) returns
+    /// [`ValidationError`] rather than [`StorageError`] because Phase
+    /// C will widen its impl to cover anchored-commit cache + branch
+    /// CAS conditions that don't reduce cleanly to storage I/O. Phase
+    /// B routes the lattice wrapper's [`crate::commit::BackendStorePersister`]
+    /// errors through this variant.
+    ///
+    /// D41 Phase B.
+    Persist(ValidationError),
     /// The builder rejected a resource (e.g., core-namespace violation
     /// on a non-root layer). Surfaced from `LayerBuilder::add_resource`
     /// callers; the lattice doesn't generate these itself but propagates
@@ -127,6 +137,7 @@ impl std::fmt::Display for CommitError {
                 Ok(())
             }
             CommitError::Storage(e) => write!(f, "storage error during commit: {e}"),
+            CommitError::Persist(e) => write!(f, "persist error during commit: {e}"),
             CommitError::Layer(e) => write!(f, "layer build error: {e}"),
             CommitError::WorkingSetExhausted(e) => {
                 write!(f, "commit aborted: {e}")
@@ -476,23 +487,26 @@ pub fn with_branch_lock<R>(f: impl FnOnce() -> R) -> R {
 
 /// Append a validated layer to the DAG.
 ///
-/// Builds the `Layer` from `builder` (which already carries its parent
-/// reference and accumulated resources), validates it against the
-/// resolved chain (per-new-layer Rules 1–19), runs the retroactive
-/// validation pass against lower-layer resources affected by the new
-/// content per `policy`, and persists via the backend's atomic
-/// `store_layer`. Does **not** touch any branch ref — call
-/// `update_branch` separately.
+/// Thin wrapper around [`crate::commit::CommitPipeline::with_retroactive`]
+/// (D41 Phase B). Builds the `Layer` from `builder`, runs structural
+/// validation, runs the retroactive validation pass against lower-layer
+/// resources affected by the new content per `policy`, and persists via
+/// `backend.store_layer` through the
+/// [`crate::commit::BackendStorePersister`] adapter. Does **not** touch
+/// any branch ref — call `update_branch` separately.
 ///
 /// `working_set` holds the scratch collections the retroactive pass
 /// uses. Callers driving many commits should reuse one via
 /// [`crate::validation::CommitWorkingSetPool`]; single-shot callers
 /// can pass a fresh `CommitWorkingSet::in_memory()`.
 ///
-/// **Phase 1 note.** The retroactive validation pass is not yet
-/// implemented; the policy and working set are accepted but
-/// `cascade_tombstones` / `cascade_iterations` always come back empty
-/// /zero. Phase 2 wires the Reject pass; Phase 3 wires CascadeTombstone.
+/// **Return shape preserved.** The pipeline produces a
+/// [`crate::commit::LayerCommitOutcome`]; this wrapper translates back
+/// to the legacy [`CommitOutcome`] so all existing callers (lattice
+/// tests, gc.rs, bootstrap, storage E2E tests) compile unchanged.
+/// D41 §11 retires this wrapper in a later phase.
+///
+/// D41 §11 / Phase B.
 pub fn commit_layer(
     builder: LayerBuilder,
     storage: LayerStorage,
@@ -500,194 +514,26 @@ pub fn commit_layer(
     policy: CommitPolicy,
     working_set: &mut crate::validation::CommitWorkingSet,
 ) -> Result<CommitOutcome, CommitError> {
-    // Build initial layer. Clone the builder so we keep the original
-    // for the cascade path's per-iteration rebuilds. Reject path
-    // doesn't need the clone but the cost is one BTreeMap clone +
-    // a few Arc bumps — negligible vs. the validation work that
-    // dwarfs it.
-    let initial_layer = Arc::new(builder.clone().build(storage.clone()));
-
-    // 1. Per-new-layer validation on the user's content as committed.
-    //    A malformed initial layer rejects regardless of policy — the
-    //    cascade can't fix violations the caller themselves caused.
-    let validator = Validator::new(Arc::clone(&initial_layer));
-    let new_layer_errors = validator.validate();
-    if !new_layer_errors.is_empty() {
-        let total = new_layer_errors.len();
-        let max = match &policy {
-            CommitPolicy::Reject { max_violations } => *max_violations,
-            // Cascade can't tombstone new-layer resources, so the
-            // commit must reject. Use a generous cap so the user sees
-            // every error.
-            CommitPolicy::CascadeTombstone => usize::MAX,
-        };
-        let mut errors = new_layer_errors;
-        errors.truncate(max);
-        return Err(CommitError::Validation {
-            errors,
-            total_violations: total,
-        });
-    }
-
-    // 2. Dispatch to the policy-specific path.
-    match policy {
-        CommitPolicy::Reject { max_violations } => {
-            commit_reject_path(initial_layer, working_set, max_violations, backend)
-        }
-        CommitPolicy::CascadeTombstone => {
-            commit_cascade_path(builder, initial_layer, storage, working_set, backend)
-        }
-    }
-}
-
-/// Reject path: single retroactive pass, surface violations if any.
-fn commit_reject_path(
-    layer: Arc<Layer>,
-    ws: &mut crate::validation::CommitWorkingSet,
-    max_violations: usize,
-    backend: &dyn PersistentBackend,
-) -> Result<CommitOutcome, CommitError> {
-    crate::validation::retroactive_validate(&layer, ws)
-        .map_err(CommitError::WorkingSetExhausted)?;
-    if !ws.violations.is_empty() {
-        let drained = ws.violations.drain(max_violations);
-        return Err(CommitError::Validation {
-            errors: drained.errors,
-            total_violations: drained.total,
-        });
-    }
-    backend.store_layer(&layer).map_err(CommitError::Storage)?;
+    // D41 §11.1: the lattice wrapper delegates to the new pipeline via
+    // a minimal `LayerPersister` adapter that just calls
+    // `backend.store_layer`. No CAS, no cache — the lattice path has
+    // never owned those.
+    let persister = crate::commit::BackendStorePersister { backend };
+    let cfg = crate::commit::PipelineConfig {
+        persister: &persister,
+        // Lattice path is branch-agnostic. `"main"` is a placeholder;
+        // `BackendStorePersister` ignores it.
+        branch: "main",
+        policy,
+        institutions: None,
+        storage,
+    };
+    let outcome =
+        crate::commit::CommitPipeline::with_retroactive().run(builder, cfg, working_set)?;
     Ok(CommitOutcome {
-        layer,
-        cascade_tombstones: std::collections::BTreeSet::new(),
-        cascade_iterations: 0,
-    })
-}
-
-/// CascadeTombstone path: fixpoint loop, adding tombstones for
-/// every violating lower-layer IRI until no more violations arise.
-/// Aborts if any iteration would invalidate a new-layer resource.
-fn commit_cascade_path(
-    original_builder: LayerBuilder,
-    initial_layer: Arc<Layer>,
-    storage: LayerStorage,
-    ws: &mut crate::validation::CommitWorkingSet,
-    backend: &dyn PersistentBackend,
-) -> Result<CommitOutcome, CommitError> {
-    use crate::validation::ValidationError;
-    let mut current_layer = initial_layer;
-    let mut iterations: u32 = 0;
-
-    loop {
-        iterations += 1;
-
-        // Reset per-iteration state but preserve the cumulative
-        // cascade_tombstones set.
-        ws.pending.clear();
-        ws.revalidated.clear();
-        ws.violations.clear();
-
-        crate::validation::retroactive_validate(&current_layer, ws)
-            .map_err(CommitError::WorkingSetExhausted)?;
-
-        if ws.violations.is_empty() {
-            break; // Fixpoint reached.
-        }
-
-        // Partition violations: those on new-layer IRIs (cascade
-        // breakage — abort) vs lower-layer IRIs (tombstone candidates).
-        let drained = ws.violations.drain(usize::MAX);
-        let new_layer_defined: std::collections::BTreeSet<Iri> =
-            current_layer.defined_iris().clone();
-        let mut breakage: Vec<ValidationError> = Vec::new();
-        let mut new_tombs: Vec<Iri> = Vec::new();
-        for err in drained.errors {
-            match &err.resource_id {
-                Some(iri) if new_layer_defined.contains(iri) => {
-                    breakage.push(err);
-                }
-                Some(iri) if !ws.cascade_tombstones.contains(iri) => {
-                    new_tombs.push(iri.clone());
-                }
-                // Already cascade-tombstoned (shouldn't happen because
-                // the resource would resolve to None after tombstone
-                // and not surface violations), or violation without
-                // resource_id (defensive — skip).
-                _ => {}
-            }
-        }
-
-        if !breakage.is_empty() {
-            let cascade_set: std::collections::BTreeSet<Iri> =
-                ws.cascade_tombstones.iter().collect();
-            let total = breakage.len();
-            return Err(CommitError::CascadeAbort {
-                iterations,
-                cascade_tombstones: cascade_set,
-                errors: breakage,
-                total_violations: total,
-            });
-        }
-
-        if new_tombs.is_empty() {
-            // No progress — every violation was on an already-tombstoned
-            // or unidentified resource. Treat as fixpoint to avoid
-            // infinite looping; the next per-new-layer revalidation
-            // below catches anything genuinely broken.
-            break;
-        }
-
-        // Accumulate cascade tombstones.
-        for iri in new_tombs {
-            ws.cascade_tombstones
-                .insert(iri)
-                .map_err(CommitError::WorkingSetExhausted)?;
-        }
-
-        // Rebuild the layer with the accumulated cascade tombstones
-        // applied on top of the user's original builder state.
-        let mut iter_builder = original_builder.clone();
-        for tomb_iri in ws.cascade_tombstones.iter() {
-            // `tombstone` is idempotent on the underlying BTreeSet, so
-            // re-adding the same IRI across iterations is a no-op. The
-            // guard against tombstoning a new-layer-defined IRI is
-            // handled by the breakage check above.
-            iter_builder
-                .tombstone(tomb_iri)
-                .map_err(CommitError::Layer)?;
-        }
-        current_layer = Arc::new(iter_builder.build(storage.clone()));
-
-        // Re-validate the new layer's own resources after the rebuild.
-        // The cascade tombstones may have invalidated new-layer
-        // resources that reference now-suppressed IRIs (e.g., a
-        // new-layer resource's `is_a` pointed at a class the cascade
-        // just tombstoned). That's new-layer breakage by another path
-        // — surface as CascadeAbort.
-        let validator = Validator::new(Arc::clone(&current_layer));
-        let new_errs = validator.validate();
-        if !new_errs.is_empty() {
-            let cascade_set: std::collections::BTreeSet<Iri> =
-                ws.cascade_tombstones.iter().collect();
-            let total = new_errs.len();
-            return Err(CommitError::CascadeAbort {
-                iterations,
-                cascade_tombstones: cascade_set,
-                errors: new_errs,
-                total_violations: total,
-            });
-        }
-    }
-
-    // Fixpoint reached. Persist the final layer.
-    backend
-        .store_layer(&current_layer)
-        .map_err(CommitError::Storage)?;
-    let cascade_set: std::collections::BTreeSet<Iri> = ws.cascade_tombstones.iter().collect();
-    Ok(CommitOutcome {
-        layer: current_layer,
-        cascade_tombstones: cascade_set,
-        cascade_iterations: iterations,
+        layer: outcome.layer,
+        cascade_tombstones: outcome.cascade_tombstones,
+        cascade_iterations: outcome.cascade_iterations,
     })
 }
 
@@ -1674,6 +1520,15 @@ pub fn merge_independent_heads(
     let merge_layer = commit_layer_default(builder, storage, backend).map_err(|e| match e {
         CommitError::Validation { errors, .. } => MergeError::Validation(errors),
         CommitError::Storage(s) => MergeError::Storage(s),
+        CommitError::Persist(ve) => {
+            // D41 Phase B: the lattice path's `BackendStorePersister`
+            // surfaces `backend.store_layer` failures via
+            // `CommitError::Persist(ValidationError)`. The merge call
+            // site treats them the same as `CommitError::Storage`.
+            MergeError::Storage(StorageError::Internal(format!(
+                "merge commit persist: {ve}"
+            )))
+        }
         CommitError::Layer(_) => unreachable!("builder errors handled above"),
         CommitError::WorkingSetExhausted(e) => {
             MergeError::Storage(StorageError::Internal(format!("merge commit: {e}")))

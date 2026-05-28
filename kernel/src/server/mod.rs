@@ -405,41 +405,11 @@ impl BranchContextCache {
     }
 }
 
-/// Outcome of [`EigeniusService::persist_layer_if_backend`] — the
-/// canonical `LayerId` for the committed content paired with the
-/// merge outcome and a derived `branch_advanced` flag.
-///
-/// **`branch_advanced` semantics** (D33 §6 + D23 §5.4):
-///
-/// - `true` — the durable branch ref moved as a result of this
-///   persist. Holds for cache misses, same-position cache hits, and
-///   both `FastForward` / `TrivialMerge` CAS outcomes.
-/// - `false` — the branch ref did **not** move. Holds for: no
-///   persistent backend, different-position cache hit, and the
-///   `NeedsWitnessedMerge` CAS outcome (the layer is stored but
-///   unreachable from any branch ref).
-///
-/// `merge_outcome` is `Some(...)` whenever a CAS attempt actually ran
-/// (cache miss or same-position cache hit). It is `None` for the
-/// no-backend path and for different-position cache hits — in both
-/// cases there is no merge taxonomy because no CAS happened. The
-/// proto boundary maps `None` to [`proto::MergeOutcome::Unspecified`].
-#[derive(Debug, Clone)]
-struct PersistedLayerInfo {
-    layer_id: crate::layer::LayerId,
-    branch_advanced: bool,
-    merge_outcome: Option<crate::lattice::UpdateOutcome>,
-    /// `true` iff the persist short-circuited because the
-    /// anchored-commit cache (D33 §6) found a content-equivalent layer
-    /// at a different chain position. `layer_id` in that case is the
-    /// cached layer's id, not the freshly-built one. Distinguished
-    /// from the no-backend / no-CAS case (where `merge_outcome` is
-    /// also `None` and `branch_advanced` is also `false`) so the
-    /// response can carry a `MERGE_OUTCOME_CACHED_DIFFERENT_POSITION`
-    /// signal that consumers can render distinctly from "no commit
-    /// shape information available".
-    cache_hit_different_position: bool,
-}
+// `PersistedLayerInfo` is canonical in `crate::commit::persister`
+// (D41 §7 / §11.1). Phase C of D41 deduplicated the server-side copy
+// that previously lived here; call sites in this module continue to
+// use the same fields, now resolving through the re-import below.
+use crate::commit::persister::PersistedLayerInfo;
 
 /// Build a wire-format [`proto::MergeInfo`] from an optional
 /// [`PersistedLayerInfo`].
@@ -2045,6 +2015,56 @@ impl EigeniusService {
                 None
             },
         }))
+    }
+}
+
+// D41 §7 — `LayerPersister` impl for `EigeniusService`. The trait
+// surface is the seam the new commit pipeline (D41 §3.5) calls
+// through; `EigeniusService` carries the only impl that does cache
+// probe + `store_layer` + branch CAS in one body.
+//
+// Shape A (delegate): this is a thin adapter over the existing
+// [`EigeniusService::persist_layer_if_backend`]. Keeping the existing
+// method as the implementation means no behaviour change risk during
+// Phase C and no syntactic churn at the 16 existing call sites that
+// Phase E will sweep when it moves them to the orchestrator. Once
+// Phase E lands, the inherent method goes away and only the trait
+// surface remains.
+//
+// **`ValidationError` conversion.** The trait declares
+// [`crate::validation::ValidationError`] (kernel-internal), but
+// `persist_layer_if_backend` returns [`proto::ValidationError`]
+// because the server module's `use proto::*;` puts the proto type in
+// scope. The two are bit-for-bit different structs. Phase E will
+// resolve the persister error type properly; for Phase C the
+// conversion happens inline here, mapping the proto error's stringly
+// `rule` into the closest existing [`crate::validation::ValidationRule`]
+// variant ([`ValidationRule::InstitutionValidation`], matching
+// [`crate::commit::persister::BackendStorePersister`]'s Phase B
+// stand-in) and carrying the original `rule` string verbatim in
+// `message` so callers can identify the underlying cause.
+impl crate::commit::LayerPersister for EigeniusService {
+    fn persist(
+        &self,
+        branch: &str,
+        layer: &Arc<crate::layer::Layer>,
+    ) -> Result<PersistedLayerInfo, crate::validation::ValidationError> {
+        // D41 §7 — cheap deref: trait surface is `&Arc<Layer>`, the
+        // existing inherent method takes `&Layer`. Phase E will collapse
+        // the two by moving the body up into the trait method.
+        self.persist_layer_if_backend(branch, layer.as_ref())
+            .map_err(|proto_err| crate::validation::ValidationError {
+                resource_id: None,
+                property: None,
+                // D41 Phase C: persister error type is not yet split.
+                // `InstitutionValidation` is the placeholder shared with
+                // `BackendStorePersister`; Phase E will widen the
+                // persister error to carry the I/O / CAS taxonomy
+                // properly instead of laundering through a validation
+                // variant.
+                rule: crate::validation::ValidationRule::InstitutionValidation,
+                message: format!("persister ({}): {}", proto_err.rule, proto_err.message),
+            })
     }
 }
 
@@ -5100,6 +5120,80 @@ mod merge_info_tests {
         let info = merge_info_from_persist_info(Some(&pi));
         assert_eq!(info.outcome, MergeOutcome::CachedDifferentPosition as i32);
         assert_eq!(info.merge_layer_id, hex_encode(cached.0));
+    }
+}
+
+#[cfg(test)]
+mod layer_persister_dispatch_tests {
+    //! Phase C of D41 wires `EigeniusService` as the canonical
+    //! `LayerPersister` impl. Phase D's orchestrator will hand the
+    //! service to the pipeline as a `&dyn LayerPersister`; this test
+    //! pins the trait-dispatch handshake *before* the orchestrator
+    //! depends on it.
+    //!
+    //! D41 §7.
+    use super::*;
+    use crate::commit::persister::LayerPersister;
+
+    /// `EigeniusService::new()` (no-backend) is enough to exercise the
+    /// no-backend branch of `persist_layer_if_backend`:
+    /// `branch_advanced = false`, `merge_outcome = None`,
+    /// `cache_hit_different_position = false`, `layer_id` =
+    /// `layer.id()`. Calling through the trait should return the same
+    /// shape; the only difference is the proto-`ValidationError`
+    /// laundering in the trait impl (D41 Phase C compromise), which
+    /// the no-backend happy path never hits.
+    #[tokio::test]
+    async fn dyn_dispatch_matches_inherent_method_on_no_backend_path() {
+        let service = EigeniusService::new().expect("bootstrap should succeed");
+
+        // Grab the main-branch head layer. `EigeniusService::new()`
+        // seeds `"main"` eagerly (see `BranchContextCache::new`), so
+        // the cache hit is guaranteed.
+        let head: Arc<crate::layer::Layer> = {
+            let cache = service.branch_contexts.contexts.read().await;
+            let ctx = cache
+                .get(DEFAULT_BRANCH)
+                .expect("main branch context seeded at construction");
+            let ctx = ctx.read().await;
+            ctx.head().clone()
+        };
+
+        // Inherent method (today's call shape, used by all 16 existing
+        // call sites that Phase E will sweep).
+        let inherent = service
+            .persist_layer_if_backend(DEFAULT_BRANCH, head.as_ref())
+            .expect("no-backend path never errors");
+
+        // Trait dispatch through `&dyn LayerPersister` — proves the
+        // impl is object-safe and the vtable resolves to the same
+        // body. Phase D's orchestrator will hold the service exactly
+        // this way.
+        let persister: &dyn LayerPersister = &service;
+        let via_trait = persister
+            .persist(DEFAULT_BRANCH, &head)
+            .expect("no-backend path never errors");
+
+        assert_eq!(inherent.layer_id, via_trait.layer_id);
+        assert_eq!(inherent.branch_advanced, via_trait.branch_advanced);
+        assert_eq!(
+            inherent.cache_hit_different_position,
+            via_trait.cache_hit_different_position
+        );
+        // Both encode "no CAS attempted" — the no-backend path's
+        // load-bearing signal that distinguishes it from a same-position
+        // cache hit (D41 §7 docstring on `PersistedLayerInfo`).
+        assert!(inherent.merge_outcome.is_none());
+        assert!(via_trait.merge_outcome.is_none());
+
+        // And the structural payoff: the no-backend signal is
+        // `branch_advanced = false` + `merge_outcome = None` +
+        // `cache_hit_different_position = false`. Pinning the
+        // combination keeps drift between the inherent body and the
+        // trait surface visible.
+        assert!(!inherent.branch_advanced);
+        assert!(!inherent.cache_hit_different_position);
+        assert_eq!(inherent.layer_id, *head.id());
     }
 }
 

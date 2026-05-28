@@ -32,8 +32,11 @@
 //!
 //! See D41 §2, §5, §6.
 
+use std::collections::BTreeSet;
+
 use crate::lattice::{CommitError, CommitPolicy};
 use crate::layer::LayerBuilder;
+use crate::observability::{field, operation};
 use crate::validation::CommitWorkingSet;
 
 use super::hooks::{register_wasm_components, DidPersistHook};
@@ -42,7 +45,7 @@ use super::persister::LayerPersister;
 use super::phases::{
     autoonload_dispatch, build, persist, retroactive_with_cascade, structural_validate,
 };
-use super::state::InstitutionContext;
+use super::state::{CommitState, InstitutionContext};
 
 /// Phase function signature. See `phases.rs` for the five concrete
 /// phases and D41 §3 for the contract.
@@ -188,14 +191,125 @@ impl CommitPipeline {
     /// `branch_advanced = true`, and constructs the
     /// [`LayerCommitOutcome`] from the accumulators.
     ///
-    /// D41 §5.
+    /// **Phase B status (D41 §5).** This implementation services the
+    /// lattice wrapper path only — single-pipeline, no orchestrator.
+    /// The full `PipelineRunErr` / `sibling_emissions` plumbing
+    /// described in the doc is Phase D work; the body returns
+    /// `Result<LayerCommitOutcome, CommitError>` directly so the
+    /// `with_retroactive` callers (the lattice wrappers in this
+    /// commit) can use it unchanged. Phase D will widen the return
+    /// type once the orchestrator needs to partition emissions on Err.
+    ///
+    /// `did_persist` hooks dispatch as a list iff the persist phase
+    /// reported `branch_advanced = true`; for `with_retroactive` the
+    /// slice is empty so the loop body never executes. Phase B leaves
+    /// hook *bodies* `unimplemented!()`; the dispatch site is wired so
+    /// Phase D only has to fill the bodies.
     pub fn run(
         &self,
-        _builder: LayerBuilder,
-        _cfg: PipelineConfig<'_>,
-        _ws: &mut CommitWorkingSet,
+        builder: LayerBuilder,
+        cfg: PipelineConfig<'_>,
+        ws: &mut CommitWorkingSet,
     ) -> Result<LayerCommitOutcome, CommitError> {
-        unimplemented!("phase A scaffolding; see d41 §5/§6")
+        let span = tracing::info_span!(operation::COMMIT_PIPELINE_RUN, kind = ?self.kind);
+        let _enter = span.enter();
+
+        let mut state = CommitState {
+            // Inputs
+            storage: cfg.storage,
+            persist: cfg.persister,
+            policy: cfg.policy,
+            branch: cfg.branch,
+            institutions: cfg.institutions,
+
+            // Transient
+            builder,
+            layer: None,
+
+            // Accumulators
+            cascade_tombstones: BTreeSet::new(),
+            cascade_iterations: 0,
+            dispatched_verdicts: Vec::new(),
+            provenance_resources: Vec::new(),
+            emissions: Vec::new(),
+            hook_errors: Vec::new(),
+
+            // Working buffers
+            working_set: ws,
+
+            // Persist result
+            persisted: None,
+        };
+
+        // Walk phases. The first `Err` aborts the rest of the walk;
+        // didPersist hooks are not run.
+        for phase in self.phases {
+            match phase(&mut state)? {
+                PhaseControl::Continue => {}
+                PhaseControl::SkipEmptyCommit => {
+                    // Phase B: only `build` returns this. The lattice
+                    // wrappers never produce an empty builder today,
+                    // so this branch is exercised by future RPC paths
+                    // only. The brief calls for returning a `Skipped`
+                    // outcome; today's `LayerCommitOutcome` is not
+                    // shaped for that case (it requires `layer` +
+                    // `persist`). Treat empty-commit as a programming
+                    // error from the Phase B caller and surface it
+                    // via an explicit panic — Phase D will widen the
+                    // outcome shape to carry `Skipped`.
+                    unreachable!(
+                        "SkipEmptyCommit returned from `build`, but the Phase B \
+                         caller never queues empty builders; LayerCommitOutcome \
+                         has no `Skipped` shape yet (Phase D)."
+                    );
+                }
+            }
+        }
+
+        // didPersist hooks. Skip when persist didn't advance the
+        // branch — there's no successfully-persisted layer to hook
+        // off (D41 §3.6 / §6.1). For the lattice wrappers'
+        // `BackendStorePersister`, `branch_advanced` is always
+        // `false` *and* the `with_retroactive` slice is empty, so
+        // this loop is unreachable on that path; the structure is in
+        // place for Phase D's `with_institutions` flow.
+        let branch_advanced = state
+            .persisted
+            .as_ref()
+            .map(|i| i.branch_advanced)
+            .unwrap_or(false);
+        if branch_advanced && !self.did_persist.is_empty() {
+            let hook_span = tracing::info_span!(operation::COMMIT_DID_PERSIST);
+            let _hook_enter = hook_span.enter();
+            for hook in self.did_persist {
+                let outcome = hook(&mut state);
+                state.hook_errors.extend(outcome.errors);
+            }
+        }
+
+        // Construct the LayerCommitOutcome. `persist` is required at
+        // this point: every canned pipeline ends with the `persist`
+        // phase, so `state.persisted` must be `Some`.
+        let layer = state
+            .layer
+            .expect("build phase populated layer; pipeline ran to persist");
+        let persist_info = state
+            .persisted
+            .expect("persist phase populated state.persisted on Ok");
+        tracing::info!(
+            { field::OPERATION } = operation::COMMIT_PIPELINE_RUN,
+            { field::LAYER_ID } = %layer.id(),
+            "commit.pipeline_run.ok"
+        );
+        Ok(LayerCommitOutcome {
+            layer,
+            persist: persist_info,
+            cascade_tombstones: state.cascade_tombstones,
+            cascade_iterations: state.cascade_iterations,
+            dispatched_verdicts: state.dispatched_verdicts,
+            emissions: state.emissions,
+            hook_errors: state.hook_errors,
+        })
     }
 }
 
