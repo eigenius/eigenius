@@ -435,6 +435,14 @@ mod tests {
 
     fn make_resource(id: &str) -> Resource {
         let mut r = Resource::new(iri(id));
+        // Validator requires non-empty `is_a` (see
+        // `Validator::validate_resource`). Use core:Class as a generic
+        // placeholder; the GC tests don't exercise class-typing
+        // semantics so the specific target doesn't matter.
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
         r.set(
             iri("urn:eigenius:core:description"),
             Value::String("v".into()),

@@ -20,28 +20,86 @@
 use eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient;
 use eigenius_kernel::server::proto::*;
 use eigenius_kernel::server::EigeniusService;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::time::Duration;
-use tokio::time::sleep;
+use std::time::{Duration, Instant};
 
-static PORT_COUNTER: AtomicU16 = AtomicU16::new(50200);
-
+/// Spin up a kernel gRPC server on an OS-assigned ephemeral port and
+/// return its endpoint.
+///
+/// We bind a `TcpListener` ourselves to port 0, read back the assigned
+/// port, then hand the already-bound listener to tonic via
+/// `serve_with_incoming`. This avoids two failure modes the previous
+/// `PORT_COUNTER` + `Server::serve(addr)` pattern had:
+///
+/// 1. **TIME_WAIT collisions across repeated runs.** Linux holds
+///    just-released listening sockets in `TIME_WAIT` for ~60s, during
+///    which a fresh `bind()` to the same port fails with `EADDRINUSE`
+///    even though `ss -ltn` shows nothing listening. With ephemeral
+///    ports the OS picks one that isn't TIME_WAIT-occupied.
+/// 2. **Spawn-before-bind race.** Pre-binding here means the listener
+///    is ready before we ever return; the spawned task only needs to
+///    accept. The readiness probe below then catches genuine "task
+///    crashed" failures rather than masking timing races.
 async fn start_test_server() -> String {
-    let port = PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let addr = format!("0.0.0.0:{port}");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind ephemeral port");
+    let port = listener.local_addr().expect("local_addr").port();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
 
     let service = EigeniusService::new().unwrap();
     let server = tonic::transport::Server::builder()
         .add_service(service.into_server())
-        .serve(addr.parse().unwrap());
+        .serve_with_incoming(incoming);
+    let server_handle = tokio::spawn(server);
 
-    tokio::spawn(server);
-    sleep(Duration::from_millis(200)).await; // Wait for server to start
+    // The listener is already bound, so this probe normally succeeds
+    // on the first iteration. We keep the loop for two reasons: it
+    // surfaces a panic in the spawned `accept` future quickly (via
+    // `server_handle.is_finished()`), and it gives the runtime a
+    // chance to schedule the spawned task on a parallel-test-heavy
+    // run before declaring failure.
+    let probe_addr = format!("127.0.0.1:{port}");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut server_handle = Some(server_handle);
+    loop {
+        if tokio::net::TcpStream::connect(&probe_addr).await.is_ok() {
+            break;
+        }
+        if let Some(h) = server_handle.as_ref() {
+            if h.is_finished() {
+                let h = server_handle.take().expect("checked above");
+                let detail = match h.await {
+                    Ok(Ok(())) => "future returned Ok(()) without ever binding".to_string(),
+                    Ok(Err(e)) => {
+                        let mut s = format!("{e:?}");
+                        let mut src = std::error::Error::source(&e);
+                        while let Some(inner) = src {
+                            s.push_str(&format!(" -> {inner:?}"));
+                            src = inner.source();
+                        }
+                        format!("transport error: {s}")
+                    }
+                    Err(join_err) if join_err.is_panic() => {
+                        format!("server task panicked: {join_err}")
+                    }
+                    Err(join_err) => format!("server task join error: {join_err}"),
+                };
+                panic!("test server on port {port} exited before becoming ready: {detail}");
+            }
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "test server never accepted a connection on port {port} within 30s; \
+                 spawned task still running, likely starved by parallel test load"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 
     format!("http://127.0.0.1:{port}")
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn health_check() {
     let endpoint = start_test_server().await;
     let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
@@ -54,7 +112,7 @@ async fn health_check() {
     assert!(health.resource_count > 0); // Core + program ontology resources
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inspect_core_class() {
     let endpoint = start_test_server().await;
     let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
@@ -77,7 +135,7 @@ async fn inspect_core_class() {
     assert_eq!(resource.id().unwrap().as_str(), "urn:eigenius:core:Class");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inspect_not_found() {
     let endpoint = start_test_server().await;
     let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
@@ -94,7 +152,7 @@ async fn inspect_not_found() {
     assert!(!response.into_inner().found);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn query_all_classes() {
     let endpoint = start_test_server().await;
     let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
