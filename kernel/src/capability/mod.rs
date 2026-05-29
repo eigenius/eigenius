@@ -16,14 +16,14 @@
 //!
 //! Hosts pure/read WASM components in the kernel. IO WASM components are
 //! hosted by the orchestrator. Institution implementations follow the D14
-//! triadic-comorphism contract via [`wasm_institution_d14`].
+//! triadic-comorphism contract via [`wasm_institution`].
 //!
 //! See design document D12 (capability hosting) and D14 (institutions).
 
 pub mod external_institution;
 pub mod registration;
 pub mod wasm_component;
-pub mod wasm_institution_d14;
+pub mod wasm_institution;
 
 #[cfg(test)]
 mod tests;

@@ -685,9 +685,26 @@ fn prepare_consolidation(
     }
 
     // Top-of-stack: walk the range head→root (already the walk order
-    // above) and record the first-seen value for each IRI.
+    // above) and record the first-seen modification for each IRI.
+    //
+    // A "modification" is either a definition (`defined_iris`) or a
+    // tombstone (`tombstoned_iris` — D20 §6.2 / §6.3, 15g step 3).
+    // Tombstones must propagate into the consolidated layer so the
+    // post-consolidation resolve walk continues to hide the same IRIs
+    // from the consolidated layer's parent chain. Without this,
+    // collapsing a range that contains a tombstone would resurface
+    // the parent's body — a resolve-equivalence violation.
+    //
+    // The "first seen wins" rule applies uniformly: if a higher layer
+    // in the range redefines an IRI that a lower layer tombstones,
+    // the redefinition wins (it shadowed the tombstone in the original
+    // chain). Iterating `defined_iris` before `tombstoned_iris` at
+    // each layer is structurally safe because `LayerBuilder` enforces
+    // the two sets are disjoint per-layer; the order matters only
+    // across layers (handled by the head→root walk).
     let mut seen_iris: BTreeSet<Iri> = BTreeSet::new();
     let mut consolidated_resources: Vec<Resource> = Vec::new();
+    let mut consolidated_tombstones: BTreeSet<Iri> = BTreeSet::new();
     for layer in &range_layers {
         for iri in layer.defined_iris() {
             if !seen_iris.insert(iri.clone()) {
@@ -700,6 +717,12 @@ fn prepare_consolidation(
                 ))
             })?;
             consolidated_resources.push((*resource).clone());
+        }
+        for tomb in layer.tombstoned_iris() {
+            if !seen_iris.insert(tomb.clone()) {
+                continue;
+            }
+            consolidated_tombstones.insert(tomb.clone());
         }
     }
 
@@ -720,6 +743,11 @@ fn prepare_consolidation(
     for resource in consolidated_resources {
         builder.add_resource(resource).map_err(|e| {
             ConsolidateError::Internal(format!("consolidated layer rejected resource: {e}"))
+        })?;
+    }
+    for tomb in consolidated_tombstones {
+        builder.tombstone(tomb).map_err(|e| {
+            ConsolidateError::Internal(format!("consolidated layer rejected tombstone: {e}"))
         })?;
     }
     let consolidated_layer = Arc::new(builder.build(storage));
@@ -821,6 +849,95 @@ mod tests {
     /// consolidate the middle 5. Confirms the consolidated layer is
     /// stored, the branch head advances, and resolve-equivalence
     /// holds for every IRI in the chain.
+    /// Regression: a range that contains a tombstone must continue
+    /// to hide the parent's body after consolidation. Without
+    /// propagating tombstones into the consolidated layer, the
+    /// tombstone is lost and the parent's body resurfaces — a direct
+    /// resolve-equivalence violation.
+    ///
+    /// Scenario:
+    /// - root defines `demo:X` with body `v_root`.
+    /// - L1 (in range) tombstones `demo:X`.
+    /// - L2 (in range, head) defines an unrelated `demo:Y`.
+    /// - Consolidate L1..L2.
+    /// - Before: head.resolve(X) = None (tombstone at L1 hides root).
+    /// - After: head.resolve(X) must still be None.
+    #[test]
+    fn consolidation_propagates_tombstones() {
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+
+        // Root defines demo:X.
+        let mut root_b = LayerBuilder::new("root", None);
+        root_b
+            .add_resource(make_resource(
+                "urn:eigenius:demo:X",
+                vec![(
+                    "urn:eigenius:core:description",
+                    Value::String("v_root".into()),
+                )],
+            ))
+            .unwrap();
+        let root = Arc::new(root_b.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        // L1 tombstones demo:X.
+        let mut l1_b = LayerBuilder::new("L1", Some(Arc::clone(&root)));
+        l1_b.tombstone(iri("urn:eigenius:demo:X")).unwrap();
+        let l1 = Arc::new(l1_b.build(storage.clone()));
+        backend.store_layer(&l1).unwrap();
+
+        // L2 defines an unrelated IRI to give the range some real content.
+        let mut l2_b = LayerBuilder::new("L2", Some(Arc::clone(&l1)));
+        l2_b.add_resource(make_resource(
+            "urn:eigenius:demo:Y",
+            vec![("urn:eigenius:core:description", Value::String("v_y".into()))],
+        ))
+        .unwrap();
+        let l2 = Arc::new(l2_b.build(storage.clone()));
+        backend.store_layer(&l2).unwrap();
+
+        backend.put_branch("main", l2.id()).unwrap();
+
+        // Pre-condition: head sees X as removed.
+        assert!(
+            l2.resolve(&iri("urn:eigenius:demo:X")).is_none(),
+            "tombstone at L1 must hide root's body from L2"
+        );
+
+        // Consolidate L1..L2.
+        let outcome = consolidate_chain(
+            "main",
+            l1.id().clone(),
+            l2.id().clone(),
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+
+        // Rebuild the new chain through the branch head and verify
+        // resolve-equivalence: demo:X must still be hidden, demo:Y
+        // must still be visible.
+        let new_head = backend.get_branch("main").unwrap().unwrap();
+        assert_eq!(new_head, outcome.consolidated_layer);
+        let info = backend.load_chain_from(&new_head).unwrap().unwrap();
+        let new_head_layer = crate::layer::build_chain(info, storage);
+
+        assert!(
+            new_head_layer
+                .resolve(&iri("urn:eigenius:demo:X"))
+                .is_none(),
+            "consolidated layer must continue to hide demo:X via its propagated tombstone"
+        );
+        assert!(
+            new_head_layer
+                .resolve(&iri("urn:eigenius:demo:Y"))
+                .is_some(),
+            "consolidated layer must preserve demo:Y from the range"
+        );
+    }
+
     #[test]
     fn consolidates_ten_layer_chain_preserving_resolves() {
         let backend = MemoryPersistentBackend::new();

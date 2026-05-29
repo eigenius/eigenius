@@ -968,20 +968,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "eigenius-storage-memory"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "eigenius-kernel",
- "serde",
- "tokio",
-]
-
-[[package]]
 name = "eigenius-storage-rocksdb"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "ciborium",
  "eigenius-kernel",
  "hex",

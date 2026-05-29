@@ -19,9 +19,14 @@
 //! chain, and asserts that the whole layer validates without errors
 //! and the new resources resolve.
 
-use eigenius_kernel::bootstrap::bootstrap;
+use eigenius_kernel::bootstrap::bootstrap_with_storage;
+use eigenius_kernel::lattice::commit_layer_default;
+use eigenius_kernel::layer::LayerStorage;
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::storage::memory::MemoryPersistentBackend;
+use eigenius_kernel::storage::PersistentBackend;
+use std::sync::Arc;
 
 const DIFFEQ_ONTOLOGY_JSON: &str =
     include_str!("../../../julia/institutions/diffeq/declarations/diffeq-ontology.eigon.json");
@@ -41,7 +46,11 @@ fn iri(s: &str) -> Iri {
 
 #[test]
 fn catalyst_to_diffeq_comorphism_validates_cleanly() {
-    let mut ctx = bootstrap().expect("bootstrap");
+    // D41 Phase G migration — see `diffeq_chain_validation.rs` for
+    // the canonical migration note.
+    let backend = Arc::new(MemoryPersistentBackend::new());
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+    let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
     // Commit order: DiffEq ontology first because Catalyst's
     // institution declarations reference `diffeq:OdeProblem` (in
@@ -57,7 +66,10 @@ fn catalyst_to_diffeq_comorphism_validates_cleanly() {
         for r in eigon_json::parse_document(json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
-        ctx.commit(label).expect("commit");
+        let working = ctx.take_working(label).expect("take_working");
+        let layer =
+            commit_layer_default(working, ctx.storage().clone(), backend.as_ref()).expect("commit");
+        ctx.advance_head(layer, label).expect("advance_head");
     }
 
     for required in [

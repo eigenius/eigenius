@@ -22,9 +22,14 @@
 //! QueryClasses) are all present and the validator accepts the layer
 //! cleanly.
 
-use eigenius_kernel::bootstrap::bootstrap;
+use eigenius_kernel::bootstrap::bootstrap_with_storage;
+use eigenius_kernel::lattice::commit_layer_default;
+use eigenius_kernel::layer::LayerStorage;
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::storage::memory::MemoryPersistentBackend;
+use eigenius_kernel::storage::PersistentBackend;
+use std::sync::Arc;
 
 const JUMP_ONTOLOGY_JSON: &str =
     include_str!("../../../julia/institutions/jump/declarations/jump-ontology.eigon.json");
@@ -37,7 +42,10 @@ fn iri(s: &str) -> Iri {
 
 #[test]
 fn jump_ontology_and_highs_institution_validate_cleanly() {
-    let mut ctx = bootstrap().expect("bootstrap");
+    // D41 Phase G migration — see `diffeq_chain_validation.rs`.
+    let backend = Arc::new(MemoryPersistentBackend::new());
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+    let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
     for (label, json) in [
         ("jump_ontology", JUMP_ONTOLOGY_JSON),
@@ -46,7 +54,10 @@ fn jump_ontology_and_highs_institution_validate_cleanly() {
         for r in eigon_json::parse_document(json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
-        ctx.commit(label).expect("commit");
+        let working = ctx.take_working(label).expect("take_working");
+        let layer =
+            commit_layer_default(working, ctx.storage().clone(), backend.as_ref()).expect("commit");
+        ctx.advance_head(layer, label).expect("advance_head");
     }
 
     for required in [

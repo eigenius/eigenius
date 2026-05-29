@@ -120,7 +120,7 @@
 
   {
     "@id": "urn:eigenius:institution:Verdict",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Verdict",
     "urn:eigenius:core:description": "Tri-state outcome of an institution-bound predicate query (D14 §6.1). `Holds` reduces a NativeDecide to `Refl(v)` or accepts a Load; `Fails` produces a failing neutral or rejects a Load; `Undecidable` leaves the constraint as a passthrough or accepts on Load with no domain commitment.",
     "urn:eigenius:core:ctors": [

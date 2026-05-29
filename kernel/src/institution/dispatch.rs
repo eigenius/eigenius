@@ -662,9 +662,10 @@ mod tests {
         let outcome = dispatch_auto_on_load_for_resource(&make_subject(), &idx, &runtime, &ctx);
         // Fails verdicts are well-formed dispatches — they go into
         // `dispatches` so the commit pipeline can produce a Verdict
-        // resource for the audit trail. The caller (commit_with_validation)
-        // is responsible for translating a Fails dispatch into a
-        // ValidationError pointing at the Verdict IRI.
+        // resource for the audit trail. The caller (the commit
+        // pipeline's `autoonload_dispatch` phase) is responsible for
+        // translating a Fails dispatch into a ValidationError
+        // pointing at the Verdict IRI.
         assert!(outcome.errors.is_empty());
         assert_eq!(outcome.dispatches.len(), 1);
         assert!(matches!(

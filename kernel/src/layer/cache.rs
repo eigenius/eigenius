@@ -759,8 +759,9 @@ mod tests {
         for i in 0..50 {
             assert!(bloom.might_contain(&iri(&format!("urn:eigenius:test:r{i}"))));
         }
-        // And the loaded bloom matches what we'd build directly.
-        let expected = BloomFilter::for_iris(layer.defined_iris());
+        // And the loaded bloom matches what we'd build directly from
+        // the layer's visibility state (defined ∪ tombstoned).
+        let expected = BloomFilter::for_layer(layer.defined_iris(), layer.tombstoned_iris());
         assert_eq!(*bloom, expected);
     }
 

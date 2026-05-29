@@ -14,19 +14,23 @@
 
 //! Storage interface traits for persisting layers and resources.
 //!
-//! Storage backends implement these traits. Phase 0 uses the in-memory
-//! backend; SQLite and TiKV come in later phases.
+//! Storage backends implement [`PersistentBackend`] (and its
+//! supertrait [`ResourceBackend`]). The kernel's production write
+//! path goes through `PersistentBackend`; the trait surface is
+//! sync because the resolve hot path (`Layer::resolve`) is sync and
+//! would have to be reworked to thread `.await` through every chain
+//! walk otherwise. The RocksDB-backed impl wraps disk-bound bodies
+//! in [`tokio::task::block_in_place`] so it doesn't starve the
+//! tokio worker pool under concurrent sessions.
 
 use crate::layer::{Layer, LayerId, LayerTopology};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
-use async_trait::async_trait;
 use std::fmt;
 #[allow(unused_imports)]
 use std::sync::Arc;
 
-#[cfg(test)]
-pub(crate) mod memory;
+pub mod memory;
 
 pub mod version;
 
@@ -127,40 +131,6 @@ impl fmt::Display for StorageError {
 }
 
 impl std::error::Error for StorageError {}
-
-/// Trait for storing and retrieving committed layers.
-#[async_trait]
-pub trait LayerStore: Send + Sync {
-    /// Store a committed layer.
-    async fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError>;
-
-    /// Load a layer by its content-addressed ID.
-    async fn load_layer(&self, id: &LayerId) -> Result<Layer, StorageError>;
-
-    /// List all stored layer IDs.
-    async fn list_layers(&self) -> Result<Vec<LayerId>, StorageError>;
-}
-
-/// Trait for storing and retrieving individual resources within a layer.
-#[async_trait]
-pub trait ResourceStore: Send + Sync {
-    /// Store a resource associated with a layer.
-    async fn store_resource(
-        &self,
-        layer_id: &LayerId,
-        resource: &Resource,
-    ) -> Result<(), StorageError>;
-
-    /// Load a resource by IRI within a layer.
-    async fn load_resource(
-        &self,
-        layer_id: &LayerId,
-        iri: &Iri,
-    ) -> Result<Option<Resource>, StorageError>;
-
-    /// List all resource IRIs in a layer.
-    async fn list_resources(&self, layer_id: &LayerId) -> Result<Vec<Iri>, StorageError>;
-}
 
 /// A persistent backend usable by the kernel server.
 ///

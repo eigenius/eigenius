@@ -31,6 +31,9 @@ pub mod trace;
 #[cfg(test)]
 mod tests {
     use crate::bootstrap;
+    use crate::context::ExecutionContext;
+    use crate::lattice::commit_layer_default;
+    use crate::layer::{Layer, LayerStorage};
     use crate::nbe::check::{self, CheckCtx};
     use crate::nbe::env::Rho;
     use crate::nbe::eval;
@@ -40,19 +43,50 @@ mod tests {
     use crate::program::component::ComponentRegistry;
     use crate::program::eval_io::execute_program_nbe;
     use crate::program::expr::parse_program;
+    use crate::storage::memory::MemoryPersistentBackend;
+    use crate::storage::PersistentBackend;
     use std::sync::Arc;
+
+    /// Bootstrap with a memory-backed persistent backend so the test
+    /// can route layer commits through [`commit_layer_default`] — the
+    /// D41 supported single-layer-commit surface. Returns the context
+    /// alongside the backend so commit callers can hand it to
+    /// `commit_layer_default`.
+    fn bootstrap_with_memory_backend(
+    ) -> Result<(ExecutionContext, Arc<MemoryPersistentBackend>), Box<dyn std::error::Error>> {
+        let backend = Arc::new(MemoryPersistentBackend::new());
+        let storage =
+            LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+        let ctx = bootstrap::bootstrap_with_storage(storage)?;
+        Ok((ctx, backend))
+    }
+
+    /// Commit the working layer through `commit_layer_default` and
+    /// advance `ctx.head` to the new layer. D41 §11.
+    fn commit_and_advance(
+        ctx: &mut ExecutionContext,
+        backend: &MemoryPersistentBackend,
+        name: &str,
+    ) -> Arc<Layer> {
+        let working = ctx.take_working(name).expect("take_working");
+        let layer = commit_layer_default(working, ctx.storage().clone(), backend)
+            .expect("commit_layer_default");
+        ctx.advance_head(Arc::clone(&layer), name)
+            .expect("advance_head");
+        layer
+    }
 
     /// End-to-end: load a program from JSON, parse to Mini-TT, type-check, execute via NbE.
     #[test]
     fn end_to_end_identity_program() -> Result<(), Box<dyn std::error::Error>> {
-        let mut ctx = bootstrap::bootstrap()?;
+        let (mut ctx, backend) = bootstrap_with_memory_backend()?;
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animals = eigon_json::parse_document(animals_json).unwrap();
         for r in animals {
             ctx.add_resource(r).unwrap();
         }
-        ctx.commit("animals").unwrap();
+        commit_and_advance(&mut ctx, &backend, "animals");
 
         let program_json = include_str!("../../../ontologies/examples/simple-program.json");
         let program = eigon_json::parse_document(program_json).unwrap().remove(0);
@@ -98,14 +132,14 @@ mod tests {
     /// End-to-end: program with let-binding, executed via NbE.
     #[test]
     fn end_to_end_let_program() {
-        let mut ctx = bootstrap::bootstrap().unwrap();
+        let (mut ctx, backend) = bootstrap_with_memory_backend().unwrap();
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animals = eigon_json::parse_document(animals_json).unwrap();
         for r in animals {
             ctx.add_resource(r).unwrap();
         }
-        ctx.commit("animals").unwrap();
+        commit_and_advance(&mut ctx, &backend, "animals");
 
         let program_json = include_str!("../../../ontologies/examples/let-program.json");
         let program = eigon_json::parse_document(program_json).unwrap().remove(0);
@@ -143,7 +177,7 @@ mod tests {
     /// compile, parse, and type-check pipeline works end to end.
     #[test]
     fn end_to_end_codata_esl() -> Result<(), Box<dyn std::error::Error>> {
-        let mut ctx = bootstrap::bootstrap()?;
+        let (mut ctx, backend) = bootstrap_with_memory_backend()?;
 
         // Compile an ESL file that uses codata + corecord + observation.
         // The program ignores its input and returns the `fst` observation
@@ -177,7 +211,7 @@ mod tests {
         for r in resources {
             ctx.add_resource(r).unwrap();
         }
-        ctx.commit("codata_e2e").unwrap();
+        commit_and_advance(&mut ctx, &backend, "codata_e2e");
 
         // Look up the program resource.
         let program_iri = Iri::parse("urn:eigenius:example:get_fst").unwrap();
@@ -204,14 +238,14 @@ mod tests {
     /// End-to-end: validate program parsing.
     #[test]
     fn end_to_end_cli_validate() {
-        let mut ctx = bootstrap::bootstrap().unwrap();
+        let (mut ctx, backend) = bootstrap_with_memory_backend().unwrap();
 
         let animals_json = include_str!("../../../ontologies/examples/animals.json");
         let animals = eigon_json::parse_document(animals_json).unwrap();
         for r in animals {
             ctx.add_resource(r).unwrap();
         }
-        ctx.commit("animals").unwrap();
+        commit_and_advance(&mut ctx, &backend, "animals");
 
         let program_json = include_str!("../../../ontologies/examples/simple-program.json");
         let program = eigon_json::parse_document(program_json).unwrap().remove(0);

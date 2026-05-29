@@ -933,8 +933,8 @@ fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
 /// resource is committed to the regular chain at the named IRI as
 /// part of the query's outcome rather than disappearing with the
 /// per-query overlay. The QueryOutcome carries the to-be-committed
-/// resources so the server's Query RPC can lift them via
-/// `commit_with_validation`.
+/// resources so the server's Query RPC can lift them through the
+/// commit orchestrator (D41 §10).
 #[test]
 fn eigenql_fiber_into_collects_response_for_chain_commit() {
     use eigenius_kernel::query;

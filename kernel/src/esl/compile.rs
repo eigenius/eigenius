@@ -2131,8 +2131,13 @@ mod tests {
     /// drive here forces it into compile-time.
     #[test]
     fn compile_every_esl_cell_in_kinase_institutions_notebook_validates_cleanly() {
-        use crate::bootstrap::bootstrap;
+        use crate::bootstrap::bootstrap_with_storage;
+        use crate::lattice::commit_layer_default;
+        use crate::layer::LayerStorage;
+        use crate::storage::memory::MemoryPersistentBackend;
+        use crate::storage::PersistentBackend;
         use crate::validation::Validator;
+        use std::sync::Arc;
 
         const NOTEBOOK_JSON: &str =
             include_str!("../../../notebooks/examples/kinase-institutions.json");
@@ -2159,7 +2164,13 @@ mod tests {
             "../../../julia/institutions/catalyst/declarations/catalyst-ontology.eigon.json"
         );
 
-        let mut ctx = bootstrap().expect("bootstrap");
+        // Memory-backed persistent backend so layer commits go through
+        // `commit_layer_default` — the D41 supported single-layer-commit
+        // surface. `ExecutionContext::commit` was retired in D41 Phase G.
+        let backend = Arc::new(MemoryPersistentBackend::new());
+        let storage =
+            LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+        let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
         for (label, json) in [
             ("jump_ontology", JUMP_ONTOLOGY),
             ("symbolics_ontology", SYMBOLICS_ONTOLOGY),
@@ -2170,7 +2181,10 @@ mod tests {
             for r in eigon_json::parse_document(json).expect("parse ontology") {
                 ctx.add_resource(r).expect("add ontology resource");
             }
-            ctx.commit(label).expect("commit ontology layer");
+            let working = ctx.take_working(label).expect("take_working");
+            let layer = commit_layer_default(working, ctx.storage().clone(), backend.as_ref())
+                .expect("commit ontology layer");
+            ctx.advance_head(layer, label).expect("advance_head");
         }
 
         let parsed: serde_json::Value =
@@ -2199,8 +2213,14 @@ mod tests {
                 ctx.add_resource(r)
                     .unwrap_or_else(|e| panic!("ESL cell {id}: add_resource: {e:?}"));
             }
-            ctx.commit(&format!("notebook_cell_{id}"))
+            let cell_label = format!("notebook_cell_{id}");
+            let working = ctx
+                .take_working(&cell_label)
+                .unwrap_or_else(|e| panic!("ESL cell {id}: take_working: {e}"));
+            let layer = commit_layer_default(working, ctx.storage().clone(), backend.as_ref())
                 .unwrap_or_else(|e| panic!("ESL cell {id}: commit failed: {e:?}"));
+            ctx.advance_head(layer, &cell_label)
+                .unwrap_or_else(|e| panic!("ESL cell {id}: advance_head: {e}"));
         }
         assert!(
             esl_cell_count >= 3,

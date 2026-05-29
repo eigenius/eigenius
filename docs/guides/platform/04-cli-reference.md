@@ -62,9 +62,9 @@ eigenius --endpoint http://localhost:50051 inspect "urn:example:Dog" --branch fe
 
 Read or modify the layer chain. In-process operations get a fresh in-memory chain each invocation; remote operations work against the running kernel's persistent state.
 
-### `load <FILE> [--branch <NAME>]`
+### `load <FILE> [--branch <NAME>] [--commit-policy <reject|cascade>] [--max-violations <N>] [--explicit-tombstone <IRI>]...`
 
-Load an Eigon-JSON or ESL file as a new layer on top of the current chain. Validates first; rejects on validation failure.
+Load an Eigon-JSON or ESL file as a new layer on top of the current chain. Validates first; rejects on validation failure unless cascade is requested.
 
 ```bash
 eigenius --endpoint http://localhost:50051 load demo/document.json
@@ -72,11 +72,26 @@ eigenius --endpoint http://localhost:50051 load demo/document.esl
 
 # Commit to a named branch instead of main
 eigenius --endpoint http://localhost:50051 load demo/document.esl --branch feature-x
+
+# Cascade-tombstone lower-layer resources that the new layer's
+# class redefinitions retroactively invalidate (D41 §3.3)
+eigenius --endpoint http://localhost:50051 load demo/redef.json --commit-policy cascade
+
+# Tombstone specific IRIs alongside the commit (D41 §10.1)
+eigenius --endpoint http://localhost:50051 load demo/marker.json \
+    --explicit-tombstone urn:eigenius:demo:to-suppress \
+    --explicit-tombstone urn:eigenius:demo:also-suppress
 ```
 
 In-process `load` is mostly useful with `--json` for scripting; the new layer is in-memory and discarded when the command exits.
 
 `--branch` (remote mode only) commits the new layer to the named branch. Empty / omitted defaults to `main`. The branch must already exist — create it with `eigenius branch create` first.
+
+`--commit-policy reject` (default) fails the commit on any retroactive validation violation; up to `--max-violations` (default 100) errors are surfaced, with the full count in the JSON response's `total_violations` field. `--commit-policy cascade` tombstones violating lower-layer IRIs iteratively to fixpoint; the cascade aborts if it would have to tombstone an IRI the new layer itself defines.
+
+`--explicit-tombstone <IRI>` (repeatable) tombstones the given IRI as part of the same commit. Applied to the user-layer builder before retroactive validation; under `--commit-policy cascade` they combine with cascade-inferred tombstones. See D41 §10.1.
+
+JSON output (`--json`) carries `success`, `layer_id`, `resource_count`, `branch_advanced`, `cascade_tombstones` (count), `cascade_iterations`, and `total_violations`.
 
 ### `query <EIGENQL> [--file <PATH>] [--at-layer <LAYER_ID>] [--branch <NAME>]`
 
@@ -101,6 +116,8 @@ eigenius --endpoint http://localhost:50051 query \
 ```
 
 `--at-layer` (remote mode only) targets a specific historical layer. `--branch` (remote mode only) pins the read to the named branch's current head; mutually exclusive with `--at-layer`. Empty / omitted defaults to `main`.
+
+When `--file` is supplied, the load step accepts the same `--commit-policy`, `--max-violations`, and `--explicit-tombstone` flags as `load`. They're ignored when `--file` is omitted.
 
 EigenQL syntax: see the [EigenQL guide](../eigenql/README.md).
 

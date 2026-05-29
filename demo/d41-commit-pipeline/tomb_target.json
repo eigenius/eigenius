@@ -1,0 +1,8 @@
+[
+  {
+    "@id": "urn:eigenius:test:d41-template:Mouse",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Mouse",
+    "urn:eigenius:core:description": "Target for the --explicit-tombstone step. Independent of Animal so it survives step 3's cascade."
+  }
+]

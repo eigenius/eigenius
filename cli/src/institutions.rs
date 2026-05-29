@@ -1145,6 +1145,10 @@ pub async fn institution_install(endpoint: &str, definition: &str, json: bool) {
         content_type: content_type.to_string(),
         auto_commit: true,
         branch: String::new(),
+        // Default policy (Reject{100}) and no explicit tombstones —
+        // this surface predates D41's policy wire-through.
+        policy: None,
+        explicit_tombstones: Vec::new(),
     };
     match client.load(request).await {
         Ok(response) => {
@@ -1432,6 +1436,10 @@ async fn submit_resource_for_load(client: &mut EigeniusKernelClient<Channel>, re
         content_type: "application/eigon+cbor".to_string(),
         auto_commit: true,
         branch: String::new(),
+        // Default policy (Reject{100}) and no explicit tombstones —
+        // this surface predates D41's policy wire-through.
+        policy: None,
+        explicit_tombstones: Vec::new(),
     };
     match client.load(request).await {
         Ok(response) => {
