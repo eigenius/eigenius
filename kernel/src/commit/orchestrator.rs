@@ -453,12 +453,29 @@ mod tests {
 
     fn make_user_resource(local: &str) -> Resource {
         // Use a urn:eigenius:user:* IRI so the core-namespace guard
-        // doesn't reject. No `is_a` — untyped resources pass
-        // structural validation cleanly because the validator's
-        // class-shaped rules only fire when `is_a` resolves to a
-        // declared class. (Other tests follow the same pattern; see
-        // `context::tests::commit_empty_layer_succeeds`.)
-        Resource::new(Iri::parse(&format!("urn:eigenius:user:{local}")).unwrap())
+        // doesn't reject. Stamp `is_a: [core:Class]` plus the
+        // description + short_name that `core:Class` declares as
+        // required — every resource must declare at least one is_a
+        // per `Validator::validate_resource`, and instances of Class
+        // must satisfy its required-properties set. The orchestrator
+        // tests don't exercise class-typing semantics so the specific
+        // target doesn't matter; we use Class for its built-in
+        // availability in the bootstrap chain.
+        use crate::ontology::resource::Value;
+        let mut r = Resource::new(Iri::parse(&format!("urn:eigenius:user:{local}")).unwrap());
+        r.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:core:short_name").unwrap(),
+            Value::String(local.to_string()),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:core:description").unwrap(),
+            Value::String(format!("test resource {local}")),
+        );
+        r
     }
 
     /// Test 1 — single-layer success: a `WithRetroactive` root emission
@@ -495,7 +512,11 @@ mod tests {
         };
 
         let outcome = orchestrator.run(root);
-        assert!(outcome.error.is_none(), "commit must succeed");
+        assert!(
+            outcome.error.is_none(),
+            "commit must succeed: {:?}",
+            outcome.error
+        );
         assert_eq!(outcome.layers.len(), 1);
         assert_eq!(outcome.drain_hook_errors.len(), 0);
         assert_ne!(*ctx.head().id(), head_before, "ctx.head must advance");

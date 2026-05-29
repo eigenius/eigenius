@@ -1890,6 +1890,13 @@ mod tests {
         // Root defines demo:X — the IRI A will tombstone.
         let mut root_b = LayerBuilder::new("root", None);
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
+        // Validator requires non-empty `is_a`; the trivial-merge tests
+        // don't exercise class-typing semantics so any value satisfies
+        // the rule.
+        root_resource.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
         root_resource.set(
             iri("urn:eigenius:core:description"),
             Value::String("v_root".into()),
@@ -1971,6 +1978,13 @@ mod tests {
         // Root defines demo:X.
         let mut root_b = LayerBuilder::new("root", None);
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
+        // Validator requires non-empty `is_a`; the trivial-merge tests
+        // don't exercise class-typing semantics so any value satisfies
+        // the rule.
+        root_resource.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
         root_resource.set(
             iri("urn:eigenius:core:description"),
             Value::String("v_root".into()),
@@ -1996,6 +2010,10 @@ mod tests {
         // Branch B: redefines demo:X with a different body.
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut x_b = Resource::new(iri("urn:eigenius:demo:X"));
+        x_b.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
         x_b.set(
             iri("urn:eigenius:core:description"),
             Value::String("from b".into()),
