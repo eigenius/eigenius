@@ -62,6 +62,35 @@ trap 'rm -rf "$TMP"' EXIT
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '    \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Run the CLI with retries on transient transport errors. gRPC connections
+# from short-lived CLI processes to the dockerized kernel occasionally
+# drop with "transport error" / "Failed to connect" / "connection refused"
+# during handshake — most often when many fresh processes connect in
+# rapid succession. We retry up to 3 times with linear backoff; real
+# failures (validation rejections, parse errors, "not found", etc.)
+# return on the first attempt because their output doesn't match the
+# transport-error patterns.
+run_cli() {
+  local max=3 attempt=1 out rc
+  while :; do
+    set +e
+    out=$("${EIGENIUS[@]}" "$@" 2>&1)
+    rc=$?
+    set -e
+    if [ $rc -eq 0 ] \
+       || ! printf '%s' "$out" | grep -qE 'transport error|connection refused|Failed to connect'; then
+      printf '%s' "$out"
+      return $rc
+    fi
+    if [ $attempt -ge $max ]; then
+      printf '%s' "$out"
+      return $rc
+    fi
+    sleep "$attempt"
+    attempt=$((attempt + 1))
+  done
+}
+
 # Verification helpers — query the chain to confirm post-commit state.
 # `inspect` against the chain is the simplest IRI-presence probe; its
 # output shape carries either the resource (success) or a "not found"
@@ -69,11 +98,12 @@ fail() { printf '    \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 # shapes are accepted so this script is forward-compatible with output
 # format changes.
 inspect_out() {
-  # Echo (stdout, exit-code) for the given IRI.
+  # Echo (stdout, exit-code) for the given IRI. Uses `run_cli` so
+  # transient gRPC handshake failures don't surface as false negatives.
   local iri="$1"
   set +e
   local out
-  out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json inspect "$iri" 2>&1)
+  out=$(run_cli --endpoint "$ENDPOINT" --json inspect "$iri")
   local rc=$?
   set -e
   printf '%s\n%d\n' "$out" "$rc"

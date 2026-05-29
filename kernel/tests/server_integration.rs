@@ -115,7 +115,7 @@ async fn query_all_classes() {
     assert!(count >= 6, "expected at least 6 classes, got {count}");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn load_and_query() {
     let endpoint = start_test_server().await;
     let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
