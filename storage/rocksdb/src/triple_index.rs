@@ -28,6 +28,7 @@
 //! `RocksStore::delete_layer` can commit layer + index in a single
 //! atomic write per D23 §6.3.
 
+use crate::run_blocking;
 use eigenius_kernel::layer::index_keys;
 use eigenius_kernel::layer::{IndexStats, LayerId, Triple, TripleIndex};
 use eigenius_kernel::ontology::iri::Iri;
@@ -111,26 +112,28 @@ impl RocksTripleIndex {
         batch: &mut rocksdb::WriteBatch,
         layer: &LayerId,
     ) -> Result<(), StorageError> {
-        let prefix = layer_scan_prefix(layer);
-        let iter = self.db.prefix_iterator(prefix.as_slice());
-        for item in iter {
-            let (key, _) =
-                item.map_err(|e| StorageError::Internal(format!("drop_into_batch iter: {e}")))?;
-            if !key.starts_with(prefix.as_slice()) {
-                break;
+        run_blocking(|| {
+            let prefix = layer_scan_prefix(layer);
+            let iter = self.db.prefix_iterator(prefix.as_slice());
+            for item in iter {
+                let (key, _) =
+                    item.map_err(|e| StorageError::Internal(format!("drop_into_batch iter: {e}")))?;
+                if !key.starts_with(prefix.as_slice()) {
+                    break;
+                }
+                // Decode `(p, o, s)` from the reverse-key body so we can
+                // compose the matching forward key. The body lives after
+                // the `idx_layer:` prefix.
+                let body = &key[LAYER_PREFIX.len()..];
+                let (p, o, s) = index_keys::decode_layer_key(body).map_err(|e| {
+                    StorageError::Internal(format!("decode reverse key during drop: {e}"))
+                })?;
+                let pos_body = index_keys::pos_key(&p, &o, &s, layer);
+                batch.delete(full_pos_key(&pos_body));
+                batch.delete(key);
             }
-            // Decode `(p, o, s)` from the reverse-key body so we can
-            // compose the matching forward key. The body lives after
-            // the `idx_layer:` prefix.
-            let body = &key[LAYER_PREFIX.len()..];
-            let (p, o, s) = index_keys::decode_layer_key(body).map_err(|e| {
-                StorageError::Internal(format!("decode reverse key during drop: {e}"))
-            })?;
-            let pos_body = index_keys::pos_key(&p, &o, &s, layer);
-            batch.delete(full_pos_key(&pos_body));
-            batch.delete(key);
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -139,19 +142,23 @@ impl TripleIndex for RocksTripleIndex {
         if triples.is_empty() {
             return Ok(());
         }
-        let mut batch = rocksdb::WriteBatch::default();
-        self.extend_into_batch(&mut batch, layer, triples);
-        self.db
-            .write(batch)
-            .map_err(|e| StorageError::Internal(format!("triple_index extend_layer: {e}")))
+        run_blocking(|| {
+            let mut batch = rocksdb::WriteBatch::default();
+            self.extend_into_batch(&mut batch, layer, triples);
+            self.db
+                .write(batch)
+                .map_err(|e| StorageError::Internal(format!("triple_index extend_layer: {e}")))
+        })
     }
 
     fn drop_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
-        let mut batch = rocksdb::WriteBatch::default();
-        self.drop_into_batch(&mut batch, layer)?;
-        self.db
-            .write(batch)
-            .map_err(|e| StorageError::Internal(format!("triple_index drop_layer: {e}")))
+        run_blocking(|| {
+            let mut batch = rocksdb::WriteBatch::default();
+            self.drop_into_batch(&mut batch, layer)?;
+            self.db
+                .write(batch)
+                .map_err(|e| StorageError::Internal(format!("triple_index drop_layer: {e}")))
+        })
     }
 
     fn scan_predicate_object<'a>(
@@ -164,27 +171,30 @@ impl TripleIndex for RocksTripleIndex {
         // can then erase the lifetime cleanly. For typical query answer
         // sizes (10s–1000s of subjects) the materialisation cost is
         // negligible.
-        let prefix = pos_scan_prefix(p, o);
-        let mut results: Vec<Result<(Iri, LayerId), StorageError>> = Vec::new();
-        let iter = self.db.prefix_iterator(prefix.as_slice());
-        for item in iter {
-            match item {
-                Ok((key, _value)) => {
-                    if !key.starts_with(prefix.as_slice()) {
-                        break;
+        let results = run_blocking(|| {
+            let prefix = pos_scan_prefix(p, o);
+            let mut results: Vec<Result<(Iri, LayerId), StorageError>> = Vec::new();
+            let iter = self.db.prefix_iterator(prefix.as_slice());
+            for item in iter {
+                match item {
+                    Ok((key, _value)) => {
+                        if !key.starts_with(prefix.as_slice()) {
+                            break;
+                        }
+                        let body = &key[POS_PREFIX.len()..];
+                        match index_keys::decode_pos_key(body) {
+                            Ok((_, _, subject, layer)) => results.push(Ok((subject, layer))),
+                            Err(e) => results
+                                .push(Err(StorageError::Internal(format!("decode pos key: {e}")))),
+                        }
                     }
-                    let body = &key[POS_PREFIX.len()..];
-                    match index_keys::decode_pos_key(body) {
-                        Ok((_, _, subject, layer)) => results.push(Ok((subject, layer))),
-                        Err(e) => results
-                            .push(Err(StorageError::Internal(format!("decode pos key: {e}")))),
-                    }
+                    Err(e) => results.push(Err(StorageError::Internal(format!(
+                        "scan_predicate_object iter: {e}"
+                    )))),
                 }
-                Err(e) => results.push(Err(StorageError::Internal(format!(
-                    "scan_predicate_object iter: {e}"
-                )))),
             }
-        }
+            results
+        });
         self.scans.fetch_add(1, Ordering::Relaxed);
         self.entries_returned
             .fetch_add(results.len() as u64, Ordering::Relaxed);

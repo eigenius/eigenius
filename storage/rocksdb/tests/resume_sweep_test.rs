@@ -87,13 +87,23 @@ async fn resume_sweep_completes_injected_running_task() {
     let backend: Arc<dyn PersistentBackend> = store;
 
     // Drive persistence through bootstrap + commit so the backend has
-    // a real head to resolve against.
+    // a real head to resolve against. `ExecutionContext::commit` was
+    // retired in D41 Phase G — route through `commit_layer_default`.
     let mut ctx = eigenius_kernel::bootstrap::bootstrap_persistent(Arc::clone(&backend)).unwrap();
     for r in [thing_class(), payload(), identity_program()] {
         ctx.add_resource(r).unwrap();
     }
-    let layer = ctx.commit("test_setup").unwrap();
-    backend.store_layer(&layer).unwrap();
+    let working = ctx.take_working("test_setup").unwrap();
+    // `commit_layer_default` persists through `BackendStorePersister`,
+    // so we no longer need a separate `backend.store_layer` call after
+    // the commit lands.
+    let layer = eigenius_kernel::lattice::commit_layer_default(
+        working,
+        ctx.storage().clone(),
+        backend.as_ref(),
+    )
+    .unwrap();
+    ctx.advance_head(Arc::clone(&layer), "test_setup").unwrap();
     // Phase 14g: branches replace the legacy single-head pointer.
     backend.put_branch("main", layer.id()).unwrap();
     let pinned_head = layer.id().clone();

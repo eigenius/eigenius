@@ -27,7 +27,6 @@
 
 mod triple_index;
 
-use async_trait::async_trait;
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
 use eigenius_kernel::layer::{
@@ -36,10 +35,46 @@ use eigenius_kernel::layer::{
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
-use eigenius_kernel::storage::{LayerStore, ResourceBackend, ResourceStore, StorageError};
+use eigenius_kernel::storage::{ResourceBackend, StorageError};
 use std::path::Path;
 use std::sync::Arc;
 use triple_index::RocksTripleIndex;
+
+/// Run a sync disk-bound block in a way that doesn't starve the
+/// tokio worker pool.
+///
+/// When called inside a multi-threaded tokio runtime,
+/// [`tokio::task::block_in_place`] relocates other tasks off the
+/// current worker thread, runs the closure synchronously, then lets
+/// the worker resume normal scheduling. This avoids the failure mode
+/// where N concurrent gRPC handlers all block on RocksDB's sync WAL
+/// flush and starve all other RPCs from making progress.
+///
+/// Outside a multi-threaded runtime (kernel tests not annotated
+/// `#[tokio::test(flavor = "multi_thread")]`, bootstrap before the
+/// gRPC server starts, CLI commands), the closure runs directly.
+/// `block_in_place` would panic in a current-thread runtime; the
+/// fallback keeps the impl callable from every context.
+///
+/// Concurrency ceiling under this design is `tokio_workers ≈ num_cpus`
+/// — that's enough for the workloads we're solving for. If we ever
+/// need hundreds of concurrent disk-bound calls, the trait would
+/// have to become async and the impl would use
+/// [`tokio::task::spawn_blocking`] against the much larger blocking
+/// pool. Deferred until usage justifies the trait churn.
+#[inline]
+pub(crate) fn run_blocking<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
 
 const TOPO_PREFIX: &str = "topo:";
 const BLOOM_PREFIX: &str = "bloom:";
@@ -113,41 +148,27 @@ impl RocksStore {
         self.db.compact_range::<&[u8], &[u8]>(None, None);
     }
 
-    /// Store a layer's parent chain pointer.
-    fn set_chain(
-        &self,
-        layer_id: &LayerId,
-        parent_id: Option<&LayerId>,
-    ) -> Result<(), StorageError> {
-        let key = format!("chain:{}", hex::encode(layer_id.0));
-        let value = match parent_id {
-            Some(pid) => hex::encode(pid.0),
-            None => String::new(),
-        };
-        self.db
-            .put(key.as_bytes(), value.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("failed to set chain: {e}")))
-    }
-
     /// Get a layer's parent ID from the chain.
     fn get_chain(&self, layer_id: &LayerId) -> Result<Option<LayerId>, StorageError> {
-        let key = format!("chain:{}", hex::encode(layer_id.0));
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let hex_str = String::from_utf8(bytes)
-                    .map_err(|e| StorageError::Internal(format!("invalid chain value: {e}")))?;
-                if hex_str.is_empty() {
-                    Ok(None) // Root layer
-                } else {
-                    Ok(Some(hex_to_layer_id(&hex_str)?))
+        run_blocking(|| {
+            let key = format!("chain:{}", hex::encode(layer_id.0));
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let hex_str = String::from_utf8(bytes)
+                        .map_err(|e| StorageError::Internal(format!("invalid chain value: {e}")))?;
+                    if hex_str.is_empty() {
+                        Ok(None) // Root layer
+                    } else {
+                        Ok(Some(hex_to_layer_id(&hex_str)?))
+                    }
                 }
+                Ok(None) => Err(StorageError::NotFound(format!(
+                    "chain entry for layer {}",
+                    hex::encode(layer_id.0)
+                ))),
+                Err(e) => Err(StorageError::Internal(format!("failed to get chain: {e}"))),
             }
-            Ok(None) => Err(StorageError::NotFound(format!(
-                "chain entry for layer {}",
-                hex::encode(layer_id.0)
-            ))),
-            Err(e) => Err(StorageError::Internal(format!("failed to get chain: {e}"))),
-        }
+        })
     }
 
     /// Build a `ChainInfo` describing the chain from root → `head`. Phase 14a-iii:
@@ -157,57 +178,62 @@ impl RocksStore {
         &self,
         head: &LayerId,
     ) -> Result<Option<eigenius_kernel::storage::ChainInfo>, StorageError> {
-        // Walk parent pointers head → root, redirect-aware (D25 §12.8
-        // / Phase 17f-F). When the walk reaches a layer that's a
-        // redirect source, switch to walking the target's chain
-        // instead of continuing through the (potentially reclaimed)
-        // original parent pointer. v1's refuse-chaining policy
-        // guarantees a single hop is enough — no cycles.
-        let mut chain_ids = vec![head.clone()];
-        let mut current = head.clone();
-        loop {
-            if let Some(redirect_entry) =
-                <Self as eigenius_kernel::storage::PersistentBackend>::lookup_redirect(
-                    self, &current,
-                )?
-            {
-                chain_ids.push(redirect_entry.target.clone());
-                current = redirect_entry.target;
-                continue;
-            }
-            match self.get_chain(&current)? {
-                Some(parent_id) => {
-                    chain_ids.push(parent_id.clone());
-                    current = parent_id;
+        run_blocking(|| {
+            // Walk parent pointers head → root, redirect-aware (D25 §12.8
+            // / Phase 17f-F). When the walk reaches a layer that's a
+            // redirect source, switch to walking the target's chain
+            // instead of continuing through the (potentially reclaimed)
+            // original parent pointer. v1's refuse-chaining policy
+            // guarantees a single hop is enough — no cycles.
+            let mut chain_ids = vec![head.clone()];
+            let mut current = head.clone();
+            loop {
+                if let Some(redirect_entry) =
+                    <Self as eigenius_kernel::storage::PersistentBackend>::lookup_redirect(
+                        self, &current,
+                    )?
+                {
+                    chain_ids.push(redirect_entry.target.clone());
+                    current = redirect_entry.target;
+                    continue;
                 }
-                None => break,
+                match self.get_chain(&current)? {
+                    Some(parent_id) => {
+                        chain_ids.push(parent_id.clone());
+                        current = parent_id;
+                    }
+                    None => break,
+                }
             }
-        }
-        chain_ids.reverse();
+            chain_ids.reverse();
 
-        let mut handles = Vec::with_capacity(chain_ids.len());
-        let mut defined_iris_per_layer = std::collections::BTreeMap::new();
-        for id in &chain_ids {
-            let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
-            let bytes = self
-                .db
-                .get(topo_key.as_bytes())
-                .map_err(|e| StorageError::Internal(format!("get topo entry: {e}")))?
-                .ok_or_else(|| {
-                    StorageError::NotFound(format!("topo entry for layer {}", hex::encode(id.0)))
-                })?;
-            let handle: LayerHandle = ciborium::from_reader(bytes.as_slice())
-                .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
-            let iris = ResourceBackend::list_layer_iris(self, id)?;
-            handles.push(handle);
-            defined_iris_per_layer.insert(id.clone(), iris);
-        }
+            let mut handles = Vec::with_capacity(chain_ids.len());
+            let mut defined_iris_per_layer = std::collections::BTreeMap::new();
+            for id in &chain_ids {
+                let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
+                let bytes = self
+                    .db
+                    .get(topo_key.as_bytes())
+                    .map_err(|e| StorageError::Internal(format!("get topo entry: {e}")))?
+                    .ok_or_else(|| {
+                        StorageError::NotFound(format!(
+                            "topo entry for layer {}",
+                            hex::encode(id.0)
+                        ))
+                    })?;
+                let handle: LayerHandle = ciborium::from_reader(bytes.as_slice())
+                    .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+                let iris = ResourceBackend::list_layer_iris(self, id)?;
+                handles.push(handle);
+                defined_iris_per_layer.insert(id.clone(), iris);
+            }
 
-        Ok(Some(eigenius_kernel::storage::ChainInfo {
-            head: head.clone(),
-            handles,
-            defined_iris_per_layer,
-        }))
+            Ok(Some(eigenius_kernel::storage::ChainInfo {
+                head: head.clone(),
+                handles,
+                defined_iris_per_layer,
+            }))
+        })
     }
 
     /// Load the full `LayerHandle` for a known layer.
@@ -216,47 +242,42 @@ impl RocksStore {
     /// fallback — pre-Phase-14 DBs are not supported; recovery is to drop
     /// the DB and re-load from source files.
     fn load_layer_handle(&self, layer_id: &LayerId) -> Result<LayerHandle, StorageError> {
-        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
-        let bytes = self
-            .db
-            .get(topo_key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("failed to load topo entry: {e}")))?
-            .ok_or_else(|| StorageError::NotFound(format!("layer {}", hex::encode(layer_id.0))))?;
-        ciborium::from_reader(bytes.as_slice())
-            .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))
-    }
-
-    /// Write a `topo:<id>` entry containing the LayerHandle. Phase 14a-ii.
-    fn put_topology_entry(&self, handle: &LayerHandle) -> Result<(), StorageError> {
-        let key = format!("{TOPO_PREFIX}{}", hex::encode(handle.id.0));
-        let mut bytes = Vec::new();
-        ciborium::into_writer(handle, &mut bytes)
-            .map_err(|e| StorageError::Internal(format!("encode LayerHandle: {e}")))?;
-        self.db
-            .put(key.as_bytes(), bytes)
-            .map_err(|e| StorageError::Internal(format!("put topology entry: {e}")))
+        run_blocking(|| {
+            let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
+            let bytes = self
+                .db
+                .get(topo_key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("failed to load topo entry: {e}")))?
+                .ok_or_else(|| {
+                    StorageError::NotFound(format!("layer {}", hex::encode(layer_id.0)))
+                })?;
+            ciborium::from_reader(bytes.as_slice())
+                .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))
+        })
     }
 
     /// Read all `topo:<id>` entries into an in-memory `LayerTopology`. Returns
     /// an empty topology if no entries exist (caller decides whether to
     /// migrate from the legacy `chain:` layout).
     fn read_topology_entries(&self) -> Result<LayerTopology, StorageError> {
-        let mut topology = LayerTopology::new();
-        let iter = self.db.prefix_iterator(TOPO_PREFIX.as_bytes());
-        for item in iter {
-            let (key, value) =
-                item.map_err(|e| StorageError::Internal(format!("topology iter: {e}")))?;
-            let key_str = std::str::from_utf8(&key)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 topo key: {e}")))?;
-            // Prefix iterator may overshoot — trim.
-            if !key_str.starts_with(TOPO_PREFIX) {
-                break;
+        run_blocking(|| {
+            let mut topology = LayerTopology::new();
+            let iter = self.db.prefix_iterator(TOPO_PREFIX.as_bytes());
+            for item in iter {
+                let (key, value) =
+                    item.map_err(|e| StorageError::Internal(format!("topology iter: {e}")))?;
+                let key_str = std::str::from_utf8(&key)
+                    .map_err(|e| StorageError::Internal(format!("non-utf8 topo key: {e}")))?;
+                // Prefix iterator may overshoot — trim.
+                if !key_str.starts_with(TOPO_PREFIX) {
+                    break;
+                }
+                let handle: LayerHandle = ciborium::from_reader(value.as_ref())
+                    .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+                topology.insert_layer(handle);
             }
-            let handle: LayerHandle = ciborium::from_reader(value.as_ref())
-                .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
-            topology.insert_layer(handle);
-        }
-        Ok(topology)
+            Ok(topology)
+        })
     }
 }
 
@@ -266,18 +287,22 @@ use eigenius_kernel::program::trace::{ComponentMetrics, ComponentTrace, TraceSto
 
 impl TraceStore for RocksStore {
     fn get_component_trace(&self, key: &[u8; 32]) -> Option<ComponentTrace> {
-        let db_key = format!("trace:{}", hex::encode(key));
-        match self.db.get(db_key.as_bytes()) {
-            Ok(Some(bytes)) => deserialize_component_trace(&bytes).ok(),
-            _ => None,
-        }
+        run_blocking(|| {
+            let db_key = format!("trace:{}", hex::encode(key));
+            match self.db.get(db_key.as_bytes()) {
+                Ok(Some(bytes)) => deserialize_component_trace(&bytes).ok(),
+                _ => None,
+            }
+        })
     }
 
     fn put_component_trace(&self, key: [u8; 32], trace: ComponentTrace) {
-        let db_key = format!("trace:{}", hex::encode(key));
-        if let Ok(bytes) = serialize_component_trace(&trace) {
-            let _ = self.db.put(db_key.as_bytes(), bytes);
-        }
+        run_blocking(|| {
+            let db_key = format!("trace:{}", hex::encode(key));
+            if let Ok(bytes) = serialize_component_trace(&trace) {
+                let _ = self.db.put(db_key.as_bytes(), bytes);
+            }
+        });
     }
 }
 
@@ -361,200 +386,6 @@ fn hex_to_layer_id(hex_str: &str) -> Result<LayerId, StorageError> {
     Ok(LayerId(id))
 }
 
-#[async_trait]
-impl LayerStore for RocksStore {
-    async fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
-        let id = layer.id().clone();
-        // 14e: persist all topological parents in the LayerHandle so
-        // multi-parent merge layers round-trip correctly. The legacy
-        // `chain:<id>` map below stores `parents.first()` as the
-        // canonical parent for chain-walk reconstruction — consistent
-        // with `Layer::parent()` semantics.
-        let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
-        let canonical_parent = all_parents.first().cloned();
-
-        // Pre-serialize resources so we can both (a) stamp the
-        // handle's `byte_size` and (b) write the values below without
-        // re-encoding. CBOR encoding is the hot work, so doing it
-        // once per resource is the right shape regardless of
-        // byte_size.
-        let encoded: Vec<(Iri, Vec<u8>)> = layer
-            .iter_resources()
-            .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
-            .collect();
-        let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
-
-        let handle = LayerHandle {
-            id: id.clone(),
-            content_hash: layer.content_hash().clone(),
-            supporting_layer: layer.supporting_layer().cloned(),
-            parents: all_parents,
-            name: layer.name().to_string(),
-            resource_count: layer.defined_iris().len() as u64,
-            // Copy the build-time stamp set by `LayerBuilder::build`
-            // rather than taking `now_millis()` here; keeps the
-            // in-memory Layer and persisted handle consistent on
-            // `created_at`.
-            created_at: layer.created_at(),
-            byte_size,
-            is_redirect_source: false,
-            // 15g step 3: persist tombstones onto the handle so the
-            // round-trip preserves them through `load_chain_from`.
-            tombstoned_iris: layer.tombstoned_iris().clone(),
-        };
-        self.put_topology_entry(&handle)?;
-        // Content-hash dedup index (D25 §11.0). Idempotent by
-        // `(content_hash, position_hash)` — re-storing the same layer
-        // writes the same key with the same empty value.
-        let content_key = format!(
-            "{CONTENT_INDEX_PREFIX}{}:{}",
-            hex::encode(handle.content_hash.0),
-            hex::encode(id.0)
-        );
-        self.db
-            .put(content_key.as_bytes(), [])
-            .map_err(|e| StorageError::Internal(format!("put content index: {e}")))?;
-
-        // Store each resource as CBOR (already serialized above).
-        for (iri, value) in &encoded {
-            let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            self.db
-                .put(key.as_bytes(), value)
-                .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))?;
-        }
-
-        // Store chain pointer (canonical parent only — full multi-parent
-        // record is in the topology entry above).
-        self.set_chain(&id, canonical_parent.as_ref())?;
-
-        Ok(id)
-    }
-
-    async fn load_layer(&self, id: &LayerId) -> Result<Layer, StorageError> {
-        // Phase 14a-iii: rebuild as a parent-less Layer with self as both
-        // cache (fresh) and backend. Used by tests that exercise the older
-        // `LayerStore` API in isolation; production code uses
-        // `PersistentBackend::load_chain` + `build_chain` instead.
-        //
-        // The on-disk `LayerHandle` carries the layer's content hash; we
-        // reuse it directly rather than reconstructing a synthetic handle
-        // so the reconstructed `Layer.content_hash` matches what
-        // `store_layer` wrote. Parents are deliberately cleared because
-        // this code path doesn't reconstruct the parent chain (production
-        // chain reads go through `PersistentBackend::load_chain`).
-        let mut handle = self.load_layer_handle(id)?;
-        handle.parents.clear();
-        let defined_iris = ResourceBackend::list_layer_iris(self, id)?;
-        // Construct an in-memory storage bundle and warm both caches from
-        // RocksDB so reads via the returned Layer succeed without going
-        // back to disk. (Production callers use `PersistentBackend::load_chain`
-        // + `build_chain` instead — this path exists for the older async
-        // `LayerStore` API tests.)
-        let storage = eigenius_kernel::layer::LayerStorage::in_memory();
-        for iri in &defined_iris {
-            if let Some(resource) = ResourceBackend::load_resource(self, id, iri) {
-                storage.cache.put(
-                    eigenius_kernel::layer::ResourceKey::new(id.clone(), iri.clone()),
-                    Arc::new(resource),
-                    eigenius_kernel::layer::CacheTier::Active,
-                );
-            }
-        }
-        if let Ok(Some(bloom)) = eigenius_kernel::storage::PersistentBackend::load_bloom(self, id) {
-            storage.bloom_cache.put(id.clone(), Arc::new(bloom));
-        }
-        Ok(Layer::from_handle(handle, None, defined_iris, storage))
-    }
-
-    async fn list_layers(&self) -> Result<Vec<LayerId>, StorageError> {
-        let prefix = b"layer:";
-        let mut ids = std::collections::BTreeSet::new();
-
-        let iter = self.db.prefix_iterator(prefix);
-        for item in iter {
-            let (key, _) =
-                item.map_err(|e| StorageError::Internal(format!("iteration error: {e}")))?;
-
-            let key_str = String::from_utf8_lossy(&key);
-            if !key_str.starts_with("layer:") {
-                break;
-            }
-
-            // Extract layer ID from key: "layer:<hex>:..."
-            if let Some(rest) = key_str.strip_prefix("layer:") {
-                if let Some(hex_part) = rest.split(':').next() {
-                    if let Ok(id) = hex_to_layer_id(hex_part) {
-                        ids.insert(id);
-                    }
-                }
-            }
-        }
-
-        Ok(ids.into_iter().collect())
-    }
-}
-
-#[async_trait]
-impl ResourceStore for RocksStore {
-    async fn store_resource(
-        &self,
-        layer_id: &LayerId,
-        resource: &Resource,
-    ) -> Result<(), StorageError> {
-        let iri = resource
-            .id()
-            .ok_or_else(|| StorageError::Internal("resource has no @id".to_string()))?;
-        let key = format!("layer:{}:res:{}", hex::encode(layer_id.0), iri.as_str());
-        let value = eigon_cbor::serialize_resource(resource);
-        self.db
-            .put(key.as_bytes(), value)
-            .map_err(|e| StorageError::Internal(format!("failed to store resource: {e}")))
-    }
-
-    async fn load_resource(
-        &self,
-        layer_id: &LayerId,
-        iri: &Iri,
-    ) -> Result<Option<Resource>, StorageError> {
-        let key = format!("layer:{}:res:{}", hex::encode(layer_id.0), iri.as_str());
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let resource = eigon_cbor::parse_resource(&bytes)
-                    .map_err(|e| StorageError::Internal(format!("CBOR parse error: {e}")))?;
-                Ok(Some(resource))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!(
-                "failed to load resource: {e}"
-            ))),
-        }
-    }
-
-    async fn list_resources(&self, layer_id: &LayerId) -> Result<Vec<Iri>, StorageError> {
-        let prefix = format!("layer:{}:res:", hex::encode(layer_id.0));
-        let mut iris = Vec::new();
-
-        let iter = self.db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            let (key, _) =
-                item.map_err(|e| StorageError::Internal(format!("iteration error: {e}")))?;
-
-            let key_str = String::from_utf8_lossy(&key);
-            if !key_str.starts_with(&prefix) {
-                break;
-            }
-
-            if let Some(iri_str) = key_str.strip_prefix(&prefix) {
-                if let Ok(iri) = Iri::parse(iri_str) {
-                    iris.push(iri);
-                }
-            }
-        }
-
-        Ok(iris)
-    }
-}
-
 // --- ResourceBackend (Phase 14a-iii: sync single-resource lookup) ---
 
 impl ResourceBackend for RocksStore {
@@ -572,41 +403,45 @@ impl ResourceBackend for RocksStore {
         layer_id: &LayerId,
         iri: &Iri,
     ) -> Result<Option<Resource>, StorageError> {
-        let key = format!("layer:{}:res:{}", hex::encode(layer_id.0), iri.as_str());
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let resource = eigon_cbor::parse_resource(&bytes)
-                    .map_err(|e| StorageError::Internal(format!("CBOR parse error: {e}")))?;
-                Ok(Some(resource))
+        run_blocking(|| {
+            let key = format!("layer:{}:res:{}", hex::encode(layer_id.0), iri.as_str());
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let resource = eigon_cbor::parse_resource(&bytes)
+                        .map_err(|e| StorageError::Internal(format!("CBOR parse error: {e}")))?;
+                    Ok(Some(resource))
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(StorageError::Internal(format!(
+                    "failed to load resource: {e}"
+                ))),
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!(
-                "failed to load resource: {e}"
-            ))),
-        }
+        })
     }
 
     fn list_layer_iris(
         &self,
         layer_id: &LayerId,
     ) -> Result<std::collections::BTreeSet<Iri>, StorageError> {
-        let prefix = format!("layer:{}:res:", hex::encode(layer_id.0));
-        let mut iris = std::collections::BTreeSet::new();
-        let iter = self.db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            let (key, _) =
-                item.map_err(|e| StorageError::Internal(format!("list_layer_iris iter: {e}")))?;
-            let key_str = String::from_utf8_lossy(&key);
-            if !key_str.starts_with(&prefix) {
-                break;
-            }
-            if let Some(iri_str) = key_str.strip_prefix(&prefix) {
-                if let Ok(iri) = Iri::parse(iri_str) {
-                    iris.insert(iri);
+        run_blocking(|| {
+            let prefix = format!("layer:{}:res:", hex::encode(layer_id.0));
+            let mut iris = std::collections::BTreeSet::new();
+            let iter = self.db.prefix_iterator(prefix.as_bytes());
+            for item in iter {
+                let (key, _) =
+                    item.map_err(|e| StorageError::Internal(format!("list_layer_iris iter: {e}")))?;
+                let key_str = String::from_utf8_lossy(&key);
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
+                if let Some(iri_str) = key_str.strip_prefix(&prefix) {
+                    if let Ok(iri) = Iri::parse(iri_str) {
+                        iris.insert(iri);
+                    }
                 }
             }
-        }
-        Ok(iris)
+            Ok(iris)
+        })
     }
 }
 
@@ -621,210 +456,227 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
-        // Per D23 §6.3, a layer commit must atomically write the topology
-        // entry, the per-layer bloom (Phase 14b), every `layer:<id>:res:`
-        // entry, and the chain pointer. We bundle them into one
-        // `WriteBatch`; RocksDB guarantees atomicity across the batch so a
-        // partial commit is impossible. (The pre-14b code used individual
-        // `put` calls and relied on commit ordering — fine in practice but
-        // not what the spec promises.)
-        let id = layer.id().clone();
-        // 14e: persist all topological parents in the LayerHandle so
-        // multi-parent merge layers round-trip correctly. The
-        // `chain:<id>` key below stores `parents.first()` as the
-        // canonical parent for chain-walk reconstruction — consistent
-        // with `Layer::parent()` semantics.
-        let all_parents: Vec<LayerId> = layer.parents().iter().map(|p| p.id().clone()).collect();
-        let canonical_parent = all_parents.first().cloned();
+        run_blocking(|| {
+            // Per D23 §6.3, a layer commit must atomically write the topology
+            // entry, the per-layer bloom (Phase 14b), every `layer:<id>:res:`
+            // entry, and the chain pointer. We bundle them into one
+            // `WriteBatch`; RocksDB guarantees atomicity across the batch so a
+            // partial commit is impossible. (The pre-14b code used individual
+            // `put` calls and relied on commit ordering — fine in practice but
+            // not what the spec promises.)
+            let id = layer.id().clone();
+            // 14e: persist all topological parents in the LayerHandle so
+            // multi-parent merge layers round-trip correctly. The
+            // `chain:<id>` key below stores `parents.first()` as the
+            // canonical parent for chain-walk reconstruction — consistent
+            // with `Layer::parent()` semantics.
+            let all_parents: Vec<LayerId> =
+                layer.parents().iter().map(|p| p.id().clone()).collect();
+            let canonical_parent = all_parents.first().cloned();
 
-        // Pre-serialize resources so we can both stamp the handle's
-        // `byte_size` (sum of encoded resource bytes — drives GC's
-        // reclaim estimate) and write the values into the batch
-        // without re-encoding.
-        let encoded: Vec<(Iri, Vec<u8>)> = layer
-            .iter_resources()
-            .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
-            .collect();
-        let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
+            // Pre-serialize resources so we can both stamp the handle's
+            // `byte_size` (sum of encoded resource bytes — drives GC's
+            // reclaim estimate) and write the values into the batch
+            // without re-encoding.
+            let encoded: Vec<(Iri, Vec<u8>)> = layer
+                .iter_resources()
+                .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
+                .collect();
+            let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
 
-        let handle = LayerHandle {
-            id: id.clone(),
-            content_hash: layer.content_hash().clone(),
-            supporting_layer: layer.supporting_layer().cloned(),
-            parents: all_parents,
-            name: layer.name().to_string(),
-            resource_count: layer.defined_iris().len() as u64,
-            // Copy the build-time stamp set by `LayerBuilder::build`
-            // rather than taking `now_millis()` here; keeps the
-            // in-memory Layer and persisted handle consistent on
-            // `created_at`.
-            created_at: layer.created_at(),
-            byte_size,
-            is_redirect_source: false,
-            // 15g step 3: persist tombstones onto the handle so the
-            // round-trip preserves them through `load_chain_from`.
-            tombstoned_iris: layer.tombstoned_iris().clone(),
-        };
-        let bloom = BloomFilter::for_iris(layer.defined_iris());
+            let handle = LayerHandle {
+                id: id.clone(),
+                content_hash: layer.content_hash().clone(),
+                supporting_layer: layer.supporting_layer().cloned(),
+                parents: all_parents,
+                name: layer.name().to_string(),
+                resource_count: layer.defined_iris().len() as u64,
+                // Copy the build-time stamp set by `LayerBuilder::build`
+                // rather than taking `now_millis()` here; keeps the
+                // in-memory Layer and persisted handle consistent on
+                // `created_at`.
+                created_at: layer.created_at(),
+                byte_size,
+                is_redirect_source: false,
+                // 15g step 3: persist tombstones onto the handle so the
+                // round-trip preserves them through `load_chain_from`.
+                tombstoned_iris: layer.tombstoned_iris().clone(),
+            };
+            let bloom = BloomFilter::for_layer(layer.defined_iris(), layer.tombstoned_iris());
 
-        // Encode CBOR payloads outside the batch — encoding is CPU work
-        // and can fail; no point holding the batch while computing.
-        let mut handle_bytes = Vec::new();
-        ciborium::into_writer(&handle, &mut handle_bytes)
-            .map_err(|e| StorageError::Internal(format!("encode LayerHandle: {e}")))?;
-        let mut bloom_bytes = Vec::new();
-        ciborium::into_writer(&bloom, &mut bloom_bytes)
-            .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
+            // Encode CBOR payloads outside the batch — encoding is CPU work
+            // and can fail; no point holding the batch while computing.
+            let mut handle_bytes = Vec::new();
+            ciborium::into_writer(&handle, &mut handle_bytes)
+                .map_err(|e| StorageError::Internal(format!("encode LayerHandle: {e}")))?;
+            let mut bloom_bytes = Vec::new();
+            ciborium::into_writer(&bloom, &mut bloom_bytes)
+                .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
 
-        let mut batch = rocksdb::WriteBatch::default();
+            let mut batch = rocksdb::WriteBatch::default();
 
-        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
-        batch.put(topo_key.as_bytes(), &handle_bytes);
+            let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
+            batch.put(topo_key.as_bytes(), &handle_bytes);
 
-        let bloom_key = format!("{BLOOM_PREFIX}{}", hex::encode(id.0));
-        batch.put(bloom_key.as_bytes(), &bloom_bytes);
+            let bloom_key = format!("{BLOOM_PREFIX}{}", hex::encode(id.0));
+            batch.put(bloom_key.as_bytes(), &bloom_bytes);
 
-        for (iri, value) in &encoded {
-            let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-            batch.put(key.as_bytes(), value);
-        }
+            for (iri, value) in &encoded {
+                let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
+                batch.put(key.as_bytes(), value);
+            }
 
-        let chain_key = format!("chain:{}", hex::encode(id.0));
-        let chain_value = match canonical_parent.as_ref() {
-            Some(pid) => hex::encode(pid.0),
-            None => String::new(),
-        };
-        batch.put(chain_key.as_bytes(), chain_value.as_bytes());
+            let chain_key = format!("chain:{}", hex::encode(id.0));
+            let chain_value = match canonical_parent.as_ref() {
+                Some(pid) => hex::encode(pid.0),
+                None => String::new(),
+            };
+            batch.put(chain_key.as_bytes(), chain_value.as_bytes());
 
-        // Content-hash dedup index (D25 §11.0 / D33 §6). Each entry is a
-        // `content:<content_hex>:<position_hex>` key with an empty value;
-        // the key existence is the signal. Idempotent by
-        // `(content_hash, position_hash)` so re-storing the same layer
-        // is a structural no-op at the index's logical level.
-        let content_key = format!(
-            "{CONTENT_INDEX_PREFIX}{}:{}",
-            hex::encode(layer.content_hash().0),
-            hex::encode(id.0)
-        );
-        batch.put(content_key.as_bytes(), []);
+            // Content-hash dedup index (D25 §11.0 / D33 §6). Each entry is a
+            // `content:<content_hex>:<position_hex>` key with an empty value;
+            // the key existence is the signal. Idempotent by
+            // `(content_hash, position_hash)` so re-storing the same layer
+            // is a structural no-op at the index's logical level.
+            let content_key = format!(
+                "{CONTENT_INDEX_PREFIX}{}:{}",
+                hex::encode(layer.content_hash().0),
+                hex::encode(id.0)
+            );
+            batch.put(content_key.as_bytes(), []);
 
-        // Phase 14h: index entries are populated by `LayerBuilder::build`
-        // (same precomputation pattern as the bloom). The persistent
-        // index is shared (`RocksStore.triple_index` ↔ `LayerStorage.triple_index`)
-        // so the build-time `extend_layer` already wrote them to RocksDB.
-        // No duplicate population here.
+            // Phase 14h: index entries are populated by `LayerBuilder::build`
+            // (same precomputation pattern as the bloom). The persistent
+            // index is shared (`RocksStore.triple_index` ↔ `LayerStorage.triple_index`)
+            // so the build-time `extend_layer` already wrote them to RocksDB.
+            // No duplicate population here.
 
-        // Sync write: layer commits are durability-critical. The kernel
-        // writes the layer + branch CAS sequentially, and a verdict
-        // resource committed via AutoOnLoad must survive a SIGKILL'd
-        // restart (the audit-chain promise of D28 §5.7). RocksDB's
-        // default async-WAL-flush mode lets writes return before the
-        // WAL fsyncs, opening a sub-second window where a forced kill
-        // loses the just-committed layer. `sync = true` makes the WAL
-        // fsync inline. Per-commit latency cost is ~10ms on local disk —
-        // dwarfed by the nanoda proof-check costs we already accept on
-        // institution-gated commits.
-        let mut write_opts = rocksdb::WriteOptions::default();
-        write_opts.set_sync(true);
-        self.db
-            .write_opt(batch, &write_opts)
-            .map_err(|e| StorageError::Internal(format!("store_layer batch: {e}")))?;
-        Ok(id)
+            // Sync write: layer commits are durability-critical. The kernel
+            // writes the layer + branch CAS sequentially, and a verdict
+            // resource committed via AutoOnLoad must survive a SIGKILL'd
+            // restart (the audit-chain promise of D28 §5.7). RocksDB's
+            // default async-WAL-flush mode lets writes return before the
+            // WAL fsyncs, opening a sub-second window where a forced kill
+            // loses the just-committed layer. `sync = true` makes the WAL
+            // fsync inline. Per-commit latency cost is ~10ms on local disk —
+            // dwarfed by the nanoda proof-check costs we already accept on
+            // institution-gated commits.
+            let mut write_opts = rocksdb::WriteOptions::default();
+            write_opts.set_sync(true);
+            self.db
+                .write_opt(batch, &write_opts)
+                .map_err(|e| StorageError::Internal(format!("store_layer batch: {e}")))?;
+            Ok(id)
+        })
     }
 
     fn load_topology(&self) -> Result<LayerTopology, StorageError> {
-        let mut topology = self.read_topology_entries()?;
-        // D25 §12.8.1(d): manufacture synthetic tombstones for every
-        // redirect source whose original handle was reclaimed.
-        let entries = eigenius_kernel::storage::PersistentBackend::list_redirects(self)?;
-        eigenius_kernel::layer::augment_topology_with_redirects(&mut topology, &entries);
-        Ok(topology)
+        run_blocking(|| {
+            let mut topology = self.read_topology_entries()?;
+            // D25 §12.8.1(d): manufacture synthetic tombstones for every
+            // redirect source whose original handle was reclaimed.
+            let entries = eigenius_kernel::storage::PersistentBackend::list_redirects(self)?;
+            eigenius_kernel::layer::augment_topology_with_redirects(&mut topology, &entries);
+            Ok(topology)
+        })
     }
 
     fn load_handle(&self, layer_id: &LayerId) -> Result<Option<LayerHandle>, StorageError> {
-        // Real handle: read `topo:<id>` directly.
-        let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
-        match self.db.get(topo_key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let handle = ciborium::from_reader(bytes.as_slice())
-                    .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
-                return Ok(Some(handle));
+        run_blocking(|| {
+            // Real handle: read `topo:<id>` directly.
+            let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(layer_id.0));
+            match self.db.get(topo_key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let handle = ciborium::from_reader(bytes.as_slice())
+                        .map_err(|e| StorageError::Internal(format!("decode LayerHandle: {e}")))?;
+                    return Ok(Some(handle));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return Err(StorageError::Internal(format!(
+                        "failed to load topo entry: {e}"
+                    )))
+                }
             }
-            Ok(None) => {}
-            Err(e) => {
-                return Err(StorageError::Internal(format!(
-                    "failed to load topo entry: {e}"
-                )))
+            // Synthetic tombstone via the redirect CF (D25 §12.8.1(d)) —
+            // matches `load_topology`'s view for any redirect source whose
+            // original on-disk handle has been reclaimed.
+            if let Some(entry) =
+                eigenius_kernel::storage::PersistentBackend::lookup_redirect(self, layer_id)?
+            {
+                return Ok(Some(eigenius_kernel::layer::manufacture_tombstone(&entry)));
             }
-        }
-        // Synthetic tombstone via the redirect CF (D25 §12.8.1(d)) —
-        // matches `load_topology`'s view for any redirect source whose
-        // original on-disk handle has been reclaimed.
-        if let Some(entry) =
-            eigenius_kernel::storage::PersistentBackend::lookup_redirect(self, layer_id)?
-        {
-            return Ok(Some(eigenius_kernel::layer::manufacture_tombstone(&entry)));
-        }
-        Ok(None)
+            Ok(None)
+        })
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let db_key = format!("meta:{key}");
-        self.db
-            .get(db_key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("meta get: {e}")))
+        run_blocking(|| {
+            let db_key = format!("meta:{key}");
+            self.db
+                .get(db_key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("meta get: {e}")))
+        })
     }
 
     fn put_meta(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
-        let db_key = format!("meta:{key}");
-        self.db
-            .put(db_key.as_bytes(), value)
-            .map_err(|e| StorageError::Internal(format!("meta put: {e}")))
+        run_blocking(|| {
+            let db_key = format!("meta:{key}");
+            self.db
+                .put(db_key.as_bytes(), value)
+                .map_err(|e| StorageError::Internal(format!("meta put: {e}")))
+        })
     }
 
     fn delete_meta(&self, key: &str) -> Result<(), StorageError> {
-        let db_key = format!("meta:{key}");
-        self.db
-            .delete(db_key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("meta delete: {e}")))
+        run_blocking(|| {
+            let db_key = format!("meta:{key}");
+            self.db
+                .delete(db_key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("meta delete: {e}")))
+        })
     }
 
     fn write_batch(&self, ops: &[eigenius_kernel::storage::BatchOp]) -> Result<(), StorageError> {
-        use eigenius_kernel::storage::BatchOp;
-        let mut batch = rocksdb::WriteBatch::default();
-        for op in ops {
-            match op {
-                BatchOp::PutMeta { key, value } => {
-                    let db_key = format!("meta:{key}");
-                    batch.put(db_key.as_bytes(), value);
-                }
-                BatchOp::DeleteMeta { key } => {
-                    let db_key = format!("meta:{key}");
-                    batch.delete(db_key.as_bytes());
+        run_blocking(|| {
+            use eigenius_kernel::storage::BatchOp;
+            let mut batch = rocksdb::WriteBatch::default();
+            for op in ops {
+                match op {
+                    BatchOp::PutMeta { key, value } => {
+                        let db_key = format!("meta:{key}");
+                        batch.put(db_key.as_bytes(), value);
+                    }
+                    BatchOp::DeleteMeta { key } => {
+                        let db_key = format!("meta:{key}");
+                        batch.delete(db_key.as_bytes());
+                    }
                 }
             }
-        }
-        self.db
-            .write(batch)
-            .map_err(|e| StorageError::Internal(format!("write_batch: {e}")))
+            self.db
+                .write(batch)
+                .map_err(|e| StorageError::Internal(format!("write_batch: {e}")))
+        })
     }
 
     fn list_meta_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
-        let db_prefix = format!("meta:{prefix}");
-        let mut out = Vec::new();
-        let iter = self.db.prefix_iterator(db_prefix.as_bytes());
-        for item in iter {
-            let (k, _v) =
-                item.map_err(|e| StorageError::Internal(format!("list_meta_prefix: {e}")))?;
-            let key_str = std::str::from_utf8(&k)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 meta key: {e}")))?;
-            // Prefix iterator may overshoot — trim.
-            if !key_str.starts_with(&db_prefix) {
-                break;
+        run_blocking(|| {
+            let db_prefix = format!("meta:{prefix}");
+            let mut out = Vec::new();
+            let iter = self.db.prefix_iterator(db_prefix.as_bytes());
+            for item in iter {
+                let (k, _v) =
+                    item.map_err(|e| StorageError::Internal(format!("list_meta_prefix: {e}")))?;
+                let key_str = std::str::from_utf8(&k)
+                    .map_err(|e| StorageError::Internal(format!("non-utf8 meta key: {e}")))?;
+                // Prefix iterator may overshoot — trim.
+                if !key_str.starts_with(&db_prefix) {
+                    break;
+                }
+                out.push(key_str["meta:".len()..].to_string());
             }
-            out.push(key_str["meta:".len()..].to_string());
-        }
-        Ok(out)
+            Ok(out)
+        })
     }
 
     fn as_trace_store(&self) -> &(dyn eigenius_kernel::program::trace::TraceStore + Send + Sync) {
@@ -836,296 +688,332 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
-        let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let bloom: BloomFilter = ciborium::from_reader(bytes.as_slice())
-                    .map_err(|e| StorageError::Internal(format!("decode BloomFilter: {e}")))?;
-                Ok(Some(bloom))
+        run_blocking(|| {
+            let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let bloom: BloomFilter = ciborium::from_reader(bytes.as_slice())
+                        .map_err(|e| StorageError::Internal(format!("decode BloomFilter: {e}")))?;
+                    Ok(Some(bloom))
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(StorageError::Internal(format!("load_bloom: {e}"))),
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!("load_bloom: {e}"))),
-        }
+        })
     }
 
     fn store_bloom(&self, layer: &LayerId, bloom: &BloomFilter) -> Result<(), StorageError> {
-        let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
-        let mut bytes = Vec::new();
-        ciborium::into_writer(bloom, &mut bytes)
-            .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
-        self.db
-            .put(key.as_bytes(), bytes)
-            .map_err(|e| StorageError::Internal(format!("store_bloom: {e}")))
+        run_blocking(|| {
+            let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
+            let mut bytes = Vec::new();
+            ciborium::into_writer(bloom, &mut bytes)
+                .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
+            self.db
+                .put(key.as_bytes(), bytes)
+                .map_err(|e| StorageError::Internal(format!("store_bloom: {e}")))
+        })
     }
 
     fn get_branch(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
-        let key = format!("{BRANCH_PREFIX}{name}");
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let hex_str = String::from_utf8(bytes).map_err(|e| {
-                    StorageError::Internal(format!("invalid branch ref value: {e}"))
-                })?;
-                Ok(Some(hex_to_layer_id(&hex_str)?))
+        run_blocking(|| {
+            let key = format!("{BRANCH_PREFIX}{name}");
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let hex_str = String::from_utf8(bytes).map_err(|e| {
+                        StorageError::Internal(format!("invalid branch ref value: {e}"))
+                    })?;
+                    Ok(Some(hex_to_layer_id(&hex_str)?))
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(StorageError::Internal(format!("get_branch: {e}"))),
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!("get_branch: {e}"))),
-        }
+        })
     }
 
     fn put_branch(&self, name: &str, id: &LayerId) -> Result<(), StorageError> {
-        // Sync write: the branch ref is the entry point for every chain
-        // walk. A `put_branch` returning ok without the WAL fsync'd
-        // means a SIGKILL'd restart sees the *old* branch ref — the
-        // newly-committed layer (already stored via `store_layer` with
-        // sync, above) becomes an unreachable orphan, and the audit
-        // chain's `verified` claims silently disappear (D28 §5.7).
-        // Same ~10ms latency cost as the `store_layer` sync write.
-        let key = format!("{BRANCH_PREFIX}{name}");
-        let mut write_opts = rocksdb::WriteOptions::default();
-        write_opts.set_sync(true);
-        self.db
-            .put_opt(key.as_bytes(), hex::encode(id.0), &write_opts)
-            .map_err(|e| StorageError::Internal(format!("put_branch: {e}")))
+        run_blocking(|| {
+            // Sync write: the branch ref is the entry point for every chain
+            // walk. A `put_branch` returning ok without the WAL fsync'd
+            // means a SIGKILL'd restart sees the *old* branch ref — the
+            // newly-committed layer (already stored via `store_layer` with
+            // sync, above) becomes an unreachable orphan, and the audit
+            // chain's `verified` claims silently disappear (D28 §5.7).
+            // Same ~10ms latency cost as the `store_layer` sync write.
+            let key = format!("{BRANCH_PREFIX}{name}");
+            let mut write_opts = rocksdb::WriteOptions::default();
+            write_opts.set_sync(true);
+            self.db
+                .put_opt(key.as_bytes(), hex::encode(id.0), &write_opts)
+                .map_err(|e| StorageError::Internal(format!("put_branch: {e}")))
+        })
     }
 
     fn delete_branch(&self, name: &str) -> Result<(), StorageError> {
-        let key = format!("{BRANCH_PREFIX}{name}");
-        self.db
-            .delete(key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("delete_branch: {e}")))
+        run_blocking(|| {
+            let key = format!("{BRANCH_PREFIX}{name}");
+            self.db
+                .delete(key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("delete_branch: {e}")))
+        })
     }
 
     fn delete_layer(&self, layer: &LayerId) -> Result<(), StorageError> {
-        let id_hex = hex::encode(layer.0);
-        // Per D23 §6.3, layer-shape mutations land via one WriteBatch.
-        // Atomic across the topology entry, bloom, chain pointer,
-        // every resource entry, the content-hash index entry, and
-        // (Phase 14h) every triple-index entry — no partial state
-        // visible after a crash mid-delete.
+        run_blocking(|| {
+            let id_hex = hex::encode(layer.0);
+            // Per D23 §6.3, layer-shape mutations land via one WriteBatch.
+            // Atomic across the topology entry, bloom, chain pointer,
+            // every resource entry, the content-hash index entry, and
+            // (Phase 14h) every triple-index entry — no partial state
+            // visible after a crash mid-delete.
 
-        // Read the topology entry *before* the batch builds — we need
-        // the content hash to know which content-index key to delete.
-        // If the layer is absent, delete_layer is a no-op (idempotent
-        // contract); a `None` content hash falls through to the rest of
-        // the cleanup which is also no-op on absent keys.
-        let content_hash_hex = self
-            .load_layer_handle(layer)
-            .ok()
-            .map(|h| hex::encode(h.content_hash.0));
+            // Read the topology entry *before* the batch builds — we need
+            // the content hash to know which content-index key to delete.
+            // If the layer is absent, delete_layer is a no-op (idempotent
+            // contract); a `None` content hash falls through to the rest of
+            // the cleanup which is also no-op on absent keys.
+            let content_hash_hex = self
+                .load_layer_handle(layer)
+                .ok()
+                .map(|h| hex::encode(h.content_hash.0));
 
-        let mut batch = rocksdb::WriteBatch::default();
+            let mut batch = rocksdb::WriteBatch::default();
 
-        let topo_key = format!("{TOPO_PREFIX}{id_hex}");
-        batch.delete(topo_key.as_bytes());
+            let topo_key = format!("{TOPO_PREFIX}{id_hex}");
+            batch.delete(topo_key.as_bytes());
 
-        if let Some(ch_hex) = content_hash_hex {
-            let content_key = format!("{CONTENT_INDEX_PREFIX}{ch_hex}:{id_hex}");
-            batch.delete(content_key.as_bytes());
-        }
-
-        let bloom_key = format!("{BLOOM_PREFIX}{id_hex}");
-        batch.delete(bloom_key.as_bytes());
-
-        let chain_key = format!("chain:{id_hex}");
-        batch.delete(chain_key.as_bytes());
-
-        // Resource entries: prefix-scan + per-key delete inside the
-        // batch. RocksDB's `delete_range` is faster but has subtle
-        // interactions with snapshot iterators we don't want to pull
-        // in for v1; per-key delete is correct and fast enough for
-        // typical layer sizes.
-        let res_prefix = format!("layer:{id_hex}:res:");
-        let iter = self.db.prefix_iterator(res_prefix.as_bytes());
-        for item in iter {
-            let (k, _v) =
-                item.map_err(|e| StorageError::Internal(format!("delete_layer iter: {e}")))?;
-            if !k.starts_with(res_prefix.as_bytes()) {
-                break;
+            if let Some(ch_hex) = content_hash_hex {
+                let content_key = format!("{CONTENT_INDEX_PREFIX}{ch_hex}:{id_hex}");
+                batch.delete(content_key.as_bytes());
             }
-            batch.delete(&k);
-        }
 
-        // Phase 14h: drop both index orderings for this layer in the
-        // same atomic batch. Walks the reverse `idx_layer:<L>:` prefix
-        // to discover which forward `idx_pos:` entries to delete.
-        self.triple_index.drop_into_batch(&mut batch, layer)?;
+            let bloom_key = format!("{BLOOM_PREFIX}{id_hex}");
+            batch.delete(bloom_key.as_bytes());
 
-        self.db
-            .write(batch)
-            .map_err(|e| StorageError::Internal(format!("delete_layer batch: {e}")))?;
-        Ok(())
+            let chain_key = format!("chain:{id_hex}");
+            batch.delete(chain_key.as_bytes());
+
+            // Resource entries: prefix-scan + per-key delete inside the
+            // batch. RocksDB's `delete_range` is faster but has subtle
+            // interactions with snapshot iterators we don't want to pull
+            // in for v1; per-key delete is correct and fast enough for
+            // typical layer sizes.
+            let res_prefix = format!("layer:{id_hex}:res:");
+            let iter = self.db.prefix_iterator(res_prefix.as_bytes());
+            for item in iter {
+                let (k, _v) =
+                    item.map_err(|e| StorageError::Internal(format!("delete_layer iter: {e}")))?;
+                if !k.starts_with(res_prefix.as_bytes()) {
+                    break;
+                }
+                batch.delete(&k);
+            }
+
+            // Phase 14h: drop both index orderings for this layer in the
+            // same atomic batch. Walks the reverse `idx_layer:<L>:` prefix
+            // to discover which forward `idx_pos:` entries to delete.
+            self.triple_index.drop_into_batch(&mut batch, layer)?;
+
+            self.db
+                .write(batch)
+                .map_err(|e| StorageError::Internal(format!("delete_layer batch: {e}")))?;
+            Ok(())
+        })
     }
 
     fn list_branches(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
-        let mut out = Vec::new();
-        let iter = self.db.prefix_iterator(BRANCH_PREFIX.as_bytes());
-        for item in iter {
-            let (k, v) =
-                item.map_err(|e| StorageError::Internal(format!("list_branches iter: {e}")))?;
-            let key_str = std::str::from_utf8(&k)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 branch key: {e}")))?;
-            // Prefix iterator may overshoot.
-            if !key_str.starts_with(BRANCH_PREFIX) {
-                break;
+        run_blocking(|| {
+            let mut out = Vec::new();
+            let iter = self.db.prefix_iterator(BRANCH_PREFIX.as_bytes());
+            for item in iter {
+                let (k, v) =
+                    item.map_err(|e| StorageError::Internal(format!("list_branches iter: {e}")))?;
+                let key_str = std::str::from_utf8(&k)
+                    .map_err(|e| StorageError::Internal(format!("non-utf8 branch key: {e}")))?;
+                // Prefix iterator may overshoot.
+                if !key_str.starts_with(BRANCH_PREFIX) {
+                    break;
+                }
+                let name = key_str[BRANCH_PREFIX.len()..].to_string();
+                let hex_str = std::str::from_utf8(&v)
+                    .map_err(|e| StorageError::Internal(format!("non-utf8 branch value: {e}")))?;
+                let id = hex_to_layer_id(hex_str)?;
+                out.push((name, id));
             }
-            let name = key_str[BRANCH_PREFIX.len()..].to_string();
-            let hex_str = std::str::from_utf8(&v)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 branch value: {e}")))?;
-            let id = hex_to_layer_id(hex_str)?;
-            out.push((name, id));
-        }
-        // BTreeMap-style sort for deterministic ordering even though
-        // prefix-scan already yields sorted keys; defensive against
-        // future column-family layout changes.
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(out)
+            // BTreeMap-style sort for deterministic ordering even though
+            // prefix-scan already yields sorted keys; defensive against
+            // future column-family layout changes.
+            out.sort_by(|a, b| a.0.cmp(&b.0));
+            Ok(out)
+        })
     }
 
     fn create_tag(&self, name: &str, id: &LayerId) -> Result<bool, StorageError> {
-        let key = format!("{TAG_PREFIX}{name}");
-        // Read-then-write under a single column family is safe enough
-        // for tag creation: tags are administrator-driven operations,
-        // not a hot write path, and a race between two `CreateTag`
-        // calls just means whichever lost gets `Ok(false)` — the
-        // intended "AlreadyExists" semantic. For genuine atomicity
-        // we'd need a transactional DB; v1 ships with the simpler
-        // shape.
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(_)) => Ok(false),
-            Ok(None) => {
-                self.db
-                    .put(key.as_bytes(), hex::encode(id.0))
-                    .map_err(|e| StorageError::Internal(format!("create_tag: {e}")))?;
-                Ok(true)
+        run_blocking(|| {
+            let key = format!("{TAG_PREFIX}{name}");
+            // Read-then-write under a single column family is safe enough
+            // for tag creation: tags are administrator-driven operations,
+            // not a hot write path, and a race between two `CreateTag`
+            // calls just means whichever lost gets `Ok(false)` — the
+            // intended "AlreadyExists" semantic. For genuine atomicity
+            // we'd need a transactional DB; v1 ships with the simpler
+            // shape.
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(_)) => Ok(false),
+                Ok(None) => {
+                    self.db
+                        .put(key.as_bytes(), hex::encode(id.0))
+                        .map_err(|e| StorageError::Internal(format!("create_tag: {e}")))?;
+                    Ok(true)
+                }
+                Err(e) => Err(StorageError::Internal(format!("create_tag get: {e}"))),
             }
-            Err(e) => Err(StorageError::Internal(format!("create_tag get: {e}"))),
-        }
+        })
     }
 
     fn get_tag(&self, name: &str) -> Result<Option<LayerId>, StorageError> {
-        let key = format!("{TAG_PREFIX}{name}");
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let hex_str = String::from_utf8(bytes)
-                    .map_err(|e| StorageError::Internal(format!("invalid tag value: {e}")))?;
-                Ok(Some(hex_to_layer_id(&hex_str)?))
+        run_blocking(|| {
+            let key = format!("{TAG_PREFIX}{name}");
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let hex_str = String::from_utf8(bytes)
+                        .map_err(|e| StorageError::Internal(format!("invalid tag value: {e}")))?;
+                    Ok(Some(hex_to_layer_id(&hex_str)?))
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(StorageError::Internal(format!("get_tag: {e}"))),
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!("get_tag: {e}"))),
-        }
+        })
     }
 
     fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
-        let key = format!("{TAG_PREFIX}{name}");
-        // Same read-then-delete shape: tag deletion is rare and the
-        // race window is harmless (both deleters succeed; second
-        // returns `false`).
-        let existed = self
-            .db
-            .get(key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("delete_tag get: {e}")))?
-            .is_some();
-        if existed {
-            self.db
-                .delete(key.as_bytes())
-                .map_err(|e| StorageError::Internal(format!("delete_tag: {e}")))?;
-        }
-        Ok(existed)
+        run_blocking(|| {
+            let key = format!("{TAG_PREFIX}{name}");
+            // Same read-then-delete shape: tag deletion is rare and the
+            // race window is harmless (both deleters succeed; second
+            // returns `false`).
+            let existed = self
+                .db
+                .get(key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("delete_tag get: {e}")))?
+                .is_some();
+            if existed {
+                self.db
+                    .delete(key.as_bytes())
+                    .map_err(|e| StorageError::Internal(format!("delete_tag: {e}")))?;
+            }
+            Ok(existed)
+        })
     }
 
     fn list_tags(&self) -> Result<Vec<(String, LayerId)>, StorageError> {
-        let mut out = Vec::new();
-        let iter = self.db.prefix_iterator(TAG_PREFIX.as_bytes());
-        for item in iter {
-            let (k, v) =
-                item.map_err(|e| StorageError::Internal(format!("list_tags iter: {e}")))?;
-            let key_str = std::str::from_utf8(&k)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 tag key: {e}")))?;
-            if !key_str.starts_with(TAG_PREFIX) {
-                break;
+        run_blocking(|| {
+            let mut out = Vec::new();
+            let iter = self.db.prefix_iterator(TAG_PREFIX.as_bytes());
+            for item in iter {
+                let (k, v) =
+                    item.map_err(|e| StorageError::Internal(format!("list_tags iter: {e}")))?;
+                let key_str = std::str::from_utf8(&k)
+                    .map_err(|e| StorageError::Internal(format!("non-utf8 tag key: {e}")))?;
+                if !key_str.starts_with(TAG_PREFIX) {
+                    break;
+                }
+                let name = key_str[TAG_PREFIX.len()..].to_string();
+                let hex_str = std::str::from_utf8(&v)
+                    .map_err(|e| StorageError::Internal(format!("non-utf8 tag value: {e}")))?;
+                let id = hex_to_layer_id(hex_str)?;
+                out.push((name, id));
             }
-            let name = key_str[TAG_PREFIX.len()..].to_string();
-            let hex_str = std::str::from_utf8(&v)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 tag value: {e}")))?;
-            let id = hex_to_layer_id(hex_str)?;
-            out.push((name, id));
-        }
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(out)
+            out.sort_by(|a, b| a.0.cmp(&b.0));
+            Ok(out)
+        })
     }
 
     fn lookup_by_content_hash(
         &self,
         content_hash: &ContentHash,
     ) -> Result<Vec<LayerId>, StorageError> {
-        // Prefix-scan `content:<content_hex>:` — every key matching the
-        // prefix names a position currently in storage that shares the
-        // given content hash. The position-hash hex follows the content
-        // hash and the separator inside the key, so a substring slice
-        // recovers it without parsing.
-        let prefix = format!("{CONTENT_INDEX_PREFIX}{}:", hex::encode(content_hash.0));
-        let mut out = Vec::new();
-        let iter = self.db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            let (k, _v) = item
-                .map_err(|e| StorageError::Internal(format!("lookup_by_content_hash iter: {e}")))?;
-            let key_str = std::str::from_utf8(&k)
-                .map_err(|e| StorageError::Internal(format!("non-utf8 content-index key: {e}")))?;
-            // Prefix iterator may overshoot — trim.
-            if !key_str.starts_with(&prefix) {
-                break;
+        run_blocking(|| {
+            // Prefix-scan `content:<content_hex>:` — every key matching the
+            // prefix names a position currently in storage that shares the
+            // given content hash. The position-hash hex follows the content
+            // hash and the separator inside the key, so a substring slice
+            // recovers it without parsing.
+            let prefix = format!("{CONTENT_INDEX_PREFIX}{}:", hex::encode(content_hash.0));
+            let mut out = Vec::new();
+            let iter = self.db.prefix_iterator(prefix.as_bytes());
+            for item in iter {
+                let (k, _v) = item.map_err(|e| {
+                    StorageError::Internal(format!("lookup_by_content_hash iter: {e}"))
+                })?;
+                let key_str = std::str::from_utf8(&k).map_err(|e| {
+                    StorageError::Internal(format!("non-utf8 content-index key: {e}"))
+                })?;
+                // Prefix iterator may overshoot — trim.
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
+                let pos_hex = &key_str[prefix.len()..];
+                out.push(hex_to_layer_id(pos_hex)?);
             }
-            let pos_hex = &key_str[prefix.len()..];
-            out.push(hex_to_layer_id(pos_hex)?);
-        }
-        Ok(out)
+            Ok(out)
+        })
     }
 
     fn put_redirect(&self, entry: &RedirectEntry) -> Result<(), StorageError> {
-        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(entry.source().0));
-        let mut bytes = Vec::new();
-        ciborium::into_writer(entry, &mut bytes)
-            .map_err(|e| StorageError::Internal(format!("encode RedirectEntry: {e}")))?;
-        self.db
-            .put(key.as_bytes(), bytes)
-            .map_err(|e| StorageError::Internal(format!("put redirect: {e}")))
+        run_blocking(|| {
+            let key = format!("{REDIRECT_PREFIX}{}", hex::encode(entry.source().0));
+            let mut bytes = Vec::new();
+            ciborium::into_writer(entry, &mut bytes)
+                .map_err(|e| StorageError::Internal(format!("encode RedirectEntry: {e}")))?;
+            self.db
+                .put(key.as_bytes(), bytes)
+                .map_err(|e| StorageError::Internal(format!("put redirect: {e}")))
+        })
     }
 
     fn lookup_redirect(&self, source: &LayerId) -> Result<Option<RedirectEntry>, StorageError> {
-        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                let entry: RedirectEntry = ciborium::from_reader(bytes.as_slice())
-                    .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
-                Ok(Some(entry))
+        run_blocking(|| {
+            let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    let entry: RedirectEntry =
+                        ciborium::from_reader(bytes.as_slice()).map_err(|e| {
+                            StorageError::Internal(format!("decode RedirectEntry: {e}"))
+                        })?;
+                    Ok(Some(entry))
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(StorageError::Internal(format!("get redirect: {e}"))),
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!("get redirect: {e}"))),
-        }
+        })
     }
 
     fn delete_redirect(&self, source: &LayerId) -> Result<(), StorageError> {
-        let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
-        self.db
-            .delete(key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("delete redirect: {e}")))
+        run_blocking(|| {
+            let key = format!("{REDIRECT_PREFIX}{}", hex::encode(source.0));
+            self.db
+                .delete(key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("delete redirect: {e}")))
+        })
     }
 
     fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
-        let mut out = Vec::new();
-        let iter = self.db.prefix_iterator(REDIRECT_PREFIX.as_bytes());
-        for item in iter {
-            let (k, v) =
-                item.map_err(|e| StorageError::Internal(format!("list_redirects iter: {e}")))?;
-            // Prefix iterator may overshoot — trim.
-            if !k.starts_with(REDIRECT_PREFIX.as_bytes()) {
-                break;
+        run_blocking(|| {
+            let mut out = Vec::new();
+            let iter = self.db.prefix_iterator(REDIRECT_PREFIX.as_bytes());
+            for item in iter {
+                let (k, v) =
+                    item.map_err(|e| StorageError::Internal(format!("list_redirects iter: {e}")))?;
+                // Prefix iterator may overshoot — trim.
+                if !k.starts_with(REDIRECT_PREFIX.as_bytes()) {
+                    break;
+                }
+                let entry: RedirectEntry = ciborium::from_reader(v.as_ref())
+                    .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
+                out.push(entry);
             }
-            let entry: RedirectEntry = ciborium::from_reader(v.as_ref())
-                .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
-            out.push(entry);
-        }
-        Ok(out)
+            Ok(out)
+        })
     }
 
     fn lookup_anchored_commit(
@@ -1133,26 +1021,28 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         content_hash: &ContentHash,
         supporting_content_hash: &ContentHash,
     ) -> Result<Option<LayerId>, StorageError> {
-        let key = format!(
-            "{ANCHORED_COMMIT_PREFIX}{}:{}",
-            hex::encode(content_hash.0),
-            hex::encode(supporting_content_hash.0)
-        );
-        match self.db.get(key.as_bytes()) {
-            Ok(Some(bytes)) => {
-                if bytes.len() != 32 {
-                    return Err(StorageError::Internal(format!(
-                        "anchored_commit value has length {}, expected 32",
-                        bytes.len()
-                    )));
+        run_blocking(|| {
+            let key = format!(
+                "{ANCHORED_COMMIT_PREFIX}{}:{}",
+                hex::encode(content_hash.0),
+                hex::encode(supporting_content_hash.0)
+            );
+            match self.db.get(key.as_bytes()) {
+                Ok(Some(bytes)) => {
+                    if bytes.len() != 32 {
+                        return Err(StorageError::Internal(format!(
+                            "anchored_commit value has length {}, expected 32",
+                            bytes.len()
+                        )));
+                    }
+                    let mut id = [0u8; 32];
+                    id.copy_from_slice(&bytes);
+                    Ok(Some(LayerId(id)))
                 }
-                let mut id = [0u8; 32];
-                id.copy_from_slice(&bytes);
-                Ok(Some(LayerId(id)))
+                Ok(None) => Ok(None),
+                Err(e) => Err(StorageError::Internal(format!("get anchored_commit: {e}"))),
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(StorageError::Internal(format!("get anchored_commit: {e}"))),
-        }
+        })
     }
 
     fn put_anchored_commit(
@@ -1161,14 +1051,16 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         supporting_content_hash: &ContentHash,
         layer_id: &LayerId,
     ) -> Result<(), StorageError> {
-        let key = format!(
-            "{ANCHORED_COMMIT_PREFIX}{}:{}",
-            hex::encode(content_hash.0),
-            hex::encode(supporting_content_hash.0)
-        );
-        self.db
-            .put(key.as_bytes(), layer_id.0)
-            .map_err(|e| StorageError::Internal(format!("put anchored_commit: {e}")))
+        run_blocking(|| {
+            let key = format!(
+                "{ANCHORED_COMMIT_PREFIX}{}:{}",
+                hex::encode(content_hash.0),
+                hex::encode(supporting_content_hash.0)
+            );
+            self.db
+                .put(key.as_bytes(), layer_id.0)
+                .map_err(|e| StorageError::Internal(format!("put anchored_commit: {e}")))
+        })
     }
 
     fn delete_anchored_commit(
@@ -1176,56 +1068,63 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         content_hash: &ContentHash,
         supporting_content_hash: &ContentHash,
     ) -> Result<(), StorageError> {
-        let key = format!(
-            "{ANCHORED_COMMIT_PREFIX}{}:{}",
-            hex::encode(content_hash.0),
-            hex::encode(supporting_content_hash.0)
-        );
-        self.db
-            .delete(key.as_bytes())
-            .map_err(|e| StorageError::Internal(format!("delete anchored_commit: {e}")))
+        run_blocking(|| {
+            let key = format!(
+                "{ANCHORED_COMMIT_PREFIX}{}:{}",
+                hex::encode(content_hash.0),
+                hex::encode(supporting_content_hash.0)
+            );
+            self.db
+                .delete(key.as_bytes())
+                .map_err(|e| StorageError::Internal(format!("delete anchored_commit: {e}")))
+        })
     }
 
     fn list_anchored_commits(
         &self,
     ) -> Result<Vec<eigenius_kernel::storage::AnchoredCommitEntry>, StorageError> {
-        let mut out = Vec::new();
-        let iter = self.db.prefix_iterator(ANCHORED_COMMIT_PREFIX.as_bytes());
-        for item in iter {
-            let (k, v) = item
-                .map_err(|e| StorageError::Internal(format!("list_anchored_commit iter: {e}")))?;
-            if !k.starts_with(ANCHORED_COMMIT_PREFIX.as_bytes()) {
-                break;
+        run_blocking(|| {
+            let mut out = Vec::new();
+            let iter = self.db.prefix_iterator(ANCHORED_COMMIT_PREFIX.as_bytes());
+            for item in iter {
+                let (k, v) = item.map_err(|e| {
+                    StorageError::Internal(format!("list_anchored_commit iter: {e}"))
+                })?;
+                if !k.starts_with(ANCHORED_COMMIT_PREFIX.as_bytes()) {
+                    break;
+                }
+                let key_str = std::str::from_utf8(&k).map_err(|e| {
+                    StorageError::Internal(format!("non-utf8 anchored_commit key: {e}"))
+                })?;
+                // Parse `cell:<content_hex>:<supporting_content_hex>`.
+                let rest = &key_str[ANCHORED_COMMIT_PREFIX.len()..];
+                let mut parts = rest.splitn(2, ':');
+                let content_hex = parts.next().ok_or_else(|| {
+                    StorageError::Internal("malformed anchored_commit key".to_string())
+                })?;
+                let supporting_hex = parts.next().ok_or_else(|| {
+                    StorageError::Internal(
+                        "malformed anchored_commit key (no supporting)".to_string(),
+                    )
+                })?;
+                let content_hash = hex_to_content_hash(content_hex)?;
+                let supporting_content_hash = hex_to_content_hash(supporting_hex)?;
+                if v.len() != 32 {
+                    return Err(StorageError::Internal(format!(
+                        "anchored_commit value has length {}, expected 32",
+                        v.len()
+                    )));
+                }
+                let mut id = [0u8; 32];
+                id.copy_from_slice(&v);
+                out.push(eigenius_kernel::storage::AnchoredCommitEntry {
+                    content_hash,
+                    supporting_content_hash,
+                    layer_id: LayerId(id),
+                });
             }
-            let key_str = std::str::from_utf8(&k).map_err(|e| {
-                StorageError::Internal(format!("non-utf8 anchored_commit key: {e}"))
-            })?;
-            // Parse `cell:<content_hex>:<supporting_content_hex>`.
-            let rest = &key_str[ANCHORED_COMMIT_PREFIX.len()..];
-            let mut parts = rest.splitn(2, ':');
-            let content_hex = parts.next().ok_or_else(|| {
-                StorageError::Internal("malformed anchored_commit key".to_string())
-            })?;
-            let supporting_hex = parts.next().ok_or_else(|| {
-                StorageError::Internal("malformed anchored_commit key (no supporting)".to_string())
-            })?;
-            let content_hash = hex_to_content_hash(content_hex)?;
-            let supporting_content_hash = hex_to_content_hash(supporting_hex)?;
-            if v.len() != 32 {
-                return Err(StorageError::Internal(format!(
-                    "anchored_commit value has length {}, expected 32",
-                    v.len()
-                )));
-            }
-            let mut id = [0u8; 32];
-            id.copy_from_slice(&v);
-            out.push(eigenius_kernel::storage::AnchoredCommitEntry {
-                content_hash,
-                supporting_content_hash,
-                layer_id: LayerId(id),
-            });
-        }
-        Ok(out)
+            Ok(out)
+        })
     }
 }
 
@@ -1268,100 +1167,11 @@ mod tests {
         (store, dir)
     }
 
-    #[tokio::test]
-    async fn store_and_load_layer() {
-        let (store, _dir) = open_temp_store();
-
-        let mut builder = LayerBuilder::new("test", None);
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:core:test",
-                vec![(
-                    "urn:eigenius:core:description",
-                    Value::String("hello".into()),
-                )],
-            ))
-            .unwrap();
-        let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
-        let id = layer.id().clone();
-
-        store.store_layer(&layer).await.unwrap();
-        let loaded = store.load_layer(&id).await.unwrap();
-        assert_eq!(loaded.name(), "test");
-        assert_eq!(loaded.iter_resources().count(), 1);
-    }
-
-    #[tokio::test]
-    async fn load_nonexistent_layer() {
-        let (store, _dir) = open_temp_store();
-        let fake_id = LayerId([0u8; 32]);
-        assert!(matches!(
-            store.load_layer(&fake_id).await,
-            Err(StorageError::NotFound(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn store_and_load_resource() {
-        let (store, _dir) = open_temp_store();
-        let layer_id = LayerId([1u8; 32]);
-        let resource = make_resource(
-            "urn:eigenius:test:foo",
-            vec![("urn:eigenius:core:description", Value::String("bar".into()))],
-        );
-
-        store.store_resource(&layer_id, &resource).await.unwrap();
-        let loaded = ResourceStore::load_resource(&store, &layer_id, &iri("urn:eigenius:test:foo"))
-            .await
-            .unwrap();
-        assert!(loaded.is_some());
-        assert_eq!(
-            loaded
-                .unwrap()
-                .get(&iri("urn:eigenius:core:description"))
-                .unwrap()
-                .as_str(),
-            Some("bar")
-        );
-    }
-
-    #[tokio::test]
-    async fn list_resources() {
-        let (store, _dir) = open_temp_store();
-        let layer_id = LayerId([2u8; 32]);
-        store
-            .store_resource(&layer_id, &make_resource("urn:eigenius:test:a", vec![]))
-            .await
-            .unwrap();
-        store
-            .store_resource(&layer_id, &make_resource("urn:eigenius:test:b", vec![]))
-            .await
-            .unwrap();
-
-        let iris = store.list_resources(&layer_id).await.unwrap();
-        assert_eq!(iris.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn list_layers() {
-        let (store, _dir) = open_temp_store();
-
-        let mut b1 = LayerBuilder::new("a", None);
-        b1.add_resource(make_resource("urn:eigenius:core:x", vec![]))
-            .unwrap();
-        let l1 = b1.build(eigenius_kernel::layer::LayerStorage::in_memory());
-
-        let mut b2 = LayerBuilder::new("b", None);
-        b2.add_resource(make_resource("urn:eigenius:core:y", vec![]))
-            .unwrap();
-        let l2 = b2.build(eigenius_kernel::layer::LayerStorage::in_memory());
-
-        store.store_layer(&l1).await.unwrap();
-        store.store_layer(&l2).await.unwrap();
-
-        let ids = store.list_layers().await.unwrap();
-        assert_eq!(ids.len(), 2);
-    }
+    // Phase-0 async `LayerStore` / `ResourceStore` smoke tests were
+    // removed when those traits were deleted. The `PersistentBackend`
+    // (sync) equivalents are exercised by the integration tests in
+    // `storage/rocksdb/tests/` and by the `cbor_coverage_tests` and
+    // `topology_tests` sub-modules below.
 
     // Phase 14g: the legacy `head_pointer` test was removed. The
     // pre-Phase-14 single-head pointer (`set_head`/`get_head`) is gone;
@@ -1736,7 +1546,7 @@ mod tests {
         assert!(empty.is_empty());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn persistence_across_reopen() {
         let dir = TempDir::new().unwrap();
 
@@ -1755,7 +1565,7 @@ mod tests {
                 .unwrap();
             let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
             let id = layer.id().clone();
-            store.store_layer(&layer).await.unwrap();
+            eigenius_kernel::storage::PersistentBackend::store_layer(&store, &layer).unwrap();
             // Phase 14g: track the head via `branch:main` instead of
             // the removed `set_head`.
             eigenius_kernel::storage::PersistentBackend::put_branch(&store, "main", &id).unwrap();
@@ -1763,20 +1573,30 @@ mod tests {
 
         // Reopen and verify
         {
-            let store = RocksStore::open(dir.path()).unwrap();
-            let head = eigenius_kernel::storage::PersistentBackend::get_branch(&store, "main")
-                .unwrap()
-                .expect("branch:main survives reopen");
+            let store = Arc::new(RocksStore::open(dir.path()).unwrap());
+            let head =
+                eigenius_kernel::storage::PersistentBackend::get_branch(store.as_ref(), "main")
+                    .unwrap()
+                    .expect("branch:main survives reopen");
 
-            let layer = store.load_layer(&head).await.unwrap();
-            assert_eq!(layer.name(), "persisted");
-            assert!(layer
-                .get_resource(&iri("urn:eigenius:core:persistent"))
+            // Resolve the layer via the sync `PersistentBackend` surface;
+            // the old async `load_layer` is gone. We rebuild the chain
+            // (one-element here) and inspect the head through it.
+            let info =
+                eigenius_kernel::storage::PersistentBackend::load_chain_from(store.as_ref(), &head)
+                    .unwrap()
+                    .expect("chain present");
+            let layer_storage =
+                eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store) as _);
+            let head_layer = eigenius_kernel::layer::build_chain(info, layer_storage);
+            assert_eq!(head_layer.name(), "persisted");
+            assert!(head_layer
+                .resolve(&iri("urn:eigenius:core:persistent"))
                 .is_some());
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn chain_reconstruction() {
         let (store, _dir) = open_temp_store();
 
@@ -1786,7 +1606,7 @@ mod tests {
             .add_resource(make_resource("urn:eigenius:core:Class", vec![]))
             .unwrap();
         let root = Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
-        store.store_layer(&root).await.unwrap();
+        eigenius_kernel::storage::PersistentBackend::store_layer(&store, &root).unwrap();
 
         // Build and store child layer
         let mut child_builder = LayerBuilder::new("domain", Some(Arc::clone(&root)));
@@ -1801,7 +1621,7 @@ mod tests {
             .unwrap();
         let child = child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
         let child_id = child.id().clone();
-        store.store_layer(&child).await.unwrap();
+        eigenius_kernel::storage::PersistentBackend::store_layer(&store, &child).unwrap();
         // Phase 14g: track head via `branch:main`; load chain via
         // `load_chain_from(branch_head)` rather than the removed
         // no-arg `load_chain()`.

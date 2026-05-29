@@ -46,7 +46,7 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::lattice::commit_layer;
+use eigenius_kernel::lattice::commit_layer_default;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -80,7 +80,7 @@ fn widget(description: &str) -> Resource {
     r
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn load_after_concurrent_conflicting_commit_reports_needs_witnessed_merge() {
     let tmp = TempDir::new().unwrap();
     let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
@@ -117,7 +117,7 @@ async fn load_after_concurrent_conflicting_commit_reports_needs_witnessed_merge(
     a_builder
         .add_resource(widget("from concurrent client A"))
         .unwrap();
-    let layer_a = commit_layer(a_builder, storage.clone(), backend.as_ref())
+    let layer_a = commit_layer_default(a_builder, storage.clone(), backend.as_ref())
         .expect("commit_layer A succeeds");
 
     // Advance the branch ref to L_A out-of-band. The service's cached
@@ -143,6 +143,8 @@ async fn load_after_concurrent_conflicting_commit_reports_needs_witnessed_merge(
         content_type: "application/eigon+json".to_string(),
         auto_commit: true,
         branch: String::new(),
+        policy: None,
+        explicit_tombstones: Vec::new(),
     };
     let response = service
         .load(Request::new(load_request))

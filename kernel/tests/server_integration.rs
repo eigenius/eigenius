@@ -187,6 +187,8 @@ async fn load_and_query() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         })
         .await
         .unwrap();
@@ -194,6 +196,25 @@ async fn load_and_query() {
     let load = load_response.into_inner();
     assert!(load.success, "load failed: {:?}", load.errors);
     assert_eq!(load.resource_count, 5);
+
+    // Sanity-check that Rex (the single Dog instance in animals.json)
+    // is reachable post-commit. If this fails, the load reported success
+    // but didn't actually land Rex; if it passes, the failure below is
+    // in the query engine's MATCH path, not in the commit pipeline.
+    let rex_inspect = client
+        .inspect(InspectRequest {
+            iri: "urn:eigenius:example:rex".to_string(),
+            at_layer: String::new(),
+            branch: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(
+        rex_inspect.found,
+        "Rex was not reachable after load; load reported success but the user-layer \
+         commit didn't actually land the resource (or it was tombstoned by a cascade)"
+    );
 
     // Query for dogs
     let query_response = client

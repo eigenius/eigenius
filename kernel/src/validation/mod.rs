@@ -17,6 +17,16 @@
 //! Validates resources in a layer against definitions reachable through
 //! the parent chain. Implements all validation rules from D1 §5.4.
 
+pub mod retroactive;
+pub mod working_set;
+
+pub use retroactive::retroactive_validate;
+pub use working_set::{
+    CommitWorkingSet, CommitWorkingSetPool, DrainedViolations, InMemoryIriQueue, InMemoryIriSet,
+    InMemoryViolationCollector, IriQueue, IriSet, PooledWorkingSet, ViolationCollector,
+    WorkingSetExhausted, DEFAULT_WORKING_SET_CAP,
+};
+
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -93,10 +103,11 @@ pub enum ValidationRule {
     UniverseStratificationViolation,
     /// A class or property declaration references an IRI that doesn't
     /// resolve to a resource of the expected kind in the layer chain.
-    /// Examples: `requires` referencing a missing `core:Property`,
-    /// `class_types` referencing a missing `core:Class`, `data_type`
-    /// referencing a missing `core:DataType`, `subclass_of` referencing
-    /// a missing `core:Class`. See eigenius#26.
+    /// Examples: `is_a` referencing a missing class, `requires`
+    /// referencing a missing `core:Property`, `class_types` referencing
+    /// a missing `core:Class`, `data_type` referencing a missing
+    /// `core:DataType`, `subclass_of` referencing a missing
+    /// `core:Class`. See eigenius#26.
     UnresolvedClassReference,
     /// An inductive value carries a `ctor` not declared on its
     /// referenced `InductiveType`, an arity mismatch against the

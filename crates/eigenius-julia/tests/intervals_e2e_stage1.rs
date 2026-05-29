@@ -44,14 +44,17 @@
 use std::sync::Arc;
 
 use eigenius_julia::mirror_gen::{mirror_to_resource, JuliaMirrorGenerator};
-use eigenius_kernel::bootstrap::bootstrap;
+use eigenius_kernel::bootstrap::bootstrap_with_storage;
 use eigenius_kernel::capability::registration::validate_external_institution_chain;
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::registry::{InstitutionIndex, RuntimeKind};
-use eigenius_kernel::layer::Layer;
+use eigenius_kernel::lattice::commit_layer_default;
+use eigenius_kernel::layer::{Layer, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_kernel::storage::memory::MemoryPersistentBackend;
+use eigenius_kernel::storage::PersistentBackend;
 
 // ─── Paths to the institution's source-of-truth artifacts ──────────────
 
@@ -101,12 +104,25 @@ fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
 
-fn commit_layer(ctx: &mut ExecutionContext, json: &str, name: &str) -> Arc<Layer> {
+/// Stage a JSON document onto `ctx`'s working layer, then route the
+/// commit through [`commit_layer_default`] (the D41 single-layer-commit
+/// surface) and advance `ctx.head` to the new layer.
+fn commit_layer(
+    ctx: &mut ExecutionContext,
+    backend: &MemoryPersistentBackend,
+    json: &str,
+    name: &str,
+) -> Arc<Layer> {
     let resources = eigon_json::parse_document(json).expect("Eigon-JSON must parse");
     for r in resources {
         ctx.add_resource(r).expect("add_resource");
     }
-    ctx.commit(name).expect("commit")
+    let working = ctx.take_working(name).expect("take_working");
+    let layer = commit_layer_default(working, ctx.storage().clone(), backend)
+        .expect("commit_layer_default");
+    ctx.advance_head(Arc::clone(&layer), name)
+        .expect("advance_head");
+    layer
 }
 
 /// `ChainAccessor` impl backed by an in-process [`Layer`]. The mirror
@@ -141,22 +157,30 @@ fn intervals_install_lifecycle_produces_clean_external_institution_plan() {
     // Stage 1 walks the install pipeline in process and pins the
     // resulting plan against the declared metadata.
 
-    // 1. Bootstrap.
-    let mut ctx = bootstrap().expect("bootstrap");
+    // 1. Bootstrap with a memory-backed `PersistentBackend` so commits
+    //    route through `commit_layer_default` (D41 Phase G).
+    let backend = Arc::new(MemoryPersistentBackend::new());
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+    let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
     // 1.4 JuMP ontology — must precede symbolics because
     //     `SymbolicsToJuMPInput` references jump:VariableBound and
     //     jump:Constraint via class_types (Phase 19f.1).
-    commit_layer(&mut ctx, JUMP_ONTOLOGY_JSON, "jump_ontology");
+    commit_layer(&mut ctx, &backend, JUMP_ONTOLOGY_JSON, "jump_ontology");
 
     // 1.5 Symbolics ontology — must precede intervals because
     //     `BoundsRequest.expr` references SymbolicExpression
     //     (Phase 19d.2).
-    commit_layer(&mut ctx, SYMBOLICS_ONTOLOGY_JSON, "symbolics_ontology");
+    commit_layer(
+        &mut ctx,
+        &backend,
+        SYMBOLICS_ONTOLOGY_JSON,
+        "symbolics_ontology",
+    );
 
     // 2. Ontology layer — the BoundedBy class + value/lower/upper
     //    properties.
-    let ontology_layer = commit_layer(&mut ctx, ONTOLOGY_JSON, "intervals_ontology");
+    let ontology_layer = commit_layer(&mut ctx, &backend, ONTOLOGY_JSON, "intervals_ontology");
     assert!(
         ontology_layer.resolve(&iri(BOUNDED_BY_CLASS_IRI)).is_some(),
         "BoundedBy class must resolve on the committed ontology layer"
@@ -204,7 +228,13 @@ fn intervals_install_lifecycle_produces_clean_external_institution_plan() {
         .clone();
     ctx.add_resource(mirror_resource)
         .expect("commit mirror Resource");
-    let _mirror_layer = ctx.commit("intervals_mirror").expect("commit mirror layer");
+    let mirror_working = ctx.take_working("intervals_mirror").expect("take_working");
+    let mirror_layer =
+        commit_layer_default(mirror_working, ctx.storage().clone(), backend.as_ref())
+            .expect("commit mirror layer");
+    ctx.advance_head(Arc::clone(&mirror_layer), "intervals_mirror")
+        .expect("advance_head");
+    let _mirror_layer = mirror_layer;
 
     // 4. Env layer — RuntimeEnvironment carrying language, image
     //    digest (placeholder), the mirror reference, runtime version,
@@ -214,11 +244,21 @@ fn intervals_install_lifecycle_produces_clean_external_institution_plan() {
     //    the boundary check (D26 §5.3.1).
     let env = build_env_resource(&mirror_iri);
     ctx.add_resource(env).expect("commit env");
-    let _env_layer = ctx.commit("intervals_env").expect("commit env layer");
+    let env_working = ctx.take_working("intervals_env").expect("take_working");
+    let env_layer = commit_layer_default(env_working, ctx.storage().clone(), backend.as_ref())
+        .expect("commit env layer");
+    ctx.advance_head(Arc::clone(&env_layer), "intervals_env")
+        .expect("advance_head");
+    let _env_layer = env_layer;
 
     // 5. Institution layer — Institution + QueryClass +
     //    RuntimeMethodSignature.
-    let institution_layer = commit_layer(&mut ctx, INSTITUTION_JSON, "intervals_institution");
+    let institution_layer = commit_layer(
+        &mut ctx,
+        &backend,
+        INSTITUTION_JSON,
+        "intervals_institution",
+    );
     assert!(
         institution_layer.resolve(&iri(INSTITUTION_IRI)).is_some(),
         "Institution must resolve on the committed institution layer"

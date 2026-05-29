@@ -119,7 +119,7 @@ export function createMcpServer(client: KernelClient): McpServer {
       try {
         const response = await client.load(
           args.json,
-          args.auto_commit ?? true,
+          { autoCommit: args.auto_commit ?? true },
         );
         return {
           content: [{

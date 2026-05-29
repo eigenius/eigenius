@@ -19,7 +19,7 @@
 //!   - eigenius_wasm_doc_validator.wasm: document validator using the SDK
 //!
 //! D14 institution-side host-bridge tests live in
-//! `kernel/src/capability/wasm_institution_d14.rs::tests`.
+//! `kernel/src/capability/wasm_institution.rs::tests`.
 
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
 use crate::ontology::iri::Iri;

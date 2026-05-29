@@ -26,6 +26,7 @@
 pub mod api;
 pub mod bootstrap;
 pub mod capability;
+pub mod commit;
 pub mod context;
 pub mod esl;
 pub mod gc;

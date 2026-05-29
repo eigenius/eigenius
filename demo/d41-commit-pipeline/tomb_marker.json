@@ -1,0 +1,8 @@
+[
+  {
+    "@id": "urn:eigenius:test:d41-template:Marker",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Marker",
+    "urn:eigenius:core:description": "Unrelated content so the explicit-tombstone commit has something to apply to. The --explicit-tombstone urn:eigenius:test:d41-template:Mouse flag should suppress Mouse alongside committing Marker."
+  }
+]

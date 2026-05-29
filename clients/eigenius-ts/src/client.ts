@@ -64,6 +64,12 @@ import {
   type ListTagsResponse,
   ListTasksRequestSchema,
   type ListTasksResponse,
+  type CommitPolicy,
+  CommitPolicy_CascadeTombstoneSchema,
+  CommitPolicy_RejectSchema,
+  CommitPolicySchema,
+  type CommittedLayer,
+  LayerRole,
   LoadRequestSchema,
   type LoadResponse,
   type CascadeAckWire,
@@ -113,6 +119,8 @@ export type {
   CancelTaskResponse,
   CascadeAckWire,
   CascadeItemWire,
+  CommitPolicy,
+  CommittedLayer,
   ComorphismDecl,
   ConsolidateChainResponse,
   CreateBranchResponse,
@@ -154,6 +162,7 @@ export type {
 export {
   ConsolidateErrorKind,
   DispatchRole,
+  LayerRole,
   MergeOutcome,
   MergeQuotientKind,
   MergeSide,
@@ -279,6 +288,52 @@ export interface LoadOptions {
    * use `createBranch()` to create one.
    */
   branch?: string;
+
+  /**
+   * Retroactive-validation policy (D41 §3.3, §8). Omit for the
+   * server-side default (`{ kind: "reject", maxViolations: 100 }`).
+   * `cascadeTombstone` opts into cascade-tombstoning lower-layer IRIs
+   * that become invalid under the new layer's effect.
+   */
+  policy?: LoadPolicy;
+
+  /**
+   * IRIs to tombstone as part of this commit (D41 §10.1). Applied to
+   * the initial user-layer builder before retroactive validation runs;
+   * under `cascadeTombstone` they're combined with any cascade-inferred
+   * tombstones.
+   */
+  explicitTombstones?: string[];
+}
+
+/**
+ * Commit-policy shapes accepted by `Eigen.load`. Maps to the proto
+ * `CommitPolicy` oneof. Absent or `{ kind: "reject" }` with no
+ * `maxViolations` defers to the server-side default
+ * (`Reject{ max_violations: 100 }`).
+ */
+export type LoadPolicy =
+  | { kind: "reject"; maxViolations?: number }
+  | { kind: "cascadeTombstone" };
+
+function policyToProto(policy: LoadPolicy | undefined): CommitPolicy | undefined {
+  if (!policy) return undefined;
+  if (policy.kind === "reject") {
+    return create(CommitPolicySchema, {
+      variant: {
+        case: "reject",
+        value: create(CommitPolicy_RejectSchema, {
+          maxViolations: policy.maxViolations ?? 0,
+        }),
+      },
+    });
+  }
+  return create(CommitPolicySchema, {
+    variant: {
+      case: "cascadeTombstone",
+      value: create(CommitPolicy_CascadeTombstoneSchema, {}),
+    },
+  });
 }
 
 export interface RunProgramOptions {
@@ -523,6 +578,8 @@ export class Eigen {
         contentType,
         autoCommit: options.autoCommit ?? true,
         branch: this.resolveBranch(options.branch),
+        policy: policyToProto(options.policy),
+        explicitTombstones: options.explicitTombstones ?? [],
       }),
     );
   }

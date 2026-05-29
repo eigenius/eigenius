@@ -70,7 +70,10 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
-    /// Build a bloom from the layer's defined IRIs at the default FPR.
+    /// Build a bloom from a single IRI set at the default FPR. Used
+    /// by tests and any callsite that wants a bloom over an arbitrary
+    /// set of IRIs (not a layer's visibility state). For per-layer
+    /// shadowing blooms use [`BloomFilter::for_layer`].
     pub fn for_iris(iris: &BTreeSet<Iri>) -> Self {
         Self::for_iris_with_fpr(iris, DEFAULT_FPR)
     }
@@ -88,6 +91,33 @@ impl BloomFilter {
             iri_count: n,
         };
         for iri in iris {
+            bloom.insert(iri);
+        }
+        bloom
+    }
+
+    /// Build a per-layer shadowing bloom over the union of `defined`
+    /// and `tombstoned`. The bloom is the master "should I consult
+    /// this layer" gate during chain walks (D23 §5.2): every IRI the
+    /// layer modifies the visibility of — by defining a body for it
+    /// or by tombstoning a parent's body (D20 §6.2 / §6.3) — must
+    /// produce `might_contain == true`. Walkers that skip a layer
+    /// whose bloom returns `false` are guaranteed the layer changes
+    /// nothing for that IRI.
+    ///
+    /// Pre-condition: `LayerBuilder` rejects layers that simultaneously
+    /// define and tombstone the same IRI, so the two sets are disjoint
+    /// and the bloom is sized for the exact union count.
+    pub fn for_layer(defined: &BTreeSet<Iri>, tombstoned: &BTreeSet<Iri>) -> Self {
+        let n = (defined.len() + tombstoned.len()) as u64;
+        let (bit_count, hash_count) = size_params(n, DEFAULT_FPR);
+        let mut bloom = Self {
+            bits: vec![0u64; (bit_count / 64) as usize],
+            bit_count,
+            hash_count,
+            iri_count: n,
+        };
+        for iri in defined.iter().chain(tombstoned.iter()) {
             bloom.insert(iri);
         }
         bloom
@@ -284,6 +314,41 @@ mod tests {
             );
             assert!(m >= MIN_BIT_COUNT);
         }
+    }
+
+    #[test]
+    fn for_layer_unions_defined_and_tombstoned() {
+        // The bloom must report `might_contain == true` for both
+        // defined IRIs and tombstoned IRIs — tombstones are
+        // visibility-modifying changes the chain walk must not skip
+        // past.
+        let mut defined = BTreeSet::new();
+        defined.insert(iri("urn:eigenius:test:def"));
+        let mut tombstoned = BTreeSet::new();
+        tombstoned.insert(iri("urn:eigenius:test:tomb"));
+
+        let bloom = BloomFilter::for_layer(&defined, &tombstoned);
+        assert!(bloom.might_contain(&iri("urn:eigenius:test:def")));
+        assert!(bloom.might_contain(&iri("urn:eigenius:test:tomb")));
+        // Untouched IRI doesn't have to miss (1% FPR budget), so we
+        // only assert the union members are present.
+        assert_eq!(bloom.iri_count(), 2);
+    }
+
+    #[test]
+    fn for_layer_with_empty_tombstones_matches_for_iris() {
+        // When tombstoned is empty, `for_layer` and `for_iris` must
+        // produce byte-identical blooms — the on-disk shape for
+        // layers without tombstones can't have churned.
+        let mut defined = BTreeSet::new();
+        for i in 0..50 {
+            defined.insert(iri(&format!("urn:eigenius:test:{i}")));
+        }
+        let tombstoned: BTreeSet<Iri> = BTreeSet::new();
+
+        let from_layer = BloomFilter::for_layer(&defined, &tombstoned);
+        let from_iris = BloomFilter::for_iris(&defined);
+        assert_eq!(from_layer, from_iris);
     }
 
     #[test]

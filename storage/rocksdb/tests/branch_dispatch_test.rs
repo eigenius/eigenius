@@ -95,6 +95,8 @@ async fn load_into(service: &EigeniusService, branch: &str, payload: &str) -> St
             content_type: "application/eigon+json".into(),
             auto_commit: true,
             branch: branch.into(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load")
@@ -105,7 +107,7 @@ async fn load_into(service: &EigeniusService, branch: &str, payload: &str) -> St
     resp.layer_id
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn two_branches_advance_independently() {
     let (_tmp, service) = build_service();
     create_branch_off_main(&service, "feature-x").await;
@@ -147,7 +149,7 @@ async fn two_branches_advance_independently() {
     assert_ne!(feature_after_beta, beta_layer);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inspect_routes_by_branch() {
     let (_tmp, service) = build_service();
     create_branch_off_main(&service, "feature-x").await;
@@ -205,7 +207,7 @@ async fn inspect_routes_by_branch() {
     assert!(!beta_on_feature.found);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn empty_branch_defaults_to_main() {
     let (_tmp, service) = build_service();
     let layer = load_into(&service, "", BETA_JSON).await;
@@ -213,7 +215,7 @@ async fn empty_branch_defaults_to_main() {
     assert_eq!(layer, main_head);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn unknown_branch_returns_not_found() {
     let (_tmp, service) = build_service();
     let err = service
@@ -222,13 +224,15 @@ async fn unknown_branch_returns_not_found() {
             content_type: "application/eigon+json".into(),
             auto_commit: true,
             branch: "ghost-branch".into(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect_err("ghost branch should fail");
     assert_eq!(err.code(), Code::NotFound);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn at_layer_and_branch_mutually_exclusive() {
     let (_tmp, service) = build_service();
     let err = service

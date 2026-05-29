@@ -21,7 +21,7 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::lattice::{commit_layer, update_branch, ConflictPolicy};
+use eigenius_kernel::lattice::{commit_layer_default, update_branch, ConflictPolicy};
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -87,7 +87,7 @@ fn append_chain(n: usize, backend: &Arc<dyn PersistentBackend>) -> Vec<String> {
             Value::String(format!("v{i}")),
         );
         builder.add_resource(r).unwrap();
-        let layer = commit_layer(builder, storage.clone(), backend.as_ref()).unwrap();
+        let layer = commit_layer_default(builder, storage.clone(), backend.as_ref()).unwrap();
 
         update_branch(
             "main",

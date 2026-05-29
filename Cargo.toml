@@ -12,7 +12,6 @@ members = [
     "sdk/wasm-sdk",
     "storage/tikv",
     "storage/rocksdb",
-    "storage/memory",
     "cli",
 ]
 exclude = [

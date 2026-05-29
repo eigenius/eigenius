@@ -72,14 +72,33 @@ pub fn compute_supporting_layer(
         return None;
     }
     // Walk head→root through the first-parent chain. The supporting
-    // layer is the first ancestor that defines any external reference
-    // — its ancestor closure (itself + everything below) then covers
-    // every remaining reference, because chain validation already
-    // ensures every reference resolves somewhere in the chain.
+    // layer is the first ancestor that *resolves* any external
+    // reference — its ancestor closure (itself + everything below)
+    // then covers every remaining reference.
+    //
+    // Tombstones encountered along the walk hide deeper definitions
+    // of the same IRI (D20 §6.2 / §6.3, 15g step 3). A reference
+    // tombstoned at an intermediate layer is unreachable from the
+    // layer being built — even if a deeper ancestor defines it —
+    // so the tombstoned reference must be excluded from the
+    // candidate match. Without this masking, `compute_supporting_layer`
+    // would pick a layer whose closure doesn't actually serve the
+    // reference, producing a misleading `supporting_layer` on the
+    // LayerHandle even when chain-validation correctly rejects the
+    // commit downstream.
+    let mut tombstoned: BTreeSet<Iri> = BTreeSet::new();
     let mut current: Option<&Layer> = Some(parent.as_ref());
     while let Some(layer) = current {
+        // Tombstones at this layer hide every definition below it for
+        // the IRIs in `tombstoned_iris`. Accumulate before the
+        // candidate check so a layer that simultaneously sits on the
+        // walk *and* contains a relevant tombstone doesn't lie to us
+        // about a deeper sibling's definition.
+        for t in layer.tombstoned_iris() {
+            tombstoned.insert(t.clone());
+        }
         for iri in &references {
-            if layer.defined_iris().contains(iri) {
+            if !tombstoned.contains(iri) && layer.defined_iris().contains(iri) {
                 return Some(layer.id().clone());
             }
         }
@@ -328,6 +347,103 @@ mod tests {
         assert!(
             supporting.is_none(),
             "fully self-referential layer has no supporting ancestor"
+        );
+    }
+
+    /// Tombstones at an intermediate layer hide deeper definitions
+    /// from the descendant's view (D20 §6.2 / §6.3, 15g step 3).
+    /// `compute_supporting_layer` must skip past a layer that defines
+    /// a reference if the reference was tombstoned by an ancestor
+    /// closer to the layer being built — otherwise the returned
+    /// supporting layer claims a closure that resolve doesn't agree
+    /// with.
+    #[test]
+    fn intermediate_tombstone_hides_deeper_definition() {
+        // Layer L_y (root) defines demo:ClassA. Middle tombstones
+        // demo:ClassA. Child references demo:ClassA. The child's
+        // reference is structurally unreachable (`Layer::resolve`
+        // returns None at middle's tombstone), so there is no valid
+        // supporting layer. Core-namespace IRIs are excluded because
+        // `LayerBuilder::tombstone` rejects them (D20: core never
+        // disappears under merges) — the test uses demo:* IRIs.
+        let root = Arc::new(build_layer(
+            "root",
+            None,
+            vec![(
+                "urn:eigenius:demo:ClassA",
+                vec![("urn:eigenius:core:description", Value::String("A".into()))],
+            )],
+        ));
+        let mut middle_builder = LayerBuilder::new("middle", Some(Arc::clone(&root)));
+        middle_builder
+            .tombstone(iri("urn:eigenius:demo:ClassA"))
+            .unwrap();
+        let middle = Arc::new(middle_builder.build(LayerStorage::in_memory()));
+
+        let mut b = LayerBuilder::new("child", Some(Arc::clone(&middle)));
+        let mut child_resource = Resource::new(iri("urn:eigenius:demo:X"));
+        child_resource.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:ClassA"))]),
+        );
+        b.add_resource(child_resource).unwrap();
+        let resources = b.resources().clone();
+        let defined: BTreeSet<Iri> = resources.keys().cloned().collect();
+        let supporting = compute_supporting_layer(&resources, &defined, Some(&middle));
+        assert!(
+            supporting.is_none(),
+            "tombstone in middle hides root's ClassA from child's perspective; \
+             supporting layer must reflect that no ancestor actually serves the reference"
+        );
+    }
+
+    /// A tombstone in an intermediate layer hides a reference that
+    /// resolves *only* through a deeper layer, but doesn't affect a
+    /// reference resolved through the immediate parent.
+    #[test]
+    fn tombstone_only_masks_affected_reference() {
+        let root = Arc::new(build_layer(
+            "root",
+            None,
+            vec![
+                (
+                    "urn:eigenius:demo:ClassA",
+                    vec![("urn:eigenius:core:description", Value::String("A".into()))],
+                ),
+                (
+                    "urn:eigenius:demo:ClassB",
+                    vec![("urn:eigenius:core:description", Value::String("B".into()))],
+                ),
+            ],
+        ));
+        // Middle tombstones demo:ClassA (hiding root's body) but
+        // defines another resource. A child referencing only ClassB
+        // anchors on root (ClassB is defined there, the tombstone
+        // doesn't affect it).
+        let mut middle_builder = LayerBuilder::new("middle", Some(Arc::clone(&root)));
+        middle_builder
+            .tombstone(iri("urn:eigenius:demo:ClassA"))
+            .unwrap();
+        let middle = Arc::new(middle_builder.build(LayerStorage::in_memory()));
+
+        // Child references ClassB only — supporting layer is root
+        // (where ClassB is defined). The tombstone of ClassA in
+        // middle doesn't mask this reference.
+        let mut b = LayerBuilder::new("child_b", Some(Arc::clone(&middle)));
+        let mut child_resource = Resource::new(iri("urn:eigenius:demo:UsesB"));
+        child_resource.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:ClassB"))]),
+        );
+        b.add_resource(child_resource).unwrap();
+        let resources = b.resources().clone();
+        let defined: BTreeSet<Iri> = resources.keys().cloned().collect();
+        let supporting = compute_supporting_layer(&resources, &defined, Some(&middle));
+        assert_eq!(
+            supporting.as_ref(),
+            Some(root.id()),
+            "child references ClassB defined at root; tombstone of ClassA \
+             at middle is irrelevant to this reference"
         );
     }
 
