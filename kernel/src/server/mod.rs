@@ -1834,11 +1834,20 @@ impl crate::commit::LayerPersister for EigeniusService {
         let layer = layer.as_ref();
         let Some(backend) = self.backend.as_ref() else {
             // No persistent backend — the layer lives in-memory only.
-            // There is no durable branch ref to advance, and no CAS
-            // attempted (merge_outcome = None).
+            // There is no durable branch ref to advance and no CAS
+            // attempted (merge_outcome = None), but `ctx.head` IS the
+            // session's source of truth in this mode, so the
+            // orchestrator must advance to the freshly-built layer.
+            // Returning `branch_advanced = false` here would tell
+            // `CommitOrchestrator::run` to leave `ctx.head` at the
+            // bootstrap, silently dropping every committed resource
+            // from session reads (see kernel/tests/server_integration.rs
+            // `load_and_query`). The field's contract is "should
+            // `ctx.head` advance to this layer?" — in no-backend mode
+            // the answer is yes.
             return Ok(PersistedLayerInfo {
                 layer_id: layer.id().clone(),
-                branch_advanced: false,
+                branch_advanced: true,
                 merge_outcome: None,
                 cache_hit_different_position: false,
             });
@@ -5291,11 +5300,14 @@ mod layer_persister_dispatch_tests {
             .persist(DEFAULT_BRANCH, &head)
             .expect("no-backend path never errors");
 
-        // The no-backend signal is `branch_advanced = false` +
+        // The no-backend signal is `branch_advanced = true` +
         // `merge_outcome = None` + `cache_hit_different_position = false`.
-        // Pinning the combination keeps the no-backend shape stable.
+        // `branch_advanced = true` because in no-backend mode `ctx.head`
+        // is the session's source of truth and the orchestrator must
+        // advance to the freshly-built layer (see the persister's body
+        // for the rationale).
         assert_eq!(via_trait.layer_id, *head.id());
-        assert!(!via_trait.branch_advanced);
+        assert!(via_trait.branch_advanced);
         assert!(!via_trait.cache_hit_different_position);
         assert!(via_trait.merge_outcome.is_none());
     }
