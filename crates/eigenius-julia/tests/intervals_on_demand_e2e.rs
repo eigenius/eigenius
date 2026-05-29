@@ -58,12 +58,15 @@ use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::institution::registry::{DispatchRole, InstitutionIndex};
 use eigenius_kernel::institution::runtime::{Institution, InstitutionRuntime, QueryOutcome};
+use eigenius_kernel::lattice::commit_layer_default;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_kernel::storage::memory::MemoryPersistentBackend;
+use eigenius_kernel::storage::PersistentBackend;
 use eigenius_runtime_substrate::chain::ChainAccessor;
 use eigenius_runtime_substrate::facade::SubstrateDispatcher;
 use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
@@ -124,7 +127,13 @@ const ANCHOR_DOMAIN_IRI: &str = "urn:eigenius:test:on_demand:domain";
 /// the kernel's IRI-dereference pass embeds them before they flow to
 /// the institution.
 fn build_chain() -> (Arc<Layer>, LayerStorage) {
-    let mut ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    // D41 Phase G migration: bootstrap with a memory-backed
+    // `PersistentBackend` so layer commits go through
+    // `commit_layer_default` — the D41 supported single-layer-commit
+    // surface.
+    let backend = Arc::new(MemoryPersistentBackend::new());
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+    let mut ctx = eigenius_kernel::bootstrap::bootstrap_with_storage(storage).expect("bootstrap");
     // Commit order:
     //   - jump ontology first because symbolics now references
     //     jump:VariableBound / jump:Constraint via class_types
@@ -141,14 +150,17 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
         for r in eigon_json::parse_document(json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
-        ctx.commit(label).expect("commit");
+        let working = ctx.take_working(label).expect("take_working");
+        let layer =
+            commit_layer_default(working, ctx.storage().clone(), backend.as_ref()).expect("commit");
+        ctx.advance_head(layer, label).expect("advance_head");
     }
 
     // Anchor a SymbolicExpression and a BoundedBy on the chain so the
-    // textual FIBER syntax can reference them by IRI. Plain `commit`
-    // (rather than `commit_with_validation`) because no
-    // InstitutionRuntime is wired during chain build — AutoOnLoad
-    // wouldn't fire even if we asked for it.
+    // textual FIBER syntax can reference them by IRI. Routed through
+    // `commit_layer_default` (no AutoOnLoad — no InstitutionRuntime is
+    // wired during chain build, so even the orchestrator's
+    // `WithInstitutions` pipeline wouldn't fire any gates here).
     let mut expr = Resource::new(iri(ANCHOR_EXPR_IRI));
     expr.set(
         iri("urn:eigenius:core:is_a"),
@@ -198,7 +210,17 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
         Value::Float(std::f64::consts::FRAC_PI_2),
     );
     ctx.add_resource(domain).expect("add chain domain");
-    ctx.commit("chain_inputs").expect("commit chain inputs");
+    let chain_inputs_working = ctx
+        .take_working("chain_inputs")
+        .expect("take_working chain_inputs");
+    let chain_inputs_layer = commit_layer_default(
+        chain_inputs_working,
+        ctx.storage().clone(),
+        backend.as_ref(),
+    )
+    .expect("commit chain inputs");
+    ctx.advance_head(chain_inputs_layer, "chain_inputs")
+        .expect("advance_head chain_inputs");
 
     (Arc::clone(ctx.head()), ctx.storage().clone())
 }

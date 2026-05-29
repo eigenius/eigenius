@@ -27,9 +27,14 @@
 //!   time — the env Resource itself is committed during the
 //!   live-stack demo, not by this test).
 
-use eigenius_kernel::bootstrap::bootstrap;
+use eigenius_kernel::bootstrap::bootstrap_with_storage;
+use eigenius_kernel::lattice::commit_layer_default;
+use eigenius_kernel::layer::LayerStorage;
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::storage::memory::MemoryPersistentBackend;
+use eigenius_kernel::storage::PersistentBackend;
+use std::sync::Arc;
 
 const CATALYST_ONTOLOGY_JSON: &str =
     include_str!("../../../julia/institutions/catalyst/declarations/catalyst-ontology.eigon.json");
@@ -49,7 +54,13 @@ fn iri(s: &str) -> Iri {
 
 #[test]
 fn catalyst_ontology_and_institution_validate_cleanly() {
-    let mut ctx = bootstrap().expect("bootstrap");
+    // D41 Phase G migration: bootstrap with a memory-backed
+    // `PersistentBackend` so layer commits go through
+    // `commit_layer_default` — the D41 supported single-layer-commit
+    // surface. `ExecutionContext::commit` was retired in D41 Phase G.
+    let backend = Arc::new(MemoryPersistentBackend::new());
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+    let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
     for (label, json) in [
         ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON),
@@ -59,7 +70,10 @@ fn catalyst_ontology_and_institution_validate_cleanly() {
         for r in eigon_json::parse_document(json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
-        ctx.commit(label).expect("commit");
+        let working = ctx.take_working(label).expect("take_working");
+        let layer =
+            commit_layer_default(working, ctx.storage().clone(), backend.as_ref()).expect("commit");
+        ctx.advance_head(layer, label).expect("advance_head");
     }
 
     for required in [

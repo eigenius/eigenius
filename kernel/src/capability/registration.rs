@@ -285,10 +285,10 @@ pub struct ExternalInstitutionCheckError {
 /// every malformed one in `errors`.
 ///
 /// Pure data check — does **not** open a gRPC connection. Used by
-/// [`crate::context::ExecutionContext::commit_with_validation`] to
-/// reject a Load whose external-institution shape can't be wired up,
-/// and by [`register_external_institutions`] to feed the registration
-/// loop without re-walking the chain.
+/// the D41 commit pipeline's `autoonload_dispatch` phase to reject a
+/// Load whose external-institution shape can't be wired up, and by
+/// [`register_external_institutions`] to feed the registration loop
+/// without re-walking the chain.
 pub fn validate_external_institution_chain(
     layer: &Layer,
     index: &InstitutionIndex,

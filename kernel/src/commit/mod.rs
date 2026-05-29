@@ -13,9 +13,10 @@
 // limitations under the License.
 
 //! Commit pipeline — one home for the "land a layer on a branch"
-//! work that is currently smeared across `context::commit_with_validation`,
-//! `lattice::commit_layer`, the Load handler in `server::mod`, and
-//! `server::persist_layer_if_backend`.
+//! work. Pre-D41 this work was smeared across
+//! `context::commit_with_validation`, `lattice::commit_layer`, the
+//! Load handler in `server::mod`, and `server::persist_layer_if_backend`;
+//! Phases A–G of D41 consolidated all of it here.
 //!
 //! The module splits into two layers:
 //!
@@ -62,13 +63,18 @@ pub use crate::validation::{CommitWorkingSet, CommitWorkingSetPool};
 // --- Re-exports of the commit module's own surface ---
 
 pub use hooks::{
-    rebuild_institution_index, register_wasm_components, DidDrainHook, DidPersistHook, HookOutcome,
+    rebuild_institution_index, register_wasm_components, CommitHookHost, DidDrainHook,
+    DidPersistHook, HookOutcome, NoopHost,
 };
 pub use orchestrator::{CommitOrchestrator, MAX_EMISSION_DEPTH};
-pub use outcome::{DispatchEntry, LayerCommitOutcome, LayerEmission, MultiLayerOutcome};
+pub use outcome::{
+    DispatchEntry, EmissionKind, LayerCommitOutcome, LayerEmission, MultiLayerOutcome,
+};
 pub use persister::{BackendStorePersister, LayerPersister, PersistedLayerInfo};
 pub use phases::{
     autoonload_dispatch, build, persist, retroactive_with_cascade, structural_validate,
 };
-pub use pipeline::{CommitPipeline, Phase, PhaseControl, PipelineConfig, PipelineKind};
+pub use pipeline::{
+    CommitPipeline, Phase, PhaseControl, PipelineConfig, PipelineKind, PipelineRunErr,
+};
 pub use state::{CommitState, DrainState, InstitutionContext};

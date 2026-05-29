@@ -186,3 +186,254 @@ impl LayerPersister for BackendStorePersister<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! D41 Phase F.5 — `BackendStorePersister` error-mapping and
+    //! happy-path field-shape coverage.
+
+    use super::*;
+    use crate::layer::{Layer, LayerBuilder, LayerStorage};
+    use crate::storage::memory::MemoryPersistentBackend;
+    use crate::storage::{
+        AnchoredCommitEntry, BatchOp, ChainInfo, PersistentBackend, ResourceBackend, StorageError,
+    };
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    /// Backend wrapper whose `store_layer` always returns
+    /// `StorageError::Internal` so the persister's error mapping can be
+    /// asserted. Every other method delegates to an inner
+    /// [`MemoryPersistentBackend`] so the trait object compiles cleanly
+    /// without manually implementing the long surface.
+    struct FailingStoreBackend {
+        inner: MemoryPersistentBackend,
+    }
+    impl FailingStoreBackend {
+        fn new() -> Self {
+            Self {
+                inner: MemoryPersistentBackend::new(),
+            }
+        }
+    }
+
+    impl ResourceBackend for FailingStoreBackend {
+        fn load_resource(
+            &self,
+            layer_id: &crate::layer::LayerId,
+            iri: &crate::ontology::iri::Iri,
+        ) -> Option<crate::ontology::resource::Resource> {
+            self.inner.load_resource(layer_id, iri)
+        }
+        fn try_load_resource(
+            &self,
+            layer_id: &crate::layer::LayerId,
+            iri: &crate::ontology::iri::Iri,
+        ) -> Result<Option<crate::ontology::resource::Resource>, StorageError> {
+            self.inner.try_load_resource(layer_id, iri)
+        }
+        fn list_layer_iris(
+            &self,
+            layer_id: &crate::layer::LayerId,
+        ) -> Result<BTreeSet<crate::ontology::iri::Iri>, StorageError> {
+            self.inner.list_layer_iris(layer_id)
+        }
+    }
+
+    impl PersistentBackend for FailingStoreBackend {
+        fn load_chain_from(
+            &self,
+            head_id: &crate::layer::LayerId,
+        ) -> Result<Option<ChainInfo>, StorageError> {
+            self.inner.load_chain_from(head_id)
+        }
+        fn store_layer(&self, _layer: &Layer) -> Result<crate::layer::LayerId, StorageError> {
+            Err(StorageError::Internal(
+                "synthetic store_layer failure".into(),
+            ))
+        }
+        fn load_topology(&self) -> Result<crate::layer::LayerTopology, StorageError> {
+            self.inner.load_topology()
+        }
+        fn load_handle(
+            &self,
+            layer_id: &crate::layer::LayerId,
+        ) -> Result<Option<crate::layer::LayerHandle>, StorageError> {
+            self.inner.load_handle(layer_id)
+        }
+        fn get_meta(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_meta(key)
+        }
+        fn put_meta(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_meta(key, value)
+        }
+        fn delete_meta(&self, key: &str) -> Result<(), StorageError> {
+            self.inner.delete_meta(key)
+        }
+        fn write_batch(&self, ops: &[BatchOp]) -> Result<(), StorageError> {
+            self.inner.write_batch(ops)
+        }
+        fn list_meta_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+            self.inner.list_meta_prefix(prefix)
+        }
+        fn as_trace_store(&self) -> &(dyn crate::program::trace::TraceStore + Send + Sync) {
+            self.inner.as_trace_store()
+        }
+        fn triple_index_arc(&self) -> Arc<dyn crate::layer::TripleIndex> {
+            self.inner.triple_index_arc()
+        }
+        fn load_bloom(
+            &self,
+            layer: &crate::layer::LayerId,
+        ) -> Result<Option<crate::layer::BloomFilter>, StorageError> {
+            self.inner.load_bloom(layer)
+        }
+        fn store_bloom(
+            &self,
+            layer: &crate::layer::LayerId,
+            bloom: &crate::layer::BloomFilter,
+        ) -> Result<(), StorageError> {
+            self.inner.store_bloom(layer, bloom)
+        }
+        fn get_branch(&self, name: &str) -> Result<Option<crate::layer::LayerId>, StorageError> {
+            self.inner.get_branch(name)
+        }
+        fn put_branch(&self, name: &str, id: &crate::layer::LayerId) -> Result<(), StorageError> {
+            self.inner.put_branch(name, id)
+        }
+        fn delete_branch(&self, name: &str) -> Result<(), StorageError> {
+            self.inner.delete_branch(name)
+        }
+        fn list_branches(&self) -> Result<Vec<(String, crate::layer::LayerId)>, StorageError> {
+            self.inner.list_branches()
+        }
+        fn create_tag(&self, name: &str, id: &crate::layer::LayerId) -> Result<bool, StorageError> {
+            self.inner.create_tag(name, id)
+        }
+        fn get_tag(&self, name: &str) -> Result<Option<crate::layer::LayerId>, StorageError> {
+            self.inner.get_tag(name)
+        }
+        fn delete_tag(&self, name: &str) -> Result<bool, StorageError> {
+            self.inner.delete_tag(name)
+        }
+        fn list_tags(&self) -> Result<Vec<(String, crate::layer::LayerId)>, StorageError> {
+            self.inner.list_tags()
+        }
+        fn delete_layer(&self, layer: &crate::layer::LayerId) -> Result<(), StorageError> {
+            self.inner.delete_layer(layer)
+        }
+        fn put_redirect(&self, entry: &crate::layer::RedirectEntry) -> Result<(), StorageError> {
+            self.inner.put_redirect(entry)
+        }
+        fn lookup_redirect(
+            &self,
+            source: &crate::layer::LayerId,
+        ) -> Result<Option<crate::layer::RedirectEntry>, StorageError> {
+            self.inner.lookup_redirect(source)
+        }
+        fn delete_redirect(&self, source: &crate::layer::LayerId) -> Result<(), StorageError> {
+            self.inner.delete_redirect(source)
+        }
+        fn list_redirects(&self) -> Result<Vec<crate::layer::RedirectEntry>, StorageError> {
+            self.inner.list_redirects()
+        }
+        fn lookup_anchored_commit(
+            &self,
+            content_hash: &crate::layer::ContentHash,
+            supporting_content_hash: &crate::layer::ContentHash,
+        ) -> Result<Option<crate::layer::LayerId>, StorageError> {
+            self.inner
+                .lookup_anchored_commit(content_hash, supporting_content_hash)
+        }
+        fn put_anchored_commit(
+            &self,
+            content_hash: &crate::layer::ContentHash,
+            supporting_content_hash: &crate::layer::ContentHash,
+            layer_id: &crate::layer::LayerId,
+        ) -> Result<(), StorageError> {
+            self.inner
+                .put_anchored_commit(content_hash, supporting_content_hash, layer_id)
+        }
+        fn delete_anchored_commit(
+            &self,
+            content_hash: &crate::layer::ContentHash,
+            supporting_content_hash: &crate::layer::ContentHash,
+        ) -> Result<(), StorageError> {
+            self.inner
+                .delete_anchored_commit(content_hash, supporting_content_hash)
+        }
+        fn list_anchored_commits(&self) -> Result<Vec<AnchoredCommitEntry>, StorageError> {
+            self.inner.list_anchored_commits()
+        }
+        fn lookup_by_content_hash(
+            &self,
+            content_hash: &crate::layer::ContentHash,
+        ) -> Result<Vec<crate::layer::LayerId>, StorageError> {
+            self.inner.lookup_by_content_hash(content_hash)
+        }
+    }
+
+    /// Build a trivial root layer to hand to the persister. The
+    /// layer's content is irrelevant — the persister only invokes
+    /// `backend.store_layer(&layer)` and inspects the result.
+    fn build_trivial_layer() -> Arc<Layer> {
+        let storage = LayerStorage::in_memory();
+        let builder = LayerBuilder::new("trivial", None);
+        Arc::new(builder.build(storage))
+    }
+
+    /// Hole 6 — backend failure surfaces as `ValidationError` carrying
+    /// the original backend message under
+    /// `ValidationRule::InstitutionValidation` (the documented Phase B
+    /// stand-in).
+    #[test]
+    fn backend_store_persister_returns_validation_error_on_store_failure() {
+        let backend = FailingStoreBackend::new();
+        let persister = BackendStorePersister { backend: &backend };
+        let layer = build_trivial_layer();
+
+        let result = persister.persist("main", &layer);
+        let err = result.expect_err("store_layer Err must surface");
+
+        assert!(matches!(err.rule, ValidationRule::InstitutionValidation));
+        assert!(
+            err.message.contains("synthetic store_layer failure"),
+            "error message must carry the underlying backend message verbatim; \
+             got `{}`",
+            err.message
+        );
+        assert!(
+            err.message.starts_with("persist_layer failed:"),
+            "message must carry the documented `persist_layer failed:` prefix; \
+             got `{}`",
+            err.message
+        );
+    }
+
+    /// Happy path: confirm the PersistedLayerInfo shape documented for
+    /// the no-CAS lattice path.
+    #[test]
+    fn backend_store_persister_returns_no_branch_advanced() {
+        let backend = MemoryPersistentBackend::new();
+        let persister = BackendStorePersister { backend: &backend };
+        let layer = build_trivial_layer();
+
+        let info = persister
+            .persist("main", &layer)
+            .expect("happy path returns Ok");
+
+        assert_eq!(info.layer_id, *layer.id());
+        assert!(
+            !info.branch_advanced,
+            "no CAS in the lattice path; branch_advanced is always false"
+        );
+        assert!(
+            info.merge_outcome.is_none(),
+            "merge_outcome is None when no CAS attempted"
+        );
+        assert!(
+            !info.cache_hit_different_position,
+            "no anchored-commit probe in the simple lattice path"
+        );
+    }
+}

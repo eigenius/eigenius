@@ -80,7 +80,7 @@ fn widget(description: &str) -> Resource {
     r
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn load_after_concurrent_conflicting_commit_reports_needs_witnessed_merge() {
     let tmp = TempDir::new().unwrap();
     let store = Arc::new(RocksStore::open(tmp.path()).unwrap());

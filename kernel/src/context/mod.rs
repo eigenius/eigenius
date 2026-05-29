@@ -16,8 +16,23 @@
 //!
 //! An `ExecutionContext` holds a reference to the current head layer
 //! (the top of the committed chain) and a `LayerBuilder` for accumulating
-//! uncommitted resources. On commit, the working layer is built, validated,
-//! and becomes the new head.
+//! uncommitted resources. Resources are staged on the working layer via
+//! [`ExecutionContext::add_resource`]; commits go through the
+//! [`crate::commit::CommitOrchestrator`] (or the simpler
+//! [`crate::lattice::commit_layer_default`] helper for callers that don't
+//! need orchestrator features). The handler shape is:
+//!
+//! 1. [`take_working`](ExecutionContext::take_working) — extract the
+//!    accumulated `LayerBuilder` and reset the context to a fresh one.
+//! 2. Hand the builder to the pipeline / orchestrator.
+//! 3. [`advance_head`](ExecutionContext::advance_head) on success, or
+//!    [`revert_head`](ExecutionContext::revert_head) if the persist
+//!    didn't advance the branch (D33 §6 cache hit, D34 §G.1 witnessed
+//!    merge).
+//!
+//! D41 Phase G removed the pre-pipeline `commit` / `commit_with_validation`
+//! methods that previously bundled build + validate + persist inside
+//! the context; that work now lives in the `commit::` module.
 
 use crate::layer::{
     BloomCache, Layer, LayerBuilder, LayerError, LayerId, LayerStorage, ResourceCache,
@@ -25,7 +40,6 @@ use crate::layer::{
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use crate::storage::ResourceBackend;
-use crate::validation::Validator;
 use std::fmt;
 use std::sync::Arc;
 
@@ -39,87 +53,22 @@ pub enum ExecutionMode {
 }
 
 /// Errors that can occur during context operations.
+///
+/// D41 Phase G removed the legacy `ValidationFailed { ... }` variant
+/// that previously carried structural / AutoOnLoad rejection
+/// information. Validation failures are now produced by the commit
+/// pipeline as [`crate::lattice::CommitError::Validation`] and reach
+/// callers through the orchestrator's
+/// [`crate::commit::MultiLayerOutcome::error`] field; the context never
+/// has to model them.
 #[derive(Debug)]
 pub enum ContextError {
     /// Attempted a write operation in read-only mode.
     ReadOnly,
     /// Layer building error.
     Layer(LayerError),
-    /// Validation failed on commit. `provenance_layer` is `Some` when
-    /// the commit was rejected by an institutional gate (D31 §6.3) but
-    /// the audit-anchor `Verdict` + `RuntimeInvocation` resources still
-    /// landed on a separate provenance-only layer. `None` for the plain
-    /// structural-validation failure path where nothing committed.
-    ///
-    /// `prior_head` is `Some` whenever `ctx.head` was advanced before
-    /// the validation step rejected the commit — callers need it to
-    /// revert `ctx.head` if the subsequent provenance-layer persist
-    /// short-circuits (different-position cache hit per D33 §6). It's
-    /// `None` for failure paths that bail out before any head-advance
-    /// (structural validation, missing institution, handler errors)
-    /// because there's nothing to revert. See `CommitOutcome::prior_head`
-    /// for the analogous Ok-path field and the rationale.
-    ValidationFailed {
-        errors: Vec<crate::validation::ValidationError>,
-        provenance_layer: Option<Arc<Layer>>,
-        prior_head: Option<Arc<Layer>>,
-    },
     /// Head has moved since this context was created (conflict).
     StaleHead { expected: LayerId, actual: LayerId },
-}
-
-impl ContextError {
-    /// Convenience constructor for the "validation failed, no
-    /// provenance committed" case — the structural / installer /
-    /// handler-error paths.
-    pub fn validation_failed(errors: Vec<crate::validation::ValidationError>) -> Self {
-        // `prior_head: None` — this constructor is for failures that
-        // bail before ctx.head advances (structural validation,
-        // missing institution, handler errors), so there's nothing
-        // to revert.
-        Self::ValidationFailed {
-            errors,
-            provenance_layer: None,
-            prior_head: None,
-        }
-    }
-}
-
-/// Successful outcome of [`ExecutionContext::commit_with_validation`].
-///
-/// Carries both the user-authored layer (the gated subject's commit)
-/// and the optional follow-up `verdict_provenance` layer ([D31 §6.3])
-/// that AutoOnLoad dispatches add when at least one Holds /
-/// Undecidable Verdict landed against the gated subject. Both must
-/// be persisted by the caller — the provenance layer is the parent
-/// of the next user commit (`ctx.head` is advanced to it), so a
-/// caller that persists only `user_layer` would leave the
-/// provenance layer as an in-memory ghost. The next commit would
-/// reference a parent the backend doesn't know about, and
-/// `update_branch`'s LCA walk would fail with
-/// "merge during update_branch: no common ancestor". Persisting
-/// both keeps the chain on the backend in lockstep with `ctx.head`.
-#[derive(Debug, Clone)]
-pub struct CommitOutcome {
-    /// The committed layer carrying the user-authored resources from
-    /// this batch.
-    pub user_layer: Arc<Layer>,
-    /// The follow-up `verdict_provenance` layer — `Some` iff at least
-    /// one AutoOnLoad QueryClass on a Holds / Undecidable path
-    /// produced a chain-side `Verdict` + `RuntimeInvocation` audit
-    /// pair. Mirrors the Fails-path `ContextError::ValidationFailed
-    /// { provenance_layer, .. }` shape so the caller's persist logic
-    /// is identical across both branches.
-    pub provenance_layer: Option<Arc<Layer>>,
-    /// The context's head from immediately before this commit. Callers
-    /// keep this around so they can revert `ctx.head` back to it when
-    /// the corresponding `persist_layer_if_backend` reports the
-    /// branch ref did *not* advance (different-position cache hit per
-    /// D33 §6, NeedsWitnessedMerge per D34 §G.1). Without the revert,
-    /// `ctx.head` advances to an in-memory-only layer whose parent
-    /// isn't in storage — the next commit's `update_branch` LCA walk
-    /// then fails with "merge during update_branch: no common ancestor".
-    pub prior_head: Arc<Layer>,
 }
 
 impl fmt::Display for ContextError {
@@ -127,13 +76,6 @@ impl fmt::Display for ContextError {
         match self {
             ContextError::ReadOnly => write!(f, "cannot modify in read-only mode"),
             ContextError::Layer(e) => write!(f, "layer error: {e}"),
-            ContextError::ValidationFailed { errors, .. } => {
-                writeln!(f, "validation failed with {} error(s):", errors.len())?;
-                for e in errors {
-                    writeln!(f, "  {e}")?;
-                }
-                Ok(())
-            }
             ContextError::StaleHead { expected, actual } => {
                 write!(
                     f,
@@ -257,260 +199,85 @@ impl ExecutionContext {
         self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
     }
 
-    /// Commit the working layer.
+    /// Install `layer` as the new `head` and reset the working builder
+    /// to attach to it. Callers use this from the commit orchestrator
+    /// (D41 §6) once a pipeline's `persist` phase set
+    /// `branch_advanced = true`. Read-only contexts reject; the
+    /// caller should have built a write context for the commit-shaped
+    /// RPC.
     ///
-    /// Builds the working layer, validates it against the chain,
-    /// updates head to the new layer, and starts a fresh working layer.
-    ///
-    /// Returns the new layer (which is now the head).
-    pub fn commit(&mut self, name: &str) -> Result<Arc<Layer>, ContextError> {
+    /// D41 §9.
+    pub fn advance_head(&mut self, layer: Arc<Layer>, name: &str) -> Result<(), ContextError> {
         if self.mode == ExecutionMode::ReadOnly {
             return Err(ContextError::ReadOnly);
         }
-
-        // Build the layer using the context's shared cache + backend.
-        let working = std::mem::replace(
-            &mut self.working,
-            LayerBuilder::new(name, Some(Arc::clone(&self.head))),
-        );
-        let new_layer = Arc::new(working.build(self.storage.clone()));
-
-        // Validate the new layer
-        let validator = Validator::new(Arc::clone(&new_layer));
-        let errors = validator.validate();
-        if !errors.is_empty() {
-            // Validation failed — restore working layer state
-            // (the resources are lost since we consumed the builder,
-            // but that's acceptable — the caller should fix and retry)
-            return Err(ContextError::validation_failed(errors));
-        }
-
-        // Update head
-        self.head = Arc::clone(&new_layer);
-
-        // Reset working layer to point to new head
+        self.head = layer;
         self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
-
-        Ok(new_layer)
+        Ok(())
     }
 
-    /// Commit the working layer with D14 institution-aware validation
-    /// (D14 §9.1). Same as [`commit`] but, after structural validation
-    /// succeeds, runs every AutoOnLoad QueryClass declared in the
-    /// chain against the new layer's resources. A QueryClass returning
-    /// `Fails` aborts the commit with `ContextError::ValidationFailed`;
-    /// `Holds` and `Undecidable` accept.
+    /// Consume the working builder and replace it with a fresh, empty
+    /// one parented at `ctx.head()` and named `fresh_name`. Returns the
+    /// old builder by value so the caller can route its accumulated
+    /// resources / tombstones through the commit pipeline.
     ///
-    /// The institution dispatch needs `&ExecutionContext` to pass to
-    /// the institution's `query` handler, so the commit promotes head
-    /// to the new layer *before* dispatching, then reverts head if any
-    /// AutoOnLoad QueryClass rejects. This lets a QueryClass resolve
-    /// freshly-loaded references via the chain.
+    /// Used by the Load handler (and other commit-shaped RPC handlers
+    /// once Phase F migrates them) to hand the accumulated working
+    /// builder off to the [`crate::commit::CommitOrchestrator`] as the
+    /// root [`crate::commit::LayerEmission`]. The orchestrator then
+    /// constructs its own builders per emission; this method makes the
+    /// transition explicit at the handler boundary.
     ///
-    /// Used by the Load RPC. RunProgram-style commits stay on plain
-    /// [`commit`] — those produce trusted resources and don't need
-    /// institutional re-checking.
-    pub fn commit_with_validation(
-        &mut self,
-        name: &str,
-        index: &crate::institution::registry::InstitutionIndex,
-        runtime: &crate::institution::runtime::InstitutionRuntime,
-    ) -> Result<CommitOutcome, ContextError> {
+    /// Read-only contexts reject — taking the working builder is a
+    /// write operation by intent, even though the working builder is
+    /// always present (the handler that called `take_working` was
+    /// going to commit something, and the orchestrator that consumes
+    /// the returned builder needs `ctx` to be writeable for the
+    /// subsequent `advance_head` calls).
+    ///
+    /// D41 §9.
+    pub fn take_working(&mut self, fresh_name: &str) -> Result<LayerBuilder, ContextError> {
         if self.mode == ExecutionMode::ReadOnly {
             return Err(ContextError::ReadOnly);
         }
-
-        let working = std::mem::replace(
+        let parent = Arc::clone(&self.head);
+        Ok(std::mem::replace(
             &mut self.working,
-            LayerBuilder::new(name, Some(Arc::clone(&self.head))),
-        );
-        let new_layer = Arc::new(working.build(self.storage.clone()));
-
-        // Structural validation first — institutions assume well-formed
-        // morphism resources (D14 §9.1).
-        let validator = Validator::new(Arc::clone(&new_layer));
-        let errors = validator.validate();
-        if !errors.is_empty() {
-            return Err(ContextError::validation_failed(errors));
-        }
-
-        // D31 §5 install-time cross-check — every external Institution
-        // declaration in the new layer must resolve its env_ref, image
-        // digest, and per-QueryClass dispatch metadata against the
-        // chain. Run before head promotion so an incomplete external
-        // institution fails the Load cleanly rather than landing in
-        // the chain and surfacing only at runtime.
-        let new_index = crate::institution::registry::InstitutionIndex::from_layer(&new_layer).0;
-        let (_, ext_errors) = crate::capability::registration::validate_external_institution_chain(
-            &new_layer, &new_index,
-        );
-        if !ext_errors.is_empty() {
-            let mapped: Vec<crate::validation::ValidationError> = ext_errors
-                .into_iter()
-                .map(|e| crate::validation::ValidationError {
-                    resource_id: Iri::parse(&e.institution_iri).ok(),
-                    property: None,
-                    rule: crate::validation::ValidationRule::InstitutionValidation,
-                    message: e.message,
-                })
-                .collect();
-            return Err(ContextError::validation_failed(mapped));
-        }
-
-        // Promote head to the new layer so AutoOnLoad QueryClasses can
-        // resolve cross-references freshly loaded in the same batch.
-        let prior_head = std::mem::replace(&mut self.head, Arc::clone(&new_layer));
-        self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
-
-        // Read-only ExecutionContext over the promoted-head state.
-        // Cloning self gives institution handlers a snapshot view —
-        // they can call `resolve` etc. against the new chain.
-        let snapshot = ExecutionContext::new(
-            Arc::clone(&new_layer),
-            "__validate__",
-            ExecutionMode::ReadOnly,
-            self.storage.clone(),
-        );
-        let auto_outcome = crate::institution::dispatch::dispatch_auto_on_load_for_layer(
-            &new_layer, index, runtime, &snapshot,
-        );
-
-        // Handler-side errors (missing institution, malformed Verdict,
-        // etc.) have no provenance — surface them as plain
-        // ValidationFailed and revert head. These are bugs in the
-        // institution wiring, not domain rejections.
-        if !auto_outcome.errors.is_empty() {
-            self.head = prior_head;
-            self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
-            return Err(ContextError::validation_failed(auto_outcome.errors));
-        }
-
-        // Build chain-side `RuntimeInvocation` + `Verdict` resources
-        // for every dispatch — Holds, Fails, and Undecidable each
-        // produce one of each per [D31 §6.3]. Dispatches against
-        // embedded subjects (no `@id`) skip provenance entirely but
-        // still apply the gate.
-        let mut provenance: Vec<crate::ontology::resource::Resource> = Vec::new();
-        let mut fail_errors: Vec<crate::validation::ValidationError> = Vec::new();
-        for dispatch in &auto_outcome.dispatches {
-            let invocation_iri = crate::institution::dispatch::allocate_invocation_iri();
-            let invocation = crate::institution::dispatch::build_runtime_invocation_resource(
-                dispatch,
-                &invocation_iri,
-                &derive_verdict_iri(&invocation_iri),
-            );
-            let verdict = crate::institution::dispatch::build_verdict_resource(
-                dispatch,
-                invocation.as_ref().map(|_| &invocation_iri),
-                None,
-                None,
-            );
-            if matches!(
-                dispatch.verdict,
-                crate::institution::dispatch::VerdictReading::Fails
-            ) {
-                let verdict_ref = verdict
-                    .as_ref()
-                    .and_then(|v| v.id().map(|i| i.as_str().to_string()))
-                    .unwrap_or_else(|| "<embedded>".to_string());
-                fail_errors.push(crate::validation::ValidationError {
-                    resource_id: dispatch.subject_iri.clone(),
-                    property: None,
-                    rule: crate::validation::ValidationRule::InstitutionValidation,
-                    message: format!(
-                        "AutoOnLoad QueryClass `{}` returned Fails (Verdict `{}`)",
-                        dispatch.query_class_iri, verdict_ref
-                    ),
-                });
-            }
-            if let Some(inv) = invocation {
-                provenance.push(inv);
-            }
-            if let Some(v) = verdict {
-                provenance.push(v);
-            }
-        }
-
-        if !fail_errors.is_empty() {
-            // Per [D31 §6.3]: gated resources are dropped on Fails,
-            // but RuntimeInvocation + Verdict provenance commits as
-            // the audit anchor explaining the rejection. Revert head
-            // (drops the gated layer) and commit a fresh
-            // provenance-only layer in its place.
-            self.head = Arc::clone(&prior_head);
-            self.working = LayerBuilder::new("verdict_provenance", Some(Arc::clone(&self.head)));
-            for r in provenance {
-                self.working.add_resource(r).map_err(ContextError::Layer)?;
-            }
-            let provenance_layer = if self.working.resources().is_empty() {
-                None
-            } else {
-                let working = std::mem::replace(
-                    &mut self.working,
-                    LayerBuilder::new(name, Some(Arc::clone(&self.head))),
-                );
-                let layer = Arc::new(working.build(self.storage.clone()));
-                self.head = Arc::clone(&layer);
-                self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
-                Some(layer)
-            };
-            return Err(ContextError::ValidationFailed {
-                errors: fail_errors,
-                provenance_layer,
-                prior_head: Some(prior_head),
-            });
-        }
-
-        // Holds / Undecidable path: keep the gated commit and add a
-        // follow-up `verdict_provenance` layer carrying the
-        // RuntimeInvocation + Verdict resources. Both layers commit
-        // before this method returns — that's the [D31 §6.3]
-        // "transactional" guarantee from the caller's perspective.
-        // The caller MUST persist both via the [`CommitOutcome`] —
-        // returning only `user_layer` would leave `prov_layer` as an
-        // in-memory ghost (`ctx.head` advances to it but the backend
-        // never sees it), and the next commit would reference a
-        // parent the backend doesn't know about, surfacing later as
-        // "merge during update_branch: no common ancestor" when the
-        // LCA walk fails to load the missing layer's parent chain.
-        let provenance_layer = if !provenance.is_empty() {
-            self.working = LayerBuilder::new("verdict_provenance", Some(Arc::clone(&self.head)));
-            for r in provenance {
-                self.working.add_resource(r).map_err(ContextError::Layer)?;
-            }
-            let working = std::mem::replace(
-                &mut self.working,
-                LayerBuilder::new(name, Some(Arc::clone(&self.head))),
-            );
-            let prov_layer = Arc::new(working.build(self.storage.clone()));
-            self.head = Arc::clone(&prov_layer);
-            self.working = LayerBuilder::new(name, Some(Arc::clone(&self.head)));
-            Some(prov_layer)
-        } else {
-            None
-        };
-
-        Ok(CommitOutcome {
-            user_layer: new_layer,
-            provenance_layer,
-            prior_head,
-        })
+            LayerBuilder::new(fresh_name, Some(parent)),
+        ))
     }
-}
-
-/// Derive the deterministic Verdict IRI for a given RuntimeInvocation
-/// per [D31 §6.3] — `urn:eigenius:invocation:<inv-id>:verdict`.
-fn derive_verdict_iri(invocation_iri: &Iri) -> Iri {
-    Iri::parse(&format!("{}:verdict", invocation_iri.as_str())).expect("derived Verdict IRI parses")
 }
 
 #[cfg(test)]
 mod tests {
+    //! D41 Phase G — context tests cover the surviving
+    //! [`ExecutionContext`] surface only. The committed pipeline
+    //! (build, structural validate, AutoOnLoad dispatch, persist, and
+    //! revert bookkeeping) is exercised in `commit::phases::tests`,
+    //! `commit::orchestrator::tests`, and the storage E2E suite. The
+    //! pre-D41 `commit` / `commit_with_validation` integration tests
+    //! here are gone alongside the methods themselves.
+    //!
+    //! What remains are unit tests on:
+    //! - read-only mode rejection (`add_resource`, `take_working`,
+    //!   `advance_head`),
+    //! - resolution precedence (working layer before chain),
+    //! - the working / head interop (`take_working`, `advance_head`,
+    //!   `revert_head`),
+    //! - `has_changes`.
+    //!
+    //! Tests that need a full validated commit lean on
+    //! [`crate::lattice::commit_layer_default`] (the D41 supported
+    //! single-layer-commit surface) over a
+    //! [`crate::storage::memory::MemoryPersistentBackend`].
     use super::*;
+    use crate::lattice::commit_layer_default;
     use crate::layer::LayerBuilder;
     use crate::ontology::eigon_json;
     use crate::ontology::resource::Value;
     use crate::ontology::well_known as wk;
+    use crate::storage::memory::MemoryPersistentBackend;
+    use crate::storage::PersistentBackend;
 
     fn iri(s: &str) -> Iri {
         Iri::parse(s).unwrap()
@@ -526,6 +293,16 @@ mod tests {
 
     fn test_storage() -> LayerStorage {
         LayerStorage::in_memory()
+    }
+
+    /// Memory-backed [`LayerStorage`] paired with the [`PersistentBackend`]
+    /// that drives it. Used by tests that need to route a commit through
+    /// [`commit_layer_default`] (the D41 single-layer-commit surface).
+    fn test_storage_with_backend() -> (LayerStorage, Arc<MemoryPersistentBackend>) {
+        let backend = Arc::new(MemoryPersistentBackend::new());
+        let storage =
+            LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+        (storage, backend)
     }
 
     fn build_core_layer(storage: LayerStorage) -> Arc<Layer> {
@@ -548,11 +325,30 @@ mod tests {
     }
 
     #[test]
-    fn read_only_rejects_commit() {
+    fn read_only_rejects_take_working() {
+        // `take_working` is the D41 pipeline-interop replacement for
+        // `commit` (Phase E) and inherits the same ReadOnly gate.
         let storage = test_storage();
         let core = build_core_layer(storage.clone());
         let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadOnly, storage);
-        assert!(matches!(ctx.commit("test"), Err(ContextError::ReadOnly)));
+        assert!(matches!(
+            ctx.take_working("test"),
+            Err(ContextError::ReadOnly)
+        ));
+    }
+
+    #[test]
+    fn read_only_rejects_advance_head() {
+        // `advance_head` is the orchestrator's head-promotion call
+        // (Phase D) and inherits the same ReadOnly gate as `commit` had.
+        let storage = test_storage();
+        let core = build_core_layer(storage.clone());
+        let mut ctx =
+            ExecutionContext::new(Arc::clone(&core), "test", ExecutionMode::ReadOnly, storage);
+        assert!(matches!(
+            ctx.advance_head(core, "test"),
+            Err(ContextError::ReadOnly)
+        ));
     }
 
     #[test]
@@ -586,13 +382,16 @@ mod tests {
     }
 
     #[test]
-    fn commit_valid_resource() {
-        let storage = test_storage();
+    fn take_working_advance_head_lands_valid_resource() {
+        // Smoke test on the pipeline-interop pair: stage a valid
+        // resource, take the working builder, route through
+        // `commit_layer_default`, advance head. Mirrors the shape of
+        // the pre-D41 `commit_valid_resource` test but uses the D41
+        // surfaces directly.
+        let (storage, backend) = test_storage_with_backend();
         let core = build_core_layer(storage.clone());
-        let mut ctx =
-            ExecutionContext::new(core.clone(), "test", ExecutionMode::ReadWrite, storage);
+        let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite, storage);
 
-        // Add a valid Property resource
         ctx.add_resource(make_resource(
             "urn:eigenius:test:my_prop",
             vec![
@@ -607,23 +406,27 @@ mod tests {
         ))
         .unwrap();
 
-        let new_layer = ctx.commit("next").unwrap();
+        let working = ctx.take_working("next").expect("take_working");
+        let new_layer = commit_layer_default(working, ctx.storage().clone(), backend.as_ref())
+            .expect("commit_layer_default");
+        ctx.advance_head(Arc::clone(&new_layer), "next")
+            .expect("advance_head");
+
         assert!(!new_layer.is_root());
-        // Head should now be the new layer
         assert_eq!(ctx.head().id(), new_layer.id());
-        // Should still be able to resolve core resources through the chain
         assert!(ctx.resolve(&iri("urn:eigenius:core:Class")).is_some());
-        // And the newly committed resource
         assert!(ctx.resolve(&iri("urn:eigenius:test:my_prop")).is_some());
     }
 
     #[test]
-    fn commit_invalid_resource_fails() {
-        let storage = test_storage();
+    fn commit_layer_default_rejects_invalid_resource() {
+        // Validation moved from `ExecutionContext::commit` to the
+        // `commit::phases::structural_validate` phase; the surfacing
+        // path is now `lattice::CommitError::Validation`.
+        let (storage, backend) = test_storage_with_backend();
         let core = build_core_layer(storage.clone());
         let mut ctx = ExecutionContext::new(core, "test", ExecutionMode::ReadWrite, storage);
 
-        // Add a Property missing required 'data_type'
         ctx.add_resource(make_resource(
             "urn:eigenius:test:bad",
             vec![
@@ -638,10 +441,13 @@ mod tests {
         ))
         .unwrap();
 
-        assert!(matches!(
-            ctx.commit("next"),
-            Err(ContextError::ValidationFailed { .. })
-        ));
+        let working = ctx.take_working("next").expect("take_working");
+        let err = commit_layer_default(working, ctx.storage().clone(), backend.as_ref())
+            .expect_err("missing data_type must reject");
+        assert!(
+            matches!(err, crate::lattice::CommitError::Validation { .. }),
+            "expected CommitError::Validation, got {err:?}"
+        );
     }
 
     #[test]
@@ -653,371 +459,5 @@ mod tests {
         ctx.add_resource(make_resource("urn:eigenius:test:x", vec![]))
             .unwrap();
         assert!(ctx.has_changes());
-    }
-
-    // ─── commit_with_validation (D14 M7) ───────────────────────────
-
-    use crate::institution::error::InstitutionError;
-    use crate::institution::registry::InstitutionIndex;
-    use crate::institution::runtime::{Institution, InstitutionRuntime};
-    use crate::nbe::val::Val;
-    use crate::ontology::iri::Iri;
-    use crate::ontology::resource::Resource;
-
-    /// Stub institution that returns `Verdict::Fails` from every
-    /// query — used to confirm `commit_with_validation` aborts when
-    /// AutoOnLoad rejects.
-    struct AlwaysFails;
-    impl Institution for AlwaysFails {
-        fn institution_iri(&self) -> &Iri {
-            static INST_IRI: std::sync::OnceLock<Iri> = std::sync::OnceLock::new();
-            INST_IRI.get_or_init(|| Iri::parse("urn:eigenius:test:cwv:inst").unwrap())
-        }
-        fn extract_typed(
-            &self,
-            _: &Iri,
-            _: &Resource,
-            _: &ExecutionContext,
-        ) -> Result<Val, InstitutionError> {
-            unreachable!()
-        }
-        fn reify(
-            &self,
-            _: &Iri,
-            _: &Val,
-            _: &ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
-            unreachable!()
-        }
-        fn query(
-            &self,
-            _: &Iri,
-            _: &Resource,
-            _: &ExecutionContext,
-        ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
-            let mut r = Resource::new_embedded();
-            r.set(
-                Iri::parse(wk::IS_A).unwrap(),
-                Value::Array(vec![Value::String(
-                    "urn:eigenius:institution:verdicts:fails".into(),
-                )]),
-            );
-            Ok(crate::institution::runtime::QueryOutcome::from_output(r))
-        }
-    }
-
-    /// Build a chain layered on top of core that declares an
-    /// AutoOnLoad QueryClass for `urn:eigenius:test:cwv:Subject`.
-    /// Returns the chain plus a derived index + runtime registering
-    /// `AlwaysFails` for the institution IRI.
-    fn build_cwv_setup() -> (
-        Arc<crate::layer::Layer>,
-        Arc<InstitutionIndex>,
-        Arc<InstitutionRuntime>,
-        LayerStorage,
-    ) {
-        let storage = test_storage();
-        let core = build_core_layer(storage.clone());
-        let mut b = LayerBuilder::new("test", Some(core));
-
-        let inst_iri = "urn:eigenius:test:cwv:inst";
-        let qc_iri = "urn:eigenius:test:cwv:check";
-        let subject = "urn:eigenius:test:cwv:Subject";
-
-        let mut qc = Resource::new(Iri::parse(qc_iri).unwrap());
-        qc.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::String(wk::QUERY_CLASS_CLASS.into())]),
-        );
-        qc.set(
-            Iri::parse("urn:eigenius:institution:query_class").unwrap(),
-            Value::String(subject.into()),
-        );
-        qc.set(
-            Iri::parse("urn:eigenius:institution:result_class").unwrap(),
-            Value::String("urn:eigenius:institution:Verdict".into()),
-        );
-        qc.set(
-            Iri::parse("urn:eigenius:institution:dispatch_role").unwrap(),
-            Value::Array(vec![Value::String(
-                "urn:eigenius:institution:dispatch_roles:auto_on_load".into(),
-            )]),
-        );
-        qc.set(
-            Iri::parse("urn:eigenius:institution:query_handler").unwrap(),
-            Value::String("urn:eigenius:test:cwv:proc:check".into()),
-        );
-        qc.set(
-            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
-            Value::String(inst_iri.into()),
-        );
-        b.add_resource(qc).unwrap();
-
-        let layer = Arc::new(b.build(storage.clone()));
-        let (idx, errors) = InstitutionIndex::from_layer(&layer);
-        assert!(errors.is_empty(), "{errors:?}");
-        let mut runtime = InstitutionRuntime::new();
-        runtime.register(Box::new(AlwaysFails)).unwrap();
-        (layer, Arc::new(idx), Arc::new(runtime), storage)
-    }
-
-    #[test]
-    fn commit_with_validation_accepts_when_no_auto_on_load_class_matches() {
-        let (chain, idx, runtime, storage) = build_cwv_setup();
-        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite, storage);
-
-        // Resource of an unrelated class — no AutoOnLoad matches.
-        ctx.add_resource(make_resource(
-            "urn:eigenius:test:cwv:unrelated",
-            vec![(
-                wk::IS_A,
-                Value::Array(vec![Value::String("urn:eigenius:test:Other".into())]),
-            )],
-        ))
-        .unwrap();
-
-        let outcome = ctx
-            .commit_with_validation("loaded", &idx, &runtime)
-            .expect("commit_with_validation");
-        assert!(!outcome.user_layer.is_root());
-        assert!(
-            outcome.provenance_layer.is_none(),
-            "no AutoOnLoad QueryClass matched, so no provenance layer"
-        );
-    }
-
-    /// Stub institution that returns a Holds Verdict alongside a
-    /// partial RuntimeInvocation — exercises the D31 §6.3 commit
-    /// pipeline that folds the partial into a chain-side
-    /// RuntimeInvocation and commits it transactionally with the
-    /// gated resource and the Verdict.
-    struct HoldsWithProvenance;
-    impl Institution for HoldsWithProvenance {
-        fn institution_iri(&self) -> &Iri {
-            static INST_IRI: std::sync::OnceLock<Iri> = std::sync::OnceLock::new();
-            INST_IRI.get_or_init(|| Iri::parse("urn:eigenius:test:cwv:inst").unwrap())
-        }
-        fn extract_typed(
-            &self,
-            _: &Iri,
-            _: &Resource,
-            _: &ExecutionContext,
-        ) -> Result<Val, InstitutionError> {
-            unreachable!()
-        }
-        fn reify(
-            &self,
-            _: &Iri,
-            _: &Val,
-            _: &ExecutionContext,
-        ) -> Result<Resource, InstitutionError> {
-            unreachable!()
-        }
-        fn query(
-            &self,
-            _: &Iri,
-            _: &Resource,
-            _: &ExecutionContext,
-        ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
-            // Verdict carrying ctor_name=Holds.
-            let mut output = Resource::new_embedded();
-            output.set(
-                Iri::parse(wk::IS_A).unwrap(),
-                Value::Array(vec![Value::String(wk::VERDICT.into())]),
-            );
-            output.set(
-                Iri::parse(wk::CTOR_NAME).unwrap(),
-                Value::String("Holds".into()),
-            );
-            // Partial RuntimeInvocation mirroring the substrate's
-            // `DispatchTrace::into_partial_invocation` shape — an
-            // embedded resource with the timestamp-ish properties
-            // the substrate would normally capture.
-            let mut partial = Resource::new_embedded();
-            partial.set(
-                Iri::parse("urn:eigenius:runtime:language").unwrap(),
-                Value::String("test".into()),
-            );
-            partial.set(
-                Iri::parse("urn:eigenius:runtime:started_at").unwrap(),
-                Value::String("2026-05-05T00:00:00.000Z".into()),
-            );
-            partial.set(
-                Iri::parse("urn:eigenius:runtime:completed_at").unwrap(),
-                Value::String("2026-05-05T00:00:00.001Z".into()),
-            );
-            Ok(crate::institution::runtime::QueryOutcome {
-                output,
-                partial_invocation: Some(partial),
-            })
-        }
-    }
-
-    #[test]
-    fn commit_with_validation_commits_provenance_on_holds() {
-        // Reuse `build_cwv_setup`'s chain shape (one Subject class,
-        // one AutoOnLoad QueryClass, one Institution declaration) but
-        // register the Holds-with-provenance stub instead of the
-        // AlwaysFails one.
-        let (chain, idx, _runtime, storage) = build_cwv_setup();
-        let prior_head_id = chain.id().to_string();
-        let mut runtime = InstitutionRuntime::new();
-        runtime
-            .register(Box::new(HoldsWithProvenance))
-            .expect("register");
-        let runtime = Arc::new(runtime);
-
-        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite, storage);
-        ctx.add_resource(make_resource(
-            "urn:eigenius:test:cwv:good",
-            vec![(
-                wk::IS_A,
-                Value::Array(vec![Value::String("urn:eigenius:test:cwv:Subject".into())]),
-            )],
-        ))
-        .unwrap();
-
-        let outcome = ctx
-            .commit_with_validation("loaded", &idx, &runtime)
-            .expect("Holds dispatch must commit cleanly");
-        let gated_layer = outcome.user_layer.clone();
-        // Gated resource is on the gated layer.
-        assert!(
-            gated_layer
-                .get_resource(&iri("urn:eigenius:test:cwv:good"))
-                .is_some(),
-            "gated resource must commit on Holds"
-        );
-
-        // Head advances past the gated layer to a follow-up
-        // verdict_provenance layer per D31 §6.3 — and that prov
-        // layer is exposed on the outcome so callers can persist it.
-        assert_ne!(ctx.head().id().to_string(), prior_head_id);
-        assert_ne!(
-            ctx.head().id().to_string(),
-            gated_layer.id().to_string(),
-            "Holds dispatch must commit a separate provenance layer on top of the gated layer"
-        );
-        let outcome_prov = outcome
-            .provenance_layer
-            .as_ref()
-            .expect("Holds outcome carries the provenance layer for the caller to persist");
-        assert_eq!(
-            outcome_prov.id().to_string(),
-            ctx.head().id().to_string(),
-            "outcome.provenance_layer must equal ctx.head() so the caller can persist it"
-        );
-
-        // The provenance layer carries one RuntimeInvocation and one
-        // Verdict, both stamped DerivedResource, with the
-        // RuntimeInvocation referenced from the Verdict.
-        let prov_layer = ctx.head().clone();
-        let mut invocation_iri: Option<Iri> = None;
-        let mut verdict_iri: Option<Iri> = None;
-        for (resource_iri, resource) in prov_layer.iter_resources() {
-            let is_a: Vec<String> = resource.is_a().into_iter().map(|i| i.to_string()).collect();
-            if is_a
-                .iter()
-                .any(|s| s == "urn:eigenius:runtime:RuntimeInvocation")
-            {
-                invocation_iri = Some(resource_iri.clone());
-            }
-            if is_a.iter().any(|s| s == wk::VERDICT) {
-                verdict_iri = Some(resource_iri.clone());
-            }
-        }
-        let invocation_iri = invocation_iri.expect("RuntimeInvocation must commit on Holds");
-        let verdict_iri = verdict_iri.expect("Verdict must commit on Holds");
-
-        // Verdict IRI is derived from invocation IRI per D31 §6.3.
-        assert_eq!(
-            verdict_iri.as_str(),
-            format!("{}:verdict", invocation_iri.as_str())
-        );
-
-        // Verdict points back at the invocation via `runtime_invocation`.
-        let verdict = prov_layer.get_resource(&verdict_iri).expect("verdict");
-        let inv_back = verdict
-            .get(&Iri::parse("urn:eigenius:institution:runtime_invocation").unwrap())
-            .and_then(|v| match v {
-                Value::ResourceRef(i) => Some(i.clone()),
-                Value::String(s) => Iri::parse(s).ok(),
-                _ => None,
-            });
-        assert_eq!(inv_back.as_ref(), Some(&invocation_iri));
-
-        // RuntimeInvocation carries the kernel-stamped fields
-        // (script ← signature_iri, inputs ← gated resource, output
-        // ← Verdict) per D31 §6.3.
-        let invocation = prov_layer
-            .get_resource(&invocation_iri)
-            .expect("invocation");
-        let script = invocation
-            .get(&Iri::parse("urn:eigenius:runtime:script").unwrap())
-            .expect("script");
-        match script {
-            Value::ResourceRef(i) => assert_eq!(i.as_str(), "urn:eigenius:test:cwv:proc:check"),
-            other => panic!("script: expected ResourceRef, got {other:?}"),
-        }
-        let output_ref = invocation
-            .get(&Iri::parse("urn:eigenius:runtime:output").unwrap())
-            .expect("output");
-        match output_ref {
-            Value::ResourceRef(i) => assert_eq!(i, &verdict_iri),
-            other => panic!("output: expected ResourceRef, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn commit_with_validation_rejects_when_auto_on_load_returns_fails() {
-        let (chain, idx, runtime, storage) = build_cwv_setup();
-        let prior_head_id = chain.id().to_string();
-        let mut ctx = ExecutionContext::new(chain, "test", ExecutionMode::ReadWrite, storage);
-
-        ctx.add_resource(make_resource(
-            "urn:eigenius:test:cwv:bad",
-            vec![(
-                wk::IS_A,
-                Value::Array(vec![Value::String("urn:eigenius:test:cwv:Subject".into())]),
-            )],
-        ))
-        .unwrap();
-
-        let err = ctx
-            .commit_with_validation("loaded", &idx, &runtime)
-            .expect_err("AlwaysFails should abort the gated commit");
-        let provenance_layer_id = match err {
-            ContextError::ValidationFailed {
-                errors,
-                provenance_layer,
-                prior_head: _,
-            } => {
-                assert!(errors.iter().any(|e| e.message.contains("returned Fails")));
-                // Per D31 §6.3: gated resource is rejected, but the
-                // Verdict audit anchor commits on a separate layer.
-                let layer = provenance_layer
-                    .expect("Fails dispatch must commit a Verdict provenance layer per D31 §6.3");
-                let verdict_committed = layer
-                    .iter_resources()
-                    .any(|(iri, _)| iri.as_str().contains(":verdict"));
-                assert!(
-                    verdict_committed,
-                    "provenance layer must contain at least one Verdict resource"
-                );
-                layer.id().to_string()
-            }
-            other => panic!("expected ValidationFailed, got {other}"),
-        };
-        // The gated `urn:eigenius:test:cwv:bad` resource never landed —
-        // the layer holding it was dropped. Head now points at the
-        // provenance-only layer, which sits on top of the prior head.
-        assert_ne!(ctx.head().id().to_string(), prior_head_id);
-        assert_eq!(ctx.head().id().to_string(), provenance_layer_id);
-        assert!(
-            ctx.head()
-                .get_resource(&iri("urn:eigenius:test:cwv:bad"))
-                .is_none(),
-            "gated resource must not appear on the chain after a Fails"
-        );
     }
 }

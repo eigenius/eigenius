@@ -71,7 +71,7 @@ fn class_and_input_json() -> String {
     .to_string()
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn run_program_persists_task_record() {
     let tmp = TempDir::new().unwrap();
     let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
@@ -145,7 +145,7 @@ async fn run_program_persists_task_record() {
     assert!(record.updated_at >= record.created_at);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn list_tasks_and_get_task_status() {
     // Spin up a service, run the identity program, then exercise
     // ListTasks + GetTaskStatus on its returned task_id.
@@ -231,7 +231,7 @@ async fn list_tasks_and_get_task_status() {
     assert!(!get_missing.found);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
     // Since RunProgram is synchronous in 9b-iii.3, the task is
     // always Completed by the time CancelTask runs. For 9b-iii.3c
@@ -319,7 +319,7 @@ async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
     assert_eq!(resp.status, "Completed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inspect_at_layer_reaches_prior_head() {
     // D21 §3.6 read extension: Inspect with at_layer targets a
     // specific committed layer. Exercise by loading a class, noting
@@ -434,7 +434,7 @@ async fn inspect_at_layer_reaches_prior_head() {
     assert_eq!(err.code(), tonic::Code::NotFound);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn run_program_without_backend_has_empty_task_id() {
     // No persistent backend → no task store → task_id stays empty,
     // preserving the pre-Phase-9b-iii behaviour for ephemeral
@@ -481,10 +481,10 @@ async fn run_program_without_backend_has_empty_task_id() {
 }
 
 /// Regression for D34 §6 trace-not-found: when the program-run's
-/// commit fails (`commit_with_validation` reports validation errors,
-/// `persist_layer_if_backend` errors, or the kernel can't add an
-/// internally-generated resource to the layer), the response must
-/// surface `success=false` with structured errors and **clear**
+/// commit fails (the commit pipeline reports validation errors,
+/// the persister errors, or the kernel can't add an internally
+/// generated resource to the layer), the response must surface
+/// `success=false` with structured errors and **clear**
 /// `trace_iri` / `output` / `output_resource_iris`.
 ///
 /// Pre-fix behaviour: the kernel `warn!`'d the failure and returned
@@ -493,7 +493,7 @@ async fn run_program_without_backend_has_empty_task_id() {
 /// "not found," and the notebook displayed a misleading `◐ cached`
 /// badge in place of the actual validation error.
 ///
-/// Triggering an honest `commit_with_validation` rejection requires a
+/// Triggering an honest commit-pipeline rejection requires a
 /// non-identity program that produces a fresh resource — `Construct`,
 /// for instance. We don't have a minimal Construct fixture in
 /// rocksdb/tests yet, so this case stays as a TODO; for now we pin
@@ -504,7 +504,7 @@ async fn run_program_without_backend_has_empty_task_id() {
 /// rejected the trace resource's `trace_tree: required` constraint,
 /// and surfacing that rejection made them all fail until the
 /// reflection ontology change at the same review).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a Construct-program fixture to engineer a real chain rejection"]
 async fn run_program_failed_validation_clears_trace_iri_and_output() {
     let tmp = TempDir::new().unwrap();
@@ -557,8 +557,9 @@ async fn run_program_failed_validation_clears_trace_iri_and_output() {
     // so loading it as a chain resource would reject too — but the
     // RunProgram path receives the input inline (via Eigon-JSON), it
     // doesn't pre-commit. The output's missing-field failure surfaces
-    // at the post-eval `commit_with_validation` step, which is the
-    // path under test.
+    // at the post-eval commit-pipeline step (D41 `WithRetroactive`
+    // pipeline's `structural_validate` phase), which is the path
+    // under test.
     let program = serde_json::json!({
         "@id": "urn:eigenius:test:program:strict_identity",
         "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],

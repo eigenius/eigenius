@@ -30,13 +30,20 @@
 //!
 //! See D41 §3 for the phase contract.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use crate::context::{ExecutionContext, ExecutionMode};
+use crate::institution::dispatch::{
+    allocate_invocation_iri, build_runtime_invocation_resource, build_verdict_resource,
+    dispatch_auto_on_load_for_layer, VerdictReading,
+};
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
-use crate::validation::{retroactive_validate, ValidationError, Validator};
+use crate::validation::{retroactive_validate, ValidationError, ValidationRule, Validator};
 
-use super::pipeline::PhaseControl;
+use super::outcome::{DispatchEntry, EmissionKind, LayerEmission};
+use super::pipeline::{PhaseControl, PipelineKind};
 use super::state::CommitState;
 
 // `CommitError` / `CommitPolicy` are re-exported from the lattice while
@@ -318,22 +325,180 @@ fn cascade_path(
 ///
 /// For each AutoOnLoad QueryClass covering an IRI in the new layer,
 /// dispatches the gate, collects `Verdict` / `RuntimeInvocation`
-/// pairs into `state.provenance_resources`, and queues a
+/// pairs into `state.provenance_resources`, and queues exactly one
 /// `verdict_provenance` emission (pipeline kind
-/// [`super::pipeline::PipelineKind::StructuralFollowup`],
-/// `EmissionKind::Sibling`) whenever any verdict was produced.
+/// [`PipelineKind::StructuralFollowup`], [`EmissionKind::Sibling`])
+/// whenever any verdict was produced — Holds, Undecidable, or Fails.
+/// Ported from `commit_with_validation` in `kernel/src/context/mod.rs`.
 ///
 /// A `Fails` verdict returns `Err(CommitError::Validation { ... })`.
 /// The emission is queued *before* the phase decides Ok vs Err — the
-/// orchestrator drains it either way (see D41 §3.4 / §6.1).
+/// orchestrator rescues it on the Err path as the audit anchor for
+/// the rejected commit (D41 §6.1).
 ///
-/// Phase is absent unless `state.institutions` is `Some` — the
-/// pipeline kind controls whether it runs.
+/// Phase requires `state.institutions` to be `Some` — the pipeline
+/// kind controls whether it runs. Hitting the phase with
+/// `state.institutions == None` is a wiring bug and aborts the commit
+/// with `CommitError::Validation` carrying a single
+/// `InstitutionValidation` error describing the misconfiguration.
 ///
-/// D41 §3.4. **Phase D will implement; Phase B leaves
-/// `unimplemented!()`.**
-pub fn autoonload_dispatch(_state: &mut CommitState<'_>) -> Result<PhaseControl, CommitError> {
-    unimplemented!("phase autoonload_dispatch — Phase D / D41 §3.4")
+/// D41 §3.4.
+pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, CommitError> {
+    let Some(institutions) = state.institutions.as_ref() else {
+        // Defensive: `with_institutions` pipelines always carry an
+        // `InstitutionContext`. Hitting this branch indicates a
+        // pipeline-kind / config mismatch (a callable bug). Surface
+        // through the normal Validation channel so the orchestrator's
+        // Err arm partitions emissions cleanly.
+        return Err(CommitError::Validation {
+            errors: vec![ValidationError {
+                resource_id: None,
+                property: None,
+                rule: ValidationRule::InstitutionValidation,
+                message: "autoonload_dispatch invoked without an InstitutionContext".to_string(),
+            }],
+            total_violations: 1,
+        });
+    };
+
+    let layer = state
+        .layer
+        .as_ref()
+        .expect("autoonload_dispatch runs after build; layer must be Some")
+        .clone();
+
+    tracing::info!(
+        { field::OPERATION } = operation::COMMIT_AUTOONLOAD,
+        { field::LAYER_ID } = %layer.id(),
+        "commit.autoonload.start"
+    );
+
+    // Read-only ExecutionContext over the freshly-built (not-yet-persisted)
+    // user layer so AutoOnLoad QueryClasses can resolve cross-references
+    // against the candidate chain. Mirrors the snapshot in
+    // `commit_with_validation`.
+    let snapshot = ExecutionContext::new(
+        Arc::clone(&layer),
+        "__validate__",
+        ExecutionMode::ReadOnly,
+        state.storage.clone(),
+    );
+
+    let auto_outcome = dispatch_auto_on_load_for_layer(
+        layer.as_ref(),
+        institutions.index.as_ref(),
+        institutions.runtime.as_ref(),
+        &snapshot,
+    );
+
+    // Handler-side failures (missing institution, malformed Verdict)
+    // carry no provenance — surface as plain Validation. The
+    // partition step in `pipeline.run` drops any `Child` emissions
+    // queued earlier in the phase walk (none today) and rescues any
+    // `Sibling` (none queued yet, because the verdict-pair build
+    // below hasn't run). The institution-runtime error simply unwinds.
+    if !auto_outcome.errors.is_empty() {
+        let total = auto_outcome.errors.len();
+        return Err(CommitError::Validation {
+            errors: auto_outcome.errors,
+            total_violations: total,
+        });
+    }
+
+    // Build `RuntimeInvocation` + `Verdict` provenance resources for
+    // every dispatch (Holds, Undecidable, and Fails alike). Per D31
+    // §6.3, every dispatch that produced a Verdict gets a chain-side
+    // provenance pair; the Fails arm additionally surfaces an error.
+    let mut provenance: Vec<crate::ontology::Resource> = Vec::new();
+    let mut fail_errors: Vec<ValidationError> = Vec::new();
+    for dispatch in &auto_outcome.dispatches {
+        // Record the per-subject dispatch reading for surfacing back
+        // to the handler / response, irrespective of Holds / Fails /
+        // Undecidable.
+        state.dispatched_verdicts.push(DispatchEntry {
+            subject_iri: dispatch.subject_iri.clone(),
+            query_class_iri: dispatch.query_class_iri.as_str().to_string(),
+            verdict: dispatch.verdict.clone(),
+        });
+
+        let invocation_iri = allocate_invocation_iri();
+        let invocation = build_runtime_invocation_resource(
+            dispatch,
+            &invocation_iri,
+            &derive_verdict_iri(&invocation_iri),
+        );
+        let verdict = build_verdict_resource(
+            dispatch,
+            invocation.as_ref().map(|_| &invocation_iri),
+            None,
+            None,
+        );
+        if matches!(dispatch.verdict, VerdictReading::Fails) {
+            let verdict_ref = verdict
+                .as_ref()
+                .and_then(|v| v.id().map(|i| i.as_str().to_string()))
+                .unwrap_or_else(|| "<embedded>".to_string());
+            fail_errors.push(ValidationError {
+                resource_id: dispatch.subject_iri.clone(),
+                property: None,
+                rule: ValidationRule::InstitutionValidation,
+                message: format!(
+                    "AutoOnLoad QueryClass `{}` returned Fails (Verdict `{}`)",
+                    dispatch.query_class_iri, verdict_ref
+                ),
+            });
+        }
+        if let Some(inv) = invocation {
+            provenance.push(inv);
+        }
+        if let Some(v) = verdict {
+            provenance.push(v);
+        }
+    }
+
+    // Queue the audit-anchor Sibling emission whenever ANY dispatch
+    // ran — Holds, Undecidable, or Fails. The `Sibling` kind tells
+    // the orchestrator's drain that this emission lands regardless of
+    // whether the user-layer pipeline returned Ok or Err (D41 §3.4 /
+    // §6.1). Crucially, queue BEFORE the Err return below so the
+    // partition step in `pipeline.run` can rescue it.
+    if !provenance.is_empty() {
+        // Stash for diagnostics; the emission consumes a clone of the
+        // resources (well, the canonical copy) so the orchestrator
+        // can drive the follow-up persist without re-running dispatch.
+        state.provenance_resources = provenance.clone();
+        state.emissions.push(LayerEmission {
+            name: "verdict_provenance",
+            pipeline: PipelineKind::StructuralFollowup,
+            kind: EmissionKind::Sibling,
+            resources: provenance,
+            tombstones: BTreeSet::new(),
+        });
+    }
+
+    tracing::info!(
+        { field::OPERATION } = operation::COMMIT_AUTOONLOAD,
+        { field::LAYER_ID } = %layer.id(),
+        { field::COUNT } = auto_outcome.dispatches.len() as u64,
+        fail_count = fail_errors.len() as u64,
+        "commit.autoonload.done"
+    );
+
+    if !fail_errors.is_empty() {
+        let total = fail_errors.len();
+        return Err(CommitError::Validation {
+            errors: fail_errors,
+            total_violations: total,
+        });
+    }
+
+    Ok(PhaseControl::Continue)
+}
+
+/// Derive the deterministic Verdict IRI for a given RuntimeInvocation
+/// per D31 §6.3 — `urn:eigenius:invocation:<inv-id>:verdict`.
+fn derive_verdict_iri(invocation_iri: &Iri) -> Iri {
+    Iri::parse(&format!("{}:verdict", invocation_iri.as_str())).expect("derived Verdict IRI parses")
 }
 
 /// Phase 3.5 — call [`crate::commit::persister::LayerPersister::persist`]
@@ -367,4 +532,323 @@ pub fn persist(state: &mut CommitState<'_>) -> Result<PhaseControl, CommitError>
     );
     state.persisted = Some(info);
     Ok(PhaseControl::Continue)
+}
+
+#[cfg(test)]
+mod tests {
+    //! D41 Phase F.5 — `autoonload_dispatch` phase coverage for the
+    //! Holds and no-match paths (the Fails path is covered indirectly
+    //! by `orchestrator::tests::sibling_rescue_on_fails_verdict`).
+
+    use super::*;
+    use crate::commit::hooks::CommitHookHost;
+    use crate::commit::outcome::{DispatchEntry, EmissionKind};
+    use crate::commit::persister::{LayerPersister, PersistedLayerInfo};
+    use crate::commit::state::{CommitState, InstitutionContext};
+    use crate::institution::registry::InstitutionIndex;
+    use crate::institution::runtime::{Institution, InstitutionRuntime, QueryOutcome};
+    use crate::layer::{Layer, LayerBuilder, LayerStorage};
+    use crate::ontology::eigon_json;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::ontology::well_known;
+    use crate::validation::CommitWorkingSet;
+
+    /// Institution stub that returns a Holds Verdict for every query.
+    /// Mirror of `orchestrator::tests::AlwaysFails` but for Holds.
+    struct AlwaysHolds;
+    impl Institution for AlwaysHolds {
+        fn institution_iri(&self) -> &Iri {
+            static INST_IRI: std::sync::OnceLock<Iri> = std::sync::OnceLock::new();
+            INST_IRI.get_or_init(|| Iri::parse("urn:eigenius:test:phase:inst").unwrap())
+        }
+        fn extract_typed(
+            &self,
+            _: &Iri,
+            _: &Resource,
+            _: &ExecutionContext,
+        ) -> Result<crate::nbe::val::Val, crate::institution::error::InstitutionError> {
+            unreachable!()
+        }
+        fn reify(
+            &self,
+            _: &Iri,
+            _: &crate::nbe::val::Val,
+            _: &ExecutionContext,
+        ) -> Result<Resource, crate::institution::error::InstitutionError> {
+            unreachable!()
+        }
+        fn query(
+            &self,
+            _: &Iri,
+            _: &Resource,
+            _: &ExecutionContext,
+        ) -> Result<QueryOutcome, crate::institution::error::InstitutionError> {
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse(well_known::IS_A).unwrap(),
+                Value::Array(vec![Value::String(
+                    "urn:eigenius:institution:verdicts:holds".into(),
+                )]),
+            );
+            Ok(QueryOutcome::from_output(r))
+        }
+    }
+
+    /// Persister stub — never invoked by `autoonload_dispatch`.
+    struct UnusedPersister;
+    impl LayerPersister for UnusedPersister {
+        fn persist(
+            &self,
+            _branch: &str,
+            _layer: &Arc<Layer>,
+        ) -> Result<PersistedLayerInfo, ValidationError> {
+            unreachable!("autoonload_dispatch does not call persist")
+        }
+    }
+
+    /// Host stub — never invoked by `autoonload_dispatch`.
+    struct UnusedHost;
+    impl CommitHookHost for UnusedHost {
+        fn register_wasm_for_layer(
+            &self,
+            _layer: &Arc<Layer>,
+        ) -> Result<Vec<Resource>, Vec<ValidationError>> {
+            unreachable!()
+        }
+        fn rebuild_institution_index(
+            &self,
+            _top_layer: &Arc<Layer>,
+        ) -> Result<(), Vec<ValidationError>> {
+            unreachable!()
+        }
+    }
+
+    /// Build the bootstrap chain extended with a QueryClass targeting
+    /// `urn:eigenius:test:phase:Subject` through `AlwaysHolds`. Mirrors
+    /// the orchestrator's `build_rescue_setup` shape but for the Holds
+    /// path the phase test exercises.
+    fn build_holds_chain() -> (
+        Arc<Layer>,
+        Arc<InstitutionIndex>,
+        Arc<InstitutionRuntime>,
+        LayerStorage,
+    ) {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let storage = ctx.storage().clone();
+        let bootstrap_head = Arc::clone(ctx.head());
+        let mut b = LayerBuilder::new("phase_test", Some(bootstrap_head));
+
+        let inst_iri = "urn:eigenius:test:phase:inst";
+        let qc_iri = "urn:eigenius:test:phase:check";
+        let subject = "urn:eigenius:test:phase:Subject";
+
+        let mut qc = Resource::new(Iri::parse(qc_iri).unwrap());
+        qc.set(
+            Iri::parse(well_known::IS_A).unwrap(),
+            Value::Array(vec![Value::String(well_known::QUERY_CLASS_CLASS.into())]),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:query_class").unwrap(),
+            Value::String(subject.into()),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:result_class").unwrap(),
+            Value::String("urn:eigenius:institution:Verdict".into()),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:dispatch_role").unwrap(),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:institution:dispatch_roles:auto_on_load".into(),
+            )]),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:query_handler").unwrap(),
+            Value::String("urn:eigenius:test:phase:proc:check".into()),
+        );
+        qc.set(
+            Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
+            Value::String(inst_iri.into()),
+        );
+        b.add_resource(qc).unwrap();
+
+        // Declare the Subject class so any new-layer resource typed as
+        // it is well-formed enough to reach autoonload_dispatch.
+        let mut subject_class = Resource::new(Iri::parse(subject).unwrap());
+        subject_class.set(
+            Iri::parse(well_known::IS_A).unwrap(),
+            Value::Array(vec![Value::String(well_known::CLASS.to_string())]),
+        );
+        subject_class.set(
+            Iri::parse("urn:eigenius:core:description").unwrap(),
+            Value::String("phase test subject".into()),
+        );
+        subject_class.set(
+            Iri::parse("urn:eigenius:core:short_name").unwrap(),
+            Value::String("PhaseSubject".into()),
+        );
+        b.add_resource(subject_class).unwrap();
+
+        let chain = Arc::new(b.build(storage.clone()));
+        let (idx, errors) = InstitutionIndex::from_layer(&chain);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut runtime = InstitutionRuntime::new();
+        runtime.register(Box::new(AlwaysHolds)).unwrap();
+        (chain, Arc::new(idx), Arc::new(runtime), storage)
+    }
+
+    /// Build a single-resource user layer typed as the Subject class.
+    fn build_user_layer(parent: &Arc<Layer>, storage: LayerStorage) -> Arc<Layer> {
+        let mut b = LayerBuilder::new("user", Some(Arc::clone(parent)));
+        let mut subject = Resource::new(Iri::parse("urn:eigenius:test:phase:s1").unwrap());
+        subject.set(
+            Iri::parse(well_known::IS_A).unwrap(),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:test:phase:Subject".into(),
+            )]),
+        );
+        b.add_resource(subject).unwrap();
+        Arc::new(b.build(storage))
+    }
+
+    /// Construct a `CommitState` for direct phase invocation. Returns
+    /// `(state, ws)` — the working set must outlive `state` so we
+    /// surface it back to the caller.
+    fn make_state<'a>(
+        layer: Arc<Layer>,
+        storage: LayerStorage,
+        institutions: Option<InstitutionContext<'a>>,
+        host: &'a dyn CommitHookHost,
+        persister: &'a dyn LayerPersister,
+        ws: &'a mut CommitWorkingSet,
+    ) -> CommitState<'a> {
+        CommitState {
+            storage: storage.clone(),
+            persist: persister,
+            host,
+            policy: CommitPolicy::default(),
+            branch: "main",
+            institutions,
+            builder: LayerBuilder::new("ignored", None),
+            layer: Some(layer),
+            cascade_tombstones: BTreeSet::new(),
+            cascade_iterations: 0,
+            dispatched_verdicts: Vec::<DispatchEntry>::new(),
+            provenance_resources: Vec::new(),
+            emissions: Vec::new(),
+            hook_errors: Vec::new(),
+            working_set: ws,
+            persisted: None,
+        }
+    }
+
+    /// Hole 1 — Holds verdict queues a `verdict_provenance` Sibling
+    /// emission and returns `Ok(Continue)`.
+    #[test]
+    fn autoonload_queues_provenance_sibling_for_holds_verdict() {
+        let (chain, idx, runtime, storage) = build_holds_chain();
+        let user_layer = build_user_layer(&chain, storage.clone());
+        let host = UnusedHost;
+        let persister = UnusedPersister;
+        let mut ws = CommitWorkingSet::in_memory();
+        let institutions = Some(InstitutionContext {
+            index: idx,
+            runtime,
+            _marker: std::marker::PhantomData,
+        });
+        let mut state = make_state(
+            user_layer,
+            storage,
+            institutions,
+            &host,
+            &persister,
+            &mut ws,
+        );
+
+        let result = autoonload_dispatch(&mut state);
+
+        // Phase returns Ok(Continue) — Holds is not a rejection.
+        assert!(
+            matches!(result, Ok(PhaseControl::Continue)),
+            "Holds verdict must not error; got {result:?}"
+        );
+        // Provenance accumulated.
+        assert!(
+            !state.provenance_resources.is_empty(),
+            "Holds dispatch must populate provenance_resources"
+        );
+        // Exactly one emission queued.
+        assert_eq!(state.emissions.len(), 1);
+        let em = &state.emissions[0];
+        assert_eq!(em.name, "verdict_provenance");
+        assert_eq!(em.pipeline, PipelineKind::StructuralFollowup);
+        assert_eq!(em.kind, EmissionKind::Sibling);
+        // Emission carries the same resources as provenance_resources.
+        assert_eq!(em.resources.len(), state.provenance_resources.len());
+        // dispatched_verdicts records the Holds reading per D14.
+        assert_eq!(state.dispatched_verdicts.len(), 1);
+        assert!(matches!(
+            state.dispatched_verdicts[0].verdict,
+            crate::institution::dispatch::VerdictReading::Holds
+        ));
+    }
+
+    /// Hole 2 — chain with no AutoOnLoad QueryClass declared leaves
+    /// the phase a no-op: no emissions, no provenance, Ok(Continue).
+    #[test]
+    fn autoonload_emits_no_sibling_when_no_classes_match() {
+        // Plain core layer, no QueryClass declarations.
+        let storage = LayerStorage::in_memory();
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build(storage.clone()));
+
+        // Empty institution index — nothing to dispatch.
+        let (idx, errors) = InstitutionIndex::from_layer(&core);
+        assert!(errors.is_empty(), "{errors:?}");
+        let runtime = InstitutionRuntime::new();
+
+        // Build a trivial user layer with a single non-classy resource
+        // — its `is_a` doesn't match any QueryClass so dispatch is empty.
+        let mut b = LayerBuilder::new("user", Some(Arc::clone(&core)));
+        let r = Resource::new(Iri::parse("urn:eigenius:user:plain").unwrap());
+        b.add_resource(r).unwrap();
+        let user_layer = Arc::new(b.build(storage.clone()));
+
+        let host = UnusedHost;
+        let persister = UnusedPersister;
+        let mut ws = CommitWorkingSet::in_memory();
+        let institutions = Some(InstitutionContext {
+            index: Arc::new(idx),
+            runtime: Arc::new(runtime),
+            _marker: std::marker::PhantomData,
+        });
+        let mut state = make_state(
+            user_layer,
+            storage,
+            institutions,
+            &host,
+            &persister,
+            &mut ws,
+        );
+
+        let result = autoonload_dispatch(&mut state);
+
+        assert!(
+            matches!(result, Ok(PhaseControl::Continue)),
+            "no matching classes must not error; got {result:?}"
+        );
+        assert!(
+            state.provenance_resources.is_empty(),
+            "no QueryClass match means no provenance"
+        );
+        assert!(
+            state.emissions.is_empty(),
+            "no provenance means no emission queued"
+        );
+        assert!(state.dispatched_verdicts.is_empty());
+    }
 }

@@ -71,7 +71,7 @@ fn compile_test_artifacts() -> (serde_json::Value, serde_json::Value) {
     (program, ontology)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn run_program_commits_construct_output_to_chain_at_deterministic_iri() {
     let tmp = TempDir::new().unwrap();
     let store = Arc::new(RocksStore::open(tmp.path()).unwrap());

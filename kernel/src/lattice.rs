@@ -113,6 +113,16 @@ pub enum CommitError {
         errors: Vec<ValidationError>,
         total_violations: usize,
     },
+    /// The orchestrator's FIFO drain queued an emission whose depth
+    /// exceeded [`crate::commit::MAX_EMISSION_DEPTH`]. Catches a
+    /// runaway phase or hook that emits unboundedly. Today's depth is
+    /// at most 1 on every code path; hitting the cap is a programming
+    /// error and the offending emission's `name` is surfaced for
+    /// debuggability. D41 §6.3 / Phase D.
+    EmissionDepthExceeded {
+        depth: u32,
+        layer_name: &'static str,
+    },
 }
 
 impl std::fmt::Display for CommitError {
@@ -164,6 +174,14 @@ impl std::fmt::Display for CommitError {
                     writeln!(f, "  {e}")?;
                 }
                 Ok(())
+            }
+            CommitError::EmissionDepthExceeded { depth, layer_name } => {
+                write!(
+                    f,
+                    "commit orchestrator emission depth cap exceeded at depth {depth} \
+                     (layer `{layer_name}`); MAX_EMISSION_DEPTH={}",
+                    crate::commit::MAX_EMISSION_DEPTH
+                )
             }
         }
     }
@@ -519,8 +537,14 @@ pub fn commit_layer(
     // `backend.store_layer`. No CAS, no cache — the lattice path has
     // never owned those.
     let persister = crate::commit::BackendStorePersister { backend };
+    // D41 Phase D: the lattice path doesn't run `with_institutions` and
+    // doesn't trigger any `didPersist` hook, but `PipelineConfig` still
+    // requires a `host`. NoopHost satisfies the trait without pulling
+    // in service state.
+    let host = crate::commit::hooks::NoopHost;
     let cfg = crate::commit::PipelineConfig {
         persister: &persister,
+        host: &host,
         // Lattice path is branch-agnostic. `"main"` is a placeholder;
         // `BackendStorePersister` ignores it.
         branch: "main",
@@ -528,8 +552,12 @@ pub fn commit_layer(
         institutions: None,
         storage,
     };
-    let outcome =
-        crate::commit::CommitPipeline::with_retroactive().run(builder, cfg, working_set)?;
+    let outcome = crate::commit::CommitPipeline::with_retroactive()
+        .run(builder, cfg, working_set)
+        // D41 Phase D: the lattice wrapper doesn't run an orchestrator,
+        // so any rescued Sibling emissions in `PipelineRunErr` are dead
+        // — drop them and surface only the inner `CommitError`.
+        .map_err(|e| e.error)?;
     Ok(CommitOutcome {
         layer: outcome.layer,
         cascade_tombstones: outcome.cascade_tombstones,
@@ -1539,6 +1567,14 @@ pub fn merge_independent_heads(
             // case the default ever changes.
             MergeError::Storage(StorageError::Internal(
                 "merge commit produced unexpected CascadeAbort".into(),
+            ))
+        }
+        CommitError::EmissionDepthExceeded { .. } => {
+            // commit_layer_default goes through `BackendStorePersister`,
+            // bypassing the orchestrator entirely. Surface as
+            // Storage::Internal in case the wrapping ever changes.
+            MergeError::Storage(StorageError::Internal(
+                "merge commit produced unexpected EmissionDepthExceeded".into(),
             ))
         }
     })?;

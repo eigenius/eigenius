@@ -25,14 +25,14 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::context::ExecutionContext;
 use crate::institution::registry::InstitutionIndex;
 use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::{Layer, LayerBuilder, LayerStorage};
 use crate::ontology::{Iri, Resource};
 use crate::validation::{CommitWorkingSet, ValidationError};
 
-use super::outcome::{DispatchEntry, LayerEmission, MultiLayerOutcome};
+use super::hooks::CommitHookHost;
+use super::outcome::{DispatchEntry, LayerEmission};
 use super::persister::{LayerPersister, PersistedLayerInfo};
 
 // `CommitPolicy` is re-exported from `lattice` via `super` so that
@@ -85,6 +85,12 @@ pub struct CommitState<'a> {
     pub storage: LayerStorage,
     /// Persist seam. Phase `persist` is its only caller.
     pub persist: &'a dyn LayerPersister,
+    /// Host seam — used by `didPersist` hooks (today
+    /// `register_wasm_components`) to delegate kernel-side
+    /// registrations / index rebuilds back into `EigeniusService`.
+    /// Threaded into the state by `PipelineConfig`; identical for
+    /// every pipeline run within one orchestrator invocation. Phase D.
+    pub host: &'a dyn CommitHookHost,
     /// Global commit policy for this orchestrator run. Today the same
     /// policy threads through every pipeline run; per-phase policies
     /// are future work (D41 §13.2).
@@ -138,23 +144,26 @@ pub struct CommitState<'a> {
 /// State the `didDrain` hook stage operates against.
 ///
 /// Constructed by the orchestrator after the drain loop exits, once
-/// the final top layer is known. `top_layer` is the most recent
-/// successfully-advanced layer (the "current head" after the drain).
-/// `multi` is the outcome accumulator the hooks may append errors to
-/// via `multi.drain_hook_errors`.
+/// the final top layer is known. `top_layer` is `Some(_)` for the
+/// most recent successfully-advanced layer (the "current head" after
+/// the drain), or `None` if no layer landed during the drain (e.g.,
+/// the root emission's persist failed with no Sibling rescue).
 ///
 /// `DrainState` deliberately does **not** expose `state.emissions` —
 /// by the time `didDrain` runs, no further pipelines will execute and
 /// queuing more work would be silently dropped. See D41 §6.5.
 pub struct DrainState<'a> {
-    /// Final top of branch after the drain.
-    pub top_layer: Arc<Layer>,
-    /// Per-orchestrator outcome. Hooks may extend
-    /// `multi.drain_hook_errors`; they should not mutate the per-layer
-    /// outcomes (those are already final).
-    pub multi: &'a mut MultiLayerOutcome,
-    /// The execution context the orchestrator was driving. Hooks like
-    /// `rebuild_institution_index` use this to update kernel-side
-    /// caches / runtimes derived from the full set of landed layers.
-    pub ctx: &'a mut ExecutionContext,
+    /// Final top of branch after the drain. `None` iff no layer landed.
+    pub top_layer: Option<Arc<Layer>>,
+    /// Host seam — used by `didDrain` hooks (today
+    /// `rebuild_institution_index`) to delegate kernel-side state
+    /// updates back into `EigeniusService`. Phase D.
+    pub host: &'a dyn CommitHookHost,
+    /// Errors collected from `didDrain` hooks across this orchestrator
+    /// run. The orchestrator copies this into
+    /// `MultiLayerOutcome.drain_hook_errors` when constructing the
+    /// final outcome.
+    pub hook_errors: Vec<ValidationError>,
+    /// Lifetime parameter pin.
+    pub _marker: std::marker::PhantomData<&'a ()>,
 }

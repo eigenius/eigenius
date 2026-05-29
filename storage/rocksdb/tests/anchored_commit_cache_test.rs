@@ -49,7 +49,12 @@ const ONTOLOGY_JSON: &str = r#"[
   }
 ]"#;
 
-#[tokio::test]
+// D41 Phase E: the kernel's commit orchestrator runs `didPersist` /
+// `didDrain` hooks via `tokio::task::block_in_place`, requiring the
+// multi-threaded runtime. Also matches the existing pattern for
+// rocksdb e2e tests that exercise the persistent backend through
+// commit-shaped RPCs.
+#[tokio::test(flavor = "multi_thread")]
 async fn load_twice_with_identical_content_hits_anchored_commit_cache() {
     let tmp = TempDir::new().unwrap();
     let store = Arc::new(RocksStore::open(tmp.path()).unwrap());

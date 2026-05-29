@@ -87,6 +87,7 @@ All phases live in `kernel/src/commit/phases.rs`. The phase set:
 - **Writes:** nothing on the happy path; returns `CommitError::Validation { errors, total_violations }` otherwise.
 - **Emits:** nothing.
 - Runs `Validator::validate` against the just-built layer. This is the structural check (referential integrity, type shape, constraint satisfaction at the level of `Decidable-QC`).
+- **Scope.** This phase runs only on pipelines that accept **user-authored content**: `structural_only`, `with_retroactive`, `with_institutions`. It is deliberately omitted from `structural_followup`, whose layers carry kernel-emitted content (`verdict_provenance`, `institution_classes`) whose well-formedness is guaranteed by the emitter. See §5 for the rationale.
 
 ### 3.3 `retroactive_with_cascade`
 
@@ -113,6 +114,8 @@ The structural framing here matters and supersedes the earlier draft. AutoOnLoad
 Both are the same emission, queued the same way, with the same `EmissionKind::Sibling`. The orchestrator's drain loop is what makes the routing fall out naturally (§6.1): `Sibling` emissions are preserved when their queuing pipeline returns `Err`, while `Child` emissions are discarded. The phase itself only has to do one thing: queue the audit unconditionally and let the drain do the routing.
 
 **On the shape of `CommitError`.** The `autoonload_dispatch` phase's `Err` does not carry the audit layer; the audit travels via `Sibling` emission. This keeps `CommitError` shape narrow and routes provenance through the same channel as all other follow-up layers. There is no `CommitError::ValidationFailed { provenance_layer }` variant — the lattice's existing `CommitError::Validation { errors, total_violations }` is sufficient because audit routing is orthogonal to the error: `Sibling` emissions carry the audit, the error carries the `Fails`. Phase 2 of D41 implementation re-exports `lattice::CommitError` from `commit::Error` unchanged.
+
+**On the audit Sibling's pipeline.** The queued `verdict_provenance` Sibling specifies `pipeline: PipelineKind::StructuralFollowup`. Because `StructuralFollowup` omits `structural_validate` (§5), the drain run that lands the audit layer will **not** re-validate the `Verdict` + `RuntimeInvocation` resources produced here. The well-formedness contract for those resources lives at the emitter — `build_verdict_resource` and `build_runtime_invocation_resource` are jointly responsible for producing resources whose `is_a`, properties, and constraint shape are consistent with the institution ontology declarations of `Verdict` and `RuntimeInvocation`. The phase rebuild therefore needs no additional ontology accommodation for audit-resource shape; if a future audit-emitter change produces ill-formed content, the fix is at the emitter, not by re-enabling validation here.
 
 **Why `Sibling` is the only emission kind warranting always-commit content.** Of the seven rejection causes the pipeline can produce (structural-validation failure, retroactive violation, cascade abort, AutoOnLoad `Fails`, persist I/O error, `NeedsWitnessedMerge`, pipeline-internal error), only AutoOnLoad `Fails` produces durable institutional facts worth anchoring to the chain. The other six produce only error responses to the caller. Institutional dispatch creates the fact "institution X dispatched against subject Y, returned `Fails` because Z, at time T" — and future chain inspection (audit queries, retroactive replays, regulatory review) wants that fact present regardless of whether the user-layer commit succeeded. User errors, chain-incompatibility errors, I/O, and concurrency taxonomy don't carry that property.
 
@@ -150,6 +153,8 @@ pub struct HookOutcome {
 **Concrete hooks today.**
 
 - `register_wasm_components` — `didPersist` hook on the `with_institutions` pipeline. Reads the just-persisted user layer (the WASM components are part of its content), registers components against the institution runtime, and queues a `LayerEmission { name: "institution_classes", pipeline: StructuralFollowup, kind: EmissionKind::Child, … }` carrying the registered classes for the institution-classes follow-up layer. Lifts the logic currently in `register_wasm_from_layer` ([`kernel/src/server/mod.rs:2201`](../../kernel/src/server/mod.rs)). The handler today calls `register_wasm_from_layer` and manually constructs the institution-classes follow-up layer; under D41 the hook does both. Errors registering components are recorded on `state.hook_errors`; the user-layer commit stands either way.
+
+  Because the queued emission specifies `pipeline: StructuralFollowup`, the institution-classes drain run will not re-validate its content (§5). The resources in that emission are produced by the WASM-registration extraction inside the hook; that extraction is responsible for emitting well-formed institution-class resources. If `register_wasm_from_layer` (or its successor inside the hook) is ever changed to produce resources whose shape the chain ontology cannot represent, that is a contract violation at the extractor — fix the extractor, not the pipeline.
 
 - `rebuild_institution_index` — `didDrain` hook on the orchestrator. Runs once after the FIFO drain completes, with the final top layer in hand. Replaces today's three intra-Load rebuild calls ([`server/mod.rs:2191`](../../kernel/src/server/mod.rs), [`server/mod.rs:2197`](../../kernel/src/server/mod.rs), [`server/mod.rs:2232`](../../kernel/src/server/mod.rs)). The collapse from three rebuilds to one is semantically equivalent because nothing inside a single Load actually consumes the rebuilt index; only the *next* RPC's `InstitutionContext` snapshot reads it. Errors here are recorded on `MultiLayerOutcome.drain_hook_errors`.
 
@@ -212,7 +217,7 @@ impl CommitPipeline {
     pub const fn structural_only() -> Self;       // build, structural_validate, persist
     pub const fn with_retroactive() -> Self;      // + retroactive_with_cascade
     pub const fn with_institutions() -> Self;     // + autoonload_dispatch; didPersist: register_wasm_components
-    pub const fn structural_followup() -> Self;   // build, structural_validate, persist (provenance / institution_classes)
+    pub const fn structural_followup() -> Self;   // build, persist (provenance / institution_classes) — no structural_validate
 }
 ```
 
@@ -221,7 +226,7 @@ impl CommitPipeline {
 | `structural_only` | yes | yes | — | — | yes | — |
 | `with_retroactive` | yes | yes | yes | — | yes | — |
 | `with_institutions` | yes | yes | yes | yes | yes | `register_wasm_components` |
-| `structural_followup` | yes | yes | — | — | yes | — |
+| `structural_followup` | yes | — | — | — | yes | — |
 
 Pipeline run signature:
 
@@ -254,7 +259,9 @@ pub fn run(
 
 The pipeline run is the granularity at which `tracing` spans are scoped. Within the run, individual phase telemetry uses `tracing::info!` with the per-phase operation constant (§12).
 
-Distinguishing `structural_only` from `structural_followup`: they share the same phase list today, but the orchestrator may evolve them differently (e.g., followup layers might in the future have a more permissive validator). Keeping them as distinct names from the start avoids a rename later and documents intent at call sites.
+Distinguishing `structural_only` from `structural_followup`: they are *not* "the same phase list under different names." `structural_followup` deliberately omits `structural_validate`. The structural reason: followup layers (`verdict_provenance`, `institution_classes`) carry **kernel-emitted content** — the resources in those layers come from `build_verdict_resource` / `build_runtime_invocation_resource` (audit content) or the WASM-registration extraction in `register_wasm_from_layer` (institution-classes content), not from user input. Well-formedness of that content is the **emitter's contract**, not something the pipeline re-checks. Re-running `structural_validate` here would be redundant *and* would force the chain ontology to be permissive enough to validate every shape the kernel emits — a coupling that runs the wrong direction (the ontology should describe the domain, not chase the emitter's output shape). If a kernel emitter ever produces content the chain ontology cannot represent, that is a contract violation at the emitter; fix the emitter, not the pipeline.
+
+Concretely, `structural_only` runs `[build, structural_validate, persist]` because it processes user-authored content; `structural_followup` runs `[build, persist]` because it processes kernel-emitted content with guaranteed well-formedness.
 
 ## 6. Orchestrator drain loop
 
@@ -536,6 +543,7 @@ Every commit-shaped RPC follows the same handler shape: translate the request in
 | Load handler revert state machine (~250 lines) | `CommitOrchestrator::run` |
 | Handler-side `register_wasm_from_layer` invocation | `register_wasm_components` `didPersist` hook on `with_institutions` |
 | Handler-side `rebuild_institution_index` invocations (×3 per Load) | `rebuild_institution_index` `didDrain` hook on orchestrator (×1 per Load) |
+| Handler-side `working.build(storage)` for provenance / institution-classes layers, with no re-validation ([`kernel/src/context/mod.rs:476-491`](../../kernel/src/context/mod.rs)) | `structural_followup` pipeline = `[build, persist]`, no `structural_validate` (§5) |
 
 The collapse of the institution-index rebuild from three calls per Load to one is an efficiency win the new shape gets for free: today's handler rebuilds after each of the user, provenance, and institution-classes layers lands, but nothing inside a single Load actually consumes the index between those rebuilds — only the next RPC's `InstitutionContext` snapshot reads it. The `didDrain` hook position makes the single-rebuild shape natural rather than requiring careful argument about which rebuilds can be elided.
 

@@ -19,10 +19,9 @@
 //! - [`CommitPipeline::with_retroactive`] — + retroactive_with_cascade.
 //! - [`CommitPipeline::with_institutions`] — + autoonload_dispatch;
 //!   `didPersist`: `register_wasm_components`.
-//! - [`CommitPipeline::structural_followup`] — same phases as
-//!   `structural_only`; kept distinct as a name so call sites
-//!   document intent and so the orchestrator can evolve followup
-//!   pipelines differently in the future (D41 §5).
+//! - [`CommitPipeline::structural_followup`] — build, persist (no
+//!   `structural_validate`: kernel-emitted content is well-formed by
+//!   construction; see `STRUCTURAL_FOLLOWUP_PHASES` for the contract).
 //!
 //! Phases are stored as `&'static [Phase]` slices — zero allocation,
 //! data-driven. The function items are defined in `phases.rs` and
@@ -39,8 +38,8 @@ use crate::layer::LayerBuilder;
 use crate::observability::{field, operation};
 use crate::validation::CommitWorkingSet;
 
-use super::hooks::{register_wasm_components, DidPersistHook};
-use super::outcome::LayerCommitOutcome;
+use super::hooks::{register_wasm_components, CommitHookHost, DidPersistHook};
+use super::outcome::{LayerCommitOutcome, LayerEmission};
 use super::persister::LayerPersister;
 use super::phases::{
     autoonload_dispatch, build, persist, retroactive_with_cascade, structural_validate,
@@ -101,6 +100,8 @@ pub enum PipelineKind {
 pub struct PipelineConfig<'a> {
     /// Persist seam used by the `persist` phase.
     pub persister: &'a dyn LayerPersister,
+    /// Host seam used by `didPersist` hooks (D41 Phase D).
+    pub host: &'a dyn CommitHookHost,
     /// Branch name for this commit.
     pub branch: &'a str,
     /// Global commit policy for the run.
@@ -161,8 +162,9 @@ impl CommitPipeline {
         }
     }
 
-    /// Same phase list as [`Self::structural_only`]; distinct name
-    /// for follow-up layers (`verdict_provenance`, `institution_classes`).
+    /// Pipeline for kernel-emitted follow-up layers (`verdict_provenance`,
+    /// `institution_classes`). Skips `structural_validate` — well-formedness
+    /// is the emitter's contract; see [`STRUCTURAL_FOLLOWUP_PHASES`].
     pub const fn structural_followup() -> Self {
         Self {
             kind: PipelineKind::StructuralFollowup,
@@ -191,26 +193,23 @@ impl CommitPipeline {
     /// `branch_advanced = true`, and constructs the
     /// [`LayerCommitOutcome`] from the accumulators.
     ///
-    /// **Phase B status (D41 §5).** This implementation services the
-    /// lattice wrapper path only — single-pipeline, no orchestrator.
-    /// The full `PipelineRunErr` / `sibling_emissions` plumbing
-    /// described in the doc is Phase D work; the body returns
-    /// `Result<LayerCommitOutcome, CommitError>` directly so the
-    /// `with_retroactive` callers (the lattice wrappers in this
-    /// commit) can use it unchanged. Phase D will widen the return
-    /// type once the orchestrator needs to partition emissions on Err.
+    /// **Return shape (Phase D / D41 §5).** Widened from
+    /// `Result<LayerCommitOutcome, CommitError>` to
+    /// `Result<LayerCommitOutcome, PipelineRunErr>`. On `Err`, the
+    /// pipeline partitions `state.emissions` by [`super::EmissionKind`]:
+    /// `Sibling` entries flow onto [`PipelineRunErr::sibling_emissions`]
+    /// for the orchestrator to rescue, while `Child` entries are
+    /// silently dropped because their intended parent did not land.
+    /// Lattice wrappers convert via `.map_err(|e| e.error)`.
     ///
     /// `did_persist` hooks dispatch as a list iff the persist phase
-    /// reported `branch_advanced = true`; for `with_retroactive` the
-    /// slice is empty so the loop body never executes. Phase B leaves
-    /// hook *bodies* `unimplemented!()`; the dispatch site is wired so
-    /// Phase D only has to fill the bodies.
+    /// reported `branch_advanced = true`.
     pub fn run(
         &self,
         builder: LayerBuilder,
         cfg: PipelineConfig<'_>,
         ws: &mut CommitWorkingSet,
-    ) -> Result<LayerCommitOutcome, CommitError> {
+    ) -> Result<LayerCommitOutcome, PipelineRunErr> {
         let span = tracing::info_span!(operation::COMMIT_PIPELINE_RUN, kind = ?self.kind);
         let _enter = span.enter();
 
@@ -218,6 +217,7 @@ impl CommitPipeline {
             // Inputs
             storage: cfg.storage,
             persist: cfg.persister,
+            host: cfg.host,
             policy: cfg.policy,
             branch: cfg.branch,
             institutions: cfg.institutions,
@@ -242,37 +242,44 @@ impl CommitPipeline {
         };
 
         // Walk phases. The first `Err` aborts the rest of the walk;
-        // didPersist hooks are not run.
+        // didPersist hooks are not run. On Err we still partition any
+        // Sibling emissions phases-before-the-failing-phase queued —
+        // that's the audit-anchor rescue path (§3.4 / §6.1).
         for phase in self.phases {
-            match phase(&mut state)? {
-                PhaseControl::Continue => {}
-                PhaseControl::SkipEmptyCommit => {
-                    // Phase B: only `build` returns this. The lattice
-                    // wrappers never produce an empty builder today,
-                    // so this branch is exercised by future RPC paths
-                    // only. The brief calls for returning a `Skipped`
-                    // outcome; today's `LayerCommitOutcome` is not
-                    // shaped for that case (it requires `layer` +
-                    // `persist`). Treat empty-commit as a programming
-                    // error from the Phase B caller and surface it
-                    // via an explicit panic — Phase D will widen the
-                    // outcome shape to carry `Skipped`.
+            match phase(&mut state) {
+                Ok(PhaseControl::Continue) => {}
+                Ok(PhaseControl::SkipEmptyCommit) => {
+                    // Phase D still leaves the empty-commit path
+                    // unreachable because no caller today queues an
+                    // empty emission. Widening LayerCommitOutcome to
+                    // carry a `Skipped` variant is deferred to a
+                    // later phase.
                     unreachable!(
-                        "SkipEmptyCommit returned from `build`, but the Phase B \
-                         caller never queues empty builders; LayerCommitOutcome \
-                         has no `Skipped` shape yet (Phase D)."
+                        "SkipEmptyCommit returned from `build`, but no caller \
+                         today queues empty builders; LayerCommitOutcome has \
+                         no `Skipped` shape yet."
                     );
+                }
+                Err(error) => {
+                    // Partition: Siblings rescue, Children drop.
+                    let sibling_emissions = partition_siblings(&mut state.emissions);
+                    tracing::info!(
+                        { field::OPERATION } = operation::COMMIT_PIPELINE_RUN,
+                        { field::ERROR_KIND } = "phase_failed",
+                        rescued_siblings = sibling_emissions.len(),
+                        "commit.pipeline_run.err"
+                    );
+                    return Err(PipelineRunErr {
+                        error,
+                        sibling_emissions,
+                    });
                 }
             }
         }
 
         // didPersist hooks. Skip when persist didn't advance the
         // branch — there's no successfully-persisted layer to hook
-        // off (D41 §3.6 / §6.1). For the lattice wrappers'
-        // `BackendStorePersister`, `branch_advanced` is always
-        // `false` *and* the `with_retroactive` slice is empty, so
-        // this loop is unreachable on that path; the structure is in
-        // place for Phase D's `with_institutions` flow.
+        // off (D41 §3.6 / §6.1).
         let branch_advanced = state
             .persisted
             .as_ref()
@@ -313,6 +320,46 @@ impl CommitPipeline {
     }
 }
 
+/// Drain `Sibling` emissions out of `emissions`, leaving `Child`
+/// entries in place (they'll be dropped when the caller discards the
+/// vector). Preserves order among siblings so the FIFO invariant in
+/// the orchestrator's rescue queue holds.
+fn partition_siblings(emissions: &mut Vec<LayerEmission>) -> Vec<LayerEmission> {
+    use super::outcome::EmissionKind;
+    let mut siblings = Vec::new();
+    emissions.retain(|em| {
+        if matches!(em.kind, EmissionKind::Sibling) {
+            siblings.push(em.clone());
+            false
+        } else {
+            true
+        }
+    });
+    siblings
+}
+
+/// Error result of a single [`CommitPipeline::run`] call.
+///
+/// Carries the actual [`CommitError`] paired with the `Sibling`
+/// emissions that were queued by phases *before* the failing phase.
+/// The orchestrator's drain loop rescues siblings (§6.1) by
+/// re-queueing them at depth 0, parented at the unchanged `ctx.head`;
+/// `Child` emissions from the failed run are dropped during
+/// partitioning because their intended parent did not land.
+///
+/// Lattice wrappers that don't run an orchestrator convert via
+/// `.map_err(|e| e.error)`.
+///
+/// D41 §5 / Phase D.
+#[derive(Debug)]
+pub struct PipelineRunErr {
+    /// The phase error that aborted the pipeline run.
+    pub error: CommitError,
+    /// Sibling emissions queued before the failing phase. The
+    /// orchestrator re-queues these at depth 0.
+    pub sibling_emissions: Vec<LayerEmission>,
+}
+
 // -------------------------------------------------------------------
 // Static phase / hook slices for the four canned pipelines.
 //
@@ -345,7 +392,15 @@ static WITH_INSTITUTIONS_PHASES: &[Phase] = &[
 ];
 
 /// `structural_followup` phase slice — D41 §5.
-static STRUCTURAL_FOLLOWUP_PHASES: &[Phase] = &[build, structural_validate, persist];
+///
+/// No `structural_validate`: followup layers carry kernel-emitted content
+/// (verdict_provenance, institution_classes). Well-formedness is the
+/// emitter's contract (verdict / runtime invocation builders for the
+/// audit path; WASM-registration extraction for the institution_classes
+/// path), so re-validation is redundant and forces the ontology to be
+/// permissive enough for every shape the kernel emits. If an emitter
+/// produces malformed content that's a kernel bug to fix at the emitter.
+static STRUCTURAL_FOLLOWUP_PHASES: &[Phase] = &[build, persist];
 
 /// `with_institutions` `didPersist` slice — D41 §3.6 / §5.
 static WITH_INSTITUTIONS_DID_PERSIST: &[DidPersistHook] = &[register_wasm_components];
@@ -353,3 +408,146 @@ static WITH_INSTITUTIONS_DID_PERSIST: &[DidPersistHook] = &[register_wasm_compon
 /// Empty `didPersist` slice shared by pipelines without post-persist
 /// hooks.
 static NO_DID_PERSIST: &[DidPersistHook] = &[];
+
+#[cfg(test)]
+mod tests {
+    //! D41 Phase F.5 — `CommitPipeline::for_kind` correctness and
+    //! `partition_siblings` semantics.
+
+    use super::*;
+    use crate::commit::outcome::EmissionKind;
+    use std::collections::BTreeSet;
+
+    /// Hole 7 — every `PipelineKind` resolves to a pipeline whose
+    /// `kind` matches, whose phase slice matches D41 §5, and whose
+    /// did_persist slice matches §3.6.
+    ///
+    /// Asserts via:
+    /// - `kind()` equality,
+    /// - phase slice length (the phase function items have stable
+    ///   addresses but comparing function pointers across the slice
+    ///   is brittle because the compiler may dedupe or inline; instead
+    ///   we cross-check the phase slice the constructor uses by
+    ///   comparing it to the named static (since `for_kind` is the
+    ///   only public path to the slices, this confirms dispatch),
+    /// - did_persist slice length and identity for institutions.
+    #[test]
+    fn for_kind_dispatches_correctly_for_each_kind() {
+        // StructuralOnly — [build, structural_validate, persist]
+        let p = CommitPipeline::for_kind(PipelineKind::StructuralOnly);
+        assert_eq!(p.kind, PipelineKind::StructuralOnly);
+        assert_eq!(p.phases.len(), 3);
+        assert!(p.did_persist.is_empty());
+        // Confirm dispatch routes through the canonical canned ctor:
+        // comparing against `structural_only()` keeps the test stable
+        // under future phase-list edits — if someone changes the slice
+        // for one but not the dispatch, this test fails loudly.
+        assert_eq!(
+            p.phases.len(),
+            CommitPipeline::structural_only().phases.len()
+        );
+
+        // WithRetroactive — [build, structural_validate,
+        // retroactive_with_cascade, persist]
+        let p = CommitPipeline::for_kind(PipelineKind::WithRetroactive);
+        assert_eq!(p.kind, PipelineKind::WithRetroactive);
+        assert_eq!(p.phases.len(), 4);
+        assert!(p.did_persist.is_empty());
+        assert_eq!(
+            p.phases.len(),
+            CommitPipeline::with_retroactive().phases.len()
+        );
+
+        // WithInstitutions — [build, structural_validate,
+        // retroactive_with_cascade, autoonload_dispatch, persist]
+        // + didPersist: [register_wasm_components]
+        let p = CommitPipeline::for_kind(PipelineKind::WithInstitutions);
+        assert_eq!(p.kind, PipelineKind::WithInstitutions);
+        assert_eq!(p.phases.len(), 5);
+        assert_eq!(p.did_persist.len(), 1);
+        assert_eq!(
+            p.phases.len(),
+            CommitPipeline::with_institutions().phases.len()
+        );
+
+        // StructuralFollowup — [build, persist] (no structural_validate
+        // per D41 §5 / Phase D's fix).
+        let p = CommitPipeline::for_kind(PipelineKind::StructuralFollowup);
+        assert_eq!(p.kind, PipelineKind::StructuralFollowup);
+        assert_eq!(p.phases.len(), 2);
+        assert!(p.did_persist.is_empty());
+        assert_eq!(
+            p.phases.len(),
+            CommitPipeline::structural_followup().phases.len()
+        );
+    }
+
+    /// Hole 8 — `partition_siblings` carries Sibling entries out and
+    /// leaves Child entries in the input vector, preserving order.
+    ///
+    /// `partition_siblings` is the helper `PipelineRunErr` uses to
+    /// split `state.emissions` on the Err path. Child emissions belong
+    /// to a parent that did not land and must be dropped; only Sibling
+    /// emissions get rescued onto `PipelineRunErr.sibling_emissions`.
+    /// The structural guarantee tested here is that the partition is
+    /// disjoint (no Child leaks onto the rescue list) and preserves
+    /// FIFO order among siblings (D41 §6.2).
+    #[test]
+    fn pipeline_run_err_partitions_state_emissions_into_siblings_only() {
+        // Mixed emissions: Sibling, Child, Sibling, Child, Sibling.
+        // The two non-sibling entries must stay behind; the three
+        // siblings must come out in source order.
+        let mk = |name: &'static str, kind: EmissionKind| LayerEmission {
+            name,
+            pipeline: PipelineKind::StructuralFollowup,
+            kind,
+            resources: Vec::new(),
+            tombstones: BTreeSet::new(),
+        };
+        let mut emissions = vec![
+            mk("sib_a", EmissionKind::Sibling),
+            mk("child_a", EmissionKind::Child),
+            mk("sib_b", EmissionKind::Sibling),
+            mk("child_b", EmissionKind::Child),
+            mk("sib_c", EmissionKind::Sibling),
+        ];
+
+        let siblings = partition_siblings(&mut emissions);
+
+        // Rescued siblings: only Siblings, FIFO-preserved.
+        assert_eq!(siblings.len(), 3);
+        assert_eq!(siblings[0].name, "sib_a");
+        assert_eq!(siblings[1].name, "sib_b");
+        assert_eq!(siblings[2].name, "sib_c");
+        assert!(siblings
+            .iter()
+            .all(|e| matches!(e.kind, EmissionKind::Sibling)));
+
+        // Children left behind in the input vector (the caller will
+        // drop the vector; we just confirm nothing else moved).
+        assert_eq!(emissions.len(), 2);
+        assert_eq!(emissions[0].name, "child_a");
+        assert_eq!(emissions[1].name, "child_b");
+        assert!(emissions
+            .iter()
+            .all(|e| matches!(e.kind, EmissionKind::Child)));
+    }
+
+    /// Edge case: input with only Children leaves no siblings to
+    /// rescue. This mirrors the common case where a non-AutoOnLoad
+    /// pipeline Errs — the only queueable kind on those is Child,
+    /// and the rescue list is empty.
+    #[test]
+    fn partition_siblings_with_only_children_returns_empty() {
+        let mut emissions = vec![LayerEmission {
+            name: "only_child",
+            pipeline: PipelineKind::StructuralFollowup,
+            kind: EmissionKind::Child,
+            resources: Vec::new(),
+            tombstones: BTreeSet::new(),
+        }];
+        let siblings = partition_siblings(&mut emissions);
+        assert!(siblings.is_empty());
+        assert_eq!(emissions.len(), 1);
+    }
+}

@@ -540,6 +540,15 @@ pub struct EigeniusService {
             >,
         >,
     >,
+    /// Per-server pool of pooled [`crate::validation::CommitWorkingSet`]
+    /// instances. Each commit-shaped RPC orchestrator run acquires one
+    /// working set and re-uses it across every pipeline run in that
+    /// invocation. Per D41 §11.2: branches commit serially (per-branch
+    /// lock), so per-server is sufficient — a per-branch pool buys
+    /// nothing today.
+    ///
+    /// D41 Phase E.
+    commit_ws_pool: crate::validation::CommitWorkingSetPool,
 }
 
 impl EigeniusService {
@@ -572,6 +581,7 @@ impl EigeniusService {
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
+            commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
         })
     }
 
@@ -621,6 +631,7 @@ impl EigeniusService {
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
+            commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
         })
     }
 
@@ -680,6 +691,7 @@ impl EigeniusService {
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
+            commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
         })
     }
 
@@ -833,150 +845,6 @@ impl EigeniusService {
         }
     }
 
-    /// Persist a built `Layer` and advance `branch` to it — or
-    /// short-circuit through the anchored-commit cache (D33 §6).
-    ///
-    /// Returns a [`PersistedLayerInfo`] carrying the **canonical**
-    /// `LayerId` for the committed content together with a
-    /// `branch_advanced` flag that signals whether this call moved
-    /// the branch ref:
-    ///
-    /// - **Cache miss:** the fresh layer is stored, the branch advances
-    ///   to it, the cache is updated. `layer_id` = fresh id,
-    ///   `branch_advanced` = `true`.
-    /// - **Cache hit at the same position** (cached id == fresh id):
-    ///   `store_layer` is skipped (the layer is already on disk); the
-    ///   branch still advances (the caller meant to publish on top of
-    ///   the current head, and the cached layer occupies that
-    ///   position). `layer_id` = fresh id, `branch_advanced` = `true`.
-    /// - **Cache hit at a different position:** the content lives
-    ///   canonically at the cached layer's id, which is in a different
-    ///   chain context. `store_layer` and `update_branch` are both
-    ///   skipped — the branch stays put. `layer_id` = cached id,
-    ///   `branch_advanced` = `false`.
-    ///
-    /// The third case is the structural payoff: callers report
-    /// "your content is already canonical at X" while the branch
-    /// tracker sees no movement. Notebook cell-output reuse, mirror
-    /// regeneration against shifted parent chains, and any content
-    /// generator anchored to a supporting layer benefit transparently.
-    ///
-    /// When no persistent backend is configured, returns the fresh
-    /// layer's id with `branch_advanced` = `false` (the in-memory
-    /// chain may have changed, but there is no durable branch ref to
-    /// move).
-    fn persist_layer_if_backend(
-        &self,
-        branch: &str,
-        layer: &crate::layer::Layer,
-    ) -> Result<PersistedLayerInfo, ValidationError> {
-        let Some(backend) = self.backend.as_ref() else {
-            // No persistent backend — the layer lives in-memory only.
-            // There is no durable branch ref to advance, and no CAS
-            // attempted (merge_outcome = None).
-            return Ok(PersistedLayerInfo {
-                layer_id: layer.id().clone(),
-                branch_advanced: false,
-                merge_outcome: None,
-                cache_hit_different_position: false,
-            });
-        };
-
-        // Cache probe. The cache key is the layer's content_hash and
-        // the supporting layer's content_hash. Layers with no
-        // supporting layer (roots, pure self-referential commits) can't
-        // be keyed and fall through to the standard persist path.
-        let cache_hit = self.probe_anchored_commit(backend.as_ref(), layer);
-
-        if let Some(cached_id) = cache_hit {
-            if cached_id == *layer.id() {
-                // Same-position cache hit — the layer is already on
-                // disk. Skip `store_layer`; still attempt the branch
-                // CAS (the caller wanted to publish on top of the
-                // current head, which is the layer's parent). The CAS
-                // may still race or conflict, so the outcome is the
-                // full taxonomy.
-                tracing::debug!(
-                    { field::OPERATION } = operation::LAYER_COMMIT,
-                    { field::LAYER_ID } = %layer.id(),
-                    branch = branch,
-                    cache = "hit_same_position",
-                    "anchored-commit cache hit (same position) — skipping store_layer"
-                );
-                let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
-                let branch_advanced = !matches!(
-                    outcome,
-                    crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
-                );
-                return Ok(PersistedLayerInfo {
-                    layer_id: layer.id().clone(),
-                    branch_advanced,
-                    merge_outcome: Some(outcome),
-                    cache_hit_different_position: false,
-                });
-            }
-            // Different-position cache hit — the canonical layer is
-            // elsewhere. Skip both `store_layer` and `update_branch`;
-            // the branch stays where it is (D33 §6 supporting-
-            // equivalent context). No CAS attempted, so merge_outcome
-            // is None.
-            tracing::debug!(
-                { field::OPERATION } = operation::LAYER_COMMIT,
-                { field::LAYER_ID } = %layer.id(),
-                cached_layer = %cached_id,
-                branch = branch,
-                cache = "hit_different_position",
-                "anchored-commit cache hit (different position) — branch unchanged"
-            );
-            return Ok(PersistedLayerInfo {
-                layer_id: cached_id,
-                branch_advanced: false,
-                merge_outcome: None,
-                cache_hit_different_position: true,
-            });
-        }
-
-        // Cache miss — standard persist path.
-        if let Err(e) = backend.store_layer(layer) {
-            tracing::warn!(
-                { field::OPERATION } = operation::LAYER_COMMIT,
-                { field::ERROR_KIND } = "persist_layer_failed",
-                { field::LAYER_ID } = %layer.id(),
-                { field::ERROR_MESSAGE } = %e,
-                "failed to persist layer to backend"
-            );
-            return Err(ValidationError {
-                resource_iri: String::new(),
-                property_iri: String::new(),
-                rule: "persist_layer".to_string(),
-                message: format!("{e}"),
-                severity: "error".to_string(),
-            });
-        }
-
-        // Insert into the anchored-commit cache for future short-circuit
-        // (D33 §6). Best-effort: a failure here doesn't fail the
-        // commit, but we log it so chain audits can spot drift between
-        // the cache and the topology.
-        self.put_anchored_commit_for_layer(backend.as_ref(), layer);
-
-        // Attempt the CAS. On `NeedsWitnessedMerge` the layer is on
-        // disk but not reachable from any branch ref — the fix for
-        // D34 §G.1's silent-success bug is reporting branch_advanced
-        // = false here so clients know to recover.
-        let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
-        let branch_advanced = !matches!(
-            outcome,
-            crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
-        );
-        Ok(PersistedLayerInfo {
-            layer_id: layer.id().clone(),
-            branch_advanced,
-            merge_outcome: Some(outcome),
-            cache_hit_different_position: false,
-        })
-    }
-
     /// Compute the anchored-commit cache key for `layer` and probe the
     /// backend. Returns `None` when the layer has no supporting layer
     /// (root / self-referential) or when no cache entry exists.
@@ -1030,9 +898,8 @@ impl EigeniusService {
     }
 
     /// Advance `branch` to `layer` via the lattice's CAS primitive.
-    /// Carved out of `persist_layer_if_backend` so both the
-    /// cache-miss path and the same-position cache-hit path can
-    /// share the logic.
+    /// Carved out of the persist body so both the cache-miss path and
+    /// the same-position cache-hit path can share the logic.
     ///
     /// Returns the lattice's [`UpdateOutcome`](crate::lattice::UpdateOutcome)
     /// verbatim so the caller can:
@@ -1047,12 +914,18 @@ impl EigeniusService {
     ///
     /// Pre-D34 §G.1 this method swallowed all `Ok` variants as
     /// `Ok(())`, masking the `NeedsWitnessedMerge` failure as success.
+    ///
+    /// D41 Phase F: returns kernel-internal
+    /// [`crate::validation::ValidationError`] now that the only caller
+    /// is the [`crate::commit::LayerPersister`] trait impl on
+    /// [`EigeniusService`] (the inherent `persist_layer_if_backend`
+    /// was inlined and deleted in Phase F).
     fn advance_branch_for_layer(
         &self,
         branch: &str,
         layer: &crate::layer::Layer,
         backend: &dyn crate::storage::PersistentBackend,
-    ) -> Result<crate::lattice::UpdateOutcome, ValidationError> {
+    ) -> Result<crate::lattice::UpdateOutcome, crate::validation::ValidationError> {
         let expected_old = layer.parent().map(|p| p.id().clone());
         let storage = LayerStorage::with_persistent(
             self.backend
@@ -1087,12 +960,11 @@ impl EigeniusService {
                     { field::ERROR_MESSAGE } = %e,
                     "failed to advance branch"
                 );
-                Err(ValidationError {
-                    resource_iri: String::new(),
-                    property_iri: String::new(),
-                    rule: "advance_branch".to_string(),
-                    message: format!("{e}"),
-                    severity: "error".to_string(),
+                Err(crate::validation::ValidationError {
+                    resource_id: None,
+                    property: None,
+                    rule: crate::validation::ValidationRule::InstitutionValidation,
+                    message: format!("advance_branch failed: {e}"),
                 })
             }
         }
@@ -1674,34 +1546,23 @@ impl EigeniusService {
 
         // Auto-commit program-run layer: produced domain resources
         // (comorphism reify outputs, program-final output) +
-        // ProgramTrace + all IO ComponentTraces. The commit goes
-        // through `commit_with_validation` so AutoOnLoad QueryClasses
-        // bound to the produced resources' classes fire on chain
-        // entry (D14 §9.3 step 5).
+        // ProgramTrace + all IO ComponentTraces.
+        //
+        // Per D41 §10, RunProgram / RunProgramByIri commit through
+        // `WithRetroactive` — not `WithInstitutions` — because only
+        // Load runs AutoOnLoad today and RunProgram output is
+        // kernel-generated (comorphism reify outputs + ProgramTrace),
+        // not user-authored content the AutoOnLoad gate is designed
+        // to police. Cascade tombstoning under `WithRetroactive`
+        // still applies.
         let output_resource_iris: Vec<String> = produced_resources
             .iter()
             .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
             .collect();
         // `branch_advanced` reports whether the durable branch ref
-        // moved as a result of this run's commits. We OR the outcomes
-        // of the user-layer and provenance-layer persists: a fresh
-        // commit or same-position cache hit advances the branch;
-        // a different-position cache hit (D33 §6) does not.
-        //
-        // `merge_outcome` carries the user-layer's CAS outcome only —
-        // surfacing both user-layer and provenance outcomes would
-        // conflate two distinct events. See proto comment on
-        // `RunProgramResponse.merge` for the rationale.
-        // `branch_advanced` reports whether the durable branch ref moved
-        // as a result of this run's commits. We OR the user-layer and
-        // provenance-layer persists: a fresh commit or same-position
-        // cache hit advances the branch; a different-position cache hit
-        // (D33 §6) does not.
-        //
-        // `merge_outcome` carries the user-layer's CAS outcome only —
-        // surfacing both user-layer and provenance outcomes would
-        // conflate two distinct events. See proto comment on
-        // `RunProgramResponse.merge` for the rationale.
+        // moved as a result of this run's commit. A fresh commit or
+        // same-position cache hit advances the branch; a
+        // different-position cache hit (D33 §6) does not.
         //
         // `errors` accumulates every failure that should turn this
         // response into a `success=false` (D34 §6 trace-not-found bug
@@ -1714,7 +1575,7 @@ impl EigeniusService {
         // from `UNSPECIFIED` via `info.cache_hit_different_position`;
         // surfacing only `merge_outcome` would conflate them.
         let mut user_persist_info: Option<PersistedLayerInfo> = None;
-        // True iff we reached `persist_layer_if_backend` for any layer.
+        // True iff the commit pipeline ran (orchestrator was invoked).
         // Distinguishes "the run committed (or tried to) — report the
         // outcome" from "we never got to the commit step — say nothing
         // about merge state." The notebook UI keys its cell-footer
@@ -1776,178 +1637,105 @@ impl EigeniusService {
                 // structurally inconsistent.
                 None
             } else {
-                let index = Arc::clone(&*self.institution_index.read().await);
-                let runtime = Arc::clone(&*self.institution_runtime.read().await);
-                match ctx.commit_with_validation("program-run", &index, &runtime) {
-                    Ok(outcome) => {
-                        // Persist user layer; provenance layer (when
-                        // present, from Holds/Undecidable AutoOnLoad
-                        // verdicts) follows. A failure to persist
-                        // either is a backend I/O issue, distinct from
-                        // a chain rejection — log it and surface as an
-                        // error so the caller doesn't see a dangling
-                        // trace_iri.
-                        commit_attempted = true;
-                        let mut user_advanced = false;
-                        match self.persist_layer_if_backend(branch, &outcome.user_layer) {
-                            Ok(info) => {
-                                branch_advanced |= info.branch_advanced;
-                                user_advanced = info.branch_advanced;
-                                user_persist_info = Some(info);
-                            }
-                            Err(err) => {
-                                tracing::warn!(
-                                    { field::OPERATION } = operation::LAYER_COMMIT,
-                                    { field::ERROR_KIND } = "program_run_persist_failed",
-                                    { field::LAYER_ID } = %outcome.user_layer.id(),
-                                    { field::ERROR_MESSAGE } = %err.message,
-                                    "failed to persist program-run layer"
-                                );
-                                errors.push(err);
-                            }
-                        }
-                        // If the user layer didn't make it onto the
-                        // durable branch — different-position cache
-                        // hit, NeedsWitnessedMerge, or a backend I/O
-                        // error — `ctx.head` was advanced to an
-                        // in-memory-only layer. Revert so the next
-                        // RPC's commit doesn't fail with
-                        // "merge during update_branch: no common
-                        // ancestor" when its LCA walk hits the ghost.
-                        // Skip the provenance persist (its parent is
-                        // the never-stored user_layer).
-                        if !user_advanced && self.backend.is_some() {
-                            ctx.revert_head(outcome.prior_head, "program-run");
-                            None
-                        } else {
-                            if let Some(prov) = outcome.provenance_layer.as_ref() {
-                                let mut prov_advanced = false;
-                                match self.persist_layer_if_backend(branch, prov) {
-                                    Ok(info) => {
-                                        branch_advanced |= info.branch_advanced;
-                                        prov_advanced = info.branch_advanced;
-                                    }
-                                    Err(err) => {
-                                        tracing::warn!(
-                                            { field::OPERATION } = operation::LAYER_COMMIT,
-                                            { field::ERROR_KIND } = "program_run_provenance_persist_failed",
-                                            { field::LAYER_ID } = %prov.id(),
-                                            { field::ERROR_MESSAGE } = %err.message,
-                                            "failed to persist program-run provenance layer"
-                                        );
-                                        errors.push(err);
-                                    }
-                                }
-                                if !prov_advanced && self.backend.is_some() {
-                                    // Provenance didn't go in. The
-                                    // user_layer did — leave ctx.head
-                                    // on user_layer (revert from
-                                    // provenance to user_layer).
-                                    ctx.revert_head(Arc::clone(&outcome.user_layer), "program-run");
-                                }
-                            }
-                            Some(
-                                outcome
-                                    .provenance_layer
-                                    .as_ref()
-                                    .map(|l| l.id().clone())
-                                    .unwrap_or_else(|| outcome.user_layer.id().clone()),
-                            )
-                        }
-                    }
-                    Err(crate::context::ContextError::ValidationFailed {
-                        errors: verrs,
-                        provenance_layer,
-                        prior_head,
-                    }) => {
-                        // The chain refused the run's output (AutoOnLoad
-                        // `Fails`, structural validation error, etc.).
-                        // Per D31 §6.3 the provenance layer recording
-                        // the rejection is still persisted as the audit
-                        // anchor; the run itself is surfaced as a
-                        // failure to the caller.
-                        for ve in &verrs {
-                            tracing::warn!(
-                                { field::OPERATION } = operation::VALIDATE_RESOURCE,
-                                { field::ERROR_KIND } = ?ve.rule,
-                                { field::RESOURCE_IRI } = ve.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
-                                { field::PROPERTY_IRI } = ve.property.as_ref().map(|i| i.as_str()).unwrap_or(""),
-                                { field::ERROR_MESSAGE } = %ve.message,
-                                "program-run validation error"
-                            );
-                        }
-                        for ve in verrs {
-                            errors.push(ValidationError {
-                                resource_iri: ve
-                                    .resource_id
-                                    .as_ref()
-                                    .map(|i| i.as_str().to_string())
-                                    .unwrap_or_default(),
-                                property_iri: ve
-                                    .property
-                                    .as_ref()
-                                    .map(|i| i.as_str().to_string())
-                                    .unwrap_or_default(),
-                                rule: format!("{:?}", ve.rule),
-                                message: ve.message,
-                                severity: "error".to_string(),
-                            });
-                        }
-                        commit_attempted = true;
-                        let mut prov_advanced = false;
-                        if let Some(prov) = provenance_layer.as_ref() {
-                            match self.persist_layer_if_backend(branch, prov) {
-                                Ok(info) => {
-                                    branch_advanced |= info.branch_advanced;
-                                    prov_advanced = info.branch_advanced;
-                                }
-                                Err(err) => {
-                                    tracing::warn!(
-                                        { field::OPERATION } = operation::LAYER_COMMIT,
-                                        { field::ERROR_KIND } = "program_run_provenance_persist_failed",
-                                        { field::LAYER_ID } = %prov.id(),
-                                        { field::ERROR_MESSAGE } = %err.message,
-                                        "failed to persist program-run failure provenance layer"
-                                    );
-                                    errors.push(err);
-                                }
-                            }
-                        }
-                        // If the provenance didn't go through (or
-                        // there was no provenance to commit), revert
-                        // ctx.head to the original head. The Fails arm
-                        // of `commit_with_validation` had already
-                        // advanced ctx.head to the provenance layer
-                        // (or left it at prior_head if there was no
-                        // provenance to commit) — but if persist
-                        // cache-hits we need to revert to keep
-                        // ctx.head in storage.
-                        if !prov_advanced && self.backend.is_some() {
-                            if let Some(ph) = prior_head {
-                                ctx.revert_head(ph, "program-run");
-                            }
-                        }
-                        // Return the provenance layer's id so the task
-                        // record can point at the audit anchor for the
-                        // failed run.
-                        provenance_layer.map(|l| l.id().clone())
-                    }
+                let working = match ctx.take_working("program-run") {
+                    Ok(b) => b,
                     Err(e) => {
-                        tracing::warn!(
-                            { field::OPERATION } = operation::LAYER_COMMIT,
-                            { field::ERROR_KIND } = "program_run_commit_failed",
-                            { field::ERROR_MESSAGE } = %e,
-                            "program-run layer commit failed"
-                        );
                         errors.push(ValidationError {
                             resource_iri: String::new(),
                             property_iri: String::new(),
                             rule: "commit".to_string(),
-                            message: format!("{e}"),
+                            message: format!("program-run take_working failed: {e}"),
                             severity: "error".to_string(),
                         });
-                        None
+                        return Ok(Response::new(RunProgramResponse {
+                            success: false,
+                            output: Vec::new(),
+                            errors,
+                            trace_iri: String::new(),
+                            task_id: task_id_str,
+                            output_resource_iris: Vec::new(),
+                            branch_advanced: false,
+                            merge: None,
+                        }));
                     }
+                };
+                let root = crate::commit::LayerEmission::from_builder(
+                    "program-run",
+                    crate::commit::PipelineKind::WithRetroactive,
+                    crate::commit::EmissionKind::Child,
+                    working,
+                );
+
+                let commit_outcome = {
+                    let orchestrator = crate::commit::CommitOrchestrator {
+                        ctx: &mut ctx,
+                        pool: &self.commit_ws_pool,
+                        persister: self as &dyn crate::commit::LayerPersister,
+                        host: self as &dyn crate::commit::CommitHookHost,
+                        branch,
+                        policy: crate::lattice::CommitPolicy::default(),
+                        institutions: None,
+                        did_drain: crate::commit::CommitOrchestrator::default_did_drain(),
+                    };
+                    orchestrator.run(root)
+                };
+                commit_attempted = true;
+
+                // Surface didPersist + drain hook errors as
+                // ValidationErrors (commits stand either way per
+                // D41 §3.6, but the caller should still see them).
+                for layer_outcome in &commit_outcome.layers {
+                    for ve in &layer_outcome.hook_errors {
+                        errors.push(kernel_validation_error_to_proto(ve));
+                    }
+                }
+                for ve in &commit_outcome.drain_hook_errors {
+                    errors.push(kernel_validation_error_to_proto(ve));
+                }
+
+                // Surface the pipeline error (if any). Pre-D41 logged
+                // one event per rule violation so dashboards can group
+                // on `error_kind` — keep that.
+                if let Some(commit_err) = commit_outcome.error.as_ref() {
+                    match commit_err {
+                        crate::commit::CommitError::Validation { errors: verrs, .. }
+                        | crate::commit::CommitError::CascadeAbort { errors: verrs, .. } => {
+                            for ve in verrs {
+                                tracing::warn!(
+                                    { field::OPERATION } = operation::VALIDATE_RESOURCE,
+                                    { field::ERROR_KIND } = ?ve.rule,
+                                    { field::RESOURCE_IRI } = ve.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                                    { field::PROPERTY_IRI } = ve.property.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                                    { field::ERROR_MESSAGE } = %ve.message,
+                                    "program-run validation error"
+                                );
+                            }
+                        }
+                        other => {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::LAYER_COMMIT,
+                                { field::ERROR_KIND } = "program_run_commit_failed",
+                                { field::ERROR_MESSAGE } = %other,
+                                "program-run layer commit failed"
+                            );
+                        }
+                    }
+                    for proto_err in commit_error_to_proto(commit_err) {
+                        errors.push(proto_err);
+                    }
+                }
+
+                // Inspect outcome.layers[0] for the user-layer persist
+                // info (RunProgram emits no follow-up layers under
+                // `WithRetroactive`).
+                if let Some(user) = commit_outcome.layers.first() {
+                    branch_advanced |= user.persist.branch_advanced;
+                    user_persist_info = Some(user.persist.clone());
+                    // Return the user layer's id so the task record
+                    // can point at it for completion / failure audit.
+                    Some(user.persist.layer_id.clone())
+                } else {
+                    None
                 }
             }
         };
@@ -2023,48 +1811,297 @@ impl EigeniusService {
 // through; `EigeniusService` carries the only impl that does cache
 // probe + `store_layer` + branch CAS in one body.
 //
-// Shape A (delegate): this is a thin adapter over the existing
-// [`EigeniusService::persist_layer_if_backend`]. Keeping the existing
-// method as the implementation means no behaviour change risk during
-// Phase C and no syntactic churn at the 16 existing call sites that
-// Phase E will sweep when it moves them to the orchestrator. Once
-// Phase E lands, the inherent method goes away and only the trait
-// surface remains.
+// **Body inlined in Phase F.** Pre-Phase F this was a thin adapter
+// delegating to the inherent `persist_layer_if_backend` method on
+// `EigeniusService`. Phase F moved the body up into this trait impl
+// and deleted the inherent method — there are no longer any inherent
+// callers because every commit-shaped RPC now goes through the
+// orchestrator, which only ever sees a `&dyn LayerPersister`. Keeping
+// the inherent method alongside the trait impl would invite drift.
 //
-// **`ValidationError` conversion.** The trait declares
-// [`crate::validation::ValidationError`] (kernel-internal), but
-// `persist_layer_if_backend` returns [`proto::ValidationError`]
-// because the server module's `use proto::*;` puts the proto type in
-// scope. The two are bit-for-bit different structs. Phase E will
-// resolve the persister error type properly; for Phase C the
-// conversion happens inline here, mapping the proto error's stringly
-// `rule` into the closest existing [`crate::validation::ValidationRule`]
-// variant ([`ValidationRule::InstitutionValidation`], matching
-// [`crate::commit::persister::BackendStorePersister`]'s Phase B
-// stand-in) and carrying the original `rule` string verbatim in
-// `message` so callers can identify the underlying cause.
+// **`ValidationError` shape.** The trait declares
+// [`crate::validation::ValidationError`] (kernel-internal); the body
+// constructs that variant directly. Pre-Phase F the body returned
+// `proto::ValidationError` and the trait impl converted at the
+// boundary; the conversion is gone now that the body is here.
 impl crate::commit::LayerPersister for EigeniusService {
     fn persist(
         &self,
         branch: &str,
         layer: &Arc<crate::layer::Layer>,
     ) -> Result<PersistedLayerInfo, crate::validation::ValidationError> {
-        // D41 §7 — cheap deref: trait surface is `&Arc<Layer>`, the
-        // existing inherent method takes `&Layer`. Phase E will collapse
-        // the two by moving the body up into the trait method.
-        self.persist_layer_if_backend(branch, layer.as_ref())
-            .map_err(|proto_err| crate::validation::ValidationError {
+        let layer = layer.as_ref();
+        let Some(backend) = self.backend.as_ref() else {
+            // No persistent backend — the layer lives in-memory only.
+            // There is no durable branch ref to advance, and no CAS
+            // attempted (merge_outcome = None).
+            return Ok(PersistedLayerInfo {
+                layer_id: layer.id().clone(),
+                branch_advanced: false,
+                merge_outcome: None,
+                cache_hit_different_position: false,
+            });
+        };
+
+        // Cache probe. The cache key is the layer's content_hash and
+        // the supporting layer's content_hash. Layers with no
+        // supporting layer (roots, pure self-referential commits) can't
+        // be keyed and fall through to the standard persist path.
+        let cache_hit = self.probe_anchored_commit(backend.as_ref(), layer);
+
+        if let Some(cached_id) = cache_hit {
+            if cached_id == *layer.id() {
+                // Same-position cache hit — the layer is already on
+                // disk. Skip `store_layer`; still attempt the branch
+                // CAS (the caller wanted to publish on top of the
+                // current head, which is the layer's parent). The CAS
+                // may still race or conflict, so the outcome is the
+                // full taxonomy.
+                tracing::debug!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::LAYER_ID } = %layer.id(),
+                    branch = branch,
+                    cache = "hit_same_position",
+                    "anchored-commit cache hit (same position) — skipping store_layer"
+                );
+                let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+                let branch_advanced = !matches!(
+                    outcome,
+                    crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
+                );
+                return Ok(PersistedLayerInfo {
+                    layer_id: layer.id().clone(),
+                    branch_advanced,
+                    merge_outcome: Some(outcome),
+                    cache_hit_different_position: false,
+                });
+            }
+            // Different-position cache hit — the canonical layer is
+            // elsewhere. Skip both `store_layer` and `update_branch`;
+            // the branch stays where it is (D33 §6 supporting-
+            // equivalent context). No CAS attempted, so merge_outcome
+            // is None.
+            tracing::debug!(
+                { field::OPERATION } = operation::LAYER_COMMIT,
+                { field::LAYER_ID } = %layer.id(),
+                cached_layer = %cached_id,
+                branch = branch,
+                cache = "hit_different_position",
+                "anchored-commit cache hit (different position) — branch unchanged"
+            );
+            return Ok(PersistedLayerInfo {
+                layer_id: cached_id,
+                branch_advanced: false,
+                merge_outcome: None,
+                cache_hit_different_position: true,
+            });
+        }
+
+        // Cache miss — standard persist path.
+        if let Err(e) = backend.store_layer(layer) {
+            tracing::warn!(
+                { field::OPERATION } = operation::LAYER_COMMIT,
+                { field::ERROR_KIND } = "persist_layer_failed",
+                { field::LAYER_ID } = %layer.id(),
+                { field::ERROR_MESSAGE } = %e,
+                "failed to persist layer to backend"
+            );
+            return Err(crate::validation::ValidationError {
                 resource_id: None,
                 property: None,
-                // D41 Phase C: persister error type is not yet split.
-                // `InstitutionValidation` is the placeholder shared with
-                // `BackendStorePersister`; Phase E will widen the
-                // persister error to carry the I/O / CAS taxonomy
-                // properly instead of laundering through a validation
-                // variant.
                 rule: crate::validation::ValidationRule::InstitutionValidation,
-                message: format!("persister ({}): {}", proto_err.rule, proto_err.message),
-            })
+                message: format!("persist_layer failed: {e}"),
+            });
+        }
+
+        // Insert into the anchored-commit cache for future short-circuit
+        // (D33 §6). Best-effort: a failure here doesn't fail the
+        // commit, but we log it so chain audits can spot drift between
+        // the cache and the topology.
+        self.put_anchored_commit_for_layer(backend.as_ref(), layer);
+
+        // Attempt the CAS. On `NeedsWitnessedMerge` the layer is on
+        // disk but not reachable from any branch ref — the fix for
+        // D34 §G.1's silent-success bug is reporting branch_advanced
+        // = false here so clients know to recover.
+        let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
+        let branch_advanced = !matches!(
+            outcome,
+            crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
+        );
+        Ok(PersistedLayerInfo {
+            layer_id: layer.id().clone(),
+            branch_advanced,
+            merge_outcome: Some(outcome),
+            cache_hit_different_position: false,
+        })
+    }
+}
+
+// D41 §3.6 — `CommitHookHost` impl for `EigeniusService`. Lives in
+// `server::mod` for the same reason as the `LayerPersister` impl:
+// it has to reach into service state (the institution runtime, WASM
+// component registry, orchestrator client) without making the kernel
+// `commit` module depend on the server, which would be a cycle.
+//
+// **Async-to-sync bridge.** Both delegate methods on `EigeniusService`
+// are `async fn`, but the `CommitHookHost` trait surface is sync
+// (hook function pointers can't be async). Each method wraps with
+// `tokio::task::block_in_place(|| Handle::current().block_on(...))`
+// — the same dual-context pattern Phase B noted for
+// `BackendStorePersister`-style sync-over-async work. The hooks run
+// on the tokio thread driving the orchestrator (which itself runs
+// inside a tonic handler), so a current-thread runtime is always
+// available; `block_in_place` permits blocking without starving the
+// scheduler.
+//
+// **`register_wasm_for_layer` shape.** The existing
+// `register_wasm_from_layer` does more than register WASM components
+// — it also forwards IO components to the orchestrator, updates the
+// kernel-hosted component registry, and (by historical convention)
+// returns a `Vec<Resource>` that today is always empty (the
+// institution-classes follow-up content used to come from here but
+// no longer does — D14 institutions declare their classes directly
+// in the chain). The hook surface still requires the return because
+// future institution shapes may re-introduce auto-published classes.
+// The returned `Vec` flows into the `institution_classes` Child
+// emission (no-op today; non-empty future).
+impl crate::commit::CommitHookHost for EigeniusService {
+    fn register_wasm_for_layer(
+        &self,
+        layer: &Arc<crate::layer::Layer>,
+    ) -> Result<Vec<Resource>, Vec<crate::validation::ValidationError>> {
+        let mut proto_errors: Vec<ValidationError> = Vec::new();
+        let resources = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(self.register_wasm_from_layer(layer.as_ref(), &mut proto_errors))
+        });
+        if proto_errors.is_empty() {
+            Ok(resources)
+        } else {
+            // D41 §3.6: errors flow into `state.hook_errors` and the
+            // commit stands. The host returns Err so the hook can
+            // surface them; the returned `resources` (if any) are
+            // discarded because the institution_classes follow-up
+            // can't proceed if registration failed for some
+            // declarations. This mirrors today's handler which also
+            // surfaces these as errors but commits the user layer
+            // anyway.
+            Err(proto_errors
+                .iter()
+                .map(convert_proto_validation_error)
+                .collect())
+        }
+    }
+
+    fn rebuild_institution_index(
+        &self,
+        top_layer: &Arc<crate::layer::Layer>,
+    ) -> Result<(), Vec<crate::validation::ValidationError>> {
+        // The inherent async method has no error path — it logs
+        // failures at warn level and updates the index best-effort.
+        // The hook's `Ok` return mirrors that. A future widening
+        // could surface lock-poisoning / wasm-runtime build failures
+        // here; for today the hook is always Ok.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(self.rebuild_institution_index(top_layer.as_ref()))
+        });
+        Ok(())
+    }
+}
+
+/// Convert a proto-side `ValidationError` to the kernel-internal one.
+///
+/// D41 Phase C/D introduced this conversion at the `LayerPersister` /
+/// `CommitHookHost` trait boundaries because the kernel-side commit
+/// module can't depend on proto types. The mapping is lossy on `rule`
+/// (proto carries a string, kernel carries the
+/// [`crate::validation::ValidationRule`] enum); we land on
+/// `InstitutionValidation` as the closest fit and carry the original
+/// proto rule string in the message so call sites can identify the
+/// underlying cause.
+fn convert_proto_validation_error(
+    proto_err: &ValidationError,
+) -> crate::validation::ValidationError {
+    crate::validation::ValidationError {
+        resource_id: Iri::parse(&proto_err.resource_iri).ok(),
+        property: Iri::parse(&proto_err.property_iri).ok(),
+        rule: crate::validation::ValidationRule::InstitutionValidation,
+        message: format!(
+            "{} ({}): {}",
+            proto_err.rule, proto_err.severity, proto_err.message
+        ),
+    }
+}
+
+/// Convert a kernel-internal `ValidationError` to the proto-side one.
+///
+/// Inverse of [`convert_proto_validation_error`]. Used by the Load
+/// handler (and other commit-shaped RPC handlers, once Phase F migrates
+/// them) to surface the [`crate::commit::CommitOrchestrator`]'s
+/// per-layer / drain-hook / pipeline errors back to gRPC clients.
+///
+/// D41 Phase E.
+fn kernel_validation_error_to_proto(err: &crate::validation::ValidationError) -> ValidationError {
+    ValidationError {
+        resource_iri: err
+            .resource_id
+            .as_ref()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_default(),
+        property_iri: err
+            .property
+            .as_ref()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_default(),
+        rule: format!("{:?}", err.rule),
+        message: err.message.clone(),
+        severity: "error".to_string(),
+    }
+}
+
+/// Translate a [`crate::commit::CommitError`] to a list of proto
+/// `ValidationError`s for surfacing to the gRPC caller.
+///
+/// The mapping per variant follows D41 Phase E:
+///
+/// - `Validation { errors, .. }` / `CascadeAbort { errors, .. }` —
+///   the kernel-internal `ValidationError`s translate one-for-one.
+/// - `Storage` / `Layer` / `WorkingSetExhausted` / `Persist` — wrap
+///   the `Display` impl into a synthetic `ValidationError` with rule
+///   `commit_error` so callers can distinguish it from a domain
+///   rejection.
+/// - `EmissionDepthExceeded { name, depth }` — synthetic
+///   `ValidationError` with rule `emission_depth`. This should never
+///   fire in practice today; surface it cleanly anyway.
+///
+/// D41 Phase E.
+fn commit_error_to_proto(err: &crate::commit::CommitError) -> Vec<ValidationError> {
+    use crate::commit::CommitError;
+    match err {
+        CommitError::Validation { errors, .. } | CommitError::CascadeAbort { errors, .. } => {
+            errors.iter().map(kernel_validation_error_to_proto).collect()
+        }
+        CommitError::Storage(_)
+        | CommitError::Layer(_)
+        | CommitError::WorkingSetExhausted(_)
+        | CommitError::Persist(_) => vec![ValidationError {
+            resource_iri: String::new(),
+            property_iri: String::new(),
+            rule: "commit_error".to_string(),
+            message: err.to_string(),
+            severity: "error".to_string(),
+        }],
+        CommitError::EmissionDepthExceeded { depth, layer_name } => vec![ValidationError {
+            resource_iri: String::new(),
+            property_iri: String::new(),
+            rule: "emission_depth".to_string(),
+            message: format!(
+                "commit orchestrator: emission {layer_name:?} exceeded MAX_EMISSION_DEPTH at depth {depth}"
+            ),
+            severity: "error".to_string(),
+        }],
     }
 }
 
@@ -2107,251 +2144,149 @@ impl EigeniusKernel for EigeniusService {
         let mut errors = Vec::new();
 
         if req.auto_commit {
-            // Snapshot the current D14 institution index + runtime to
-            // pass to commit_with_validation. Newly committed
-            // resources are gated by AutoOnLoad QueryClasses already
-            // declared in the chain; QueryClasses declared in the
-            // same Load batch take effect on subsequent loads (the
-            // index gets rebuilt below).
+            // D41 Phase E migration. The ~250-line handler-side
+            // revert state-machine collapses into one
+            // `CommitOrchestrator::run` call:
+            //
+            // 1. Take the working builder we just populated above.
+            //    `take_working` consumes it and installs a fresh
+            //    builder parented at `ctx.head` so the orchestrator
+            //    can re-use the context for emission-driven layers.
+            // 2. Snapshot the D14 institution index + runtime. Newly
+            //    committed resources are gated by AutoOnLoad
+            //    QueryClasses *already* declared in the chain;
+            //    QueryClasses declared in the same Load batch take
+            //    effect on subsequent loads (the
+            //    `rebuild_institution_index` `didDrain` hook
+            //    refreshes the cell after the drain completes).
+            // 3. Construct the root `LayerEmission` from the working
+            //    builder.
+            // 4. Run the orchestrator. It drains the root through
+            //    `WithInstitutions`, runs the `register_wasm_components`
+            //    `didPersist` hook (which may queue an
+            //    `institution_classes` Child emission), drains that,
+            //    and finally fires the `rebuild_institution_index`
+            //    `didDrain` hook once with the top layer.
+            // 5. Translate the resulting `MultiLayerOutcome` to
+            //    `LoadResponse` fields.
+            //
+            // The write guard on `ctx` must outlive the orchestrator
+            // call because the orchestrator borrows `&mut ExecutionContext`
+            // for `take_working` / `advance_head` / `revert_head` (D41 §9).
+            // We extend it for the orchestrator's lifetime and drop it
+            // explicitly before computing the response.
+            let working = match ctx.take_working("loaded") {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(Status::failed_precondition(format!("load error: {e}")));
+                }
+            };
             let index_snapshot = Arc::clone(&*self.institution_index.read().await);
             let runtime_snapshot = Arc::clone(&*self.institution_runtime.read().await);
-            match ctx.commit_with_validation("loaded", &index_snapshot, &runtime_snapshot) {
-                Ok(outcome) => {
-                    let layer = outcome.user_layer;
-                    let prior_head = outcome.prior_head;
-                    let provenance = outcome.provenance_layer;
-                    // Default to the freshly-built layer's id; the
-                    // persist step below may substitute the canonical
-                    // id from the anchored-commit cache (D33 §6) if
-                    // this exact content + supporting context was
-                    // committed before.
-                    layer_id = layer.id().to_string();
-                    tracing::info!(
-                        { field::OPERATION } = operation::LAYER_COMMIT,
-                        { field::LAYER_ID } = %layer_id,
-                        { field::COUNT } = count,
-                        branch = %branch,
-                        "layer committed"
-                    );
-                    drop(ctx);
-                    // `user_advanced`: did the durable branch ref move
-                    // to (or through) the user layer? Drives whether we
-                    // can safely build on it for the provenance commit,
-                    // and whether the in-memory `ctx.head` is allowed
-                    // to stay where `commit_with_validation` advanced it.
-                    let mut user_advanced = false;
-                    match self.persist_layer_if_backend(&branch, &layer) {
-                        Ok(info) => {
-                            // On a cache hit at a different position
-                            // the canonical id differs from the
-                            // freshly-built one — surface that to the
-                            // caller so they see the chain's canonical
-                            // representative for this content.
-                            // `branch_advanced` distinguishes a fresh
-                            // commit / same-position hit (branch moved)
-                            // from a different-position hit (branch
-                            // stayed put). `merge_outcome` carries the
-                            // CAS taxonomy (FastForward / TrivialMerge /
-                            // NeedsWitnessedMerge) when a CAS ran.
-                            layer_id = info.layer_id.to_string();
-                            branch_advanced = info.branch_advanced;
-                            user_advanced = info.branch_advanced;
-                            user_persist_info = Some(info);
-                        }
-                        Err(err) => errors.push(err),
-                    }
-                    // If the user layer didn't go into the durable
-                    // chain — different-position cache hit or
-                    // NeedsWitnessedMerge — `ctx.head` was advanced to
-                    // an in-memory-only layer whose parent isn't in
-                    // storage. Revert so subsequent commits build on
-                    // the same head the durable branch ref points at;
-                    // skip the provenance persist (whose parent is
-                    // the never-stored user_layer) and the
-                    // institution-class follow-up commit (same reason).
-                    if !user_advanced && self.backend.is_some() {
-                        let mut ctx_w = ctx_arc.write().await;
-                        ctx_w.revert_head(prior_head, "loaded");
-                        drop(ctx_w);
-                        let response = LoadResponse {
-                            success: errors.is_empty(),
-                            errors,
-                            layer_id,
-                            resource_count: count,
-                            branch,
-                            branch_advanced,
-                            merge: Some(merge_info_from_persist_info(user_persist_info.as_ref())),
-                        };
-                        if !response.success {
-                            guard.fail("validation_failed");
-                        }
-                        return Ok(Response::new(response));
-                    }
-                    // Persist the AutoOnLoad provenance layer too if
-                    // one was produced (D31 §6.3 Holds/Undecidable
-                    // path). The kernel's commit pipeline advances
-                    // `ctx.head` to the provenance layer, so failing
-                    // to persist it leaves `ctx.head` pointing at a
-                    // backend-unknown layer — the next commit's CAS
-                    // would surface as "merge during update_branch:
-                    // no common ancestor" when the LCA walk hit the
-                    // ghost.
-                    if let Some(prov) = provenance {
-                        let mut prov_advanced = false;
-                        match self.persist_layer_if_backend(&branch, &prov) {
-                            Ok(info) => prov_advanced = info.branch_advanced,
-                            Err(err) => errors.push(err),
-                        }
-                        if !prov_advanced && self.backend.is_some() {
-                            // Revert ctx.head to the user_layer — the
-                            // provenance layer didn't make it through.
-                            let mut ctx_w = ctx_arc.write().await;
-                            ctx_w.revert_head(Arc::clone(&layer), "loaded");
-                        } else {
-                            self.rebuild_institution_index(&prov).await;
-                        }
-                    }
-                    // Rebuild the D14 institution index from the new
-                    // chain so subsequent commits see the just-loaded
-                    // declarations.
-                    self.rebuild_institution_index(&layer).await;
-                    // Scan the newly committed layer for WASM components/institutions.
-                    // For institutions, this returns the declared morphism / query
-                    // class resources that the registration produced.
-                    let published = self.register_wasm_from_layer(&layer, &mut errors).await;
 
-                    // Commit the published institution classes as a follow-up layer
-                    // so they become queryable via EigenQL / inspect. Closes #15.
-                    if !published.is_empty() {
-                        let mut ctx = ctx_arc.write().await;
-                        for resource in published {
-                            if let Err(e) = ctx.add_resource(resource) {
-                                errors.push(ValidationError {
-                                    resource_iri: String::new(),
-                                    property_iri: String::new(),
-                                    rule: "institution_publish".to_string(),
-                                    message: format!(
-                                        "failed to add institution-declared class: {e}"
-                                    ),
-                                    severity: "error".to_string(),
-                                });
-                            }
-                        }
-                        if ctx.has_changes() {
-                            // Save the pre-commit head so we can
-                            // revert if the institution_classes
-                            // persist short-circuits (different-position
-                            // cache hit). Same invariant as the
-                            // user-layer + provenance handling above.
-                            let inst_prior_head = Arc::clone(ctx.head());
-                            match ctx.commit("institution_classes") {
-                                Ok(extra) => match self.persist_layer_if_backend(&branch, &extra) {
-                                    Ok(info) => {
-                                        if info.branch_advanced {
-                                            drop(ctx);
-                                            self.rebuild_institution_index(&extra).await;
-                                        } else if self.backend.is_some() {
-                                            ctx.revert_head(inst_prior_head, "loaded");
-                                        }
-                                    }
-                                    Err(err) => {
-                                        errors.push(err);
-                                        if self.backend.is_some() {
-                                            ctx.revert_head(inst_prior_head, "loaded");
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    errors.push(ValidationError {
-                                        resource_iri: String::new(),
-                                        property_iri: String::new(),
-                                        rule: "institution_publish".to_string(),
-                                        message: format!("commit failed: {e}"),
-                                        severity: "error".to_string(),
-                                    });
-                                }
-                            }
-                        }
-                    }
+            let root = crate::commit::LayerEmission::from_builder(
+                "loaded",
+                crate::commit::PipelineKind::WithInstitutions,
+                crate::commit::EmissionKind::Child,
+                working,
+            );
+
+            // The orchestrator borrows `&mut ctx` for the duration of
+            // `run`. We scope its construction inside a block so the
+            // borrow ends before we read `outcome` fields.
+            let outcome = {
+                let orchestrator = crate::commit::CommitOrchestrator {
+                    ctx: &mut ctx,
+                    pool: &self.commit_ws_pool,
+                    persister: self as &dyn crate::commit::LayerPersister,
+                    host: self as &dyn crate::commit::CommitHookHost,
+                    branch: &branch,
+                    policy: crate::lattice::CommitPolicy::default(),
+                    institutions: Some(crate::commit::InstitutionContext {
+                        index: index_snapshot,
+                        runtime: runtime_snapshot,
+                        _marker: std::marker::PhantomData,
+                    }),
+                    did_drain: crate::commit::CommitOrchestrator::default_did_drain(),
+                };
+                orchestrator.run(root)
+            };
+
+            // Drop the write guard now — we're done with `ctx` for the
+            // rest of the handler; the response shape only needs
+            // values copied out of `outcome`.
+            drop(ctx);
+
+            // D41 §10: translate `MultiLayerOutcome` to the
+            // `LoadResponse` fields. Per D41 invariants (Phase D /
+            // Phase E), the user layer is `outcome.layers[0]` — the
+            // root emission is processed first in the FIFO drain.
+            // On the rejected-but-audited path (`autoonload_dispatch`
+            // returned Err with a `verdict_provenance` Sibling
+            // rescue), the user layer is absent and
+            // `outcome.layers[0]` is the audit layer; `error` is set
+            // so the caller still sees `success = false`.
+            if let Some(user_layer_outcome) = outcome.layers.first() {
+                // Use `persist.layer_id` rather than `layer.id()`: the
+                // anchored-commit cache (D33 §6) substitutes the
+                // canonical layer's id on a different-position hit, so
+                // `persist.layer_id` is the id callers expect to see.
+                // On a fresh commit the two are equal.
+                layer_id = user_layer_outcome.persist.layer_id.to_string();
+                branch_advanced = user_layer_outcome.persist.branch_advanced;
+                user_persist_info = Some(user_layer_outcome.persist.clone());
+                tracing::info!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::LAYER_ID } = %layer_id,
+                    { field::COUNT } = count,
+                    branch = %branch,
+                    "layer committed"
+                );
+            }
+
+            // Surface didPersist hook errors and drain hook errors —
+            // these don't unwind the commit but the caller should see
+            // them.
+            for layer_outcome in &outcome.layers {
+                for ve in &layer_outcome.hook_errors {
+                    errors.push(kernel_validation_error_to_proto(ve));
                 }
-                Err(crate::context::ContextError::ValidationFailed {
-                    errors: verrs,
-                    provenance_layer,
-                    prior_head,
-                }) => {
-                    // Per D31 §6.3: a Fails AutoOnLoad commits Verdict
-                    // + RuntimeInvocation as a separate provenance
-                    // layer even though the gated resource was
-                    // rejected. Persist that layer so the audit
-                    // anchor lives on the chain. The Load itself
-                    // still surfaces as a failure to the caller.
-                    let mut prov_advanced = false;
-                    if let Some(layer) = provenance_layer {
-                        match self.persist_layer_if_backend(&branch, &layer) {
-                            Ok(info) => prov_advanced = info.branch_advanced,
-                            Err(err) => errors.push(err),
-                        }
-                        if prov_advanced {
-                            self.rebuild_institution_index(&layer).await;
-                        }
-                    }
-                    // If the provenance layer didn't make it onto the
-                    // durable branch (cache hit / I/O error) and
-                    // commit_with_validation had advanced ctx.head to
-                    // it, revert to the saved prior_head so the next
-                    // commit's LCA walk doesn't fall off the chain.
-                    if !prov_advanced && self.backend.is_some() {
-                        if let Some(ph) = prior_head {
-                            let mut ctx_w = ctx_arc.write().await;
-                            ctx_w.revert_head(ph, "loaded");
+            }
+            for ve in &outcome.drain_hook_errors {
+                errors.push(kernel_validation_error_to_proto(ve));
+            }
+
+            // Surface the pipeline error (if any). Each error path is
+            // logged at warn level the same way the pre-D41 handler
+            // logged ContextError::ValidationFailed entries — one
+            // event per rule violation so dashboards can group on
+            // `error_kind`.
+            if let Some(commit_err) = outcome.error.as_ref() {
+                match commit_err {
+                    crate::commit::CommitError::Validation { errors: verrs, .. }
+                    | crate::commit::CommitError::CascadeAbort { errors: verrs, .. } => {
+                        for ve in verrs {
+                            tracing::warn!(
+                                { field::OPERATION } = operation::VALIDATE_RESOURCE,
+                                { field::ERROR_KIND } = ?ve.rule,
+                                { field::RESOURCE_IRI } = ve.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                                { field::PROPERTY_IRI } = ve.property.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                                { field::ERROR_MESSAGE } = %ve.message,
+                                "validation error"
+                            );
                         }
                     }
-                    // Per-error logging — each rule violation gets its
-                    // own warn-level event so dashboards can group on
-                    // `error_kind` (the rule's debug label) without
-                    // having to parse a flattened blob.
-                    for ve in &verrs {
+                    other => {
                         tracing::warn!(
-                            { field::OPERATION } = operation::VALIDATE_RESOURCE,
-                            { field::ERROR_KIND } = ?ve.rule,
-                            { field::RESOURCE_IRI } = ve.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
-                            { field::PROPERTY_IRI } = ve.property.as_ref().map(|i| i.as_str()).unwrap_or(""),
-                            { field::ERROR_MESSAGE } = %ve.message,
-                            "validation error"
+                            { field::OPERATION } = operation::LAYER_COMMIT,
+                            { field::ERROR_KIND } = "commit_failed",
+                            { field::ERROR_MESSAGE } = %other,
+                            "layer commit failed"
                         );
                     }
-                    for ve in verrs {
-                        errors.push(ValidationError {
-                            resource_iri: ve
-                                .resource_id
-                                .as_ref()
-                                .map(|i| i.as_str().to_string())
-                                .unwrap_or_default(),
-                            property_iri: ve
-                                .property
-                                .as_ref()
-                                .map(|i| i.as_str().to_string())
-                                .unwrap_or_default(),
-                            rule: format!("{:?}", ve.rule),
-                            message: ve.message,
-                            severity: "error".to_string(),
-                        });
-                    }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        { field::OPERATION } = operation::LAYER_COMMIT,
-                        { field::ERROR_KIND } = "commit_failed",
-                        { field::ERROR_MESSAGE } = %e,
-                        "layer commit failed"
-                    );
-                    errors.push(ValidationError {
-                        resource_iri: String::new(),
-                        property_iri: String::new(),
-                        rule: "commit".to_string(),
-                        message: format!("{e}"),
-                        severity: "error".to_string(),
-                    });
+                for proto_err in commit_error_to_proto(commit_err) {
+                    errors.push(proto_err);
                 }
             }
         }
@@ -2468,8 +2403,7 @@ impl EigeniusKernel for EigeniusService {
         };
 
         // FIBER ... INTO produced chain-bound resources — commit them
-        // through `commit_with_validation` so AutoOnLoad QueryClasses
-        // bound to their classes fire on chain entry (D14 §9.3 step 5
+        // through the commit orchestrator (D14 §9.3 step 5
         // chain-reinsertion via EigenQL).
         //
         // `commit_attempted` distinguishes "this query just read"
@@ -2477,6 +2411,16 @@ impl EigeniusKernel for EigeniusService {
         // FIBER INTO" (`merge` reports the CAS outcome). Without it,
         // every transient read would render as a misleading `cached`
         // badge in the notebook.
+        //
+        // Drop the unused per-query AutoOnLoad snapshots — per D41
+        // §10 FIBER INTO commits through `WithRetroactive`, not
+        // `WithInstitutions`, so the gated commit no longer needs the
+        // institution index / runtime here. The snapshots are still
+        // computed above for the `FiberRuntime` (read-side dispatch);
+        // the commit path deliberately bypasses AutoOnLoad until INTO
+        // opts back in. Revisit if a future INTO surface needs
+        // institutional gating (D41 §10 table footnote).
+        let _ = (&index, &inst_runtime);
         let mut branch_advanced = false;
         let mut user_persist_info: Option<PersistedLayerInfo> = None;
         let mut commit_attempted = false;
@@ -2500,87 +2444,92 @@ impl EigeniusKernel for EigeniusService {
                     );
                 }
             }
-            match ctx.commit_with_validation("eigenql-into", &index, &inst_runtime) {
-                Ok(co) => {
-                    commit_attempted = true;
-                    let mut user_advanced = false;
-                    match self.persist_layer_if_backend(&branch_name, &co.user_layer) {
-                        Ok(info) => {
-                            branch_advanced |= info.branch_advanced;
-                            user_advanced = info.branch_advanced;
-                            user_persist_info = Some(info);
-                        }
-                        Err(err) => tracing::warn!(
-                            { field::OPERATION } = operation::LAYER_COMMIT,
-                            { field::ERROR_KIND } = "eigenql_into_persist_failed",
-                            { field::LAYER_ID } = %co.user_layer.id(),
-                            { field::ERROR_MESSAGE } = %err.message,
-                            "failed to persist eigenql-into layer (query result still returned)"
-                        ),
-                    }
-                    if !user_advanced && self.backend.is_some() {
-                        // FIBER INTO's user layer didn't go through —
-                        // revert ctx.head to keep it on the durable
-                        // chain. See D34 §6.1 / the trace-not-found fix.
-                        ctx.revert_head(co.prior_head, "eigenql-into");
-                    } else if let Some(prov) = co.provenance_layer.as_ref() {
-                        let mut prov_advanced = false;
-                        match self.persist_layer_if_backend(&branch_name, prov) {
-                            Ok(info) => {
-                                branch_advanced |= info.branch_advanced;
-                                prov_advanced = info.branch_advanced;
-                            }
-                            Err(err) => tracing::warn!(
-                                { field::OPERATION } = operation::LAYER_COMMIT,
-                                { field::ERROR_KIND } = "eigenql_into_provenance_persist_failed",
-                                { field::LAYER_ID } = %prov.id(),
-                                { field::ERROR_MESSAGE } = %err.message,
-                                "failed to persist eigenql-into provenance layer"
-                            ),
-                        }
-                        if !prov_advanced && self.backend.is_some() {
-                            ctx.revert_head(Arc::clone(&co.user_layer), "eigenql-into");
-                        }
-                    }
-                }
+
+            let working = match ctx.take_working("eigenql-into") {
+                Ok(b) => b,
                 Err(e) => {
                     guard.fail("eigenql_into_commit_failed");
-                    let msg = format!("{e}");
-                    tracing::warn!(
-                        { field::OPERATION } = operation::LAYER_COMMIT,
-                        { field::ERROR_KIND } = "eigenql_into_commit_failed",
-                        { field::ERROR_MESSAGE } = %msg,
-                        "FIBER INTO commit failed; surfacing error to caller"
-                    );
-                    // If the failure was a Fails-verdict
-                    // ValidationFailed, ctx.head was advanced to a
-                    // verdict_provenance layer that we didn't persist.
-                    // Revert to the carried prior_head so ctx.head
-                    // matches the durable branch state.
-                    if let crate::context::ContextError::ValidationFailed {
-                        prior_head: Some(ph),
-                        ..
-                    } = &e
-                    {
-                        if self.backend.is_some() {
-                            ctx.revert_head(Arc::clone(ph), "eigenql-into");
-                        }
-                    }
-                    // commit_with_validation rejected the FIBER INTO
-                    // resources — no CAS reached `persist_layer_if_backend`.
-                    // Send `merge=None` so the notebook surfaces this
-                    // as the (already-populated) error rather than as
-                    // a misleading cache/merge badge.
                     return Ok(Response::new(QueryResponse {
                         success: false,
                         document: Vec::new(),
                         content_type: String::new(),
-                        error: format!("FIBER INTO commit failed: {msg}"),
+                        error: format!("FIBER INTO commit failed: {e}"),
                         output_resource_iris: Vec::new(),
                         branch_advanced: false,
                         merge: None,
                     }));
                 }
+            };
+
+            let root = crate::commit::LayerEmission::from_builder(
+                "eigenql-into",
+                crate::commit::PipelineKind::WithRetroactive,
+                crate::commit::EmissionKind::Child,
+                working,
+            );
+
+            let commit_outcome = {
+                let orchestrator = crate::commit::CommitOrchestrator {
+                    ctx: &mut ctx,
+                    pool: &self.commit_ws_pool,
+                    persister: self as &dyn crate::commit::LayerPersister,
+                    host: self as &dyn crate::commit::CommitHookHost,
+                    branch: &branch_name,
+                    policy: crate::lattice::CommitPolicy::default(),
+                    institutions: None,
+                    did_drain: crate::commit::CommitOrchestrator::default_did_drain(),
+                };
+                orchestrator.run(root)
+            };
+            drop(ctx);
+
+            if let Some(commit_err) = commit_outcome.error.as_ref() {
+                guard.fail("eigenql_into_commit_failed");
+                let msg = format!("{commit_err}");
+                tracing::warn!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::ERROR_KIND } = "eigenql_into_commit_failed",
+                    { field::ERROR_MESSAGE } = %msg,
+                    "FIBER INTO commit failed; surfacing error to caller"
+                );
+                return Ok(Response::new(QueryResponse {
+                    success: false,
+                    document: Vec::new(),
+                    content_type: String::new(),
+                    error: format!("FIBER INTO commit failed: {msg}"),
+                    output_resource_iris: Vec::new(),
+                    branch_advanced: false,
+                    merge: None,
+                }));
+            }
+
+            // Surface didPersist hook errors as warnings — the commit
+            // stands either way (D41 §3.6).
+            for layer_outcome in &commit_outcome.layers {
+                for ve in &layer_outcome.hook_errors {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::LAYER_COMMIT,
+                        { field::ERROR_KIND } = "eigenql_into_hook_error",
+                        { field::ERROR_MESSAGE } = %ve.message,
+                        "FIBER INTO didPersist hook error"
+                    );
+                }
+            }
+            for ve in &commit_outcome.drain_hook_errors {
+                tracing::warn!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::ERROR_KIND } = "eigenql_into_drain_hook_error",
+                    { field::ERROR_MESSAGE } = %ve.message,
+                    "FIBER INTO drain hook error"
+                );
+            }
+
+            // Translate per-layer outcomes. INTO under `WithRetroactive`
+            // emits no follow-ups, so `layers[0]` is the user layer.
+            if let Some(user) = commit_outcome.layers.first() {
+                commit_attempted = true;
+                branch_advanced |= user.persist.branch_advanced;
+                user_persist_info = Some(user.persist.clone());
             }
             iris
         };
@@ -2813,37 +2762,79 @@ impl EigeniusKernel for EigeniusService {
             .map(|i| i.as_str().to_string())
             .unwrap_or_default();
 
-        // Commit all trace resources to a new layer
+        // D41 Phase F migration. Same shape as Load (D41 §10): build
+        // the working layer, hand it to the orchestrator as a
+        // `WithRetroactive` root emission, translate the
+        // `MultiLayerOutcome` back into `ReflectResponse` fields. The
+        // orchestrator centralises head revert + persist-not-advanced
+        // bookkeeping. Reflect content is kernel-emitted trace data —
+        // not user-authored — but it is committed through
+        // `WithRetroactive` per D41 §10 so cascade tombstoning still
+        // applies if a future trace shape touches lower-layer
+        // institutional declarations.
         let branch = resolve_branch_name(&req.branch).to_string();
         let ctx_arc = self.get_branch_context(&branch).await?;
         let mut ctx = ctx_arc.write().await;
-        // Capture the pre-commit head so we can revert ctx.head if the
-        // persist short-circuits (different-position cache hit /
-        // NeedsWitnessedMerge). `ctx.commit()` advances head to the
-        // freshly-built layer; if that layer doesn't make it onto the
-        // durable branch, leaving ctx.head there poisons the next
-        // commit's LCA walk.
-        let prior_head = Arc::clone(ctx.head());
         for resource in resources {
             ctx.add_resource(resource)
                 .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
         }
-        let layer = ctx
-            .commit("reflect")
-            .map_err(|e| Status::internal(format!("reflect commit failed: {e}")))?;
-        let info = self
-            .persist_layer_if_backend(&branch, &layer)
-            .map_err(|err| Status::internal(format!("reflect persist failed: {}", err.message)))?;
-        if !info.branch_advanced && self.backend.is_some() {
-            ctx.revert_head(prior_head, "reflect");
-        }
+
+        let working = ctx
+            .take_working("reflect")
+            .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
+
+        let root = crate::commit::LayerEmission::from_builder(
+            "reflect",
+            crate::commit::PipelineKind::WithRetroactive,
+            crate::commit::EmissionKind::Child,
+            working,
+        );
+
+        let outcome = {
+            let orchestrator = crate::commit::CommitOrchestrator {
+                ctx: &mut ctx,
+                pool: &self.commit_ws_pool,
+                persister: self as &dyn crate::commit::LayerPersister,
+                host: self as &dyn crate::commit::CommitHookHost,
+                branch: &branch,
+                policy: crate::lattice::CommitPolicy::default(),
+                // Reflect does not run AutoOnLoad — only Load does.
+                institutions: None,
+                did_drain: crate::commit::CommitOrchestrator::default_did_drain(),
+            };
+            orchestrator.run(root)
+        };
         drop(ctx);
+
+        // Translate `MultiLayerOutcome` → `ReflectResponse`. Reflect
+        // produces no follow-up layers (no AutoOnLoad), so
+        // `outcome.layers` carries at most one entry — the trace layer.
+        let user_persist_info = outcome.layers.first().map(|l| l.persist.clone());
+        let branch_advanced = user_persist_info
+            .as_ref()
+            .map(|p| p.branch_advanced)
+            .unwrap_or(false);
+        let merge = Some(merge_info_from_persist_info(user_persist_info.as_ref()));
+
+        if let Some(commit_err) = outcome.error.as_ref() {
+            // Match the pre-D41 contract: reflect commit failures
+            // surface as `Status::internal`. The pre-D41 path had two
+            // exit shapes (`commit` failure → internal, `persist`
+            // failure → internal); the new orchestrator collapses both
+            // into `MultiLayerOutcome.error`, but the response shape
+            // stays the same for backwards compatibility with notebook
+            // clients that key on the gRPC status code.
+            return Err(Status::internal(format!(
+                "reflect commit failed: {commit_err}"
+            )));
+        }
 
         Ok(Response::new(ReflectResponse {
             success: true,
             trace_iri,
-            branch_advanced: info.branch_advanced,
-            merge: Some(merge_info_from_persist_info(Some(&info))),
+            branch_advanced,
+            merge,
         }))
     }
 
@@ -5125,26 +5116,23 @@ mod merge_info_tests {
 
 #[cfg(test)]
 mod layer_persister_dispatch_tests {
-    //! Phase C of D41 wires `EigeniusService` as the canonical
-    //! `LayerPersister` impl. Phase D's orchestrator will hand the
-    //! service to the pipeline as a `&dyn LayerPersister`; this test
-    //! pins the trait-dispatch handshake *before* the orchestrator
-    //! depends on it.
+    //! Phase C of D41 wired `EigeniusService` as the canonical
+    //! `LayerPersister` impl. Phase F inlined the persist body into
+    //! the trait impl and deleted the inherent
+    //! `persist_layer_if_backend` method; this test pins the
+    //! trait-dispatch handshake the orchestrator depends on.
     //!
-    //! D41 §7.
+    //! D41 §7 / Phase F.
     use super::*;
     use crate::commit::persister::LayerPersister;
 
     /// `EigeniusService::new()` (no-backend) is enough to exercise the
-    /// no-backend branch of `persist_layer_if_backend`:
+    /// no-backend branch of `LayerPersister::persist`:
     /// `branch_advanced = false`, `merge_outcome = None`,
     /// `cache_hit_different_position = false`, `layer_id` =
-    /// `layer.id()`. Calling through the trait should return the same
-    /// shape; the only difference is the proto-`ValidationError`
-    /// laundering in the trait impl (D41 Phase C compromise), which
-    /// the no-backend happy path never hits.
+    /// `layer.id()`.
     #[tokio::test]
-    async fn dyn_dispatch_matches_inherent_method_on_no_backend_path() {
+    async fn dyn_dispatch_on_no_backend_path() {
         let service = EigeniusService::new().expect("bootstrap should succeed");
 
         // Grab the main-branch head layer. `EigeniusService::new()`
@@ -5159,41 +5147,21 @@ mod layer_persister_dispatch_tests {
             ctx.head().clone()
         };
 
-        // Inherent method (today's call shape, used by all 16 existing
-        // call sites that Phase E will sweep).
-        let inherent = service
-            .persist_layer_if_backend(DEFAULT_BRANCH, head.as_ref())
-            .expect("no-backend path never errors");
-
         // Trait dispatch through `&dyn LayerPersister` — proves the
-        // impl is object-safe and the vtable resolves to the same
-        // body. Phase D's orchestrator will hold the service exactly
-        // this way.
+        // impl is object-safe and the vtable resolves to the persist
+        // body. The orchestrator holds the service exactly this way.
         let persister: &dyn LayerPersister = &service;
         let via_trait = persister
             .persist(DEFAULT_BRANCH, &head)
             .expect("no-backend path never errors");
 
-        assert_eq!(inherent.layer_id, via_trait.layer_id);
-        assert_eq!(inherent.branch_advanced, via_trait.branch_advanced);
-        assert_eq!(
-            inherent.cache_hit_different_position,
-            via_trait.cache_hit_different_position
-        );
-        // Both encode "no CAS attempted" — the no-backend path's
-        // load-bearing signal that distinguishes it from a same-position
-        // cache hit (D41 §7 docstring on `PersistedLayerInfo`).
-        assert!(inherent.merge_outcome.is_none());
+        // The no-backend signal is `branch_advanced = false` +
+        // `merge_outcome = None` + `cache_hit_different_position = false`.
+        // Pinning the combination keeps the no-backend shape stable.
+        assert_eq!(via_trait.layer_id, *head.id());
+        assert!(!via_trait.branch_advanced);
+        assert!(!via_trait.cache_hit_different_position);
         assert!(via_trait.merge_outcome.is_none());
-
-        // And the structural payoff: the no-backend signal is
-        // `branch_advanced = false` + `merge_outcome = None` +
-        // `cache_hit_different_position = false`. Pinning the
-        // combination keeps drift between the inherent body and the
-        // trait surface visible.
-        assert!(!inherent.branch_advanced);
-        assert!(!inherent.cache_hit_different_position);
-        assert_eq!(inherent.layer_id, *head.id());
     }
 }
 
