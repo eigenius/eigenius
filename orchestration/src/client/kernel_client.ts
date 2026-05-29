@@ -76,7 +76,9 @@ export type LoadPolicy =
   | { kind: "reject"; maxViolations?: number }
   | { kind: "cascadeTombstone" };
 
-function policyToProto(policy: LoadPolicy | undefined): CommitPolicy | undefined {
+function policyToProto(
+  policy: LoadPolicy | undefined,
+): CommitPolicy | undefined {
   if (!policy) return undefined;
   if (policy.kind === "reject") {
     return create(CommitPolicySchema, {

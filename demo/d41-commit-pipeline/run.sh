@@ -62,6 +62,49 @@ trap 'rm -rf "$TMP"' EXIT
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '    \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Verification helpers — query the chain to confirm post-commit state.
+# `inspect` against the chain is the simplest IRI-presence probe; its
+# output shape carries either the resource (success) or a "not found"
+# marker (success-with-found=false, or non-zero exit with text). Both
+# shapes are accepted so this script is forward-compatible with output
+# format changes.
+inspect_out() {
+  # Echo (stdout, exit-code) for the given IRI.
+  local iri="$1"
+  set +e
+  local out
+  out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json inspect "$iri" 2>&1)
+  local rc=$?
+  set -e
+  printf '%s\n%d\n' "$out" "$rc"
+}
+
+assert_resolves() {
+  local iri="$1" desc="${2:-$iri}"
+  local raw out rc
+  raw=$(inspect_out "$iri")
+  out=$(printf '%s' "$raw" | head -n -1)
+  rc=$(printf '%s' "$raw" | tail -n 1)
+  if [ "$rc" -ne 0 ]; then
+    fail "expected $desc to resolve; inspect exit=$rc: $out"
+  fi
+  if printf '%s' "$out" | grep -qiE 'found"?: *false|not[ _]found'; then
+    fail "expected $desc to resolve; inspect reports not-found: $out"
+  fi
+}
+
+assert_not_resolved() {
+  local iri="$1" desc="${2:-$iri}"
+  local raw out rc
+  raw=$(inspect_out "$iri")
+  out=$(printf '%s' "$raw" | head -n -1)
+  rc=$(printf '%s' "$raw" | tail -n 1)
+  # Either non-zero exit OR found-false / not-found marker in output.
+  if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qiE 'found"?: *false|not[ _]found'; then
+    fail "expected $desc NOT to resolve; inspect succeeded with: $out"
+  fi
+}
+
 # Fixtures use `urn:eigenius:test:d41-template:` as a stand-in for the
 # per-run namespace so the static files contain only valid URN @id
 # values. At runtime we substitute the template namespace for $NS
@@ -94,6 +137,10 @@ out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json load "$(fixture base)" 2>&1
   || fail "base load (expected ok): $out"
 echo "$out" | grep -q '"success":true' || fail "expected success=true: $out"
 ok "base layer loaded (Animal + Cat)"
+# Verify chain state — both resources should now resolve.
+assert_resolves "${NS}Animal" "Animal class"
+assert_resolves "${NS}Cat"    "Cat instance"
+ok "chain state verified: Animal + Cat resolvable"
 echo
 
 # Step 2: default Reject rejects an invalid layer.
@@ -106,6 +153,10 @@ if [ $rc -eq 0 ]; then
   fail "expected non-zero exit for invalid layer; got: $out"
 fi
 ok "invalid layer rejected (exit=$rc)"
+# Verify chain unchanged — Animal should still resolve, BadClass should not.
+assert_resolves     "${NS}Animal"   "Animal still resolves (chain unchanged)"
+assert_not_resolved "${NS}BadClass" "rejected BadClass not committed"
+ok "chain state verified: rejection left chain unchanged"
 echo
 
 # Step 3: --commit-policy cascade tombstones lower-layer violators.
@@ -123,6 +174,10 @@ if ! echo "$out" | grep -qE '"cascade_tombstones":[ ]*[1-9]|"cascade_tombstones"
   fail "expected cascade_tombstones > 0 (Cat should have been tombstoned): $out"
 fi
 ok "cascade applied tombstones to fixpoint"
+# Verify chain state — Animal still resolves (redef landed), Cat does not (cascade-tombstoned).
+assert_resolves     "${NS}Animal" "Animal still resolves (now InductiveType)"
+assert_not_resolved "${NS}Cat"    "Cat cascade-tombstoned by Animal redefinition"
+ok "chain state verified: Animal kept, Cat suppressed"
 echo
 
 # Step 4: --explicit-tombstone suppresses an IRI.
@@ -130,6 +185,9 @@ echo "Step 4: --explicit-tombstone suppresses an IRI"
 out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json load "$(fixture tomb_target)" 2>&1) \
   || fail "tomb_target load: $out"
 echo "$out" | grep -q '"success":true' || fail "expected tomb_target ok: $out"
+# Verify Mouse landed before we tombstone it.
+assert_resolves "${NS}Mouse" "Mouse class committed"
+ok "Mouse landed in tomb_target commit"
 
 out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json load \
         --explicit-tombstone "${NS}Mouse" \
@@ -137,21 +195,11 @@ out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json load \
   || fail "tomb_marker load: $out"
 echo "$out" | grep -q '"success":true' || fail "expected tomb_marker ok: $out"
 
-# Inspect should now report Mouse as not-found (CLI's inspect surface
-# returns either a "not found" message + non-zero exit, or a JSON
-# payload with `found:false`; accept both shapes).
-set +e
-out=$("${EIGENIUS[@]}" --endpoint "$ENDPOINT" --json inspect "${NS}Mouse" 2>&1)
-rc=$?
-set -e
-if [ $rc -eq 0 ]; then
-  echo "$out" | grep -qiE 'found"?: *false|not[ _]found' \
-    || fail "expected Mouse not found after explicit-tombstone: $out"
-else
-  echo "$out" | grep -qiE 'not[ _]found' \
-    || fail "inspect failed with unexpected output: $out"
-fi
-ok "Mouse suppressed via --explicit-tombstone"
+# Verify Mouse suppressed AND the unrelated Marker resource (committed
+# alongside the explicit tombstone) is reachable.
+assert_not_resolved "${NS}Mouse"  "Mouse suppressed by --explicit-tombstone"
+assert_resolves     "${NS}Marker" "Marker committed alongside tombstone"
+ok "chain state verified: Mouse suppressed, Marker present"
 echo
 
 echo "=== D41 e2e: PASS ==="
