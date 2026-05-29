@@ -1040,7 +1040,7 @@ impl EigeniusService {
     /// dispatcher on commit.
     ///
     /// [`InstitutionRuntime`]: crate::institution::runtime::InstitutionRuntime
-    /// [`WasmInstitution`]: crate::capability::wasm_institution_d14::WasmInstitution
+    /// [`WasmInstitution`]: crate::capability::wasm_institution::WasmInstitution
     async fn rebuild_institution_index(&self, layer: &crate::layer::Layer) {
         let (idx, errors) = crate::institution::registry::InstitutionIndex::from_layer(layer);
         for err in &errors {
@@ -1660,6 +1660,7 @@ impl EigeniusService {
                     }
                 };
                 let root = crate::commit::LayerEmission::from_builder(
+                    crate::commit::LayerRole::User,
                     "program-run",
                     crate::commit::PipelineKind::WithRetroactive,
                     crate::commit::EmissionKind::Child,
@@ -2105,6 +2106,102 @@ fn commit_error_to_proto(err: &crate::commit::CommitError) -> Vec<ValidationErro
     }
 }
 
+/// Extract the policy's `total_violations` from a [`crate::commit::CommitError`].
+///
+/// Only the `Validation` and `CascadeAbort` variants carry the true
+/// violation count (D41 §3.3); every other variant resolves to `0`
+/// because the failure didn't originate in the retroactive pass.
+///
+/// D41 §10.
+fn commit_error_total_violations(err: &crate::commit::CommitError) -> u32 {
+    use crate::commit::CommitError;
+    match err {
+        CommitError::Validation {
+            total_violations, ..
+        }
+        | CommitError::CascadeAbort {
+            total_violations, ..
+        } => *total_violations as u32,
+        _ => 0,
+    }
+}
+
+/// Translate a proto [`proto::CommitPolicy`] into the kernel's
+/// [`crate::lattice::CommitPolicy`].
+///
+/// Mapping (D41 §3.3, §8):
+/// - `None` or unset variant → [`CommitPolicy::default()`] (Reject{100}).
+/// - `Reject { max_violations: 0 }` → `Reject { max_violations: 100 }` —
+///   treat `0` as "use the kernel default" so clients can leave the
+///   field at its proto zero-value and still get the default cap.
+/// - `Reject { max_violations: n }` → `Reject { max_violations: n as usize }`.
+/// - `CascadeTombstone` → `CascadeTombstone`.
+///
+/// D41 §10.1.
+fn commit_policy_from_proto(policy: Option<&proto::CommitPolicy>) -> crate::lattice::CommitPolicy {
+    use crate::lattice::CommitPolicy;
+    use proto::commit_policy::Variant;
+    let Some(p) = policy else {
+        return CommitPolicy::default();
+    };
+    match p.variant.as_ref() {
+        None => CommitPolicy::default(),
+        Some(Variant::Reject(r)) => {
+            if r.max_violations == 0 {
+                CommitPolicy::default()
+            } else {
+                CommitPolicy::Reject {
+                    max_violations: r.max_violations as usize,
+                }
+            }
+        }
+        Some(Variant::CascadeTombstone(_)) => CommitPolicy::CascadeTombstone,
+    }
+}
+
+/// Translate a [`crate::commit::LayerCommitOutcome`] into a proto
+/// [`proto::CommittedLayer`] entry.
+///
+/// The `role` field maps the closed kernel
+/// [`crate::commit::LayerRole`] taxonomy onto the wire-stable
+/// [`proto::LayerRole`] enum; this is the field clients should match
+/// on to identify the user / audit / institution-classes layers
+/// (position-in-vec is unsafe on the Sibling-rescue path, and
+/// string-comparing `name` is fragile). The `name` field carries the
+/// free-form display label from the originating
+/// [`crate::commit::LayerEmission::name`].
+///
+/// D41 §6 / §10.
+fn committed_layer_to_proto(outcome: &crate::commit::LayerCommitOutcome) -> proto::CommittedLayer {
+    proto::CommittedLayer {
+        role: layer_role_to_proto(outcome.role) as i32,
+        name: outcome.name.to_string(),
+        layer_id: outcome.persist.layer_id.to_string(),
+        branch_advanced: outcome.persist.branch_advanced,
+        merge: Some(merge_info_from_persist_info(Some(&outcome.persist))),
+        cascade_tombstones: outcome
+            .cascade_tombstones
+            .iter()
+            .map(|iri| iri.as_str().to_string())
+            .collect(),
+        cascade_iterations: outcome.cascade_iterations,
+    }
+}
+
+/// Map the kernel-internal [`crate::commit::LayerRole`] onto the
+/// wire-stable [`proto::LayerRole`]. Closed over every variant —
+/// adding a new role to the kernel taxonomy will fail compilation
+/// here until the proto enum and this mapping are updated together.
+///
+/// D41 §6.
+fn layer_role_to_proto(role: crate::commit::LayerRole) -> proto::LayerRole {
+    match role {
+        crate::commit::LayerRole::User => proto::LayerRole::User,
+        crate::commit::LayerRole::AuditProvenance => proto::LayerRole::AuditProvenance,
+        crate::commit::LayerRole::InstitutionClasses => proto::LayerRole::InstitutionClasses,
+    }
+}
+
 #[allow(clippy::result_large_err)]
 #[tonic::async_trait]
 impl EigeniusKernel for EigeniusService {
@@ -2130,9 +2227,22 @@ impl EigeniusKernel for EigeniusService {
             ctx.add_resource(resource)
                 .map_err(|e| Status::failed_precondition(format!("load error: {e}")))?;
         }
+        // D41 §10.1: apply caller-supplied explicit tombstones to the
+        // working builder before `take_working` consumes it. Validating
+        // each IRI here mirrors the resource-parsing error surface — a
+        // malformed IRI is a client-side bug, not silently-dropped.
+        for raw in &req.explicit_tombstones {
+            let iri = Iri::parse(raw).map_err(|e| {
+                Status::invalid_argument(format!("invalid tombstone IRI {raw:?}: {e}"))
+            })?;
+            ctx.tombstone(iri)
+                .map_err(|e| Status::failed_precondition(format!("tombstone error: {e}")))?;
+        }
 
         let mut layer_id = String::new();
         let mut branch_advanced = false;
+        let mut total_violations: u32 = 0;
+        let mut committed_layers: Vec<proto::CommittedLayer> = Vec::new();
         // The user-layer's persist info — the user-facing one. Any
         // follow-up persists (AutoOnLoad provenance, institution_classes)
         // log on failure but their outcomes are not surfaced in the
@@ -2185,6 +2295,7 @@ impl EigeniusKernel for EigeniusService {
             let runtime_snapshot = Arc::clone(&*self.institution_runtime.read().await);
 
             let root = crate::commit::LayerEmission::from_builder(
+                crate::commit::LayerRole::User,
                 "loaded",
                 crate::commit::PipelineKind::WithInstitutions,
                 crate::commit::EmissionKind::Child,
@@ -2194,6 +2305,7 @@ impl EigeniusKernel for EigeniusService {
             // The orchestrator borrows `&mut ctx` for the duration of
             // `run`. We scope its construction inside a block so the
             // borrow ends before we read `outcome` fields.
+            let policy = commit_policy_from_proto(req.policy.as_ref());
             let outcome = {
                 let orchestrator = crate::commit::CommitOrchestrator {
                     ctx: &mut ctx,
@@ -2201,7 +2313,7 @@ impl EigeniusKernel for EigeniusService {
                     persister: self as &dyn crate::commit::LayerPersister,
                     host: self as &dyn crate::commit::CommitHookHost,
                     branch: &branch,
-                    policy: crate::lattice::CommitPolicy::default(),
+                    policy,
                     institutions: Some(crate::commit::InstitutionContext {
                         index: index_snapshot,
                         runtime: runtime_snapshot,
@@ -2218,23 +2330,29 @@ impl EigeniusKernel for EigeniusService {
             drop(ctx);
 
             // D41 §10: translate `MultiLayerOutcome` to the
-            // `LoadResponse` fields. Per D41 invariants (Phase D /
-            // Phase E), the user layer is `outcome.layers[0]` — the
-            // root emission is processed first in the FIFO drain.
-            // On the rejected-but-audited path (`autoonload_dispatch`
-            // returned Err with a `verdict_provenance` Sibling
-            // rescue), the user layer is absent and
-            // `outcome.layers[0]` is the audit layer; `error` is set
-            // so the caller still sees `success = false`.
-            if let Some(user_layer_outcome) = outcome.layers.first() {
+            // `LoadResponse` fields. The user layer is the outcome
+            // whose role is `LayerRole::User` — *not* `layers[0]`,
+            // because on the rejected-but-audited path
+            // (`autoonload_dispatch` returns Err with a
+            // `verdict_provenance` Sibling rescue) the failing
+            // user-layer pipeline pushes nothing to `outcome.layers`
+            // and the rescued audit lands at index 0. The closed
+            // [`crate::commit::LayerRole`] taxonomy (D41 §6 /
+            // outcome.LayerRole) lets us pick the right entry
+            // unambiguously without string compares.
+            let user_layer_outcome = outcome
+                .layers
+                .iter()
+                .find(|l| l.role == crate::commit::LayerRole::User);
+            if let Some(u) = user_layer_outcome {
                 // Use `persist.layer_id` rather than `layer.id()`: the
                 // anchored-commit cache (D33 §6) substitutes the
                 // canonical layer's id on a different-position hit, so
                 // `persist.layer_id` is the id callers expect to see.
                 // On a fresh commit the two are equal.
-                layer_id = user_layer_outcome.persist.layer_id.to_string();
-                branch_advanced = user_layer_outcome.persist.branch_advanced;
-                user_persist_info = Some(user_layer_outcome.persist.clone());
+                layer_id = u.persist.layer_id.to_string();
+                branch_advanced = u.persist.branch_advanced;
+                user_persist_info = Some(u.persist.clone());
                 tracing::info!(
                     { field::OPERATION } = operation::LAYER_COMMIT,
                     { field::LAYER_ID } = %layer_id,
@@ -2243,6 +2361,15 @@ impl EigeniusKernel for EigeniusService {
                     "layer committed"
                 );
             }
+
+            // Per-layer outcomes for the response. Mapped in drain
+            // order so callers can recover the chronological story of
+            // what landed.
+            committed_layers = outcome
+                .layers
+                .iter()
+                .map(committed_layer_to_proto)
+                .collect();
 
             // Surface didPersist hook errors and drain hook errors —
             // these don't unwind the commit but the caller should see
@@ -2262,6 +2389,11 @@ impl EigeniusKernel for EigeniusService {
             // event per rule violation so dashboards can group on
             // `error_kind`.
             if let Some(commit_err) = outcome.error.as_ref() {
+                // Capture the policy's `total_violations` cap-aware
+                // count before we destructure. The proto field surfaces
+                // the full violation count even when `errors` was
+                // truncated by `CommitPolicy::Reject::max_violations`.
+                total_violations = commit_error_total_violations(commit_err);
                 match commit_err {
                     crate::commit::CommitError::Validation { errors: verrs, .. }
                     | crate::commit::CommitError::CascadeAbort { errors: verrs, .. } => {
@@ -2308,6 +2440,8 @@ impl EigeniusKernel for EigeniusService {
             } else {
                 None
             },
+            total_violations,
+            committed_layers,
         };
         if !response.success {
             guard.fail("validation_failed");
@@ -2462,6 +2596,7 @@ impl EigeniusKernel for EigeniusService {
             };
 
             let root = crate::commit::LayerEmission::from_builder(
+                crate::commit::LayerRole::User,
                 "eigenql-into",
                 crate::commit::PipelineKind::WithRetroactive,
                 crate::commit::EmissionKind::Child,
@@ -2785,6 +2920,7 @@ impl EigeniusKernel for EigeniusService {
             .map_err(|e| Status::failed_precondition(format!("reflect error: {e}")))?;
 
         let root = crate::commit::LayerEmission::from_builder(
+            crate::commit::LayerRole::User,
             "reflect",
             crate::commit::PipelineKind::WithRetroactive,
             crate::commit::EmissionKind::Child,

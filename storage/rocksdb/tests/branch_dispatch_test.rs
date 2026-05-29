@@ -95,6 +95,8 @@ async fn load_into(service: &EigeniusService, branch: &str, payload: &str) -> St
             content_type: "application/eigon+json".into(),
             auto_commit: true,
             branch: branch.into(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load")
@@ -222,6 +224,8 @@ async fn unknown_branch_returns_not_found() {
             content_type: "application/eigon+json".into(),
             auto_commit: true,
             branch: "ghost-branch".into(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect_err("ghost branch should fail");

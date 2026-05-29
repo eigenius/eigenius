@@ -40,6 +40,7 @@ import type {
   MergeResolutionWire,
 } from "@eigenius/client";
 import {
+  LayerRole,
   MergeOutcome,
   PrepareMergeErrorKind,
   PreviewCascadeErrorKind,
@@ -156,6 +157,23 @@ export type CellOutput =
      * in-memory path until the kernel disambiguates that case.
      */
     commit?: CommitMeta;
+    /**
+     * D41 cascade tombstones applied to the user layer by the
+     * `CascadeTombstone` policy. Empty / iterations = 0 means no
+     * cascade ran (either policy was `Reject` or no retroactive
+     * violations were found).
+     */
+    cascade?: { tombstones: readonly string[]; iterations: number };
+    /**
+     * D41 follow-up layers the commit produced (audit / institution
+     * classes). Excludes the user layer (already represented by
+     * `layerId`); empty for plain commits.
+     */
+    sideLayers?: readonly {
+      role: "audit" | "institution_classes" | "unspecified";
+      name: string;
+      layerId: string;
+    }[];
   }
   | {
     kind: "validate";
@@ -207,6 +225,13 @@ export type CellOutput =
   | {
     kind: "error";
     message: string;
+    /**
+     * D41: full violation count when the server's commit policy
+     * truncated `errors` (Reject policy with `max_violations` cap).
+     * `undefined` when no truncation happened or when the error
+     * isn't a validation rejection (storage / runtime / etc.).
+     */
+    totalViolations?: number;
   };
 
 export interface ProgramRunResult {
@@ -1456,8 +1481,37 @@ async function executeCell(
           message: messages.length === 0
             ? "load failed (no errors reported)"
             : messages.join("\n"),
+          // D41 totalViolations is non-zero only when the kernel
+          // surfaced more violations than `errors` carries (policy
+          // truncation). The UI uses this to render "showing X of Y".
+          totalViolations: resp.totalViolations > resp.errors.length
+            ? resp.totalViolations
+            : undefined,
         };
       }
+      // D41: find the user-layer's CommittedLayer entry to pull its
+      // cascade outcome; surface any non-user layers (audit /
+      // institution_classes) as side layers.
+      const userLayer = resp.committedLayers.find(
+        (l) => l.role === LayerRole.USER,
+      );
+      const sideLayers = resp.committedLayers
+        .filter((l) => l.role !== LayerRole.USER)
+        .map((l) => ({
+          role: l.role === LayerRole.AUDIT_PROVENANCE
+            ? "audit" as const
+            : l.role === LayerRole.INSTITUTION_CLASSES
+            ? "institution_classes" as const
+            : "unspecified" as const,
+          name: l.name,
+          layerId: l.layerId,
+        }));
+      const cascade = userLayer && userLayer.cascadeIterations > 0
+        ? {
+          tombstones: userLayer.cascadeTombstones,
+          iterations: userLayer.cascadeIterations,
+        }
+        : undefined;
       return {
         kind: "load",
         layerId: resp.layerId,
@@ -1467,6 +1521,8 @@ async function executeCell(
         // signal (validate-only Load, no-backend mode). Skip the
         // CommitMeta so the cell footer doesn't render a stale badge.
         commit: resp.merge !== undefined ? commitMetaFrom(resp) : undefined,
+        cascade,
+        sideLayers: sideLayers.length > 0 ? sideLayers : undefined,
       };
     }
     case "eigenql": {

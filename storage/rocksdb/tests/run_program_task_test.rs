@@ -90,6 +90,8 @@ async fn run_program_persists_task_record() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load")
@@ -165,6 +167,8 @@ async fn list_tasks_and_get_task_status() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load");
@@ -254,6 +258,8 @@ async fn cancel_task_marks_running_as_cancelling_and_terminal_is_noop() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load");
@@ -350,6 +356,8 @@ async fn inspect_at_layer_reaches_prior_head() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load a")
@@ -371,6 +379,8 @@ async fn inspect_at_layer_reaches_prior_head() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load b");
@@ -448,6 +458,8 @@ async fn run_program_without_backend_has_empty_task_id() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load")
@@ -542,6 +554,8 @@ async fn run_program_failed_validation_clears_trace_iri_and_output() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         }))
         .await
         .expect("load ontology")

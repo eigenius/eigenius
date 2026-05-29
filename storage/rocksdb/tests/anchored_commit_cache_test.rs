@@ -88,6 +88,8 @@ async fn load_twice_with_identical_content_hits_anchored_commit_cache() {
         content_type: "application/eigon+json".to_string(),
         auto_commit: true,
         branch: String::new(),
+        policy: None,
+        explicit_tombstones: Vec::new(),
     };
 
     // First Load: cache miss → commits a fresh layer; branch advances.

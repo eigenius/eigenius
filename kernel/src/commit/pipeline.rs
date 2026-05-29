@@ -39,7 +39,7 @@ use crate::observability::{field, operation};
 use crate::validation::CommitWorkingSet;
 
 use super::hooks::{register_wasm_components, CommitHookHost, DidPersistHook};
-use super::outcome::{LayerCommitOutcome, LayerEmission};
+use super::outcome::{LayerCommitOutcome, LayerEmission, LayerRole};
 use super::persister::LayerPersister;
 use super::phases::{
     autoonload_dispatch, build, persist, retroactive_with_cascade, structural_validate,
@@ -206,6 +206,8 @@ impl CommitPipeline {
     /// reported `branch_advanced = true`.
     pub fn run(
         &self,
+        name: &'static str,
+        role: LayerRole,
         builder: LayerBuilder,
         cfg: PipelineConfig<'_>,
         ws: &mut CommitWorkingSet,
@@ -309,6 +311,8 @@ impl CommitPipeline {
             "commit.pipeline_run.ok"
         );
         Ok(LayerCommitOutcome {
+            role,
+            name,
             layer,
             persist: persist_info,
             cascade_tombstones: state.cascade_tombstones,
@@ -498,6 +502,7 @@ mod tests {
         // The two non-sibling entries must stay behind; the three
         // siblings must come out in source order.
         let mk = |name: &'static str, kind: EmissionKind| LayerEmission {
+            role: LayerRole::User,
             name,
             pipeline: PipelineKind::StructuralFollowup,
             kind,
@@ -540,6 +545,7 @@ mod tests {
     #[test]
     fn partition_siblings_with_only_children_returns_empty() {
         let mut emissions = vec![LayerEmission {
+            role: LayerRole::User,
             name: "only_child",
             pipeline: PipelineKind::StructuralFollowup,
             kind: EmissionKind::Child,

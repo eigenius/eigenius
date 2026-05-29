@@ -25,11 +25,17 @@ import { createClient } from "@connectrpc/connect";
 import { createGrpcWebTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
 import {
+  type CommitPolicy,
+  CommitPolicy_CascadeTombstoneSchema,
+  CommitPolicy_RejectSchema,
+  CommitPolicySchema,
+  type CommittedLayer,
   EigeniusKernel,
   HealthRequestSchema,
   type HealthResponse,
   InspectRequestSchema,
   type InspectResponse,
+  LayerRole,
   LayerTopologyRequestSchema,
   type LayerTopologyResponse,
   LoadRequestSchema,
@@ -46,6 +52,8 @@ import {
 import { encodeResource } from "../wasm/cbor.ts";
 
 export type {
+  CommitPolicy,
+  CommittedLayer,
   HealthResponse,
   InspectResponse,
   LayerTopologyResponse,
@@ -55,6 +63,38 @@ export type {
   ValidateProgramResponse,
   ValidationError,
 };
+
+export { LayerRole };
+
+/**
+ * Commit-policy shapes accepted by `KernelClient.load`. Maps to the
+ * proto `CommitPolicy` oneof (D41 §3.3, §8). Absent or `{ kind: "reject" }`
+ * with no `maxViolations` defers to the server-side default
+ * (`Reject{ max_violations: 100 }`).
+ */
+export type LoadPolicy =
+  | { kind: "reject"; maxViolations?: number }
+  | { kind: "cascadeTombstone" };
+
+function policyToProto(policy: LoadPolicy | undefined): CommitPolicy | undefined {
+  if (!policy) return undefined;
+  if (policy.kind === "reject") {
+    return create(CommitPolicySchema, {
+      variant: {
+        case: "reject",
+        value: create(CommitPolicy_RejectSchema, {
+          maxViolations: policy.maxViolations ?? 0,
+        }),
+      },
+    });
+  }
+  return create(CommitPolicySchema, {
+    variant: {
+      case: "cascadeTombstone",
+      value: create(CommitPolicy_CascadeTombstoneSchema, {}),
+    },
+  });
+}
 
 const CONTENT_TYPE_CBOR = "application/eigon+cbor";
 
@@ -132,16 +172,37 @@ export class KernelClient {
 
   /**
    * Load resources into the kernel's working layer.
+   *
+   * `policy` controls retroactive-validation behaviour (D41 §3.3, §8).
+   * Omit for the server-side default (`Reject{ max_violations: 100 }`).
+   * `explicitTombstones` tombstones the listed IRIs as part of the same
+   * commit, applied to the initial user-layer builder before retroactive
+   * validation runs (D41 §10.1).
+   *
+   * The returned `LoadResponse` carries `totalViolations` (the true
+   * violation count, possibly larger than `errors.length` when the
+   * policy capped it), `committedLayers` (per-layer outcomes — match
+   * on `role` to find the user / audit / institution-classes layer),
+   * and the existing top-level `layerId` / `branchAdvanced` / `merge`
+   * fields which continue to point at the user layer.
    */
   async load(
     resourcesJson: string,
-    autoCommit = true,
+    options: {
+      autoCommit?: boolean;
+      branch?: string;
+      policy?: LoadPolicy;
+      explicitTombstones?: string[];
+    } = {},
   ): Promise<LoadResponse> {
     return await this.client.load(
       create(LoadRequestSchema, {
         resources: jsonStringToEigonCbor(resourcesJson),
         contentType: CONTENT_TYPE_CBOR,
-        autoCommit,
+        autoCommit: options.autoCommit ?? true,
+        branch: options.branch ?? "",
+        policy: policyToProto(options.policy),
+        explicitTombstones: options.explicitTombstones ?? [],
       }),
     );
   }

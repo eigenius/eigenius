@@ -129,6 +129,8 @@ async fn load_and_query() {
             content_type: "application/eigon+json".to_string(),
             auto_commit: true,
             branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
         })
         .await
         .unwrap();

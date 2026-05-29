@@ -181,6 +181,27 @@ impl ExecutionContext {
             .map_err(ContextError::Layer)
     }
 
+    /// Mark `iri` as tombstoned in the working layer.
+    ///
+    /// Used by commit-shaped RPC handlers that accept caller-supplied
+    /// explicit tombstones (D41 §10.1): the IRIs flow into the working
+    /// builder before [`Self::take_working`] hands it off to the
+    /// commit orchestrator's root [`crate::commit::LayerEmission`].
+    /// The orchestrator may then combine them with cascade-inferred
+    /// tombstones under `CommitPolicy::CascadeTombstone`.
+    ///
+    /// Fails if the context is read-only, if the IRI is in the core
+    /// namespace, or if the working layer already defines a resource
+    /// for the same IRI (the layer can't simultaneously declare and
+    /// suppress an IRI; [`crate::layer::LayerBuilder::tombstone`]
+    /// owns the policy).
+    pub fn tombstone(&mut self, iri: Iri) -> Result<(), ContextError> {
+        if self.mode == ExecutionMode::ReadOnly {
+            return Err(ContextError::ReadOnly);
+        }
+        self.working.tombstone(iri).map_err(ContextError::Layer)
+    }
+
     /// Returns true if the working layer has any resources.
     pub fn has_changes(&self) -> bool {
         !self.working.resources().is_empty()

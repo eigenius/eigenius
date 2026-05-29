@@ -143,6 +143,8 @@ async fn load_after_concurrent_conflicting_commit_reports_needs_witnessed_merge(
         content_type: "application/eigon+json".to_string(),
         auto_commit: true,
         branch: String::new(),
+        policy: None,
+        explicit_tombstones: Vec::new(),
     };
     let response = service
         .load(Request::new(load_request))

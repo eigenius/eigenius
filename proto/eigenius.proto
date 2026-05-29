@@ -220,6 +220,29 @@ service EigeniusKernel {
 
 // --- Load ---
 
+// Commit policy for retroactive validation (D41 §3.3, §8).
+// Default (variant unset on the wire): Reject{ max_violations: 100 }.
+message CommitPolicy {
+  oneof variant {
+    Reject reject = 1;
+    CascadeTombstone cascade_tombstone = 2;
+  }
+
+  // Fail the commit if any retroactive violation is found.
+  // The error list is truncated to `max_violations`; the full count
+  // is reported via `LoadResponse.total_violations`.
+  message Reject {
+    // Cap on the number of `ValidationError` entries surfaced. `0`
+    // means "use the kernel default" (currently 100).
+    uint32 max_violations = 1;
+  }
+
+  // Tombstone violating lower-layer IRIs iteratively until no further
+  // resources are invalid. Cascade aborts (commit rejected) if it
+  // would tombstone an IRI the new layer itself defines.
+  message CascadeTombstone {}
+}
+
 message LoadRequest {
   bytes resources = 1;          // Resources as CBOR or Eigon-JSON
   string content_type = 2;      // "application/cbor" or "application/eigon+json"
@@ -227,6 +250,14 @@ message LoadRequest {
   // Branch to commit into (Phase 14g). Empty defaults to "main".
   // Branch must already exist — create with CreateBranch first.
   string branch = 4;
+  // Commit policy for retroactive validation (D41 §3.3, §8). Absent
+  // → server applies CommitPolicy::default() (Reject{100}).
+  CommitPolicy policy = 5;
+  // IRIs the caller wants tombstoned as part of this commit. Applied
+  // to the initial user-layer LayerBuilder before retroactive
+  // validation; under CascadeTombstone they're combined with any
+  // cascade-inferred tombstones. See D41 §10.1.
+  repeated string explicit_tombstones = 6;
 }
 
 message LoadResponse {
@@ -256,6 +287,65 @@ message LoadResponse {
   // no CAS was attempted (no persistent backend, or a different-
   // position anchored-commit cache hit short-circuited the persist).
   MergeInfo merge = 7;
+  // When the commit was rejected, `errors` is capped by the policy's
+  // `max_violations`. `total_violations` reports the true count so
+  // clients can render "showing X of Y". `0` when there were no
+  // violations. D41 §3.3.
+  uint32 total_violations = 8;
+  // Per-layer outcomes for every layer the orchestrator drained.
+  // For an auto_commit Load this is up to three entries, identified
+  // by their `role`: `LAYER_ROLE_USER` (the user layer),
+  // `LAYER_ROLE_AUDIT_PROVENANCE` (optional verdict_provenance
+  // Sibling), `LAYER_ROLE_INSTITUTION_CLASSES` (optional
+  // institution-classes Child). The top-level `layer_id` /
+  // `branch_advanced` / `merge` fields continue to point at the
+  // user layer specifically. See D41 §6.
+  repeated CommittedLayer committed_layers = 9;
+}
+
+// Closed taxonomy of what produced a layer within a commit
+// (D41 §6 / kernel `outcome::LayerRole`). Clients should match on
+// this — not on `CommittedLayer.name` — to route per-layer response
+// handling, because the audit Sibling-rescue path makes
+// position-in-vec and name-string mapping unsafe.
+enum LayerRole {
+  LAYER_ROLE_UNSPECIFIED = 0;
+  // Root emission from the RPC caller (Load / Reflect / RunProgram /
+  // Query INTO etc.). At most one per commit.
+  LAYER_ROLE_USER = 1;
+  // Audit Sibling produced by `autoonload_dispatch` (D31 §6.3 /
+  // D41 §3.4) whenever any AutoOnLoad verdict (Holds, Undecidable,
+  // Fails) was produced.
+  LAYER_ROLE_AUDIT_PROVENANCE = 2;
+  // Follow-up Child produced by the `register_wasm_components`
+  // `didPersist` hook (D41 §3.6) when WASM-registration extraction
+  // produced institution-class resources.
+  LAYER_ROLE_INSTITUTION_CLASSES = 3;
+}
+
+// Per-layer outcome surfaced from `MultiLayerOutcome.layers` (D41 §6).
+message CommittedLayer {
+  // Closed kernel taxonomy of what produced this layer. Match on
+  // this to find the user layer / audit layer / institution-classes
+  // layer rather than string-comparing `name`.
+  LayerRole role = 1;
+  // Free-form layer name from kernel `Layer::name()`. Useful for
+  // display (e.g., notebook layer-stack visualisation labels and
+  // trace logs) but **not** for role identification — use `role`
+  // for that.
+  string name = 2;
+  // Canonical layer id. May differ from the freshly-built id on
+  // anchored-commit cache hits.
+  string layer_id = 3;
+  // Did the branch ref advance to this layer? Same semantics as
+  // `LoadResponse.branch_advanced` but per-layer.
+  bool branch_advanced = 4;
+  MergeInfo merge = 5;
+  // Cascade tombstones the policy applied to this layer.
+  repeated string cascade_tombstones = 6;
+  // Cascade fixpoint iterations for this layer. `0` if no cascade
+  // ran (either policy was Reject or no retroactive violations).
+  uint32 cascade_iterations = 7;
 }
 
 // --- Branch merge outcomes (D23 §5.4 / D34 §6) ---

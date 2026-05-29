@@ -49,7 +49,7 @@ use crate::layer::Layer;
 use crate::ontology::Resource;
 use crate::validation::ValidationError;
 
-use super::outcome::LayerEmission;
+use super::outcome::{LayerEmission, LayerRole};
 use super::pipeline::PipelineKind;
 use super::state::{CommitState, DrainState};
 
@@ -189,6 +189,7 @@ pub fn register_wasm_components(state: &mut CommitState<'_>) -> HookOutcome {
                 // from the queuing pipeline this Child would be
                 // dropped; on `Ok` (this path) it drains as expected.
                 state.emissions.push(LayerEmission {
+                    role: LayerRole::InstitutionClasses,
                     name: "institution_classes",
                     pipeline: PipelineKind::StructuralFollowup,
                     kind: super::outcome::EmissionKind::Child,
@@ -255,7 +256,7 @@ mod tests {
     //! state.hook_errors routing.
 
     use super::*;
-    use crate::commit::outcome::{DispatchEntry, EmissionKind, LayerEmission};
+    use crate::commit::outcome::{DispatchEntry, EmissionKind, LayerEmission, LayerRole};
     use crate::commit::persister::{LayerPersister, PersistedLayerInfo};
     use crate::commit::state::CommitState;
     use crate::lattice::CommitPolicy;
@@ -383,6 +384,7 @@ mod tests {
         // Emission queued: exactly one entry, with the documented shape.
         assert_eq!(state.emissions.len(), 1);
         let em: &LayerEmission = &state.emissions[0];
+        assert_eq!(em.role, LayerRole::InstitutionClasses);
         assert_eq!(em.name, "institution_classes");
         assert_eq!(em.pipeline, PipelineKind::StructuralFollowup);
         assert_eq!(em.kind, EmissionKind::Child);

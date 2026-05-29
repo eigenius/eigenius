@@ -105,7 +105,35 @@ function renderBody(
             {output.commit && (
               <CommitStatusBadge commit={output.commit} cellId={cellId} />
             )}
+            {output.cascade && (
+              <Caption1 className={styles.meta}>
+                cascade: tombstoned {output.cascade.tombstones.length} IRI
+                {output.cascade.tombstones.length === 1 ? "" : "s"} in{" "}
+                {output.cascade.iterations} iteration
+                {output.cascade.iterations === 1 ? "" : "s"}
+              </Caption1>
+            )}
+            {output.sideLayers && output.sideLayers.length > 0 && (
+              <Caption1 className={styles.meta}>
+                also committed:{" "}
+                {output.sideLayers.map((l) => l.name).join(", ")}
+              </Caption1>
+            )}
           </div>
+          {output.cascade && output.cascade.tombstones.length > 0 && (
+            <Accordion collapsible className={styles.stackAccordion}>
+              <AccordionItem value="cascade">
+                <AccordionHeader size="small">
+                  Cascade tombstones ({output.cascade.tombstones.length})
+                </AccordionHeader>
+                <AccordionPanel>
+                  <pre className={styles.errorPre}>
+                    {output.cascade.tombstones.join("\n")}
+                  </pre>
+                </AccordionPanel>
+              </AccordionItem>
+            </Accordion>
+          )}
           <Accordion collapsible className={styles.stackAccordion}>
             <AccordionItem value="stack">
               <AccordionHeader size="small">View layer stack</AccordionHeader>
@@ -174,6 +202,12 @@ function renderBody(
           <MessageBarBody>
             <MessageBarTitle>Cell failed</MessageBarTitle>
             <pre className={styles.errorPre}>{output.message}</pre>
+            {output.totalViolations !== undefined && (
+              <Caption1>
+                Showing first violations of {output.totalViolations} total
+                (commit policy capped the surfaced list).
+              </Caption1>
+            )}
           </MessageBarBody>
         </MessageBar>
       );

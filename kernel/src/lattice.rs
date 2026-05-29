@@ -552,8 +552,18 @@ pub fn commit_layer(
         institutions: None,
         storage,
     };
+    // Stable diagnostic name for the lattice wrapper's single-shot run;
+    // the lattice path is not driven by an orchestrator, so this name
+    // never reaches a `MultiLayerOutcome` consumer — it only flows into
+    // the `LayerCommitOutcome` we immediately decompose below.
     let outcome = crate::commit::CommitPipeline::with_retroactive()
-        .run(builder, cfg, working_set)
+        .run(
+            "lattice_commit",
+            crate::commit::LayerRole::User,
+            builder,
+            cfg,
+            working_set,
+        )
         // D41 Phase D: the lattice wrapper doesn't run an orchestrator,
         // so any rescued Sibling emissions in `PipelineRunErr` are dead
         // — drop them and surface only the inner `CommitError`.

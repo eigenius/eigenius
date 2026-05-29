@@ -68,7 +68,7 @@ pub use hooks::{
 };
 pub use orchestrator::{CommitOrchestrator, MAX_EMISSION_DEPTH};
 pub use outcome::{
-    DispatchEntry, EmissionKind, LayerCommitOutcome, LayerEmission, MultiLayerOutcome,
+    DispatchEntry, EmissionKind, LayerCommitOutcome, LayerEmission, LayerRole, MultiLayerOutcome,
 };
 pub use persister::{BackendStorePersister, LayerPersister, PersistedLayerInfo};
 pub use phases::{

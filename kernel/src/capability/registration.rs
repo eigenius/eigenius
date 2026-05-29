@@ -31,7 +31,7 @@
 
 use super::external_institution::{ExternalInstitution, ExternalQueryHandler};
 use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
-use super::wasm_institution_d14::WasmInstitution;
+use super::wasm_institution::WasmInstitution;
 use crate::institution::in_process_registry::InProcessInstitutionRegistry;
 use crate::institution::registry::{InstitutionIndex, RuntimeKind};
 use crate::institution::runtime::{Institution, InstitutionRuntime};

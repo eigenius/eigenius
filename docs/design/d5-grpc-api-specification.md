@@ -63,6 +63,8 @@ message LoadRequest {
   bytes resources = 2;          // Resources encoded as CBOR (default) or Eigon-JSON
   string content_type = 3;      // "application/cbor" (default) or "application/eigon+json"
   bool auto_commit = 4;         // If true, commit after successful validation
+  CommitPolicy policy = 5;      // Retroactive-validation policy (D41 §3.3)
+  repeated string explicit_tombstones = 6;  // IRIs to tombstone in this commit (D41 §10.1)
 }
 
 message LoadResponse {
@@ -70,8 +72,17 @@ message LoadResponse {
   repeated ValidationError errors = 2;
   string layer_id = 3;          // Set if auto_commit was true and succeeded
   uint32 resource_count = 4;
+  // ... branch, branch_advanced, merge ...
+  uint32 total_violations = 8;          // True violation count when errors are truncated
+  repeated CommittedLayer committed_layers = 9;  // Per-layer outcomes (D41 §6)
 }
 ```
+
+`policy` carries the commit's retroactive-validation policy (per D41 §3.3, §8). Unset on the wire → server applies `Reject{ max_violations: 100 }`. `Reject{0}` is interpreted as "use the default cap". `CascadeTombstone` opts into iterative lower-layer tombstoning to fixpoint. `explicit_tombstones` ride into the initial user-layer builder before retroactive validation runs (D41 §10.1); under `CascadeTombstone` they're combined with any cascade-inferred tombstones.
+
+`committed_layers` exposes the per-layer outcomes from the multi-layer commit pipeline (D41 §6). For an `auto_commit` Load this is up to three entries — the user layer (`role = LAYER_ROLE_USER`), the optional `verdict_provenance` audit Sibling (`role = LAYER_ROLE_AUDIT_PROVENANCE`), and the optional `institution_classes` Child (`role = LAYER_ROLE_INSTITUTION_CLASSES`) — each carrying its own `layer_id`, `branch_advanced`, `merge`, `cascade_tombstones`, and `cascade_iterations`. The top-level `layer_id` / `branch_advanced` / `merge` fields continue to point at the user layer specifically. `total_violations` reports the kernel-internal full violation count when `Reject` truncates `errors` to its `max_violations` cap, so clients can render "showing X of Y". See the proto file for the canonical wire shape; see D41 for the commit-pipeline semantics.
+
+Each `CommittedLayer` carries a closed `LayerRole` taxonomy that clients should match on to identify the user / audit / institution-classes entries rather than string-comparing the free-form `name` field. The `role` discriminator is what makes the rejected-but-audited Sibling-rescue path (D41 §6.1) unambiguous: when `autoonload_dispatch` returns `Err` on a `Fails` verdict, the failing user-layer pipeline pushes nothing to `committed_layers` and the rescued audit Sibling lands at index 0, so position-in-vec mapping is unsafe. The `name` field remains useful for display labels (notebook layer-stack visualisation, trace logs) but is not the routing key.
 
 ### 3.2 Inspect
 

@@ -42,7 +42,7 @@ use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::validation::{retroactive_validate, ValidationError, ValidationRule, Validator};
 
-use super::outcome::{DispatchEntry, EmissionKind, LayerEmission};
+use super::outcome::{DispatchEntry, EmissionKind, LayerEmission, LayerRole};
 use super::pipeline::{PhaseControl, PipelineKind};
 use super::state::CommitState;
 
@@ -468,6 +468,7 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
         // can drive the follow-up persist without re-running dispatch.
         state.provenance_resources = provenance.clone();
         state.emissions.push(LayerEmission {
+            role: LayerRole::AuditProvenance,
             name: "verdict_provenance",
             pipeline: PipelineKind::StructuralFollowup,
             kind: EmissionKind::Sibling,
@@ -779,6 +780,7 @@ mod tests {
         // Exactly one emission queued.
         assert_eq!(state.emissions.len(), 1);
         let em = &state.emissions[0];
+        assert_eq!(em.role, LayerRole::AuditProvenance);
         assert_eq!(em.name, "verdict_provenance");
         assert_eq!(em.pipeline, PipelineKind::StructuralFollowup);
         assert_eq!(em.kind, EmissionKind::Sibling);

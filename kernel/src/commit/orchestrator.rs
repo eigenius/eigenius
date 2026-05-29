@@ -168,6 +168,7 @@ impl<'a> CommitOrchestrator<'a> {
 
             let pre_run_head = Arc::clone(ctx.head());
             let em_name = em.name;
+            let em_role = em.role;
             let em_pipeline = em.pipeline;
 
             // Materialise the builder from the emission's resources +
@@ -200,7 +201,7 @@ impl<'a> CommitOrchestrator<'a> {
                 storage: ctx.storage().clone(),
             };
             let pipeline = CommitPipeline::for_kind(em_pipeline);
-            let result = pipeline.run(builder, cfg, &mut ws_guard);
+            let result = pipeline.run(em_name, em_role, builder, cfg, &mut ws_guard);
 
             match result {
                 Ok(outcome) if outcome.persist.branch_advanced => {
@@ -337,6 +338,7 @@ mod tests {
     use crate::commit::hooks::CommitHookHost;
     use crate::commit::persister::PersistedLayerInfo;
     use crate::commit::EmissionKind;
+    use crate::commit::LayerRole;
     use crate::commit::PipelineKind;
     use crate::context::{ExecutionContext, ExecutionMode};
     use crate::layer::{Layer, LayerBuilder, LayerStorage};
@@ -473,6 +475,7 @@ mod tests {
         let head_before = ctx.head().id().clone();
 
         let root = LayerEmission {
+            role: LayerRole::User,
             name: "user",
             pipeline: PipelineKind::WithRetroactive,
             kind: EmissionKind::Child,
@@ -519,6 +522,7 @@ mod tests {
         let head_before = ctx.head().id().clone();
 
         let root = LayerEmission {
+            role: LayerRole::User,
             name: "user",
             pipeline: PipelineKind::WithRetroactive,
             kind: EmissionKind::Child,
@@ -576,6 +580,7 @@ mod tests {
         );
 
         let root = LayerEmission {
+            role: LayerRole::User,
             name: "user",
             pipeline: PipelineKind::WithRetroactive,
             kind: EmissionKind::Child,
@@ -789,6 +794,7 @@ mod tests {
         );
 
         let root = LayerEmission {
+            role: LayerRole::User,
             name: "user",
             pipeline: PipelineKind::WithInstitutions,
             kind: EmissionKind::Child,
@@ -888,6 +894,7 @@ mod tests {
         let host = StubHost::new();
 
         let root = LayerEmission {
+            role: LayerRole::User,
             name: "user",
             pipeline: PipelineKind::WithRetroactive,
             kind: EmissionKind::Child,

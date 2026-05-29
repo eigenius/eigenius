@@ -42,6 +42,38 @@ use crate::validation::ValidationError;
 use super::persister::PersistedLayerInfo;
 use super::pipeline::PipelineKind;
 
+/// Kernel taxonomy of what produced a layer in a commit. Closed set:
+/// every emission site in the kernel emits one of these. The proto
+/// surface uses this enum directly (wire-stable). Free-form layer
+/// names live separately on [`LayerEmission::name`] / [`Layer::name`]
+/// for human display.
+///
+/// Use this — not a string compare on [`LayerEmission::name`] — to
+/// route per-layer response shaping in handlers. The Sibling-rescue
+/// path (the failing user-layer pipeline pushes nothing to
+/// `MultiLayerOutcome.layers`, so `layers[0]` becomes the rescued
+/// audit layer) makes position-in-vec assumptions unsafe; the role
+/// is the structural discriminator that always identifies the
+/// right entry.
+///
+/// D41 §6 / §3.4 / §3.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LayerRole {
+    /// The RPC caller's content — the root emission of any
+    /// commit-shaped RPC (Load, Reflect, RunProgram, Query INTO, etc.).
+    /// The orchestrator's [`MultiLayerOutcome::layers`] always has at
+    /// most one of these.
+    User,
+    /// Audit Sibling emitted by `autoonload_dispatch` whenever any
+    /// AutoOnLoad verdict (Holds, Undecidable, Fails) was produced.
+    /// D31 §6.3 / D41 §3.4.
+    AuditProvenance,
+    /// Follow-up Child emitted by the `register_wasm_components`
+    /// `didPersist` hook when WASM-registration extraction produced
+    /// institution-class resources. D41 §3.6.
+    InstitutionClasses,
+}
+
 /// Outcome of a single `CommitPipeline::run`.
 ///
 /// One per layer landed (or attempted) in an orchestrator run. The
@@ -51,6 +83,21 @@ use super::pipeline::PipelineKind;
 /// D41 §4 / §11.
 #[derive(Debug)]
 pub struct LayerCommitOutcome {
+    /// Kernel-internal role taxonomy of this layer. The closed
+    /// [`LayerRole`] set is what handlers and proto consumers should
+    /// match on; see the comment on [`LayerRole`] for why
+    /// position-in-vec mapping is unsafe on the Sibling-rescue path.
+    ///
+    /// D41 §6.
+    pub role: LayerRole,
+    /// Free-form diagnostic / display name carried over from the
+    /// originating [`LayerEmission::name`]. Useful for tracing and
+    /// for surface-level layer labels (notebook layer-stack
+    /// visualisation, audit log entries) but **not** for role
+    /// identification — use [`Self::role`] for that.
+    ///
+    /// D41 §6.
+    pub name: &'static str,
     /// The layer the `build` phase materialised. Identical across the
     /// outcome for cache-hit and CAS-loss paths — those are reflected
     /// in `persist.branch_advanced`, not by a different `layer`.
@@ -156,8 +203,13 @@ pub enum EmissionKind {
 /// for this emission. See D41 §6.
 #[derive(Debug, Clone)]
 pub struct LayerEmission {
+    /// Kernel-internal role taxonomy. Drives proto routing and
+    /// handler-side per-layer response shaping. See [`LayerRole`].
+    pub role: LayerRole,
     /// Stable, diagnostic name (`"user"`, `"verdict_provenance"`,
-    /// `"institution_classes"`, ...). Also used as the builder name.
+    /// `"institution_classes"`, ...). Used as the builder name and
+    /// surfaced to operators in logs / traces, but **not** the
+    /// identifier handlers match on — that's [`Self::role`].
     pub name: &'static str,
     /// Which canned pipeline to run on this emission.
     pub pipeline: PipelineKind,
@@ -185,15 +237,17 @@ impl LayerEmission {
     /// tombstones are extracted by clone; the builder itself is
     /// consumed.
     ///
-    /// `name`, `pipeline`, `kind` are caller-specified — the builder's
-    /// own name is discarded because the orchestrator will rename the
-    /// emission's builder back to `name` when it materialises (see
-    /// [`Self::materialize`]). Root emissions are always
-    /// [`EmissionKind::Child`]; the `kind` parameter is plumbed for
-    /// symmetry with the constructed-by-phase emission shape.
+    /// `role`, `name`, `pipeline`, `kind` are caller-specified — the
+    /// builder's own name is discarded because the orchestrator will
+    /// rename the emission's builder back to `name` when it
+    /// materialises (see [`Self::materialize`]). Root emissions are
+    /// always [`EmissionKind::Child`] with [`LayerRole::User`]; the
+    /// `kind` parameter is plumbed for symmetry with the
+    /// constructed-by-phase emission shape.
     ///
     /// D41 §6 / Phase E.
     pub fn from_builder(
+        role: LayerRole,
         name: &'static str,
         pipeline: PipelineKind,
         kind: EmissionKind,
@@ -209,6 +263,7 @@ impl LayerEmission {
         let resources: Vec<Resource> = builder.resources().values().cloned().collect();
         let tombstones: BTreeSet<Iri> = builder.tombstoned_iris().clone();
         Self {
+            role,
             name,
             pipeline,
             kind,
@@ -315,6 +370,7 @@ mod tests {
         tombstones.insert(Iri::parse("urn:eigenius:user:dead2").unwrap());
 
         let emission = LayerEmission {
+            role: LayerRole::User,
             name: "test_emission",
             pipeline: PipelineKind::StructuralFollowup,
             kind: EmissionKind::Child,
@@ -343,6 +399,7 @@ mod tests {
     fn layer_emission_materialize_handles_empty_resources_and_tombstones() {
         let parent = build_root_layer();
         let emission = LayerEmission {
+            role: LayerRole::User,
             name: "empty",
             pipeline: PipelineKind::StructuralFollowup,
             kind: EmissionKind::Child,
@@ -373,6 +430,7 @@ mod tests {
         let original_tombstones = original.tombstoned_iris().clone();
 
         let emission = LayerEmission::from_builder(
+            LayerRole::User,
             "round_trip",
             PipelineKind::WithRetroactive,
             EmissionKind::Child,
@@ -380,6 +438,7 @@ mod tests {
         );
 
         // Emission carries the same content.
+        assert_eq!(emission.role, LayerRole::User);
         assert_eq!(emission.name, "round_trip");
         assert_eq!(emission.pipeline, PipelineKind::WithRetroactive);
         assert_eq!(emission.kind, EmissionKind::Child);

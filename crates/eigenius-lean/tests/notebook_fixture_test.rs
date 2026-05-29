@@ -51,7 +51,7 @@ use std::sync::Arc;
 
 use eigenius_kernel::commit::{
     BackendStorePersister, CommitOrchestrator, CommitWorkingSetPool, EmissionKind,
-    InstitutionContext, LayerEmission, NoopHost, PipelineKind,
+    InstitutionContext, LayerEmission, LayerRole, NoopHost, PipelineKind,
 };
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::registry::InstitutionIndex;
@@ -166,6 +166,7 @@ fn notebook_demo_fixture_lands_holds() {
         .take_working("notebook_demo_fixture")
         .expect("take_working");
     let root = LayerEmission::from_builder(
+        LayerRole::User,
         "notebook_demo_fixture",
         PipelineKind::WithInstitutions,
         EmissionKind::Child,

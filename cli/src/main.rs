@@ -14,15 +14,117 @@
 
 //! Eigenius CLI — primary developer interface for the Eigenius platform.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 // Phase 19a.5 (D31): mirror / env / institution lifecycle CLI verbs.
-mod d31;
+mod institutions;
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::layer::LayerBuilder;
+use eigenius_kernel::context::ExecutionContext;
+use eigenius_kernel::lattice;
+use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::{eigon_json, Iri};
-use eigenius_kernel::validation::Validator;
+use eigenius_kernel::storage::memory::MemoryPersistentBackend;
+use eigenius_kernel::storage::PersistentBackend;
+use eigenius_kernel::validation::{CommitWorkingSet, Validator};
 use std::sync::Arc;
+
+/// Bootstrap a local-mode session against an in-memory persistent backend.
+///
+/// The CLI's local-mode commands (`load`, `query`, `reflect`, ...) need
+/// a `PersistentBackend` to drive `lattice::commit_layer_default` post
+/// D41 — the bare `LayerStorage::in_memory()` path has no backend
+/// attached and `commit_layer_default` requires one. Returning the
+/// backend alongside the context keeps it alive for the commit calls
+/// without leaking it into every callsite.
+fn bootstrap_local(
+) -> Result<(ExecutionContext, Arc<MemoryPersistentBackend>), bootstrap::BootstrapError> {
+    let backend = Arc::new(MemoryPersistentBackend::new());
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
+    let ctx = bootstrap::bootstrap_with_storage(storage)?;
+    Ok((ctx, backend))
+}
+
+/// Single-layer commit through the D41 pipeline: takes the working
+/// builder, runs it through `commit_layer_default`, and advances
+/// `ctx.head` to the resulting layer. The CLI's local-mode handlers
+/// share this exact shape across `load`, `query --file`, `reflect`,
+/// and `load_file_into_context`.
+fn commit_and_advance(
+    ctx: &mut ExecutionContext,
+    backend: &dyn PersistentBackend,
+    name: &str,
+) -> Result<Arc<Layer>, String> {
+    let working = ctx
+        .take_working(name)
+        .map_err(|e| format!("take_working: {e}"))?;
+    let layer = lattice::commit_layer_default(working, ctx.storage().clone(), backend)
+        .map_err(|e| format!("{e}"))?;
+    ctx.advance_head(Arc::clone(&layer), name)
+        .map_err(|e| format!("advance_head: {e}"))?;
+    Ok(layer)
+}
+
+/// Policy-aware variant: applies `explicit_tombstones` to the working
+/// builder, then commits with the user-supplied `CommitPolicy`. Returns
+/// the full `CommitOutcome` so callers can surface cascade results.
+fn commit_and_advance_with_policy(
+    ctx: &mut ExecutionContext,
+    backend: &dyn PersistentBackend,
+    name: &str,
+    policy: lattice::CommitPolicy,
+    explicit_tombstones: &[String],
+) -> Result<lattice::CommitOutcome, String> {
+    for tomb in explicit_tombstones {
+        let iri = Iri::parse(tomb).map_err(|e| format!("invalid tombstone IRI {tomb:?}: {e}"))?;
+        ctx.tombstone(iri).map_err(|e| format!("tombstone: {e}"))?;
+    }
+    let working = ctx
+        .take_working(name)
+        .map_err(|e| format!("take_working: {e}"))?;
+    let mut ws = CommitWorkingSet::in_memory();
+    let outcome = lattice::commit_layer(working, ctx.storage().clone(), backend, policy, &mut ws)
+        .map_err(|e| format!("{e}"))?;
+    ctx.advance_head(Arc::clone(&outcome.layer), name)
+        .map_err(|e| format!("advance_head: {e}"))?;
+    Ok(outcome)
+}
+
+/// CLI representation of `lattice::CommitPolicy`. `reject` is the
+/// default; `cascade` opts into `CascadeTombstone`.
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CommitPolicyArg {
+    #[default]
+    Reject,
+    Cascade,
+}
+
+impl CommitPolicyArg {
+    fn to_lattice(self, max_violations: usize) -> lattice::CommitPolicy {
+        match self {
+            Self::Reject => lattice::CommitPolicy::Reject { max_violations },
+            Self::Cascade => lattice::CommitPolicy::CascadeTombstone,
+        }
+    }
+
+    fn to_proto(
+        self,
+        max_violations: usize,
+    ) -> Option<eigenius_kernel::server::proto::CommitPolicy> {
+        use eigenius_kernel::server::proto::{
+            commit_policy::{CascadeTombstone, Reject, Variant},
+            CommitPolicy as ProtoPolicy,
+        };
+        let variant = match self {
+            Self::Reject => Variant::Reject(Reject {
+                max_violations: max_violations as u32,
+            }),
+            Self::Cascade => Variant::CascadeTombstone(CascadeTombstone {}),
+        };
+        Some(ProtoPolicy {
+            variant: Some(variant),
+        })
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "eigenius")]
@@ -52,6 +154,24 @@ enum Commands {
         /// Branch to commit into (defaults to "main"). Remote mode only.
         #[arg(long, value_name = "BRANCH")]
         branch: Option<String>,
+
+        /// Retroactive-validation policy (D41 §3.3). `reject` (default)
+        /// fails the commit on any violation; `cascade` tombstones
+        /// violating lower-layer IRIs iteratively to fixpoint.
+        #[arg(long, value_enum, default_value_t = CommitPolicyArg::Reject)]
+        commit_policy: CommitPolicyArg,
+
+        /// Cap on the number of validation errors surfaced under
+        /// `--commit-policy reject`. Ignored under `cascade`.
+        #[arg(long, value_name = "N", default_value_t = 100)]
+        max_violations: usize,
+
+        /// Tombstone these IRIs as part of the commit (repeatable).
+        /// Applied to the user-layer builder before retroactive
+        /// validation; under `--commit-policy cascade` they combine
+        /// with cascade-inferred tombstones. D41 §10.1.
+        #[arg(long = "explicit-tombstone", value_name = "IRI")]
+        explicit_tombstones: Vec<String>,
     },
 
     /// Validate an Eigon-JSON file without loading
@@ -81,6 +201,22 @@ enum Commands {
         /// with --at-layer. Remote mode only.
         #[arg(long, value_name = "BRANCH")]
         branch: Option<String>,
+
+        /// Retroactive-validation policy for the optional `--file` load
+        /// step (D41 §3.3). `reject` (default) fails the commit on any
+        /// violation; `cascade` tombstones violating lower-layer IRIs
+        /// iteratively to fixpoint. Ignored when `--file` is omitted.
+        #[arg(long, value_enum, default_value_t = CommitPolicyArg::Reject)]
+        commit_policy: CommitPolicyArg,
+
+        /// Cap on validation errors surfaced under `--commit-policy reject`.
+        #[arg(long, value_name = "N", default_value_t = 100)]
+        max_violations: usize,
+
+        /// Tombstone these IRIs as part of the `--file` load step
+        /// (repeatable). D41 §10.1.
+        #[arg(long = "explicit-tombstone", value_name = "IRI")]
+        explicit_tombstones: Vec<String>,
     },
 
     /// Type-check a program
@@ -667,7 +803,13 @@ async fn main() {
                 file: _,
                 at_layer,
                 branch,
+                commit_policy: _,
+                max_violations: _,
+                explicit_tombstones: _,
             } => {
+                // Remote query doesn't surface the --file load path, so
+                // the commit-policy flags are accepted but ignored. The
+                // remote `Query` RPC has no LoadRequest.
                 remote_query(
                     endpoint,
                     &query,
@@ -691,8 +833,22 @@ async fn main() {
                 )
                 .await
             }
-            Commands::Load { file, branch } => {
-                remote_load(endpoint, &file, branch.as_deref(), cli.json).await
+            Commands::Load {
+                file,
+                branch,
+                commit_policy,
+                max_violations,
+                explicit_tombstones,
+            } => {
+                remote_load(
+                    endpoint,
+                    &file,
+                    branch.as_deref(),
+                    commit_policy.to_proto(max_violations),
+                    &explicit_tombstones,
+                    cli.json,
+                )
+                .await
             }
             Commands::Reflect { file } => remote_reflect(endpoint, &file, cli.json).await,
             Commands::ListInstitutions => remote_list_institutions(endpoint, cli.json).await,
@@ -782,9 +938,34 @@ async fn main() {
 
     // Local mode: embedded kernel
     match cli.command {
-        Commands::Load { file, .. } => cmd_load(&file, cli.json),
+        Commands::Load {
+            file,
+            branch: _,
+            commit_policy,
+            max_violations,
+            explicit_tombstones,
+        } => cmd_load(
+            &file,
+            commit_policy.to_lattice(max_violations),
+            &explicit_tombstones,
+            cli.json,
+        ),
         Commands::Validate { file } => cmd_validate(&file, cli.json),
-        Commands::Query { query, file, .. } => cmd_query(&query, file.as_deref(), cli.json),
+        Commands::Query {
+            query,
+            file,
+            at_layer: _,
+            branch: _,
+            commit_policy,
+            max_violations,
+            explicit_tombstones,
+        } => cmd_query(
+            &query,
+            file.as_deref(),
+            commit_policy.to_lattice(max_violations),
+            &explicit_tombstones,
+            cli.json,
+        ),
         Commands::ProgramValidate {
             program_file,
             ontology,
@@ -841,10 +1022,15 @@ async fn main() {
     }
 }
 
-fn cmd_load(file: &str, json_output: bool) {
+fn cmd_load(
+    file: &str,
+    policy: lattice::CommitPolicy,
+    explicit_tombstones: &[String],
+    json_output: bool,
+) {
     // Bootstrap
-    let mut ctx = match bootstrap::bootstrap() {
-        Ok(ctx) => ctx,
+    let (mut ctx, backend) = match bootstrap_local() {
+        Ok(pair) => pair,
         Err(e) => {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
@@ -863,17 +1049,34 @@ fn cmd_load(file: &str, json_output: bool) {
         }
     }
 
-    // Commit (validates and builds layer)
-    match ctx.commit("loaded") {
-        Ok(layer) => {
+    // Commit (validates and builds layer) through the D41 pipeline,
+    // applying the user-supplied policy + explicit tombstones.
+    match commit_and_advance_with_policy(
+        &mut ctx,
+        backend.as_ref(),
+        "loaded",
+        policy,
+        explicit_tombstones,
+    ) {
+        Ok(outcome) => {
+            let cascade_count = outcome.cascade_tombstones.len();
+            let cascade_iters = outcome.cascade_iterations;
             if json_output {
                 println!(
-                    "{{\"status\":\"ok\",\"resources\":{count},\"layer_id\":\"{}\"}}",
-                    layer.id()
+                    "{{\"status\":\"ok\",\"resources\":{count},\"layer_id\":\"{}\",\"cascade_tombstones\":{cascade_count},\"cascade_iterations\":{cascade_iters}}}",
+                    outcome.layer.id()
                 );
             } else {
-                println!("Loaded {count} resource(s) into layer {}", layer.id());
+                println!(
+                    "Loaded {count} resource(s) into layer {}",
+                    outcome.layer.id()
+                );
                 println!("Validation passed.");
+                if cascade_count > 0 {
+                    println!(
+                        "Cascade tombstoned {cascade_count} IRI(s) in {cascade_iters} iteration(s)."
+                    );
+                }
             }
         }
         Err(e) => {
@@ -887,17 +1090,24 @@ fn cmd_load(file: &str, json_output: bool) {
     }
 }
 
-fn cmd_query(query_str: &str, file: Option<&str>, json_output: bool) {
+fn cmd_query(
+    query_str: &str,
+    file: Option<&str>,
+    policy: lattice::CommitPolicy,
+    explicit_tombstones: &[String],
+    json_output: bool,
+) {
     // Bootstrap
-    let mut ctx = match bootstrap::bootstrap() {
-        Ok(ctx) => ctx,
+    let (mut ctx, backend) = match bootstrap_local() {
+        Ok(pair) => pair,
         Err(e) => {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
         }
     };
 
-    // Optionally load a file first
+    // Optionally load a file first, applying the user-supplied
+    // commit policy + explicit tombstones.
     if let Some(file_path) = file {
         let content = match std::fs::read_to_string(file_path) {
             Ok(c) => c,
@@ -919,7 +1129,13 @@ fn cmd_query(query_str: &str, file: Option<&str>, json_output: bool) {
                 std::process::exit(1);
             }
         }
-        if let Err(e) = ctx.commit("loaded") {
+        if let Err(e) = commit_and_advance_with_policy(
+            &mut ctx,
+            backend.as_ref(),
+            "loaded",
+            policy,
+            explicit_tombstones,
+        ) {
             eprintln!("Load failed: {e}");
             std::process::exit(1);
         }
@@ -958,8 +1174,8 @@ fn cmd_query(query_str: &str, file: Option<&str>, json_output: bool) {
 }
 
 fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output: bool) {
-    let mut ctx = match bootstrap::bootstrap() {
-        Ok(ctx) => ctx,
+    let (mut ctx, backend) = match bootstrap_local() {
+        Ok(pair) => pair,
         Err(e) => {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
@@ -968,7 +1184,7 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
 
     // Load ontology if provided
     if let Some(ont_file) = ontology {
-        load_file_into_context(&mut ctx, ont_file);
+        load_file_into_context(&mut ctx, backend.as_ref(), ont_file);
     }
 
     // Read and parse program
@@ -1024,7 +1240,7 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
     }
 }
 
-fn load_file_into_context(ctx: &mut eigenius_kernel::context::ExecutionContext, file: &str) {
+fn load_file_into_context(ctx: &mut ExecutionContext, backend: &dyn PersistentBackend, file: &str) {
     let resources = load_resources_from_file(file);
     for resource in resources {
         if let Err(e) = ctx.add_resource(resource) {
@@ -1032,7 +1248,7 @@ fn load_file_into_context(ctx: &mut eigenius_kernel::context::ExecutionContext, 
             std::process::exit(1);
         }
     }
-    if let Err(e) = ctx.commit("loaded") {
+    if let Err(e) = commit_and_advance(ctx, backend, "loaded") {
         eprintln!("Commit failed for '{file}': {e}");
         std::process::exit(1);
     }
@@ -1170,8 +1386,8 @@ fn load_resources_from_file(file: &str) -> Vec<eigenius_kernel::ontology::resour
 }
 
 fn cmd_reflect(file: &str, json_output: bool) {
-    let mut ctx = match bootstrap::bootstrap() {
-        Ok(ctx) => ctx,
+    let (mut ctx, backend) = match bootstrap_local() {
+        Ok(pair) => pair,
         Err(e) => {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
@@ -1198,7 +1414,7 @@ fn cmd_reflect(file: &str, json_output: bool) {
         }
     }
 
-    if let Err(e) = ctx.commit("reflect") {
+    if let Err(e) = commit_and_advance(&mut ctx, backend.as_ref(), "reflect") {
         eprintln!("Commit failed: {e}");
         std::process::exit(1);
     }
@@ -1211,7 +1427,7 @@ fn cmd_reflect(file: &str, json_output: bool) {
 }
 
 fn cmd_db(command: DbCommands) {
-    use eigenius_kernel::storage::{LayerStore, ResourceStore};
+    use eigenius_kernel::storage::ResourceBackend;
 
     match command {
         DbCommands::Stats { path } => {
@@ -1221,25 +1437,26 @@ fn cmd_db(command: DbCommands) {
                     std::process::exit(1);
                 });
 
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let layers = rt.block_on(store.list_layers()).unwrap_or_default();
+            // Phase 14a: layers are enumerated via the in-memory
+            // topology built from the backend's `topo:<id>` entries.
+            let topology = PersistentBackend::load_topology(&store).unwrap_or_else(|e| {
+                eprintln!("Failed to load topology: {e}");
+                std::process::exit(1);
+            });
 
             println!("Database: {path}");
-            println!("Layers: {}", layers.len());
+            println!("Layers: {}", topology.layer_count());
 
             let mut total_resources = 0;
-            for layer_id in &layers {
-                let resources = rt
-                    .block_on(store.list_resources(layer_id))
-                    .unwrap_or_default();
-                total_resources += resources.len();
-                println!("  Layer {}: {} resources", layer_id, resources.len());
+            for handle in topology.iter_layers() {
+                let iris = ResourceBackend::list_layer_iris(&store, &handle.id).unwrap_or_default();
+                total_resources += iris.len();
+                println!("  Layer {}: {} resources", handle.id, iris.len());
             }
             println!("Total resources: {total_resources}");
 
             // Phase 14g: branches replace the single-head pointer.
             // List all known branches and their heads.
-            use eigenius_kernel::storage::PersistentBackend;
             match PersistentBackend::list_branches(&store) {
                 Ok(branches) if branches.is_empty() => println!("Branches: (none)"),
                 Ok(branches) => {
@@ -1270,32 +1487,42 @@ fn cmd_db(command: DbCommands) {
                     std::process::exit(1);
                 });
 
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let layers = rt.block_on(store.list_layers()).unwrap_or_default();
+            let topology = PersistentBackend::load_topology(&store).unwrap_or_else(|e| {
+                eprintln!("Failed to load topology: {e}");
+                std::process::exit(1);
+            });
 
             std::fs::create_dir_all(&output_path).unwrap_or_else(|e| {
                 eprintln!("Failed to create output directory: {e}");
                 std::process::exit(1);
             });
 
-            for layer_id in &layers {
-                let layer = rt.block_on(store.load_layer(layer_id)).unwrap();
-                let resources: Vec<serde_json::Value> = layer
-                    .iter_resources()
-                    .map(|(_, r)| eigon_json::serialize_resource(&r))
+            // Export each layer's own content (post-D41 the backend
+            // doesn't materialise `Arc<Layer>` itself; we read the IRI
+            // set + per-resource bodies directly via `ResourceBackend`).
+            for handle in topology.iter_layers() {
+                let iris =
+                    ResourceBackend::list_layer_iris(&store, &handle.id).unwrap_or_else(|e| {
+                        eprintln!("Failed to list IRIs for layer {}: {e}", handle.id);
+                        std::process::exit(1);
+                    });
+                let resources: Vec<serde_json::Value> = iris
+                    .iter()
+                    .filter_map(|iri| ResourceBackend::load_resource(&store, &handle.id, iri))
+                    .map(|r| eigon_json::serialize_resource(&r))
                     .collect();
 
                 let json = serde_json::to_string_pretty(&resources).unwrap();
                 let file_path =
-                    std::path::Path::new(&output_path).join(format!("{}.json", layer_id));
+                    std::path::Path::new(&output_path).join(format!("{}.json", handle.id));
                 std::fs::write(&file_path, json).unwrap_or_else(|e| {
                     eprintln!("Failed to write {}: {e}", file_path.display());
                     std::process::exit(1);
                 });
                 println!(
                     "Exported layer {} ({} resources) → {}",
-                    layer_id,
-                    layer.defined_iris().len(),
+                    handle.id,
+                    iris.len(),
                     file_path.display()
                 );
             }
@@ -1577,7 +1804,14 @@ async fn remote_run(
     }
 }
 
-async fn remote_load(endpoint: &str, file: &str, branch: Option<&str>, json_output: bool) {
+async fn remote_load(
+    endpoint: &str,
+    file: &str,
+    branch: Option<&str>,
+    policy: Option<eigenius_kernel::server::proto::CommitPolicy>,
+    explicit_tombstones: &[String],
+    json_output: bool,
+) {
     let mut client = connect_client(endpoint).await;
 
     let data = std::fs::read(file).unwrap_or_else(|e| {
@@ -1591,6 +1825,8 @@ async fn remote_load(endpoint: &str, file: &str, branch: Option<&str>, json_outp
         content_type,
         auto_commit: true,
         branch: branch.unwrap_or("").to_string(),
+        policy,
+        explicit_tombstones: explicit_tombstones.to_vec(),
     };
 
     match client.load(request).await {
@@ -2601,7 +2837,7 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             output,
             institution_file,
         } => {
-            d31::mirror_create(
+            institutions::mirror_create(
                 endpoint,
                 &layer,
                 filter.as_deref(),
@@ -2613,11 +2849,13 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             )
             .await
         }
-        MirrorCommands::Get { iri, output } => d31::mirror_get(endpoint, &iri, &output, json).await,
-        MirrorCommands::List { language } => {
-            d31::mirror_list(endpoint, language.as_deref(), json).await
+        MirrorCommands::Get { iri, output } => {
+            institutions::mirror_get(endpoint, &iri, &output, json).await
         }
-        MirrorCommands::Inspect { iri } => d31::mirror_inspect(endpoint, &iri, json).await,
+        MirrorCommands::List { language } => {
+            institutions::mirror_list(endpoint, language.as_deref(), json).await
+        }
+        MirrorCommands::Inspect { iri } => institutions::mirror_inspect(endpoint, &iri, json).await,
     }
 }
 
@@ -2631,7 +2869,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             worker_source_dir,
             depot,
         } => {
-            d31::env_build(
+            institutions::env_build(
                 endpoint,
                 &language,
                 package_path.as_deref(),
@@ -2653,7 +2891,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             image_digest,
             runtime_version,
         } => {
-            d31::env_create(
+            institutions::env_create(
                 endpoint,
                 &language,
                 &handler_package,
@@ -2667,19 +2905,21 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             )
             .await
         }
-        EnvCommands::List { language } => d31::env_list(endpoint, language.as_deref(), json).await,
-        EnvCommands::Inspect { iri } => d31::env_inspect(endpoint, &iri, json).await,
+        EnvCommands::List { language } => {
+            institutions::env_list(endpoint, language.as_deref(), json).await
+        }
+        EnvCommands::Inspect { iri } => institutions::env_inspect(endpoint, &iri, json).await,
     }
 }
 
 async fn remote_institution(endpoint: &str, command: InstitutionCommands, json: bool) {
     match command {
         InstitutionCommands::Install { definition } => {
-            d31::institution_install(endpoint, &definition, json).await
+            institutions::institution_install(endpoint, &definition, json).await
         }
-        InstitutionCommands::List => d31::institution_list(endpoint, json).await,
+        InstitutionCommands::List => institutions::institution_list(endpoint, json).await,
         InstitutionCommands::Inspect { iri } => {
-            d31::institution_inspect(endpoint, &iri, json).await
+            institutions::institution_inspect(endpoint, &iri, json).await
         }
     }
 }
@@ -3075,6 +3315,10 @@ async fn remote_capability_install(
         content_type: "application/eigon+json".to_string(),
         auto_commit: true,
         branch: String::new(),
+        // Default policy (Reject{100}) and no explicit tombstones —
+        // this CLI surface predates D41's policy wire-through.
+        policy: None,
+        explicit_tombstones: Vec::new(),
     };
 
     match client.load(request).await {
