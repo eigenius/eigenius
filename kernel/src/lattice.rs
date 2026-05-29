@@ -1146,8 +1146,21 @@ mod tests {
         Iri::parse(s).unwrap()
     }
 
+    /// Stamp the validator-required `is_a` field on a test resource.
+    /// Use `urn:eigenius:core:Class` as a generic placeholder; the
+    /// lattice tests don't exercise class-typing semantics so the
+    /// specific target doesn't matter. Call after `Resource::new` for
+    /// any test fixture that the validator will see.
+    fn set_default_is_a(r: &mut Resource) {
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
+    }
+
     fn make_resource(id: &str) -> Resource {
         let mut r = Resource::new(iri(id));
+        set_default_is_a(&mut r);
         r.set(
             iri("urn:eigenius:core:description"),
             Value::String("v".into()),
@@ -1282,6 +1295,7 @@ mod tests {
         let conflict_iri = "urn:eigenius:example:contested";
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         let mut r_a = Resource::new(iri(conflict_iri));
+        set_default_is_a(&mut r_a);
         r_a.set(
             iri("urn:eigenius:core:description"),
             Value::String("from a".into()),
@@ -1291,6 +1305,7 @@ mod tests {
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
+        set_default_is_a(&mut r_b);
         r_b.set(
             iri("urn:eigenius:core:description"),
             Value::String("from b".into()),
@@ -1431,6 +1446,7 @@ mod tests {
         let conflict_iri = "urn:eigenius:example:contested";
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         let mut r_a = Resource::new(iri(conflict_iri));
+        set_default_is_a(&mut r_a);
         r_a.set(
             iri("urn:eigenius:core:description"),
             Value::String("from a".into()),
@@ -1440,6 +1456,7 @@ mod tests {
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
+        set_default_is_a(&mut r_b);
         r_b.set(
             iri("urn:eigenius:core:description"),
             Value::String("from b".into()),
@@ -1676,6 +1693,7 @@ mod tests {
 
         let mut mid_b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
         let mut r = Resource::new(iri("urn:eigenius:example:x"));
+        set_default_is_a(&mut r);
         r.set(
             iri("urn:eigenius:core:description"),
             Value::String("v1".into()),
@@ -1685,6 +1703,7 @@ mod tests {
 
         let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
         let mut r2 = Resource::new(iri("urn:eigenius:example:x"));
+        set_default_is_a(&mut r2);
         r2.set(
             iri("urn:eigenius:core:description"),
             Value::String("v2".into()),
@@ -1753,6 +1772,7 @@ mod tests {
         let conflict_iri = "urn:eigenius:example:contested";
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         let mut r_a = Resource::new(iri(conflict_iri));
+        set_default_is_a(&mut r_a);
         r_a.set(
             iri("urn:eigenius:core:description"),
             Value::String("a".into()),
@@ -1762,6 +1782,7 @@ mod tests {
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
+        set_default_is_a(&mut r_b);
         r_b.set(
             iri("urn:eigenius:core:description"),
             Value::String("b".into()),
@@ -1811,6 +1832,7 @@ mod tests {
 
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         let mut r_a = Resource::new(iri("urn:eigenius:example:a"));
+        set_default_is_a(&mut r_a);
         r_a.set(
             iri("urn:eigenius:core:description"),
             Value::String("from a".into()),
@@ -1820,6 +1842,7 @@ mod tests {
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri("urn:eigenius:example:b"));
+        set_default_is_a(&mut r_b);
         r_b.set(
             iri("urn:eigenius:core:description"),
             Value::String("from b".into()),
@@ -2255,6 +2278,7 @@ mod tests {
     ) -> LayerBuilder {
         let mut b = LayerBuilder::new("cell", Some(parent));
         let mut r = Resource::new(iri(cell_iri));
+        set_default_is_a(&mut r);
         r.set(
             iri("urn:eigenius:core:description"),
             Value::String(cell_value.into()),
@@ -2393,6 +2417,7 @@ mod tests {
         let build_marker_cell = |parent: Arc<Layer>| {
             let mut b = LayerBuilder::new("cell", Some(parent));
             let mut r = Resource::new(iri("urn:eigenius:demo:cell"));
+            set_default_is_a(&mut r);
             r.set(
                 iri("urn:eigenius:demo:Marker"),
                 Value::String("attached".into()),

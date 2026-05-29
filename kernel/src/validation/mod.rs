@@ -174,6 +174,24 @@ impl Validator {
         let class_iris = resource.is_a();
         let class_refs: Vec<&Iri> = class_iris.iter().collect();
 
+        // Every resource must declare at least one class via `is_a`.
+        // Previously this was enforced incidentally by the parser
+        // rejecting empty arrays; that check was removed because empty
+        // arrays are a valid Eigon value for other properties (e.g.
+        // `urn:eigenius:query:rows` for a zero-row query result). The
+        // semantic of "an Eigon resource has at least one is_a class"
+        // is a validator rule, not a wire-format rule.
+        if class_iris.is_empty() {
+            errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: Some(
+                    Iri::parse(crate::ontology::well_known::IS_A).expect("wk::IS_A parses"),
+                ),
+                rule: ValidationRule::MissingRequired,
+                message: "resource has no `is_a` classes".to_string(),
+            });
+        }
+
         // Collect effective requires/recommends from all classes + ancestors
         let (required_props, _recommended_props) = self.collect_effective_properties(&class_refs);
 
@@ -4094,6 +4112,27 @@ mod tests {
             ],
         );
         builder.add_resource(prop).unwrap();
+        // Holder class for the option_a tests' propositional carriers.
+        // The validator now requires every resource to have at least
+        // one is_a class — this declares a minimal placeholder class
+        // (no required / recommended properties) so the holder
+        // resources can satisfy that without inheriting any
+        // class-typing constraints that would interfere with the test.
+        let holder_class = make_resource(
+            "urn:eigenius:test:PropositionHolder",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+                ),
+                (wk::SHORT_NAME, Value::String("PropositionHolder".into())),
+                (
+                    wk::DESCRIPTION,
+                    Value::String("test placeholder class".into()),
+                ),
+            ],
+        );
+        builder.add_resource(holder_class).unwrap();
         Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
@@ -4107,10 +4146,18 @@ mod tests {
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p_single",
-            vec![(
-                "urn:eigenius:test:proposition_value",
-                Value::Json(lambda_x_in_nat()),
-            )],
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:test:PropositionHolder",
+                    ))]),
+                ),
+                (
+                    "urn:eigenius:test:proposition_value",
+                    Value::Json(lambda_x_in_nat()),
+                ),
+            ],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -4132,13 +4179,21 @@ mod tests {
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p_array",
-            vec![(
-                "urn:eigenius:test:proposition_value",
-                Value::Array(vec![
-                    Value::Json(lambda_x_in_nat()),
-                    Value::Json(lambda_x_in_nat()),
-                ]),
-            )],
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:test:PropositionHolder",
+                    ))]),
+                ),
+                (
+                    "urn:eigenius:test:proposition_value",
+                    Value::Array(vec![
+                        Value::Json(lambda_x_in_nat()),
+                        Value::Json(lambda_x_in_nat()),
+                    ]),
+                ),
+            ],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
