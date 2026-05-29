@@ -1063,7 +1063,7 @@ fn cmd_load(
             let cascade_iters = outcome.cascade_iterations;
             if json_output {
                 println!(
-                    "{{\"status\":\"ok\",\"resources\":{count},\"layer_id\":\"{}\",\"cascade_tombstones\":{cascade_count},\"cascade_iterations\":{cascade_iters}}}",
+                    "{{\"success\":true,\"resource_count\":{count},\"layer_id\":\"{}\",\"branch\":\"main\",\"branch_advanced\":true,\"cascade_tombstones\":{cascade_count},\"cascade_iterations\":{cascade_iters},\"total_violations\":0}}",
                     outcome.layer.id()
                 );
             } else {
@@ -1081,7 +1081,7 @@ fn cmd_load(
         }
         Err(e) => {
             if json_output {
-                eprintln!("{{\"status\":\"error\",\"message\":\"{e}\"}}");
+                eprintln!("{{\"success\":false,\"message\":\"{e}\"}}");
             } else {
                 eprintln!("Load failed: {e}");
             }
@@ -1832,20 +1832,36 @@ async fn remote_load(
     match client.load(request).await {
         Ok(response) => {
             let resp = response.into_inner();
+            // Find the user-layer outcome to extract cascade info; the
+            // orchestrator's `committed_layers` may also carry an audit
+            // Sibling (`verdict_provenance`) and an `institution_classes`
+            // follow-up. The user layer's role enum value is `1`
+            // (LAYER_ROLE_USER per proto/eigenius.proto).
+            let user_layer = resp
+                .committed_layers
+                .iter()
+                .find(|l| l.role == eigenius_kernel::server::proto::LayerRole::User as i32);
+            let cascade_tombs = user_layer.map(|l| l.cascade_tombstones.len()).unwrap_or(0);
+            let cascade_iters = user_layer.map(|l| l.cascade_iterations).unwrap_or(0);
             if resp.success {
                 if json_output {
                     println!(
-                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\",\"branch_advanced\":{}}}",
+                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\",\"branch\":\"{}\",\"branch_advanced\":{},\"cascade_tombstones\":{cascade_tombs},\"cascade_iterations\":{cascade_iters},\"total_violations\":0}}",
                         resp.resource_count,
                         resp.layer_id,
                         resp.branch,
-                        resp.branch_advanced
+                        resp.branch_advanced,
                     );
                 } else if resp.branch_advanced {
                     println!(
                         "Loaded {} resource(s) into branch {}. Layer: {}",
                         resp.resource_count, resp.branch, resp.layer_id
                     );
+                    if cascade_tombs > 0 {
+                        println!(
+                            "Cascade tombstoned {cascade_tombs} IRI(s) in {cascade_iters} iteration(s)."
+                        );
+                    }
                 } else {
                     // Anchored-commit cache hit at a different
                     // position — the canonical layer for this content
@@ -1857,9 +1873,24 @@ async fn remote_load(
                     );
                 }
             } else {
-                eprintln!("Load failed:");
-                for err in &resp.errors {
-                    eprintln!("  {}: {}", err.rule, err.message);
+                if json_output {
+                    println!(
+                        "{{\"success\":false,\"total_violations\":{},\"errors\":{}}}",
+                        resp.total_violations,
+                        resp.errors.len()
+                    );
+                } else {
+                    eprintln!("Load failed:");
+                    for err in &resp.errors {
+                        eprintln!("  {}: {}", err.rule, err.message);
+                    }
+                    if (resp.total_violations as usize) > resp.errors.len() {
+                        eprintln!(
+                            "(Showing first {} of {} total violations.)",
+                            resp.errors.len(),
+                            resp.total_violations
+                        );
+                    }
                 }
                 std::process::exit(1);
             }

@@ -1,0 +1,13 @@
+[
+  {
+    "@id": "urn:eigenius:test:d41-template:Animal",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Animal",
+    "urn:eigenius:core:description": "Base Animal class for D41 e2e (declared as Class)."
+  },
+  {
+    "@id": "urn:eigenius:test:d41-template:Cat",
+    "urn:eigenius:core:is_a": ["urn:eigenius:test:d41-template:Animal"],
+    "urn:eigenius:core:short_name": "Cat"
+  }
+]

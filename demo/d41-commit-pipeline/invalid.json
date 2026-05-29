@@ -1,0 +1,8 @@
+[
+  {
+    "@id": "urn:eigenius:test:d41-template:Orphan",
+    "urn:eigenius:core:is_a": ["urn:eigenius:test:d41-template:Phantom"],
+    "urn:eigenius:core:short_name": "Orphan",
+    "urn:eigenius:core:description": "References undefined urn:eigenius:test:d41-template:Phantom to trigger UnresolvedClassReference."
+  }
+]

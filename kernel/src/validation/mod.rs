@@ -103,10 +103,11 @@ pub enum ValidationRule {
     UniverseStratificationViolation,
     /// A class or property declaration references an IRI that doesn't
     /// resolve to a resource of the expected kind in the layer chain.
-    /// Examples: `requires` referencing a missing `core:Property`,
-    /// `class_types` referencing a missing `core:Class`, `data_type`
-    /// referencing a missing `core:DataType`, `subclass_of` referencing
-    /// a missing `core:Class`. See eigenius#26.
+    /// Examples: `is_a` referencing a missing class, `requires`
+    /// referencing a missing `core:Property`, `class_types` referencing
+    /// a missing `core:Class`, `data_type` referencing a missing
+    /// `core:DataType`, `subclass_of` referencing a missing
+    /// `core:Class`. See eigenius#26.
     UnresolvedClassReference,
     /// An inductive value carries a `ctor` not declared on its
     /// referenced `InductiveType`, an arity mismatch against the
@@ -183,6 +184,28 @@ impl Validator {
         // Collect all classes this resource is an instance of
         let class_iris = resource.is_a();
         let class_refs: Vec<&Iri> = class_iris.iter().collect();
+
+        // Every `is_a` target must resolve in the layer chain.
+        // `collect_effective_properties` silently skips unresolved
+        // entries, which would mask a structurally invalid reference
+        // (and let a resource declare `is_a: [SomethingNonExistent]`
+        // without ever surfacing the broken IRI). Fire one error per
+        // unresolved target. `is_a` targets that resolve but to a
+        // resource without `class_types` containing `Class` /
+        // `InductiveType` are caught elsewhere (Rule 14
+        // `ClassTypeMismatch`); this check is the missing-link
+        // counterpart to that rule.
+        let is_a_iri = Iri::parse(wk::IS_A).expect("wk::IS_A is well-formed");
+        for iri in &class_iris {
+            if self.layer.resolve(iri).is_none() {
+                errors.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(is_a_iri.clone()),
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!("`is_a` references unresolved IRI '{iri}'"),
+                });
+            }
+        }
 
         // Collect effective requires/recommends from all classes + ancestors
         let (required_props, _recommended_props) = self.collect_effective_properties(&class_refs);
