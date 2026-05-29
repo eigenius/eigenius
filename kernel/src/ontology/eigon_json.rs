@@ -31,8 +31,6 @@ pub enum ParseError {
     InvalidIri { key: String, source: IriError },
     /// Explicit null values are not allowed.
     NullNotAllowed { property: String },
-    /// Empty arrays are not allowed.
-    EmptyArray { property: String },
     /// Empty objects are not allowed.
     EmptyObject { property: String },
     /// Embedded resource must not have an @id.
@@ -51,9 +49,6 @@ impl std::fmt::Display for ParseError {
             }
             ParseError::NullNotAllowed { property } => {
                 write!(f, "null value not allowed for property '{property}'")
-            }
-            ParseError::EmptyArray { property } => {
-                write!(f, "empty array not allowed for property '{property}'")
             }
             ParseError::EmptyObject { property } => {
                 write!(f, "empty object not allowed for property '{property}'")
@@ -203,11 +198,10 @@ fn parse_value(value: &serde_json::Value, property: &str) -> Result<Value, Parse
         }
         serde_json::Value::String(s) => Ok(Value::String(s.clone())),
         serde_json::Value::Array(arr) => {
-            if arr.is_empty() {
-                return Err(ParseError::EmptyArray {
-                    property: property.to_string(),
-                });
-            }
+            // Empty arrays are valid JSON and valid Eigon — they
+            // represent "no items." Per-property "must be non-empty"
+            // semantics (e.g., `is_a`, `requires`) are enforced by the
+            // validator, not the parser.
             let mut values = Vec::with_capacity(arr.len());
             for item in arr {
                 values.push(parse_value(item, property)?);
@@ -351,12 +345,17 @@ mod tests {
     }
 
     #[test]
-    fn reject_empty_array() {
+    fn accept_empty_array() {
+        // Empty arrays are valid Eigon — they represent "no items."
+        // Per-property "must be non-empty" enforcement (e.g., `is_a`)
+        // lives in the validator, not the parser.
         let json = r#"{"@id": "urn:eigenius:example:a", "urn:eigenius:example:x": []}"#;
-        assert!(matches!(
-            parse_document(json),
-            Err(ParseError::EmptyArray { .. })
-        ));
+        let doc = parse_document(json).expect("parse empty array");
+        let r = &doc[0];
+        let x = r
+            .get(&Iri::parse("urn:eigenius:example:x").unwrap())
+            .expect("property x present");
+        assert!(matches!(x, Value::Array(arr) if arr.is_empty()));
     }
 
     #[test]

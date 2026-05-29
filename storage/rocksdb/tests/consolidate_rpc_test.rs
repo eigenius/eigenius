@@ -75,6 +75,14 @@ fn append_chain(n: usize, backend: &Arc<dyn PersistentBackend>) -> Vec<String> {
         let mut builder = LayerBuilder::new(&format!("L{i}"), Some(parent));
         let mut r = Resource::new(iri(&format!("urn:eigenius:demo:layer_{i}")));
         r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
+        r.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String(format!("layer_{i}")),
+        );
+        r.set(
             iri("urn:eigenius:core:description"),
             Value::String(format!("v{i}")),
         );

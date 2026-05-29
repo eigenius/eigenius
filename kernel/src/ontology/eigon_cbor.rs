@@ -39,7 +39,6 @@ pub enum CborError {
     Encode(String),
     Decode(String),
     InvalidIri { key: String, source: IriError },
-    EmptyArray { property: String },
     EmptyObject { property: String },
 }
 
@@ -50,9 +49,6 @@ impl std::fmt::Display for CborError {
             CborError::Decode(msg) => write!(f, "CBOR decode error: {msg}"),
             CborError::InvalidIri { key, source } => {
                 write!(f, "invalid IRI for key '{key}': {source}")
-            }
-            CborError::EmptyArray { property } => {
-                write!(f, "empty array not allowed for property '{property}'")
             }
             CborError::EmptyObject { property } => {
                 write!(f, "empty object not allowed for property '{property}'")
@@ -338,11 +334,12 @@ fn cbor_to_value(value: &ciborium::Value, property: &str) -> Result<Value, CborE
         ciborium::Value::Float(f) => Ok(Value::Float(*f)),
         ciborium::Value::Bool(b) => Ok(Value::Boolean(*b)),
         ciborium::Value::Array(arr) => {
-            if arr.is_empty() {
-                return Err(CborError::EmptyArray {
-                    property: property.to_string(),
-                });
-            }
+            // Empty arrays are valid CBOR and valid Eigon — they
+            // represent "no items," which is the natural encoding for
+            // properties like `urn:eigenius:query:rows` whose
+            // cardinality is data-dependent. Per-property "must be
+            // non-empty" semantics (e.g., `is_a`, `requires`) are
+            // enforced by the validator, not the parser.
             let mut values = Vec::with_capacity(arr.len());
             for item in arr {
                 values.push(cbor_to_value(item, property)?);
@@ -552,12 +549,18 @@ mod tests {
     }
 
     #[test]
-    fn reject_empty_array() {
+    fn accept_empty_array() {
+        // Empty arrays are valid CBOR + valid Eigon — "no items."
+        // Per-property non-empty semantics live in the validator.
         let mut r = Resource::new(iri("urn:eigenius:test:bad"));
         r.set(iri("urn:eigenius:test:arr"), Value::Array(vec![]));
 
         let cbor = serialize_resource(&r);
-        assert!(parse_resource(&cbor).is_err());
+        let parsed = parse_resource(&cbor).expect("parse empty array round-trip");
+        let arr = parsed
+            .get(&iri("urn:eigenius:test:arr"))
+            .expect("array property present");
+        assert!(matches!(arr, Value::Array(v) if v.is_empty()));
     }
 
     #[test]
