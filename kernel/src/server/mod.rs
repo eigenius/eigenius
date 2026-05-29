@@ -549,6 +549,16 @@ pub struct EigeniusService {
     ///
     /// D41 Phase E.
     commit_ws_pool: crate::validation::CommitWorkingSetPool,
+
+    /// The [`crate::commit::LayerPersister`] threaded into every
+    /// orchestrator run. Owns the anchored-commit cache probe + branch
+    /// CAS dispatch (D34 §G.1 / D33 §6). Extracted out of `EigeniusService`
+    /// so persistence isn't coupled to the gRPC struct; the impl is
+    /// testable in isolation against any `PersistentBackend`. Wraps
+    /// the same `Option<Arc<dyn PersistentBackend>>` value as
+    /// `self.backend`, so the no-backend case (`None`) is handled
+    /// internally with the `branch_advanced = true` in-memory shape.
+    persister: Arc<crate::commit::BackendPersister>,
 }
 
 impl EigeniusService {
@@ -582,6 +592,7 @@ impl EigeniusService {
             resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
             commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
+            persister: Arc::new(crate::commit::BackendPersister::new(None)),
         })
     }
 
@@ -626,12 +637,13 @@ impl EigeniusService {
             in_process_registry: Arc::new(
                 crate::institution::in_process_registry::InProcessInstitutionRegistry::new(),
             ),
-            backend: Some(backend),
+            backend: Some(Arc::clone(&backend)),
             task_store: Some(task_store),
             session: Arc::new(RwLock::new(crate::task::Session::hardwired())),
             resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
             commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
+            persister: Arc::new(crate::commit::BackendPersister::new(Some(backend))),
         })
     }
 
@@ -692,6 +704,7 @@ impl EigeniusService {
             resume_state: Arc::new(ResumeState::default()),
             orchestrator_client: None,
             commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
+            persister: Arc::new(crate::commit::BackendPersister::new(None)),
         })
     }
 
@@ -842,131 +855,6 @@ impl EigeniusService {
                 at_layer
             ))),
             Err(e) => Err(Status::internal(format!("load_chain_from failed: {e}"))),
-        }
-    }
-
-    /// Compute the anchored-commit cache key for `layer` and probe the
-    /// backend. Returns `None` when the layer has no supporting layer
-    /// (root / self-referential) or when no cache entry exists.
-    /// Verifies the cached layer is still in storage before returning
-    /// — a stale entry (cached layer was reclaimed by GC) is treated
-    /// as a cache miss.
-    fn probe_anchored_commit(
-        &self,
-        backend: &dyn crate::storage::PersistentBackend,
-        layer: &crate::layer::Layer,
-    ) -> Option<crate::layer::LayerId> {
-        let supporting_id = layer.supporting_layer()?;
-        let supporting_handle = backend.load_handle(supporting_id).ok().flatten()?;
-        let cached_id = backend
-            .lookup_anchored_commit(layer.content_hash(), &supporting_handle.content_hash)
-            .ok()
-            .flatten()?;
-        // Verify the cached layer still exists. If GC has reclaimed
-        // it (or it was never persisted for some reason), treat as a
-        // miss so the caller re-persists.
-        backend.load_handle(&cached_id).ok().flatten()?;
-        Some(cached_id)
-    }
-
-    /// Insert the freshly-committed layer into the anchored-commit
-    /// cache. Best-effort — failures log a warning but don't propagate.
-    fn put_anchored_commit_for_layer(
-        &self,
-        backend: &dyn crate::storage::PersistentBackend,
-        layer: &crate::layer::Layer,
-    ) {
-        let Some(supporting_id) = layer.supporting_layer() else {
-            return;
-        };
-        let Some(supporting_handle) = backend.load_handle(supporting_id).ok().flatten() else {
-            return;
-        };
-        if let Err(e) = backend.put_anchored_commit(
-            layer.content_hash(),
-            &supporting_handle.content_hash,
-            layer.id(),
-        ) {
-            tracing::warn!(
-                { field::OPERATION } = operation::LAYER_COMMIT,
-                { field::ERROR_KIND } = "anchored_commit_cache_put_failed",
-                { field::LAYER_ID } = %layer.id(),
-                { field::ERROR_MESSAGE } = %e,
-                "failed to update anchored-commit cache (commit succeeded)"
-            );
-        }
-    }
-
-    /// Advance `branch` to `layer` via the lattice's CAS primitive.
-    /// Carved out of the persist body so both the cache-miss path and
-    /// the same-position cache-hit path can share the logic.
-    ///
-    /// Returns the lattice's [`UpdateOutcome`](crate::lattice::UpdateOutcome)
-    /// verbatim so the caller can:
-    ///
-    /// - distinguish `FastForward` (clean CAS) from `TrivialMerge`
-    ///   (concurrent disjoint-IRI contributions; kernel produced a
-    ///   merge layer) from `NeedsWitnessedMerge` (concurrent
-    ///   conflicting contributions; branch unchanged);
-    /// - correctly compute `branch_advanced` — in particular,
-    ///   `NeedsWitnessedMerge` means the branch did **not** advance
-    ///   (the layer is stored but unreachable from any branch ref).
-    ///
-    /// Pre-D34 §G.1 this method swallowed all `Ok` variants as
-    /// `Ok(())`, masking the `NeedsWitnessedMerge` failure as success.
-    ///
-    /// D41 Phase F: returns kernel-internal
-    /// [`crate::validation::ValidationError`] now that the only caller
-    /// is the [`crate::commit::LayerPersister`] trait impl on
-    /// [`EigeniusService`] (the inherent `persist_layer_if_backend`
-    /// was inlined and deleted in Phase F).
-    fn advance_branch_for_layer(
-        &self,
-        branch: &str,
-        layer: &crate::layer::Layer,
-        backend: &dyn crate::storage::PersistentBackend,
-    ) -> Result<crate::lattice::UpdateOutcome, crate::validation::ValidationError> {
-        let expected_old = layer.parent().map(|p| p.id().clone());
-        let storage = LayerStorage::with_persistent(
-            self.backend
-                .as_ref()
-                .expect("advance_branch_for_layer called only when backend is Some")
-                .clone(),
-        );
-        match crate::lattice::update_branch(
-            branch,
-            expected_old,
-            layer.id().clone(),
-            crate::lattice::ConflictPolicy::AllowTrivial,
-            storage,
-            backend,
-        ) {
-            Ok(outcome) => {
-                tracing::debug!(
-                    { field::OPERATION } = operation::LAYER_COMMIT,
-                    { field::LAYER_ID } = %layer.id(),
-                    branch = branch,
-                    outcome = ?outcome,
-                    "branch CAS attempted"
-                );
-                Ok(outcome)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    { field::OPERATION } = operation::LAYER_COMMIT,
-                    { field::ERROR_KIND } = "branch_update_failed",
-                    { field::LAYER_ID } = %layer.id(),
-                    branch = branch,
-                    { field::ERROR_MESSAGE } = %e,
-                    "failed to advance branch"
-                );
-                Err(crate::validation::ValidationError {
-                    resource_id: None,
-                    property: None,
-                    rule: crate::validation::ValidationRule::InstitutionValidation,
-                    message: format!("advance_branch failed: {e}"),
-                })
-            }
         }
     }
 
@@ -1671,7 +1559,7 @@ impl EigeniusService {
                     let orchestrator = crate::commit::CommitOrchestrator {
                         ctx: &mut ctx,
                         pool: &self.commit_ws_pool,
-                        persister: self as &dyn crate::commit::LayerPersister,
+                        persister: &*self.persister,
                         host: self as &dyn crate::commit::CommitHookHost,
                         branch,
                         policy: crate::lattice::CommitPolicy::default(),
@@ -1804,147 +1692,6 @@ impl EigeniusService {
                 None
             },
         }))
-    }
-}
-
-// D41 §7 — `LayerPersister` impl for `EigeniusService`. The trait
-// surface is the seam the new commit pipeline (D41 §3.5) calls
-// through; `EigeniusService` carries the only impl that does cache
-// probe + `store_layer` + branch CAS in one body.
-//
-// **Body inlined in Phase F.** Pre-Phase F this was a thin adapter
-// delegating to the inherent `persist_layer_if_backend` method on
-// `EigeniusService`. Phase F moved the body up into this trait impl
-// and deleted the inherent method — there are no longer any inherent
-// callers because every commit-shaped RPC now goes through the
-// orchestrator, which only ever sees a `&dyn LayerPersister`. Keeping
-// the inherent method alongside the trait impl would invite drift.
-//
-// **`ValidationError` shape.** The trait declares
-// [`crate::validation::ValidationError`] (kernel-internal); the body
-// constructs that variant directly. Pre-Phase F the body returned
-// `proto::ValidationError` and the trait impl converted at the
-// boundary; the conversion is gone now that the body is here.
-impl crate::commit::LayerPersister for EigeniusService {
-    fn persist(
-        &self,
-        branch: &str,
-        layer: &Arc<crate::layer::Layer>,
-    ) -> Result<PersistedLayerInfo, crate::validation::ValidationError> {
-        let layer = layer.as_ref();
-        let Some(backend) = self.backend.as_ref() else {
-            // No persistent backend — the layer lives in-memory only.
-            // There is no durable branch ref to advance and no CAS
-            // attempted (merge_outcome = None), but `ctx.head` IS the
-            // session's source of truth in this mode, so the
-            // orchestrator must advance to the freshly-built layer.
-            // Returning `branch_advanced = false` here would tell
-            // `CommitOrchestrator::run` to leave `ctx.head` at the
-            // bootstrap, silently dropping every committed resource
-            // from session reads (see kernel/tests/server_integration.rs
-            // `load_and_query`). The field's contract is "should
-            // `ctx.head` advance to this layer?" — in no-backend mode
-            // the answer is yes.
-            return Ok(PersistedLayerInfo {
-                layer_id: layer.id().clone(),
-                branch_advanced: true,
-                merge_outcome: None,
-                cache_hit_different_position: false,
-            });
-        };
-
-        // Cache probe. The cache key is the layer's content_hash and
-        // the supporting layer's content_hash. Layers with no
-        // supporting layer (roots, pure self-referential commits) can't
-        // be keyed and fall through to the standard persist path.
-        let cache_hit = self.probe_anchored_commit(backend.as_ref(), layer);
-
-        if let Some(cached_id) = cache_hit {
-            if cached_id == *layer.id() {
-                // Same-position cache hit — the layer is already on
-                // disk. Skip `store_layer`; still attempt the branch
-                // CAS (the caller wanted to publish on top of the
-                // current head, which is the layer's parent). The CAS
-                // may still race or conflict, so the outcome is the
-                // full taxonomy.
-                tracing::debug!(
-                    { field::OPERATION } = operation::LAYER_COMMIT,
-                    { field::LAYER_ID } = %layer.id(),
-                    branch = branch,
-                    cache = "hit_same_position",
-                    "anchored-commit cache hit (same position) — skipping store_layer"
-                );
-                let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
-                let branch_advanced = !matches!(
-                    outcome,
-                    crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
-                );
-                return Ok(PersistedLayerInfo {
-                    layer_id: layer.id().clone(),
-                    branch_advanced,
-                    merge_outcome: Some(outcome),
-                    cache_hit_different_position: false,
-                });
-            }
-            // Different-position cache hit — the canonical layer is
-            // elsewhere. Skip both `store_layer` and `update_branch`;
-            // the branch stays where it is (D33 §6 supporting-
-            // equivalent context). No CAS attempted, so merge_outcome
-            // is None.
-            tracing::debug!(
-                { field::OPERATION } = operation::LAYER_COMMIT,
-                { field::LAYER_ID } = %layer.id(),
-                cached_layer = %cached_id,
-                branch = branch,
-                cache = "hit_different_position",
-                "anchored-commit cache hit (different position) — branch unchanged"
-            );
-            return Ok(PersistedLayerInfo {
-                layer_id: cached_id,
-                branch_advanced: false,
-                merge_outcome: None,
-                cache_hit_different_position: true,
-            });
-        }
-
-        // Cache miss — standard persist path.
-        if let Err(e) = backend.store_layer(layer) {
-            tracing::warn!(
-                { field::OPERATION } = operation::LAYER_COMMIT,
-                { field::ERROR_KIND } = "persist_layer_failed",
-                { field::LAYER_ID } = %layer.id(),
-                { field::ERROR_MESSAGE } = %e,
-                "failed to persist layer to backend"
-            );
-            return Err(crate::validation::ValidationError {
-                resource_id: None,
-                property: None,
-                rule: crate::validation::ValidationRule::InstitutionValidation,
-                message: format!("persist_layer failed: {e}"),
-            });
-        }
-
-        // Insert into the anchored-commit cache for future short-circuit
-        // (D33 §6). Best-effort: a failure here doesn't fail the
-        // commit, but we log it so chain audits can spot drift between
-        // the cache and the topology.
-        self.put_anchored_commit_for_layer(backend.as_ref(), layer);
-
-        // Attempt the CAS. On `NeedsWitnessedMerge` the layer is on
-        // disk but not reachable from any branch ref — the fix for
-        // D34 §G.1's silent-success bug is reporting branch_advanced
-        // = false here so clients know to recover.
-        let outcome = self.advance_branch_for_layer(branch, layer, backend.as_ref())?;
-        let branch_advanced = !matches!(
-            outcome,
-            crate::lattice::UpdateOutcome::NeedsWitnessedMerge { .. }
-        );
-        Ok(PersistedLayerInfo {
-            layer_id: layer.id().clone(),
-            branch_advanced,
-            merge_outcome: Some(outcome),
-            cache_hit_different_position: false,
-        })
     }
 }
 
@@ -2319,7 +2066,7 @@ impl EigeniusKernel for EigeniusService {
                 let orchestrator = crate::commit::CommitOrchestrator {
                     ctx: &mut ctx,
                     pool: &self.commit_ws_pool,
-                    persister: self as &dyn crate::commit::LayerPersister,
+                    persister: &*self.persister,
                     host: self as &dyn crate::commit::CommitHookHost,
                     branch: &branch,
                     policy,
@@ -2616,7 +2363,7 @@ impl EigeniusKernel for EigeniusService {
                 let orchestrator = crate::commit::CommitOrchestrator {
                     ctx: &mut ctx,
                     pool: &self.commit_ws_pool,
-                    persister: self as &dyn crate::commit::LayerPersister,
+                    persister: &*self.persister,
                     host: self as &dyn crate::commit::CommitHookHost,
                     branch: &branch_name,
                     policy: crate::lattice::CommitPolicy::default(),
@@ -2940,7 +2687,7 @@ impl EigeniusKernel for EigeniusService {
             let orchestrator = crate::commit::CommitOrchestrator {
                 ctx: &mut ctx,
                 pool: &self.commit_ws_pool,
-                persister: self as &dyn crate::commit::LayerPersister,
+                persister: &*self.persister,
                 host: self as &dyn crate::commit::CommitHookHost,
                 branch: &branch,
                 policy: crate::lattice::CommitPolicy::default(),
@@ -5261,21 +5008,25 @@ mod merge_info_tests {
 
 #[cfg(test)]
 mod layer_persister_dispatch_tests {
-    //! Phase C of D41 wired `EigeniusService` as the canonical
-    //! `LayerPersister` impl. Phase F inlined the persist body into
-    //! the trait impl and deleted the inherent
-    //! `persist_layer_if_backend` method; this test pins the
-    //! trait-dispatch handshake the orchestrator depends on.
+    //! Phase C of D41 wired the canonical `LayerPersister` for the
+    //! gRPC service path; the impl was inlined in Phase F and then
+    //! extracted to a dedicated [`crate::commit::BackendPersister`]
+    //! struct held as `EigeniusService::persister`. This test pins the
+    //! trait-dispatch handshake the orchestrator depends on, going
+    //! through the service's stored persister exactly the way every
+    //! commit-shaped RPC handler does.
     //!
-    //! D41 §7 / Phase F.
+    //! D41 §7 / Phase F + persister-extraction.
     use super::*;
     use crate::commit::persister::LayerPersister;
 
     /// `EigeniusService::new()` (no-backend) is enough to exercise the
     /// no-backend branch of `LayerPersister::persist`:
-    /// `branch_advanced = false`, `merge_outcome = None`,
+    /// `branch_advanced = true`, `merge_outcome = None`,
     /// `cache_hit_different_position = false`, `layer_id` =
-    /// `layer.id()`.
+    /// `layer.id()`. (`branch_advanced = true` because in no-backend
+    /// mode `ctx.head` is the session's source of truth — see the
+    /// persister's body for the rationale.)
     #[tokio::test]
     async fn dyn_dispatch_on_no_backend_path() {
         let service = EigeniusService::new().expect("bootstrap should succeed");
@@ -5294,8 +5045,8 @@ mod layer_persister_dispatch_tests {
 
         // Trait dispatch through `&dyn LayerPersister` — proves the
         // impl is object-safe and the vtable resolves to the persist
-        // body. The orchestrator holds the service exactly this way.
-        let persister: &dyn LayerPersister = &service;
+        // body. The orchestrator holds the persister exactly this way.
+        let persister: &dyn LayerPersister = &*service.persister;
         let via_trait = persister
             .persist(DEFAULT_BRANCH, &head)
             .expect("no-backend path never errors");
