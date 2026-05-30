@@ -4,68 +4,58 @@
 
 # Eigenius
 
-An open-source **AI platform for science and engineering** built on a typed, queryable knowledge graph.
+<p align="center">
+  <a href="https://github.com/eigenius/eigenius/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/eigenius/eigenius/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <a href="docs/"><img alt="Docs" src="https://img.shields.io/badge/docs-design%20%2B%20guides-brightgreen.svg"></a>
+</p>
 
-Contemporary LLMs produce text that reads like knowledge but carries no epistemic warranty — there is no structural way to distinguish a correct derivation from a convincing hallucination. Eigenius addresses this by anchoring knowledge in a typed, queryable knowledge graph where every fact has tracked provenance, every derivation is replayable, and formal proofs provide machine-checked certainty.
+An open-source platform for **verifiable AI in science and engineering**, built on a typed, versioned knowledge graph.
 
-The platform maintains four epistemic categories: **declared** knowledge (human assertions), **observed** knowledge (facts with provenance), **derived** knowledge (conclusions from typed pipelines with full audit trails), and **verified** knowledge (derivations with machine-checked formal proofs). For frontier research in quantum physics, life sciences, materials science, and beyond, this distinction makes it possible to know what has been truly verified versus what is plausible-sounding text without proper grounding.
+Modern language models can produce convincing text without producing trustworthy knowledge. Eigenius is a substrate for representing what the science actually says: typed resources with tracked provenance, replayable derivations, and — where the claim warrants it — machine-checked formal proofs.
 
-Eigenius is grounded in [dependent type theory and institution theory](https://github.com/user-attachments/files/27193066/eigenius-cacm.pdf) to bridge and integrate different logics and scientific disciplines.
+The platform distinguishes four kinds of knowledge, each with stronger guarantees than the last:
+
+- **Declared** — a human asserts it.
+- **Observed** — measured or recorded with provenance.
+- **Derived** — produced by a typed pipeline whose steps are auditable.
+- **Verified** — derived *and* re-checked by a formal proof system (Lean 4 today).
+
+When a result matters — a clinical trial conclusion, a materials-property prediction, a regulatory submission — you can tell what has been verified end-to-end versus what's plausible-sounding text without grounding.
+
+Theoretical foundation: dependent type theory + Grothendieck institutions, integrating different formal logics and scientific disciplines under one typed substrate. The [CACM-style overview](https://github.com/user-attachments/files/27193066/eigenius-cacm.pdf) sketches the academic framing.
 
 > This is still a very early stage of this project. Anticipate
 > features not working or missing functionality overall. Our goal
 > is to close those quality gaps rather aggressively. Feel free
 > to submit issues in the discussion forum or directly as issue.
 
-Eigenius's key features include:
+## Quick start
 
-- **Storage graph management and versioning.**
-  [Branches, tags, and trivial merges](docs/design/d23-out-of-core-layer-architecture.md),
-  the [layer reconciliation surface](docs/design/d20-layer-reconciliation.md)
-  (Witness / Rename / SchemaQuotient / Restructure strategies plus a chain-resident
-  [`MergeResolutionRecord`](docs/design/d38-merge-provenance-and-witness-discovery.md)
-  per resolved conflict and off-span witness discovery), and
-  [chain consolidation](docs/design/d25-chain-consolidation.md) are wired through
-  to the notebook (Branches / Tags / History / Merge / Compaction destinations on the
-  workspace rail) and the CLI (`eigenius db branch`, `db tag`, `db merge`,
-  `db consolidate`).
-  [Garbage collection across graph layers](docs/design/d23-out-of-core-layer-architecture.md)
-  has a notebook destination and a CLI surface; still pending is integrating it into
-  the application life-cycle (automatic triggering on branch/tag delete and during
-  low-traffic windows).
+The fastest path is the Docker Compose stack (no Rust or Deno needed on the host):
 
-- **Generic runtime substrate** ([D26](docs/design/d26-runtime-substrate.md)) with
-  the Julia worker live and five reference
-  [Julia Institutions](docs/design/d27-julia-institutions.md) landed end-to-end:
-  [`Symbolics`](https://juliasymbolics.org/) /
-  [`ModelingToolkit`](https://github.com/SciML/ModelingToolkit.jl)
-  (symbolic algebra over a chain-typed `FormulaTerm`),
-  [`IntervalArithmetic`](https://juliaintervals.github.io/)
-  (rigorous bounds; Decidable role),
-  [`Catalyst`](https://docs.sciml.ai/Catalyst/stable/) (chemical reaction networks),
-  [`DifferentialEquations.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) (ODEs), and
-  [`JuMP`](https://jump.dev/) (mathematical programming, HiGHS back end for LP/QP).
-  Two cross-institution comorphisms over the shared `FormulaTerm` representation are
-  wired and tested end-to-end: Catalyst → DiffEq (reaction-network compilation to ODE
-  problems) and Symbolics → JuMP (symbolic-objective framing into optimisation
-  problems, demonstrated by a kinase Ki-fit).
+```bash
+# Mock LLM, no API key needed:
+EIGENIUS_MOCK_LLM=true docker compose up --build -d
 
-- **Lean 4 as verification institution** ([D28](docs/design/d28-lean-4-as-institution.md))
-  contributing the *verified* epistemic level. Authoring side runs on the
-  runtime substrate (`lean4export` against a pinned `LeanEnvironment` image);
-  the verification side stays in-process via [`nanoda_lib`](https://github.com/ammkrn/nanoda_lib)
-  for trust-surface reasons (no IPC, verdict is a direct function call). The
-  full audit chain D28 §5.7 promises is queryable end-to-end:
-  `LeanProofTerm` → verbatim `lean4export` bytes → `LeanPackageMirror`
-  (audit anchor with content-addressed [archive hash](docs/design/d30-eigon-to-lean-faithful-translation.md))
-  → `LeanEnvironment` → image digest → mirrored chain class. The three-part
-  correspondence check (proof validity + mirror correspondence +
-  anchor consistency) runs at commit time via AutoOnLoad; a passing
-  proof lands a `Verdict::Holds` resource on the chain so the
-  *verified* tag is itself a typed, queryable resource. The
-  capstone notebook ([`notebooks/examples/lean-verification.json`](notebooks/examples/lean-verification.json))
-  walks the audit chain backward from the verdict to the chain-side
-  `Patient` class the proof discharges a claim about.
+# Open the notebook
+open http://localhost:8080/notebooks/   # macOS; xdg-open on Linux
+
+# Run the end-to-end CLI demo
+./demo/run.sh
+```
+
+The first build takes a few minutes (Rust + WASM components). Subsequent ups are fast. See [Docker Compose](#docker-compose) below for state inspection, logs, and `ANTHROPIC_API_KEY` setup, or [Getting Started](#getting-started) for a native-toolchain build.
+
+**What Eigenius gives you, today:**
+
+- **Typed, versioned knowledge graph** — immutable layers with content-addressed IDs, branches/tags/merges, conflict resolution with on-chain provenance, garbage collection. ([D23](docs/design/d23-out-of-core-layer-architecture.md), [D20](docs/design/d20-layer-reconciliation.md))
+- **Five live Julia institutions** for scientific computing — [Symbolics](https://juliasymbolics.org/), [IntervalArithmetic](https://juliaintervals.github.io/), [Catalyst](https://docs.sciml.ai/Catalyst/stable/), [DifferentialEquations](https://docs.sciml.ai/DiffEqDocs/stable/), and [JuMP](https://jump.dev/) — sharing a typed `FormulaTerm` representation, with cross-institution comorphisms (Catalyst→DiffEq, Symbolics→JuMP). ([D27](docs/design/d27-julia-institutions.md))
+- **Lean 4 verification institution** — proof terms commit as chain resources; the kernel re-checks them in-process via [`nanoda_lib`](https://github.com/ammkrn/nanoda_lib) and lands a typed `Verdict` resource so *verified* is itself queryable. ([D28](docs/design/d28-lean-4-as-institution.md))
+- **Typed program execution** with full reasoning traces, memoization, four epistemic categories enforced by the ontology, and an LLM dispatch surface (Anthropic via Vercel AI SDK, structured output via `CompleteJson`).
+- **Notebook, CLI, and TypeScript SDK** — author and run cells (ESL, EigenQL, TypeScript, programs, charts) in the browser; drive the kernel from the shell; embed it from any TS runtime via [`@eigenius/client`](clients/eigenius-ts/). ([D22](docs/design/d22-notebook-and-typescript-sdk.md))
+- **WASM extensibility** — untrusted capabilities and D14 institutions sandboxed via Wasmtime with fuel/memory limits.
+- **Runtime substrate** — heavy native libraries (SAT solvers, ODE integrators, theorem provers) hosted in sibling containers with content-addressed images and pinned environments. ([D26](docs/design/d26-runtime-substrate.md))
 
 ## The notebook — start here
 
@@ -96,9 +86,14 @@ Four task-first guides plus a consolidated bibliography, all grounded in the imp
 
 Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
 
-## Current Status: Phases 0–11e + D22 Notebook & SDK + D14 Institution Realisation + D26/D29/D31 Runtime Substrate + D32 Formula Language + D28/D30/D40 Lean 4 Verification Institution Complete
+## Status
 
-The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The system can:
+The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. Phases 0–11e are complete, plus the notebook + SDK (D22), institution realisation (D14), runtime substrate (D26 / D29 / D31), formula language (D32), and the Lean 4 verification institution (D28 / D30 / D40).
+
+<details>
+<summary>Full capability inventory (what the system can do today)</summary>
+
+The system can:
 
 - Parse and serialize Eigon-JSON and CBOR documents
 - Load the self-describing core, program, reflection, and institution ontologies (4 bootstrap layers)
@@ -138,11 +133,16 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 - Drive the platform from a React notebook (six cell types: markdown, ESL, EigenQL, TypeScript, program-run, and form-based chart cells covering grouped-bar / vertical-bar / horizontal-bar / donut / line / area; auto-rendered outputs; layer-stack and per-layer topology graph visualisations; cell-order Run / Run-from-here / Run-to-here with stale markers; collapse/expand; content-addressed publish-to-layer with a queryable Open dialog; bundled into the orchestrator image and served at `/notebooks/`)
 - Use the same kernel from any TypeScript runtime via `@eigenius/client` — a typed SDK over the Connect-RPC surface (browser, Deno, Node)
 
+</details>
+
 See [docs/design/implementation-plan.md](docs/design/implementation-plan.md) for the full phased build plan.
 
 ## Architecture
 
 Everything in Eigenius is a **Resource** — classes, properties, data types, formats, and instance data are all represented uniformly with IRI identity and typed property values. The core ontology is self-describing: `Class` is an instance of `Class`.
+
+<details>
+<summary>Subsystem inventory (kernel, orchestrator, layer system, …)</summary>
 
 - **Rust Kernel** — ontology validation, layer management, resource resolution, program execution, gRPC server. Uses `BTreeMap` for deterministic ordering and cache-friendly access.
 - **Deno Orchestrator** — IO component dispatch, LLM integration (Vercel AI SDK), MCP server. Communicates with the kernel via Connect RPC/gRPC.
@@ -159,13 +159,15 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Durable State** — `eigenius serve --db <path>` persists layers, traces, and WASM capabilities in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
 - **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
+</details>
+
 Phase 19 complete (19a–19i): D26 runtime substrate landed end-to-end with the Julia v1 instantiation (D27 — five worked institutions: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS); D29 mirror generator with closure walker; D31 install lifecycle; D32 formula language as Mini-TT fragment with the ESL `formula(...)` sublanguage; comorphism chain reinsertion (D14 §9.3) wired through both ESL `Exp::InstitutionInvoke` and EigenQL `FIBER ... INTO`. The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](notebooks/examples/kinase-institutions.json)) exercises the entire stack end-to-end.
 
 Phase 20a complete (20a.0–20a.8): the first verification institution. D28 Lean 4 institution landed end-to-end through the substrate's authoring side (`lean4export` against pinned `LeanEnvironment` images) and an in-process verification side (`nanoda_lib` re-check with axiom-allowlist enforcement); D40 chain-mirrored `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` inductives; D30 faithful translation spec with the substrate `LeanMirrorGenerator` producing baked `EigeniusFFI` Lake packages; three-part correspondence check (D28 §5.5) wired through AutoOnLoad. The lean-verification notebook ([`notebooks/examples/lean-verification.json`](notebooks/examples/lean-verification.json)) walks the closed audit chain D28 §5.7 promises. Phase 20b (Mathlib-scale operational landing per D28 §11.2) is consumer-triggered; not architecturally required.
 
 See [docs/design/architecture-v0.3.md](docs/design/architecture-v0.3.md) for the full architecture specification.
 
-### Docker Compose
+## Docker Compose
 
 The demo can also run via Docker Compose without installing Rust or Deno locally.
 
@@ -185,7 +187,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 docker compose down
 ```
 
-#### Inspecting the kernel's persistent state
+### Inspecting the kernel's persistent state
 
 The kernel writes its RocksDB store to a named docker volume (`eigenius_db`)
 mounted at `/var/lib/eigenius/db` inside the kernel container. The volume
@@ -222,7 +224,7 @@ The volume name on the host is `<project>_eigenius_db` — typically
 gets stamped at seed time and why a `down -v` reset is sometimes needed
 after a kernel upgrade.
 
-#### Reading the kernel logs
+### Reading the kernel logs
 
 The kernel uses [`tracing`](https://docs.rs/tracing/) and emits structured
 JSON when running in docker (no TTY). Standard `docker compose logs`
@@ -265,6 +267,9 @@ keeps the rest of the workspace at the default level. `trace` is rarely
 useful — that's where high-volume per-resource events live.
 
 ## Repository Structure
+
+<details>
+<summary>Full tree (~60 lines)</summary>
 
 ```
 kernel/          Rust kernel crate
@@ -348,6 +353,8 @@ docs/            Documentation
 scripts/         License-header application, BibTeX-to-Markdown, citation verification
 references/      Reference implementations consulted during development (e.g. `nanoda_lib` for Mini-TT)
 ```
+
+</details>
 
 ## Getting Started
 
@@ -622,6 +629,18 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 | [D26: Runtime Substrate](docs/design/d26-runtime-substrate.md) | Language-agnostic substrate for embedding scientific-computation runtimes (Julia, Python, R, …) into Eigenius. Resource classes, image-vs-graph boundary, container-digest-anchored deployment, mirror generators. |
 | [D27: Julia Institutions](docs/design/d27-julia-institutions.md) | Julia as the first runtime-substrate instance, plus three reference institutions wrapping Julia libraries with their own fibers: `Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`. The future Lean / Julia bridge. |
 | [D28: Lean 4 as Verification Institution](docs/design/d28-lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
+
+## Contributing
+
+Contributions are welcome — bug reports, design discussion, and patches alike. The project is early; the structural decisions matter more than feature velocity, so please open an issue before any non-trivial change so we can align on shape first.
+
+- **Bugs and feature requests:** [open an issue](https://github.com/eigenius/eigenius/issues).
+- **Discussion:** general design questions and ideas live in [GitHub Discussions](https://github.com/eigenius/eigenius/discussions).
+- **Patches:** fork, branch, run `just check` (fmt + clippy + lint) and `just test`, then open a PR. All commits must pass CI.
+- **Code style:** `cargo fmt --all` is enforced; clippy runs with `-D warnings`.
+- **Design docs** under [docs/design/](docs/design/) are the source of truth for system shape — substantive changes should land as an updated design doc alongside the code.
+
+By contributing, you agree your contributions are licensed under Apache-2.0.
 
 ## License
 
