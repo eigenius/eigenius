@@ -31,13 +31,14 @@
  * flows or destructive ops that belong to the notebook UI or an operator,
  * not a single-turn agent invocation.
  *
- * Transport: stdio (via [`startStdioServer`]) is the wired entry point.
- * See [`../mcp_main.ts`] for the standalone stdio binary. An HTTP
- * transport mounted on the orchestrator's main port is a tracked
- * follow-up — the MCP SDK's `StreamableHTTPServerTransport` is built for
- * Node's `http.ServerResponse`, and adapting that surface to Deno's
- * `Request` / `Response` needs care to avoid breaking the existing
- * Connect-RPC handlers on the same port.
+ * Two transports are wired:
+ *  - HTTP — mounted at `/mcp` on the orchestrator's HTTP port via
+ *    `createMcpHttpHandler` ([`./http.ts`]). The right path for the
+ *    docker compose stack; clients connect at `http://localhost:8080/mcp`.
+ *  - stdio — `startStdioServer` (below); entry point at
+ *    [`../mcp_main.ts`], runnable as `deno task mcp`. The right path
+ *    for kernel-on-host development without bringing up the orchestrator
+ *    container.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
