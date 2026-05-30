@@ -4,9 +4,15 @@ Works that situate Eigenius within a longer arc of research on Mathematical Know
 
 _Generated from `docs/references/eigenius_precursors.bib` by `scripts/bib-to-md.py`. Do not edit by hand._
 
-Total entries: **14**.
+Total entries: **15**.
 
 ---
+
+### `brown2008pharos`
+
+Brown, Jr., Allen L. (2008). "Enforcing the Scientific Method". In *Provenance and Annotation of Data and Processes*, ed. Freire, Juliana, Koop, David, and Moreau, Luc, pp. 2–2, Springer Berlin Heidelberg.
+
+> Presentation of Pharos, the Microsoft Health Solutions Group platform for life-sciences researchers, framed around audited inference + audited workflow as the substrate for enforcing the scientific method. Direct ancestor of Eigenius: same animating goal (machine-readable audit trail over both the conduct and results of scientific investigation), distinct stakeholder set (researchers, regulators, funders, tenure committees, research managements). Pharos shipped a port of Isabelle/HOL called MetaL and a typed graph store on SQL Server with a SPARQL processor called DataNet. Eigenius generalises and substantially extends that substrate: Lean 4 instead of Isabelle/HOL for the proof assistant; a kernel rooted in a Martin-Löf type theory (Pharos had none); explicit institutions as a structural concept (Pharos had none); a layer-graph model with lattice structure and merge operations (Pharos had a flat graph); a notebook interface; and epistemic tracing as core infrastructure substrate, not metadata.
 
 ### `carette-farmer2009`
 

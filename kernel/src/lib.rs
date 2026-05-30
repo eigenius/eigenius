@@ -23,7 +23,6 @@
 //! - NbE type checker (Mini-TT dependent type theory for programs)
 //! - Bootstrap sequence (Core Ontology + Foundation Layer)
 
-pub mod api;
 pub mod bootstrap;
 pub mod capability;
 pub mod commit;
