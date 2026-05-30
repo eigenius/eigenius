@@ -183,12 +183,14 @@ Deno.test("HTTP handler: tools carrying required arguments declare them", async 
   ]);
 
   // No-args tools should not declare a required array (or it should be empty).
-  for (const noArgs of [
-    "eigenius_health",
-    "eigenius_list_branches",
-    "eigenius_list_tags",
-    "eigenius_list_tasks",
-  ]) {
+  for (
+    const noArgs of [
+      "eigenius_health",
+      "eigenius_list_branches",
+      "eigenius_list_tags",
+      "eigenius_list_tasks",
+    ]
+  ) {
     const req = byName[noArgs].inputSchema.required;
     if (req !== undefined) assertEquals(req, []);
   }

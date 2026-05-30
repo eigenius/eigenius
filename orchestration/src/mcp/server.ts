@@ -120,7 +120,9 @@ export function createMcpServer(client: KernelClient): McpServer {
       if (!resp.success) {
         return errorResult(`Query failed: ${resp.error}`);
       }
-      const rows = resp.document.length > 0 ? decodeQueryRows(resp.document) : [];
+      const rows = resp.document.length > 0
+        ? decodeQueryRows(resp.document)
+        : [];
       return jsonResult({
         rows,
         rowCount: rows.length,
@@ -207,7 +209,9 @@ export function createMcpServer(client: KernelClient): McpServer {
       "required / recommended properties walked through the layer chain. " +
       "Useful for grounding LLM JSON generation in the typed shape.",
     {
-      classIri: z.string().describe("IRI of the class to generate a schema for."),
+      classIri: z.string().describe(
+        "IRI of the class to generate a schema for.",
+      ),
       atLayer: z.string().optional().describe(
         "Hex-encoded LayerId to read against (defaults to the active top).",
       ),
