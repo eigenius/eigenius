@@ -3,6 +3,10 @@ name = "eigenius-storage-rocksdb"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "RocksDB-backed PersistentBackend implementation for the Eigenius kernel — durable single-node storage for layer chains, anchored-commit caches, branch refs, tags, traces, and tasks. Key encoding per D4."
+keywords = ["eigenius", "rocksdb", "storage", "knowledge-graph"]
+categories = ["database-implementations", "science"]
 
 [dependencies]
 ciborium = "0.2"

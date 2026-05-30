@@ -5,6 +5,20 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Worker-side substrate protocol shim for the Lean language runtime. Exposes a C-ABI surface that the Lake-built Lean worker links against; Rust handles UDS + CBOR transport, Lean handles per-verb dispatch via @[export]-ed functions. See D26 §8.1, Phase 20a.5b."
+keywords = ["eigenius", "lean4", "ffi", "language-runtime"]
+categories = ["external-ffi-bindings", "science"]
+
+# The build.rs compiles a C bridge against Lean's `lean.h` (obtained
+# from an installed elan toolchain). docs.rs has no elan, so building
+# the crate fully would fail. Skip the build script there and let
+# rustdoc generate documentation from the source alone.
+[package.metadata.docs.rs]
+all-features = true
+no-default-features = false
+rustdoc-args = ["--cfg", "docsrs"]
+# docs.rs honours `cargo:rerun-if-env-changed=DOCS_RS` — the build.rs
+# can short-circuit when DOCS_RS is set. If it doesn't (build.rs is
+# unconditional today), revisit after the first docs.rs build attempt.
 
 [lib]
 # `cdylib` produces a shared library the Lean worker links against

@@ -41,6 +41,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # --- Runtime stage ---
 FROM debian:bookworm-slim
 
+# OCI image labels for registry consumers (GHCR auto-links the image
+# to the source repository via image.source; Docker Hub / other
+# registries surface description + licenses on the listing page).
+LABEL org.opencontainers.image.title="eigenius-kernel"
+LABEL org.opencontainers.image.description="Eigenius kernel gRPC server — typed knowledge-graph platform with layer chains, Mini-TT type theory, and an institutional dispatch surface."
+LABEL org.opencontainers.image.source="https://github.com/eigenius/eigenius"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="Eigenius"
+LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigenius/tree/main/docs"
+
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/eigenius /usr/local/bin/eigenius

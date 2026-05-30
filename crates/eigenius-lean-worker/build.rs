@@ -42,6 +42,17 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // docs.rs has no Lean toolchain. Setting `DOCS_RS=1` is its
+    // convention for letting build scripts short-circuit cleanly; we
+    // skip the C bridge compile entirely so rustdoc can still build the
+    // crate's documentation from source. The published crate's
+    // `[package.metadata.docs.rs]` doesn't need any extra flags — this
+    // env check is the whole short-circuit.
+    if env::var_os("DOCS_RS").is_some() {
+        println!("cargo:warning=eigenius-lean-worker: DOCS_RS detected, skipping C bridge build");
+        return;
+    }
+
     let include_dir = match discover_lean_include_dir() {
         Ok(p) => p,
         Err(msg) => {
@@ -60,6 +71,7 @@ fn main() {
     println!("cargo:rerun-if-changed=c/lean_bridge.h");
     println!("cargo:rerun-if-env-changed=EIGENIUS_LEAN_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=LEAN_SYSROOT");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     cc::Build::new()
         .file("c/lean_bridge.c")

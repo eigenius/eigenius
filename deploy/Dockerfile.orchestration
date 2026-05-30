@@ -90,6 +90,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # --- Stage 3: orchestrator runtime --------------------------------------------
 FROM denoland/deno:latest
 
+# OCI image labels for registry consumers.
+LABEL org.opencontainers.image.title="eigenius-orchestrator"
+LABEL org.opencontainers.image.description="Eigenius orchestrator — Deno service hosting the notebook SPA, IO-capability WASM dispatch, runtime-substrate workers, and the kernel-facing gRPC client."
+LABEL org.opencontainers.image.source="https://github.com/eigenius/eigenius"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="Eigenius"
+LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigenius/tree/main/docs"
+
 WORKDIR /app
 
 # Cache Deno deps from the source layout.
