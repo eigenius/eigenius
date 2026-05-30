@@ -36,6 +36,12 @@ pub enum TokenKind {
     /// IRI from its target class. Reserved globally so it can't be
     /// shadowed by user-defined identifiers.
     For,
+    /// D43 §3.1 — `text_index <iri> { target_property = ...; text_analyzer = "..."; }`.
+    /// Sugar over a `core:TextIndex` Resource declaration.
+    TextIndex,
+    /// D43 §3.1 — `vector_index <iri> { target_property = ...; vec_model = ...; ... }`.
+    /// Sugar over a `core:VectorIndex` Resource declaration.
+    VectorIndex,
 
     // Expression keywords
     Let,
@@ -436,6 +442,11 @@ impl<'a> Lexer<'a> {
             // D37 §3.3 — typed merge witness declaration.
             "merge_comorphism" => TokenKind::MergeComorphism,
             "for" => TokenKind::For,
+            // D43 §3.1 — index Resource declarations as top-level keywords.
+            // Sugar over `resource <iri> : core:TextIndex { ... }` /
+            // `resource <iri> : core:VectorIndex { ... }`.
+            "text_index" => TokenKind::TextIndex,
+            "vector_index" => TokenKind::VectorIndex,
             // Expression keywords
             "let" => TokenKind::Let,
             "case" => TokenKind::Case,

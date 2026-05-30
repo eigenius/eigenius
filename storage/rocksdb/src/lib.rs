@@ -112,6 +112,34 @@ const REDIRECT_PREFIX: &str = "redirect:";
 /// chain commit).
 const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
+/// Column family for D43's custom layer-aware text inverted index
+/// (D43 §2.3). Holds `text_term:<index_iri>:<term>:<layer>`,
+/// `text_docs:<index_iri>:<layer>`, `text_stats:<index_iri>:<layer>`,
+/// and `text_terms_layer:<layer>:<index_iri>` keys. Isolated from the
+/// default CF so text-segment compaction doesn't interleave with
+/// layer / topology / triple-index churn.
+pub const CF_TEXT: &str = "cf_text";
+
+/// Column family for D43's vector index segments (D43 §2.4). Holds
+/// `vec_seg:<index_iri>:<layer>` CBOR blobs and the
+/// `vec_layer:<layer>:<index_iri>` reverse index. Separate CF because
+/// vector blobs have different size and update profiles than text
+/// postings.
+pub const CF_VEC: &str = "cf_vec";
+
+/// Column family for D43's content-addressed embedding cache
+/// (D43 §5.3). Keys: `(blake3(content), model_iri)` → vector bytes.
+/// Lifecycle independent of layers and traces — survives kernel
+/// restarts and layer GC; evicted by LRU under a configurable budget.
+pub const CF_EMBED_CACHE: &str = "cf_embed_cache";
+
+/// All non-default column families opened by `RocksStore::open`. The
+/// existing single-CF data (`layer:`, `chain:`, `topo:`, `bloom:`,
+/// `branch:`, `idx_pos:`, `idx_layer:`, `meta:`, `trace:`, …) stays
+/// on the default CF; D43 populates the dedicated CFs declared here
+/// once M2 lands.
+const D43_COLUMN_FAMILIES: &[&str] = &[CF_TEXT, CF_VEC, CF_EMBED_CACHE];
+
 // `now_millis` removed — `LayerHandle.created_at` is now sourced from
 // `Layer.created_at()` (stamped at `LayerBuilder::build` time), so the
 // backend no longer generates its own timestamp.
@@ -130,12 +158,30 @@ pub struct RocksStore {
 
 impl RocksStore {
     /// Open or create a RocksDB database at the given path.
+    ///
+    /// Opens with the three D43 column families (`cf_text`, `cf_vec`,
+    /// `cf_embed_cache`) declared alongside the default CF. New DBs
+    /// receive the CFs at creation time via
+    /// `create_missing_column_families(true)`. Reads and writes for
+    /// the existing key prefixes continue to target the default CF;
+    /// D43's M2 storage substrate will route the new prefixes to
+    /// their dedicated CFs.
     pub fn open(path: &Path) -> Result<Self, StorageError> {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
 
-        let db = rocksdb::DB::open(&opts, path)
+        let cf_descriptors: Vec<rocksdb::ColumnFamilyDescriptor> = D43_COLUMN_FAMILIES
+            .iter()
+            .map(|name| {
+                let mut cf_opts = rocksdb::Options::default();
+                cf_opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+                rocksdb::ColumnFamilyDescriptor::new(*name, cf_opts)
+            })
+            .collect();
+
+        let db = rocksdb::DB::open_cf_descriptors(&opts, path, cf_descriptors)
             .map_err(|e| StorageError::Internal(format!("failed to open RocksDB: {e}")))?;
         let db = Arc::new(db);
         let triple_index = Arc::new(RocksTripleIndex::new(Arc::clone(&db)));
@@ -1544,6 +1590,79 @@ mod tests {
         let empty =
             PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
         assert!(empty.is_empty());
+    }
+
+    /// D43 M1 — `RocksStore::open` declares the three D43 column
+    /// families (`cf_text`, `cf_vec`, `cf_embed_cache`) so that
+    /// subsequent milestones (M2 storage substrate onward) can route
+    /// their key prefixes to dedicated compaction streams.
+    ///
+    /// Verifies: (a) a freshly-opened store exposes a handle for each
+    /// D43 CF, (b) writes to each CF persist across reopen, and (c)
+    /// data in one CF does not leak into another (each CF is its own
+    /// keyspace).
+    #[test]
+    fn d43_column_families_open_persist_and_isolate() {
+        let dir = TempDir::new().unwrap();
+
+        // Round 1: open, verify CFs exist, write a sentinel value to each.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            for cf_name in D43_COLUMN_FAMILIES {
+                let cf = store
+                    .db
+                    .cf_handle(cf_name)
+                    .unwrap_or_else(|| panic!("CF {cf_name} should exist after open"));
+                let key = format!("sentinel:{cf_name}");
+                let val = format!("value-in-{cf_name}");
+                store
+                    .db
+                    .put_cf(&cf, key.as_bytes(), val.as_bytes())
+                    .unwrap();
+            }
+        }
+
+        // Round 2: reopen, verify each sentinel persisted and CFs are isolated.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            for cf_name in D43_COLUMN_FAMILIES {
+                let cf = store
+                    .db
+                    .cf_handle(cf_name)
+                    .unwrap_or_else(|| panic!("CF {cf_name} should persist across reopen"));
+                let key = format!("sentinel:{cf_name}");
+                let expected = format!("value-in-{cf_name}");
+                let got = store
+                    .db
+                    .get_cf(&cf, key.as_bytes())
+                    .unwrap()
+                    .expect("sentinel value should persist");
+                assert_eq!(got, expected.as_bytes(), "value in {cf_name} after reopen");
+
+                // Other CFs must not see this sentinel key — CFs are
+                // independent keyspaces.
+                for other in D43_COLUMN_FAMILIES.iter().filter(|n| *n != cf_name) {
+                    let other_cf = store.db.cf_handle(other).unwrap();
+                    let leak = store.db.get_cf(&other_cf, key.as_bytes()).unwrap();
+                    assert!(
+                        leak.is_none(),
+                        "CF {other} should not see sentinel key from {cf_name}"
+                    );
+                }
+            }
+
+            // The default CF should also not see the D43 sentinels —
+            // existing key prefixes continue to target the default CF
+            // unaffected by the new keyspaces.
+            for cf_name in D43_COLUMN_FAMILIES {
+                let key = format!("sentinel:{cf_name}");
+                let default_leak = store.db.get(key.as_bytes()).unwrap();
+                assert!(
+                    default_leak.is_none(),
+                    "default CF should not see D43 sentinel for {cf_name}"
+                );
+            }
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

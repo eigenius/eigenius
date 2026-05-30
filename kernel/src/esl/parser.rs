@@ -192,11 +192,17 @@ impl<'a> Parser<'a> {
                 TokenKind::MergeComorphism => declarations.push(Declaration::MergeComorphism(
                     self.parse_merge_comorphism()?,
                 )),
+                TokenKind::TextIndex => {
+                    declarations.push(Declaration::TextIndex(self.parse_text_index()?))
+                }
+                TokenKind::VectorIndex => {
+                    declarations.push(Declaration::VectorIndex(self.parse_vector_index()?))
+                }
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -1123,6 +1129,42 @@ impl<'a> Parser<'a> {
             transformation,
             pos,
         })
+    }
+
+    // --- D43 §3.1 — text_index / vector_index declarations ---
+
+    /// `text_index <iri> { target_property = ...; text_analyzer = "..."; }`.
+    /// Sugar over a `core:TextIndex` Resource declaration; the class
+    /// is implicit in the keyword. The compiler is responsible for
+    /// the lowering to a regular Resource.
+    fn parse_text_index(&mut self) -> Result<TextIndexDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::TextIndex)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut body = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            body.push(self.parse_resource_field()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(TextIndexDecl { name, body, pos })
+    }
+
+    /// `vector_index <iri> { target_property = ...; vec_model = ...; vec_dim = ...; ... }`.
+    /// Sugar over a `core:VectorIndex` Resource declaration; the
+    /// class is implicit in the keyword. The compiler is responsible
+    /// for the lowering to a regular Resource.
+    fn parse_vector_index(&mut self) -> Result<VectorIndexDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::VectorIndex)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LBrace)?;
+        let mut body = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            body.push(self.parse_resource_field()?);
+        }
+        self.expect(&TokenKind::RBrace)?;
+        Ok(VectorIndexDecl { name, body, pos })
     }
 
     // --- Data (Phase 11b step 7, D19 §10) ---
@@ -3215,5 +3257,144 @@ mod tests {
             "#,
         );
         assert!(result.is_err(), "missing 'for' clause should fail to parse");
+    }
+
+    // --- D43 §3.1 text_index / vector_index parsing (M1) ---
+
+    /// `text_index ex:my_index { ... }` parses into a TextIndexDecl
+    /// with the body fields preserved.
+    #[test]
+    fn parses_text_index_declaration() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            text_index ex:description_en {
+                core:target_property = ex:description;
+                core:text_analyzer = "en-stem-v1";
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::TextIndex(ti) => {
+                assert_eq!(ti.name.namespace.as_deref(), Some("ex"));
+                assert_eq!(ti.name.name, "description_en");
+                assert_eq!(ti.body.len(), 2);
+
+                // First field: target_property = ex:description
+                assert_eq!(ti.body[0].property.namespace.as_deref(), Some("core"));
+                assert_eq!(ti.body[0].property.name, "target_property");
+                match &ti.body[0].value {
+                    Value::Ref(qn) => {
+                        assert_eq!(qn.namespace.as_deref(), Some("ex"));
+                        assert_eq!(qn.name, "description");
+                    }
+                    other => panic!("expected ref value for target_property, got {other:?}"),
+                }
+
+                // Second field: text_analyzer = "en-stem-v1"
+                assert_eq!(ti.body[1].property.name, "text_analyzer");
+                match &ti.body[1].value {
+                    Value::String(s) => assert_eq!(s, "en-stem-v1"),
+                    other => panic!("expected string value for text_analyzer, got {other:?}"),
+                }
+            }
+            other => panic!("expected text_index declaration, got {other:?}"),
+        }
+    }
+
+    /// `vector_index ex:my_index { ... }` parses into a VectorIndexDecl
+    /// with all field shapes (Ref, String, Int) preserved. Nested-IRI
+    /// scopes like `urn:eigenius:core:distances:cosine` are addressed
+    /// via separate namespace aliases per ESL's single-colon
+    /// QualifiedName grammar.
+    #[test]
+    fn parses_vector_index_declaration() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            namespace cd = "urn:eigenius:core:distances";
+            namespace cs = "urn:eigenius:core:strategies";
+            vector_index ex:description_oai_v3 {
+                core:target_property = ex:description;
+                core:vec_model = ex:openai_text_embedding_3_large_v3;
+                core:vec_dim = 1536;
+                core:vec_distance = cd:cosine;
+                core:vec_strategy = cs:auto;
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::VectorIndex(vi) => {
+                assert_eq!(vi.name.namespace.as_deref(), Some("ex"));
+                assert_eq!(vi.name.name, "description_oai_v3");
+                assert_eq!(vi.body.len(), 5);
+
+                // Field types preserved per the §3.1 typing
+                assert!(matches!(&vi.body[0].value, Value::Ref(_)));
+                assert!(matches!(&vi.body[1].value, Value::Ref(_)));
+                assert!(matches!(&vi.body[2].value, Value::Int(1536)));
+                assert!(matches!(&vi.body[3].value, Value::Ref(_)));
+                assert!(matches!(&vi.body[4].value, Value::Ref(_)));
+
+                // Check distance resolves through the dedicated `cd` alias.
+                match &vi.body[3].value {
+                    Value::Ref(qn) => {
+                        assert_eq!(qn.namespace.as_deref(), Some("cd"));
+                        assert_eq!(qn.name, "cosine");
+                    }
+                    other => panic!("expected ref value for vec_distance, got {other:?}"),
+                }
+            }
+            other => panic!("expected vector_index declaration, got {other:?}"),
+        }
+    }
+
+    /// An empty body is valid syntax (no fields). Useful when an Index
+    /// is being staged before its parameters are filled in.
+    #[test]
+    fn parses_text_index_with_empty_body() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            text_index ex:stub {}
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::TextIndex(ti) => {
+                assert_eq!(ti.name.name, "stub");
+                assert!(ti.body.is_empty());
+            }
+            other => panic!("expected text_index declaration, got {other:?}"),
+        }
+    }
+
+    /// `text_index` without a name fails — the IRI is required for
+    /// the Resource it lowers to.
+    #[test]
+    fn text_index_rejects_missing_name() {
+        let result = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            text_index { core:text_analyzer = "en-stem-v1"; }
+            "#,
+        );
+        assert!(result.is_err(), "missing IRI should fail to parse");
+    }
+
+    /// `vector_index` without a name fails for the same reason.
+    #[test]
+    fn vector_index_rejects_missing_name() {
+        let result = parse_str(
+            r#"
+            namespace ex = "urn:ex";
+            vector_index { core:vec_dim = 1536; }
+            "#,
+        );
+        assert!(result.is_err(), "missing IRI should fail to parse");
     }
 }

@@ -779,6 +779,77 @@ mod tests {
         }
     }
 
+    /// D43 §3.1 — `core:TextIndex` and `core:VectorIndex` Class
+    /// declarations resolve from the core ontology. M1 deliverable.
+    #[test]
+    fn can_resolve_d43_index_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in ["TextIndex", "VectorIndex"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 index class {class}"
+            );
+        }
+    }
+
+    /// D43 §3.1 — enum Classes that narrow `vec_distance` /
+    /// `vec_strategy` / `vec_embedding_policy` resolve from the core
+    /// ontology, plus each of their declared Resource instances.
+    #[test]
+    fn can_resolve_d43_enum_classes_and_instances() {
+        let ctx = bootstrap().unwrap();
+        for class in ["DistanceMetric", "VectorStrategy", "EmbeddingPolicy"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 enum class {class}"
+            );
+        }
+
+        for (prefix, instance) in [
+            ("distances", "cosine"),
+            ("distances", "l2"),
+            ("distances", "dot"),
+            ("strategies", "flat"),
+            ("strategies", "hnsw"),
+            ("strategies", "auto"),
+            ("embedding_policies", "eager_on_load"),
+            ("embedding_policies", "lazy_on_query"),
+            ("embedding_policies", "manual"),
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prefix}:{instance}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 enum instance {prefix}:{instance}"
+            );
+        }
+    }
+
+    /// D43 §3.1 — Properties carried by TextIndex / VectorIndex
+    /// Resources resolve from the core ontology.
+    #[test]
+    fn can_resolve_d43_index_properties() {
+        let ctx = bootstrap().unwrap();
+        for prop in [
+            "target_property",
+            "text_analyzer",
+            "vec_model",
+            "vec_dim",
+            "vec_distance",
+            "vec_strategy",
+            "vec_hnsw_m",
+            "vec_hnsw_ef_construction",
+            "vec_embedding_policy",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prop}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 index property {prop}"
+            );
+        }
+    }
+
     #[test]
     fn can_resolve_program_classes() {
         let ctx = bootstrap().unwrap();

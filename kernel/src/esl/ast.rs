@@ -57,6 +57,16 @@ pub enum Declaration {
     /// inline-body form) a synthesised standalone Lambda resource at a
     /// content-hash IRI.
     MergeComorphism(MergeComorphismDecl),
+    /// D43 §3.1 — `text_index <iri> { target_property = ...; text_analyzer = "..."; }`.
+    /// Lowers to a `core:TextIndex` Resource (M2+ compiler work). The
+    /// declared body fields populate the Resource's properties; the
+    /// class is implicit in the keyword.
+    TextIndex(TextIndexDecl),
+    /// D43 §3.1 — `vector_index <iri> { target_property = ...; vec_model = ...; vec_dim = ...; ... }`.
+    /// Lowers to a `core:VectorIndex` Resource (M2+ compiler work). The
+    /// declared body fields populate the Resource's properties; the
+    /// class is implicit in the keyword.
+    VectorIndex(VectorIndexDecl),
 }
 
 /// `class ex:Dog : ex:Animal { ... }` or
@@ -345,6 +355,31 @@ pub struct MergeComorphismDecl {
     /// `urn:eigenius:core:merge_target_class`.
     pub target_class: QualifiedName,
     pub body: MergeComorphismBody,
+    pub pos: Position,
+}
+
+/// D43 §3.1 — `text_index <iri> { … }`. Sugar over a `core:TextIndex`
+/// Resource declaration; the class is implicit in the keyword and
+/// the body fields populate the Resource's properties (`target_property`,
+/// `text_analyzer`). The compiler is responsible for the lowering to a
+/// regular Resource at commit time.
+#[derive(Debug)]
+pub struct TextIndexDecl {
+    pub name: QualifiedName,
+    pub body: Vec<ResourceField>,
+    pub pos: Position,
+}
+
+/// D43 §3.1 — `vector_index <iri> { … }`. Sugar over a `core:VectorIndex`
+/// Resource declaration; the class is implicit in the keyword and the
+/// body fields populate the Resource's properties (`target_property`,
+/// `vec_model`, `vec_dim`, `vec_distance`, `vec_strategy`, `vec_hnsw_m`,
+/// `vec_hnsw_ef_construction`, `vec_embedding_policy`). The compiler is
+/// responsible for the lowering to a regular Resource at commit time.
+#[derive(Debug)]
+pub struct VectorIndexDecl {
+    pub name: QualifiedName,
+    pub body: Vec<ResourceField>,
     pub pos: Position,
 }
 
