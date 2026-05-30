@@ -301,25 +301,33 @@ claude mcp add --transport http eigenius http://localhost:8080/mcp
 claude mcp list                                     # verify ✓ Connected
 ```
 
-**Claude Desktop / Cursor / IDE agents** — edit the host's MCP config and
-add an `eigenius` entry:
+**Claude Desktop** — native HTTP transport support is uneven across
+builds; use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote)
+stdio bridge instead. Requires Node.js installed on the host (for `npx`):
 
 ```json
 {
   "mcpServers": {
     "eigenius": {
-      "type": "http",
-      "url": "http://localhost:8080/mcp"
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8080/mcp"]
     }
   }
 }
 ```
+
+Some builds do accept `{ "type": "http", "url": "http://localhost:8080/mcp" }`
+directly — try that first if you prefer; fall back to `mcp-remote` if the
+app reports "MCP failed to connect."
 
 Config file locations:
 
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+**Cursor / other IDE agents** — `{ "type": "http", "url": "..." }` works
+on most builds. If it doesn't, use the `mcp-remote` form above.
 
 For a **stdio** transport (kernel-on-host development, no orchestrator
 container required), run `cd orchestration && deno task mcp` and point

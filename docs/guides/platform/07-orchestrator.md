@@ -173,20 +173,22 @@ claude mcp add --transport http eigenius http://localhost:8080/mcp
 claude mcp list                            # verify it shows ✓ Connected
 ```
 
-For **Claude Desktop**, edit `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS, `~/.config/Claude/` on Linux):
+For **Claude Desktop**, edit `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS, `~/.config/Claude/` on Linux). Claude Desktop's native HTTP transport support is uneven across builds — use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) stdio bridge to be safe (requires Node.js on the host):
 
 ```json
 {
   "mcpServers": {
     "eigenius": {
-      "type": "http",
-      "url": "http://localhost:8080/mcp"
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8080/mcp"]
     }
   }
 }
 ```
 
-Restart the app. The 14 `eigenius_*` tools appear in the tool list.
+Some builds accept `{ "type": "http", "url": "http://localhost:8080/mcp" }` directly — try that first if you'd rather skip the bridge. If the app reports "MCP failed to connect," fall back to the `mcp-remote` form above.
+
+Restart the app. The 14 `eigenius_*` tools appear in the tool list (look for the hammer icon in the input area).
 
 ### 7.7.3. Setup — stdio path (kernel-on-host development)
 
