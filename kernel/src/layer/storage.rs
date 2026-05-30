@@ -28,7 +28,8 @@
 
 use crate::layer::{
     BloomCache, BoundedResourceCache, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
-    MemoryTripleIndex, NoRedirects, RedirectMap, ResourceCache, TripleIndex,
+    MemoryTextIndex, MemoryTripleIndex, MemoryVectorIndex, NoRedirects, RedirectMap, ResourceCache,
+    TextIndex, TripleIndex, VectorIndex,
 };
 use crate::storage::{PersistentBackend, ResourceBackend};
 use std::sync::Arc;
@@ -58,6 +59,17 @@ pub struct LayerStorage {
     /// share a fresh `MemoryTripleIndex`; persistent layers share the
     /// backend's `as_triple_index()` view.
     pub triple_index: Arc<dyn TripleIndex>,
+    /// Per-`(TextIndex Resource, layer)` inverted index (D43 §2.3).
+    /// Populated by `LayerBuilder::build` (M2.6) — discovers active
+    /// `core:TextIndex` Resources at the commit head and indexes
+    /// each indexed property's tokens. Consulted by the EigenQL
+    /// text retrieval path (M3).
+    pub text_index: Arc<dyn TextIndex>,
+    /// Per-`(VectorIndex Resource, layer)` vector segment store
+    /// (D43 §2.4). Populated by the M5 post-Load embedding sweep;
+    /// consulted by the EigenQL vector retrieval path (M5+ for the
+    /// flat path; M6 for HNSW).
+    pub vector_index: Arc<dyn VectorIndex>,
     /// In-memory cache of installed resolve redirects (D25 §12.8 /
     /// Phase 17f). Populated at `with_persistent` time from the
     /// backend's `list_redirects()`; consulted by `build_chain` to
@@ -84,6 +96,8 @@ impl LayerStorage {
             backend: Arc::new(MemoryResourceBackend::new()),
             bloom_cache: Arc::new(MemoryBloomCache::cache_only()),
             triple_index: Arc::new(MemoryTripleIndex::new()),
+            text_index: Arc::new(MemoryTextIndex::new()),
+            vector_index: Arc::new(MemoryVectorIndex::new()),
             redirect_map: Arc::new(NoRedirects),
             persistent_backend: None,
         }
@@ -97,12 +111,16 @@ impl LayerStorage {
     /// `with_persistent_bounded`.
     pub fn with_persistent(pb: Arc<dyn PersistentBackend>) -> Self {
         let triple_index = pb.triple_index_arc();
+        let text_index = pb.text_index_arc();
+        let vector_index = pb.vector_index_arc();
         let redirect_map = crate::layer::redirect::redirect_map_from_backend(pb.as_ref());
         Self {
             cache: Arc::new(MemoryResourceCache::new()),
             backend: Arc::clone(&pb) as Arc<dyn ResourceBackend>,
             bloom_cache: Arc::new(MemoryBloomCache::new(Arc::clone(&pb))),
             triple_index,
+            text_index,
+            vector_index,
             redirect_map,
             persistent_backend: Some(pb),
         }
@@ -122,12 +140,16 @@ impl LayerStorage {
     /// workload data informs the production default.
     pub fn with_persistent_bounded(pb: Arc<dyn PersistentBackend>, total_entries: u64) -> Self {
         let triple_index = pb.triple_index_arc();
+        let text_index = pb.text_index_arc();
+        let vector_index = pb.vector_index_arc();
         let redirect_map = crate::layer::redirect::redirect_map_from_backend(pb.as_ref());
         Self {
             cache: Arc::new(BoundedResourceCache::new(total_entries)),
             backend: Arc::clone(&pb) as Arc<dyn ResourceBackend>,
             bloom_cache: Arc::new(MemoryBloomCache::new(Arc::clone(&pb))),
             triple_index,
+            text_index,
+            vector_index,
             redirect_map,
             persistent_backend: Some(pb),
         }

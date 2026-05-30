@@ -25,7 +25,9 @@
 //!   trace:<key_hex>                   → ComponentTrace (CBOR)
 //!   meta:<key>                        → Generic metadata KV
 
+mod text_index;
 mod triple_index;
+mod vector_index;
 
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
@@ -38,7 +40,9 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::storage::{ResourceBackend, StorageError};
 use std::path::Path;
 use std::sync::Arc;
+use text_index::RocksTextIndex;
 use triple_index::RocksTripleIndex;
+use vector_index::RocksVectorIndex;
 
 /// Run a sync disk-bound block in a way that doesn't starve the
 /// tokio worker pool.
@@ -154,6 +158,19 @@ pub struct RocksStore {
     /// `store_layer` / `delete_layer`'s `WriteBatch` so layer + index
     /// commits stay atomic per D23 §6.3.
     triple_index: Arc<RocksTripleIndex>,
+    /// D43 §2.3 text index (M2.4). RocksDB-backed; shares the same
+    /// `Arc<rocksdb::DB>` as `db` and `triple_index` so commits land
+    /// in the same physical store. Its `extend_into_batch` /
+    /// `drop_into_batch` participate in `store_layer` /
+    /// `delete_layer`'s `WriteBatch` for atomic-with-layer-commit
+    /// semantics (D43 §2.5).
+    text_index: Arc<RocksTextIndex>,
+    /// D43 §2.4 vector index (M2.5). RocksDB-backed; shares the same
+    /// `Arc<rocksdb::DB>` as `db`. Segments are stored as CBOR blobs
+    /// in `cf_vec` with the §2.4 layout (concatenated `vectors`
+    /// bstr). Its `extend_into_batch` / `drop_into_batch` participate
+    /// in `store_layer` / `delete_layer`'s `WriteBatch` (D43 §2.5).
+    vector_index: Arc<RocksVectorIndex>,
 }
 
 impl RocksStore {
@@ -185,8 +202,15 @@ impl RocksStore {
             .map_err(|e| StorageError::Internal(format!("failed to open RocksDB: {e}")))?;
         let db = Arc::new(db);
         let triple_index = Arc::new(RocksTripleIndex::new(Arc::clone(&db)));
+        let text_index = Arc::new(RocksTextIndex::new(Arc::clone(&db)));
+        let vector_index = Arc::new(RocksVectorIndex::new(Arc::clone(&db)));
 
-        Ok(Self { db, triple_index })
+        Ok(Self {
+            db,
+            triple_index,
+            text_index,
+            vector_index,
+        })
     }
 
     /// Trigger manual compaction on the entire database.
@@ -733,6 +757,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         Arc::clone(&self.triple_index) as Arc<dyn eigenius_kernel::layer::TripleIndex>
     }
 
+    fn text_index_arc(&self) -> Arc<dyn eigenius_kernel::layer::TextIndex> {
+        Arc::clone(&self.text_index) as Arc<dyn eigenius_kernel::layer::TextIndex>
+    }
+
+    fn vector_index_arc(&self) -> Arc<dyn eigenius_kernel::layer::VectorIndex> {
+        Arc::clone(&self.vector_index) as Arc<dyn eigenius_kernel::layer::VectorIndex>
+    }
+
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
         run_blocking(|| {
             let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
@@ -858,6 +890,15 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             // same atomic batch. Walks the reverse `idx_layer:<L>:` prefix
             // to discover which forward `idx_pos:` entries to delete.
             self.triple_index.drop_into_batch(&mut batch, layer)?;
+
+            // D43 M2.7: drop the per-Index text and vector entries
+            // contributed by this layer in the same atomic batch.
+            // Both walks use their reverse-index prefix
+            // (`text_terms_layer:<L>:` / `vec_layer:<L>:`) so cleanup
+            // cost is proportional to the layer's contributions, not
+            // the total index size.
+            self.text_index.drop_into_batch(&mut batch, layer)?;
+            self.vector_index.drop_into_batch(&mut batch, layer)?;
 
             self.db
                 .write(batch)
@@ -1663,6 +1704,132 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// D43 M2.7 — `RocksStore::delete_layer` participates in the
+    /// atomic-with-layer-drop envelope: the same `WriteBatch` that
+    /// removes the layer's resource rows, topology entry, and
+    /// triple-index entries also removes the layer's text-index
+    /// postings (`text_term:`, `text_docs:`, `text_stats:`,
+    /// `text_terms_layer:`) and vector-index segments (`vec_seg:`,
+    /// `vec_layer:`). Verifies cleanup across both new CFs in one
+    /// commit per D43 §2.5.
+    #[test]
+    fn delete_layer_drops_text_and_vector_indexes_atomically() {
+        use eigenius_kernel::layer::{
+            LayerBuilder, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
+            NoRedirects, TextDoc, VectorDoc,
+        };
+        use eigenius_kernel::ontology::iri::Iri;
+        use eigenius_kernel::storage::PersistentBackend;
+
+        let (store, _dir) = {
+            let dir = TempDir::new().unwrap();
+            let store = RocksStore::open(dir.path()).unwrap();
+            (Arc::new(store), dir)
+        };
+
+        // Use a minimal layer + the store's index Arcs directly.
+        let storage = eigenius_kernel::layer::LayerStorage {
+            cache: Arc::new(MemoryResourceCache::new()),
+            backend: Arc::new(MemoryResourceBackend::new()),
+            bloom_cache: Arc::new(MemoryBloomCache::cache_only()),
+            triple_index: store.triple_index_arc(),
+            text_index: store.text_index_arc(),
+            vector_index: store.vector_index_arc(),
+            redirect_map: Arc::new(NoRedirects),
+            persistent_backend: None,
+        };
+        let builder = LayerBuilder::new("test", None);
+        let layer = builder.build(storage);
+        let layer_id = layer.id().clone();
+        store.store_layer(&layer).unwrap();
+
+        // Populate text + vector indexes against this layer.
+        let index_iri = Iri::parse("urn:eigenius:test:idx").unwrap();
+        let subject = Iri::parse("urn:eigenius:test:s").unwrap();
+        let model_iri = Iri::parse("urn:eigenius:test:embed").unwrap();
+        let tokens = vec!["alpha".to_string(), "beta".to_string()];
+        let vec_data = [1.0f32, 0.5, 0.25];
+
+        store
+            .text_index_arc()
+            .extend_layer(
+                &index_iri,
+                &layer_id,
+                "en-stem-v1",
+                &[TextDoc {
+                    subject: &subject,
+                    tokens: &tokens,
+                }],
+            )
+            .unwrap();
+        store
+            .vector_index_arc()
+            .extend_layer(
+                &index_iri,
+                &layer_id,
+                &model_iri,
+                3,
+                "cosine",
+                &[VectorDoc {
+                    subject: &subject,
+                    vector: &vec_data,
+                }],
+            )
+            .unwrap();
+
+        // Sanity: data is present.
+        assert!(store
+            .text_index_arc()
+            .get_layer_stats(&index_iri, &layer_id)
+            .unwrap()
+            .is_some());
+        assert!(store
+            .vector_index_arc()
+            .get_segment(&index_iri, &layer_id)
+            .unwrap()
+            .is_some());
+
+        // delete_layer fires the atomic batch covering all three indexes.
+        store.delete_layer(&layer_id).unwrap();
+
+        // Text-index entries gone.
+        assert!(store
+            .text_index_arc()
+            .get_layer_stats(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .text_index_arc()
+            .get_layer_docs(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .text_index_arc()
+            .get_layer_analyzer(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .text_index_arc()
+                .scan_term(&index_iri, "alpha")
+                .count(),
+            0,
+            "text postings dropped"
+        );
+
+        // Vector-index segment gone.
+        assert!(store
+            .vector_index_arc()
+            .get_segment(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store.vector_index_arc().scan_index(&index_iri).count(),
+            0,
+            "vector segments dropped"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

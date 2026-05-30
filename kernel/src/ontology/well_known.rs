@@ -37,6 +37,54 @@ pub const CONDITIONAL_REQUIREMENT: &str = "urn:eigenius:core:ConditionalRequirem
 
 pub const MERGE_COMORPHISM: &str = "urn:eigenius:core:MergeComorphism";
 pub const MERGE_TRANSFORMATION: &str = "urn:eigenius:core:merge_transformation";
+
+// --- D43 §3.1 — Index Resource classes and their property slots ---
+
+/// Class IRI for a `core:TextIndex` Resource — the first-class
+/// Resource that declares an inverted-index target plus analyzer
+/// configuration for D43 §2.3.
+pub const TEXT_INDEX_CLASS: &str = "urn:eigenius:core:TextIndex";
+
+/// Class IRI for a `core:VectorIndex` Resource — the first-class
+/// Resource that declares an embedded-vector target plus model,
+/// dimensionality, distance metric, strategy, and policy for
+/// D43 §2.4 / §5.
+pub const VECTOR_INDEX_CLASS: &str = "urn:eigenius:core:VectorIndex";
+
+/// Property IRI for `target_property` — the Property an Index
+/// Resource (TextIndex or VectorIndex) targets for indexing.
+/// Value is a resource reference to a `core:Property`.
+pub const TARGET_PROPERTY: &str = "urn:eigenius:core:target_property";
+
+/// Property IRI for `text_analyzer` — the analyzer ID for a
+/// TextIndex (e.g. `"en-stem-v1"`).
+pub const TEXT_ANALYZER: &str = "urn:eigenius:core:text_analyzer";
+
+/// Property IRI for `vec_model` — the Embedder Component IRI a
+/// VectorIndex uses.
+pub const VEC_MODEL: &str = "urn:eigenius:core:vec_model";
+
+/// Property IRI for `vec_dim` — declared output dimensionality.
+pub const VEC_DIM: &str = "urn:eigenius:core:vec_dim";
+
+/// Property IRI for `vec_distance` — distance-metric Resource ref
+/// (one of `core:distances:cosine | l2 | dot`).
+pub const VEC_DISTANCE: &str = "urn:eigenius:core:vec_distance";
+
+/// Property IRI for `vec_strategy` — per-segment strategy Resource
+/// ref (one of `core:strategies:flat | hnsw | auto`).
+pub const VEC_STRATEGY: &str = "urn:eigenius:core:vec_strategy";
+
+/// Property IRI for `vec_hnsw_m` — HNSW M parameter (optional).
+pub const VEC_HNSW_M: &str = "urn:eigenius:core:vec_hnsw_m";
+
+/// Property IRI for `vec_hnsw_ef_construction` — HNSW build-time
+/// exploration depth (optional).
+pub const VEC_HNSW_EF_CONSTRUCTION: &str = "urn:eigenius:core:vec_hnsw_ef_construction";
+
+/// Property IRI for `vec_embedding_policy` — embedding-policy
+/// Resource ref (one of `core:embedding_policies:eager_on_load | lazy_on_query | manual`).
+pub const VEC_EMBEDDING_POLICY: &str = "urn:eigenius:core:vec_embedding_policy";
 /// The class a `MergeComorphism` is declared for — its `A` in the
 /// `(A, A, Option<A>) -> A` transformation signature (D37 §3.3, §6.1).
 /// Required on every committed `MergeComorphism` so the witness path

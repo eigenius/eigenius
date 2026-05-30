@@ -32,10 +32,13 @@ mod cache;
 mod consolidate;
 mod handle;
 mod index;
+mod index_discovery;
 pub mod merge;
 mod redirect;
 mod storage;
 mod supporting;
+mod text_index;
+mod vector_index;
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{
@@ -51,12 +54,23 @@ pub use index::{
     collect_ancestors, extract_indexable_triples, index_keys, is_indexable_predicate, is_shadowed,
     scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
+pub use index_discovery::{
+    resolve_active_text_indexes, resolve_active_vector_indexes, verify_text_index_multiplicity,
+    verify_vector_index_multiplicity, ActiveTextIndex, ActiveVectorIndex,
+};
 pub use redirect::{
     augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,
     RedirectEntry, RedirectMap,
 };
 pub use storage::LayerStorage;
 pub use supporting::compute_supporting_layer;
+pub use text_index::{
+    decode_doc_set, encode_doc_set, MemoryTextIndex, TermHit, TextDoc, TextDocs, TextIndex,
+    TextIndexStats, TextLayerStats,
+};
+pub use vector_index::{
+    MemoryVectorIndex, VectorDoc, VectorIndex, VectorIndexStats, VectorSegment,
+};
 
 /// Construct an `Arc<Layer>` chain from chain metadata.
 ///

@@ -230,6 +230,26 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// physical index.
     fn triple_index_arc(&self) -> Arc<dyn crate::layer::TripleIndex>;
 
+    /// Arc-shared text index view of this backend (D43 §2.3, M2.3).
+    ///
+    /// Same pattern as [`Self::triple_index_arc`]: each backend owns
+    /// its own [`TextIndex`](crate::layer::TextIndex) impl and hands
+    /// out `Arc::clone`s for `LayerStorage.text_index`. The memory
+    /// backend uses `MemoryTextIndex`; `RocksStore` exposes
+    /// `RocksTextIndex` (M2.4) backed by the `cf_text` column family
+    /// with the four-key schema from D43 §2.3.
+    fn text_index_arc(&self) -> Arc<dyn crate::layer::TextIndex>;
+
+    /// Arc-shared vector index view of this backend (D43 §2.4, M2.3).
+    ///
+    /// Same pattern as [`Self::triple_index_arc`]: each backend owns
+    /// its own [`VectorIndex`](crate::layer::VectorIndex) impl and
+    /// hands out `Arc::clone`s for `LayerStorage.vector_index`. The
+    /// memory backend uses `MemoryVectorIndex`; `RocksStore` exposes
+    /// `RocksVectorIndex` (M2.5) backed by the `cf_vec` column family
+    /// with the CBOR segment layout from D43 §2.4.
+    fn vector_index_arc(&self) -> Arc<dyn crate::layer::VectorIndex>;
+
     /// Read a layer's persisted shadowing bloom (D23 §5.2). Returns
     /// `None` if no bloom was persisted — a layer written by an
     /// older kernel build, or any layer for which `store_layer`

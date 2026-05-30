@@ -29,8 +29,8 @@
 //! reference-implementation comparisons use this.
 
 use crate::layer::{
-    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTripleIndex,
-    RedirectEntry, TripleIndex,
+    BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTextIndex,
+    MemoryTripleIndex, MemoryVectorIndex, RedirectEntry, TextIndex, TripleIndex, VectorIndex,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
@@ -44,6 +44,12 @@ pub struct MemoryPersistentBackend {
     inner: RwLock<MemoryState>,
     traces: InMemoryTraceStore,
     triple_index: Arc<MemoryTripleIndex>,
+    /// D43 §2.3 text index (M2.3). In-memory backend uses the
+    /// `MemoryTextIndex` impl from `kernel/src/layer/text_index.rs`.
+    text_index: Arc<MemoryTextIndex>,
+    /// D43 §2.4 vector index (M2.3). In-memory backend uses the
+    /// `MemoryVectorIndex` impl from `kernel/src/layer/vector_index.rs`.
+    vector_index: Arc<MemoryVectorIndex>,
 }
 
 struct MemoryState {
@@ -113,6 +119,8 @@ impl MemoryPersistentBackend {
             }),
             traces: InMemoryTraceStore::new(),
             triple_index: Arc::new(MemoryTripleIndex::new()),
+            text_index: Arc::new(MemoryTextIndex::new()),
+            vector_index: Arc::new(MemoryVectorIndex::new()),
         }
     }
 }
@@ -347,6 +355,14 @@ impl PersistentBackend for MemoryPersistentBackend {
 
     fn triple_index_arc(&self) -> Arc<dyn TripleIndex> {
         Arc::clone(&self.triple_index) as Arc<dyn TripleIndex>
+    }
+
+    fn text_index_arc(&self) -> Arc<dyn TextIndex> {
+        Arc::clone(&self.text_index) as Arc<dyn TextIndex>
+    }
+
+    fn vector_index_arc(&self) -> Arc<dyn VectorIndex> {
+        Arc::clone(&self.vector_index) as Arc<dyn VectorIndex>
     }
 
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
@@ -987,5 +1003,68 @@ mod tests {
             .expect("chain present");
         let names: Vec<&str> = info.handles.iter().map(|h| h.name.as_str()).collect();
         assert_eq!(names, vec!["root", "child"]);
+    }
+
+    /// D43 M2.3 — `PersistentBackend::text_index_arc` returns an
+    /// `Arc<dyn TextIndex>` that is shareable and Arc-cloned across
+    /// calls (so `LayerStorage` instances built from the same
+    /// backend see the same physical index).
+    #[test]
+    fn text_index_arc_returns_shared_handle() {
+        use crate::layer::TextDoc;
+
+        let backend = MemoryPersistentBackend::new();
+        let ti_a = backend.text_index_arc();
+        let ti_b = backend.text_index_arc();
+
+        // Write through one handle, read through the other —
+        // shared state confirms both Arcs point at the same
+        // underlying MemoryTextIndex.
+        let index_iri = Iri::parse("urn:eigenius:test:ti").unwrap();
+        let layer = LayerId([7u8; 32]);
+        let subject = Iri::parse("urn:eigenius:test:s").unwrap();
+        let tokens = vec!["alpha".to_string(), "beta".to_string()];
+        let docs = [TextDoc {
+            subject: &subject,
+            tokens: &tokens,
+        }];
+        ti_a.extend_layer(&index_iri, &layer, "en-stem-v1", &docs)
+            .unwrap();
+
+        let hits: Vec<_> = ti_b
+            .scan_term(&index_iri, "alpha")
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(hits.len(), 1, "second Arc handle sees writes via first");
+        assert_eq!(hits[0].df, 1);
+    }
+
+    /// D43 M2.3 — same shape for the vector index Arc.
+    #[test]
+    fn vector_index_arc_returns_shared_handle() {
+        use crate::layer::VectorDoc;
+
+        let backend = MemoryPersistentBackend::new();
+        let vi_a = backend.vector_index_arc();
+        let vi_b = backend.vector_index_arc();
+
+        let index_iri = Iri::parse("urn:eigenius:test:vi").unwrap();
+        let layer = LayerId([11u8; 32]);
+        let model_iri = Iri::parse("urn:eigenius:test:embedder").unwrap();
+        let subject = Iri::parse("urn:eigenius:test:s").unwrap();
+        let vec_data = [1.0f32, 0.5, 0.0];
+        let docs = [VectorDoc {
+            subject: &subject,
+            vector: &vec_data,
+        }];
+        vi_a.extend_layer(&index_iri, &layer, &model_iri, 3, "cosine", &docs)
+            .unwrap();
+
+        let seg = vi_b
+            .get_segment(&index_iri, &layer)
+            .unwrap()
+            .expect("second Arc handle sees writes via first");
+        assert_eq!(seg.count(), 1);
+        assert_eq!(seg.vector_at(0), &vec_data);
     }
 }
