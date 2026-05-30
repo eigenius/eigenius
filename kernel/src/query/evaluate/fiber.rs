@@ -57,6 +57,12 @@ pub struct FiberRuntime<'a> {
     /// parts.
     pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
+    /// D43 §4.6 — retrieval context threaded into expression eval so
+    /// `TEXT_MATCH` / `TEXT_SCORE` can map a property-bound `?var`
+    /// back to the row's source subject and dispatch the
+    /// `run_text_search` probe against the layer's `TextIndex`. `None`
+    /// for callers that don't use retrieval primitives.
+    pub retrieval: Option<&'a super::retrieval::TextRetrievalContext<'a>>,
 }
 
 /// Resources produced at runtime by FIBER clauses. They live for the

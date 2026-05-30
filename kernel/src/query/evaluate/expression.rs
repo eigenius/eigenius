@@ -57,6 +57,15 @@ pub(super) fn eval_expression(
         }
         Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
         Expression::FunctionCall { name, args } => {
+            // D43 §4.6 — TEXT_MATCH / TEXT_SCORE dispatch through the
+            // query-scoped retrieval context, which holds the
+            // property-bound `?var` map and a per-`(index, query)`
+            // probe cache. Evaluated before the generic arg-vector
+            // path so the AST args (not the row-evaluated values)
+            // can supply the property-variable name.
+            if name == "TEXT_MATCH" || name == "TEXT_SCORE" {
+                return eval_text_retrieval(name, args, binding, runtime);
+            }
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
                 .map(|a| eval_expression(a, binding, layer, runtime))
@@ -377,6 +386,113 @@ pub(super) fn resolve_iri_string(
         }
     }
     layer.resolve(&iri).map(|r| (*r).clone())
+}
+
+/// D43 §4.6 — evaluate `TEXT_MATCH(?prop, "query")` (→ Boolean) or
+/// `TEXT_SCORE(?prop, "query")` (→ Float) for one row's binding.
+///
+/// Semantics:
+///
+/// 1. The typechecker has already validated `?prop` is a property-
+///    bound variable; the call's purpose is *"is this row's source
+///    subject in the text-index hits, and what is its BM25 score?"*.
+/// 2. Look up the property-binding info (subject_variable name +
+///    property IRI) from the query-scoped
+///    [`retrieval::TextRetrievalContext`].
+/// 3. Find the active TextIndex Resource for that property; run
+///    (or fetch from the per-query cache) the index probe via
+///    [`crate::query::text::search::run_text_search`].
+/// 4. Resolve this row's subject IRI from the binding map.
+/// 5. For TEXT_MATCH: return true iff the subject appears in the
+///    hit set. For TEXT_SCORE: return the hit's BM25 score, or 0.0
+///    if the subject is not in the hit set.
+fn eval_text_retrieval(
+    fn_name: &str,
+    args: &[Expression],
+    binding: &Binding,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    use super::retrieval::TextSearchOutcome;
+
+    let retrieval = runtime.retrieval.ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} requires a query-scoped retrieval context; \
+             the evaluator entry point did not build one"
+        ))
+    })?;
+
+    if args.len() != 2 {
+        return Err(QueryError::evaluation(format!(
+            "{fn_name} expects 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let var = match &args[0] {
+        Expression::Variable(v) => v,
+        _ => {
+            return Err(QueryError::evaluation(format!(
+                "{fn_name} first argument must be a property-bound variable"
+            )));
+        }
+    };
+    let query = match &args[1] {
+        Expression::Literal(Literal::String(s)) => s.as_str(),
+        _ => {
+            return Err(QueryError::evaluation(format!(
+                "{fn_name} second argument must be a literal query string"
+            )));
+        }
+    };
+
+    let binding_info = retrieval.binding_for(&var.name).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} argument `?{}` is not bound by a MATCH property pattern",
+            var.name
+        ))
+    })?;
+    let active = retrieval
+        .active_index_for(&binding_info.property_iri)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "no active TextIndex for property `{}` at this head",
+                binding_info.property_iri.as_str()
+            ))
+        })?;
+
+    let outcome = retrieval.probe(active, query);
+    let hits = match outcome.as_ref() {
+        TextSearchOutcome::Ok(h) => h,
+        TextSearchOutcome::Err(e) => {
+            return Err(QueryError::evaluation(format!(
+                "TextIndex probe failed: {e:?}"
+            )));
+        }
+    };
+
+    let subject_value = binding.get(&binding_info.subject_variable).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} cannot resolve source subject `?{}` for `?{}`",
+            binding_info.subject_variable, var.name
+        ))
+    })?;
+    let subject_iri = match subject_value {
+        Value::String(s) => Iri::parse(s).ok(),
+        Value::ResourceRef(iri) => Some(iri.clone()),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} source subject `?{}` is not an IRI",
+            binding_info.subject_variable
+        ))
+    })?;
+
+    let hit = hits.iter().find(|h| h.subject == subject_iri);
+    match fn_name {
+        "TEXT_MATCH" => Ok(Value::Boolean(hit.is_some())),
+        "TEXT_SCORE" => Ok(Value::Float(hit.map(|h| h.score as f64).unwrap_or(0.0))),
+        _ => unreachable!("eval_text_retrieval dispatched on unknown name"),
+    }
 }
 
 /// Check if any return item uses an aggregate function.
@@ -773,6 +889,7 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
+            retrieval: None,
         };
 
         // Use FunctionCall directly at eval_expression level for a
@@ -825,6 +942,7 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
+            retrieval: None,
         };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
@@ -1012,6 +1130,7 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
+            retrieval: None,
         };
 
         // Pass the IRI as a String literal — same shape MATCH

@@ -911,6 +911,12 @@ impl LayerBuilder {
                 .triple_index
                 .extend_layer(layer.id(), &borrowed);
         }
+        // D43 M3.5: pre-populate the text index from the layer's
+        // indexable property values. Runs after the triple-index
+        // pre-population so that `resolve_active_text_indexes`
+        // (which scans via the triple index for `is_a == TextIndex`)
+        // sees this layer's own contributions.
+        crate::query::text::indexing::populate_text_indexes(&layer);
         layer
     }
 }

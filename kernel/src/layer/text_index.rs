@@ -209,6 +209,27 @@ pub trait TextIndex: Send + Sync {
         layer: &LayerId,
     ) -> Result<Option<String>, StorageError>;
 
+    /// Compute the AND-intersection of posting lists for all
+    /// `terms` under `(index, layer)`. Returns the sorted set of
+    /// local doc-ids that contain every term, or an empty `Vec` if
+    /// any term has no posting at this `(index, layer)` (or the
+    /// term set is empty).
+    ///
+    /// Each backend uses its native posting representation to do
+    /// the intersection (Roaring bitwise-AND for the RocksDB
+    /// backend; sorted set intersection for the memory backend),
+    /// so this method is significantly more efficient than the
+    /// orchestrator decoding `scan_term` postings itself.
+    ///
+    /// Doc-ids are layer-local — callers resolve them to subject
+    /// IRIs via [`Self::get_layer_docs`].
+    fn intersect_layer(
+        &self,
+        index: &Iri,
+        layer: &LayerId,
+        terms: &[String],
+    ) -> Result<Vec<u32>, StorageError>;
+
     /// Snapshot of operational counters.
     fn stats(&self) -> TextIndexStats;
 }
@@ -440,6 +461,56 @@ impl TextIndex for MemoryTextIndex {
             .analyzers
             .get(&(index.clone(), layer.clone()))
             .cloned())
+    }
+
+    fn intersect_layer(
+        &self,
+        index: &Iri,
+        layer: &LayerId,
+        terms: &[String],
+    ) -> Result<Vec<u32>, StorageError> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let state = self.inner.read().expect("MemoryTextIndex poisoned");
+
+        // Memory backend's posting format is the length-prefixed u32
+        // encoding from `encode_doc_set` / `decode_doc_set`. Decode
+        // the first term into a `BTreeSet<u32>` and intersect against
+        // subsequent terms in sorted-set form.
+        let mut accumulator: BTreeSet<u32> =
+            match state
+                .postings
+                .get(&(index.clone(), terms[0].clone(), layer.clone()))
+            {
+                Some(hit) => decode_doc_set(&hit.postings).map_err(|e| {
+                    StorageError::Internal(format!(
+                        "intersect_layer decode (term {}): {e}",
+                        terms[0]
+                    ))
+                })?,
+                None => return Ok(Vec::new()),
+            };
+
+        for term in &terms[1..] {
+            if accumulator.is_empty() {
+                break;
+            }
+            match state
+                .postings
+                .get(&(index.clone(), term.clone(), layer.clone()))
+            {
+                Some(hit) => {
+                    let other = decode_doc_set(&hit.postings).map_err(|e| {
+                        StorageError::Internal(format!("intersect_layer decode (term {term}): {e}"))
+                    })?;
+                    accumulator = accumulator.intersection(&other).copied().collect();
+                }
+                None => return Ok(Vec::new()),
+            }
+        }
+
+        Ok(accumulator.into_iter().collect())
     }
 
     fn stats(&self) -> TextIndexStats {

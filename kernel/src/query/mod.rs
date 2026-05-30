@@ -24,6 +24,7 @@ pub mod functions;
 pub mod lexer;
 pub mod parser;
 pub mod stratify;
+pub mod text;
 pub mod type_check;
 
 use crate::layer::Layer;

@@ -54,6 +54,7 @@ impl EigeniusService {
                 components: Some(&components),
                 overlay: None,
                 ctx: Some(&ctx),
+                retrieval: None,
             };
 
             match query::execute_with_into(&req.eigenql, &layer, runtime) {

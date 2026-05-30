@@ -571,6 +571,64 @@ impl TextIndex for RocksTextIndex {
         })
     }
 
+    fn intersect_layer(
+        &self,
+        index: &Iri,
+        layer: &LayerId,
+        terms: &[String],
+    ) -> Result<Vec<u32>, StorageError> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        run_blocking(|| {
+            let cf = self.cf_text()?;
+
+            // Roaring bitwise-AND. The first term seeds the
+            // accumulator; subsequent terms intersect in place.
+            // An absent posting at any layer means the AND is empty
+            // — short-circuit.
+            let mut accumulator: RoaringBitmap = match self
+                .db
+                .get_cf(&cf, text_term_key(index, &terms[0], layer))
+                .map_err(|e| StorageError::Internal(format!("text_term get: {e}")))?
+            {
+                Some(bytes) => {
+                    let (_, bitmap) = decode_posting_value(&bytes).map_err(|e| {
+                        StorageError::Internal(format!(
+                            "intersect_layer decode (term {}): {e}",
+                            terms[0]
+                        ))
+                    })?;
+                    bitmap
+                }
+                None => return Ok(Vec::new()),
+            };
+
+            for term in &terms[1..] {
+                if accumulator.is_empty() {
+                    break;
+                }
+                match self
+                    .db
+                    .get_cf(&cf, text_term_key(index, term, layer))
+                    .map_err(|e| StorageError::Internal(format!("text_term get: {e}")))?
+                {
+                    Some(bytes) => {
+                        let (_, other) = decode_posting_value(&bytes).map_err(|e| {
+                            StorageError::Internal(format!(
+                                "intersect_layer decode (term {term}): {e}"
+                            ))
+                        })?;
+                        accumulator &= other;
+                    }
+                    None => return Ok(Vec::new()),
+                }
+            }
+
+            Ok(accumulator.iter().collect())
+        })
+    }
+
     fn stats(&self) -> TextIndexStats {
         // Live counts would require a full scan; for v1 we only
         // report the cumulative scan counter. Precise sizing via
@@ -886,5 +944,67 @@ mod tests {
         // placeholder no longer applies. For now, this verifies the
         // standalone path.
         let _ = store.text_index_arc(); // smoke
+    }
+
+    /// D43 M3.3 — `intersect_layer` returns the AND of multiple
+    /// posting lists. Verifies the Roaring-bitwise-AND path
+    /// against a small corpus.
+    #[test]
+    fn intersect_layer_returns_and_of_postings() {
+        let (store, _dir) = open_temp_store();
+        let idx = RocksTextIndex::new(Arc::clone(&store.db));
+        let i1 = iri("urn:eigenius:test:i1");
+        let l1 = layer_id(1);
+        let s_a = iri("urn:eigenius:test:sa");
+        let s_b = iri("urn:eigenius:test:sb");
+        let s_c = iri("urn:eigenius:test:sc");
+
+        let toks_a = tokens("alpha beta gamma");
+        let toks_b = tokens("alpha gamma");
+        let toks_c = tokens("alpha beta");
+        idx.extend_layer(
+            &i1,
+            &l1,
+            "en-stem-v1",
+            &[
+                TextDoc {
+                    subject: &s_a,
+                    tokens: &toks_a,
+                },
+                TextDoc {
+                    subject: &s_b,
+                    tokens: &toks_b,
+                },
+                TextDoc {
+                    subject: &s_c,
+                    tokens: &toks_c,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Doc-ids: 0 = s_a, 1 = s_b, 2 = s_c.
+        // "alpha" hits all three; "beta" hits s_a and s_c; "gamma" hits s_a and s_b.
+        // AND("alpha", "beta") = {0, 2}.
+        let ids = idx
+            .intersect_layer(&i1, &l1, &["alpha".into(), "beta".into()])
+            .unwrap();
+        assert_eq!(ids, vec![0, 2]);
+
+        // AND("alpha", "beta", "gamma") = {0}.
+        let ids = idx
+            .intersect_layer(&i1, &l1, &["alpha".into(), "beta".into(), "gamma".into()])
+            .unwrap();
+        assert_eq!(ids, vec![0]);
+
+        // Term not in index → empty result, short-circuits.
+        let ids = idx
+            .intersect_layer(&i1, &l1, &["alpha".into(), "missing".into()])
+            .unwrap();
+        assert!(ids.is_empty());
+
+        // Empty terms list → empty result.
+        let ids = idx.intersect_layer(&i1, &l1, &[]).unwrap();
+        assert!(ids.is_empty());
     }
 }

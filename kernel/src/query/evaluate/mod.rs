@@ -33,6 +33,7 @@
 mod expression;
 mod fiber;
 mod pattern;
+mod retrieval;
 mod return_shape;
 
 use crate::layer::Layer;
@@ -63,6 +64,17 @@ pub fn evaluate(
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
 ) -> Result<(Vec<Resource>, Vec<Resource>), QueryError> {
+    // D43 §4.6 retrieval context: built once per query, threaded
+    // through every FiberRuntime so per-row `TEXT_MATCH` /
+    // `TEXT_SCORE` calls can resolve their property-bound `?var`
+    // back to a source subject + active TextIndex and memoise the
+    // index probe across rows.
+    let retrieval = retrieval::TextRetrievalContext::new(program, layer);
+    let runtime = FiberRuntime {
+        retrieval: Some(&retrieval),
+        ..runtime
+    };
+
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
     // 1. Evaluate DEFINE rules with seminaive fixpoint

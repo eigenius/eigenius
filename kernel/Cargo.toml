@@ -17,7 +17,12 @@ hex = "0.4"
 # patterns and the crate is production-grade in Rust services.
 moka = { version = "0.12", features = ["sync"] }
 regex = "1"
+# D43 §2.3 / M3 — text tokenisation pipeline.
+# unicode-segmentation gives Unicode-correct word splitting; rust-stemmers
+# provides the Porter (English) stem for the `en-stem-v1` analyzer.
+rust-stemmers = "1"
 sha2 = "0.10"
+unicode-segmentation = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

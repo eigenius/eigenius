@@ -104,17 +104,22 @@ mod vec_defaults {
 /// Read an IRI-valued slot from a Resource. Returns `Some(iri)` iff
 /// the Resource has the property and the value resolves to an IRI
 /// (canonical `ResourceRef` form or the pre-canonical string form).
+///
+/// Uses `Layer::resolve` (not `get_resource`) so that Resources
+/// defined in ancestor layers are visible — the Index Resource
+/// being read may have been declared upstream.
 fn read_iri(layer: &Layer, resource_iri: &Iri, property_iri: &str) -> Option<Iri> {
-    let resource = layer.get_resource(resource_iri)?;
+    let resource = layer.resolve(resource_iri)?;
     let prop = Iri::parse(property_iri).ok()?;
     let value = resource.get(&prop)?;
     let iri_str = value.as_iri_str()?;
     Iri::parse(iri_str).ok()
 }
 
-/// Read a string-valued slot from a Resource.
+/// Read a string-valued slot from a Resource. See [`read_iri`] for
+/// the chain-walk rationale.
 fn read_string(layer: &Layer, resource_iri: &Iri, property_iri: &str) -> Option<String> {
-    let resource = layer.get_resource(resource_iri)?;
+    let resource = layer.resolve(resource_iri)?;
     let prop = Iri::parse(property_iri).ok()?;
     match resource.get(&prop)? {
         Value::String(s) => Some(s.clone()),
@@ -122,9 +127,10 @@ fn read_string(layer: &Layer, resource_iri: &Iri, property_iri: &str) -> Option<
     }
 }
 
-/// Read an integer-valued slot from a Resource.
+/// Read an integer-valued slot from a Resource. See [`read_iri`]
+/// for the chain-walk rationale.
 fn read_u32(layer: &Layer, resource_iri: &Iri, property_iri: &str) -> Option<u32> {
-    let resource = layer.get_resource(resource_iri)?;
+    let resource = layer.resolve(resource_iri)?;
     let prop = Iri::parse(property_iri).ok()?;
     match resource.get(&prop)? {
         Value::Integer(i) => u32::try_from(*i).ok(),

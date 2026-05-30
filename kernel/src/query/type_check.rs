@@ -18,12 +18,12 @@
 //! Checks variable binding, USING resolution, and aggregate/GROUP BY consistency.
 
 use crate::institution::registry::{DispatchRole, InstitutionIndex};
-use crate::layer::Layer;
+use crate::layer::{resolve_active_text_indexes, ActiveTextIndex, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::well_known as wk;
 use crate::query::ast::*;
 use crate::query::error::QueryError;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Type-check a parsed EigenQL program against a layer.
 ///
@@ -105,6 +105,49 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
 
     // Check aggregate/GROUP BY consistency
     check_aggregate_consistency(program, &mut errors);
+
+    // D43 §4.6 — TEXT_MATCH / TEXT_SCORE typing rules.
+    //
+    // Builds a property-variable index from MATCH patterns (which
+    // `?var` was bound by which property of which class), then walks
+    // every expression that can contain a retrieval call (WHERE,
+    // RETURN, GROUP BY, ORDER BY, and rule bodies' WHERE) and rejects:
+    //   1. arg-count mismatches,
+    //   2. arg[0] not a Variable bound through a PropertyPattern,
+    //   3. property without an active TextIndex at this head,
+    //   4. property whose declared data_type is not `core:string`,
+    //   5. arg[1] not a literal string.
+    let prop_var_index = build_property_variable_index(program, layer);
+    let text_indexes = resolve_active_text_indexes(layer);
+    for cond in &program.query.body.conditions {
+        check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
+    }
+    for item in &program.query.result {
+        check_text_retrieval(
+            &item.expression,
+            &prop_var_index,
+            &text_indexes,
+            layer,
+            &mut errors,
+        );
+    }
+    for expr in &program.query.group_by {
+        check_text_retrieval(expr, &prop_var_index, &text_indexes, layer, &mut errors);
+    }
+    for item in &program.query.order_by {
+        check_text_retrieval(
+            &item.expression,
+            &prop_var_index,
+            &text_indexes,
+            layer,
+            &mut errors,
+        );
+    }
+    for def in &program.definitions {
+        for cond in &def.body.conditions {
+            check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
+        }
+    }
 
     errors
 }
@@ -936,13 +979,240 @@ fn query_class_name_display(name: &Name) -> String {
     }
 }
 
+// ─── D43 §4.6 — TEXT_MATCH / TEXT_SCORE typing rules ─────────────
+
+/// Schema view a retrieval call needs: which property a `?var` was
+/// bound to, plus an optional class hint from the MATCH pattern.
+///
+/// Recorded per property-bound variable. The pattern
+/// `MATCH Document(?d) { description: ?desc }` produces an entry
+/// `?desc → PropertyBinding { property_iri: …:description,
+/// class_iri: Some(…:Document) }`. Variables bound directly as
+/// subjects (`?d` above) are not recorded — retrieval calls take a
+/// property-value variable, not a subject variable.
+struct PropertyBinding {
+    /// IRI of the Property whose value bound the variable.
+    property_iri: Iri,
+}
+
+/// Walk every MATCH pattern in the program and build the
+/// variable → PropertyBinding map. Used by TEXT_MATCH / TEXT_SCORE
+/// typing to recover the source property of a retrieval call's
+/// first argument.
+fn build_property_variable_index(
+    program: &Program,
+    layer: &Layer,
+) -> BTreeMap<String, PropertyBinding> {
+    let mut out: BTreeMap<String, PropertyBinding> = BTreeMap::new();
+    let mut visit = |patterns: &[Pattern]| {
+        for pat in patterns {
+            for pp in &pat.properties {
+                if let ValueOrVariable::Variable(var) = &pp.object {
+                    if let Some(property_iri) = resolve_property_name(&pp.property, layer) {
+                        out.entry(var.name.clone())
+                            .or_insert(PropertyBinding { property_iri });
+                    }
+                }
+            }
+        }
+    };
+    let collect = |part: &MatchPart| -> Vec<Pattern> { part.patterns().cloned().collect() };
+    visit(&collect(&program.query.body));
+    for def in &program.definitions {
+        visit(&collect(&def.body));
+    }
+    out
+}
+
+/// Resolve a property `Name` to its IRI. `FullIri` returns the IRI
+/// directly; `ShortName` scans the layer chain for a Property
+/// Resource whose `short_name` matches.
+fn resolve_property_name(name: &Name, layer: &Layer) -> Option<Iri> {
+    match name {
+        Name::FullIri(iri) => Some(iri.clone()),
+        Name::ShortName(s) => {
+            use crate::ontology::resource::Value;
+            let prop_class = Iri::parse(wk::PROPERTY).ok()?;
+            let short_prop = Iri::parse(wk::SHORT_NAME).ok()?;
+            for (iri, res) in layer.iter_all_resources() {
+                if !res.is_instance_of(&prop_class) {
+                    continue;
+                }
+                if let Some(Value::String(sn)) = res.get(&short_prop) {
+                    if sn == s {
+                        return Some(iri.clone());
+                    }
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Recursively walk `expr`, checking every TEXT_MATCH / TEXT_SCORE
+/// call against the schema view per D43 §4.6.
+fn check_text_retrieval(
+    expr: &Expression,
+    prop_var_index: &BTreeMap<String, PropertyBinding>,
+    text_indexes: &[ActiveTextIndex],
+    layer: &Layer,
+    errors: &mut Vec<QueryError>,
+) {
+    match expr {
+        Expression::FunctionCall { name, args } => {
+            if name == "TEXT_MATCH" || name == "TEXT_SCORE" {
+                check_text_retrieval_call(name, args, prop_var_index, text_indexes, layer, errors);
+            }
+            for a in args {
+                check_text_retrieval(a, prop_var_index, text_indexes, layer, errors);
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            check_text_retrieval(left, prop_var_index, text_indexes, layer, errors);
+            check_text_retrieval(right, prop_var_index, text_indexes, layer, errors);
+        }
+        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
+            check_text_retrieval(operand, prop_var_index, text_indexes, layer, errors);
+        }
+        Expression::Aggregate { arg, .. } => {
+            check_text_retrieval(arg, prop_var_index, text_indexes, layer, errors);
+        }
+        Expression::Array(items) => {
+            for it in items {
+                check_text_retrieval(it, prop_var_index, text_indexes, layer, errors);
+            }
+        }
+        Expression::Object(pairs) => {
+            for (_, v) in pairs {
+                check_text_retrieval(v, prop_var_index, text_indexes, layer, errors);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Enforce the per-call structural and schema-view requirements.
+fn check_text_retrieval_call(
+    fn_name: &str,
+    args: &[Expression],
+    prop_var_index: &BTreeMap<String, PropertyBinding>,
+    text_indexes: &[ActiveTextIndex],
+    layer: &Layer,
+    errors: &mut Vec<QueryError>,
+) {
+    if args.len() != 2 {
+        errors.push(QueryError::type_check(
+            "text_retrieval_arity",
+            format!(
+                "{fn_name} requires exactly 2 arguments: a property-bound variable and a query string \
+                 (got {} arguments)",
+                args.len()
+            ),
+        ));
+        return;
+    }
+
+    // Argument 0 — must be a `?var` bound by a property pattern.
+    let var = match &args[0] {
+        Expression::Variable(v) => v,
+        _ => {
+            errors.push(QueryError::type_check(
+                "text_retrieval_arg0_not_variable",
+                format!(
+                    "{fn_name} first argument must be a property-bound variable (e.g. `?desc` \
+                     from `MATCH Class(?c) {{ description: ?desc }}`)"
+                ),
+            ));
+            return;
+        }
+    };
+    let binding = match prop_var_index.get(&var.name) {
+        Some(b) => b,
+        None => {
+            errors.push(QueryError::type_check(
+                "text_retrieval_arg0_not_property_bound",
+                format!(
+                    "{fn_name} first argument `?{}` is not bound by a property pattern — \
+                     it must appear as the object of a `{{ prop: ?var }}` binding in MATCH",
+                    var.name
+                ),
+            ));
+            return;
+        }
+    };
+
+    // Argument 1 — must be a literal string.
+    if !matches!(&args[1], Expression::Literal(Literal::String(_))) {
+        errors.push(QueryError::type_check(
+            "text_retrieval_arg1_not_string_literal",
+            format!("{fn_name} second argument must be a literal query string"),
+        ));
+        // No early return — still validate the property side.
+    }
+
+    // Schema view: property must be string-typed and must have an
+    // active TextIndex at this head.
+    let property_iri = &binding.property_iri;
+    if !property_is_string_typed(property_iri, layer) {
+        errors.push(QueryError::type_check(
+            "text_retrieval_property_not_string",
+            format!(
+                "{fn_name} requires a String-typed property; `{}` has a non-string data_type",
+                property_iri.as_str()
+            ),
+        ));
+    }
+    if !text_indexes
+        .iter()
+        .any(|ti| ti.target_property == *property_iri)
+    {
+        errors.push(QueryError::type_check(
+            "text_retrieval_no_active_index",
+            format!(
+                "property `{}` has no active TextIndex at this head — declare a \
+                 `core:TextIndex` Resource targeting it before using {fn_name}",
+                property_iri.as_str()
+            ),
+        ));
+    }
+}
+
+/// Does the Property Resource at `property_iri` declare
+/// `data_type: core:string`?
+///
+/// Properties without a `data_type` slot are treated as
+/// non-string-typed — defensive: the typechecker should never
+/// silently pass a retrieval call against a property whose data
+/// shape is unspecified.
+fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
+    let resource = match layer.resolve(property_iri) {
+        Some(r) => r,
+        None => return false,
+    };
+    let data_type_prop = match Iri::parse(wk::DATA_TYPE_PROP) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let string_iri = match Iri::parse(wk::STRING) {
+        Ok(i) => i,
+        Err(_) => return false,
+    };
+    match resource.get(&data_type_prop) {
+        Some(v) => v
+            .as_iri_str()
+            .and_then(|s| Iri::parse(s).ok())
+            .map(|iri| iri == string_iri)
+            .unwrap_or(false),
+        None => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Imports used above — keep below the public surface to avoid polluting
 // the top.
 // ---------------------------------------------------------------------------
 
 use crate::ontology::resource::Resource;
-use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests {
@@ -1387,6 +1657,273 @@ mod tests {
                 .iter()
                 .any(|e| e.rule == "bare_verdict_in_boolean_position"),
             "expected bare_verdict_in_boolean_position under NOT; got {errors:?}"
+        );
+    }
+
+    // ─── D43 §4.6 — TEXT_MATCH / TEXT_SCORE typing tests ────────────────
+
+    /// Build a layer with three test-only Properties and a
+    /// `core:TextIndex` Resource targeting one of them, stacked on the
+    /// bootstrap chain so `core:string` / `core:Property` /
+    /// `core:TextIndex` resolve. Used by the §4.6 typing tests below.
+    ///
+    /// Short names are deliberately namespaced (`test_body`,
+    /// `test_count`, `test_title`) to avoid collision with the core
+    /// ontology's own `description` Property — the merged-view
+    /// short-name resolver returns the IRI-sort-order-first match,
+    /// so a colliding short name would silently route to the wrong
+    /// Property.
+    fn build_text_index_layer() -> Arc<Layer> {
+        use crate::ontology::iri::Iri;
+        use crate::ontology::resource::{Resource, Value};
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let parent = Arc::clone(ctx.head());
+        let mut b = LayerBuilder::new("text-index-fixture", Some(parent));
+
+        // Property: urn:eigenius:test:body, data_type: string,
+        // short_name "test_body" — TextIndex targets this one.
+        let mut body_prop = Resource::new(Iri::parse("urn:eigenius:test:body").unwrap());
+        body_prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        body_prop.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            Value::String("test_body".into()),
+        );
+        body_prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+        );
+        b.add_resource(body_prop).unwrap();
+
+        // Integer-typed Property for the negative test
+        // (TEXT_MATCH on non-string property).
+        let mut count_prop = Resource::new(Iri::parse("urn:eigenius:test:count").unwrap());
+        count_prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        count_prop.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            Value::String("test_count".into()),
+        );
+        count_prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::INTEGER).unwrap()),
+        );
+        b.add_resource(count_prop).unwrap();
+
+        // Property without a TextIndex — for the no-active-index test.
+        let mut bare_prop = Resource::new(Iri::parse("urn:eigenius:test:title").unwrap());
+        bare_prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        bare_prop.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            Value::String("test_title".into()),
+        );
+        bare_prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+        );
+        b.add_resource(bare_prop).unwrap();
+
+        // The TextIndex targeting `test:body`.
+        let mut ti = Resource::new(Iri::parse("urn:eigenius:test:ti_body").unwrap());
+        ti.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse(wk::TEXT_INDEX_CLASS).unwrap(),
+            )]),
+        );
+        ti.set(
+            Iri::parse(wk::TARGET_PROPERTY).unwrap(),
+            Value::ResourceRef(Iri::parse("urn:eigenius:test:body").unwrap()),
+        );
+        ti.set(
+            Iri::parse(wk::TEXT_ANALYZER).unwrap(),
+            Value::String("en-stem-v1".into()),
+        );
+        b.add_resource(ti).unwrap();
+
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn text_match_well_formed_passes() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE TEXT_MATCH(?desc, "wal truncation")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        let related: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule.starts_with("text_retrieval"))
+            .collect();
+        assert!(
+            related.is_empty(),
+            "expected no text_retrieval_* errors, got {related:?}"
+        );
+    }
+
+    #[test]
+    fn text_score_well_formed_passes() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            RETURN [] { d: ?d, s: TEXT_SCORE(?desc, "wal") }
+            "#,
+        );
+        let related: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule.starts_with("text_retrieval"))
+            .collect();
+        assert!(
+            related.is_empty(),
+            "expected no text_retrieval_* errors, got {related:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_with_full_iri_property_passes() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?desc }
+            WHERE TEXT_MATCH(?desc, "wal")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        let related: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule.starts_with("text_retrieval"))
+            .collect();
+        assert!(
+            related.is_empty(),
+            "FullIri MATCH binding should typecheck; got {related:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_wrong_arity_rejected() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE TEXT_MATCH(?desc)
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "text_retrieval_arity"),
+            "expected text_retrieval_arity; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_on_unbound_variable_rejected() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d {}
+            WHERE TEXT_MATCH(?d, "wal")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "text_retrieval_arg0_not_property_bound"),
+            "expected text_retrieval_arg0_not_property_bound; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_on_non_variable_rejected() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE TEXT_MATCH("not a var", "wal")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "text_retrieval_arg0_not_variable"),
+            "expected text_retrieval_arg0_not_variable; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_non_string_query_rejected() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE TEXT_MATCH(?desc, 42)
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "text_retrieval_arg1_not_string_literal"),
+            "expected text_retrieval_arg1_not_string_literal; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_on_non_string_property_rejected() {
+        let layer = build_text_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_count: ?n }
+            WHERE TEXT_MATCH(?n, "wal")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "text_retrieval_property_not_string"),
+            "expected text_retrieval_property_not_string; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn text_match_without_active_index_rejected() {
+        let layer = build_text_index_layer();
+        // `test_title` is a string Property but has no TextIndex
+        // targeting it.
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_title: ?t }
+            WHERE TEXT_MATCH(?t, "wal")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "text_retrieval_no_active_index"),
+            "expected text_retrieval_no_active_index; got {errors:?}"
         );
     }
 }
