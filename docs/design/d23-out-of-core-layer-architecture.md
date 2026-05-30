@@ -1,6 +1,6 @@
 # D23 — Out-of-Core Layer Architecture
 
-**Status:** Draft (2026-04-26)
+**Status:** Implemented (Phase 14; topology/content split, branches + CAS, GC, per-layer triple index)
 **Phase:** 14
 **Supersedes:** the in-memory layer chain established in Phase 0; the linear chain assumption baked into D13's persistent store
 **Companion docs:** D13 (durable kernel state, the atomicity guarantees Phase 14 inherits), D20 (layer reconciliation, Phase 15, uses Phase 14's branching primitive), D24 (out-of-core query execution, Phase 16, builds on Phase 14's storage abstractions)

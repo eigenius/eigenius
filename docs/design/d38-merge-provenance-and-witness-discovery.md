@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — May 2026*
 
-**Status:** Draft
+**Status:** Implemented (chain-resident `MergeResolutionRecord` per resolved conflict + off-span witness discovery)
 **Builds on:** [D20 — Layer Reconciliation](d20-layer-reconciliation.md), [D36 — Merge Resolution UX](d36-merge-resolution-ux.md), [D37 — Lambda surface and typed merge comorphisms](d37-lambda-surface-and-typed-merge-comorphisms.md).
 **Closes:** D36 §15.6 (Resolution attribution: deferred).
 **Forward-references:** D39 — Resolution strategy UX, second pass (the broader UX redesign that D37 §10.6 sketched; previously referred to as D38 but renumbered here).

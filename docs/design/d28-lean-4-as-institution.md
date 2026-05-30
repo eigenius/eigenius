@@ -1,6 +1,6 @@
 # D28: Lean 4 as a Verification Institution in Eigenius
 
-**Status:** Draft — calibrated against the live substrate (D26 shipped) and the Julia institution suite (D27/D29 shipped end-to-end).
+**Status:** Implemented (Phase 20a; authoring side on substrate, in-process verification via `nanoda_lib`, three-part correspondence check live). Phase 20b (Mathlib-scale operational landing) is consumer-triggered.
 **Scope:** What it takes to make Lean 4 a registered institution within Eigenius, contributing the *verified* epistemic level to the knowledge graph by realising the [D14](d14-institution-realisation.md) institution protocol.
 
 **Related:**

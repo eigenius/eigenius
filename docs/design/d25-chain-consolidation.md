@@ -1,6 +1,6 @@
 # D25 — Chain Consolidation
 
-**Status:** Draft (2026-05-02)
+**Status:** Implemented (Phase 17; `eigenius db consolidate` + notebook Compaction destination)
 **Phase:** 17
 **Supersedes:** the deferred "deep chain" performance concern raised in D23 §5.2.7
 **Companion docs:** D23 (out-of-core layer architecture; the per-layer bloom resolve walk this phase reduces), D20 (layer reconciliation; the resolution decisions a v2 multi-parent consolidate must preserve), D21 (task traces and checkpointing; the pinning semantics this phase must respect), D13 (durable kernel state; consolidation does not modify the seed manifest)

@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase D22; notebook + @eigenius/client shipped)
 **Required before:** Phase 12 (Worked Institution Examples) gains a notebook surface
 **Resolves:** Browser-side notebook architecture, TypeScript SDK shape, Connect-RPC API, orchestrator-side notebook routes, cell-execution model, notebook persistence format
 

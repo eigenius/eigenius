@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 4)
 **Required before:** Phase 4 implementation
 **Resolves:** Kernel↔orchestrator boundary, component dispatch, durability through traces, DAPR as service glue
 

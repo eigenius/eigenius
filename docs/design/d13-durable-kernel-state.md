@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 9a)
 **Required before:** Phase 9a implementation
 **Depends on:** D4 (storage key encoding), D6b (trace schema), D10 (institutions), D12 (WASM)
 **Companion to:** D11 (codata + resumable execution)

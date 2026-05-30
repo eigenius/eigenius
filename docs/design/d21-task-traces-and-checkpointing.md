@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 9b-iii)
 **Required before:** Phase 9b-iii (task model) implementation
 **Depends on:** D6 (execution architecture), D13 (durable kernel state)
 **Companion to:** D11 (codata + streams)

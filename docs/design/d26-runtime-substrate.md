@@ -1,6 +1,6 @@
 # Runtime Substrate
 
-**Status:** Draft — outline for the design specification
+**Status:** Implemented (Phase 18; Julia substrate live, Lean authoring side wired)
 **Scope:** A language-agnostic substrate for hosting external language toolchains inside Eigenius with full provenance. Defines the trait, the resource classes, the image-vs-graph boundary, the deployment model, and the CLI surface. Julia is the first concrete instance for the *derived*-knowledge path; the Lean integration's authoring-side workflow is the second consumer. Per-language design docs (e.g. [`d27-julia-institutions.md`](d27-julia-institutions.md), [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md)) layer on top.
 **Related:** [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) (verification institution; substrate-hosted authoring + in-process verification), `boundary-contracts.md` (the meta-specification this outline instantiates), [`d27-julia-institutions.md`](d27-julia-institutions.md) (Julia-specific institutions wrapping this substrate)
 

@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 0)
 **Required before:** Phase 0 implementation
 **Resolves:** Eigon JSON schema, property value encoding, IRI representation, blob references, resource identity
 

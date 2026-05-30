@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 10a)
 **Required before:** Phase 10a implementation
 **Depends on:** D9 (NbE + type extensions), D13 (durable kernel state)
 **Unblocks:** Phase 11 (type-theory extensions), life-science-requirements.md §19

@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 2)
 **Required before:** Phase 2 implementation
 **Resolves:** Program representation, expression language, component interface, execution model
 

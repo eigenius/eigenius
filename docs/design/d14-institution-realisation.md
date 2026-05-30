@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 6; WASM + runtime-substrate institutions live)
 **Supersedes:** D10 (Grothendieck Institution Protocol). D14 is the canonical reference for institutions in Eigenius; D10 is retained as a redirect file but carries no content.
 **Depends on:** D1 (Eigon serialisation + structural validator), D9 (NbE / Mini-TT), D12 (WASM extensibility), D19 (inductive types).
 **Theoretical foundation:** Diaconescu, *Institution-independent Model Theory*, 2nd ed., Studies in Universal Logic, Springer 2025 (`diaconescu2025`). Chapter 14 is the canonical reference for the comorphism-based Grothendieck construction; cited inline as "Diaconescu 2025, Ch. 14, §X.Y". Goguen and Burstall (1992), "Institutions: Abstract model theory for specification and programming", JACM (`goguen1992`) — the underlying institution notion. The published paper [`docs/papers/eigenius-institutions.tex`](../papers/eigenius-institutions.tex) is the high-level narrative; D14 is the implementation contract.

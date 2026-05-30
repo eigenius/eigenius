@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 9b)
 **Required before:** Phase 8.9 implementation
 **Depends on:** D9 (NbE unification), D10 (Grothendieck institutions)
 

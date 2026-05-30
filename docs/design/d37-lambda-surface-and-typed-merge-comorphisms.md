@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — May 2026*
 
-**Status:** Draft
+**Status:** Implemented (ESL `merge_comorphism` / `lambda` / `pi` surface live; validator enforces Mini-TT well-typedness)
 **Builds on:** [D20 — Layer Reconciliation](d20-layer-reconciliation.md), [D36 — Merge Resolution UX](d36-merge-resolution-ux.md), [D7 — ESL Surface Syntax](d7-esl-surface-syntax.md), [D19 — Inductive Types](d19-inductive-types.md).
 **Closes:** D36 §15's note that the witness happy path is gated on an authoring surface for Mini-TT lambdas.
 

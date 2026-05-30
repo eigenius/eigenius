@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — May 2026*
 
-**Status:** Draft
+**Status:** Implemented (six-state flow, four strategies, cascade gate, chain-resident provenance live in the notebook)
 **Required before:** the first notebook release that ships Phase 15 — until D36 lands the notebook user has no way to resolve a conflict in-place.
 **Builds on:** [D20 — Layer Reconciliation](d20-layer-reconciliation.md), [D22 — Notebook UX and TypeScript SDK](d22-notebook-and-typescript-sdk.md), [D34 — Notebook Chain Workspace](d34-notebook-chain-workspace.md).
 **Supersedes:** D34 §6.2's `WitnessedMergeRecoveryDialog`. The "save as sibling / pin-rebase / discard" escape hatches are removed in favor of in-place resolution. We have not shipped any notebook release, so no muscle memory needs to be preserved.

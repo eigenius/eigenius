@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 3)
 **Required before:** Phase 3 implementation
 **Resolves:** RPC definitions, message types, streaming vs unary, error codes, authentication, context management
 
