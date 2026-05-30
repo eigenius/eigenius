@@ -43,6 +43,24 @@ pub enum Value {
     Array(Vec<Value>),
     /// Opaque JSON value, not validated by the ontology.
     Json(serde_json::Value),
+    /// D43 §4.1 — typed embedding vector produced by the `EMBED`
+    /// primitive (M4). Carries the Embedder Component IRI it was
+    /// produced by; dimensionality is `data.len()`. Vector values are
+    /// **transient compute values**, not chain resources: they flow
+    /// from `EMBED` into `VECTOR_NEAR` / `VECTOR_SIM` within a single
+    /// query and do not survive to canonical CBOR or persisted Eigon-
+    /// JSON (serialising one fails with a clear diagnostic — the
+    /// chain stores vectors as `vec_seg:<I>:<L>` blobs per §2.4, not
+    /// as inline property values).
+    Vector {
+        /// IRI of the Embedder Component that produced this vector.
+        /// Used by `VECTOR_NEAR` / `VECTOR_SIM` typecheck (D43 §4.5)
+        /// to verify model agreement against the queried property's
+        /// active VectorIndex.
+        model_iri: Iri,
+        /// Packed `f32` vector data; `len()` is the dimensionality.
+        data: Vec<f32>,
+    },
 }
 
 impl Value {
@@ -139,6 +157,15 @@ impl Value {
     pub fn as_array(&self) -> Option<&[Value]> {
         match self {
             Value::Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    /// Returns the value's vector data + Embedder model IRI, if it
+    /// is a `Vector`. The slice length is the dimensionality.
+    pub fn as_vector(&self) -> Option<(&Iri, &[f32])> {
+        match self {
+            Value::Vector { model_iri, data } => Some((model_iri, data)),
             _ => None,
         }
     }
@@ -334,6 +361,52 @@ mod tests {
             .as_resource_ref()
             .is_some());
         assert!(Value::String("hi".into()).as_integer().is_none());
+    }
+
+    #[test]
+    fn vector_variant_construction_and_accessors() {
+        let model = iri("urn:eigenius:embed:dummy:v1");
+        let v = Value::Vector {
+            model_iri: model.clone(),
+            data: vec![0.1f32, 0.2, 0.3],
+        };
+        let (got_model, got_data) = v.as_vector().expect("should be a vector");
+        assert_eq!(got_model.as_str(), model.as_str());
+        assert_eq!(got_data.len(), 3);
+        assert_eq!(got_data, &[0.1f32, 0.2, 0.3]);
+        // Other accessors return None.
+        assert!(v.as_str().is_none());
+        assert!(v.as_integer().is_none());
+        assert!(v.as_float().is_none());
+        assert!(v.as_boolean().is_none());
+        assert!(v.as_resource_ref().is_none());
+        assert!(v.as_embedded().is_none());
+        assert!(v.as_array().is_none());
+    }
+
+    #[test]
+    fn vector_equality_requires_same_model_and_data() {
+        let m1 = iri("urn:eigenius:embed:m1");
+        let m2 = iri("urn:eigenius:embed:m2");
+        let a = Value::Vector {
+            model_iri: m1.clone(),
+            data: vec![1.0, 2.0],
+        };
+        let a2 = Value::Vector {
+            model_iri: m1.clone(),
+            data: vec![1.0, 2.0],
+        };
+        let different_model = Value::Vector {
+            model_iri: m2,
+            data: vec![1.0, 2.0],
+        };
+        let different_data = Value::Vector {
+            model_iri: m1,
+            data: vec![1.0, 2.5],
+        };
+        assert_eq!(a, a2);
+        assert_ne!(a, different_model);
+        assert_ne!(a, different_data);
     }
 
     #[test]

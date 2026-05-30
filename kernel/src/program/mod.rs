@@ -21,6 +21,7 @@
 //! Execution is via NbE in IO mode (eval_io module).
 
 pub mod component;
+pub mod embedder;
 pub mod eval_io;
 pub mod expr;
 pub mod ground;

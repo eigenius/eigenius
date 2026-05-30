@@ -740,7 +740,8 @@ impl Parser {
             | TokenKind::ContainsFn
             | TokenKind::ConcatFn
             | TokenKind::TextMatchFn
-            | TokenKind::TextScoreFn => {
+            | TokenKind::TextScoreFn
+            | TokenKind::EmbedFn => {
                 let name = match self.advance().kind {
                     TokenKind::DateFn => "DATE",
                     TokenKind::TimestampFn => "TIMESTAMP",
@@ -750,6 +751,7 @@ impl Parser {
                     TokenKind::ConcatFn => "CONCAT",
                     TokenKind::TextMatchFn => "TEXT_MATCH",
                     TokenKind::TextScoreFn => "TEXT_SCORE",
+                    TokenKind::EmbedFn => "EMBED",
                     _ => unreachable!(),
                 }
                 .to_string();

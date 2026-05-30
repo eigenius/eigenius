@@ -66,6 +66,9 @@ pub(super) fn eval_expression(
             if name == "TEXT_MATCH" || name == "TEXT_SCORE" {
                 return eval_text_retrieval(name, args, binding, runtime);
             }
+            if name == "EMBED" {
+                return eval_embed(args, binding, layer, runtime);
+            }
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
                 .map(|a| eval_expression(a, binding, layer, runtime))
@@ -495,6 +498,75 @@ fn eval_text_retrieval(
     }
 }
 
+/// D43 §3.5 — evaluate `EMBED("text", "<model_iri>")` → `Value::Vector`.
+///
+/// v1 signature is fully positional: `EMBED(text, model_iri)`. The
+/// keyword form (`EMBED("text", model: M)`) and typecheck-time
+/// model inference from the surrounding `VECTOR_NEAR` context
+/// (D43 §4.4) are deferred — both add parser/typecheck work without
+/// changing the dispatch shape.
+///
+/// Steps:
+/// 1. Validate argument shape (count + both literal strings).
+/// 2. Resolve the Embedder from [`FiberRuntime::embedders`].
+/// 3. Call [`crate::program::embedder::Embedder::embed`] and verify
+///    the returned length equals the declared dim — a length
+///    mismatch is an implementation bug worth surfacing as a query
+///    error rather than silently constructing a mis-sized vector.
+/// 4. Wrap into [`Value::Vector`] for downstream consumers
+///    (`VECTOR_NEAR` / `VECTOR_SIM`, M5).
+fn eval_embed(
+    args: &[Expression],
+    binding: &Binding,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    if args.len() != 2 {
+        return Err(QueryError::evaluation(format!(
+            "EMBED expects 2 arguments (text, model_iri), got {}",
+            args.len()
+        )));
+    }
+    let text_val = eval_expression(&args[0], binding, layer, runtime)?;
+    let text = text_val
+        .as_str()
+        .ok_or_else(|| QueryError::evaluation("EMBED first argument must evaluate to a string"))?;
+
+    let model_val = eval_expression(&args[1], binding, layer, runtime)?;
+    let model_str = model_val.as_iri_str().ok_or_else(|| {
+        QueryError::evaluation("EMBED second argument must evaluate to an IRI-shaped string")
+    })?;
+    let model_iri = Iri::parse(model_str)
+        .map_err(|e| QueryError::evaluation(format!("EMBED model_iri is not a valid IRI: {e}")))?;
+
+    let registry = runtime.embedders.ok_or_else(|| {
+        QueryError::evaluation(
+            "EMBED requires an EmbedderRegistry on the query runtime; \
+             none was supplied",
+        )
+    })?;
+    let embedder = registry.get(&model_iri).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "EMBED model `{}` is not registered in the Embedder registry",
+            model_iri.as_str()
+        ))
+    })?;
+
+    let data = embedder
+        .embed(text)
+        .map_err(|e| QueryError::evaluation(format!("EMBED dispatch failed: {e}")))?;
+    let declared_dim = embedder.dim() as usize;
+    if data.len() != declared_dim {
+        return Err(QueryError::evaluation(format!(
+            "EMBED dispatch returned {} values but `{}` declares dim={}",
+            data.len(),
+            model_iri.as_str(),
+            declared_dim
+        )));
+    }
+    Ok(Value::Vector { model_iri, data })
+}
+
 /// Check if any return item uses an aggregate function.
 pub(super) fn has_aggregates(result: &[ReturnItem]) -> bool {
     result
@@ -890,6 +962,7 @@ mod tests {
             overlay: None,
             ctx: Some(&exec_ctx),
             retrieval: None,
+            embedders: None,
         };
 
         // Use FunctionCall directly at eval_expression level for a
@@ -943,6 +1016,7 @@ mod tests {
             overlay: None,
             ctx: Some(&exec_ctx),
             retrieval: None,
+            embedders: None,
         };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
@@ -1131,6 +1205,7 @@ mod tests {
             overlay: None,
             ctx: Some(&exec_ctx),
             retrieval: None,
+            embedders: None,
         };
 
         // Pass the IRI as a String literal — same shape MATCH
@@ -1267,5 +1342,153 @@ mod tests {
             msg.contains("Verdict-typed operand"),
             "unexpected message: {msg}"
         );
+    }
+
+    // ─── D43 §3.5 — EMBED evaluator tests ─────────────────────────────
+
+    /// Trivial layer used by EMBED tests — `eval_embed` doesn't
+    /// actually consult the layer, but `eval_expression` needs one
+    /// for its signature.
+    fn empty_layer() -> Arc<crate::layer::Layer> {
+        Arc::new(
+            LayerBuilder::new("embed-test", None).build(crate::layer::LayerStorage::in_memory()),
+        )
+    }
+
+    #[test]
+    fn embed_dispatches_through_registry_and_returns_vector() {
+        use crate::program::embedder::registry_with_dummy;
+        let reg = registry_with_dummy();
+        let layer = empty_layer();
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            ..FiberRuntime::default()
+        };
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "EMBED".into(),
+            args: vec![
+                Expression::Literal(Literal::String("hello world".into())),
+                Expression::Literal(Literal::String("urn:eigenius:embed:dummy:v1".into())),
+            ],
+        };
+        let v = eval_expression(&expr, &binding, &layer, runtime).expect("EMBED dispatch");
+        let (model, data) = v.as_vector().expect("EMBED should produce Value::Vector");
+        assert_eq!(model.as_str(), "urn:eigenius:embed:dummy:v1");
+        assert_eq!(data.len(), 8);
+    }
+
+    #[test]
+    fn embed_is_deterministic_via_dummy() {
+        use crate::program::embedder::registry_with_dummy;
+        let reg = registry_with_dummy();
+        let layer = empty_layer();
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            ..FiberRuntime::default()
+        };
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "EMBED".into(),
+            args: vec![
+                Expression::Literal(Literal::String("identical input".into())),
+                Expression::Literal(Literal::String("urn:eigenius:embed:dummy:v1".into())),
+            ],
+        };
+        let a = eval_expression(&expr, &binding, &layer, runtime).expect("first EMBED");
+        let b = eval_expression(&expr, &binding, &layer, runtime).expect("second EMBED");
+        // The dummy embedder is deterministic, so two calls with the
+        // same input produce the same vector. Real embedders are
+        // NonDeterministic (D43 §5.2) and would not satisfy this.
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn embed_rejects_unknown_model_iri() {
+        use crate::program::embedder::registry_with_dummy;
+        let reg = registry_with_dummy();
+        let layer = empty_layer();
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            ..FiberRuntime::default()
+        };
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "EMBED".into(),
+            args: vec![
+                Expression::Literal(Literal::String("hello".into())),
+                Expression::Literal(Literal::String("urn:eigenius:embed:missing".into())),
+            ],
+        };
+        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
+        assert!(
+            format!("{err}").contains("not registered"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn embed_without_registry_errors_clearly() {
+        let layer = empty_layer();
+        let runtime = FiberRuntime::default(); // embedders: None
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "EMBED".into(),
+            args: vec![
+                Expression::Literal(Literal::String("hello".into())),
+                Expression::Literal(Literal::String("urn:eigenius:embed:dummy:v1".into())),
+            ],
+        };
+        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
+        assert!(
+            format!("{err}").contains("EmbedderRegistry"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn embed_wrong_arity_errors() {
+        use crate::program::embedder::registry_with_dummy;
+        let reg = registry_with_dummy();
+        let layer = empty_layer();
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            ..FiberRuntime::default()
+        };
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "EMBED".into(),
+            args: vec![Expression::Literal(Literal::String("hello".into()))],
+        };
+        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
+        assert!(
+            format!("{err}").contains("EMBED expects 2 arguments"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn embed_parses_through_full_pipeline() {
+        // The parser routes `EMBED(...)` to a `FunctionCall` with
+        // name "EMBED". Verify the AST shape end-to-end so a future
+        // refactor doesn't silently drop the routing.
+        use crate::query::lexer::tokenize;
+        use crate::query::parser;
+        let tokens = tokenize(
+            r#"
+            MATCH ?x {}
+            RETURN [] { v: EMBED("hi", "urn:eigenius:embed:dummy:v1") }
+            "#,
+        )
+        .expect("tokenize");
+        let program = parser::parse(tokens).expect("parse");
+        let ret_expr = &program.query.result[0].expression;
+        match ret_expr {
+            Expression::FunctionCall { name, args } => {
+                assert_eq!(name, "EMBED");
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
     }
 }

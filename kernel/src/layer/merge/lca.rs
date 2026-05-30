@@ -166,6 +166,7 @@ pub(crate) fn collect_iri_refs_into(value: &crate::ontology::resource::Value, ou
         | Value::Integer(_)
         | Value::Float(_)
         | Value::Boolean(_)
-        | Value::Json(_) => {}
+        | Value::Json(_)
+        | Value::Vector { .. } => {}
     }
 }

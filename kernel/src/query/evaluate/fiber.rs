@@ -63,6 +63,11 @@ pub struct FiberRuntime<'a> {
     /// `run_text_search` probe against the layer's `TextIndex`. `None`
     /// for callers that don't use retrieval primitives.
     pub retrieval: Option<&'a super::retrieval::TextRetrievalContext<'a>>,
+    /// D43 §3.5 / §5.2 — registry of Embedder Components dispatched
+    /// by the `EMBED` primitive (M4). `None` when EMBED is not in
+    /// use; calls to EMBED then fail at evaluation with a clear
+    /// "no embedders registered" diagnostic.
+    pub embedders: Option<&'a crate::program::embedder::EmbedderRegistry>,
 }
 
 /// Resources produced at runtime by FIBER clauses. They live for the
