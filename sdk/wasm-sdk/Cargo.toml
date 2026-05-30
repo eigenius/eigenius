@@ -1,9 +1,12 @@
 [package]
 name = "eigenius-wasm-sdk"
-version = "0.1.0"
-edition = "2021"
-license = "Apache-2.0"
-description = "SDK for building WASM components and institutions for Eigenius."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SDK for building WASM components and institutions that run inside the Eigenius kernel or orchestrator. Mirrors the kernel's Eigon data model with no kernel dependency."
+keywords = ["eigenius", "wasm", "sdk", "component-model"]
+categories = ["wasm", "api-bindings"]
 
 [dependencies]
 ciborium = { version = "0.2", default-features = false }

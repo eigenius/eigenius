@@ -3,6 +3,10 @@ name = "eigenius-kernel"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Eigenius kernel: typed knowledge-graph platform with layered immutable chains, Mini-TT dependent type theory, a gRPC service surface, and an institutional dispatch model."
+keywords = ["knowledge-graph", "type-theory", "ontology", "grpc", "provenance"]
+categories = ["science", "data-structures", "web-programming"]
 
 [dependencies]
 async-trait = "0.1"

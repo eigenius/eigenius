@@ -3,6 +3,10 @@ name = "eigenius-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Eigenius command-line interface — load, query, validate, run programs, and administer kernel databases either in-process or against a running gRPC server."
+keywords = ["eigenius", "knowledge-graph", "cli", "grpc", "rocksdb"]
+categories = ["command-line-utilities", "science"]
 
 [[bin]]
 name = "eigenius"
