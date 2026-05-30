@@ -95,7 +95,7 @@ const LEAN_COMMON_DIR = Deno.env.get("EIGENIUS_LEAN_COMMON_DIR");
 const LEAN_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_LEAN_BASE_IMAGE_REF");
 const LEAN_DEPOT_PATH = Deno.env.get("EIGENIUS_LEAN_DEPOT_PATH");
 
-async function main() {
+function main() {
   // Install the structured-logging subscriber before anything else
   // emits an event. Reads `EIGENIUS_LOG_LEVEL` and
   // `EIGENIUS_LOG_FORMAT` from env (same envelope as the kernel).
@@ -292,4 +292,4 @@ async function main() {
   );
 }
 
-await main();
+main();
