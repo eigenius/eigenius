@@ -274,33 +274,37 @@ useful — that's where high-volume per-resource events live.
 ```
 kernel/          Rust kernel crate
   src/ontology/    IRI, Resource, Value, Eigon-JSON / Eigon-CBOR, well-known constants
-  src/layer/       Layer, LayerBuilder, LayerId (content-addressed), merge (D20/D36/D37/D38)
+  src/layer/       Layer, LayerBuilder, LayerId (content-addressed), merge/ (D20/D36/D37/D38)
   src/lattice.rs   Branch-ref CAS, LCA + iri_sources_since, trivial-merge driver
   src/gc.rs        Garbage collection over the reachable layer graph (D24)
-  src/validation/  Validator (commit-time rules incl. Lambda well-typedness, MergeComorphism shape)
-  src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator
+  src/validation/  Validator: 12 commit-time rules (type-check, format, pattern, range, length,
+                   class-types, allows-only, domain, conditional, inductive, is_a, ...)
+  src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator/
   src/nbe/         Mini-TT type theory: terms, values, eval, readback, type checker
   src/program/     Program model: expression parser, ground type resolution, executor
   src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON (incl. `merge_comorphism`, `lambda`, `pi`)
   src/capability/  WASM capability hosting, ComponentRegistry, WasmInstitution (D14), chain-scan auto-registration
   src/institution/ D14 Institution trait, InstitutionIndex (chain-derived), InstitutionRuntime, AutoOnLoad dispatch
   src/runtime/     Runtime-substrate dispatch (D26 worker IPC, mirror-derived call routing)
+  src/commit/      D41 commit pipeline: single-layer pipeline + multi-layer orchestrator, persister, hooks
   src/context/     ExecutionContext (snapshot isolation, read/write control)
   src/bootstrap/   Ontology loader and system initialization (six bootstrap layers)
   src/storage/     Storage interface traits (LayerStore, ResourceStore, branch/tag CAS)
-  src/server/      gRPC service implementations (Connect-RPC compatible)
+  src/server/      gRPC service implementations (per-RPC modules: branches, consolidate, gc,
+                   inspect, lifecycle, load, programs, query, reflect, tags, tasks, ...)
   src/task/        Task model: TaskRecord, Checkpoint, resume sweep
-  src/api/         Public re-exports for embedded-kernel consumers
   src/observability/  Tracing spans, RPC guards, operation labels
 storage/         Storage backend implementations
-  memory/          In-memory backend (BTreeMap + Arc<RwLock>)
   rocksdb/         RocksDB backend (durable layers, traces, branch refs, capabilities)
   tikv/            TiKV backend (placeholder)
 crates/
-  wasm-runtime/        Wasmtime integration for WASM capability sandboxing
-  runtime-substrate/   D26 substrate: worker spawning + UDS IPC + mirror generation
-  eigenius-julia/      Julia worker host (spawns the Julia process, marshals FormulaTerm)
-  eigenius-config/     Workspace configuration parsing
+  wasm-runtime/            Wasmtime integration for WASM capability sandboxing
+  runtime-substrate/       D26 substrate: worker spawning + UDS IPC + mirror generation
+  eigenius-julia/          Julia worker host (spawns the Julia process, marshals FormulaTerm)
+  eigenius-lean/           Lean 4 institution: orchestrator-facing authoring surface
+  eigenius-lean-runtime/   Lean 4 image / Lake-package build driver (substrate side)
+  eigenius-lean-worker/    In-process Lean re-checker via `nanoda_lib` (verification side, D28)
+  eigenius-config/         Workspace configuration parsing
 sdk/
   wasm-sdk/        Rust SDK for authoring WASM capabilities
 examples/        WASM capability examples (excluded from workspace, built with cargo-component)
@@ -319,8 +323,12 @@ julia/           Julia v1 institutions + substrate host (D27)
   institutions/      Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP
   comorphisms/       Catalyst → DiffEq, Symbolics → JuMP, Symbolics → IntervalArithmetic
   research/          Experimental institutions
+lean/            Lean 4 verification institution worker + shared support (D28 / D30 / D40)
+  runtime-worker/    Authoring-side Lake package: `lean4export` against the pinned LeanEnvironment image
+  common/            Shared Lean helpers (mirror plumbing, EigeniusFFI surface)
+  research/          Experimental proofs and mirror-validation fixtures
 cli/             Command-line interface (load, validate, query, run, serve, tasks, capability,
-                  db {branch,tag,merge,consolidate,gc,export,stats}, capability install, ...)
+                  db {branch,tag,merge,consolidate,gc,export,stats}, mirror / env / institution, ...)
 ontologies/      Ontology definitions (chain-bootstrapped on startup)
   core/            Core ontology — self-describing bootstrap (incl. MergeComorphism + MergeResolutionRecord)
   program/         Program ontology — expression classes, Lambda, Pi, Components
@@ -333,19 +341,23 @@ ontologies/      Ontology definitions (chain-bootstrapped on startup)
 notebooks/       React notebook SPA (D22) — bundled into the orchestrator image
   src/             Source: cell editors + output renderers + workspace rail (Branches/Tags/
                    History/Merge/Compaction/GC/Layer/Institutions/Health/Topology destinations)
-  examples/        Bundled notebooks (patent-analysis, kinase-institutions, D36 merge tests)
+  examples/        Bundled notebooks (patent-analysis, kinase-institutions, D36 merge tests, lean-verification)
   e2e/             Playwright specs (patent-demo, kinase-charts)
 clients/
   eigenius-ts/     `@eigenius/client` — TypeScript SDK that wraps the orchestrator's RPC surface
                    (incl. branch/tag/merge/preview/submit surfaces with witness-search-branches)
 proto/           gRPC protobuf definitions
 wit/             WIT world definitions for D14 WASM institutions + capability components
-orchestration/   Deno/TypeScript orchestration layer (LLM dispatch, MCP server, notebook static-file route,
-                  substrate addon)
-deploy/          Dockerfiles + Azure ContainerApps Bicep IaC
-demo/            End-to-end demo scripts (`run.sh`, `patent/run.sh`, `wasm/run.sh`, …)
+orchestration/   Deno/TypeScript orchestration layer (LLM dispatch, MCP server, notebook static-file route)
+  src/                       Orchestrator source
+  runtime-substrate-native/  napi-rs addon embedding the Rust runtime substrate inside Deno
+  native/                    Native build outputs
+  tests/                     Deno integration tests
+deploy/          Dockerfiles (kernel, orchestration) + Azure ContainerApps Bicep IaC
+demo/            End-to-end demo scripts (`run.sh`, `patent/run.sh`, `wasm/run.sh`,
+                  `d41-commit-pipeline/run.sh`, …)
 docs/            Documentation
-  design/          Design documents (D1–D38; the kernel/UX surface specs)
+  design/          Design documents (D1–D41) + architecture-v0.3 + implementation plan
   guides/          User guides — platform (18 chapters), ESL, EigenQL, formula, references
   notes/           Working notes (e.g. manual-test scenarios)
   references/      BibTeX bibliography
@@ -602,33 +614,92 @@ cargo run -p eigenius-cli -- --endpoint http://localhost:50051 inspect "urn:eige
 
 ## Design Documents
 
+The full set lives under [docs/design/](docs/design/); the index below groups the
+load-bearing specs by area. Cross-cutting roots:
+**[Architecture v0.3](docs/design/architecture-v0.3.md)** (authoritative
+system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)**
+(phased build plan).
+
+**Foundations**
+
 | Document | Description |
 |----------|-------------|
-| [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON spec: IRI identity, three-layer type system, validation rules, canonical form |
-| [D2: EigenQL Specification](docs/design/d2-eigenql-specification.md) | EigenQL spec: typed stratified Datalog, DEFINE, aggregation, full grammar |
-| [D3: Program Model](docs/design/d3-program-model.md) | Program expression language, component model, scheduling, ESL surface syntax |
-| [D4: Storage Key Encoding](docs/design/d4-storage-key-encoding.md) | Key encoding for RocksDB/TiKV, column families, index layout |
-| [D5: gRPC API Specification](docs/design/d5-grpc-api-specification.md) | RPC definitions, streaming query, error codes, CLI/orchestration integration |
-| [D6: Execution Architecture](docs/design/d6-execution-architecture.md) | Kernel-orchestrator boundary, activity dispatch, MCP server placement |
+| [D1: Eigon Serialization Format](docs/design/d1-eigon-serialization-format.md) | Eigon-JSON / CBOR: IRI identity, three-layer type system, canonical form |
+| [D2: EigenQL Specification](docs/design/d2-eigenql-specification.md) | Typed stratified Datalog: MATCH / DEFINE / FIBER, aggregation, full grammar |
+| [D3: Program Model](docs/design/d3-program-model.md) | Program expression language, component model, scheduling |
+| [D5: gRPC API Specification](docs/design/d5-grpc-api-specification.md) | RPC surface, streaming query, error model, CLI/orchestration integration |
+| [D6: Execution Architecture](docs/design/d6-execution-architecture.md) | Kernel ↔ orchestrator boundary, activity dispatch, MCP placement |
+| [D7: ESL Surface Syntax](docs/design/d7-esl-surface-syntax.md) | Two-layer design: HCL-style structural blocks + ML-style expressions |
+
+**Type theory and programs**
+
+| Document | Description |
+|----------|-------------|
 | [D6b: Reasoning Trace Schema](docs/design/d6b-reasoning-trace-schema.md) | Trace classes, provenance chain, epistemic status, universe stratification |
-| [D7: ESL Surface Syntax](docs/design/d7-esl-surface-syntax.md) | Two-layer design: HCL-style structural + ML-style expressions |
-| [D8: CompleteJson Component](docs/design/d8-complete-json-component.md) | Structured LLM output via JSON Schema from ontology classes |
-| [D9: NbE Unification](docs/design/d9-nbe-unification-and-type-extensions.md) | Capability modes, type theory extensions, ground type resolution, trace storage |
-| [D11: Codata and Streams](docs/design/d11-codata-streams.md) | Coinductive types, stream semantics, tasks as codata, guardedness checking |
-| [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | WASM module lifecycle, host imports, capability levels, fuel/memory limits |
-| [D13: Durable Kernel State](docs/design/d13-durable-kernel-state.md) | `serve --db` flag, seeded bootstrap, drift-refusal, restart re-registration |
-| [D14: Institution Realisation](docs/design/d14-institution-realisation.md) | Institution trait (extract_typed/reify/query), ontology-first declarations, triadic comorphisms, Verdict shape, dispatch model. Supersedes D10. |
-| [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` layer-chain resolution, `CheckCtx`, inference-mode rules |
-| [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized termination via bounded binders, self-referential parameterised codata, productivity by typing |
+| [D8: CompleteJson Component](docs/design/d8-complete-json-component.md) | Structured LLM output via JSON Schema derived from ontology classes |
+| [D9: NbE Unification & Type Extensions](docs/design/d9-nbe-unification-and-type-extensions.md) | Mini-TT NbE, ground-type resolution, capability modes, trace storage |
+| [D11: Codata and Streams](docs/design/d11-codata-streams.md) | Coinductive types, tasks as codata, guardedness checking |
+| [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` chain resolution, `CheckCtx`, inference-mode rules |
+| [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized-termination binders, self-referential parameterised codata |
+| [D32: Chain-Mirrored Mini-TT Inductives](docs/design/d32-chain-mirrored-mini-tt-inductives.md) | `formulas:FormulaTerm` and the ESL `formula(...)` Pratt-parsed sublanguage |
+
+**Storage, lifecycle, commit**
+
+| Document | Description |
+|----------|-------------|
+| [D4: Storage Key Encoding](docs/design/d4-storage-key-encoding.md) | Key encoding for RocksDB / TiKV, column families, index layout |
+| [D13: Durable Kernel State](docs/design/d13-durable-kernel-state.md) | `serve --db`, seeded bootstrap, drift-refusal, restart re-registration |
 | [D21: Task Traces and Checkpointing](docs/design/d21-task-traces-and-checkpointing.md) | Per-task trace keys, checkpoint primitive, resume sweep, task RPCs |
-| [D22: Notebook UX and TypeScript SDK](docs/design/d22-notebook-and-typescript-sdk.md) | The React notebook, the `Eigen` SDK, the notebook ontology, content-addressed publish |
-| [D23: Out-of-Core Layer Architecture](docs/design/d23-out-of-core-layer-architecture.md) | Phase 14: topology/content split, per-layer blooms, branches + CAS, multi-parent merges, GC, per-layer triple index |
-| [D24: Schema Versioning Policy](docs/design/d24-schema-versioning.md) | On-disk schema versioning: kernel `SCHEMA_VERSION`, migration framework, boot-time check, contributor checklist. Companion: [Schema Changelog](docs/design/schema-changelog.md). |
-| [Implementation Plan](docs/design/implementation-plan.md) | Phased build plan (Phases 0–15) |
-| [Architecture v0.3](docs/design/architecture-v0.3.md) | Full architecture specification |
-| [D26: Runtime Substrate](docs/design/d26-runtime-substrate.md) | Language-agnostic substrate for embedding scientific-computation runtimes (Julia, Python, R, …) into Eigenius. Resource classes, image-vs-graph boundary, container-digest-anchored deployment, mirror generators. |
-| [D27: Julia Institutions](docs/design/d27-julia-institutions.md) | Julia as the first runtime-substrate instance, plus three reference institutions wrapping Julia libraries with their own fibers: `Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`. The future Lean / Julia bridge. |
-| [D28: Lean 4 as Verification Institution](docs/design/d28-lean-4-as-institution.md) | Integration plan for the Lean 4 proof checker as an Eigenius institution (uses [nanoda_lib](https://github.com/ammkrn/nanoda_lib)) |
+| [D23: Out-of-Core Layer Architecture](docs/design/d23-out-of-core-layer-architecture.md) | Topology/content split, per-layer blooms, CAS, GC, per-layer triple index |
+| [D24: Schema Versioning Policy](docs/design/d24-schema-versioning.md) | On-disk `SCHEMA_VERSION`, migration framework, boot-time check (+ [Schema Changelog](docs/design/schema-changelog.md)) |
+| [D25: Chain Consolidation](docs/design/d25-chain-consolidation.md) | Background compaction of long chain spans into single resolved layers |
+| [D33: Partial-Order Chains](docs/design/d33-partial-order-chains.md) | Lifting the chain abstraction from a linear DAG to a partial order |
+| [D41: Commit Pipeline](docs/design/d41-commit-pipeline.md) | Single-layer pipeline + multi-layer orchestrator, FIFO drain, emission policy |
+
+**Layer reconciliation and merge**
+
+| Document | Description |
+|----------|-------------|
+| [D20: Layer Reconciliation](docs/design/d20-layer-reconciliation.md) | Witness / Rename / SchemaQuotient / Restructure strategies, conflict surface |
+| [D36: Merge Resolution UX](docs/design/d36-merge-resolution-ux.md) | Notebook merge flow: six-state machine, cascade gate, on-rail workspace |
+| [D37: Lambda Surface and Typed Merge Comorphisms](docs/design/d37-lambda-surface-and-typed-merge-comorphisms.md) | `merge_comorphism` ESL surface, Mini-TT lambda well-typedness |
+| [D38: Merge Provenance and Witness Discovery](docs/design/d38-merge-provenance-and-witness-discovery.md) | Chain-resident `MergeResolutionRecord`, off-span witness search |
+
+**Institutions and verification**
+
+| Document | Description |
+|----------|-------------|
+| [D14: Institution Realisation](docs/design/d14-institution-realisation.md) | `Institution` trait (extract_typed / reify / query), ontology-first declarations, triadic comorphisms, `Verdict` dispatch. Supersedes D10. |
+| [D26: Runtime Substrate](docs/design/d26-runtime-substrate.md) | Language-agnostic substrate for embedded scientific runtimes (Julia, Python, …); image-vs-graph boundary, digest-anchored deployment |
+| [D27: Julia Institutions](docs/design/d27-julia-institutions.md) | First runtime-substrate instance with five reference institutions (Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP) |
+| [D28: Lean 4 as Verification Institution](docs/design/d28-lean-4-as-institution.md) | Lean 4 proof checker as a verification institution via [`nanoda_lib`](https://github.com/ammkrn/nanoda_lib) |
+| [D29: Eigon → Julia Mirror Spec](docs/design/d29-eigon-julia-mirror-spec.md) | Mirror generator: closure walker, content-addressed Julia packages |
+| [D30: Eigon → Lean Faithful Translation](docs/design/d30-eigon-to-lean-faithful-translation.md) | `LeanPackageMirror`, audit anchor, baked `EigeniusFFI` Lake package |
+| [D31: External Institution Lifecycle](docs/design/d31-external-institution-lifecycle.md) | `mirror create → env build → env create → institution install` lifecycle |
+| [D40: Chain-Mirrored Lean Expressions](docs/design/d40-chain-mirrored-lean-expressions.md) | `lean:LeanExpr` / `LeanLevel` / `LeanName` inductives for verifiable propositions |
+
+**WASM extensibility**
+
+| Document | Description |
+|----------|-------------|
+| [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | WASM module lifecycle, host imports, capability levels, fuel/memory limits |
+| [D12b: Orchestrator WASM Plan](docs/design/d12b-orchestrator-wasm-plan.md) | WASM dispatch model on the orchestrator side |
+
+**Notebook, SDK, and workspace**
+
+| Document | Description |
+|----------|-------------|
+| [D22: Notebook UX and TypeScript SDK](docs/design/d22-notebook-and-typescript-sdk.md) | React notebook, `@eigenius/client`, notebook ontology, content-addressed publish |
+| [D34: Notebook Chain Workspace](docs/design/d34-notebook-chain-workspace.md) | Workspace rail destinations (branches / tags / history / merge / GC) |
+
+**Domain and vision**
+
+| Document | Description |
+|----------|-------------|
+| [D35: Software Engineering Knowledge Graph](docs/design/d35-software-engineering-knowledge-graph.md) | Applying the platform to its own codebase as a worked domain |
+| [Manifesto](docs/design/manifesto.md) | Project ethos and posture |
+| [Vision](docs/design/vision.md) | Long-horizon target for the platform |
+| [Life Science Requirements](docs/design/life-science-requirements.md) | Driving requirements from clinical / translational use cases |
 
 ## Contributing
 
