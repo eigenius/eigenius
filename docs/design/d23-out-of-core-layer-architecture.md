@@ -3,11 +3,11 @@
 **Status:** Implemented (Phase 14; topology/content split, branches + CAS, GC, per-layer triple index)
 **Phase:** 14
 **Supersedes:** the in-memory layer chain established in Phase 0; the linear chain assumption baked into D13's persistent store
-**Companion docs:** D13 (durable kernel state, the atomicity guarantees Phase 14 inherits), D20 (layer reconciliation, Phase 15, uses Phase 14's branching primitive), D24 (out-of-core query execution, Phase 16, builds on Phase 14's storage abstractions)
+**Companion docs:** D13 (durable kernel state, the atomicity guarantees Phase 14 inherits), D20 (layer reconciliation, Phase 15, uses Phase 14's branching primitive), D42 (out-of-core query execution, Phase 16, builds on Phase 14's storage abstractions)
 
 ## 1. Summary
 
-Phase 14 lifts the kernel's working-set bound from "graph size" to "cache size" by separating **layer topology** (small, cheap, always in memory) from **resource content** (potentially large, paged through a bounded cache from the persistent backend). On top of that split, the layer model generalises from a single chain to a **DAG with named branches**, supports **multi-session writes** (one writer per branch, any reader anywhere), and gains **lifecycle operations**: reachability-based **garbage collection** with trace pinning, and explicit **branch pruning**. The EigenQL evaluator's pattern-matching path becomes **index-driven** through the previously-stubbed SPO/POS/OPS indexes; result-set processing remains in memory (operator-level spill is D24).
+Phase 14 lifts the kernel's working-set bound from "graph size" to "cache size" by separating **layer topology** (small, cheap, always in memory) from **resource content** (potentially large, paged through a bounded cache from the persistent backend). On top of that split, the layer model generalises from a single chain to a **DAG with named branches**, supports **multi-session writes** (one writer per branch, any reader anywhere), and gains **lifecycle operations**: reachability-based **garbage collection** with trace pinning, and explicit **branch pruning**. The EigenQL evaluator's pattern-matching path becomes **index-driven** through the previously-stubbed SPO/POS/OPS indexes; result-set processing remains in memory (operator-level spill is D42).
 
 This document specifies the data model, the storage layout, the public Rust traits and gRPC additions, and a one-time migration path from the Phase 9a layout. Phase 15 (merge) and Phase 16 (operator spill) are downstream and lean on the structures here without modifying them.
 
@@ -39,7 +39,7 @@ The fix is structural: stop holding all resource content in memory; stop assumin
 **Non-goals:**
 
 - Branch merging / reconciliation. (D20 / Phase 15.)
-- Operator-level spill in EigenQL — joins, sorts, group-by accumulators stay in RAM. (D24 / Phase 16.)
+- Operator-level spill in EigenQL — joins, sorts, group-by accumulators stay in RAM. (D42 / Phase 16.)
 - Distributed storage or read replicas. (TiKV deployment is a parallel story, not impacted here.)
 - Online schema migration via comorphism. (D20's `migrate`.)
 - Compression of resource content beyond what RocksDB already provides.
@@ -628,7 +628,7 @@ pub trait TripleIndex: Send + Sync {
 
 #### Cost-model awareness
 
-Deferred. The three hot sites have one bound predicate-object pair each, so there's no choice between probe orderings. A v2 cost model becomes useful once SPO/OPS land and the planner has to pick the most selective probe — D24's cardinality estimates handle that case.
+Deferred. The three hot sites have one bound predicate-object pair each, so there's no choice between probe orderings. A v2 cost model becomes useful once SPO/OPS land and the planner has to pick the most selective probe — D42's cardinality estimates handle that case.
 
 ## 6. Storage layout
 
@@ -1007,7 +1007,7 @@ Primitive combinators:
 - D2 — EigenQL Specification (the operator surface that §5.9 preserves)
 - D6b — Reasoning Trace Schema (the trace structure that §5.7's pinning rules respect)
 - D20 (forthcoming, Phase 15) — Layer Reconciliation via Comorphisms (the witnessed-merge case Phase 14's trivial merge complements)
-- D24 (forthcoming, Phase 16) — Out-of-Core Query Execution
+- D42 (forthcoming, Phase 16) — Out-of-Core Query Execution
 
 Source code touchpoints (entering Phase 14):
 
