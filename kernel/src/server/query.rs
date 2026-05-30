@@ -56,6 +56,8 @@ impl EigeniusService {
                 ctx: Some(&ctx),
                 retrieval: None,
                 embedders: None,
+                embedding_cache: None,
+                vector_segment_cache: None,
             };
 
             match query::execute_with_into(&req.eigenql, &layer, runtime) {

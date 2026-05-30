@@ -18,6 +18,7 @@
 
 pub mod ast;
 pub mod document;
+pub mod embed_infer;
 pub mod error;
 pub mod evaluate;
 pub mod functions;
@@ -26,6 +27,7 @@ pub mod parser;
 pub mod stratify;
 pub mod text;
 pub mod type_check;
+pub mod vector;
 
 use crate::layer::Layer;
 use crate::observability::{field, operation};
@@ -102,6 +104,17 @@ pub fn execute_with_into(
     let type_errors = type_check::type_check(&program, layer);
     if !type_errors.is_empty() {
         return Err(type_errors);
+    }
+
+    // 4b. D43 §4.4 — EMBED model inference. Rewrites 1-arg
+    //     EMBED("text") calls into 2-arg EMBED("text", "<model>")
+    //     using the surrounding VECTOR_NEAR / VECTOR_SIM context's
+    //     active VectorIndex `model_iri`. The evaluator never sees
+    //     the 1-arg form.
+    let mut program = program;
+    let infer_errors = embed_infer::infer_embed_models(&mut program, layer);
+    if !infer_errors.is_empty() {
+        return Err(infer_errors);
     }
 
     // 5. Evaluate — row resources with synthesized Property IRIs;

@@ -23,6 +23,11 @@ regex = "1"
 rust-stemmers = "1"
 sha2 = "0.10"
 unicode-segmentation = "1"
+# D43 §3.4 / M5.9 — SIMD distance kernels. `wide` is a stable-Rust
+# (no nightly) f32x8 wrapper with AVX-2 / NEON / SSE2 fallback paths
+# selected at compile time by `target_feature`. Roughly 4–8× faster
+# than the scalar reference on a 768-dim cosine probe.
+wide = "0.7"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

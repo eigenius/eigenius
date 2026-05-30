@@ -22,6 +22,7 @@
 
 pub mod component;
 pub mod embedder;
+pub mod embedding_cache;
 pub mod eval_io;
 pub mod expr;
 pub mod ground;

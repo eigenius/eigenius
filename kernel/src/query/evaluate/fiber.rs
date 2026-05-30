@@ -62,12 +62,25 @@ pub struct FiberRuntime<'a> {
     /// back to the row's source subject and dispatch the
     /// `run_text_search` probe against the layer's `TextIndex`. `None`
     /// for callers that don't use retrieval primitives.
-    pub retrieval: Option<&'a super::retrieval::TextRetrievalContext<'a>>,
+    pub retrieval: Option<&'a super::retrieval::RetrievalContext<'a>>,
     /// D43 §3.5 / §5.2 — registry of Embedder Components dispatched
     /// by the `EMBED` primitive (M4). `None` when EMBED is not in
     /// use; calls to EMBED then fail at evaluation with a clear
     /// "no embedders registered" diagnostic.
     pub embedders: Option<&'a crate::program::embedder::EmbedderRegistry>,
+    /// D43 §5.3 — content-addressed embedding cache shared between
+    /// query-side `EMBED` calls (M4) and the indexing-side sweep
+    /// (M5, deferred). `None` means every `EMBED` dispatch goes
+    /// through to the Embedder; for tests that's the right default,
+    /// for production a single long-lived cache pins repeat-embed
+    /// cost to a hash lookup.
+    pub embedding_cache: Option<&'a crate::program::embedding_cache::EmbeddingCache>,
+    /// D43 §5.9 — vector SegmentCache shared across `VECTOR_NEAR` /
+    /// `VECTOR_SIM` probes (M5.6). `None` means each probe goes
+    /// through to the `VectorIndex` backend; production callers
+    /// pass a kernel-shared cache so repeat probes against the same
+    /// `(index_iri, layer_id)` are an in-memory `BTreeMap` lookup.
+    pub vector_segment_cache: Option<&'a crate::query::vector::cache::SegmentCache>,
 }
 
 /// Resources produced at runtime by FIBER clauses. They live for the

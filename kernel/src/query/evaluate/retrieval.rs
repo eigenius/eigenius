@@ -37,7 +37,10 @@
 //! once per program; threaded through `FiberRuntime::retrieval` into
 //! the expression evaluator.
 
-use crate::layer::{resolve_active_text_indexes, ActiveTextIndex, Layer};
+use crate::layer::{
+    resolve_active_text_indexes, resolve_active_vector_indexes, ActiveTextIndex, ActiveVectorIndex,
+    Layer,
+};
 use crate::ontology::iri::Iri;
 use crate::query::ast::{Clause, MatchPart, Pattern, Program, ValueOrVariable};
 use crate::query::text::analyzer::registry;
@@ -59,7 +62,7 @@ pub(super) struct PropertyBindingInfo {
 /// Query-scoped retrieval state. `'a` borrows from the program and
 /// the layer; the inner `RefCell` exists so per-row evaluation can
 /// memoise probe results without needing `&mut`.
-pub struct TextRetrievalContext<'a> {
+pub struct RetrievalContext<'a> {
     /// `?var → (subject_variable, property_iri)` for every property-
     /// bound variable in the program (DEFINE bodies + main query).
     /// Empty for queries that don't reference any property-bound
@@ -70,6 +73,11 @@ pub struct TextRetrievalContext<'a> {
     property_bindings: BTreeMap<String, PropertyBindingInfo>,
     /// Snapshot of the active TextIndex set at the query head.
     text_indexes: Vec<ActiveTextIndex>,
+    /// Snapshot of the active VectorIndex set at the query head.
+    /// Used by `VECTOR_NEAR` / `VECTOR_SIM` (M5.5) to resolve a
+    /// property-bound `?var` to its active VectorIndex Resource —
+    /// same shape as `text_indexes`.
+    vector_indexes: Vec<ActiveVectorIndex>,
     /// Per-`(index_iri, query)` memoisation. `Arc<Vec<…>>` so
     /// multiple TEXT_MATCH / TEXT_SCORE calls in the same query
     /// share the same allocation across many row evaluations.
@@ -87,7 +95,7 @@ pub(super) enum TextSearchOutcome {
     Err(TextSearchError),
 }
 
-impl<'a> TextRetrievalContext<'a> {
+impl<'a> RetrievalContext<'a> {
     /// Build the retrieval context for `program` against `layer`.
     /// Walks every MATCH pattern (both DEFINE bodies and the main
     /// query body) and records each property-bound variable,
@@ -100,12 +108,31 @@ impl<'a> TextRetrievalContext<'a> {
             collect_property_bindings(part, layer, &mut property_bindings);
         }
         let text_indexes = resolve_active_text_indexes(layer);
+        let vector_indexes = resolve_active_vector_indexes(layer);
         Self {
             property_bindings,
             text_indexes,
+            vector_indexes,
             cache: RefCell::new(BTreeMap::new()),
             layer,
         }
+    }
+
+    /// Find the active VectorIndex Resource targeting `property_iri`.
+    /// Returns `None` if no active VectorIndex covers the property —
+    /// the typechecker has already enforced this is not the case
+    /// for any `VECTOR_NEAR` / `VECTOR_SIM` call that reaches eval.
+    pub(super) fn active_vector_index_for(&self, property_iri: &Iri) -> Option<&ActiveVectorIndex> {
+        self.vector_indexes
+            .iter()
+            .find(|vi| vi.target_property == *property_iri)
+    }
+
+    /// Borrow of the layer the context was constructed against.
+    /// Vector-retrieval needs it to issue probes (the text path
+    /// also uses it inside `probe()`).
+    pub(super) fn layer(&self) -> &'a Layer {
+        self.layer
     }
 
     /// Look up the binding info for a property-bound variable.
@@ -472,6 +499,220 @@ mod tests {
         assert!(
             saw_doc1 && saw_positive_score,
             "row should reference doc1 with positive score"
+        );
+    }
+
+    // ─── D43 §3.4 / §4.5 — VECTOR_NEAR / VECTOR_SIM e2e tests ─────
+
+    /// Build a layer chain with a string Property + a `core:VectorIndex`
+    /// Resource targeting it + N Documents whose body strings each
+    /// embed under the dummy embedder to a distinct vector. Run the
+    /// sweep so the vector segments are populated, returning the
+    /// head + EmbedderRegistry the evaluator needs.
+    fn build_vector_corpus(
+        n_docs: usize,
+    ) -> (
+        Arc<crate::layer::Layer>,
+        crate::program::embedder::EmbedderRegistry,
+    ) {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let ctx = bootstrap().expect("bootstrap");
+        let parent = Arc::clone(ctx.head());
+        let mut b = LayerBuilder::new("vec-corpus", Some(parent));
+
+        let body_iri = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        let mut body_prop = Resource::new(iri(body_iri));
+        body_prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        body_prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        b.add_resource(body_prop).unwrap();
+
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi_body"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        b.add_resource(vi).unwrap();
+
+        for i in 0..n_docs {
+            let mut d = Resource::new(iri(&format!("urn:eigenius:test:doc{i}")));
+            d.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            d.set(iri(body_iri), Value::String(format!("text {i}")));
+            b.add_resource(d).unwrap();
+        }
+
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+        sweep_layer_vectors(&layer, &reg, None).expect("sweep");
+        (layer, reg)
+    }
+
+    #[test]
+    fn vector_near_returns_top_k_subjects() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_vector_corpus(5);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        // EMBED("text 2") matches doc2's exact body, so doc2 should
+        // be the top-1 hit. k=1 → only doc2 satisfies VECTOR_NEAR.
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("text 2", "urn:eigenius:embed:dummy:v1"), 1)
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed");
+        let subjects = row_subjects(&document);
+        assert_eq!(
+            subjects,
+            vec!["urn:eigenius:test:doc2".to_string()],
+            "VECTOR_NEAR k=1 should return only doc2; got {subjects:?}"
+        );
+    }
+
+    #[test]
+    fn vector_sim_returns_one_for_exact_match() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_vector_corpus(3);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        // EMBED("text 0") is doc0's body verbatim → cosine similarity
+        // should be 1.0 for doc0 and < 1.0 for the others.
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            RETURN [] { d: ?d, s: VECTOR_SIM(?vec, EMBED("text 0", "urn:eigenius:embed:dummy:v1")) }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed");
+        let mut scores: BTreeMap<String, f64> = BTreeMap::new();
+        for row in data_rows(&document) {
+            let mut subj: Option<String> = None;
+            let mut sc: Option<f64> = None;
+            for val in row.properties().values() {
+                if let Some(s) = val.as_iri_str() {
+                    if s.starts_with("urn:eigenius:test:doc") {
+                        subj = Some(s.to_string());
+                    }
+                }
+                if let Value::Float(f) = val {
+                    sc = Some(*f);
+                }
+            }
+            if let (Some(d), Some(s)) = (subj, sc) {
+                scores.insert(d, s);
+            }
+        }
+        let doc0 = scores
+            .get("urn:eigenius:test:doc0")
+            .copied()
+            .expect("doc0 score present");
+        let doc1 = scores
+            .get("urn:eigenius:test:doc1")
+            .copied()
+            .expect("doc1 score present");
+        let doc2 = scores
+            .get("urn:eigenius:test:doc2")
+            .copied()
+            .expect("doc2 score present");
+        assert!(
+            (doc0 - 1.0).abs() < 1e-5,
+            "doc0 should score ~1.0; got {doc0}"
+        );
+        assert!(doc1 < doc0, "doc1 ({doc1}) should be below doc0 ({doc0})");
+        assert!(doc2 < doc0, "doc2 ({doc2}) should be below doc0 ({doc0})");
+    }
+
+    #[test]
+    fn vector_near_with_inferred_embed_model_works_end_to_end() {
+        // The user writes `EMBED("text 0")` without an explicit
+        // model IRI. The §4.4 inference pass copies the active
+        // VectorIndex's model_iri into the call before evaluation;
+        // the row matches doc0 exactly so the top-1 hit is doc0.
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_vector_corpus(3);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("text 0"), 1)
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed under inferred EMBED model");
+        let subjects = row_subjects(&document);
+        assert_eq!(
+            subjects,
+            vec!["urn:eigenius:test:doc0".to_string()],
+            "inferred-model EMBED should still rank doc0 first; got {subjects:?}"
+        );
+    }
+
+    #[test]
+    fn vector_near_filters_consistently_with_vector_sim() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        // VECTOR_NEAR(k=2) ∩ VECTOR_SIM(>0.99) under cosine: only
+        // documents with cosine similarity within the top-2 *and*
+        // numerically close to 1.0 should remain. The dummy
+        // embedder is deterministic, so a query for `"text 1"`
+        // returns exactly doc1 in the top-1 / top-2.
+        let (layer, embedders) = build_vector_corpus(4);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("text 1", "urn:eigenius:embed:dummy:v1"), 2)
+              AND VECTOR_SIM(?vec, EMBED("text 1", "urn:eigenius:embed:dummy:v1")) > 0.99
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed");
+        let subjects = row_subjects(&document);
+        assert_eq!(
+            subjects,
+            vec!["urn:eigenius:test:doc1".to_string()],
+            "exactly doc1 should survive both filters; got {subjects:?}"
         );
     }
 }

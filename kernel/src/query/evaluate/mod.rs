@@ -69,7 +69,7 @@ pub fn evaluate(
     // `TEXT_SCORE` calls can resolve their property-bound `?var`
     // back to a source subject + active TextIndex and memoise the
     // index probe across rows.
-    let retrieval = retrieval::TextRetrievalContext::new(program, layer);
+    let retrieval = retrieval::RetrievalContext::new(program, layer);
     let runtime = FiberRuntime {
         retrieval: Some(&retrieval),
         ..runtime

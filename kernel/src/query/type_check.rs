@@ -18,7 +18,10 @@
 //! Checks variable binding, USING resolution, and aggregate/GROUP BY consistency.
 
 use crate::institution::registry::{DispatchRole, InstitutionIndex};
-use crate::layer::{resolve_active_text_indexes, ActiveTextIndex, Layer};
+use crate::layer::{
+    resolve_active_text_indexes, resolve_active_vector_indexes, ActiveTextIndex, ActiveVectorIndex,
+    Layer,
+};
 use crate::ontology::iri::Iri;
 use crate::ontology::well_known as wk;
 use crate::query::ast::*;
@@ -146,6 +149,41 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     for def in &program.definitions {
         for cond in &def.body.conditions {
             check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
+        }
+    }
+
+    // D43 §4.5 — VECTOR_NEAR / VECTOR_SIM typing rules. Same shape
+    // as the text-retrieval pass above, applied to all expression
+    // positions that can contain a retrieval call. v1 enforces the
+    // structural rules (arity, property-bound `?var`, active Index,
+    // K literal-integer); the cross-call model agreement and EMBED
+    // model inference (§4.4) are the M5 follow-up.
+    let vector_indexes = resolve_active_vector_indexes(layer);
+    for cond in &program.query.body.conditions {
+        check_vector_retrieval(cond, &prop_var_index, &vector_indexes, &mut errors);
+    }
+    for item in &program.query.result {
+        check_vector_retrieval(
+            &item.expression,
+            &prop_var_index,
+            &vector_indexes,
+            &mut errors,
+        );
+    }
+    for expr in &program.query.group_by {
+        check_vector_retrieval(expr, &prop_var_index, &vector_indexes, &mut errors);
+    }
+    for item in &program.query.order_by {
+        check_vector_retrieval(
+            &item.expression,
+            &prop_var_index,
+            &vector_indexes,
+            &mut errors,
+        );
+    }
+    for def in &program.definitions {
+        for cond in &def.body.conditions {
+            check_vector_retrieval(cond, &prop_var_index, &vector_indexes, &mut errors);
         }
     }
 
@@ -1204,6 +1242,143 @@ fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
             .map(|iri| iri == string_iri)
             .unwrap_or(false),
         None => false,
+    }
+}
+
+// ─── D43 §4.5 — VECTOR_NEAR / VECTOR_SIM typing rules ────────────
+
+/// Recursively walk `expr`, checking every `VECTOR_NEAR` /
+/// `VECTOR_SIM` call against the schema view per D43 §4.5.
+fn check_vector_retrieval(
+    expr: &Expression,
+    prop_var_index: &BTreeMap<String, PropertyBinding>,
+    vector_indexes: &[ActiveVectorIndex],
+    errors: &mut Vec<QueryError>,
+) {
+    match expr {
+        Expression::FunctionCall { name, args } => {
+            if name == "VECTOR_NEAR" || name == "VECTOR_SIM" {
+                check_vector_retrieval_call(name, args, prop_var_index, vector_indexes, errors);
+            }
+            for a in args {
+                check_vector_retrieval(a, prop_var_index, vector_indexes, errors);
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            check_vector_retrieval(left, prop_var_index, vector_indexes, errors);
+            check_vector_retrieval(right, prop_var_index, vector_indexes, errors);
+        }
+        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
+            check_vector_retrieval(operand, prop_var_index, vector_indexes, errors);
+        }
+        Expression::Aggregate { arg, .. } => {
+            check_vector_retrieval(arg, prop_var_index, vector_indexes, errors);
+        }
+        Expression::Array(items) => {
+            for it in items {
+                check_vector_retrieval(it, prop_var_index, vector_indexes, errors);
+            }
+        }
+        Expression::Object(pairs) => {
+            for (_, v) in pairs {
+                check_vector_retrieval(v, prop_var_index, vector_indexes, errors);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// v1 positional signatures:
+///   VECTOR_NEAR(?vec, query_vec, K)    — Boolean
+///   VECTOR_SIM(?vec, query_vec)        — Float
+///
+/// `?vec` must be a property-bound variable whose source property
+/// has an active VectorIndex at this head. `query_vec` is allowed
+/// to be any expression — full Vector-type tracking (so model and
+/// dim of `query_vec` match the active VectorIndex's declared
+/// values) is the M5 follow-up. `K` must be a positive integer
+/// literal — the planner needs it statically (D43 §4.5).
+fn check_vector_retrieval_call(
+    fn_name: &str,
+    args: &[Expression],
+    prop_var_index: &BTreeMap<String, PropertyBinding>,
+    vector_indexes: &[ActiveVectorIndex],
+    errors: &mut Vec<QueryError>,
+) {
+    let expected_arity = if fn_name == "VECTOR_NEAR" { 3 } else { 2 };
+    if args.len() != expected_arity {
+        errors.push(QueryError::type_check(
+            "vector_retrieval_arity",
+            format!(
+                "{fn_name} requires exactly {expected_arity} arguments \
+                 (got {} arguments)",
+                args.len()
+            ),
+        ));
+        return;
+    }
+
+    // Argument 0 — must be a `?var` bound by a property pattern.
+    let var = match &args[0] {
+        Expression::Variable(v) => v,
+        _ => {
+            errors.push(QueryError::type_check(
+                "vector_retrieval_arg0_not_variable",
+                format!(
+                    "{fn_name} first argument must be a property-bound variable (e.g. `?vec` \
+                     from `MATCH Class(?c) {{ embedding: ?vec }}`)"
+                ),
+            ));
+            return;
+        }
+    };
+    let binding = match prop_var_index.get(&var.name) {
+        Some(b) => b,
+        None => {
+            errors.push(QueryError::type_check(
+                "vector_retrieval_arg0_not_property_bound",
+                format!(
+                    "{fn_name} first argument `?{}` is not bound by a property pattern — \
+                     it must appear as the object of a `{{ prop: ?var }}` binding in MATCH",
+                    var.name
+                ),
+            ));
+            return;
+        }
+    };
+
+    let property_iri = &binding.property_iri;
+    if !vector_indexes
+        .iter()
+        .any(|vi| vi.target_property == *property_iri)
+    {
+        errors.push(QueryError::type_check(
+            "vector_retrieval_no_active_index",
+            format!(
+                "property `{}` has no active VectorIndex at this head — declare a \
+                 `core:VectorIndex` Resource targeting it before using {fn_name}",
+                property_iri.as_str()
+            ),
+        ));
+    }
+
+    // VECTOR_NEAR's K must be a positive integer literal.
+    if fn_name == "VECTOR_NEAR" {
+        match &args[2] {
+            Expression::Literal(Literal::Integer(k)) if *k > 0 => {}
+            Expression::Literal(Literal::Integer(_)) => {
+                errors.push(QueryError::type_check(
+                    "vector_retrieval_k_not_positive",
+                    "VECTOR_NEAR `k` argument must be a positive integer literal".to_string(),
+                ));
+            }
+            _ => {
+                errors.push(QueryError::type_check(
+                    "vector_retrieval_k_not_literal",
+                    "VECTOR_NEAR `k` argument must be a positive integer literal".to_string(),
+                ));
+            }
+        }
     }
 }
 

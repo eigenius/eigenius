@@ -69,6 +69,9 @@ pub(super) fn eval_expression(
             if name == "EMBED" {
                 return eval_embed(args, binding, layer, runtime);
             }
+            if name == "VECTOR_NEAR" || name == "VECTOR_SIM" {
+                return eval_vector_retrieval(name, args, binding, layer, runtime);
+            }
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
                 .map(|a| eval_expression(a, binding, layer, runtime))
@@ -401,7 +404,7 @@ pub(super) fn resolve_iri_string(
 ///    subject in the text-index hits, and what is its BM25 score?"*.
 /// 2. Look up the property-binding info (subject_variable name +
 ///    property IRI) from the query-scoped
-///    [`retrieval::TextRetrievalContext`].
+///    [`retrieval::RetrievalContext`].
 /// 3. Find the active TextIndex Resource for that property; run
 ///    (or fetch from the per-query cache) the index probe via
 ///    [`crate::query::text::search::run_text_search`].
@@ -539,6 +542,19 @@ fn eval_embed(
     let model_iri = Iri::parse(model_str)
         .map_err(|e| QueryError::evaluation(format!("EMBED model_iri is not a valid IRI: {e}")))?;
 
+    // D43 §5.3 — consult the content-addressed cache before paying
+    // for an Embedder dispatch. A hit on `(content_hash, model_iri)`
+    // returns the cached vector directly; a miss falls through to
+    // dispatch and inserts the result.
+    if let Some(cache) = runtime.embedding_cache {
+        if let Some(cached) = cache.get(text, &model_iri) {
+            return Ok(Value::Vector {
+                model_iri,
+                data: (*cached).clone(),
+            });
+        }
+    }
+
     let registry = runtime.embedders.ok_or_else(|| {
         QueryError::evaluation(
             "EMBED requires an EmbedderRegistry on the query runtime; \
@@ -564,7 +580,183 @@ fn eval_embed(
             declared_dim
         )));
     }
+
+    if let Some(cache) = runtime.embedding_cache {
+        cache.insert(text, &model_iri, std::sync::Arc::new(data.clone()));
+    }
     Ok(Value::Vector { model_iri, data })
+}
+
+/// D43 §3.4 / §4.5 — evaluate `VECTOR_NEAR` (→ Boolean) or
+/// `VECTOR_SIM` (→ Float) for one row's binding.
+///
+/// v1 positional signatures (kwarg `k:` is the M5 follow-up):
+///
+/// ```text
+/// VECTOR_NEAR(?vec, query_vec, K) : Boolean
+/// VECTOR_SIM(?vec, query_vec)     : Float
+/// ```
+///
+/// Steps:
+///
+/// 1. Resolve the property-binding for `?vec` via the query-scoped
+///    [`super::retrieval::RetrievalContext`] — same plumbing the
+///    text retrieval primitives use to map a property-bound `?var`
+///    back to its source subject variable.
+/// 2. Find the active VectorIndex Resource for the bound property.
+/// 3. Evaluate `query_vec` — must produce a [`Value::Vector`] (the
+///    canonical producer is `EMBED(...)`) whose `model_iri` and
+///    dimensionality match the active VectorIndex's declarations.
+/// 4. For VECTOR_NEAR: run [`crate::query::vector::search::top_k_subjects`]
+///    and check whether the row's source subject IRI is in the
+///    top-K hit set. For VECTOR_SIM: run
+///    [`crate::query::vector::search::subject_similarity`] for the
+///    row's source subject directly.
+fn eval_vector_retrieval(
+    fn_name: &str,
+    args: &[Expression],
+    binding: &Binding,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    use crate::query::vector::distance::Metric;
+    use crate::query::vector::search::{subject_similarity, top_k_subjects};
+
+    let retrieval = runtime.retrieval.ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} requires a query-scoped retrieval context; \
+             the evaluator entry point did not build one"
+        ))
+    })?;
+
+    let expected_arity = if fn_name == "VECTOR_NEAR" { 3 } else { 2 };
+    if args.len() != expected_arity {
+        return Err(QueryError::evaluation(format!(
+            "{fn_name} expects {expected_arity} arguments, got {}",
+            args.len()
+        )));
+    }
+
+    let var = match &args[0] {
+        Expression::Variable(v) => v,
+        _ => {
+            return Err(QueryError::evaluation(format!(
+                "{fn_name} first argument must be a property-bound variable"
+            )));
+        }
+    };
+    let binding_info = retrieval.binding_for(&var.name).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} argument `?{}` is not bound by a MATCH property pattern",
+            var.name
+        ))
+    })?;
+    let active = retrieval
+        .active_vector_index_for(&binding_info.property_iri)
+        .ok_or_else(|| {
+            QueryError::evaluation(format!(
+                "no active VectorIndex for property `{}` at this head",
+                binding_info.property_iri.as_str()
+            ))
+        })?;
+
+    // Evaluate the query vector. Must produce a `Value::Vector`
+    // whose model + dim match the active VectorIndex's declared
+    // values (defence in depth — the typechecker is the primary
+    // gate; this catches programmatic mis-construction).
+    let qv = eval_expression(&args[1], binding, layer, runtime)?;
+    let (qv_model, qv_data) = match qv.as_vector() {
+        Some(pair) => pair,
+        None => {
+            return Err(QueryError::evaluation(format!(
+                "{fn_name} second argument must evaluate to a Vector (e.g. via EMBED(...))"
+            )));
+        }
+    };
+    if qv_model != &active.model {
+        return Err(QueryError::evaluation(format!(
+            "{fn_name} model mismatch: query vector is `{}` but active VectorIndex declares `{}`",
+            qv_model.as_str(),
+            active.model.as_str()
+        )));
+    }
+    if qv_data.len() != active.dim as usize {
+        return Err(QueryError::evaluation(format!(
+            "{fn_name} dim mismatch: query vector is dim={} but active VectorIndex declares dim={}",
+            qv_data.len(),
+            active.dim
+        )));
+    }
+
+    let metric = Metric::from_short_name(active.distance.as_str()).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "active VectorIndex `{}` declares unknown distance `{}`",
+            active.iri.as_str(),
+            active.distance.as_str()
+        ))
+    })?;
+
+    let vector_index = retrieval.layer().storage().vector_index.as_ref();
+
+    // Resolve the row's source subject IRI from the binding map.
+    let subject_value = binding.get(&binding_info.subject_variable).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} cannot resolve source subject `?{}` for `?{}`",
+            binding_info.subject_variable, var.name
+        ))
+    })?;
+    let subject_iri = match subject_value {
+        Value::String(s) => Iri::parse(s).ok(),
+        Value::ResourceRef(iri) => Some(iri.clone()),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "{fn_name} source subject `?{}` is not an IRI",
+            binding_info.subject_variable
+        ))
+    })?;
+
+    match fn_name {
+        "VECTOR_NEAR" => {
+            let k = match &args[2] {
+                Expression::Literal(Literal::Integer(n)) if *n > 0 => *n as usize,
+                _ => {
+                    return Err(QueryError::evaluation(
+                        "VECTOR_NEAR k must be a positive integer literal".to_string(),
+                    ));
+                }
+            };
+            let hits = top_k_subjects(
+                retrieval.layer(),
+                vector_index,
+                runtime.vector_segment_cache,
+                &active.iri,
+                qv_data,
+                k,
+                &active.model,
+                metric,
+            )
+            .map_err(|e| QueryError::evaluation(format!("VECTOR_NEAR probe failed: {e}")))?;
+            let in_topk = hits.iter().any(|h| h.subject == subject_iri);
+            Ok(Value::Boolean(in_topk))
+        }
+        "VECTOR_SIM" => {
+            let sim = subject_similarity(
+                retrieval.layer(),
+                vector_index,
+                runtime.vector_segment_cache,
+                &active.iri,
+                &subject_iri,
+                qv_data,
+                &active.model,
+                metric,
+            )
+            .map_err(|e| QueryError::evaluation(format!("VECTOR_SIM probe failed: {e}")))?;
+            Ok(Value::Float(sim.unwrap_or(0.0) as f64))
+        }
+        _ => unreachable!("eval_vector_retrieval dispatched on unknown name"),
+    }
 }
 
 /// Check if any return item uses an aggregate function.
@@ -963,6 +1155,8 @@ mod tests {
             ctx: Some(&exec_ctx),
             retrieval: None,
             embedders: None,
+            embedding_cache: None,
+            vector_segment_cache: None,
         };
 
         // Use FunctionCall directly at eval_expression level for a
@@ -1017,6 +1211,8 @@ mod tests {
             ctx: Some(&exec_ctx),
             retrieval: None,
             embedders: None,
+            embedding_cache: None,
+            vector_segment_cache: None,
         };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
@@ -1206,6 +1402,8 @@ mod tests {
             ctx: Some(&exec_ctx),
             retrieval: None,
             embedders: None,
+            embedding_cache: None,
+            vector_segment_cache: None,
         };
 
         // Pass the IRI as a String literal — same shape MATCH
@@ -1465,6 +1663,134 @@ mod tests {
             format!("{err}").contains("EMBED expects 2 arguments"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn embed_caches_repeat_calls() {
+        // An Embedder that counts how many times `embed()` runs.
+        // Two identical EMBED calls through a runtime with a cache
+        // should hit dispatch exactly once.
+        use crate::program::embedder::{Embedder, EmbedderError, EmbedderRegistry};
+        use crate::program::embedding_cache::EmbeddingCache;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingEmbedder {
+            iri: Iri,
+            dim: u32,
+            calls: AtomicUsize,
+        }
+        impl Embedder for CountingEmbedder {
+            fn model_iri(&self) -> &Iri {
+                &self.iri
+            }
+            fn dim(&self) -> u32 {
+                self.dim
+            }
+            fn embed(&self, _text: &str) -> Result<Vec<f32>, EmbedderError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![1.0, 2.0, 3.0, 4.0])
+            }
+        }
+
+        let counter = Arc::new(CountingEmbedder {
+            iri: Iri::parse("urn:eigenius:embed:counting").unwrap(),
+            dim: 4,
+            calls: AtomicUsize::new(0),
+        });
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::clone(&counter) as Arc<dyn Embedder>);
+        let cache = EmbeddingCache::new(16);
+        let layer = empty_layer();
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            embedding_cache: Some(&cache),
+            ..FiberRuntime::default()
+        };
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+        let expr = Expression::FunctionCall {
+            name: "EMBED".into(),
+            args: vec![
+                Expression::Literal(Literal::String("same input".into())),
+                Expression::Literal(Literal::String("urn:eigenius:embed:counting".into())),
+            ],
+        };
+        let a = eval_expression(&expr, &binding, &layer, runtime).expect("first EMBED");
+        let b = eval_expression(&expr, &binding, &layer, runtime).expect("second EMBED");
+        assert_eq!(a, b, "cached EMBED must return the same vector");
+        assert_eq!(
+            counter.calls.load(Ordering::SeqCst),
+            1,
+            "second EMBED should be served from cache without dispatching"
+        );
+    }
+
+    #[test]
+    fn embed_cache_keys_by_text_and_model() {
+        // Two distinct inputs (or two distinct models) must each
+        // pay one dispatch — verifies the cache key is the union
+        // of (content, model_iri), not either alone.
+        use crate::program::embedder::{Embedder, EmbedderError, EmbedderRegistry};
+        use crate::program::embedding_cache::EmbeddingCache;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingEmbedder {
+            iri: Iri,
+            dim: u32,
+            calls: Arc<AtomicUsize>,
+        }
+        impl Embedder for CountingEmbedder {
+            fn model_iri(&self) -> &Iri {
+                &self.iri
+            }
+            fn dim(&self) -> u32 {
+                self.dim
+            }
+            fn embed(&self, _text: &str) -> Result<Vec<f32>, EmbedderError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![0.0; self.dim as usize])
+            }
+        }
+
+        let shared_counter = Arc::new(AtomicUsize::new(0));
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(CountingEmbedder {
+            iri: Iri::parse("urn:eigenius:embed:m1").unwrap(),
+            dim: 2,
+            calls: Arc::clone(&shared_counter),
+        }));
+        reg.register(Arc::new(CountingEmbedder {
+            iri: Iri::parse("urn:eigenius:embed:m2").unwrap(),
+            dim: 2,
+            calls: Arc::clone(&shared_counter),
+        }));
+        let cache = EmbeddingCache::new(16);
+        let layer = empty_layer();
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            embedding_cache: Some(&cache),
+            ..FiberRuntime::default()
+        };
+        let binding: BTreeMap<String, Value> = BTreeMap::new();
+
+        // Three distinct cache keys → three dispatches.
+        let call = |text: &str, model: &str| {
+            let expr = Expression::FunctionCall {
+                name: "EMBED".into(),
+                args: vec![
+                    Expression::Literal(Literal::String(text.into())),
+                    Expression::Literal(Literal::String(model.into())),
+                ],
+            };
+            eval_expression(&expr, &binding, &layer, runtime).expect("EMBED")
+        };
+        call("alpha", "urn:eigenius:embed:m1");
+        call("alpha", "urn:eigenius:embed:m2"); // different model
+        call("beta", "urn:eigenius:embed:m1"); // different content
+        assert_eq!(shared_counter.load(Ordering::SeqCst), 3);
+        // Repeats hit the cache.
+        call("alpha", "urn:eigenius:embed:m1");
+        call("beta", "urn:eigenius:embed:m1");
+        assert_eq!(shared_counter.load(Ordering::SeqCst), 3);
     }
 
     #[test]
