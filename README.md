@@ -43,9 +43,12 @@ open http://localhost:8080/notebooks/   # macOS; xdg-open on Linux
 
 # Run the end-to-end CLI demo
 ./demo/run.sh
+
+# Drive the platform from an LLM agent (Claude Code / Desktop / Cursor / ...)
+claude mcp add --transport http eigenius http://localhost:8080/mcp
 ```
 
-The first build takes a few minutes (Rust + WASM components). Subsequent ups are fast. See [Docker Compose](#docker-compose) below for state inspection, logs, and `ANTHROPIC_API_KEY` setup, or [Getting Started](#getting-started) for a native-toolchain build.
+The first build takes a few minutes (Rust + WASM components). Subsequent ups are fast. See [Docker Compose](#docker-compose) below for state inspection, logs, and `ANTHROPIC_API_KEY` setup, [MCP server](#mcp-server-for-llm-agents) for the agent surface, or [Getting Started](#getting-started) for a native-toolchain build.
 
 **What Eigenius gives you, today:**
 
@@ -106,7 +109,7 @@ The system can:
 - Dispatch IO components to the Deno orchestrator via gRPC (ComponentExecutor service)
 - Call LLMs via Vercel AI SDK (Anthropic) with prompt templating and metrics
 - Generate structured LLM output via CompleteJson (JSON Schema from ontology classes)
-- Expose kernel operations as MCP tools for LLM agents
+- Expose 14 kernel operations as MCP tools (query / inspect / load / run-program / institutions / schema / branches / tags / tasks / topology / health) for LLM agents. HTTP transport at `http://localhost:8080/mcp` when the docker stack is up (point Claude Desktop / Claude Code at the URL); stdio also available via `cd orchestration && deno task mcp` for kernel-on-host development
 - Track four epistemic categories: declared, observed, derived, verified
 - Record tree-structured reasoning traces with memoization and incremental execution
 - Validate epistemic base class requirements (DeclaredResource, DerivedResource, etc.)
@@ -265,6 +268,93 @@ block in `docker-compose.yml`:
 `eigenius_kernel=debug` turns on per-RPC and per-chain-walk events; `info`
 keeps the rest of the workspace at the default level. `trace` is rarely
 useful — that's where high-volume per-resource events live.
+
+## MCP server (for LLM agents)
+
+The orchestrator exposes a curated subset of the kernel surface as
+[Model Context Protocol](https://modelcontextprotocol.io) tools, so an LLM
+agent can drive Eigenius as part of its reasoning — query the graph, run
+programs, inspect provenance, discover institutions.
+
+**14 tools** are wired across three groups:
+
+| Group | Tools |
+|---|---|
+| Explore | `eigenius_query`, `eigenius_inspect`, `eigenius_list_branches`, `eigenius_list_tags`, `eigenius_list_institutions`, `eigenius_get_schema`, `eigenius_layer_topology` |
+| Mutate  | `eigenius_load` (with D41 `policy` / `explicitTombstones`), `eigenius_validate_program`, `eigenius_run_program`, `eigenius_run_program_by_iri` |
+| Observe | `eigenius_health`, `eigenius_list_tasks`, `eigenius_get_task_status` |
+
+Branch / tag mutation, merge submission, consolidation, GC, and task
+cancellation are deliberately **not** exposed — those are stateful or
+destructive flows that belong to the notebook UI or the operator CLI.
+
+### Setup
+
+The orchestrator mounts MCP at `http://localhost:8080/mcp` (Streamable
+HTTP, stateless + JSON-response mode). With the docker stack up, point any
+MCP-aware client at that URL.
+
+**Claude Code** (CLI or VS Code extension):
+
+```bash
+claude mcp add --transport http eigenius http://localhost:8080/mcp
+claude mcp list                                     # verify ✓ Connected
+```
+
+**Claude Desktop / Cursor / IDE agents** — edit the host's MCP config and
+add an `eigenius` entry:
+
+```json
+{
+  "mcpServers": {
+    "eigenius": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+Config file locations:
+
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+For a **stdio** transport (kernel-on-host development, no orchestrator
+container required), run `cd orchestration && deno task mcp` and point
+the client at that subprocess. See
+[platform guide §7.7](docs/guides/platform/07-orchestrator.md#77-the-mcp-server)
+for the full client wiring.
+
+### The `eigenius` skill (Claude Code only)
+
+The repo ships an agent skill at
+[`.claude/skills/eigenius.md`](.claude/skills/eigenius.md) — a project-scoped
+file Claude Code loads automatically when you launch it from the repo root.
+The skill teaches Claude the platform's mental model, the three surface
+languages, the MCP tool selection table, minimal Eigon-JSON / ESL / EigenQL
+shapes, common workflows, and the pitfalls that trip agents up (mandatory
+`is_a`, synthesized IRI row keys in query results, persistent-backend
+requirements, D41 multi-layer outcomes, …).
+
+After `claude mcp add` and a fresh Claude Code session, ask the agent
+something like *"check the eigenius health"* or *"list the classes loaded in
+eigenius"* — the skill auto-triggers on platform keywords and the agent
+picks the right tool. Or invoke explicitly via `/eigenius`.
+
+To use the skill across all your projects, copy it to
+`~/.claude/skills/eigenius.md`.
+
+### Smoke-test with the MCP Inspector
+
+```bash
+npx @modelcontextprotocol/inspector --url http://localhost:8080/mcp
+```
+
+Opens a web UI for poking at the tools interactively. If
+`eigenius_health` returns `{ healthy: true, ... }`, the whole chain
+(client → orchestrator → kernel) is good.
 
 ## Repository Structure
 

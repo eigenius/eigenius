@@ -50,6 +50,8 @@ import {
   CALL_RUNTIME_METHOD_IRI,
   createCallRuntimeMethodHandler,
 } from "./components/call_runtime_method.ts";
+import { createMcpServer } from "./mcp/server.ts";
+import { createMcpHttpHandler } from "./mcp/http.ts";
 
 const KERNEL_ENDPOINT = Deno.env.get("EIGENIUS_KERNEL_ENDPOINT") ??
   "http://localhost:50051";
@@ -269,7 +271,14 @@ function main() {
     },
   );
 
-  // Start the orchestrator server (gRPC + NotebookService + health).
+  // MCP server — exposes a curated subset of the kernel surface to
+  // LLM agents over the orchestrator's HTTP port (`/mcp`). Stateless
+  // JSON-response mode; see `mcp/http.ts`. The SDK requires a fresh
+  // server + transport pair per request in stateless mode, so we pass
+  // a builder rather than a built instance.
+  const mcpHandler = createMcpHttpHandler(() => createMcpServer(client));
+
+  // Start the orchestrator server (gRPC + NotebookService + health + MCP).
   // Pass the substrate addon explicitly so the `DispatchExternal` RPC
   // (D31 §6.2) can route into the same handle that powers
   // `RunRuntimeScript` / `CallRuntimeMethod`.
@@ -279,6 +288,7 @@ function main() {
     ORCHESTRATOR_PORT,
     wasm,
     substrateAddon ?? undefined,
+    mcpHandler,
   );
 }
 

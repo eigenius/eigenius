@@ -12,6 +12,7 @@
     "npm:@connectrpc/connect-node@2": "2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0",
     "npm:@connectrpc/connect-web@2": "2.1.1_@bufbuild+protobuf@2.11.0_@connectrpc+connect@2.1.1__@bufbuild+protobuf@2.11.0",
     "npm:@connectrpc/connect@2": "2.1.1_@bufbuild+protobuf@2.11.0",
+    "npm:@modelcontextprotocol/sdk@*": "1.29.0_zod@3.25.76",
     "npm:@modelcontextprotocol/sdk@latest": "1.29.0_zod@3.25.76",
     "npm:ai@latest": "6.0.158_zod@3.25.76",
     "npm:cbor-x@1": "1.6.4",
