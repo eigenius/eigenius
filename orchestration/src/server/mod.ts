@@ -39,10 +39,11 @@ import { createNotebookStaticHandler } from "./notebook_static.ts";
 /**
  * Start the orchestrator server.
  *
- * Listens on `port` and serves three Connect surfaces plus a health endpoint:
+ * Listens on `port` and serves the Connect surfaces plus a health endpoint:
  * - gRPC: ComponentExecutor.Execute       (kernel → orchestrator IO dispatch)
  * - gRPC: NotebookService.LayerTopology   (browser → orchestrator → kernel)
  * - HTTP: GET /health
+ * - HTTP: POST /mcp   (when `mcpHandler` is supplied — MCP Streamable HTTP)
  *
  * The browser also reaches the existing EigeniusKernel surface (Inspect,
  * Query, Load, RunProgram, etc.) via the orchestrator's kernel client;
@@ -55,6 +56,7 @@ export function startServer(
   port: number,
   wasm?: ComponentExecutorDeps["wasm"],
   substrate?: ComponentExecutorDeps["substrate"],
+  mcpHandler?: (req: Request) => Promise<Response>,
 ): void {
   const router = createConnectRouter();
   registerComponentExecutor(router, { registry, wasm, substrate });
@@ -89,6 +91,15 @@ export function startServer(
       );
     }
 
+    // MCP Streamable HTTP endpoint (when wired up). The transport
+    // accepts POST (client → server messages), GET (SSE stream — unused
+    // in our stateless+JSON mode but still routed), and DELETE (session
+    // termination). Handing the full Web Request to the SDK keeps the
+    // protocol shape entirely on the SDK side.
+    if (mcpHandler && url.pathname === "/mcp") {
+      return await mcpHandler(req);
+    }
+
     // Notebook SPA static files (when configured).
     if (notebookStatic) {
       const staticResp = await notebookStatic.tryServe(req);
@@ -121,6 +132,7 @@ export function startServer(
     ],
     health_endpoint: "/health",
     notebook_static: notebookStatic ? notebookStaticDir : null,
+    mcp_endpoint: mcpHandler ? "/mcp" : null,
   });
 }
 
