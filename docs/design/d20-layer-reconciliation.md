@@ -1,6 +1,6 @@
 # D20 — Layer Reconciliation
 
-**Status:** Draft (2026-05-02)
+**Status:** Implemented (Phase 15; Witness / Rename / SchemaQuotient / Restructure strategies live with chain-resident MergeResolutionRecord)
 **Phase:** 15
 **Supersedes:** the `NeedsWitnessedMerge` resolution stub in D23 §5.4.3 — that doc shipped Phase 14 with conflict surfacing only and committed to deferring resolution machinery to this phase
 **Companion docs:** D23 (out-of-core layer architecture; the trivial-merge primitive Phase 15 extends), D1 (Eigon serialization format; the typing rules every resolution must respect), the *Comorphism, Realized* paper (the institution-theoretic context Phase 15's witnesses plug into)

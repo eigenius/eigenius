@@ -1,7 +1,7 @@
 # D32: Chain-Mirrored Mini-TT Inductives + the `FormulaTerm` Language
 
 **Date:** 2026-05-06
-**Status:** DRAFT
+**Status:** Implemented (Phase 19d.0; `formulas:FormulaTerm` bootstrap layer + ESL `formula(...)` Pratt sublanguage live)
 **Prerequisites:** D14 (Institution Realisation), D19 (Mini-TT Inductive Types), D26 (Runtime Substrate), D27 (Julia Institutions), D29 (Eigon-Julia Mirror)
 **Drives:** Phase 19d (Symbolics institution), the comorphism story across Phase 19e–19h, Phase 20 (Lean) cross-institution surface.
 

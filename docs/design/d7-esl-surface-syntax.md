@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 4.5)
 **Required before:** Phase 4.5 implementation
 **Resolves:** Concrete syntax for programs, ontologies, and resource definitions
 

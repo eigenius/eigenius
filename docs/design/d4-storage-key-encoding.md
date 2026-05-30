@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 3; RocksDB backend)
 **Required before:** Phase 3 implementation
 **Resolves:** Key encoding scheme for RocksDB/TiKV, column families, layer chain persistence, index layout
 

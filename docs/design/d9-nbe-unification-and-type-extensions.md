@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 5; Phase 10 extensions)
 **Required before:** Phase 5 implementation
 **Resolves:** Integration of Eigon type system with Mini-TT/CIC, trace persistence, incremental execution, validation/type-checking relationship
 

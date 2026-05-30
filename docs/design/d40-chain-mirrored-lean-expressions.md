@@ -1,7 +1,7 @@
 # D40: Chain-Mirrored Lean Expressions
 
 **Date:** 2026-05-19
-**Status:** DRAFT v1 (Phase 20a.0)
+**Status:** Implemented v1 (Phase 20a.0; `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` bootstrap inductives + Lean→chain mirror in production)
 **Prerequisites:** D14 (Institution Realisation), D19 (Mini-TT Inductive Types), D26 (Runtime Substrate), D28 (Lean 4 as Verification Institution), D32 (Chain-Mirrored Mini-TT Inductives + FormulaTerm)
 **Drives:** Phase 20a (the first complete Lean institution — `lean:LeanExpr` is the queryable shape of `LeanProofTerm.proposition`).
 

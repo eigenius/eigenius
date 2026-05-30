@@ -1,6 +1,6 @@
 # D41 — Kernel Commit Pipeline
 
-**Status:** Draft (2026-05-28)
+**Status:** Implemented (2026-05-30; `kernel/src/commit/` — CommitPipeline + CommitOrchestrator + LayerPersister live, all six commit-shaped RPCs routed through it)
 **Phase:** structural refactor of the kernel commit path
 **Companion docs:** D14 (AutoOnLoad institutions and `Verdict`/`RuntimeInvocation` provenance), D23 §5.4 (`update_branch`, `ConflictPolicy`, `UpdateOutcome`), D25 (chain consolidation; uses the same persist boundary), D31 (institution dispatch surface), D33 §6 (anchored-commit cache — the cache probe currently lives in `persist_layer_if_backend`), D34 §G (the gaps in trivial-merge surfacing and `branch_advanced` plumbing that motivated the unification)
 **Supersedes:** the implicit "commit is whatever each module does" assumption that runs through `kernel/src/context/mod.rs`, `kernel/src/lattice.rs`, and the Load handler in `kernel/src/server/mod.rs`

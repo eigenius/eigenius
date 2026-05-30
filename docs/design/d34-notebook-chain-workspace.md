@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — May 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase D34; workspace rail destinations — Branches / Tags / History / Merge / Compaction / GC / Layer / Institutions / Health / Topology — live in the notebook)
 **Required before:** Phase 21 (Life-Science Worked Examples) — the worked notebooks need branch-aware authoring, history, compaction, and merge visibility to be teachable.
 **Builds on:** [D22 — Notebook UX and TypeScript SDK](d22-notebook-and-typescript-sdk.md), [D23 — Out-of-Core Layer Architecture §5.4–§5.5](d23-out-of-core-layer-architecture.md), [D25 — Chain Consolidation](d25-chain-consolidation.md), [D33 — Partial-Order Chains §6](d33-partial-order-chains.md).
 **Resolves:** Notebook workspace IA, branch picker / branches / history / tags / merge UX, compaction wizard, GC trigger, anchored-commit cache visibility, task surfacing — and the kernel gaps each of these exposes.

@@ -1,6 +1,6 @@
 # Faithful Translation Specification — Eigon → Lean
 
-**Status:** Draft v1 (Phase 20a.0b)
+**Status:** Implemented v1 (Phase 20a.0b; substrate `LeanMirrorGenerator` produces baked `EigeniusFFI` Lake packages)
 **Scope:** The exact, byte-level contract between Eigon class structure (as resolved against an ontology layer in the chain) and the Lean source emitted by the substrate's mirror generator. Pins what the generator promises to produce so an auditor with the layer chain and the spec can re-derive byte-identical mirror source without reading the generator's Rust code.
 **Related:**
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) §7 — the language-agnostic `RuntimePackageMirror` model and faithful-translation framework.

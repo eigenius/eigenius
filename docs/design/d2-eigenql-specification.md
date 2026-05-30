@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft (D14-aligned)
+**Status:** Implemented (Phase 1; D14-aligned)
 **Required before:** Phase 1 implementation
 **Resolves:** Final EBNF grammar, keyword choices, escaping rules, type checking rules, error message format
 

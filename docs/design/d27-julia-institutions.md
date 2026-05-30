@@ -1,6 +1,6 @@
 # Julia Institutions
 
-**Status:** Draft — outline for the design specification
+**Status:** Implemented (Phase 19; five reference institutions live — Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP — with Catalyst→DiffEq and Symbolics→JuMP comorphisms)
 **Scope:** What it takes to bring Julia up as the first concrete instance of the [runtime substrate](d26-runtime-substrate.md), and to register specific Julia libraries as Eigenius institutions on top of it under the [D14 institution protocol](d14-institution-realisation.md). Covers the Julia-specific resource subclasses, the `eigon-julia-gen` mirror generator, five reference institutions (`Symbolics` / `ModelingToolkit`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` ODEs), and the future Lean / Julia bridge.
 **Related:** [`d14-institution-realisation.md`](d14-institution-realisation.md) (the institution protocol — typed declarations, trait surface, dispatch model, Verdict, Comorphism shape — that each Julia institution instantiates), [`d26-runtime-substrate.md`](d26-runtime-substrate.md) (the language-agnostic substrate this layers on), [`d28-lean-4-as-institution.md`](d28-lean-4-as-institution.md) (the proof-bearing institution the Julia integration eventually pairs with), `boundary-contracts.md` (meta-spec context — under D14 the per-institution `BoundaryContract` collapses into typed declarations + Verdict; see §5)
 

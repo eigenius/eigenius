@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Draft
+**Status:** Implemented (Phase 4)
 **Required before:** Phase 4 implementation
 **Resolves:** Ontology classes and properties for reasoning traces, provenance link structure, universe level assignment, epistemic status computation
 
