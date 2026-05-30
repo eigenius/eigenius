@@ -4,7 +4,7 @@ References that are explicitly cited from the design documents, papers, or guide
 
 _Generated from `docs/references/eigenius.bib` by `scripts/bib-to-md.py`. Do not edit by hand._
 
-Total entries: **60**.
+Total entries: **61**.
 
 ---
 
@@ -108,6 +108,8 @@ Diaconescu, Răzvan (2002). "Grothendieck institutions". *Applied Categorical St
 
 Diaconescu, Răzvan (2008). *Institution-independent Model Theory*. Birkhäuser, Basel.
 
+> First edition. For citations to specific chapters, theorems, or page numbers, prefer the second edition (\textttdiaconescu2025), which has revised numbering.
+
 ### `diaconescu2012-three-decades`
 
 Diaconescu, Răzvan (2012). "Three decades of institution theory". In *Universal Logic: An Anthology*, ed. Béziau, Jean-Yves, Studies in Universal Logic, pp. 309–322, Birkhäuser.
@@ -121,6 +123,14 @@ Diaconescu, Răzvan (2017). *3/2-Institutions: An institution theory for concept
 [arXiv:1708.09675](https://arxiv.org/abs/1708.09675)
 
 > Extension of institution theory accommodating implicit partiality of signature morphisms; motivated by conceptual blending and software evolution.
+
+### `diaconescu2025`
+
+Diaconescu, Răzvan (2025). *Institution-independent Model Theory*. Studies in Universal Logic, Springer Nature Switzerland.
+
+[DOI: 10.1007/978-3-031-68854-6](https://doi.org/10.1007/978-3-031-68854-6)
+
+> Second edition. Chapter 14 (`Grothendieck institutions', pp. 449–473) is the canonical reference for the Grothendieck construction on institutions, the comorphism-based variant, and the globalisation theorems for theory co-limits, model amalgamation (Thm. 14.15) and interpolation (Thm. 14.16).
 
 ### `goguen-burstall1984`
 

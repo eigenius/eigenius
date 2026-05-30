@@ -47,6 +47,7 @@
 //!   [`crate::validation::CommitWorkingSetPool`] are re-exported so
 //!   commit consumers don't need to know they live in `validation`.
 
+pub mod backend_persister;
 pub mod hooks;
 pub mod orchestrator;
 pub mod outcome;
@@ -62,6 +63,7 @@ pub use crate::validation::{CommitWorkingSet, CommitWorkingSetPool};
 
 // --- Re-exports of the commit module's own surface ---
 
+pub use backend_persister::BackendPersister;
 pub use hooks::{
     rebuild_institution_index, register_wasm_components, CommitHookHost, DidDrainHook,
     DidPersistHook, HookOutcome, NoopHost,
