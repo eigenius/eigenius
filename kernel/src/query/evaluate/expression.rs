@@ -629,11 +629,21 @@ fn eval_vector_retrieval(
         ))
     })?;
 
-    let expected_arity = if fn_name == "VECTOR_NEAR" { 3 } else { 2 };
-    if args.len() != expected_arity {
+    // VECTOR_NEAR: 3 args (?vec, q, k) or 4 (with optional ef);
+    // VECTOR_SIM: 2 args. Matches the typechecker's M6.5 rule.
+    let arity_ok = match fn_name {
+        "VECTOR_NEAR" => args.len() == 3 || args.len() == 4,
+        _ => args.len() == 2,
+    };
+    if !arity_ok {
         return Err(QueryError::evaluation(format!(
-            "{fn_name} expects {expected_arity} arguments, got {}",
-            args.len()
+            "{fn_name} got {} arguments, but accepts {}",
+            args.len(),
+            if fn_name == "VECTOR_NEAR" {
+                "3 or 4 (?vec, query_vec, K, ef?)"
+            } else {
+                "2 (?vec, query_vec)"
+            }
         )));
     }
 
@@ -727,6 +737,18 @@ fn eval_vector_retrieval(
                     ));
                 }
             };
+            // Optional 4th positional arg — `ef` exploration depth.
+            // None falls through to top_k_subjects's default
+            // `max(k*4, 64)` per D43 §3.4.
+            let ef = match args.get(3) {
+                None => None,
+                Some(Expression::Literal(Literal::Integer(n))) if *n > 0 => Some(*n as usize),
+                _ => {
+                    return Err(QueryError::evaluation(
+                        "VECTOR_NEAR ef must be a positive integer literal".to_string(),
+                    ));
+                }
+            };
             let hits = top_k_subjects(
                 retrieval.layer(),
                 vector_index,
@@ -734,6 +756,7 @@ fn eval_vector_retrieval(
                 &active.iri,
                 qv_data,
                 k,
+                ef,
                 &active.model,
                 metric,
             )

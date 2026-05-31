@@ -38,10 +38,12 @@
 //! into it expose a graph the orchestrator traverses instead of
 //! the linear scan.
 
-use crate::layer::{collect_ancestors, is_shadowed, Layer, LayerId, VectorIndex, VectorSegment};
+use crate::layer::{collect_ancestors, is_shadowed, Layer, LayerId, VectorIndex};
 use crate::ontology::iri::Iri;
 use crate::query::vector::cache::SegmentCache;
 use crate::query::vector::distance::{compare_similarity, Metric};
+use crate::query::vector::recall::{heuristic_recall, min_recall, RecallSource, SegmentRecall};
+use crate::query::vector::segment::SegmentView;
 use crate::storage::StorageError;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -57,6 +59,17 @@ pub struct VectorScoredHit {
     /// Higher is better (see [`Metric::similarity`]).
     pub similarity: f32,
     pub defining_layer: LayerId,
+}
+
+/// Top-K result bundle returned by [`top_k_subjects_with_recall`].
+/// Carries the hits plus a `min_recall` rolled up across every
+/// segment the search touched — per D43 §3.4, the result set
+/// surfaces the minimum per-segment recall so callers can reason
+/// about exactness. `None` when no segment was touched.
+#[derive(Debug, Clone)]
+pub struct TopKResult {
+    pub hits: Vec<VectorScoredHit>,
+    pub min_recall: Option<f32>,
 }
 
 /// Errors specific to the vector orchestrator. Wraps storage
@@ -106,6 +119,11 @@ pub enum VectorSearchError {
 /// hits the underlying `VectorIndex` backend. Test callers pass
 /// `None` to drive the storage path directly; production callers
 /// pass the kernel-shared cache so repeat probes are O(map-lookup).
+///
+/// `ef` controls the HNSW search exploration depth for segments
+/// whose strategy built an HNSW graph; `None` defaults to
+/// `max(k * 4, 64)` per D43 §3.4. Segments without an HNSW graph
+/// ignore `ef` and use the brute-force path.
 #[allow(clippy::too_many_arguments)]
 pub fn top_k_subjects(
     head: &Layer,
@@ -114,18 +132,56 @@ pub fn top_k_subjects(
     index_iri: &Iri,
     query_vec: &[f32],
     k: usize,
+    ef: Option<usize>,
     expected_model: &Iri,
     expected_metric: Metric,
 ) -> Result<Vec<VectorScoredHit>, VectorSearchError> {
+    let result = top_k_subjects_with_recall(
+        head,
+        vector_index,
+        cache,
+        index_iri,
+        query_vec,
+        k,
+        ef,
+        expected_model,
+        expected_metric,
+    )?;
+    Ok(result.hits)
+}
+
+/// As [`top_k_subjects`], but additionally surfaces the per-segment
+/// recall rollup (D43 §3.4). The hits are unchanged from the
+/// brute-only variant; the new field is `min_recall = min(per-
+/// segment recall across every touched segment)`, with `Exact`
+/// (flat) segments contributing `1.0` and HNSW segments
+/// contributing a heuristic from `ef / k`. `None` when no segment
+/// was touched.
+#[allow(clippy::too_many_arguments)]
+pub fn top_k_subjects_with_recall(
+    head: &Layer,
+    vector_index: &dyn VectorIndex,
+    cache: Option<&SegmentCache>,
+    index_iri: &Iri,
+    query_vec: &[f32],
+    k: usize,
+    ef: Option<usize>,
+    expected_model: &Iri,
+    expected_metric: Metric,
+) -> Result<TopKResult, VectorSearchError> {
     if k == 0 {
-        return Ok(Vec::new());
+        return Ok(TopKResult {
+            hits: Vec::new(),
+            min_recall: None,
+        });
     }
+    let effective_ef = ef.unwrap_or_else(|| (k * 4).max(64));
     let chain = collect_ancestors(head);
-    // Min-heap of candidate hits by similarity so the lowest-scoring
-    // entry sits at the top, ready to be evicted when a better
-    // candidate arrives. The `Reverse` wrapper flips the natural
-    // BinaryHeap-as-max-heap behaviour.
     let mut heap: BinaryHeap<Reverse<HeapEntry>> = BinaryHeap::with_capacity(k + 1);
+    // One SegmentRecall entry per *touched* segment (segment exists
+    // in the index for this chain layer); accumulated across the
+    // chain walk and rolled up after the heap drain.
+    let mut per_segment_recalls: Vec<SegmentRecall> = Vec::new();
 
     for layer_id in &chain {
         let segment = match fetch_segment(vector_index, cache, index_iri, layer_id)? {
@@ -139,27 +195,57 @@ pub fn top_k_subjects(
             expected_model,
             expected_metric,
         )?;
-        let dim = segment.dim as usize;
-        for i in 0..segment.count() {
-            let vec_i = &segment.vectors[i * dim..(i + 1) * dim];
-            let sim = expected_metric.similarity(query_vec, vec_i);
-            let subject = segment.subjects[i].clone();
-            // Shadow check: a subject redefined in a layer above
-            // `defining_layer` (or in head's chain above) is filtered
-            // out so we don't surface the older body's vector when
-            // the newer body has no vector yet.
-            if is_shadowed(head, layer_id, &subject) {
-                continue;
+        // Strategy dispatch (D43 §2.4): when the segment carries an
+        // HNSW graph, traverse it with `ef` and oversample to
+        // `k * 2` per segment so the global merge can reorder.
+        // Otherwise brute-force scan. Per-segment recall: HNSW
+        // segments report the §3.4 heuristic; flat segments are
+        // exact.
+        if let Some(graph) = segment.hnsw() {
+            let per_segment_k = (k * 2).max(k);
+            let hits = graph.search(query_vec, per_segment_k, effective_ef);
+            per_segment_recalls.push(SegmentRecall::Approx {
+                recall: heuristic_recall(k, effective_ef),
+                source: RecallSource::Heuristic,
+            });
+            let subjects = segment.subjects();
+            for (node_idx, sim) in hits {
+                let subject = subjects[node_idx].clone();
+                if is_shadowed(head, layer_id, &subject) {
+                    continue;
+                }
+                push_heap(
+                    &mut heap,
+                    HeapEntry {
+                        sim,
+                        layer: layer_id.clone(),
+                        subject,
+                    },
+                    k,
+                );
             }
-            push_heap(
-                &mut heap,
-                HeapEntry {
-                    sim,
-                    layer: layer_id.clone(),
-                    subject,
-                },
-                k,
-            );
+        } else {
+            per_segment_recalls.push(SegmentRecall::Exact);
+            let dim = segment.dim() as usize;
+            let vectors = segment.vectors();
+            let subjects = segment.subjects();
+            for i in 0..segment.count() {
+                let vec_i = &vectors[i * dim..(i + 1) * dim];
+                let sim = expected_metric.similarity(query_vec, vec_i);
+                let subject = subjects[i].clone();
+                if is_shadowed(head, layer_id, &subject) {
+                    continue;
+                }
+                push_heap(
+                    &mut heap,
+                    HeapEntry {
+                        sim,
+                        layer: layer_id.clone(),
+                        subject,
+                    },
+                    k,
+                );
+            }
         }
     }
 
@@ -167,7 +253,7 @@ pub fn top_k_subjects(
     // order by `Reverse<X>`, which is descending order by `X`. So the
     // resulting vec is already highest-similarity-first — no reverse
     // needed.
-    let out: Vec<VectorScoredHit> = heap
+    let hits: Vec<VectorScoredHit> = heap
         .into_sorted_vec()
         .into_iter()
         .map(|Reverse(e)| VectorScoredHit {
@@ -176,7 +262,10 @@ pub fn top_k_subjects(
             defining_layer: e.layer,
         })
         .collect();
-    Ok(out)
+    Ok(TopKResult {
+        hits,
+        min_recall: min_recall(per_segment_recalls),
+    })
 }
 
 /// VECTOR_SIM — similarity score for one specific subject under
@@ -219,9 +308,9 @@ pub fn subject_similarity(
             )?;
             // Linear search for the subject — segments are small in
             // v1, no per-subject index needed.
-            if let Some(i) = segment.subjects.iter().position(|s| s == subject) {
-                let dim = segment.dim as usize;
-                let vec_i = &segment.vectors[i * dim..(i + 1) * dim];
+            if let Some(i) = segment.subjects().iter().position(|s| s == subject) {
+                let dim = segment.dim() as usize;
+                let vec_i = &segment.vectors()[i * dim..(i + 1) * dim];
                 return Ok(Some(expected_metric.similarity(query_vec, vec_i)));
             }
         }
@@ -242,50 +331,50 @@ fn fetch_segment(
     cache: Option<&SegmentCache>,
     index_iri: &Iri,
     layer_id: &LayerId,
-) -> Result<Option<Arc<VectorSegment>>, StorageError> {
+) -> Result<Option<Arc<SegmentView>>, StorageError> {
     if let Some(c) = cache {
         if let Some(hit) = c.get(index_iri, layer_id) {
             return Ok(Some(hit));
         }
     }
-    let segment = match vector_index.get_segment(index_iri, layer_id)? {
-        Some(s) => Arc::new(s),
+    let view = match vector_index.get_segment(index_iri, layer_id)? {
+        Some(s) => Arc::new(SegmentView::from_segment(s)),
         None => return Ok(None),
     };
     if let Some(c) = cache {
-        c.insert(index_iri.clone(), layer_id.clone(), Arc::clone(&segment));
+        c.insert(index_iri.clone(), layer_id.clone(), Arc::clone(&view));
     }
-    Ok(Some(segment))
+    Ok(Some(view))
 }
 
 fn verify_segment_shape(
     index_iri: &Iri,
-    segment: &crate::layer::VectorSegment,
+    segment: &SegmentView,
     query_vec: &[f32],
     expected_model: &Iri,
     expected_metric: Metric,
 ) -> Result<(), VectorSearchError> {
-    if segment.model_iri != *expected_model {
+    if segment.model_iri() != expected_model {
         return Err(VectorSearchError::ModelMismatch {
             index: index_iri.as_str().to_string(),
-            indexed: segment.model_iri.as_str().to_string(),
+            indexed: segment.model_iri().as_str().to_string(),
             queried: expected_model.as_str().to_string(),
         });
     }
-    let segment_metric = Metric::from_short_name(&segment.distance)
-        .ok_or_else(|| VectorSearchError::UnknownMetric(segment.distance.clone()))?;
+    let segment_metric = Metric::from_short_name(segment.distance())
+        .ok_or_else(|| VectorSearchError::UnknownMetric(segment.distance().to_string()))?;
     if segment_metric != expected_metric {
         return Err(VectorSearchError::MetricMismatch {
             index: index_iri.as_str().to_string(),
-            indexed: segment.distance.clone(),
+            indexed: segment.distance().to_string(),
             queried: expected_metric.short_name().to_string(),
         });
     }
-    if query_vec.len() != segment.dim as usize {
+    if query_vec.len() != segment.dim() as usize {
         return Err(VectorSearchError::DimMismatch {
             index: index_iri.as_str().to_string(),
             query_dim: query_vec.len(),
-            segment_dim: segment.dim as usize,
+            segment_dim: segment.dim() as usize,
         });
     }
     Ok(())
@@ -489,6 +578,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             0,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -521,6 +611,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             3,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -555,6 +646,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             2,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -585,6 +677,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             5,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -609,6 +702,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             5,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -633,6 +727,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             5,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -661,6 +756,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             5,
+            None,
             &iri(other_model),
             Metric::Cosine,
         )
@@ -688,6 +784,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             5,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -810,14 +907,18 @@ mod tests {
 
         // Cache pre-loaded with a single-subject segment.
         let cache = SegmentCache::new(16);
-        let fake = VectorSegment {
+        let fake = crate::layer::VectorSegment {
             model_iri: iri(MODEL),
             dim: 2,
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:from_cache")],
             vectors: vec![1.0, 0.0],
         };
-        cache.insert(iri(IDX), head.id().clone(), Arc::new(fake));
+        cache.insert(
+            iri(IDX),
+            head.id().clone(),
+            Arc::new(SegmentView::from_segment(fake)),
+        );
 
         let hits = top_k_subjects(
             &head,
@@ -826,6 +927,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             5,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -856,6 +958,7 @@ mod tests {
             &iri(IDX),
             &[1.0, 0.0],
             1,
+            None,
             &iri(MODEL),
             Metric::Cosine,
         )
@@ -878,14 +981,18 @@ mod tests {
         let head = Arc::new(b.build(storage.clone()));
 
         let cache = SegmentCache::new(16);
-        let fake = VectorSegment {
+        let fake = crate::layer::VectorSegment {
             model_iri: iri(MODEL),
             dim: 2,
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:a")],
             vectors: vec![1.0, 0.0],
         };
-        cache.insert(iri(IDX), head.id().clone(), Arc::new(fake));
+        cache.insert(
+            iri(IDX),
+            head.id().clone(),
+            Arc::new(SegmentView::from_segment(fake)),
+        );
 
         let sim = subject_similarity(
             &head,
@@ -900,5 +1007,301 @@ mod tests {
         .unwrap();
         assert!(sim.is_some());
         assert!((sim.unwrap() - 1.0).abs() < 1e-6);
+    }
+
+    // ─── HNSW dispatch (M6.4) ───────────────────────────────────
+
+    /// When the cached SegmentView has an HNSW graph attached, the
+    /// query path traverses it instead of the brute-force scan.
+    /// We can't directly observe the path taken from outside, but
+    /// we can prove the behaviour by:
+    ///
+    /// 1. Building a corpus where the brute-force backend would
+    ///    return one result set (e.g. the segment), and
+    /// 2. Pre-loading the cache with a SegmentView whose HNSW graph
+    ///    indexes a *different* vector set, then
+    /// 3. Verifying the query result reflects the cache's HNSW
+    ///    contents, not the backend.
+    ///
+    /// HNSW returning the right top-k under self-queries is the
+    /// adapter's own contract (covered by `query::vector::hnsw`
+    /// tests); this test only verifies the dispatch decision.
+    #[test]
+    fn cache_view_with_hnsw_serves_top_k_via_hnsw_path() {
+        use crate::query::vector::hnsw::HnswBuildConfig;
+        use crate::query::vector::segment::{admit_segment, SegmentStrategy};
+
+        let storage = LayerStorage::in_memory();
+        let mut b = LayerBuilder::new("hnsw-dispatch", None);
+        b.add_resource(Resource::new(iri("urn:eigenius:test:placeholder")))
+            .unwrap();
+        let head = Arc::new(b.build(storage.clone()));
+
+        // Cache holds a segment with three vectors; HNSW built over
+        // them. The backend is empty.
+        let cache = SegmentCache::new(16);
+        let fake = crate::layer::VectorSegment {
+            model_iri: iri(MODEL),
+            dim: 2,
+            distance: "cosine".into(),
+            subjects: vec![
+                iri("urn:eigenius:test:doca"),
+                iri("urn:eigenius:test:docb"),
+                iri("urn:eigenius:test:docc"),
+            ],
+            vectors: vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0],
+        };
+        let view = admit_segment(
+            fake,
+            Metric::Cosine,
+            SegmentStrategy::Hnsw,
+            HnswBuildConfig::for_segment(3),
+        );
+        assert!(view.hnsw().is_some(), "test setup: HNSW should be built");
+        cache.insert(iri(IDX), head.id().clone(), Arc::new(view));
+
+        // Query along the (1, 0) axis. HNSW top-1 should be doca.
+        let hits = top_k_subjects(
+            &head,
+            storage.vector_index.as_ref(),
+            Some(&cache),
+            &iri(IDX),
+            &[1.0, 0.0],
+            1,
+            None,
+            &iri(MODEL),
+            Metric::Cosine,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].subject.as_str(), "urn:eigenius:test:doca");
+        assert!((hits[0].similarity - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn top_k_with_recall_returns_exact_for_flat_only_chain() {
+        // All segments are flat → per-segment recall is Exact →
+        // min_recall is 1.0.
+        let (head, idx) = build_corpus_layer(
+            IDX,
+            MODEL,
+            "cosine",
+            2,
+            &["urn:eigenius:test:a", "urn:eigenius:test:b"],
+            &[vec![1.0, 0.0], vec![0.0, 1.0]],
+        );
+        let result = top_k_subjects_with_recall(
+            &head,
+            idx.as_ref(),
+            None,
+            &iri(IDX),
+            &[1.0, 0.0],
+            1,
+            None,
+            &iri(MODEL),
+            Metric::Cosine,
+        )
+        .unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(
+            result.min_recall,
+            Some(1.0),
+            "flat segments should yield min_recall = 1.0"
+        );
+    }
+
+    #[test]
+    fn top_k_with_recall_emits_heuristic_for_hnsw_segments() {
+        use crate::query::vector::hnsw::HnswBuildConfig;
+        use crate::query::vector::segment::{admit_segment, SegmentStrategy};
+
+        // Cache holds an HNSW segment; backend empty. Query goes
+        // through the HNSW path and should report a sub-1.0
+        // min_recall.
+        let storage = LayerStorage::in_memory();
+        let mut b = LayerBuilder::new("recall-hnsw", None);
+        b.add_resource(Resource::new(iri("urn:eigenius:test:placeholder")))
+            .unwrap();
+        let head = Arc::new(b.build(storage.clone()));
+
+        let cache = SegmentCache::new(16);
+        let fake = crate::layer::VectorSegment {
+            model_iri: iri(MODEL),
+            dim: 2,
+            distance: "cosine".into(),
+            subjects: vec![iri("urn:eigenius:test:a"), iri("urn:eigenius:test:b")],
+            vectors: vec![1.0, 0.0, 0.0, 1.0],
+        };
+        let view = admit_segment(
+            fake,
+            Metric::Cosine,
+            SegmentStrategy::Hnsw,
+            HnswBuildConfig::for_segment(2),
+        );
+        cache.insert(iri(IDX), head.id().clone(), Arc::new(view));
+
+        // k=4, ef=None → default ef = max(k*4, 64) = 64, ratio=16
+        // → cap at 0.99. Whatever the exact value, it must be < 1.0
+        // and >= 0.85.
+        let result = top_k_subjects_with_recall(
+            &head,
+            storage.vector_index.as_ref(),
+            Some(&cache),
+            &iri(IDX),
+            &[1.0, 0.0],
+            4,
+            None,
+            &iri(MODEL),
+            Metric::Cosine,
+        )
+        .unwrap();
+        let recall = result.min_recall.expect("HNSW segment was touched");
+        assert!(
+            (0.85..1.0).contains(&recall),
+            "HNSW recall should be approximate; got {recall}"
+        );
+    }
+
+    #[test]
+    fn top_k_with_recall_min_picks_lowest_across_segments() {
+        // A mixed chain: parent has an HNSW segment, child has a
+        // flat segment. min_recall is the HNSW segment's heuristic
+        // (lower than the flat 1.0).
+        use crate::query::vector::hnsw::HnswBuildConfig;
+        use crate::query::vector::segment::{admit_segment, SegmentStrategy};
+
+        // Use build_chain to set up the chain structure, then
+        // override the parent's cache entry with an HNSW-bearing
+        // SegmentView.
+        let (head, idx) = build_chain(
+            IDX,
+            MODEL,
+            "cosine",
+            2,
+            &["urn:eigenius:test:a"],
+            &[vec![1.0, 0.0]],
+            &["urn:eigenius:test:b"],
+            &[vec![0.0, 1.0]],
+        );
+        let parent_id = head.parents()[0].id().clone();
+
+        // Pre-load the cache: parent gets an HNSW view, child gets
+        // a flat view. (Both built from the same vector data — the
+        // chain's actual storage is the source of truth, but the
+        // cache takes precedence per M5.6 test
+        // `cache_takes_precedence_over_empty_backend`.)
+        let cache = SegmentCache::new(16);
+        let parent_seg = crate::layer::VectorSegment {
+            model_iri: iri(MODEL),
+            dim: 2,
+            distance: "cosine".into(),
+            subjects: vec![iri("urn:eigenius:test:a")],
+            vectors: vec![1.0, 0.0],
+        };
+        cache.insert(
+            iri(IDX),
+            parent_id.clone(),
+            Arc::new(admit_segment(
+                parent_seg,
+                Metric::Cosine,
+                SegmentStrategy::Hnsw,
+                HnswBuildConfig::for_segment(1),
+            )),
+        );
+        let child_seg = crate::layer::VectorSegment {
+            model_iri: iri(MODEL),
+            dim: 2,
+            distance: "cosine".into(),
+            subjects: vec![iri("urn:eigenius:test:b")],
+            vectors: vec![0.0, 1.0],
+        };
+        cache.insert(
+            iri(IDX),
+            head.id().clone(),
+            Arc::new(admit_segment(
+                child_seg,
+                Metric::Cosine,
+                SegmentStrategy::Flat,
+                HnswBuildConfig::for_segment(1),
+            )),
+        );
+
+        let result = top_k_subjects_with_recall(
+            &head,
+            idx.as_ref(),
+            Some(&cache),
+            &iri(IDX),
+            &[1.0, 0.0],
+            4,
+            None,
+            &iri(MODEL),
+            Metric::Cosine,
+        )
+        .unwrap();
+        let recall = result.min_recall.expect("two segments touched");
+        // HNSW heuristic should be < 1.0 (parent's segment).
+        // Flat's 1.0 doesn't lower the min — HNSW's does.
+        assert!(
+            recall < 1.0,
+            "min across (HNSW, flat) should be the HNSW heuristic < 1.0; got {recall}"
+        );
+        assert!(recall >= 0.85);
+    }
+
+    #[test]
+    fn top_k_with_recall_returns_none_for_empty_chain() {
+        let storage = LayerStorage::in_memory();
+        let mut b = LayerBuilder::new("empty", None);
+        b.add_resource(Resource::new(iri("urn:eigenius:test:placeholder")))
+            .unwrap();
+        let head = Arc::new(b.build(storage.clone()));
+        let result = top_k_subjects_with_recall(
+            &head,
+            storage.vector_index.as_ref(),
+            None,
+            &iri(IDX),
+            &[1.0, 0.0],
+            5,
+            None,
+            &iri(MODEL),
+            Metric::Cosine,
+        )
+        .unwrap();
+        assert!(result.hits.is_empty());
+        assert_eq!(result.min_recall, None);
+    }
+
+    #[test]
+    fn ef_default_max_k4_or_64() {
+        // top_k_subjects computes effective_ef = ef.unwrap_or(max(k*4, 64)).
+        // Pin the floor at k=10: max(40, 64) = 64.
+        // Pin the multiplier at k=20: max(80, 64) = 80.
+        // The behaviour is observable only when HNSW is in play, but
+        // we can verify the function accepts None without panicking
+        // even with k > 16 (the regime where the default formula
+        // matters).
+        let (head, idx) = build_corpus_layer(
+            IDX,
+            MODEL,
+            "cosine",
+            2,
+            &["urn:eigenius:test:a"],
+            &[vec![1.0, 0.0]],
+        );
+        // k=20 exercises the (k*4 > 64) branch; smaller corpus is
+        // intentional — we only verify the call shape.
+        let hits = top_k_subjects(
+            &head,
+            idx.as_ref(),
+            None,
+            &iri(IDX),
+            &[1.0, 0.0],
+            20,
+            None,
+            &iri(MODEL),
+            Metric::Cosine,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1, "single-vector corpus yields one hit");
     }
 }

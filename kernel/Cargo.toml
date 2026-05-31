@@ -28,6 +28,16 @@ unicode-segmentation = "1"
 # selected at compile time by `target_feature`. Roughly 4–8× faster
 # than the scalar reference on a 768-dim cosine probe.
 wide = "0.7"
+# D43 §2.4 / M5.10 — zero-copy `&[u8]` → `&[f32]` reinterpretation
+# for vector segment reads. Pure-Rust, transitive-dep-free.
+bytemuck = "1"
+# D43 §2.4 / M6 — HNSW (Hierarchical Navigable Small World) graphs
+# for approximate vector search at large segment sizes. Pure-Rust,
+# exposes per-search `ef_search` which the §3.4 query surface
+# requires. v1 commits to this library; the stable on-wire format
+# work (independent of the chosen library) is the M6 follow-up
+# tracked separately.
+hnsw_rs = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

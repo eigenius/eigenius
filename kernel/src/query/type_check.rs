@@ -1305,14 +1305,23 @@ fn check_vector_retrieval_call(
     vector_indexes: &[ActiveVectorIndex],
     errors: &mut Vec<QueryError>,
 ) {
-    let expected_arity = if fn_name == "VECTOR_NEAR" { 3 } else { 2 };
-    if args.len() != expected_arity {
+    // VECTOR_NEAR accepts 3 args (?vec, query_vec, K) or 4
+    // (?vec, query_vec, K, ef). VECTOR_SIM always takes 2.
+    let arity_ok = match fn_name {
+        "VECTOR_NEAR" => args.len() == 3 || args.len() == 4,
+        _ => args.len() == 2,
+    };
+    if !arity_ok {
         errors.push(QueryError::type_check(
             "vector_retrieval_arity",
             format!(
-                "{fn_name} requires exactly {expected_arity} arguments \
-                 (got {} arguments)",
-                args.len()
+                "{fn_name} {arity_desc} (got {} arguments)",
+                args.len(),
+                arity_desc = if fn_name == "VECTOR_NEAR" {
+                    "requires 3 or 4 arguments (?vec, query_vec, K, ef?)"
+                } else {
+                    "requires exactly 2 arguments"
+                }
             ),
         ));
         return;
@@ -1377,6 +1386,27 @@ fn check_vector_retrieval_call(
                     "vector_retrieval_k_not_literal",
                     "VECTOR_NEAR `k` argument must be a positive integer literal".to_string(),
                 ));
+            }
+        }
+        // Optional `ef` — same positive-integer-literal constraint
+        // (D43 §4.5: "K and (if present) E are positive integer
+        // literals — the planner requires statically-known values
+        // to push them into index probes").
+        if args.len() == 4 {
+            match &args[3] {
+                Expression::Literal(Literal::Integer(ef)) if *ef > 0 => {}
+                Expression::Literal(Literal::Integer(_)) => {
+                    errors.push(QueryError::type_check(
+                        "vector_retrieval_ef_not_positive",
+                        "VECTOR_NEAR `ef` argument must be a positive integer literal".to_string(),
+                    ));
+                }
+                _ => {
+                    errors.push(QueryError::type_check(
+                        "vector_retrieval_ef_not_literal",
+                        "VECTOR_NEAR `ef` argument must be a positive integer literal".to_string(),
+                    ));
+                }
             }
         }
     }
@@ -2099,6 +2129,127 @@ mod tests {
                 .iter()
                 .any(|e| e.rule == "text_retrieval_no_active_index"),
             "expected text_retrieval_no_active_index; got {errors:?}"
+        );
+    }
+
+    // ─── D43 §4.5 — VECTOR_NEAR `ef` typing (M6.5) ──────────────
+
+    fn build_vector_index_layer() -> Arc<Layer> {
+        use crate::ontology::iri::Iri;
+        use crate::ontology::resource::{Resource, Value};
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let parent = Arc::clone(ctx.head());
+        let mut b = LayerBuilder::new("vector-index-fixture", Some(parent));
+
+        let body_iri = "urn:eigenius:test:body";
+        let model = "urn:eigenius:embed:dummy:v1";
+
+        let mut body_prop = Resource::new(Iri::parse(body_iri).unwrap());
+        body_prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        body_prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+        );
+        b.add_resource(body_prop).unwrap();
+
+        let mut vi = Resource::new(Iri::parse("urn:eigenius:test:vi").unwrap());
+        vi.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse(wk::VECTOR_INDEX_CLASS).unwrap(),
+            )]),
+        );
+        vi.set(
+            Iri::parse(wk::TARGET_PROPERTY).unwrap(),
+            Value::ResourceRef(Iri::parse(body_iri).unwrap()),
+        );
+        vi.set(
+            Iri::parse(wk::VEC_MODEL).unwrap(),
+            Value::ResourceRef(Iri::parse(model).unwrap()),
+        );
+        vi.set(Iri::parse(wk::VEC_DIM).unwrap(), Value::Integer(8));
+        b.add_resource(vi).unwrap();
+
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn vector_near_with_ef_passes() {
+        let layer = build_vector_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, 32)
+            RETURN [] { d: ?d }
+            "#,
+        );
+        let related: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule.starts_with("vector_retrieval"))
+            .collect();
+        assert!(
+            related.is_empty(),
+            "VECTOR_NEAR with ef should typecheck; got {related:?}"
+        );
+    }
+
+    #[test]
+    fn vector_near_ef_must_be_positive() {
+        let layer = build_vector_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, 0)
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "vector_retrieval_ef_not_positive"),
+            "expected vector_retrieval_ef_not_positive; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn vector_near_ef_must_be_integer_literal() {
+        let layer = build_vector_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, "not a number")
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "vector_retrieval_ef_not_literal"),
+            "expected vector_retrieval_ef_not_literal; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn vector_near_with_5_args_rejected() {
+        // 5 args is out of range. v1 supports only 3 or 4.
+        let layer = build_vector_index_layer();
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, 32, 100)
+            RETURN [] { d: ?d }
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "vector_retrieval_arity"),
+            "expected vector_retrieval_arity for 5-arg VECTOR_NEAR; got {errors:?}"
         );
     }
 }

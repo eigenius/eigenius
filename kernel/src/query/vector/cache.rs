@@ -15,7 +15,7 @@
 //! D43 §5.9 / M5.6 — vector SegmentCache.
 //!
 //! Bounded LRU on deserialised per-`(index_iri, layer_id)`
-//! [`crate::layer::VectorSegment`] snapshots. Without this, every
+//! [`crate::layer::SegmentView`] snapshots. Without this, every
 //! `VECTOR_NEAR` / `VECTOR_SIM` probe re-fetches and (in the
 //! RocksDB-backed path) re-deserialises the segment from CBOR; with
 //! it, the second probe against the same `(index, layer)` is a
@@ -39,20 +39,21 @@
 //! [`SegmentCache::invalidate_all`] is the bulk path used by
 //! consolidation / reindex sweeps.
 
-use crate::layer::{LayerId, VectorSegment};
+use crate::layer::LayerId;
 use crate::ontology::iri::Iri;
+use crate::query::vector::segment::SegmentView;
 use moka::sync::Cache;
 use std::sync::Arc;
 
-/// Bounded LRU on deserialised per-`(index, layer)` `VectorSegment`
+/// Bounded LRU on deserialised per-`(index, layer)` `SegmentView`
 /// snapshots.
 ///
-/// Entries hold `Arc<VectorSegment>` so multiple consumers
+/// Entries hold `Arc<SegmentView>` so multiple consumers
 /// (concurrent `VECTOR_NEAR` probes; the planner's hybrid scoring
 /// in M7) share the same allocation without cloning the per-vector
 /// `f32` payload.
 pub struct SegmentCache {
-    inner: Cache<(Iri, LayerId), Arc<VectorSegment>>,
+    inner: Cache<(Iri, LayerId), Arc<SegmentView>>,
 }
 
 impl SegmentCache {
@@ -64,14 +65,14 @@ impl SegmentCache {
         }
     }
 
-    /// Probe the cache. Returns `Some(Arc<VectorSegment>)` on hit.
-    pub fn get(&self, index: &Iri, layer: &LayerId) -> Option<Arc<VectorSegment>> {
+    /// Probe the cache. Returns `Some(Arc<SegmentView>)` on hit.
+    pub fn get(&self, index: &Iri, layer: &LayerId) -> Option<Arc<SegmentView>> {
         self.inner.get(&(index.clone(), layer.clone()))
     }
 
     /// Admit a fresh entry. If the cache is at capacity the
     /// least-recently-used entry is evicted.
-    pub fn insert(&self, index: Iri, layer: LayerId, segment: Arc<VectorSegment>) {
+    pub fn insert(&self, index: Iri, layer: LayerId, segment: Arc<SegmentView>) {
         self.inner.insert((index, layer), segment);
     }
 
@@ -125,8 +126,8 @@ mod tests {
         LayerId([byte; 32])
     }
 
-    fn dummy_segment(n: usize, dim: u32) -> Arc<VectorSegment> {
-        Arc::new(VectorSegment {
+    fn dummy_segment(n: usize, dim: u32) -> Arc<SegmentView> {
+        Arc::new(SegmentView::from_segment(crate::layer::VectorSegment {
             model_iri: iri("urn:eigenius:embed:test:m1"),
             dim,
             distance: "cosine".into(),
@@ -134,7 +135,7 @@ mod tests {
                 .map(|i| iri(&format!("urn:eigenius:test:s{i}")))
                 .collect(),
             vectors: vec![0.5f32; n * dim as usize],
-        })
+        }))
     }
 
     #[test]

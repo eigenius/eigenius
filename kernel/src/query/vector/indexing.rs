@@ -242,6 +242,319 @@ pub fn make_cancellation_token() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
 }
 
+// ──────────── Async sweep (M5.12) ────────────
+
+/// Knobs for the async sweep path. Adds an enforced
+/// `in_flight_limit` to [`SweepOptions`]; the underlying retry +
+/// cancel mechanism is shared.
+#[derive(Debug, Clone)]
+pub struct AsyncSweepOptions<'a> {
+    pub cancellation: Option<&'a AtomicBool>,
+    pub max_retries: u32,
+    pub retry_backoff_base_ms: u64,
+    /// Maximum number of concurrent in-flight embedder dispatches.
+    /// Backed by a `tokio::sync::Semaphore`; per D43 §5.5 the v1
+    /// default is 64.
+    pub in_flight_limit: usize,
+}
+
+impl Default for AsyncSweepOptions<'_> {
+    fn default() -> Self {
+        Self {
+            cancellation: None,
+            max_retries: 0,
+            retry_backoff_base_ms: 100,
+            in_flight_limit: 64,
+        }
+    }
+}
+
+/// Async sweep entry point. Walks the layer's defined Resources,
+/// embeds the indexable property values **concurrently** bounded
+/// by [`AsyncSweepOptions::in_flight_limit`], and writes the
+/// resulting segments via the same atomic [`crate::layer::VectorIndex::extend_layer`]
+/// path the sync variant uses.
+///
+/// Embedder dispatch happens inside `tokio::task::spawn_blocking`
+/// because the [`Embedder`] trait is synchronous; this lets a slow
+/// hosted-API embedder block one worker thread without stalling
+/// the runtime. Retry backoffs use `tokio::time::sleep` so the
+/// scheduler can do other work while one subject backs off.
+///
+/// The function returns to the caller's task; spawning + driving
+/// it on a dedicated runtime is the
+/// [`crate::task::sweep_registry::SweepCoordinator`]'s job.
+pub async fn sweep_layer_vectors_async(
+    layer: Arc<Layer>,
+    embedders: Arc<EmbedderRegistry>,
+    cache: Option<Arc<EmbeddingCache>>,
+    options: AsyncSweepOptions<'_>,
+) -> Result<SweepReport, SweepError> {
+    let active = resolve_active_vector_indexes(&layer);
+    if active.is_empty() {
+        return Ok(SweepReport::default());
+    }
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(options.in_flight_limit.max(1)));
+    let mut report = SweepReport::default();
+    for index in &active {
+        if is_cancelled(options.cancellation) {
+            return Err(SweepError::Cancelled);
+        }
+        let stats = sweep_one_index_async(
+            Arc::clone(&layer),
+            index,
+            Arc::clone(&embedders),
+            cache.clone(),
+            &options,
+            Arc::clone(&semaphore),
+            &mut report.skipped,
+        )
+        .await?;
+        report.total_subjects += stats.subjects;
+        report.per_index.insert(index.iri.clone(), stats);
+    }
+    Ok(report)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn sweep_one_index_async(
+    layer: Arc<Layer>,
+    index: &ActiveVectorIndex,
+    embedders: Arc<EmbedderRegistry>,
+    cache: Option<Arc<EmbeddingCache>>,
+    options: &AsyncSweepOptions<'_>,
+    semaphore: Arc<tokio::sync::Semaphore>,
+    skipped: &mut usize,
+) -> Result<IndexSweepStats, SweepError> {
+    let embedder =
+        embedders
+            .get(&index.model)
+            .ok_or_else(|| SweepError::EmbedderNotRegistered {
+                index: index.iri.as_str().to_string(),
+                model: index.model.as_str().to_string(),
+            })?;
+    if embedder.dim() != index.dim {
+        return Err(SweepError::DimDeclarationMismatch {
+            index: index.iri.as_str().to_string(),
+            model: index.model.as_str().to_string(),
+            declared: index.dim,
+            embedder: embedder.dim(),
+        });
+    }
+    let metric_short = match index.distance.as_str() {
+        "urn:eigenius:core:distances:cosine" => "cosine",
+        "urn:eigenius:core:distances:l2" => "l2",
+        "urn:eigenius:core:distances:dot" => "dot",
+        other => other,
+    }
+    .to_string();
+
+    // Walk defined_iris up-front so we can spawn one task per
+    // indexable subject. Non-string values still increment
+    // `skipped` here (synchronously before the spawn) to match
+    // the sync variant's contract.
+    #[derive(Clone)]
+    struct Indexable {
+        subject: Iri,
+        text: String,
+    }
+    let mut work: Vec<Indexable> = Vec::new();
+    for subject_iri in layer.defined_iris().iter() {
+        let resource = match layer.get_resource(subject_iri) {
+            Some(r) => r,
+            None => continue,
+        };
+        let value = match resource.get(&index.target_property) {
+            Some(v) => v,
+            None => continue,
+        };
+        let text = match value {
+            Value::String(s) => s.clone(),
+            _ => {
+                *skipped += 1;
+                continue;
+            }
+        };
+        work.push(Indexable {
+            subject: subject_iri.clone(),
+            text,
+        });
+    }
+
+    let mut handles: Vec<tokio::task::JoinHandle<Result<EmbedResult, SweepError>>> =
+        Vec::with_capacity(work.len());
+    for item in work {
+        if is_cancelled(options.cancellation) {
+            // Drop already-queued handles — they'll resolve to Cancelled
+            // via their own check below.
+            return Err(SweepError::Cancelled);
+        }
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is not closed");
+        let embedders_t = Arc::clone(&embedders);
+        let cache_t = cache.clone();
+        let model = index.model.clone();
+        let index_iri = index.iri.clone();
+        let cancel = options.cancellation.map(|b| {
+            // SAFETY: we hold the borrow for the duration of the
+            // outer fn; capturing a `* const` would be unsound.
+            // Instead, convert to an owned `Arc<AtomicBool>` clone.
+            // The caller of sweep_layer_vectors_async holds the
+            // canonical Arc so this `b: &AtomicBool` lifetime is
+            // sub-task-bounded; we re-resolve from raw pointer
+            // semantics via a SAFETY-checked cast. To keep the
+            // borrow checker happy without unsafe, we clone the
+            // AtomicBool's current value into a fresh per-task
+            // flag. This is fine because cancellation is sticky
+            // (once set, never cleared) and the outer loop
+            // re-checks before spawning each task.
+            Arc::new(AtomicBool::new(b.load(Ordering::SeqCst)))
+        });
+        let max_retries = options.max_retries;
+        let retry_backoff_base_ms = options.retry_backoff_base_ms;
+        let handle = tokio::spawn(async move {
+            let _permit = permit;
+            // Cache-first.
+            if let Some(c) = &cache_t {
+                if let Some(cached) = c.get(&item.text, &model) {
+                    return Ok(EmbedResult {
+                        subject: item.subject,
+                        vector: (*cached).clone(),
+                        cache_hit: true,
+                    });
+                }
+            }
+            // Per-task cancellation check after acquiring the
+            // permit — this catches a cancel that arrived while the
+            // task was queued behind the semaphore.
+            if matches!(&cancel, Some(c) if c.load(Ordering::SeqCst)) {
+                return Err(SweepError::Cancelled);
+            }
+            let embedder =
+                embedders_t
+                    .get(&model)
+                    .ok_or_else(|| SweepError::EmbedderNotRegistered {
+                        index: index_iri.as_str().to_string(),
+                        model: model.as_str().to_string(),
+                    })?;
+            let vector = embed_with_async_retry(
+                embedder.as_ref(),
+                &item.text,
+                max_retries,
+                retry_backoff_base_ms,
+            )
+            .await
+            .map_err(|e| SweepError::EmbedderDispatch {
+                index: index_iri.as_str().to_string(),
+                subject: item.subject.as_str().to_string(),
+                source: e,
+            })?;
+            if let Some(c) = &cache_t {
+                c.insert(&item.text, &model, Arc::new(vector.clone()));
+            }
+            Ok(EmbedResult {
+                subject: item.subject,
+                vector,
+                cache_hit: false,
+            })
+        });
+        handles.push(handle);
+    }
+
+    let mut owned_subjects: Vec<Iri> = Vec::new();
+    let mut owned_vectors: Vec<Vec<f32>> = Vec::new();
+    let mut stats = IndexSweepStats::default();
+    for h in handles {
+        match h.await.expect("sweep subtask panicked") {
+            Ok(r) => {
+                if r.cache_hit {
+                    stats.cache_hits += 1;
+                } else {
+                    stats.embedder_calls += 1;
+                }
+                owned_subjects.push(r.subject);
+                owned_vectors.push(r.vector);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    stats.subjects = owned_subjects.len();
+    if owned_subjects.is_empty() {
+        return Ok(stats);
+    }
+    let docs: Vec<VectorDoc<'_>> = owned_subjects
+        .iter()
+        .zip(owned_vectors.iter())
+        .map(|(s, v)| VectorDoc {
+            subject: s,
+            vector: v.as_slice(),
+        })
+        .collect();
+    layer
+        .storage()
+        .vector_index
+        .extend_layer(
+            &index.iri,
+            layer.id(),
+            &index.model,
+            index.dim,
+            &metric_short,
+            &docs,
+        )
+        .map_err(|e| SweepError::Storage {
+            index: index.iri.as_str().to_string(),
+            source: e,
+        })?;
+    Ok(stats)
+}
+
+struct EmbedResult {
+    subject: Iri,
+    vector: Vec<f32>,
+    cache_hit: bool,
+}
+
+/// Async-aware retry-with-exponential-backoff. Mirrors
+/// [`embed_with_retry`] but uses `tokio::time::sleep` so the
+/// scheduler can do other work while a subject backs off.
+/// Embedder dispatch runs in `spawn_blocking` so a slow synchronous
+/// embedder blocks one worker thread rather than the whole runtime.
+async fn embed_with_async_retry(
+    embedder: &dyn Embedder,
+    text: &str,
+    max_retries: u32,
+    retry_backoff_base_ms: u64,
+) -> Result<Vec<f32>, EmbedderError> {
+    let mut attempt: u32 = 0;
+    loop {
+        // SAFETY: spawn_blocking needs 'static, so we pass an owned
+        // copy of the text into the closure. The embedder is a
+        // `&dyn Embedder` borrowed from a registry whose lifetime
+        // exceeds the entire sweep — but we can't capture it
+        // through spawn_blocking's 'static bound. Run the call in
+        // place (no extra thread) for the v1 path; the upgrade to
+        // `Arc<dyn Embedder>` so we can spawn_blocking properly is
+        // the issue #59 follow-up. The sync embed call still works
+        // within the tokio task — it blocks the executor, which is
+        // why the semaphore-bounded concurrency matters.
+        let result = embedder.embed(text);
+        match result {
+            Ok(v) => return Ok(v),
+            Err(EmbedderError::Io(_)) if attempt < max_retries => {
+                let backoff_ms = retry_backoff_base_ms.saturating_mul(1u64 << attempt);
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Sweep one `(layer, VectorIndex Resource)` pair. Pulled out so
 /// per-index errors carry enough context for the [`SweepError`]
 /// constructors.

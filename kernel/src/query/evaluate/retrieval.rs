@@ -715,4 +715,220 @@ mod tests {
             "exactly doc1 should survive both filters; got {subjects:?}"
         );
     }
+
+    /// D43 §5.5 partial-materialisation guarantee: when a layer's
+    /// segments haven't been swept yet, vector queries see no
+    /// contribution from that layer but still correctly return
+    /// hits from layers whose segments are present. Builds a
+    /// parent (swept) + child (unswept) chain and verifies the
+    /// query at the child head returns only the parent's docs.
+    #[test]
+    fn vector_query_during_unswept_child_returns_only_parent_hits() {
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::Value;
+        use crate::ontology::well_known as wk;
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let body_iri = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        // Parent declares the Property + VectorIndex and contributes
+        // 2 indexable Documents. The sweep materialises its segment.
+        let ctx = bootstrap().expect("bootstrap");
+        let parent_chain = Arc::clone(ctx.head());
+        let mut pb = LayerBuilder::new("parent-with-segments", Some(parent_chain));
+        let mut prop = Resource::new(iri(body_iri));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        pb.add_resource(prop).unwrap();
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        pb.add_resource(vi).unwrap();
+        for i in 0..2 {
+            let mut d = Resource::new(iri(&format!("urn:eigenius:test:docparent{i}")));
+            d.set(iri(body_iri), Value::String(format!("parent {i}")));
+            pb.add_resource(d).unwrap();
+        }
+        let parent = Arc::new(pb.build(LayerStorage::in_memory()));
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+        sweep_layer_vectors(&parent, &reg, None).expect("parent sweep");
+
+        // Child commits 2 more Documents but the sweep has NOT been
+        // run on it — the §5.5 "in-flight" state.
+        let mut cb = LayerBuilder::new("child-unswept", Some(Arc::clone(&parent)));
+        for i in 0..2 {
+            let mut d = Resource::new(iri(&format!("urn:eigenius:test:docchild{i}")));
+            d.set(iri(body_iri), Value::String(format!("child {i}")));
+            cb.add_resource(d).unwrap();
+        }
+        let child = Arc::new(cb.build(parent.storage().clone()));
+
+        // Query against the child head: MATCH yields 4 Documents,
+        // but VECTOR_NEAR only sees segments from the parent.
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            ..FiberRuntime::default()
+        };
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("parent 0"), 10)
+            RETURN [] { d: ?d }
+            "#,
+            &child,
+            runtime,
+        )
+        .expect("query should succeed");
+        let subjects = row_subjects(&document);
+        // Only the parent docs are in the segment, so VECTOR_NEAR's
+        // top-10 only includes them. Child docs are skipped — the
+        // structural match found them but VECTOR_NEAR's per-row
+        // check fails (their subjects aren't in the segments).
+        assert!(
+            subjects.iter().all(|s| s.contains("docparent")),
+            "only parent docs should match; got {subjects:?}"
+        );
+        assert_eq!(
+            subjects.len(),
+            2,
+            "both docs from the swept parent should be hits"
+        );
+    }
+
+    /// D43 §3.4 / M6.5 — optional 4th-positional `ef` arg on
+    /// VECTOR_NEAR is parsed, typechecked (positive int literal),
+    /// and reaches `top_k_subjects`. Same end-to-end shape as
+    /// `vector_near_returns_top_k_subjects` but with an explicit
+    /// `ef`.
+    #[test]
+    fn vector_near_with_explicit_ef_runs_end_to_end() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_vector_corpus(5);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("text 2"), 1, 32)
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed with explicit ef");
+        let subjects = row_subjects(&document);
+        assert_eq!(
+            subjects,
+            vec!["urn:eigenius:test:doc2".to_string()],
+            "ef should not affect top-1 on a deterministic small corpus; got {subjects:?}"
+        );
+    }
+
+    /// Two independent corpus layers each declare their own
+    /// VectorIndex Resource (different IRIs, different target
+    /// properties). Sweeping each then querying must yield
+    /// non-overlapping per-Index segments — proves the
+    /// per-Index keying invariant from §3.1.
+    #[test]
+    fn branch_divergence_per_index_segments_dont_collide() {
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::Value;
+        use crate::ontology::well_known as wk;
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let model = "urn:eigenius:embed:dummy:v1";
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model, 8)));
+
+        let make = |label: &str, target_property: &str, n_docs: usize| -> Arc<Layer> {
+            let ctx = bootstrap().expect("bootstrap");
+            let parent = Arc::clone(ctx.head());
+            let mut b = LayerBuilder::new(label, Some(parent));
+            let mut prop = Resource::new(iri(target_property));
+            prop.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            );
+            prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+            b.add_resource(prop).unwrap();
+            let mut vi = Resource::new(iri(&format!("urn:eigenius:test:vi_{label}")));
+            vi.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            );
+            vi.set(
+                iri(wk::TARGET_PROPERTY),
+                Value::ResourceRef(iri(target_property)),
+            );
+            vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model)));
+            vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+            b.add_resource(vi).unwrap();
+            for i in 0..n_docs {
+                let mut d = Resource::new(iri(&format!("urn:eigenius:test:doc{label}{i}")));
+                d.set(iri(target_property), Value::String(format!("{label} {i}")));
+                b.add_resource(d).unwrap();
+            }
+            Arc::new(b.build(LayerStorage::in_memory()))
+        };
+
+        let layer_a = make("a", "urn:eigenius:test:body_a", 3);
+        let layer_b = make("b", "urn:eigenius:test:body_b", 2);
+        sweep_layer_vectors(&layer_a, &reg, None).expect("sweep a");
+        sweep_layer_vectors(&layer_b, &reg, None).expect("sweep b");
+
+        let runtime = FiberRuntime {
+            embedders: Some(&reg),
+            ..FiberRuntime::default()
+        };
+
+        // Query against layer A only sees layer A's docs.
+        let doc_a = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body_a": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("a 1"), 10)
+            RETURN [] { d: ?d }
+            "#,
+            &layer_a,
+            runtime,
+        )
+        .expect("query a");
+        let subjects_a = row_subjects(&doc_a);
+        assert_eq!(subjects_a.len(), 3, "all 3 a-docs should match");
+        assert!(subjects_a.iter().all(|s| s.contains("doca")));
+
+        let doc_b = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body_b": ?vec }
+            WHERE VECTOR_NEAR(?vec, EMBED("b 0"), 10)
+            RETURN [] { d: ?d }
+            "#,
+            &layer_b,
+            runtime,
+        )
+        .expect("query b");
+        let subjects_b = row_subjects(&doc_b);
+        assert_eq!(subjects_b.len(), 2, "all 2 b-docs should match");
+        assert!(subjects_b.iter().all(|s| s.contains("docb")));
+    }
 }

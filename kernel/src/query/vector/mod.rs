@@ -22,5 +22,8 @@
 
 pub mod cache;
 pub mod distance;
+pub mod hnsw;
 pub mod indexing;
+pub mod recall;
 pub mod search;
+pub mod segment;
