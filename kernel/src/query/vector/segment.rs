@@ -295,19 +295,66 @@ impl SegmentStrategy {
 /// [`VectorSegment`], optionally building an HNSW graph per
 /// `strategy` and `metric` (§2.4 strategy dispatch). M5.6's
 /// `fetch_segment` calls this on cache miss.
+///
+/// When the segment carries a persisted `hnsw_graph_bytes` payload
+/// (D43 §2.4 / M6-finish.4), the decoder is consulted instead of
+/// rebuilding the graph. Decode failure on what should be a valid
+/// graph is silently demoted to a rebuild so a corrupt cached
+/// segment doesn't poison query traffic; the build path is the
+/// authoritative producer.
 pub fn admit_segment(
     segment: VectorSegment,
     metric: Metric,
     strategy: SegmentStrategy,
     hnsw_config: HnswBuildConfig,
 ) -> SegmentView {
+    use crate::query::vector::hnsw_format;
     let count = segment.subjects.len();
+    let dim_usize = segment.dim as usize;
+    let persisted_graph = segment.hnsw_graph_bytes.clone();
     let view = SegmentView::from_segment(segment);
+
+    if let Some(bytes) = persisted_graph {
+        match hnsw_format::decode(&bytes) {
+            Ok(layout) if layout.count() == count => {
+                let vectors_arc: Arc<[f32]> = Arc::from(view.vectors().to_vec());
+                let graph = HnswGraph::from_layout(layout, vectors_arc, dim_usize, metric);
+                return view.with_hnsw(Arc::new(graph));
+            }
+            Ok(_) | Err(_) => {
+                // Demote to rebuild — see fn doc.
+            }
+        }
+    }
+
     if strategy.should_build_hnsw(count) {
         view.build_and_attach_hnsw(metric, hnsw_config)
     } else {
         view
     }
+}
+
+/// Sweep-side helper: build an HNSW graph over `vectors` if
+/// `strategy` (resolved from the active VectorIndex's `strategy`
+/// slot) calls for it, and encode the result via the §2.4 wire
+/// format. Returns `None` for the flat path; returns `Some(bytes)`
+/// for `hnsw` / `auto`-promoted segments. The bytes are what the
+/// sweep hands to [`crate::layer::VectorIndex::extend_layer`] so the
+/// graph survives kernel restart.
+pub fn build_hnsw_graph_bytes(
+    vectors: &[f32],
+    dim: usize,
+    count: usize,
+    metric: Metric,
+    strategy: SegmentStrategy,
+    hnsw_config: HnswBuildConfig,
+) -> Option<Vec<u8>> {
+    use crate::query::vector::hnsw_format;
+    if !strategy.should_build_hnsw(count) {
+        return None;
+    }
+    let graph = HnswGraph::build(vectors, dim, metric, hnsw_config);
+    Some(hnsw_format::encode(graph.layout()))
 }
 
 #[cfg(test)]
@@ -329,6 +376,7 @@ mod tests {
                 .map(|i| iri(&format!("urn:eigenius:test:s{i}")))
                 .collect(),
             vectors: (0..count).map(|i| i as f32 * 0.125).collect(),
+            hnsw_graph_bytes: None,
         }
     }
 
@@ -475,5 +523,102 @@ mod tests {
         let view = SegmentView::from_segment(dummy_segment(12, 4));
         let view = view.build_and_attach_hnsw(Metric::Cosine, HnswBuildConfig::for_segment(12));
         assert_eq!(view.hnsw().unwrap().count(), 12);
+    }
+
+    // ─── Persisted HNSW (M6-finish.4) ───────────────────────────
+
+    /// `build_hnsw_graph_bytes` returns `None` under `Flat` and
+    /// returns wire-format bytes that decode under `Hnsw`.
+    #[test]
+    fn build_hnsw_graph_bytes_respects_strategy() {
+        use crate::query::vector::hnsw_format;
+        let segment = dummy_segment(8, 4);
+        let count = segment.subjects.len();
+        let dim = segment.dim as usize;
+
+        let none_bytes = build_hnsw_graph_bytes(
+            &segment.vectors,
+            dim,
+            count,
+            Metric::Cosine,
+            SegmentStrategy::Flat,
+            HnswBuildConfig::for_segment(count),
+        );
+        assert!(none_bytes.is_none(), "Flat strategy emits no graph");
+
+        let some_bytes = build_hnsw_graph_bytes(
+            &segment.vectors,
+            dim,
+            count,
+            Metric::Cosine,
+            SegmentStrategy::Hnsw,
+            HnswBuildConfig::for_segment(count),
+        )
+        .expect("Hnsw strategy emits bytes");
+        let layout = hnsw_format::decode(&some_bytes).expect("encoded bytes decode");
+        assert_eq!(layout.count(), count);
+    }
+
+    /// When the segment carries `hnsw_graph_bytes` from storage,
+    /// `admit_segment` must skip the rebuild and attach the decoded
+    /// graph. The contract observable from outside is: the cache
+    /// admission yields a SegmentView whose `hnsw()` is `Some` even
+    /// when `strategy = Flat` (the persisted graph beats the
+    /// strategy slot when present).
+    #[test]
+    fn admit_segment_uses_persisted_hnsw_bytes() {
+        use crate::query::vector::hnsw_format;
+        let segment = dummy_segment(8, 4);
+        let dim = segment.dim as usize;
+        let count = segment.subjects.len();
+
+        // Build the same graph the sweep would have written.
+        let bytes = build_hnsw_graph_bytes(
+            &segment.vectors,
+            dim,
+            count,
+            Metric::Cosine,
+            SegmentStrategy::Hnsw,
+            HnswBuildConfig::for_segment(count),
+        )
+        .unwrap();
+
+        let with_persisted = VectorSegment {
+            hnsw_graph_bytes: Some(bytes.clone()),
+            ..segment.clone()
+        };
+
+        // strategy=Flat is the load-bearing assertion: persisted
+        // bytes win, no rebuild needed.
+        let view = admit_segment(
+            with_persisted,
+            Metric::Cosine,
+            SegmentStrategy::Flat,
+            HnswBuildConfig::for_segment(count),
+        );
+        let graph = view.hnsw().expect("persisted bytes attached");
+        assert_eq!(graph.count(), count);
+
+        // The decoded graph's topology equals the original wire shape.
+        let expected = hnsw_format::decode(&bytes).unwrap();
+        assert_eq!(graph.layout(), &expected);
+    }
+
+    /// Corrupt `hnsw_graph_bytes` are silently demoted to a rebuild
+    /// or a flat view — the read path must not crash query traffic
+    /// on a malformed segment.
+    #[test]
+    fn admit_segment_falls_back_when_persisted_bytes_corrupt() {
+        let mut segment = dummy_segment(8, 4);
+        segment.hnsw_graph_bytes = Some(vec![0xFF; 8]); // garbage
+
+        // strategy=Hnsw → fall back to rebuild
+        let view = admit_segment(
+            segment,
+            Metric::Cosine,
+            SegmentStrategy::Hnsw,
+            HnswBuildConfig::for_segment(8),
+        );
+        assert!(view.hnsw().is_some(), "corrupt bytes demote to rebuild");
     }
 }

@@ -133,8 +133,12 @@ fn decode_layer_key_body(body: &[u8]) -> Result<(LayerId, Iri), String> {
 /// (the in-RAM consumer casts the byte slice to `&[f32]` via
 /// `bytemuck`).
 ///
-/// Optional `hnsw_graph` field is reserved for M6; v1 omits it so
-/// the reader knows it's a brute-force-only segment.
+/// `hnsw_graph` is the optional D43 §2.4 wire-format topology blob
+/// (M6-finish.1's `kernel::query::vector::hnsw_format`). Present
+/// for `strategy: hnsw` / `auto`-promoted segments; absent for
+/// flat segments. The serde `default` + `skip_serializing_if` pair
+/// keeps the on-disk shape backward-compatible with pre-M6-finish.4
+/// segments written without the field.
 #[derive(Debug, Serialize, Deserialize)]
 struct VectorSegmentCbor {
     model_iri: String,
@@ -143,6 +147,8 @@ struct VectorSegmentCbor {
     subjects: Vec<String>,
     /// `count × dim × 4` bytes, little-endian fp32.
     vectors: serde_bytes::ByteBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hnsw_graph: Option<serde_bytes::ByteBuf>,
 }
 
 fn segment_to_cbor(segment: &VectorSegment) -> Vec<u8> {
@@ -160,6 +166,10 @@ fn segment_to_cbor(segment: &VectorSegment) -> Vec<u8> {
             .map(|s| s.as_str().to_string())
             .collect(),
         vectors: serde_bytes::ByteBuf::from(vector_bytes),
+        hnsw_graph: segment
+            .hnsw_graph_bytes
+            .as_ref()
+            .map(|b| serde_bytes::ByteBuf::from(b.clone())),
     };
     let mut buf = Vec::new();
     ciborium::into_writer(&cbor, &mut buf).expect("CBOR encode VectorSegment cannot fail");
@@ -206,6 +216,7 @@ fn segment_from_cbor(bytes: &[u8]) -> Result<VectorSegment, StorageError> {
         distance: cbor.distance,
         subjects,
         vectors,
+        hnsw_graph_bytes: cbor.hnsw_graph.map(|b| b.into_vec()),
     })
 }
 
@@ -251,6 +262,7 @@ impl RocksVectorIndex {
         dim: u32,
         distance: &str,
         docs: &[VectorDoc<'_>],
+        hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError> {
         if docs.is_empty() {
             return Ok(());
@@ -283,6 +295,7 @@ impl RocksVectorIndex {
             distance: distance.to_string(),
             subjects,
             vectors,
+            hnsw_graph_bytes: hnsw_graph.map(|b| b.to_vec()),
         };
 
         let blob = segment_to_cbor(&segment);
@@ -335,13 +348,16 @@ impl VectorIndex for RocksVectorIndex {
         dim: u32,
         distance: &str,
         docs: &[VectorDoc<'_>],
+        hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError> {
         if docs.is_empty() {
             return Ok(());
         }
         run_blocking(|| {
             let mut batch = rocksdb::WriteBatch::default();
-            self.extend_into_batch(&mut batch, index, layer, model_iri, dim, distance, docs)?;
+            self.extend_into_batch(
+                &mut batch, index, layer, model_iri, dim, distance, docs, hnsw_graph,
+            )?;
             self.db
                 .write(batch)
                 .map_err(|e| StorageError::Internal(format!("vec_index extend_layer: {e}")))
@@ -479,6 +495,7 @@ mod tests {
                     vector: &v_b,
                 },
             ],
+            None,
         )
         .unwrap();
 
@@ -513,6 +530,7 @@ mod tests {
                     subject: &s,
                     vector: &too_short,
                 }],
+                None,
             )
             .expect_err("dim mismatch should fail");
         assert!(matches!(err, StorageError::Internal(_)));
@@ -537,11 +555,11 @@ mod tests {
             vector: &v,
         }];
 
-        idx.extend_layer(&i1, &l1, &model, 2, "cosine", &docs)
+        idx.extend_layer(&i1, &l1, &model, 2, "cosine", &docs, None)
             .unwrap();
-        idx.extend_layer(&i1, &l2, &model, 2, "cosine", &docs)
+        idx.extend_layer(&i1, &l2, &model, 2, "cosine", &docs, None)
             .unwrap();
-        idx.extend_layer(&i2, &l3, &model, 2, "cosine", &docs)
+        idx.extend_layer(&i2, &l3, &model, 2, "cosine", &docs, None)
             .unwrap();
 
         let i1_layers: BTreeSet<LayerId> = idx.scan_index(&i1).map(|r| r.unwrap()).collect();
@@ -568,11 +586,11 @@ mod tests {
             vector: &v,
         }];
 
-        idx.extend_layer(&i1, &l1, &model, 1, "cosine", &docs)
+        idx.extend_layer(&i1, &l1, &model, 1, "cosine", &docs, None)
             .unwrap();
-        idx.extend_layer(&i2, &l1, &model, 1, "cosine", &docs)
+        idx.extend_layer(&i2, &l1, &model, 1, "cosine", &docs, None)
             .unwrap();
-        idx.extend_layer(&i1, &l2, &model, 1, "cosine", &docs)
+        idx.extend_layer(&i1, &l2, &model, 1, "cosine", &docs, None)
             .unwrap();
 
         idx.drop_layer(&l1).unwrap();
@@ -603,6 +621,7 @@ mod tests {
                 subject: &s,
                 vector: &v_v1,
             }],
+            None,
         )
         .unwrap();
         let v_v2 = [0.0f32, 1.0];
@@ -616,6 +635,7 @@ mod tests {
                 subject: &s,
                 vector: &v_v2,
             }],
+            None,
         )
         .unwrap();
         let seg = idx.get_segment(&i1, &l1).unwrap().unwrap();
@@ -646,6 +666,7 @@ mod tests {
                     subject: &s,
                     vector: &v,
                 }],
+                None,
             )
             .unwrap();
         }
@@ -669,9 +690,87 @@ mod tests {
             distance: "l2".to_string(),
             subjects: vec![s_a.clone(), s_b.clone()],
             vectors: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            hnsw_graph_bytes: None,
         };
         let bytes = segment_to_cbor(&seg);
         let decoded = segment_from_cbor(&bytes).unwrap();
         assert_eq!(decoded, seg);
+    }
+
+    /// D43 §2.4 / M6-finish.4 — CBOR round-trips the optional
+    /// `hnsw_graph` payload alongside the vectors. Backward-compat
+    /// with pre-M6-finish.4 segments (no `hnsw_graph` field at all)
+    /// is exercised by the no-bytes variant above.
+    #[test]
+    fn segment_cbor_round_trips_with_hnsw_graph() {
+        let model = iri("urn:eigenius:test:m");
+        let s = iri("urn:eigenius:test:s");
+        let graph_bytes: Vec<u8> = vec![0x45, 0x47, 0x48, 0x53, 0x01, 0xAA, 0xBB];
+        let seg = VectorSegment {
+            model_iri: model.clone(),
+            dim: 2,
+            distance: "cosine".to_string(),
+            subjects: vec![s.clone()],
+            vectors: vec![1.0, 0.0],
+            hnsw_graph_bytes: Some(graph_bytes.clone()),
+        };
+        let bytes = segment_to_cbor(&seg);
+        let decoded = segment_from_cbor(&bytes).unwrap();
+        assert_eq!(decoded, seg);
+        assert_eq!(
+            decoded.hnsw_graph_bytes.as_deref(),
+            Some(graph_bytes.as_slice())
+        );
+    }
+
+    /// D43 §2.4 / M6-finish.4 — `extend_layer` persists the HNSW
+    /// graph payload through to a fresh storage handle. The restart
+    /// path is the load-bearing case: a kernel that came up cold
+    /// should be able to query without paying the HNSW build cost.
+    #[test]
+    fn hnsw_graph_bytes_persist_across_reopen() {
+        let dir = TempDir::new().unwrap();
+        let i1 = iri("urn:eigenius:test:i1");
+        let l1 = layer_id(1);
+        let model = iri("urn:eigenius:test:m");
+        let s_a = iri("urn:eigenius:test:a");
+        let s_b = iri("urn:eigenius:test:b");
+        let v_a = [1.0f32, 0.0];
+        let v_b = [0.0f32, 1.0];
+        let graph_bytes: Vec<u8> = vec![0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x42];
+
+        {
+            let store = crate::RocksStore::open(dir.path()).unwrap();
+            let idx = RocksVectorIndex::new(Arc::clone(&store.db));
+            idx.extend_layer(
+                &i1,
+                &l1,
+                &model,
+                2,
+                "cosine",
+                &[
+                    VectorDoc {
+                        subject: &s_a,
+                        vector: &v_a,
+                    },
+                    VectorDoc {
+                        subject: &s_b,
+                        vector: &v_b,
+                    },
+                ],
+                Some(&graph_bytes),
+            )
+            .unwrap();
+        }
+
+        let store = crate::RocksStore::open(dir.path()).unwrap();
+        let idx = RocksVectorIndex::new(Arc::clone(&store.db));
+        let seg = idx.get_segment(&i1, &l1).unwrap().unwrap();
+        assert_eq!(
+            seg.hnsw_graph_bytes.as_deref(),
+            Some(graph_bytes.as_slice())
+        );
+        assert_eq!(seg.vector_at(0), &v_a);
+        assert_eq!(seg.vector_at(1), &v_b);
     }
 }

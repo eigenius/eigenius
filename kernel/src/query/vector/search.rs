@@ -486,6 +486,7 @@ mod tests {
                 dim,
                 metric,
                 &docs,
+                None,
             )
             .expect("write segment");
         (layer, vec_index)
@@ -528,6 +529,7 @@ mod tests {
                 dim,
                 metric,
                 &parent_docs,
+                None,
             )
             .expect("write parent segment");
 
@@ -552,6 +554,7 @@ mod tests {
                 dim,
                 metric,
                 &child_docs,
+                None,
             )
             .expect("write child segment");
 
@@ -913,6 +916,7 @@ mod tests {
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:from_cache")],
             vectors: vec![1.0, 0.0],
+            hnsw_graph_bytes: None,
         };
         cache.insert(
             iri(IDX),
@@ -987,6 +991,7 @@ mod tests {
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:a")],
             vectors: vec![1.0, 0.0],
+            hnsw_graph_bytes: None,
         };
         cache.insert(
             iri(IDX),
@@ -1050,6 +1055,7 @@ mod tests {
                 iri("urn:eigenius:test:docc"),
             ],
             vectors: vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0],
+            hnsw_graph_bytes: None,
         };
         let view = admit_segment(
             fake,
@@ -1131,6 +1137,7 @@ mod tests {
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:a"), iri("urn:eigenius:test:b")],
             vectors: vec![1.0, 0.0, 0.0, 1.0],
+            hnsw_graph_bytes: None,
         };
         let view = admit_segment(
             fake,
@@ -1197,6 +1204,7 @@ mod tests {
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:a")],
             vectors: vec![1.0, 0.0],
+            hnsw_graph_bytes: None,
         };
         cache.insert(
             iri(IDX),
@@ -1214,6 +1222,7 @@ mod tests {
             distance: "cosine".into(),
             subjects: vec![iri("urn:eigenius:test:b")],
             vectors: vec![0.0, 1.0],
+            hnsw_graph_bytes: None,
         };
         cache.insert(
             iri(IDX),

@@ -12,58 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D43 §2.4 / M6.1 — HNSW adapter.
+//! D43 §2.4 / M6.1 — HNSW adapter (post M6-finish.3).
 //!
-//! The kernel doesn't ship its own HNSW implementation; this module
-//! wraps the [`hnsw_rs`] crate (a stable-Rust port of the
-//! Malkov-Yashunin 2016 paper). The wrapper:
+//! Thin search-facing wrapper around the in-tree HNSW algorithm
+//! ([`crate::query::vector::hnsw_core`]) and the §2.4 wire shape
+//! ([`crate::query::vector::hnsw_format::HnswGraph`]). The rest of
+//! the kernel — the SegmentView's `hnsw` slot (M6.2), the search
+//! orchestrator's HNSW dispatch (M6.4), the strategy-driven cache
+//! admission (M6.3) — consumes one [`HnswGraph`] handle and doesn't
+//! care which library produced it. After M6-finish.3 the answer is
+//! "no library — our own algorithm."
 //!
-//! 1. Hides the library's internal types behind a small surface
-//!    ([`HnswGraph`], [`HnswBuildConfig`]) so a future swap to
-//!    `instant-distance`, `usearch`, or a roll-our-own implementation
-//!    is a one-file change.
-//! 2. Owns the per-metric type instantiation. v1 supports cosine
-//!    and L2; dot is folded into cosine by L2-normalising both
-//!    sides upstream (TODO: add dot/inner-product support when a
-//!    workload needs it; cf §3.4 "v1 supports flat for dot").
-//! 3. Carries the build-time parameters (`M`, `ef_construction`)
-//!    that the active VectorIndex Resource declares (§3.1
-//!    `hnsw_m` / `hnsw_ef_construction` slots).
+//! ## Memory layout
 //!
-//! ## v1 wire format
+//! The handle owns:
 //!
-//! `hnsw_rs` doesn't expose its graph structure as a portable byte
-//! representation; v1 persists the library's own `bincode` form
-//! inside the segment's `hnsw_graph` bstr. The design (§2.4
-//! paragraph "HNSW graph encoding") commits to a library-
-//! independent on-wire format eventually, but that work is
-//! deferred — see the M6 follow-up issue for the migration plan.
-//! v1 segments with HNSW graphs are tied to this library version;
-//! a library swap requires re-running the sweep to rebuild them,
-//! which is the same cost as a model upgrade (§5.7 atomic reindex)
-//! and uses the same machinery.
+//! - the wire-format `HnswGraph` ([`crate::query::vector::hnsw_format::HnswGraph`])
+//!   carrying topology only (entry_point, max_level, per-node level + adjacency);
+//! - an `Arc<[f32]>` copy of the vectors keyed by the same node ids
+//!   the graph references. The search path needs them for per-pair
+//!   distance computation as it traverses the graph.
+//! - the [`Metric`] used at build time so the search emits scores
+//!   in the kernel's "higher = better" similarity convention.
+//!
+//! The duplication with [`crate::query::vector::segment::SegmentView`]'s
+//! own aligned vector backing is intentional for v1 — keeping the
+//! HNSW handle self-contained avoids a lifetime tangle. A v2 sharing
+//! the SegmentView's `Arc<[u32]>` backing is contained future work.
 
 use crate::query::vector::distance::Metric;
-use hnsw_rs::prelude::*;
-use std::sync::Mutex;
+use crate::query::vector::hnsw_core::{
+    build as core_build, search as core_search, CoreBuildConfig,
+};
+use crate::query::vector::hnsw_format::HnswGraph as GraphLayout;
+use std::sync::Arc;
 
 /// Build-time parameters for an HNSW graph. The active VectorIndex
 /// Resource carries these in `hnsw_m` and `hnsw_ef_construction`
 /// slots (D43 §3.1); the sweep reads them into this struct before
-/// calling [`HnswGraph::build`].
+/// calling [`HnswGraph::build`]. The `max_elements` knob is the
+/// caller's segment count — it sizes the internal buffers but is
+/// otherwise informational under the in-tree algorithm (the v1
+/// vendored builder grows freely; the field is preserved on the
+/// public surface so the existing sweep code doesn't need a
+/// signature change).
 #[derive(Debug, Clone, Copy)]
 pub struct HnswBuildConfig {
-    /// `M` — the max number of bidirectional links each node carries
-    /// at the upper levels. v1 default is 16; the design's §3.1
-    /// recommended range is 8–32.
     pub m: usize,
-    /// `ef_construction` — exploration breadth during build. Higher
-    /// produces a higher-quality graph at the cost of build time.
-    /// v1 default is 200.
     pub ef_construction: usize,
-    /// Estimated max element count. Used by `hnsw_rs` to size its
-    /// internal buffers; over-estimating is fine, under-estimating
-    /// causes a reallocation midway through the build.
     pub max_elements: usize,
 }
 
@@ -80,40 +76,30 @@ impl HnswBuildConfig {
     }
 }
 
-/// Built HNSW graph + the vectors it indexes. The vectors are
-/// borrowed at build time and owned at search time so the
-/// SegmentView's aligned-byte-backed `&[f32]` can be the
-/// authoritative store; [`HnswGraph`] is the searchable index
-/// over it.
+/// Search-capable HNSW handle: the graph topology + the vectors it
+/// indexes + the metric / dim metadata the search loop needs.
 ///
-/// `hnsw_rs::Hnsw` is wrapped in a `Mutex` because the library's
-/// internal state isn't `Sync` even though the read path is
-/// thread-safe in practice. v1 takes the lock per search; if the
-/// contention is measurable in production we switch to a finer
-/// lock or to a library that exposes `Sync` directly.
+/// `Send + Sync` because all the inner state is `Arc`-backed and
+/// the algorithm is purely functional after build (no shared
+/// mutable state during search). The earlier `hnsw_rs`-wrapped
+/// version needed a `Mutex`; the in-tree algorithm doesn't.
 pub struct HnswGraph {
-    inner: Mutex<HnswInner>,
-    metric: Metric,
+    layout: Arc<GraphLayout>,
+    vectors: Arc<[f32]>,
     dim: usize,
+    metric: Metric,
 }
 
 impl std::fmt::Debug for HnswGraph {
-    /// `hnsw_rs::Hnsw` doesn't implement `Debug`, so we render a
-    /// summary that's useful in logs without dragging in the
-    /// library's internal state.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HnswGraph")
             .field("metric", &self.metric)
             .field("dim", &self.dim)
             .field("count", &self.count())
+            .field("max_level", &self.layout.max_level)
+            .field("entry_point", &self.layout.entry_point)
             .finish()
     }
-}
-
-enum HnswInner {
-    Cosine(Hnsw<'static, f32, DistCosine>),
-    L2(Hnsw<'static, f32, DistL2>),
-    Dot(Hnsw<'static, f32, DistDot>),
 }
 
 impl HnswGraph {
@@ -124,68 +110,51 @@ impl HnswGraph {
     pub fn build(vectors: &[f32], dim: usize, metric: Metric, config: HnswBuildConfig) -> Self {
         debug_assert!(dim > 0);
         debug_assert_eq!(vectors.len() % dim, 0);
-        let count = vectors.len() / dim;
-        let max_layer = if count < 16 {
-            // Single-layer when the segment is tiny — keeps the
-            // graph degenerate-but-valid.
-            1
-        } else {
-            // log2(count) is the textbook upper-level cap.
-            (count as f32).log2().ceil() as usize
+        let core_config = CoreBuildConfig {
+            m: config.m,
+            ef_construction: config.ef_construction,
+            // The post-Load sweep doesn't pick a seed today; using
+            // a fixed value keeps test reproducibility across
+            // runs of `cargo test`. A future configurable seed
+            // (per-`(layer, Index)` for hash-of-content reuse)
+            // slots in here without touching the wire format.
+            seed: 0xE16E_4143_4F52_4500, // "EIGE_ACOR_E" pun seed
         };
-
-        let mut data: Vec<&[f32]> = Vec::with_capacity(count);
-        for i in 0..count {
-            data.push(&vectors[i * dim..(i + 1) * dim]);
-        }
-
-        let inner = match metric {
-            Metric::Cosine => {
-                let h = Hnsw::<f32, DistCosine>::new(
-                    config.m,
-                    config.max_elements,
-                    max_layer,
-                    config.ef_construction,
-                    DistCosine,
-                );
-                for (i, v) in data.iter().enumerate() {
-                    h.insert((v, i));
-                }
-                HnswInner::Cosine(h)
-            }
-            Metric::L2 => {
-                let h = Hnsw::<f32, DistL2>::new(
-                    config.m,
-                    config.max_elements,
-                    max_layer,
-                    config.ef_construction,
-                    DistL2,
-                );
-                for (i, v) in data.iter().enumerate() {
-                    h.insert((v, i));
-                }
-                HnswInner::L2(h)
-            }
-            Metric::Dot => {
-                let h = Hnsw::<f32, DistDot>::new(
-                    config.m,
-                    config.max_elements,
-                    max_layer,
-                    config.ef_construction,
-                    DistDot,
-                );
-                for (i, v) in data.iter().enumerate() {
-                    h.insert((v, i));
-                }
-                HnswInner::Dot(h)
-            }
-        };
-
+        let layout = core_build(vectors, dim, metric, core_config);
         Self {
-            inner: Mutex::new(inner),
-            metric,
+            layout: Arc::new(layout),
+            vectors: Arc::from(vectors.to_vec()),
             dim,
+            metric,
         }
+    }
+
+    /// Reconstitute a search handle from a previously-encoded wire-
+    /// format [`GraphLayout`] + its associated vectors. The
+    /// RocksDB-backed reload path (M6-finish.4) calls this after
+    /// pulling the `hnsw_graph` bstr out of the segment CBOR and
+    /// decoding it via [`crate::query::vector::hnsw_format::decode`].
+    pub fn from_layout(
+        layout: GraphLayout,
+        vectors: Arc<[f32]>,
+        dim: usize,
+        metric: Metric,
+    ) -> Self {
+        debug_assert!(dim > 0);
+        debug_assert_eq!(vectors.len() % dim, 0);
+        debug_assert_eq!(vectors.len() / dim, layout.count());
+        Self {
+            layout: Arc::new(layout),
+            vectors,
+            dim,
+            metric,
+        }
+    }
+
+    /// Borrow the wire-format graph (for the M6-finish.4 persist
+    /// path).
+    pub fn layout(&self) -> &GraphLayout {
+        &self.layout
     }
 
     /// Search for the top-`k` nearest neighbours of `query` with
@@ -199,56 +168,29 @@ impl HnswGraph {
     /// `max(k*4, 64)` is the caller's responsibility.
     pub fn search(&self, query: &[f32], k: usize, ef: usize) -> Vec<(usize, f32)> {
         debug_assert_eq!(query.len(), self.dim);
-        let guard = self.inner.lock().expect("hnsw mutex poisoned");
-        let raw: Vec<Neighbour> = match &*guard {
-            HnswInner::Cosine(h) => h.search(query, k, ef),
-            HnswInner::L2(h) => h.search(query, k, ef),
-            HnswInner::Dot(h) => h.search(query, k, ef),
-        };
-        // `hnsw_rs` returns Neighbours sorted by ascending distance.
-        // Convert each distance to the "higher = better" similarity
-        // form the rest of the query path uses.
-        raw.into_iter()
-            .map(|n| {
-                let sim = distance_to_similarity(self.metric, n.distance);
-                (n.d_id, sim)
-            })
-            .collect()
+        core_search(
+            self.layout.as_ref(),
+            &self.vectors,
+            self.dim,
+            self.metric,
+            query,
+            k,
+            ef,
+        )
+        .into_iter()
+        .map(|(id, sim)| (id as usize, sim))
+        .collect()
     }
 
     /// Number of indexed vectors. Used by tests and by the recall
     /// measurement (M6.6) which reports per-segment coverage.
     pub fn count(&self) -> usize {
-        let guard = self.inner.lock().expect("hnsw mutex poisoned");
-        match &*guard {
-            HnswInner::Cosine(h) => h.get_nb_point(),
-            HnswInner::L2(h) => h.get_nb_point(),
-            HnswInner::Dot(h) => h.get_nb_point(),
-        }
+        self.layout.count()
     }
-}
 
-/// Convert `hnsw_rs`-returned distance to the kernel's
-/// "higher = better" similarity convention. Mirrors
-/// [`Metric::similarity`] — the two helpers are kept in parity by
-/// test [`tests::hnsw_similarity_matches_metric_similarity`].
-fn distance_to_similarity(metric: Metric, distance: f32) -> f32 {
-    match metric {
-        Metric::Cosine => {
-            // `DistCosine` in `hnsw_rs` returns `1 - cos(a, b)` so
-            // we recover the similarity by `1 - d`.
-            1.0 - distance
-        }
-        Metric::L2 => {
-            // `DistL2` returns sqrt-Euclidean distance; mirror the
-            // brute-force orientation: `1 / (1 + d)`.
-            1.0 / (1.0 + distance)
-        }
-        Metric::Dot => {
-            // `DistDot` returns `-dot(a, b)` (lower = closer to
-            // "more similar"); flip the sign for similarity.
-            -distance
-        }
+    /// Distance metric this graph was built under.
+    pub fn metric(&self) -> Metric {
+        self.metric
     }
 }
 
@@ -262,7 +204,6 @@ mod tests {
     }
 
     fn known_2d_corpus() -> (Vec<f32>, usize) {
-        // 4 unit vectors at 0°, 90°, 180°, 270°. dim=2.
         let mut data: Vec<f32> = Vec::new();
         for &deg in &[0.0f32, 90.0, 180.0, 270.0] {
             data.extend(unit_vec_2d(deg));
@@ -274,14 +215,11 @@ mod tests {
     fn build_then_search_finds_self_for_unit_vectors() {
         let (data, dim) = known_2d_corpus();
         let graph = HnswGraph::build(&data, dim, Metric::Cosine, HnswBuildConfig::for_segment(4));
-        // Query with each indexed vector and expect that vector
-        // as the top-1.
         for i in 0..4 {
             let q = &data[i * dim..(i + 1) * dim];
             let hits = graph.search(q, 1, 16);
             assert_eq!(hits.len(), 1, "i={i} should return one hit");
             assert_eq!(hits[0].0, i, "i={i} should be top-1");
-            // Cosine sim with self is ~1.0.
             assert!(
                 (hits[0].1 - 1.0).abs() < 1e-5,
                 "self-similarity ≈ 1 at i={i}; got {}",
@@ -292,8 +230,6 @@ mod tests {
 
     #[test]
     fn search_returns_hits_in_descending_similarity_order() {
-        // 8 unit vectors evenly spaced; query at 45° should return
-        // the closest first.
         let mut data: Vec<f32> = Vec::new();
         for k in 0..8 {
             let deg = (k as f32) * 45.0;
@@ -311,21 +247,12 @@ mod tests {
                 w[1].1
             );
         }
-        // Top-1 is the 45° point itself, index 1.
         assert_eq!(hits[0].0, 1);
         assert!((hits[0].1 - 1.0).abs() < 1e-4);
     }
 
     #[test]
     fn larger_corpus_returns_self_for_self_query() {
-        // 200 vectors in 16 dimensions, each a unique direction by
-        // construction (the SHA-256-style mixing avoids the
-        // collinearity that a naive `(i * a + j * b) % p` mixer
-        // produces, where ~200 / 97 ≈ 2 near-duplicates per point
-        // would defeat the self-query check). For each indexed
-        // vector, the self-query must return that vector as
-        // top-1 — this is the "exactness on hit" property that
-        // makes HNSW useful for non-degenerate workloads.
         use sha2::{Digest, Sha256};
         let dim = 16;
         let count = 200;
@@ -335,9 +262,6 @@ mod tests {
             h.update((i as u64).to_le_bytes());
             let digest = h.finalize();
             for j in 0..dim {
-                // Unpack 4 bytes from the digest (32 bytes covers up
-                // to dim=8 f32s; for higher dim we rehash with j as
-                // a counter — mirrors `DummyEmbedder`'s pattern).
                 let chunk_idx = j % 8;
                 let bytes = [
                     digest[chunk_idx * 4],
@@ -396,31 +320,28 @@ mod tests {
         assert_eq!(graph.count(), 4);
     }
 
-    /// Pin the conversion: hnsw_rs distance → similarity must
-    /// match the brute-force [`Metric::similarity`] for identical
-    /// inputs, so HNSW and flat-path scores are comparable
-    /// within a single result set (per §2.4 "the reader
-    /// dispatches; results carry per-segment recall").
     #[test]
-    fn hnsw_similarity_matches_metric_similarity() {
-        // Cosine: distance is 1 - cos. Use the canonical
-        // 45-degree unit vector via the f32 constant rather than
-        // an inexact 0.7071 literal (clippy::approx_constant).
-        let a = vec![1.0f32, 0.0];
-        let b = vec![
-            std::f32::consts::FRAC_1_SQRT_2,
-            std::f32::consts::FRAC_1_SQRT_2,
-        ];
-        let scalar = Metric::Cosine.similarity(&a, &b);
-        // Simulate what hnsw_rs would return: 1 - cos.
-        let d = 1.0 - scalar;
-        let converted = distance_to_similarity(Metric::Cosine, d);
-        assert!((scalar - converted).abs() < 1e-5);
+    fn metric_accessor_returns_build_metric() {
+        let (data, dim) = known_2d_corpus();
+        let graph = HnswGraph::build(&data, dim, Metric::L2, HnswBuildConfig::for_segment(4));
+        assert_eq!(graph.metric(), Metric::L2);
+    }
 
-        // L2.
-        let scalar = Metric::L2.similarity(&a, &b);
-        let d_l2 = crate::query::vector::distance::l2_distance(&a, &b);
-        let converted = distance_to_similarity(Metric::L2, d_l2);
-        assert!((scalar - converted).abs() < 1e-5);
+    #[test]
+    fn from_layout_round_trips_via_wire_format() {
+        // Build, encode, decode, reload via from_layout; the
+        // reloaded graph must search to the same self-query top-1
+        // as the original.
+        use crate::query::vector::hnsw_format::{decode, encode};
+        let (data, dim) = known_2d_corpus();
+        let g = HnswGraph::build(&data, dim, Metric::Cosine, HnswBuildConfig::for_segment(4));
+        let bytes = encode(g.layout());
+        let layout = decode(&bytes).expect("decode");
+        let reloaded = HnswGraph::from_layout(layout, Arc::from(data.clone()), dim, Metric::Cosine);
+        let q = &data[0..dim];
+        let original_hits = g.search(q, 1, 16);
+        let reloaded_hits = reloaded.search(q, 1, 16);
+        assert_eq!(original_hits[0].0, reloaded_hits[0].0);
+        assert!((original_hits[0].1 - reloaded_hits[0].1).abs() < 1e-6);
     }
 }

@@ -23,6 +23,8 @@
 pub mod cache;
 pub mod distance;
 pub mod hnsw;
+pub mod hnsw_core;
+pub mod hnsw_format;
 pub mod indexing;
 pub mod recall;
 pub mod search;

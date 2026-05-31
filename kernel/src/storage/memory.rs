@@ -1057,7 +1057,7 @@ mod tests {
             subject: &subject,
             vector: &vec_data,
         }];
-        vi_a.extend_layer(&index_iri, &layer, &model_iri, 3, "cosine", &docs)
+        vi_a.extend_layer(&index_iri, &layer, &model_iri, 3, "cosine", &docs, None)
             .unwrap();
 
         let seg = vi_b

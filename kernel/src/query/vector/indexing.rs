@@ -51,6 +51,9 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::program::embedder::{Embedder, EmbedderError, EmbedderRegistry};
 use crate::program::embedding_cache::EmbeddingCache;
+use crate::query::vector::distance::Metric;
+use crate::query::vector::hnsw::HnswBuildConfig;
+use crate::query::vector::segment::{build_hnsw_graph_bytes, strategy_from_iri};
 use crate::storage::StorageError;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -495,6 +498,7 @@ async fn sweep_one_index_async(
             vector: v.as_slice(),
         })
         .collect();
+    let hnsw_bytes = maybe_build_index_hnsw(index, &metric_short, &owned_vectors);
     layer
         .storage()
         .vector_index
@@ -505,12 +509,43 @@ async fn sweep_one_index_async(
             index.dim,
             &metric_short,
             &docs,
+            hnsw_bytes.as_deref(),
         )
         .map_err(|e| SweepError::Storage {
             index: index.iri.as_str().to_string(),
             source: e,
         })?;
     Ok(stats)
+}
+
+/// Sweep-side decision: build + encode the HNSW graph if the active
+/// VectorIndex's `strategy` slot (or `auto`'s threshold) says so.
+/// Skips silently when the metric IRI doesn't map to a known
+/// [`Metric`] — that case already fails the lazy query path with a
+/// readable error and we don't want the sweep to surface a bogus
+/// "unrecognised metric" while the caller is still mid-embed.
+fn maybe_build_index_hnsw(
+    index: &ActiveVectorIndex,
+    metric_short: &str,
+    owned_vectors: &[Vec<f32>],
+) -> Option<Vec<u8>> {
+    let metric = Metric::from_short_name(metric_short)?;
+    let strategy = strategy_from_iri(&index.strategy);
+    let count = owned_vectors.len();
+    if count == 0 {
+        return None;
+    }
+    let dim = index.dim as usize;
+    let mut flat: Vec<f32> = Vec::with_capacity(count * dim);
+    for v in owned_vectors {
+        flat.extend_from_slice(v);
+    }
+    let config = HnswBuildConfig {
+        m: index.hnsw_m as usize,
+        ef_construction: index.hnsw_ef_construction as usize,
+        max_elements: count.max(16),
+    };
+    build_hnsw_graph_bytes(&flat, dim, count, metric, strategy, config)
 }
 
 struct EmbedResult {
@@ -664,6 +699,7 @@ fn sweep_one_index(
             vector: v.as_slice(),
         })
         .collect();
+    let hnsw_bytes = maybe_build_index_hnsw(index, &metric_short, &owned_vectors);
     layer
         .storage()
         .vector_index
@@ -674,6 +710,7 @@ fn sweep_one_index(
             index.dim,
             &metric_short,
             &docs,
+            hnsw_bytes.as_deref(),
         )
         .map_err(|e| SweepError::Storage {
             index: index.iri.as_str().to_string(),

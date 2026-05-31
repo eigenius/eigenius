@@ -1776,6 +1776,7 @@ mod tests {
                     subject: &subject,
                     vector: &vec_data,
                 }],
+                None,
             )
             .unwrap();
 

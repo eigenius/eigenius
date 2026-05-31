@@ -90,6 +90,16 @@ pub struct VectorSegment {
     /// Flat `count × dim` row-major layout. `subjects.len() * dim`
     /// elements always.
     pub vectors: Vec<f32>,
+    /// Optional HNSW graph in the D43 §2.4 wire format
+    /// (`crate::query::vector::hnsw_format`). Present when the
+    /// active VectorIndex Resource's `strategy` is `hnsw` (or
+    /// `auto` with a count above the threshold) and the sweep
+    /// built one. Absent for flat segments. The cache-admission
+    /// path (M6.3 / M6-finish.4) decodes these bytes via
+    /// `hnsw_format::decode` and attaches the resulting graph to
+    /// the SegmentView so the first query after a restart doesn't
+    /// pay the HNSW rebuild cost.
+    pub hnsw_graph_bytes: Option<Vec<u8>>,
 }
 
 impl VectorSegment {
@@ -169,6 +179,14 @@ pub trait VectorIndex: Send + Sync {
     /// a layer's vector contribution under a fresh VectorIndex
     /// Resource (which gets a new IRI, so it's a different key
     /// anyway).
+    ///
+    /// **`hnsw_graph`** — D43 §2.4 / M6-finish.4. Optional HNSW
+    /// graph in the [`crate::query::vector::hnsw_format`] wire
+    /// shape, persisted alongside the vectors so the graph survives
+    /// kernel restart without paying the build cost on first query.
+    /// `None` for flat segments (the legacy and `strategy: flat`
+    /// path); `Some(bytes)` for `hnsw` / `auto`-promoted segments.
+    #[allow(clippy::too_many_arguments)]
     fn extend_layer(
         &self,
         index: &Iri,
@@ -177,6 +195,7 @@ pub trait VectorIndex: Send + Sync {
         dim: u32,
         distance: &str,
         docs: &[VectorDoc<'_>],
+        hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError>;
 
     /// Drop every segment contributed by `layer` across all
@@ -253,6 +272,7 @@ impl VectorIndex for MemoryVectorIndex {
         dim: u32,
         distance: &str,
         docs: &[VectorDoc<'_>],
+        hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError> {
         if docs.is_empty() {
             return Ok(());
@@ -283,6 +303,7 @@ impl VectorIndex for MemoryVectorIndex {
             distance: distance.to_string(),
             subjects,
             vectors,
+            hnsw_graph_bytes: hnsw_graph.map(|b| b.to_vec()),
         };
 
         let mut state = self.inner.write().expect("MemoryVectorIndex poisoned");
@@ -393,7 +414,7 @@ mod tests {
                 vector: &v_b,
             },
         ];
-        idx.extend_layer(&i1, &l1, &model, 4, "cosine", &docs)
+        idx.extend_layer(&i1, &l1, &model, 4, "cosine", &docs, None)
             .unwrap();
 
         let seg = idx.get_segment(&i1, &l1).unwrap().unwrap();
@@ -423,7 +444,7 @@ mod tests {
             vector: &too_short,
         }];
         let err = idx
-            .extend_layer(&i1, &l1, &model, 4, "cosine", &docs)
+            .extend_layer(&i1, &l1, &model, 4, "cosine", &docs, None)
             .expect_err("dim mismatch should fail");
         assert!(matches!(err, StorageError::Internal(_)));
 
@@ -458,6 +479,7 @@ mod tests {
                 subject: &s,
                 vector: &v_for_i1,
             }],
+            None,
         )
         .unwrap();
         idx.extend_layer(
@@ -470,6 +492,7 @@ mod tests {
                 subject: &s,
                 vector: &v_for_i2,
             }],
+            None,
         )
         .unwrap();
 
@@ -504,9 +527,12 @@ mod tests {
         }];
 
         // i1 contributes at L1, L2; i2 contributes at L3.
-        idx.extend_layer(&i1, &l1, &model, 2, "dot", &docs).unwrap();
-        idx.extend_layer(&i1, &l2, &model, 2, "dot", &docs).unwrap();
-        idx.extend_layer(&i2, &l3, &model, 2, "dot", &docs).unwrap();
+        idx.extend_layer(&i1, &l1, &model, 2, "dot", &docs, None)
+            .unwrap();
+        idx.extend_layer(&i1, &l2, &model, 2, "dot", &docs, None)
+            .unwrap();
+        idx.extend_layer(&i2, &l3, &model, 2, "dot", &docs, None)
+            .unwrap();
 
         let i1_layers: BTreeSet<LayerId> = idx.scan_index(&i1).map(|r| r.unwrap()).collect();
         assert_eq!(i1_layers, BTreeSet::from([l1.clone(), l2.clone()]));
@@ -532,11 +558,11 @@ mod tests {
             vector: &v,
         }];
 
-        idx.extend_layer(&i1, &l1, &model, 1, "cosine", &docs)
+        idx.extend_layer(&i1, &l1, &model, 1, "cosine", &docs, None)
             .unwrap();
-        idx.extend_layer(&i2, &l1, &model, 1, "cosine", &docs)
+        idx.extend_layer(&i2, &l1, &model, 1, "cosine", &docs, None)
             .unwrap();
-        idx.extend_layer(&i1, &l2, &model, 1, "cosine", &docs)
+        idx.extend_layer(&i1, &l2, &model, 1, "cosine", &docs, None)
             .unwrap();
 
         idx.drop_layer(&l1).unwrap();
@@ -569,6 +595,7 @@ mod tests {
                 subject: &s,
                 vector: &v_v1,
             }],
+            None,
         )
         .unwrap();
         let v_v2 = [0.0f32, 1.0];
@@ -582,6 +609,7 @@ mod tests {
                 subject: &s,
                 vector: &v_v2,
             }],
+            None,
         )
         .unwrap();
 
@@ -597,7 +625,7 @@ mod tests {
         let i1 = iri("urn:eigenius:test:i1");
         let l1 = layer_id(1);
         let model = iri("urn:eigenius:test:m");
-        idx.extend_layer(&i1, &l1, &model, 4, "cosine", &[])
+        idx.extend_layer(&i1, &l1, &model, 4, "cosine", &[], None)
             .unwrap();
         assert!(idx.get_segment(&i1, &l1).unwrap().is_none());
         let s = idx.stats();
@@ -638,6 +666,7 @@ mod tests {
                     vector: &v_b,
                 },
             ],
+            None,
         )
         .unwrap();
         idx.extend_layer(
@@ -650,6 +679,7 @@ mod tests {
                 subject: &s_a,
                 vector: &v_a,
             }],
+            None,
         )
         .unwrap();
         idx.extend_layer(
@@ -662,6 +692,7 @@ mod tests {
                 subject: &s_a,
                 vector: &v_a,
             }],
+            None,
         )
         .unwrap();
 
@@ -677,5 +708,32 @@ mod tests {
         let _ = idx.scan_index(&i1).count();
         let s2 = idx.stats();
         assert_eq!(s2.scans, 3);
+    }
+
+    /// D43 §2.4 / M6-finish.4 — `extend_layer` accepts an optional
+    /// HNSW graph payload and `get_segment` returns it through
+    /// `hnsw_graph_bytes`. The bytes are stored opaquely; backends
+    /// do not parse them at write time.
+    #[test]
+    fn extend_layer_round_trips_hnsw_graph_bytes() {
+        let idx = MemoryVectorIndex::new();
+        let i1 = iri("urn:eigenius:test:vi");
+        let l1 = layer_id(7);
+        let model = iri("urn:eigenius:test:m");
+        let s = iri("urn:eigenius:test:s");
+        let v = [1.0f32, 0.0];
+        let docs = [VectorDoc {
+            subject: &s,
+            vector: &v,
+        }];
+        let graph_bytes: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
+
+        idx.extend_layer(&i1, &l1, &model, 2, "cosine", &docs, Some(&graph_bytes))
+            .unwrap();
+        let seg = idx.get_segment(&i1, &l1).unwrap().unwrap();
+        assert_eq!(
+            seg.hnsw_graph_bytes.as_deref(),
+            Some(graph_bytes.as_slice())
+        );
     }
 }

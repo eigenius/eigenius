@@ -135,6 +135,7 @@ mod tests {
                 .map(|i| iri(&format!("urn:eigenius:test:s{i}")))
                 .collect(),
             vectors: vec![0.5f32; n * dim as usize],
+            hnsw_graph_bytes: None,
         }))
     }
 
