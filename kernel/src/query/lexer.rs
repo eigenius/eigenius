@@ -98,6 +98,13 @@ pub enum TokenKind {
     /// with `ORDER BY` / `LIMIT` in the same query.
     Top,
 
+    // D45 — query-body variable binding.
+    /// `BIND(expr AS ?var)` in WHERE position. Introduces `?var`
+    /// bound to `expr` evaluated against the current binding;
+    /// subsequent clauses see the variable. Re-binding is rejected
+    /// at typecheck. SPARQL 1.1 surface inherited verbatim.
+    Bind,
+
     // Literals
     StringLit(String),
     NumberInt(i64),
@@ -657,6 +664,7 @@ impl<'a> Lexer<'a> {
             "EMBED" => TokenKind::EmbedFn,
             "RRF" => TokenKind::RrfFn,
             "TOP" => TokenKind::Top,
+            "BIND" => TokenKind::Bind,
             // Booleans
             "true" => TokenKind::BooleanLit(true),
             "false" => TokenKind::BooleanLit(false),

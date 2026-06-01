@@ -177,6 +177,38 @@ pub(super) fn eval_expression(
         Expression::Object(_) => Err(QueryError::evaluation(
             "object literals in expressions not yet implemented",
         )),
+        Expression::Rrf { .. } => {
+            // D43 §3.6 / §6.4 — RRF is *not* row-local. The
+            // evaluator's pre-pass materialises per-source ranks for
+            // every binding before this row-by-row code runs; we
+            // simply look up the current binding's fused score.
+            //
+            // The two `None` branches below catch planner bugs: the
+            // pre-pass either didn't see this node (impossible if the
+            // walker matches RETURN / TOP K BY structure) or the
+            // shaping loop didn't set `current_binding_idx`. Surface
+            // them as typed evaluation errors rather than panicking
+            // so the failure shows up in the user's response payload.
+            let rrf_ctx = runtime.rrf.ok_or_else(|| {
+                QueryError::evaluation(
+                    "RRF evaluation requires a pre-built RrfContext; \
+                     the evaluator entry point did not run the pre-pass",
+                )
+            })?;
+            let materialised = rrf_ctx.get(expr).ok_or_else(|| {
+                QueryError::evaluation(
+                    "RRF node missing from the materialised rank context — \
+                     RETURN / TOP K BY walker did not see this expression",
+                )
+            })?;
+            let binding_idx = runtime.current_binding_idx.ok_or_else(|| {
+                QueryError::evaluation(
+                    "RRF evaluation requires `current_binding_idx` to be set on the \
+                     FiberRuntime; the row-by-row shaping loop did not thread it",
+                )
+            })?;
+            Ok(Value::Float(materialised.score_for(binding_idx)))
+        }
     }
 }
 
@@ -1180,6 +1212,8 @@ mod tests {
             embedders: None,
             embedding_cache: None,
             vector_segment_cache: None,
+            rrf: None,
+            current_binding_idx: None,
         };
 
         // Use FunctionCall directly at eval_expression level for a
@@ -1236,6 +1270,8 @@ mod tests {
             embedders: None,
             embedding_cache: None,
             vector_segment_cache: None,
+            rrf: None,
+            current_binding_idx: None,
         };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
@@ -1427,6 +1463,8 @@ mod tests {
             embedders: None,
             embedding_cache: None,
             vector_segment_cache: None,
+            rrf: None,
+            current_binding_idx: None,
         };
 
         // Pass the IRI as a String literal — same shape MATCH
@@ -1484,7 +1522,8 @@ mod tests {
             .body
             .conditions
             .first()
-            .expect("WHERE condition");
+            .expect("WHERE condition")
+            .expression();
         match cond {
             Expression::Unary { op, operand } => {
                 assert_eq!(*op, UnaryOp::Not);

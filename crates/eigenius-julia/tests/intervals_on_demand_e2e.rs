@@ -754,6 +754,8 @@ RETURN [] {{
         embedders: None,
         embedding_cache: None,
         vector_segment_cache: None,
+        rrf: None,
+        current_binding_idx: None,
     };
 
     let document = match eigenius_kernel::query::execute_with(&fiber_query, &head, fiber_runtime) {

@@ -93,9 +93,11 @@ pub fn infer_embed_models(program: &mut Program, layer: &Layer) -> Vec<QueryErro
         vector_indexes: &vector_indexes,
     };
 
-    // Main query body.
-    for cond in &mut program.query.body.conditions {
-        infer_in_expr(cond, None, &ctx, &mut errors);
+    // Main query body. WHERE items can be either filter expressions
+    // or `BIND(expr AS ?var)` (D45) — both contain an expression to
+    // walk for EMBED inference.
+    for item in &mut program.query.body.conditions {
+        infer_in_where_item(item, &ctx, &mut errors);
     }
     for item in &mut program.query.result {
         infer_in_expr(&mut item.expression, None, &ctx, &mut errors);
@@ -106,13 +108,28 @@ pub fn infer_embed_models(program: &mut Program, layer: &Layer) -> Vec<QueryErro
     for item in &mut program.query.order_by {
         infer_in_expr(&mut item.expression, None, &ctx, &mut errors);
     }
+    if let Some(top_k) = program.query.top_k_by.as_mut() {
+        infer_in_expr(&mut top_k.expression, None, &ctx, &mut errors);
+    }
     // Rule bodies' WHERE.
     for def in &mut program.definitions {
-        for cond in &mut def.body.conditions {
-            infer_in_expr(cond, None, &ctx, &mut errors);
+        for item in &mut def.body.conditions {
+            infer_in_where_item(item, &ctx, &mut errors);
         }
     }
     errors
+}
+
+fn infer_in_where_item(
+    item: &mut crate::query::ast::WhereItem,
+    ctx: &InferCtx<'_>,
+    errors: &mut Vec<QueryError>,
+) {
+    use crate::query::ast::WhereItem;
+    match item {
+        WhereItem::Filter(e) => infer_in_expr(e, None, ctx, errors),
+        WhereItem::Bind { expr, .. } => infer_in_expr(expr, None, ctx, errors),
+    }
 }
 
 // ---------------- internals ----------------
@@ -247,6 +264,11 @@ fn infer_in_expr(
                 infer_in_expr(v, None, ctx, errors);
             }
         }
+        Expression::Rrf { sources, .. } => {
+            for src in sources {
+                infer_in_expr(src, None, ctx, errors);
+            }
+        }
         Expression::Literal(_)
         | Expression::Variable(_)
         | Expression::NotExists(_)
@@ -377,8 +399,12 @@ mod tests {
     /// Locate the first EMBED call's args by walking every
     /// expression position in the program.
     fn first_embed_args(program: &Program) -> Vec<Expression> {
-        for cond in &program.query.body.conditions {
-            let v = find_embed_args(cond);
+        for item in &program.query.body.conditions {
+            let e = match item {
+                crate::query::ast::WhereItem::Filter(e) => e,
+                crate::query::ast::WhereItem::Bind { expr, .. } => expr,
+            };
+            let v = find_embed_args(e);
             if !v.is_empty() {
                 return v;
             }

@@ -81,6 +81,19 @@ pub struct FiberRuntime<'a> {
     /// pass a kernel-shared cache so repeat probes against the same
     /// `(index_iri, layer_id)` are an in-memory `BTreeMap` lookup.
     pub vector_segment_cache: Option<&'a crate::query::vector::cache::SegmentCache>,
+    /// D43 §6.4 / M7.2 — materialised per-source ranks for every
+    /// `RRF` expression in scope. Built once by the evaluator's
+    /// pre-pass before row-by-row RETURN shaping; consulted from
+    /// `Expression::Rrf` to compute the fused score per row without
+    /// re-evaluating sources. `None` for queries with no RRF.
+    pub rrf: Option<&'a super::rrf::RrfContext>,
+    /// D43 §6.4 — index of the binding currently being evaluated
+    /// during RETURN / TOP K BY shaping. Set per-iteration by the
+    /// row-by-row loop in [`super::evaluate`]. `RRF` reads it to
+    /// look up its per-source rank in [`Self::rrf`]. `None` outside
+    /// the shaping loop (e.g., during WHERE evaluation, where RRF
+    /// is not legal).
+    pub current_binding_idx: Option<usize>,
 }
 
 /// Resources produced at runtime by FIBER clauses. They live for the
@@ -125,22 +138,57 @@ pub(super) fn evaluate_match_part(
     }
 
     if !part.conditions.is_empty() {
-        bindings.retain(|b| {
-            part.conditions.iter().all(|cond| {
-                // DEFINE bodies have no FIBER access; the institution
-                // surface is unavailable here.
-                eval_expression(cond, b, layer, FiberRuntime::default())
-                    .and_then(|v| {
-                        v.as_boolean().ok_or_else(|| {
-                            QueryError::evaluation("WHERE condition must be boolean")
-                        })
-                    })
-                    .unwrap_or(false)
-            })
-        });
+        // DEFINE bodies have no FIBER access; the institution
+        // surface is unavailable here.
+        bindings = apply_where_items(&part.conditions, bindings, layer, FiberRuntime::default());
     }
 
     Ok(bindings)
+}
+
+/// D45 §7 — apply a WHERE list to a binding set, left to right.
+/// Filter items retain bindings whose condition evaluates to
+/// `Value::Boolean(true)`; BIND items evaluate the expression
+/// against each binding and add the result under `?var`. Per the
+/// SPARQL convention an evaluation error (or non-boolean filter
+/// result) drops the binding.
+pub(super) fn apply_where_items(
+    items: &[WhereItem],
+    mut bindings: Vec<Binding>,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Vec<Binding> {
+    for item in items {
+        match item {
+            WhereItem::Filter(expr) => {
+                bindings.retain(|b| {
+                    eval_expression(expr, b, layer, runtime)
+                        .and_then(|v| {
+                            v.as_boolean().ok_or_else(|| {
+                                QueryError::evaluation("WHERE condition must be boolean")
+                            })
+                        })
+                        .unwrap_or(false)
+                });
+            }
+            WhereItem::Bind { expr, var } => {
+                // Drop-on-error matches SPARQL's "error in BIND drops
+                // the solution" rule (D45 §5).
+                let mut next: Vec<Binding> = Vec::with_capacity(bindings.len());
+                for mut b in bindings.drain(..) {
+                    match eval_expression(expr, &b, layer, runtime) {
+                        Ok(v) => {
+                            b.insert(var.name.clone(), v);
+                            next.push(b);
+                        }
+                        Err(_) => { /* drop binding */ }
+                    }
+                }
+                bindings = next;
+            }
+        }
+    }
+    bindings
 }
 
 /// Evaluate a MatchPart with FIBER-clause support (top-level queries).
@@ -203,17 +251,7 @@ pub(super) fn evaluate_match_part_with_fiber(
             overlay: Some(&overlay.entries),
             ..runtime
         };
-        bindings.retain(|b| {
-            part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer, where_runtime)
-                    .and_then(|v| {
-                        v.as_boolean().ok_or_else(|| {
-                            QueryError::evaluation("WHERE condition must be boolean")
-                        })
-                    })
-                    .unwrap_or(false)
-            })
-        });
+        bindings = apply_where_items(&part.conditions, bindings, layer, where_runtime);
     }
 
     Ok(bindings)

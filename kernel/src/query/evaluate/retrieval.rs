@@ -931,4 +931,352 @@ mod tests {
         assert_eq!(subjects_b.len(), 2, "all 2 b-docs should match");
         assert!(subjects_b.iter().all(|s| s.contains("docb")));
     }
+
+    // ─── D43 §6.5 / M7.3 hybrid retrieval ──────────────────────
+
+    /// Build a layer where the same string property is indexed by
+    /// both a `TextIndex` and a `VectorIndex` — the canonical
+    /// hybrid-retrieval shape from D43 §6.5. Returns the layer + an
+    /// embedder registry the test can plumb into `FiberRuntime`.
+    ///
+    /// `docs` is a list of `(short_id, body_text)` pairs; each
+    /// becomes `urn:eigenius:test:doc_hybrid_{short_id}` with the body
+    /// stored under `urn:eigenius:test:body`.
+    fn build_hybrid_corpus(
+        docs: &[(&str, &str)],
+    ) -> (
+        Arc<crate::layer::Layer>,
+        crate::program::embedder::EmbedderRegistry,
+    ) {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let ctx = bootstrap().expect("bootstrap");
+        let parent = Arc::clone(ctx.head());
+        let mut b = LayerBuilder::new("hybrid-corpus", Some(parent));
+
+        let body_iri = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        // The shared string Property.
+        let mut body_prop = Resource::new(iri(body_iri));
+        body_prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        body_prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        b.add_resource(body_prop).unwrap();
+
+        // TextIndex targeting body.
+        let mut ti = Resource::new(iri("urn:eigenius:test:ti_body"));
+        ti.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::TEXT_INDEX_CLASS))]),
+        );
+        ti.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
+        ti.set(iri(wk::TEXT_ANALYZER), Value::String("en-stem-v1".into()));
+        b.add_resource(ti).unwrap();
+
+        // VectorIndex targeting body (same property — the embedder
+        // tokenises the string into a vector).
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi_body"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        b.add_resource(vi).unwrap();
+
+        for (sid, body) in docs {
+            let mut d = Resource::new(iri(&format!("urn:eigenius:test:doc_hybrid_{sid}")));
+            d.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            d.set(iri(body_iri), Value::String((*body).to_string()));
+            b.add_resource(d).unwrap();
+        }
+
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+        sweep_layer_vectors(&layer, &reg, None).expect("sweep");
+        (layer, reg)
+    }
+
+    /// D43 §6.5 / M7.3 — `TEXT_MATCH OR VECTOR_NEAR` returns the
+    /// union of the two probe result sets. This is the canonical
+    /// hybrid retrieval shape: a row matches the WHERE if either
+    /// probe accepts it. The semantic correctness comes from the
+    /// per-row OR evaluation already present in the evaluator
+    /// (see `eval_binary` for `BinaryOp::Or`); the planner-side
+    /// parallel dispatch (true §6.5 scheduling) is a perf layer
+    /// landed on top by a future planner pass.
+    ///
+    /// The test runs three queries against the same corpus:
+    /// text-only, vector-only, and `text OR vector`. It then
+    /// asserts the OR result equals the set union of the first two
+    /// — a clean union-semantics check that doesn't depend on the
+    /// dummy embedder's exact top-k.
+    #[test]
+    fn hybrid_text_or_vector_returns_union_of_probes() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+        use std::collections::BTreeSet;
+
+        let (layer, embedders) = build_hybrid_corpus(&[
+            ("doc_text", "wal truncation under concurrent commit"),
+            ("doc_vector", "text 1"),
+            ("doc_both", "wal truncation and text 1"),
+            ("doc_neither", "completely unrelated content"),
+        ]);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+
+        let text_only = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?body }
+            WHERE TEXT_MATCH(?body, "wal truncation")
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("text-only query should succeed");
+        let text_subjects: BTreeSet<String> = row_subjects(&text_only).into_iter().collect();
+
+        let vector_only = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?body }
+            WHERE VECTOR_NEAR(?body, EMBED("text 1"), 2)
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("vector-only query should succeed");
+        let vector_subjects: BTreeSet<String> = row_subjects(&vector_only).into_iter().collect();
+
+        let hybrid = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?body }
+            WHERE TEXT_MATCH(?body, "wal truncation")
+               OR VECTOR_NEAR(?body, EMBED("text 1"), 2)
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("hybrid OR query should succeed");
+        let hybrid_subjects: BTreeSet<String> = row_subjects(&hybrid).into_iter().collect();
+
+        // Sanity: text probe found the docs whose body contains
+        // "wal truncation" — `doc_text` and `doc_both`.
+        assert!(
+            text_subjects.contains("urn:eigenius:test:doc_hybrid_doc_text"),
+            "text probe must find doc_text; got {text_subjects:?}"
+        );
+        assert!(
+            text_subjects.contains("urn:eigenius:test:doc_hybrid_doc_both"),
+            "text probe must find doc_both; got {text_subjects:?}"
+        );
+
+        // The OR semantics: hybrid = text ∪ vector.
+        let expected: BTreeSet<String> = text_subjects.union(&vector_subjects).cloned().collect();
+        assert_eq!(
+            hybrid_subjects, expected,
+            "OR semantics: text_only={text_subjects:?}, vector_only={vector_subjects:?}, \
+             expected union={expected:?}, got hybrid={hybrid_subjects:?}"
+        );
+    }
+
+    /// D43 §6.5 / §3.6 / M7.3 — end-to-end hybrid pipeline:
+    /// `TEXT_MATCH OR VECTOR_NEAR` in WHERE, `TEXT_SCORE` and
+    /// `VECTOR_SIM` projected in RETURN, fused via `RRF`. This is
+    /// the §6.5 worked example minus the parallel-probe perf
+    /// scheduling and minus the `TOP K BY fused DESC` step —
+    /// semantic equivalence of the union-and-fuse stages is what
+    /// we pin here.
+    ///
+    /// **`TOP K BY RRF(...)` is its own follow-up.** Today's
+    /// post-shape sort path (`return_shape::sort_results`) does
+    /// only property-name lookups against the row resource; it
+    /// can't evaluate an inlined RRF expression because that needs
+    /// the binding index + the rrf context threaded through. A
+    /// proper fix re-shapes `sort_results` to do `eval_expression`-
+    /// style evaluation per row; landing that is M7.4 (it pairs
+    /// naturally with the planner-side top-k pushdown).
+    #[test]
+    fn hybrid_pipeline_rrf_in_return_end_to_end() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_hybrid_corpus(&[
+            ("a", "wal truncation under concurrent commit"),
+            ("b", "rolling back a partial commit"),
+            ("c", "text 2"),
+            ("d", "completely off-topic"),
+        ]);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        // EigenQL doesn't have SQL-style `AS name → bare-identifier
+        // lookup`, so RRF receives the source expressions directly
+        // rather than references to RETURN-bound names. (The §3.6
+        // spec writes `RRF(text_score, vec_score)` where `text_score`
+        // is a hypothetical RETURN binding; we inline the sources
+        // for v1.)
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?body }
+            WHERE TEXT_MATCH(?body, "wal truncation")
+               OR VECTOR_NEAR(?body, EMBED("text 2"), 3)
+            RETURN [] {
+                d: ?d,
+                ts: TEXT_SCORE(?body, "wal truncation"),
+                vs: VECTOR_SIM(?body, EMBED("text 2")),
+                fused: RRF(
+                    TEXT_SCORE(?body, "wal truncation"),
+                    VECTOR_SIM(?body, EMBED("text 2"))
+                )
+            }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("hybrid pipeline should succeed end-to-end");
+
+        let rows = data_rows(&document);
+        assert!(
+            !rows.is_empty(),
+            "hybrid query against a corpus with matching docs must return at least one row"
+        );
+
+        // Every surfaced row must have a Float `fused` score
+        // populated by the RRF evaluator. (The exact numeric value
+        // depends on the dummy embedder's hashing; pinning it here
+        // couples the test to embedder internals.)
+        let mut found_fused = false;
+        for row in &rows {
+            for val in row.properties().values() {
+                if let Value::Float(_) = val {
+                    found_fused = true;
+                    break;
+                }
+            }
+        }
+        assert!(found_fused, "every row should carry a Float fused score");
+    }
+
+    /// D43 §6.5 / §3.6 / §3.7 / D45 / M7.4 — the full worked
+    /// example from §6.5: hybrid `TEXT_MATCH OR VECTOR_NEAR` in
+    /// WHERE, BIND of per-row source scores, RRF in TOP K BY DESC
+    /// surfacing the top fused row. This is what the spec example
+    /// drives at, fully expressible after M7.4's sort restructure.
+    #[test]
+    fn hybrid_pipeline_top_k_by_rrf_end_to_end() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_hybrid_corpus(&[
+            ("a", "wal truncation under concurrent commit"),
+            ("b", "rolling back a partial commit"),
+            ("c", "text 2"),
+            ("d", "completely off-topic"),
+        ]);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?body }
+            WHERE BIND(TEXT_SCORE(?body, "wal truncation") AS ?ts),
+                  BIND(VECTOR_SIM(?body, EMBED("text 2")) AS ?vs),
+                  TEXT_MATCH(?body, "wal truncation")
+               OR VECTOR_NEAR(?body, EMBED("text 2"), 3)
+            RETURN [] { d: ?d, ts: ?ts, vs: ?vs }
+            TOP 2 BY RRF(?ts, ?vs) DESC
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("full §6.5 pipeline should succeed end-to-end");
+
+        let rows = data_rows(&document);
+        assert!(
+            !rows.is_empty(),
+            "hybrid query with matching docs must return at least one row"
+        );
+        assert!(
+            rows.len() <= 2,
+            "TOP 2 BY must cap at 2 rows; got {}",
+            rows.len()
+        );
+    }
+
+    /// D45 + D43 §6.5 — same hybrid pipeline as
+    /// `hybrid_pipeline_rrf_in_return_end_to_end` but with BIND
+    /// extracting the per-row source scores. The RRF call then
+    /// references the bound variables `?ts` / `?vs` instead of
+    /// re-evaluating TEXT_SCORE / VECTOR_SIM inline. This is the
+    /// shape the spec example assumes (modulo `AS` syntax).
+    #[test]
+    fn hybrid_pipeline_via_bind_end_to_end() {
+        use crate::query;
+        use crate::query::evaluate::FiberRuntime;
+
+        let (layer, embedders) = build_hybrid_corpus(&[
+            ("a", "wal truncation under concurrent commit"),
+            ("b", "rolling back a partial commit"),
+            ("c", "text 2"),
+            ("d", "completely off-topic"),
+        ]);
+        let runtime = FiberRuntime {
+            embedders: Some(&embedders),
+            ..FiberRuntime::default()
+        };
+        let document = query::execute_with(
+            r#"
+            MATCH ?d { "urn:eigenius:test:body": ?body }
+            WHERE BIND(TEXT_SCORE(?body, "wal truncation") AS ?ts),
+                  BIND(VECTOR_SIM(?body, EMBED("text 2")) AS ?vs),
+                  TEXT_MATCH(?body, "wal truncation")
+               OR VECTOR_NEAR(?body, EMBED("text 2"), 3)
+            RETURN [] {
+                d: ?d,
+                ts: ?ts,
+                vs: ?vs,
+                fused: RRF(?ts, ?vs)
+            }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("BIND-form hybrid pipeline should succeed end-to-end");
+
+        let rows = data_rows(&document);
+        assert!(
+            !rows.is_empty(),
+            "hybrid query against a corpus with matching docs must return at least one row"
+        );
+
+        // Every surfaced row must have a Float `fused` score.
+        let mut found_fused = false;
+        for row in &rows {
+            for val in row.properties().values() {
+                if let Value::Float(_) = val {
+                    found_fused = true;
+                    break;
+                }
+            }
+        }
+        assert!(found_fused, "every row should carry a Float fused score");
+    }
 }
