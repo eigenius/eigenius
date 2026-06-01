@@ -163,6 +163,20 @@ pub enum SweepError {
     Cancelled,
 }
 
+/// Map an `ActiveVectorIndex.distance` IRI to the short name used
+/// by the storage layer (`"cosine"`, `"l2"`, `"dot"`). The
+/// underlying [`Metric::from_short_name`] accepts both the full
+/// IRI form and the short name, and [`Metric::short_name`] is its
+/// reverse; this helper just glues them. Falls through to the
+/// raw IRI for forward-compatible unknown metrics — the
+/// typechecker rejects unknowns at parse, so this fallback only
+/// fires for test fixtures or future-extension paths.
+fn metric_short_name(index: &ActiveVectorIndex) -> &str {
+    Metric::from_short_name(index.distance.as_str())
+        .map(|m| m.short_name())
+        .unwrap_or(index.distance.as_str())
+}
+
 /// Walk `layer`'s defined Resources, embed every indexable property
 /// value via the configured Embedder, and write the resulting
 /// segments into `layer.storage().vector_index`.
@@ -243,6 +257,223 @@ fn embed_with_retry(
 /// can flip the cancellation flag without forking the sweep API.
 pub fn make_cancellation_token() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
+}
+
+// ─── D43 §5.7 / M8.3 atomic reindex ─────────────────────────────
+
+/// D43 §5.7 / M8.3 — re-embed every visible subject under one
+/// specific VectorIndex Resource by walking the chain head→root
+/// and running the per-layer sweep against that Index only.
+///
+/// Used when a new VectorIndex Resource shadows an existing one
+/// (model upgrade, dim change, distance change, HNSW-param change).
+/// The new Resource carries a fresh IRI, so its segments live
+/// under `vec_seg:<I_new>:*` keys disjoint from the prior Resource's
+/// `vec_seg:<I_old>:*`. Both Indexes' segments coexist in storage;
+/// queries at any head see whichever Index is active there.
+///
+/// Cache reuse: the same content-addressed embedding cache is
+/// consulted; cache hits only occur if some other VectorIndex had
+/// already used the new model against the same content.
+///
+/// `target_index_iri` must resolve to an *active* VectorIndex
+/// Resource at `head` — otherwise this is a misconfigured reindex
+/// (the user is asking to populate an Index that's been shadowed)
+/// and the call errors at the resolver lookup. The Resource's
+/// `target_property` drives the per-layer sweep filter: only
+/// layers whose `defined_iris()` carry subjects with that property
+/// contribute.
+///
+/// Walks layers in head→root order. Each per-layer sweep is its
+/// own [`extend_layer`] call, atomic per-layer per the existing
+/// trait contract. The full reindex is *not* atomic across all
+/// layers — between the first per-layer commit and the last,
+/// queries at the new head see partial coverage. This is the
+/// §5.7 "while the reindex is in flight, queries see progressive
+/// availability" behaviour.
+pub fn reindex_chain(
+    head: &Layer,
+    target_index_iri: &Iri,
+    embedders: &EmbedderRegistry,
+    cache: Option<&EmbeddingCache>,
+    options: &SweepOptions<'_>,
+) -> Result<SweepReport, SweepError> {
+    let active = resolve_active_vector_indexes(head);
+    let target = active.iter().find(|i| &i.iri == target_index_iri).ok_or(
+        SweepError::EmbedderNotRegistered {
+            index: target_index_iri.as_str().to_string(),
+            model: "<unresolved>".to_string(),
+        },
+    )?;
+
+    let mut report = SweepReport::default();
+    // Walk the chain head→root via parent links. Each layer's
+    // sweep is independent — fresh `extend_layer` call per layer.
+    let mut cursor: Option<&Layer> = Some(head);
+    while let Some(layer) = cursor {
+        if is_cancelled(options.cancellation) {
+            return Err(SweepError::Cancelled);
+        }
+        if layer.defined_iris().is_empty() {
+            cursor = layer.parent().map(|p| p.as_ref());
+            continue;
+        }
+        let stats = sweep_one_index(
+            layer,
+            target,
+            embedders,
+            cache,
+            options,
+            &mut report.skipped,
+        )?;
+        report.total_subjects += stats.subjects;
+        // Last-write-wins under the Index IRI for the same layer.
+        // Subsequent rounds (e.g. retry after a cancelled sweep)
+        // overwrite the partial entry cleanly.
+        report
+            .per_index
+            .entry(target.iri.clone())
+            .and_modify(|prev| {
+                prev.subjects += stats.subjects;
+                prev.embedder_calls += stats.embedder_calls;
+                prev.cache_hits += stats.cache_hits;
+            })
+            .or_insert(stats);
+        cursor = layer.parent().map(|p| p.as_ref());
+    }
+    Ok(report)
+}
+
+// ─── D43 §2.8 / M8.2 vector consolidation ───────────────────────
+
+/// D43 §2.8 / M8.2 — concatenate surviving vectors from a range
+/// of collapsed layers into the consolidated layer's segment, per
+/// active VectorIndex. Re-embedding is *not* required (vectors are
+/// model-deterministic outputs); this helper just walks the
+/// collapsed range latest-first, picks the first-seen vector for
+/// each subject in the consolidated layer's resolved set, and
+/// writes one consolidated segment per Index.
+///
+/// Mirrors [`crate::query::text::indexing::populate_text_indexes`]
+/// in role but lives outside `LayerBuilder::build` because the
+/// builder doesn't know which prior layers were in the collapsed
+/// range — the consolidation pipeline is the only place that has
+/// that information.
+///
+/// HNSW rebuild is in scope: if the active VectorIndex's strategy
+/// is `hnsw` (or `auto` with the consolidated `count` above
+/// threshold), the helper builds a fresh HNSW graph over the
+/// consolidated vectors and hands the encoded bytes to
+/// `extend_layer` so the segment is queryable through the HNSW
+/// dispatch immediately, without paying a rebuild cost on the
+/// first query (M6-finish.4).
+///
+/// Per-Index errors propagate as `SweepError::Storage`. Empty
+/// segments (no surviving vectors under a given Index) are
+/// silently skipped — they don't need an entry, and writing an
+/// empty `extend_layer` would be wasted work.
+pub fn consolidate_layer_vectors(
+    consolidated: &Layer,
+    range_layers: &[Arc<Layer>],
+) -> Result<(), SweepError> {
+    use crate::query::vector::distance::Metric;
+    use crate::query::vector::hnsw::HnswBuildConfig;
+    use crate::query::vector::segment::{build_hnsw_graph_bytes, strategy_from_iri};
+
+    let active = resolve_active_vector_indexes(consolidated);
+    if active.is_empty() {
+        return Ok(());
+    }
+    let surviving: std::collections::BTreeSet<&Iri> = consolidated.defined_iris().iter().collect();
+    if surviving.is_empty() {
+        return Ok(());
+    }
+
+    let vector_index = consolidated.storage().vector_index.clone();
+
+    for index in &active {
+        let Some(metric) = Metric::from_short_name(index.distance.as_str()) else {
+            continue; // unrecognised metric — leave for lazy build
+        };
+        let metric_short = metric.short_name();
+
+        // Walk collapsed layers latest-first, gather first-seen
+        // vector per surviving subject. Latest-first matches the
+        // resolved-set semantics (most recent definition wins).
+        let mut by_subject: BTreeMap<Iri, Vec<f32>> = BTreeMap::new();
+        for layer in range_layers.iter().rev() {
+            let segment = match vector_index.get_segment(&index.iri, layer.id()) {
+                Ok(Some(s)) => s,
+                Ok(None) => continue,
+                Err(e) => {
+                    return Err(SweepError::Storage {
+                        index: index.iri.as_str().to_string(),
+                        source: e,
+                    });
+                }
+            };
+            // Defensive: model / dim drift would indicate a bug
+            // (the active Index is identified by IRI; segments under
+            // that IRI should agree on model + dim).
+            if segment.model_iri != index.model || segment.dim != index.dim {
+                continue;
+            }
+            for (i, subject) in segment.subjects.iter().enumerate() {
+                if !surviving.contains(subject) {
+                    continue;
+                }
+                by_subject
+                    .entry(subject.clone())
+                    .or_insert_with(|| segment.vector_at(i).to_vec());
+            }
+        }
+
+        if by_subject.is_empty() {
+            continue;
+        }
+
+        let count = by_subject.len();
+        let dim = index.dim as usize;
+        let mut subjects: Vec<Iri> = Vec::with_capacity(count);
+        let mut flat: Vec<f32> = Vec::with_capacity(count * dim);
+        for (subject, vector) in by_subject {
+            subjects.push(subject);
+            flat.extend_from_slice(&vector);
+        }
+
+        let strategy = strategy_from_iri(&index.strategy);
+        let config = HnswBuildConfig {
+            m: index.hnsw_m as usize,
+            ef_construction: index.hnsw_ef_construction as usize,
+            max_elements: count.max(16),
+        };
+        let hnsw_bytes = build_hnsw_graph_bytes(&flat, dim, count, metric, strategy, config);
+
+        let docs: Vec<VectorDoc<'_>> = subjects
+            .iter()
+            .zip(flat.chunks_exact(dim))
+            .map(|(s, v)| VectorDoc {
+                subject: s,
+                vector: v,
+            })
+            .collect();
+
+        vector_index
+            .extend_layer(
+                &index.iri,
+                consolidated.id(),
+                &index.model,
+                index.dim,
+                metric_short,
+                &docs,
+                hnsw_bytes.as_deref(),
+            )
+            .map_err(|e| SweepError::Storage {
+                index: index.iri.as_str().to_string(),
+                source: e,
+            })?;
+    }
+    Ok(())
 }
 
 // ──────────── Async sweep (M5.12) ────────────
@@ -345,13 +576,7 @@ async fn sweep_one_index_async(
             embedder: embedder.dim(),
         });
     }
-    let metric_short = match index.distance.as_str() {
-        "urn:eigenius:core:distances:cosine" => "cosine",
-        "urn:eigenius:core:distances:l2" => "l2",
-        "urn:eigenius:core:distances:dot" => "dot",
-        other => other,
-    }
-    .to_string();
+    let metric_short = metric_short_name(index);
 
     // Walk defined_iris up-front so we can spawn one task per
     // indexable subject. Non-string values still increment
@@ -498,7 +723,7 @@ async fn sweep_one_index_async(
             vector: v.as_slice(),
         })
         .collect();
-    let hnsw_bytes = maybe_build_index_hnsw(index, &metric_short, &owned_vectors);
+    let hnsw_bytes = maybe_build_index_hnsw(index, metric_short, &owned_vectors);
     layer
         .storage()
         .vector_index
@@ -507,7 +732,7 @@ async fn sweep_one_index_async(
             layer.id(),
             &index.model,
             index.dim,
-            &metric_short,
+            metric_short,
             &docs,
             hnsw_bytes.as_deref(),
         )
@@ -616,13 +841,7 @@ fn sweep_one_index(
             embedder: embedder.dim(),
         });
     }
-    let metric_short = match index.distance.as_str() {
-        "urn:eigenius:core:distances:cosine" => "cosine",
-        "urn:eigenius:core:distances:l2" => "l2",
-        "urn:eigenius:core:distances:dot" => "dot",
-        other => other,
-    }
-    .to_string();
+    let metric_short = metric_short_name(index);
 
     // Buffer subject-IRI / vector pairs so we can issue one
     // `extend_layer` call at the end (matches the M2 trait's
@@ -699,7 +918,7 @@ fn sweep_one_index(
             vector: v.as_slice(),
         })
         .collect();
-    let hnsw_bytes = maybe_build_index_hnsw(index, &metric_short, &owned_vectors);
+    let hnsw_bytes = maybe_build_index_hnsw(index, metric_short, &owned_vectors);
     layer
         .storage()
         .vector_index
@@ -708,7 +927,7 @@ fn sweep_one_index(
             layer.id(),
             &index.model,
             index.dim,
-            &metric_short,
+            metric_short,
             &docs,
             hnsw_bytes.as_deref(),
         )
@@ -974,5 +1193,151 @@ mod tests {
         let report = sweep_layer_vectors(&layer, &reg, None).expect("sweep");
         assert!(report.per_index.is_empty());
         assert_eq!(report.total_subjects, 0);
+    }
+
+    // ─── D43 §5.7 / M8.3 atomic reindex ────────────────────────
+
+    /// D43 §5.7 / M8.3 — `reindex_chain` walks the chain head→root
+    /// and re-embeds every visible subject under a specific
+    /// VectorIndex Resource. Builds new `vec_seg:<I_new>:<L>`
+    /// entries for every layer `L` that contributed under any
+    /// prior Index targeting the same Property. Old segments
+    /// stay untouched.
+    ///
+    /// Scenario: two content layers under I_v1; then a layer
+    /// declaring I_v2 with a different model_iri shadows I_v1.
+    /// Reindex against I_v2 produces fresh segments per
+    /// contributing layer under I_v2; the original I_v1 segments
+    /// are unchanged.
+    #[test]
+    fn reindex_chain_rebuilds_segments_under_new_index() {
+        let ctx = bootstrap().expect("bootstrap");
+        let parent = Arc::clone(ctx.head());
+        let mut b = LayerBuilder::new("vec-corpus", Some(parent));
+
+        let body_iri = "urn:eigenius:test:body";
+        let model_v1 = "urn:eigenius:embed:dummy:v1";
+        let model_v2 = "urn:eigenius:embed:dummy:v2";
+
+        // Property declaration.
+        let mut body_prop = Resource::new(iri(body_iri));
+        body_prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        body_prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        b.add_resource(body_prop).unwrap();
+
+        // I_v1: VectorIndex targeting body via model_v1.
+        let i_v1_iri = "urn:eigenius:test:vi_v1";
+        let mut vi_v1 = Resource::new(iri(i_v1_iri));
+        vi_v1.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi_v1.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
+        vi_v1.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_v1)));
+        vi_v1.set(iri(wk::VEC_DIM), Value::Integer(8));
+        b.add_resource(vi_v1).unwrap();
+
+        // Two content subjects in the same layer.
+        for i in 0..2 {
+            let mut d = Resource::new(iri(&format!("urn:eigenius:test:doc{i}")));
+            d.set(iri(body_iri), Value::String(format!("text {i}")));
+            b.add_resource(d).unwrap();
+        }
+
+        let head = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        // Run the initial sweep under I_v1 (the only active Index
+        // at this head).
+        let mut reg_v1 = EmbedderRegistry::new();
+        reg_v1.register(Arc::new(DummyEmbedder::new(model_v1, 8)));
+        sweep_layer_vectors(&head, &reg_v1, None).expect("v1 sweep");
+
+        // Pre-condition: I_v1 segment exists.
+        let vi_index = Arc::clone(&head.storage().vector_index);
+        let v1_seg = vi_index
+            .get_segment(&iri(i_v1_iri), head.id())
+            .unwrap()
+            .expect("v1 segment present after sweep");
+        assert_eq!(v1_seg.subjects.len(), 2);
+        let v1_vec0: Vec<f32> = v1_seg.vector_at(0).to_vec();
+
+        // Now commit a child layer that declares I_v2, shadowing
+        // I_v1 by retargeting the same Property under a new model.
+        let mut child_b = LayerBuilder::new("v2-upgrade", Some(Arc::clone(&head)));
+        // Old Index becomes shadowed by adding a new VectorIndex
+        // Resource whose target_property is the same `body`. The
+        // shadowing semantics at the layer chain level make I_v2
+        // the active Index; I_v1 stays in storage but is no longer
+        // queryable from the new head's active-index set.
+        let i_v2_iri = "urn:eigenius:test:vi_v2";
+        let mut vi_v2 = Resource::new(iri(i_v2_iri));
+        vi_v2.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi_v2.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
+        vi_v2.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_v2)));
+        vi_v2.set(iri(wk::VEC_DIM), Value::Integer(8));
+        // Tombstone I_v1 so the active-index resolution picks I_v2
+        // (one active Index per Property per §3.1).
+        child_b.tombstone(iri(i_v1_iri)).unwrap();
+        child_b.add_resource(vi_v2).unwrap();
+        let new_head = Arc::new(child_b.build(head.storage().clone()));
+
+        // Pre-condition: I_v2 has no segments yet (the reindex
+        // hasn't run; subjects defined in the parent layer
+        // contribute under that parent, not under the new layer).
+        assert!(
+            vi_index
+                .get_segment(&iri(i_v2_iri), head.id())
+                .unwrap()
+                .is_none(),
+            "I_v2 segment should not exist before reindex"
+        );
+
+        // Run the reindex against I_v2.
+        let mut reg_v2 = EmbedderRegistry::new();
+        reg_v2.register(Arc::new(DummyEmbedder::new(model_v2, 8)));
+        let report = reindex_chain(
+            &new_head,
+            &iri(i_v2_iri),
+            &reg_v2,
+            None,
+            &SweepOptions::default(),
+        )
+        .expect("reindex");
+        assert_eq!(
+            report.total_subjects, 2,
+            "reindex must touch both subjects across the chain"
+        );
+
+        // I_v2 segment now exists at the original content layer
+        // (where the subjects were defined). The segment's
+        // recorded model_iri is the new model — proves the reindex
+        // dispatched through I_v2's embedder, not I_v1's. (The
+        // raw vector values happen to coincide here because
+        // `DummyEmbedder` hashes only the input text; a real
+        // embedder would also produce different floats.)
+        let v2_seg = vi_index
+            .get_segment(&iri(i_v2_iri), head.id())
+            .unwrap()
+            .expect("I_v2 segment created at the content layer");
+        assert_eq!(v2_seg.subjects.len(), 2);
+        assert_eq!(
+            v2_seg.model_iri.as_str(),
+            model_v2,
+            "I_v2 segment must record the new model IRI"
+        );
+
+        // The original I_v1 segment is untouched.
+        let v1_seg_after = vi_index
+            .get_segment(&iri(i_v1_iri), head.id())
+            .unwrap()
+            .expect("I_v1 segment must survive the reindex");
+        assert_eq!(v1_seg_after.vector_at(0), v1_vec0.as_slice());
+        assert_eq!(v1_seg_after.model_iri.as_str(), model_v1);
     }
 }

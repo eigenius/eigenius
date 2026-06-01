@@ -342,6 +342,24 @@ fn consolidate_chain_locked(
         .store_layer(&consolidated_layer)
         .map_err(ConsolidateError::WriteFailed)?;
 
+    // D43 §2.8 / M8.2 — vector consolidation. Re-embedding is not
+    // required (vectors are model-deterministic); concat surviving
+    // subjects' vectors from the collapsed range and rebuild HNSW
+    // when the active strategy demands it. Text consolidation
+    // already ran inside `LayerBuilder::build` via the existing
+    // `populate_text_indexes` path; vector indexing isn't part of
+    // that path (it needs an Embedder for normal sweeps, which
+    // consolidation doesn't), so it runs here against the
+    // pre-existing collapsed-range segments.
+    if let Err(e) = crate::query::vector::indexing::consolidate_layer_vectors(
+        &consolidated_layer,
+        &range_layers,
+    ) {
+        return Err(ConsolidateError::Internal(format!(
+            "vector consolidation failed: {e}"
+        )));
+    }
+
     if is_below_head {
         // Below-head consolidation (D25 §12.8). Install a resolve
         // redirect; do *not* touch the branch ref. Head-rooted walks
@@ -1911,5 +1929,647 @@ mod tests {
             before, after,
             "head-rooted resolves must survive reclaim GC unchanged via the redirect"
         );
+    }
+
+    // ─── D43 §2.8 / M8.1 text-index consolidation ───────────────
+
+    /// D43 §2.8 / M8.1 — search-equivalence under head substitution
+    /// for `TEXT_MATCH`. After consolidating a range of layers that
+    /// each contributed text-indexed Resources, queries at the post-
+    /// consolidation head must return the same hit set as before
+    /// consolidation. This is the consolidation atomicity invariant
+    /// extended from triple data to the text index.
+    ///
+    /// Mechanism: `LayerBuilder::build` runs `populate_text_indexes`
+    /// against the consolidated layer's defined Resources, writing
+    /// fresh `text_term:<I>:<T>:<C>` postings with new local doc-ids.
+    /// The collapsed layers' postings become unreachable after the
+    /// branch advance (head-walks no longer traverse them). The
+    /// hit set is the same modulo internal doc-id relabeling.
+    #[test]
+    fn text_search_equivalence_under_at_head_consolidation() {
+        use crate::bootstrap::bootstrap;
+        use crate::ontology::well_known as wk;
+        use crate::query::text::analyzer::EnStemV1;
+        use crate::query::text::search::run_text_search;
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let target_prop = "urn:eigenius:test:body";
+
+        // Bootstrap the core ontology so `is_a` resolves at the
+        // discovery-layer index scan time. The bootstrap head is
+        // already persisted into a backing storage; for the
+        // consolidation flow we need the same backend persistence,
+        // so persist the bootstrap layers into `backend` too.
+        let bootstrap_ctx = bootstrap().expect("bootstrap");
+        let bootstrap_head = Arc::clone(bootstrap_ctx.head());
+        // Walk the bootstrap chain head→root and persist every
+        // layer into our backend so `load_chain_from` can rebuild
+        // it after consolidation.
+        {
+            let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
+            while let Some(layer) = cursor {
+                backend
+                    .store_layer(&layer)
+                    .expect("persist bootstrap layer");
+                cursor = layer.parent().cloned();
+            }
+        }
+
+        // Declare a TextIndex on `body`.
+        let mut ti_layer = LayerBuilder::new("ti", Some(Arc::clone(&bootstrap_head)));
+        let mut ti = Resource::new(iri("urn:eigenius:test:ti"));
+        ti.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::TEXT_INDEX_CLASS))]),
+        );
+        ti.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        ti.set(iri(wk::TEXT_ANALYZER), Value::String("en-stem-v1".into()));
+        ti_layer.add_resource(ti).unwrap();
+        let ti_layer = Arc::new(ti_layer.build(storage.clone()));
+        backend.store_layer(&ti_layer).unwrap();
+
+        // Four content layers, each contributing one Resource whose
+        // body contains overlapping vocabulary so a TEXT_MATCH over
+        // ("wal", "truncation") hits multiple subjects across the
+        // range. Mix in one no-match doc to confirm filtering.
+        let bodies = [
+            ("doc1", "WAL truncation under concurrent commit"),
+            ("doc2", "wal segment rotation"),
+            ("doc3", "rollback handling unrelated to WAL"),
+            ("doc4", "truncation of orphan log files"),
+        ];
+        let mut content_layers: Vec<Arc<Layer>> = Vec::new();
+        let mut prev: Arc<Layer> = Arc::clone(&ti_layer);
+        for (sid, body) in bodies {
+            let mut lb = LayerBuilder::new(&format!("L_{sid}"), Some(Arc::clone(&prev)));
+            let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            r.set(iri(target_prop), Value::String(body.to_string()));
+            lb.add_resource(r).unwrap();
+            let layer = Arc::new(lb.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            content_layers.push(Arc::clone(&layer));
+            prev = layer;
+        }
+        let head_before = Arc::clone(&prev);
+        backend.put_branch("main", head_before.id()).unwrap();
+
+        // Capture the text-search hits at the pre-consolidation head.
+        let analyzer = EnStemV1::new();
+        let index_iri = iri("urn:eigenius:test:ti");
+        let text_index = Arc::clone(&head_before.storage().text_index);
+        let hits_before = run_text_search(
+            &head_before,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "wal truncation",
+        )
+        .expect("pre-consolidation search");
+        let subjects_before: std::collections::BTreeSet<String> = hits_before
+            .iter()
+            .map(|h| h.subject.as_str().to_string())
+            .collect();
+        // Sanity: at least one expected hit landed.
+        assert!(
+            subjects_before.contains("urn:eigenius:test:doc1"),
+            "doc1 must match 'wal truncation' pre-consolidation; got {subjects_before:?}"
+        );
+
+        // Consolidate the full content range (L_doc1..L_doc4). The
+        // TextIndex Resource stays in `ti_layer` (outside the range)
+        // so the post-consolidation chain still sees an active
+        // TextIndex.
+        let from = content_layers[0].id().clone();
+        let to = head_before.id().clone();
+        let outcome = consolidate_chain(
+            "main",
+            from,
+            to,
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+        assert!(outcome.head_advanced);
+
+        // Rebuild the chain from the new head and run the same
+        // search. The text index storage handle is shared between
+        // `storage` (used during consolidation) and the rebuilt
+        // chain — `populate_text_indexes` ran against the
+        // consolidated layer during build, writing fresh postings.
+        let new_head_id = backend.get_branch("main").unwrap().unwrap();
+        let info = backend.load_chain_from(&new_head_id).unwrap().unwrap();
+        let head_after = crate::layer::build_chain(info, storage.clone());
+        let hits_after = run_text_search(
+            &head_after,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "wal truncation",
+        )
+        .expect("post-consolidation search");
+        let subjects_after: std::collections::BTreeSet<String> = hits_after
+            .iter()
+            .map(|h| h.subject.as_str().to_string())
+            .collect();
+
+        assert_eq!(
+            subjects_before, subjects_after,
+            "text-search hit set must be invariant under at-head consolidation \
+             (D43 §2.8 atomicity)"
+        );
+    }
+
+    /// D43 §2.8 / M8.1 — same invariant under below-head
+    /// consolidation. A redirect routes head-rooted resolves
+    /// through the consolidated layer; the text index must
+    /// participate in that redirect so queries return the same
+    /// hit set without the branch ref moving.
+    #[test]
+    fn text_search_equivalence_under_below_head_consolidation() {
+        use crate::bootstrap::bootstrap;
+        use crate::ontology::well_known as wk;
+        use crate::query::text::analyzer::EnStemV1;
+        use crate::query::text::search::run_text_search;
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let target_prop = "urn:eigenius:test:body";
+
+        let bootstrap_ctx = bootstrap().expect("bootstrap");
+        let bootstrap_head = Arc::clone(bootstrap_ctx.head());
+        // Walk the bootstrap chain head→root and persist every
+        // layer into our backend so `load_chain_from` can rebuild
+        // it after consolidation.
+        {
+            let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
+            while let Some(layer) = cursor {
+                backend
+                    .store_layer(&layer)
+                    .expect("persist bootstrap layer");
+                cursor = layer.parent().cloned();
+            }
+        }
+
+        // TextIndex declaration.
+        let mut ti_layer = LayerBuilder::new("ti", Some(Arc::clone(&bootstrap_head)));
+        let mut ti = Resource::new(iri("urn:eigenius:test:ti"));
+        ti.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::TEXT_INDEX_CLASS))]),
+        );
+        ti.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        ti.set(iri(wk::TEXT_ANALYZER), Value::String("en-stem-v1".into()));
+        ti_layer.add_resource(ti).unwrap();
+        let ti_layer = Arc::new(ti_layer.build(storage.clone()));
+        backend.store_layer(&ti_layer).unwrap();
+
+        // Three middle layers (to be consolidated) + two tail
+        // layers (above the consolidated range, untouched).
+        let bodies = [
+            ("mid1", "WAL truncation in concurrent commit"),
+            ("mid2", "WAL segment lifecycle"),
+            ("mid3", "rollback during truncation"),
+        ];
+        let mut middle: Vec<Arc<Layer>> = Vec::new();
+        let mut prev = Arc::clone(&ti_layer);
+        for (sid, body) in bodies {
+            let mut lb = LayerBuilder::new(&format!("M_{sid}"), Some(Arc::clone(&prev)));
+            let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            r.set(iri(target_prop), Value::String(body.to_string()));
+            lb.add_resource(r).unwrap();
+            let layer = Arc::new(lb.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            middle.push(Arc::clone(&layer));
+            prev = layer;
+        }
+        // Tail layer above the range.
+        let mut tail_b = LayerBuilder::new("tail", Some(Arc::clone(&prev)));
+        let mut r = Resource::new(iri("urn:eigenius:test:tail_doc"));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+        );
+        r.set(
+            iri(target_prop),
+            Value::String("tail-only WAL discussion".into()),
+        );
+        tail_b.add_resource(r).unwrap();
+        let tail = Arc::new(tail_b.build(storage.clone()));
+        backend.store_layer(&tail).unwrap();
+        backend.put_branch("main", tail.id()).unwrap();
+
+        let analyzer = EnStemV1::new();
+        let index_iri = iri("urn:eigenius:test:ti");
+        let text_index = Arc::clone(&tail.storage().text_index);
+
+        let hits_before = run_text_search(
+            &tail,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "wal truncation",
+        )
+        .expect("pre-consolidation search");
+        let subjects_before: std::collections::BTreeSet<String> = hits_before
+            .iter()
+            .map(|h| h.subject.as_str().to_string())
+            .collect();
+
+        // Below-head consolidation: the range is the three middle
+        // layers; the head (tail) stays untouched.
+        let from = middle[0].id().clone();
+        let to = middle[2].id().clone();
+        let _outcome = consolidate_chain(
+            "main",
+            from,
+            to,
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("below-head consolidation succeeds");
+
+        // Branch ref didn't move — the redirect at `to` routes
+        // through the consolidated layer.
+        let new_head_id = backend.get_branch("main").unwrap().unwrap();
+        assert_eq!(
+            &new_head_id,
+            tail.id(),
+            "below-head consolidation must not move the branch ref"
+        );
+        let info = backend.load_chain_from(&new_head_id).unwrap().unwrap();
+        let head_after = crate::layer::build_chain(info, storage.clone());
+
+        let hits_after = run_text_search(
+            &head_after,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "wal truncation",
+        )
+        .expect("post-consolidation search");
+        let subjects_after: std::collections::BTreeSet<String> = hits_after
+            .iter()
+            .map(|h| h.subject.as_str().to_string())
+            .collect();
+
+        assert_eq!(
+            subjects_before, subjects_after,
+            "text-search hit set must be invariant under below-head consolidation"
+        );
+    }
+
+    // ─── D43 §2.8 / M8.2 vector-index consolidation ────────────
+
+    /// D43 §2.8 / M8.2 — vector segment is concatenated across the
+    /// collapsed range and the consolidated layer carries one
+    /// segment per active VectorIndex with all surviving subjects.
+    /// The pre-consolidation per-layer segments are still in
+    /// storage but become unreachable through head-rooted lookups
+    /// (chain walk skips them).
+    ///
+    /// Verifies the concat-and-relabel behaviour:
+    ///   1. Pre: each layer in the range owns its own (subject, vec)
+    ///      pair under `vec_seg:<I>:<L_n>`.
+    ///   2. Post: a single segment under `vec_seg:<I>:<C>` contains
+    ///      all surviving subjects with their pre-consolidation
+    ///      vectors (deterministic via DummyEmbedder).
+    #[test]
+    fn vector_consolidation_concats_segments() {
+        use crate::bootstrap::bootstrap;
+        use crate::ontology::well_known as wk;
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let target_prop = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        let bootstrap_ctx = bootstrap().expect("bootstrap");
+        let bootstrap_head = Arc::clone(bootstrap_ctx.head());
+        let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
+        while let Some(layer) = cursor {
+            backend.store_layer(&layer).unwrap();
+            cursor = layer.parent().cloned();
+        }
+
+        // VectorIndex declaration on `body`.
+        let mut vi_layer = LayerBuilder::new("vi", Some(Arc::clone(&bootstrap_head)));
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        vi_layer.add_resource(vi).unwrap();
+        let vi_layer = Arc::new(vi_layer.build(storage.clone()));
+        backend.store_layer(&vi_layer).unwrap();
+
+        // Three layers contributing indexable Resources. Each layer
+        // is swept after build, producing a per-layer segment with
+        // exactly one (subject, vector) pair.
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+        let bodies = [("v1", "alpha"), ("v2", "beta"), ("v3", "gamma")];
+        let mut range_layers: Vec<Arc<Layer>> = Vec::new();
+        let mut prev = Arc::clone(&vi_layer);
+        for (sid, body) in bodies {
+            let mut lb = LayerBuilder::new(&format!("L_{sid}"), Some(Arc::clone(&prev)));
+            let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            r.set(iri(target_prop), Value::String(body.to_string()));
+            lb.add_resource(r).unwrap();
+            let layer = Arc::new(lb.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            sweep_layer_vectors(&layer, &reg, None).expect("sweep");
+            range_layers.push(Arc::clone(&layer));
+            prev = layer;
+        }
+        let head_before = Arc::clone(&prev);
+        backend.put_branch("main", head_before.id()).unwrap();
+
+        let vector_index = Arc::clone(&head_before.storage().vector_index);
+        let index_iri = iri("urn:eigenius:test:vi");
+
+        // Capture the pre-consolidation per-subject vectors.
+        let mut pre_vectors: std::collections::BTreeMap<String, Vec<f32>> =
+            std::collections::BTreeMap::new();
+        for layer in &range_layers {
+            if let Some(seg) = vector_index.get_segment(&index_iri, layer.id()).unwrap() {
+                for (i, subject) in seg.subjects.iter().enumerate() {
+                    pre_vectors.insert(subject.as_str().to_string(), seg.vector_at(i).to_vec());
+                }
+            }
+        }
+        assert_eq!(
+            pre_vectors.len(),
+            3,
+            "each range layer must own its segment pre-consolidation"
+        );
+
+        // Consolidate the full range.
+        let from = range_layers[0].id().clone();
+        let to = head_before.id().clone();
+        let outcome = consolidate_chain(
+            "main",
+            from,
+            to,
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+        assert!(outcome.head_advanced);
+
+        // Post-consolidation: a single segment under the consolidated
+        // layer carries all three subjects with the same vectors.
+        let new_head_id = backend.get_branch("main").unwrap().unwrap();
+        let consolidated_seg = vector_index
+            .get_segment(&index_iri, &new_head_id)
+            .expect("get consolidated segment")
+            .expect("consolidated segment exists");
+        assert_eq!(consolidated_seg.dim, 8);
+        assert_eq!(consolidated_seg.model_iri.as_str(), model_iri);
+        assert_eq!(consolidated_seg.subjects.len(), 3);
+        for (i, subject) in consolidated_seg.subjects.iter().enumerate() {
+            let key = subject.as_str().to_string();
+            let pre = pre_vectors
+                .get(&key)
+                .unwrap_or_else(|| panic!("subject {key} missing from pre-vectors"));
+            assert_eq!(
+                consolidated_seg.vector_at(i),
+                pre.as_slice(),
+                "consolidated vector for {key} must match pre-consolidation vector"
+            );
+        }
+    }
+
+    /// D43 §2.8 / M8.2 — subjects that are *tombstoned* in the
+    /// collapsed range must not appear in the consolidated vector
+    /// segment. Their vectors live in the now-unreachable per-layer
+    /// segments, but the consolidated segment is the only one
+    /// visible from the new head, so dropping them is the only way
+    /// to keep query semantics consistent with the resolved-set
+    /// view.
+    #[test]
+    fn vector_consolidation_excludes_tombstoned_subjects() {
+        use crate::bootstrap::bootstrap;
+        use crate::ontology::well_known as wk;
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let target_prop = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        let bootstrap_ctx = bootstrap().expect("bootstrap");
+        let bootstrap_head = Arc::clone(bootstrap_ctx.head());
+        let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
+        while let Some(layer) = cursor {
+            backend.store_layer(&layer).unwrap();
+            cursor = layer.parent().cloned();
+        }
+
+        let mut vi_layer = LayerBuilder::new("vi", Some(Arc::clone(&bootstrap_head)));
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        vi_layer.add_resource(vi).unwrap();
+        let vi_layer = Arc::new(vi_layer.build(storage.clone()));
+        backend.store_layer(&vi_layer).unwrap();
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+
+        // L1 defines and indexes a subject that will later be
+        // tombstoned in L2.
+        let mut l1_b = LayerBuilder::new("L1", Some(Arc::clone(&vi_layer)));
+        let mut r = Resource::new(iri("urn:eigenius:test:vanishing"));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+        );
+        r.set(iri(target_prop), Value::String("about to vanish".into()));
+        l1_b.add_resource(r).unwrap();
+        let l1 = Arc::new(l1_b.build(storage.clone()));
+        backend.store_layer(&l1).unwrap();
+        sweep_layer_vectors(&l1, &reg, None).expect("sweep L1");
+
+        // L2 tombstones the L1 subject and adds a surviving one.
+        let mut l2_b = LayerBuilder::new("L2", Some(Arc::clone(&l1)));
+        l2_b.tombstone(iri("urn:eigenius:test:vanishing")).unwrap();
+        let mut r = Resource::new(iri("urn:eigenius:test:survivor"));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+        );
+        r.set(iri(target_prop), Value::String("survivor body".into()));
+        l2_b.add_resource(r).unwrap();
+        let l2 = Arc::new(l2_b.build(storage.clone()));
+        backend.store_layer(&l2).unwrap();
+        sweep_layer_vectors(&l2, &reg, None).expect("sweep L2");
+        backend.put_branch("main", l2.id()).unwrap();
+
+        // Consolidate L1..L2. The vanishing subject is tombstoned
+        // in the range, so consolidated_layer.defined_iris() doesn't
+        // include it. The consolidated vector segment should contain
+        // only the survivor.
+        let outcome = consolidate_chain(
+            "main",
+            l1.id().clone(),
+            l2.id().clone(),
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+
+        let vector_index = Arc::clone(&l2.storage().vector_index);
+        let index_iri = iri("urn:eigenius:test:vi");
+        let consolidated_seg = vector_index
+            .get_segment(&index_iri, &outcome.consolidated_layer)
+            .unwrap()
+            .expect("consolidated segment exists");
+        let subjects: Vec<String> = consolidated_seg
+            .subjects
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect();
+        assert_eq!(
+            subjects,
+            vec!["urn:eigenius:test:survivor".to_string()],
+            "tombstoned subject must not appear in the consolidated vector segment; got {subjects:?}"
+        );
+    }
+
+    /// D43 §2.8 / M8.2 — when the active VectorIndex strategy is
+    /// `hnsw`, the consolidated segment must carry a freshly-built
+    /// HNSW graph in its `hnsw_graph_bytes` payload. This pins the
+    /// "rebuild on consolidation" deliverable from M8.
+    #[test]
+    fn vector_consolidation_rebuilds_hnsw_when_strategy_demands() {
+        use crate::bootstrap::bootstrap;
+        use crate::ontology::well_known as wk;
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let target_prop = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        let bootstrap_ctx = bootstrap().expect("bootstrap");
+        let bootstrap_head = Arc::clone(bootstrap_ctx.head());
+        let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
+        while let Some(layer) = cursor {
+            backend.store_layer(&layer).unwrap();
+            cursor = layer.parent().cloned();
+        }
+
+        // VectorIndex with explicit `strategy: hnsw`.
+        let mut vi_layer = LayerBuilder::new("vi", Some(Arc::clone(&bootstrap_head)));
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        vi.set(
+            iri(wk::VEC_STRATEGY),
+            Value::ResourceRef(iri("urn:eigenius:core:strategies:hnsw")),
+        );
+        vi_layer.add_resource(vi).unwrap();
+        let vi_layer = Arc::new(vi_layer.build(storage.clone()));
+        backend.store_layer(&vi_layer).unwrap();
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+
+        // Four content layers, each contributing one subject.
+        let mut range: Vec<Arc<Layer>> = Vec::new();
+        let mut prev = Arc::clone(&vi_layer);
+        for i in 0..4 {
+            let mut lb = LayerBuilder::new(&format!("L{i}"), Some(Arc::clone(&prev)));
+            let mut r = Resource::new(iri(&format!("urn:eigenius:test:doc{i}")));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            r.set(iri(target_prop), Value::String(format!("body {i}")));
+            lb.add_resource(r).unwrap();
+            let layer = Arc::new(lb.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            sweep_layer_vectors(&layer, &reg, None).expect("sweep");
+            range.push(Arc::clone(&layer));
+            prev = layer;
+        }
+        backend.put_branch("main", prev.id()).unwrap();
+
+        let outcome = consolidate_chain(
+            "main",
+            range[0].id().clone(),
+            prev.id().clone(),
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+
+        let vector_index = Arc::clone(&prev.storage().vector_index);
+        let index_iri = iri("urn:eigenius:test:vi");
+        let consolidated_seg = vector_index
+            .get_segment(&index_iri, &outcome.consolidated_layer)
+            .unwrap()
+            .expect("consolidated segment exists");
+        assert_eq!(consolidated_seg.subjects.len(), 4);
+        assert!(
+            consolidated_seg.hnsw_graph_bytes.is_some(),
+            "strategy=hnsw consolidated segment must carry an HNSW graph payload"
+        );
+        // Decode the bytes to confirm they're a real wire-format graph.
+        let bytes = consolidated_seg.hnsw_graph_bytes.as_ref().unwrap();
+        let layout = crate::query::vector::hnsw_format::decode(bytes)
+            .expect("hnsw_graph_bytes decode to wire format");
+        assert_eq!(layout.count(), 4);
     }
 }
