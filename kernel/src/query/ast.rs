@@ -38,66 +38,12 @@ pub struct RuleDefinition {
 /// Clauses preserve textual order so FIBER dispatches can consume
 /// bindings from preceding MATCH/FIBER clauses and subsequent patterns
 /// can consume bindings produced by FIBER — see D2 §3.5, §6.12.
-///
-/// `conditions` carries the WHERE list as a sequence of
-/// [`WhereItem`]s (D45). Each item is either a filter expression or
-/// a `BIND(expr AS ?var)` binding-introduction. Order is significant
-/// — a BIND introduces a variable visible to subsequent items.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchPart {
     pub using: Vec<Iri>,
     pub using_institutions: Vec<InstitutionAlias>,
     pub clauses: Vec<Clause>,
-    pub conditions: Vec<WhereItem>,
-}
-
-impl MatchPart {
-    /// Iterate over WHERE-clause filter expressions only, skipping
-    /// `BIND` items. Used by passes that only care about filters
-    /// (e.g. stratification's dependency analysis) — most consumers
-    /// should walk `conditions` directly so they handle both shapes.
-    pub fn filters(&self) -> impl Iterator<Item = &Expression> {
-        self.conditions.iter().filter_map(|w| match w {
-            WhereItem::Filter(e) => Some(e),
-            WhereItem::Bind { .. } => None,
-        })
-    }
-}
-
-/// One item in a WHERE list (D45). Either a filter expression
-/// (existing behaviour — drops candidate bindings that evaluate to
-/// false) or a `BIND` binding-introduction (D45 §4–§5: evaluates
-/// `expr` against each candidate binding and adds `?var → result`
-/// to the binding map).
-#[derive(Debug, Clone, PartialEq)]
-pub enum WhereItem {
-    Filter(Expression),
-    /// `BIND(expr AS ?var)`. The variable must be fresh at the BIND's
-    /// position — re-binding is a typecheck error. See D45 §6.
-    Bind {
-        expr: Expression,
-        var: Variable,
-    },
-}
-
-impl WhereItem {
-    /// The expression contained in this WHERE item. Passes that
-    /// walk expressions without caring whether the item is a filter
-    /// or a binding (qualified-call checks, retrieval typecheck,
-    /// EMBED inference, etc.) consume this accessor.
-    pub fn expression(&self) -> &Expression {
-        match self {
-            WhereItem::Filter(e) => e,
-            WhereItem::Bind { expr, .. } => expr,
-        }
-    }
-
-    pub fn expression_mut(&mut self) -> &mut Expression {
-        match self {
-            WhereItem::Filter(e) => e,
-            WhereItem::Bind { expr, .. } => expr,
-        }
-    }
+    pub conditions: Vec<Expression>,
 }
 
 impl MatchPart {
@@ -320,22 +266,6 @@ pub enum Expression {
     FunctionCall {
         name: String,
         args: Vec<Expression>,
-    },
-    /// D43 §3.6 / M7.2 — Reciprocal Rank Fusion. Distinct from
-    /// `FunctionCall` because RRF is *not* row-local: its value for
-    /// a row depends on the row's rank in each source's full ranked
-    /// ordering, which the planner materialises in a pre-pass before
-    /// row-by-row evaluation (§6.4). The AST node carries the
-    /// per-source score expressions and the constant `k` (default 60
-    /// per Cormack et al.).
-    ///
-    /// Each `source` is a per-row score expression — typically a
-    /// `TEXT_SCORE(...)` or `VECTOR_SIM(...)` call, or an arithmetic
-    /// combination of these, or a variable bound to one. Typecheck
-    /// enforces this constraint (§4.7).
-    Rrf {
-        sources: Vec<Expression>,
-        k: u32,
     },
     Aggregate {
         op: AggregateOp,

@@ -89,21 +89,10 @@ pub enum TokenKind {
     /// `EMBED("text", model: M)` → Vector(model, dim) value (D43 §3.5).
     EmbedFn,
 
-    // D43 §3.6 — reciprocal rank fusion
-    /// `RRF(?s1, ?s2, ..., k: K?)` → Float fused score (D43 §3.6).
-    RrfFn,
-
     // D43 §3.7 — ranked-retrieval clause
     /// `TOP K BY ?score [DESC|ASC]` (D43 §3.7). Mutually exclusive
     /// with `ORDER BY` / `LIMIT` in the same query.
     Top,
-
-    // D45 — query-body variable binding.
-    /// `BIND(expr AS ?var)` in WHERE position. Introduces `?var`
-    /// bound to `expr` evaluated against the current binding;
-    /// subsequent clauses see the variable. Re-binding is rejected
-    /// at typecheck. SPARQL 1.1 surface inherited verbatim.
-    Bind,
 
     // Literals
     StringLit(String),
@@ -662,9 +651,7 @@ impl<'a> Lexer<'a> {
             "VECTOR_NEAR" => TokenKind::VectorNearFn,
             "VECTOR_SIM" => TokenKind::VectorSimFn,
             "EMBED" => TokenKind::EmbedFn,
-            "RRF" => TokenKind::RrfFn,
             "TOP" => TokenKind::Top,
-            "BIND" => TokenKind::Bind,
             // Booleans
             "true" => TokenKind::BooleanLit(true),
             "false" => TokenKind::BooleanLit(false),
@@ -890,15 +877,18 @@ mod tests {
     /// to M3 / M5 / M7 implementation.
     #[test]
     fn d43_retrieval_keywords_tokenize() {
+        // RRF removed from the user surface per the D43 reset; the
+        // remaining retrieval keywords (TEXT_MATCH / TEXT_SCORE /
+        // VECTOR_NEAR / VECTOR_SIM / EMBED) and TOP K will collapse
+        // into the `~` operator in subsequent reset phases.
         assert_eq!(
-            kinds("TEXT_MATCH TEXT_SCORE VECTOR_NEAR VECTOR_SIM EMBED RRF TOP"),
+            kinds("TEXT_MATCH TEXT_SCORE VECTOR_NEAR VECTOR_SIM EMBED TOP"),
             vec![
                 TokenKind::TextMatchFn,
                 TokenKind::TextScoreFn,
                 TokenKind::VectorNearFn,
                 TokenKind::VectorSimFn,
                 TokenKind::EmbedFn,
-                TokenKind::RrfFn,
                 TokenKind::Top,
             ]
         );

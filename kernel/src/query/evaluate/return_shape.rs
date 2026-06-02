@@ -91,52 +91,30 @@ pub(super) fn binding_to_resource(binding: &Binding, _classes: &[Name]) -> Resou
     resource
 }
 
-/// One element of the post-shape result pipeline: the original
-/// binding index (for RRF context lookup during sort), the
-/// underlying binding (for full expression evaluation), and the
-/// shaped result resource.
-///
-/// D43 §6.4 / M7.4 — sort and DISTINCT operate on this triple so
-/// `TOP K BY RRF(...)` can evaluate the score expression against
-/// the binding (with the rrf context) instead of being restricted
-/// to row-property short-name lookups.
-pub(super) type ResultRow = (usize, Binding, Resource);
-
-/// Deduplicate result rows by canonical-form equality on the
-/// shaped resource (DISTINCT). The original binding stays paired
-/// with its representative row so the sort path can still evaluate
-/// against the right context.
-pub(super) fn deduplicate(rows: Vec<ResultRow>) -> Vec<ResultRow> {
+/// Deduplicate resources (DISTINCT).
+pub(super) fn deduplicate(resources: Vec<Resource>) -> Vec<Resource> {
     let mut seen: Vec<Vec<u8>> = Vec::new();
     let mut result = Vec::new();
-    for (idx, binding, resource) in rows {
+    for resource in resources {
         let canonical = crate::ontology::eigon_json::canonicalize(&resource);
         if !seen.contains(&canonical) {
             seen.push(canonical);
-            result.push((idx, binding, resource));
+            result.push(resource);
         }
     }
     result
 }
 
-/// Sort result rows by ORDER BY / TOP K BY expressions. D43 §6.4 /
-/// M7.4 — the key extractor first tries `eval_expression` against
-/// the underlying binding (with `current_binding_idx` set so RRF
-/// can look up its materialised ranks); if that errors, it falls
-/// back to the legacy row-property short-name lookup so existing
-/// surfaces (notably ORDER BY of a RETURN-renamed aggregate) keep
-/// working.
+/// Sort results by ORDER BY expressions.
 pub(super) fn sort_results(
-    rows: &mut [ResultRow],
+    resources: &mut [Resource],
     order_by: &[OrderItem],
     fp: &QueryFingerprint,
-    layer: &Layer,
-    runtime: super::FiberRuntime<'_>,
 ) {
-    rows.sort_by(|a, b| {
+    resources.sort_by(|a, b| {
         for item in order_by {
-            let val_a = sort_key(a, &item.expression, fp, layer, runtime);
-            let val_b = sort_key(b, &item.expression, fp, layer, runtime);
+            let val_a = extract_sort_value(a, &item.expression, fp);
+            let val_b = extract_sort_value(b, &item.expression, fp);
 
             if let (Some(va), Some(vb)) = (&val_a, &val_b) {
                 if let Some(ord) = values_compare(va, vb) {
@@ -154,32 +132,7 @@ pub(super) fn sort_results(
     });
 }
 
-/// Compute the sort key for one row under `expr`. Tries
-/// binding-eval first (handles RRF, BIND-introduced variables,
-/// arithmetic combinations, and MATCH-bound variables); on error
-/// (e.g. an aggregate AST node that's only legal in GROUP BY
-/// context), falls back to the row-property short-name lookup that
-/// the pre-M7.4 sort used exclusively. The fallback preserves the
-/// existing `ORDER BY ?aggregate_renamed_in_RETURN` shape.
-fn sort_key(
-    row: &ResultRow,
-    expr: &Expression,
-    fp: &QueryFingerprint,
-    layer: &Layer,
-    runtime: super::FiberRuntime<'_>,
-) -> Option<Value> {
-    let (binding_idx, binding, resource) = row;
-    let runtime_for_sort = super::FiberRuntime {
-        current_binding_idx: Some(*binding_idx),
-        ..runtime
-    };
-    match eval_expression(expr, binding, layer, runtime_for_sort) {
-        Ok(v) => Some(v),
-        Err(_) => row_property_fallback(resource, expr, fp),
-    }
-}
-
-fn row_property_fallback(
+fn extract_sort_value(
     resource: &Resource,
     expr: &Expression,
     fp: &QueryFingerprint,

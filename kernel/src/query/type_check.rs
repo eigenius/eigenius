@@ -54,7 +54,7 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // Qualified-name function calls in expression position must
     // resolve to a Decidable QueryClass under D14 (D2 v2 §5.9).
     for cond in &program.query.body.conditions {
-        check_qualified_calls(cond.expression(), &index, &mut errors);
+        check_qualified_calls(cond, &index, &mut errors);
     }
     for item in &program.query.result {
         check_qualified_calls(&item.expression, &index, &mut errors);
@@ -95,35 +95,14 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // textual order within the WHERE list doesn't matter.
     let bound_vars = collect_bound_variables(program);
 
-    // D45 §6 — WHERE items are checked with an *accumulating* bound
-    // set: a BIND only contributes to items that follow it. The
-    // pre-BIND base set is MATCH patterns + FIBER bindings (and
-    // for DEFINE bodies, the rule's head variables).
-    let mut match_fiber_bound: BTreeSet<String> = BTreeSet::new();
-    collect_pattern_vars(program.query.body.patterns(), &mut match_fiber_bound);
-    for c in &program.query.body.clauses {
-        if let Clause::Fiber(fc) = c {
-            match_fiber_bound.insert(fc.binding.name.clone());
-        }
+    // Check variables used in WHERE are bound.
+    for condition in &program.query.body.conditions {
+        check_expression_variables(condition, &bound_vars, &mut errors);
     }
-    let _ = check_where_bindings_and_collect(
-        &program.query.body.conditions,
-        &match_fiber_bound,
-        &mut errors,
-    );
-    // Same for DEFINE rule bodies.
     for def in &program.definitions {
-        let mut def_base: BTreeSet<String> = BTreeSet::new();
-        collect_pattern_vars(def.body.patterns(), &mut def_base);
-        for v in &def.variables {
-            def_base.insert(v.name.clone());
+        for condition in &def.body.conditions {
+            check_expression_variables(condition, &bound_vars, &mut errors);
         }
-        for c in &def.body.clauses {
-            if let Clause::Fiber(fc) = c {
-                def_base.insert(fc.binding.name.clone());
-            }
-        }
-        let _ = check_where_bindings_and_collect(&def.body.conditions, &def_base, &mut errors);
     }
 
     // Check variables used in RETURN are bound
@@ -166,13 +145,7 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     let prop_var_index = build_property_variable_index(program, layer);
     let text_indexes = resolve_active_text_indexes(layer);
     for cond in &program.query.body.conditions {
-        check_text_retrieval(
-            cond.expression(),
-            &prop_var_index,
-            &text_indexes,
-            layer,
-            &mut errors,
-        );
+        check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
     }
     for item in &program.query.result {
         check_text_retrieval(
@@ -206,13 +179,7 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     }
     for def in &program.definitions {
         for cond in &def.body.conditions {
-            check_text_retrieval(
-                cond.expression(),
-                &prop_var_index,
-                &text_indexes,
-                layer,
-                &mut errors,
-            );
+            check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
         }
     }
 
@@ -224,12 +191,7 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // model inference (§4.4) are the M5 follow-up.
     let vector_indexes = resolve_active_vector_indexes(layer);
     for cond in &program.query.body.conditions {
-        check_vector_retrieval(
-            cond.expression(),
-            &prop_var_index,
-            &vector_indexes,
-            &mut errors,
-        );
+        check_vector_retrieval(cond, &prop_var_index, &vector_indexes, &mut errors);
     }
     for item in &program.query.result {
         check_vector_retrieval(
@@ -260,151 +222,11 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     }
     for def in &program.definitions {
         for cond in &def.body.conditions {
-            check_vector_retrieval(
-                cond.expression(),
-                &prop_var_index,
-                &vector_indexes,
-                &mut errors,
-            );
+            check_vector_retrieval(cond, &prop_var_index, &vector_indexes, &mut errors);
         }
-    }
-
-    // D43 §4.7 / M7.2 — RRF score-expression recognition. Each
-    // argument to an `Expression::Rrf` node must be a recognisable
-    // per-row score expression — a TEXT_SCORE / VECTOR_SIM call, a
-    // variable bound to one of those (or to another recognised
-    // expression), or an arithmetic combination of recognised
-    // expressions. Float literals and arbitrary function calls fail
-    // here, surfaced as a typed parse-time error per §4.7.
-    //
-    // RRF is only legal in RETURN and TOP K BY positions in v1; the
-    // walker visits both. RRF in WHERE / GROUP BY / ORDER BY emits
-    // a separate "RRF is not legal here" error.
-    for item in &program.query.result {
-        check_rrf(&item.expression, false, &mut errors);
-    }
-    if let Some(top_k) = &program.query.top_k_by {
-        check_rrf(&top_k.expression, false, &mut errors);
-    }
-    for cond in &program.query.body.conditions {
-        // BIND-positional RRF is rejected separately by
-        // `check_where_bindings_and_collect` with a clearer
-        // `bind_rrf_not_supported` diagnostic; the general "RRF
-        // outside RETURN / TOP K BY" rule still applies to the
-        // filter-positional case.
-        check_rrf(cond.expression(), true, &mut errors);
-    }
-    for expr in &program.query.group_by {
-        check_rrf(expr, true, &mut errors);
-    }
-    for item in &program.query.order_by {
-        check_rrf(&item.expression, true, &mut errors);
     }
 
     errors
-}
-
-/// D43 §4.7 — recognise the score-expression shapes RRF accepts.
-/// `reject_rrf_here` is set for positions where RRF itself is not
-/// legal (WHERE / GROUP BY / ORDER BY in v1 — RRF only flows through
-/// RETURN and TOP K BY because the planner needs to materialise
-/// ranks once per query and the rank set is the same for both).
-fn check_rrf(expr: &Expression, reject_rrf_here: bool, errors: &mut Vec<QueryError>) {
-    match expr {
-        Expression::Rrf { sources, .. } => {
-            if reject_rrf_here {
-                errors.push(QueryError::type_check(
-                    "rrf_outside_return_or_top_k",
-                    "RRF is only allowed in RETURN and TOP K BY clauses (v1)".to_string(),
-                ));
-            }
-            for (i, src) in sources.iter().enumerate() {
-                if !is_recognised_score_expression(src) {
-                    errors.push(QueryError::type_check(
-                        "rrf_arg_not_score_expression",
-                        format!(
-                            "RRF argument {} is not a recognised score expression — \
-                             expected TEXT_SCORE, VECTOR_SIM, a variable bound to one of \
-                             those, or an arithmetic combination thereof",
-                            i + 1
-                        ),
-                    ));
-                }
-                // Continue walking in case of nested RRF in a source.
-                check_rrf(src, false, errors);
-            }
-        }
-        Expression::Binary { left, right, .. } => {
-            check_rrf(left, reject_rrf_here, errors);
-            check_rrf(right, reject_rrf_here, errors);
-        }
-        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
-            check_rrf(operand, reject_rrf_here, errors);
-        }
-        Expression::Aggregate { arg, .. } => {
-            check_rrf(arg, reject_rrf_here, errors);
-        }
-        Expression::FunctionCall { args, .. } => {
-            for a in args {
-                check_rrf(a, reject_rrf_here, errors);
-            }
-        }
-        Expression::Array(items) => {
-            for it in items {
-                check_rrf(it, reject_rrf_here, errors);
-            }
-        }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                check_rrf(v, reject_rrf_here, errors);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Predicate: is `expr` a recognised per-row score expression per
-/// D43 §4.7?
-///
-/// Recognised:
-/// - `TEXT_SCORE(...)` / `VECTOR_SIM(...)` function calls.
-/// - A `?var` reference — the typecheck variable-binding pass and
-///   the existing TEXT/VECTOR retrieval checks downstream ensure
-///   the binding has the right shape; this is per the spec's "or a
-///   variable bound to one of the above" clause.
-/// - An arithmetic `Binary` combination of recognised score
-///   expressions (Add / Sub / Mul / Div / Mod / Pow).
-/// - A unary numeric operator over a recognised expression.
-/// - A nested `RRF` call (RRF returns Float, so it composes).
-///
-/// Rejected:
-/// - Literal floats / integers / strings / booleans.
-/// - Other function calls (DATE, LENGTH, CONCAT, EMBED, TEXT_MATCH —
-///   TEXT_MATCH returns Boolean, not a score; EMBED returns Vector).
-/// - DotPath, Aggregate, NotExists, Array, Object, Variable
-///   predicates.
-fn is_recognised_score_expression(expr: &Expression) -> bool {
-    match expr {
-        Expression::FunctionCall { name, .. } => name == "TEXT_SCORE" || name == "VECTOR_SIM",
-        Expression::Variable(_) => true,
-        Expression::Rrf { .. } => true,
-        Expression::Binary { op, left, right } => {
-            matches!(
-                op,
-                BinaryOp::Add
-                    | BinaryOp::Sub
-                    | BinaryOp::Mul
-                    | BinaryOp::Div
-                    | BinaryOp::Mod
-                    | BinaryOp::Pow
-            ) && is_recognised_score_expression(left)
-                && is_recognised_score_expression(right)
-        }
-        Expression::Unary { op, operand } => {
-            matches!(op, UnaryOp::Pos | UnaryOp::Neg) && is_recognised_score_expression(operand)
-        }
-        _ => false,
-    }
 }
 
 /// Check a MatchPart: validate USING IRIs resolve to classes.
@@ -436,10 +258,6 @@ fn check_match_part(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError
 /// universe of bindings visible to RETURN / ORDER BY / TOP K BY /
 /// GROUP BY positions.
 ///
-/// Note: this is *not* sufficient for WHERE itself, where BIND
-/// ordering matters (a BIND only contributes to subsequent items).
-/// [`check_where_bindings_and_collect`] does the ordering pass and
-/// emits the D45 §6 errors.
 fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
     let mut vars = BTreeSet::new();
 
@@ -447,11 +265,6 @@ fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
         collect_pattern_vars(def.body.patterns(), &mut vars);
         for v in &def.variables {
             vars.insert(v.name.clone());
-        }
-        for item in &def.body.conditions {
-            if let WhereItem::Bind { var, .. } = item {
-                vars.insert(var.name.clone());
-            }
         }
     }
 
@@ -470,69 +283,7 @@ fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
             }
         }
     }
-    // D45 — `BIND(expr AS ?var)` in the main query body's WHERE.
-    for item in &program.query.body.conditions {
-        if let WhereItem::Bind { var, .. } = item {
-            vars.insert(var.name.clone());
-        }
-    }
     vars
-}
-
-/// D45 §6 — accumulate-and-check pass over a WHERE list. Verifies:
-///
-/// 1. Every variable referenced in a filter or BIND expression is
-///    bound *at that point in the list* (`bind_expr_uses_unbound_var`
-///    when the reference is to a BIND-introduced var that comes
-///    later; the catch-all `unbound_variable` error covers the case
-///    where the variable is never bound at all).
-/// 2. A `BIND(expr AS ?var)` whose `?var` is already in scope
-///    (from MATCH / FIBER / a prior BIND) fails with
-///    `bind_redefines_variable`.
-/// 3. A `BIND(RRF(...) AS ?var)` fails with `bind_rrf_not_supported`
-///    — RRF in BIND position requires the relation-wide stratum
-///    work deferred per D45 §3.
-fn check_where_bindings_and_collect(
-    where_items: &[WhereItem],
-    base_bound: &BTreeSet<String>,
-    errors: &mut Vec<QueryError>,
-) -> BTreeSet<String> {
-    let mut bound: BTreeSet<String> = base_bound.clone();
-    for item in where_items {
-        match item {
-            WhereItem::Filter(e) => {
-                check_expression_variables(e, &bound, errors);
-            }
-            WhereItem::Bind { expr, var } => {
-                check_expression_variables(expr, &bound, errors);
-                if matches!(expr, Expression::Rrf { .. }) {
-                    errors.push(QueryError::type_check(
-                        "bind_rrf_not_supported",
-                        format!(
-                            "BIND(RRF(...) AS ?{}): RRF is not supported in BIND position in v1 \
-                             — RRF is row-non-local and requires the relation-wide-binding \
-                             stratum (D45 §3, future work). Place RRF in RETURN or TOP K BY \
-                             until that lands.",
-                            var.name
-                        ),
-                    ));
-                }
-                if bound.contains(&var.name) {
-                    errors.push(QueryError::type_check(
-                        "bind_redefines_variable",
-                        format!(
-                            "BIND(... AS ?{}): variable is already bound by a prior MATCH, \
-                             FIBER, or BIND clause — BIND introduces a fresh variable per D45 §6",
-                            var.name
-                        ),
-                    ));
-                } else {
-                    bound.insert(var.name.clone());
-                }
-            }
-        }
-    }
-    bound
 }
 
 fn collect_pattern_vars<'a>(
@@ -614,11 +365,6 @@ fn check_expression_variables(
                 check_expression_variables(value, bound, errors);
             }
         }
-        Expression::Rrf { sources, .. } => {
-            for src in sources {
-                check_expression_variables(src, bound, errors);
-            }
-        }
         Expression::Literal(_) => {}
     }
 }
@@ -629,7 +375,7 @@ fn check_expression_variables(
 fn check_aggregate_consistency(program: &Program, errors: &mut Vec<QueryError>) {
     // Check aggregates don't appear in WHERE (always invalid, regardless of RETURN)
     for cond in &program.query.body.conditions {
-        if expr_has_aggregate(cond.expression()) {
+        if expr_has_aggregate(cond) {
             errors.push(QueryError::type_check(
                 "aggregate_in_where",
                 "aggregate functions are not allowed in WHERE clauses".to_string(),
@@ -1172,7 +918,7 @@ fn check_verdict_typing(
     errors: &mut Vec<QueryError>,
 ) {
     for item in &part.conditions {
-        let cond = item.expression();
+        let cond = item;
         // Top-level WHERE expression: must NOT itself be a Verdict
         // source (forces explicit projection).
         check_boolean_position(cond, verdict_vars, index, errors);
@@ -1423,11 +1169,6 @@ fn check_text_retrieval(
                 check_text_retrieval(v, prop_var_index, text_indexes, layer, errors);
             }
         }
-        Expression::Rrf { sources, .. } => {
-            for src in sources {
-                check_text_retrieval(src, prop_var_index, text_indexes, layer, errors);
-            }
-        }
         _ => {}
     }
 }
@@ -1585,11 +1326,6 @@ fn check_vector_retrieval(
         Expression::Object(pairs) => {
             for (_, v) in pairs {
                 check_vector_retrieval(v, prop_var_index, vector_indexes, errors);
-            }
-        }
-        Expression::Rrf { sources, .. } => {
-            for src in sources {
-                check_vector_retrieval(src, prop_var_index, vector_indexes, errors);
             }
         }
         _ => {}
@@ -2558,131 +2294,6 @@ mod tests {
         assert!(
             errors.iter().any(|e| e.rule == "vector_retrieval_arity"),
             "expected vector_retrieval_arity for 5-arg VECTOR_NEAR; got {errors:?}"
-        );
-    }
-
-    // ─── D45 BIND typecheck tests ───────────────────────────────
-
-    /// `BIND(expr AS ?var)` introduces a variable visible to
-    /// subsequent WHERE items and to RETURN. The clean case must
-    /// typecheck with no errors.
-    #[test]
-    fn bind_introduces_variable_visible_to_subsequent_clauses() {
-        let layer = build_core_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?x { short_name: ?name }
-            WHERE BIND(LENGTH(?name) AS ?nlen),
-                  ?nlen > 0
-            RETURN [] { name: ?name, nlen: ?nlen }
-            "#,
-        );
-        assert!(
-            errors.is_empty(),
-            "expected no errors for valid BIND; got {errors:?}"
-        );
-    }
-
-    /// D45 §6 `bind_redefines_variable` — BIND of a name already
-    /// bound by MATCH.
-    #[test]
-    fn bind_rebinding_match_var_is_error() {
-        let layer = build_core_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?x { short_name: ?name }
-            WHERE BIND(LENGTH(?name) AS ?name)
-            RETURN [] { name: ?name }
-            "#,
-        );
-        assert!(
-            errors.iter().any(|e| e.rule == "bind_redefines_variable"),
-            "expected bind_redefines_variable; got {errors:?}"
-        );
-    }
-
-    /// D45 §6 — two BINDs introducing the same variable.
-    #[test]
-    fn bind_rebinding_prior_bind_var_is_error() {
-        let layer = build_core_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?x { short_name: ?name }
-            WHERE BIND(LENGTH(?name) AS ?nlen),
-                  BIND(?nlen + 1 AS ?nlen)
-            RETURN [] { nlen: ?nlen }
-            "#,
-        );
-        assert!(
-            errors.iter().any(|e| e.rule == "bind_redefines_variable"),
-            "expected bind_redefines_variable; got {errors:?}"
-        );
-    }
-
-    /// D45 §6 — a filter to the left of the BIND that introduces a
-    /// variable triggers the existing `unbound_variable` error.
-    /// (BIND-ordering rule: a BIND only contributes to items after
-    /// it.)
-    #[test]
-    fn use_of_bind_var_before_bind_is_unbound() {
-        let layer = build_core_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?x { short_name: ?name }
-            WHERE ?nlen > 0,
-                  BIND(LENGTH(?name) AS ?nlen)
-            RETURN [] { name: ?name }
-            "#,
-        );
-        assert!(
-            errors.iter().any(|e| e.rule == "unbound_variable"),
-            "expected unbound_variable for use-before-BIND; got {errors:?}"
-        );
-    }
-
-    /// D45 §3/§6 — `BIND(RRF(...) AS ?var)` is rejected with the
-    /// dedicated `bind_rrf_not_supported` diagnostic. RRF is row-
-    /// non-local and lives in RETURN / TOP K BY for v1.
-    #[test]
-    fn bind_of_rrf_is_rejected() {
-        let layer = build_core_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?x { short_name: ?name }
-            WHERE BIND(LENGTH(?name) AS ?a),
-                  BIND(LENGTH(?name) AS ?b),
-                  BIND(RRF(?a, ?b) AS ?fused)
-            RETURN [] { name: ?name, fused: ?fused }
-            "#,
-        );
-        assert!(
-            errors.iter().any(|e| e.rule == "bind_rrf_not_supported"),
-            "expected bind_rrf_not_supported; got {errors:?}"
-        );
-    }
-
-    /// A BIND-bound variable used inside the BIND expression itself
-    /// is unbound at evaluation time (the BIND hasn't completed) —
-    /// expressed as an `unbound_variable` error.
-    #[test]
-    fn bind_expr_self_reference_is_unbound() {
-        let layer = build_core_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?x { short_name: ?name }
-            WHERE BIND(?nlen + 1 AS ?nlen)
-            RETURN [] { name: ?name }
-            "#,
-        );
-        assert!(
-            errors.iter().any(|e| e.rule == "unbound_variable"),
-            "expected unbound_variable for self-referential BIND; got {errors:?}"
         );
     }
 }

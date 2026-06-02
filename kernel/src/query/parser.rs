@@ -222,92 +222,6 @@ impl Parser {
         })
     }
 
-    // --- RRF (D43 §3.6) ---
-
-    /// Parse an `RRF(s1, s2, ..., [k: <int>])` call. Caller has
-    /// peeked the `RrfFn` token.
-    ///
-    /// The trailing `k: <int>` named argument is recognised
-    /// specifically when the next token is `Identifier("k")`
-    /// followed by `Colon`. Any other identifier in that position
-    /// is a normal expression argument (a property-bound variable
-    /// reference).
-    fn parse_rrf_call(&mut self) -> Result<Expression, QueryError> {
-        self.expect(&TokenKind::RrfFn)?;
-        self.expect(&TokenKind::LParen)?;
-        let mut sources: Vec<Expression> = Vec::new();
-        let mut k: u32 = 60;
-        let mut saw_k = false;
-
-        // Empty RRF() is invalid — at least one source.
-        if self.at(&TokenKind::RParen) {
-            return Err(QueryError::parser(
-                self.position(),
-                "RRF requires at least two score expressions".to_string(),
-            ));
-        }
-
-        loop {
-            // Detect `k : <int>` lookahead — the only named arg in the
-            // RRF surface. Identifier("k") + Colon is unambiguous:
-            // a bare identifier in argument position is otherwise
-            // qualified or a function call (both consume the colon
-            // differently).
-            if self.peek_identifier_named("k") && matches!(self.peek_at(1), Some(TokenKind::Colon))
-            {
-                if saw_k {
-                    return Err(QueryError::parser(
-                        self.position(),
-                        "RRF: `k` named argument supplied more than once".to_string(),
-                    ));
-                }
-                self.advance(); // Identifier("k")
-                self.advance(); // Colon
-                let k_val = self.parse_usize()? as u32;
-                if k_val == 0 {
-                    return Err(QueryError::parser(
-                        self.position(),
-                        "RRF: `k` must be a positive integer".to_string(),
-                    ));
-                }
-                k = k_val;
-                saw_k = true;
-            } else {
-                if saw_k {
-                    return Err(QueryError::parser(
-                        self.position(),
-                        "RRF: positional source expressions must precede `k:` named argument"
-                            .to_string(),
-                    ));
-                }
-                sources.push(self.parse_expression()?);
-            }
-
-            if self.at(&TokenKind::Comma) {
-                self.advance();
-            } else {
-                break;
-            }
-        }
-        self.expect(&TokenKind::RParen)?;
-
-        if sources.len() < 2 {
-            return Err(QueryError::parser(
-                self.position(),
-                "RRF requires at least two score expressions".to_string(),
-            ));
-        }
-
-        Ok(Expression::Rrf { sources, k })
-    }
-
-    /// Peek at the current token: is it `Identifier(name)` with the
-    /// exact `name`? Used by the RRF parser to detect the named `k`
-    /// argument without consuming.
-    fn peek_identifier_named(&self, name: &str) -> bool {
-        matches!(self.peek(), TokenKind::Identifier(s) if s == name)
-    }
-
     // --- TOP K BY (D43 §3.7) ---
 
     fn parse_top_k_by(&mut self) -> Result<TopKBy, QueryError> {
@@ -625,40 +539,9 @@ impl Parser {
 
     // --- WHERE ---
 
-    fn parse_where(&mut self) -> Result<Vec<WhereItem>, QueryError> {
+    fn parse_where(&mut self) -> Result<Vec<Expression>, QueryError> {
         self.expect(&TokenKind::Where)?;
-        self.parse_where_item_list()
-    }
-
-    /// Parse a comma-separated list of WHERE items. Each item is
-    /// either a `BIND(expr AS ?var)` binding-introduction (D45) or
-    /// a filter expression (existing behaviour).
-    fn parse_where_item_list(&mut self) -> Result<Vec<WhereItem>, QueryError> {
-        let mut items = vec![self.parse_where_item()?];
-        while self.at(&TokenKind::Comma) {
-            self.advance();
-            items.push(self.parse_where_item()?);
-        }
-        Ok(items)
-    }
-
-    fn parse_where_item(&mut self) -> Result<WhereItem, QueryError> {
-        if self.at(&TokenKind::Bind) {
-            self.parse_bind_item()
-        } else {
-            Ok(WhereItem::Filter(self.parse_expression()?))
-        }
-    }
-
-    /// `BIND ( expr AS ?var )` — D45.
-    fn parse_bind_item(&mut self) -> Result<WhereItem, QueryError> {
-        self.expect(&TokenKind::Bind)?;
-        self.expect(&TokenKind::LParen)?;
-        let expr = self.parse_expression()?;
-        self.expect(&TokenKind::As)?;
-        let var = self.parse_variable()?;
-        self.expect(&TokenKind::RParen)?;
-        Ok(WhereItem::Bind { expr, var })
+        self.parse_expression_list()
     }
 
     // --- Expressions (precedence climbing) ---
@@ -944,13 +827,6 @@ impl Parser {
                 Ok(Expression::FunctionCall { name, args })
             }
 
-            // D43 §3.6 / M7.2 — RRF parses to its own AST node so
-            // the typechecker and planner can recognise it directly
-            // (it's not row-local; the planner materialises per-source
-            // ranks before evaluation). Accepts 2+ positional score
-            // expressions and an optional trailing `k: <int>` named
-            // arg (default 60 per Cormack et al.).
-            TokenKind::RrfFn => self.parse_rrf_call(),
 
             TokenKind::CountFn
             | TokenKind::SumFn
@@ -1410,10 +1286,10 @@ mod tests {
         assert_eq!(prog.query.body.conditions.len(), 1); // single AND expression
         assert!(matches!(
             &prog.query.body.conditions[0],
-            WhereItem::Filter(Expression::Binary {
+            Expression::Binary {
                 op: BinaryOp::And,
                 ..
-            })
+            }
         ));
     }
 
@@ -1428,7 +1304,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             &prog.query.body.conditions[0],
-            WhereItem::Filter(Expression::NotExists(_))
+            Expression::NotExists(_)
         ));
     }
 
@@ -1666,92 +1542,7 @@ mod tests {
         assert!(err.to_string().contains("more than once"));
     }
 
-    // ─── D45 BIND parser tests ──────────────────────────────────
-
-    /// `BIND(expr AS ?var)` parses into a `WhereItem::Bind`.
-    #[test]
-    fn bind_basic_parses_to_where_item() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            WHERE BIND(LENGTH(?n) AS ?nlen)
-            "#,
-        )
-        .unwrap();
-        let conds = &prog.query.body.conditions;
-        assert_eq!(conds.len(), 1);
-        match &conds[0] {
-            WhereItem::Bind { var, .. } => assert_eq!(var.name, "nlen"),
-            other => panic!("expected WhereItem::Bind, got {other:?}"),
-        }
-    }
-
-    /// BIND interleaves with filter items in a WHERE list.
-    #[test]
-    fn bind_interleaves_with_filters() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n, age: ?a }
-            WHERE ?a > 18,
-                  BIND(LENGTH(?n) AS ?nlen),
-                  ?nlen >= 3
-            "#,
-        )
-        .unwrap();
-        let conds = &prog.query.body.conditions;
-        assert_eq!(conds.len(), 3);
-        assert!(matches!(conds[0], WhereItem::Filter(_)));
-        assert!(matches!(conds[1], WhereItem::Bind { .. }));
-        assert!(matches!(conds[2], WhereItem::Filter(_)));
-    }
-
-    /// BIND of a TEXT_SCORE call — the canonical D43 §6.5 shape.
-    #[test]
-    fn bind_text_score_parses() {
-        let prog = parse_str(
-            r#"
-            MATCH ?d { description: ?desc }
-            WHERE BIND(TEXT_SCORE(?desc, "wal") AS ?ts)
-            "#,
-        )
-        .unwrap();
-        match &prog.query.body.conditions[0] {
-            WhereItem::Bind { expr, var } => {
-                assert_eq!(var.name, "ts");
-                assert!(matches!(
-                    expr,
-                    Expression::FunctionCall { name, .. } if name == "TEXT_SCORE"
-                ));
-            }
-            other => panic!("expected BIND, got {other:?}"),
-        }
-    }
-
-    /// `BIND(... AS )` without a variable target is a parse error.
-    #[test]
-    fn bind_missing_variable_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            WHERE BIND(LENGTH(?n) AS)
-            "#,
-        )
-        .expect_err("BIND without target should fail");
-        assert!(err.to_string().contains("variable"));
-    }
-
-    /// `BIND(... ?var)` without `AS` is a parse error.
-    #[test]
-    fn bind_missing_as_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            WHERE BIND(LENGTH(?n) ?nlen)
-            "#,
-        )
-        .expect_err("BIND without AS should fail");
-        assert!(err.to_string().contains("AS") || err.to_string().contains("As"));
-    }
+    // BIND parser tests deleted with D45 surface withdrawal.
 
     #[test]
     fn order_by_limit_offset_distinct() {
@@ -1858,10 +1649,10 @@ mod tests {
         let cond = &prog.query.body.conditions[0];
         assert!(matches!(
             cond,
-            WhereItem::Filter(Expression::Binary {
+            Expression::Binary {
                 op: BinaryOp::Eq,
                 ..
-            })
+            }
         ));
     }
 
