@@ -54,7 +54,7 @@ impl EigeniusService {
                 components: Some(&components),
                 overlay: None,
                 ctx: Some(&ctx),
-                retrieval: None,
+                similarity: None,
                 embedders: None,
                 embedding_cache: None,
                 vector_segment_cache: None,

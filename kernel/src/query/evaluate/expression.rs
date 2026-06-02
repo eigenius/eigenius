@@ -57,21 +57,6 @@ pub(super) fn eval_expression(
         }
         Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
         Expression::FunctionCall { name, args } => {
-            // D43 §4.6 — TEXT_MATCH / TEXT_SCORE dispatch through the
-            // query-scoped retrieval context, which holds the
-            // property-bound `?var` map and a per-`(index, query)`
-            // probe cache. Evaluated before the generic arg-vector
-            // path so the AST args (not the row-evaluated values)
-            // can supply the property-variable name.
-            if name == "TEXT_MATCH" || name == "TEXT_SCORE" {
-                return eval_text_retrieval(name, args, binding, runtime);
-            }
-            if name == "EMBED" {
-                return eval_embed(args, binding, layer, runtime);
-            }
-            if name == "VECTOR_NEAR" || name == "VECTOR_SIM" {
-                return eval_vector_retrieval(name, args, binding, layer, runtime);
-            }
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
                 .map(|a| eval_expression(a, binding, layer, runtime))
@@ -177,7 +162,48 @@ pub(super) fn eval_expression(
         Expression::Object(_) => Err(QueryError::evaluation(
             "object literals in expressions not yet implemented",
         )),
+        Expression::Similarity { .. } => eval_similarity(expr, binding, runtime),
     }
+}
+
+/// D43 §6 — per-row evaluation of `~`. Resolves the AST node to
+/// its precomputed [`SimilarityProbe`] via pointer identity, looks
+/// up the row's source-subject IRI, and returns `Boolean(true)` iff
+/// the subject appears in the fused score map.
+///
+/// The score itself is held by the probe but not exposed through
+/// the AST in v1 (see D43 §4.3 — the operator's value type is
+/// Boolean; the score feeds ranking but isn't a user-bindable
+/// Float). Future revisions can expose it via an `EXPLAIN`-shaped
+/// surface (§3.7).
+fn eval_similarity(
+    expr: &Expression,
+    binding: &Binding,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    let ctx = runtime.similarity.ok_or_else(|| {
+        QueryError::evaluation(
+            "similarity operator `~` invoked outside an evaluator pre-pass context",
+        )
+    })?;
+    let probe = ctx.probe_for(expr).ok_or_else(|| {
+        QueryError::evaluation("similarity operator `~` not registered in the pre-pass context")
+    })?;
+    let subject_value = binding.get(&probe.subject_var).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "similarity row-subject variable '?{}' is unbound at this position",
+            probe.subject_var
+        ))
+    })?;
+    let subject_iri = match subject_value {
+        Value::ResourceRef(iri) => iri.clone(),
+        Value::String(s) => match Iri::parse(s) {
+            Ok(iri) => iri,
+            Err(_) => return Ok(Value::Boolean(false)),
+        },
+        _ => return Ok(Value::Boolean(false)),
+    };
+    Ok(Value::Boolean(probe.scores.contains_key(&subject_iri)))
 }
 
 fn eval_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, QueryError> {
@@ -392,394 +418,6 @@ pub(super) fn resolve_iri_string(
         }
     }
     layer.resolve(&iri).map(|r| (*r).clone())
-}
-
-/// D43 §4.6 — evaluate `TEXT_MATCH(?prop, "query")` (→ Boolean) or
-/// `TEXT_SCORE(?prop, "query")` (→ Float) for one row's binding.
-///
-/// Semantics:
-///
-/// 1. The typechecker has already validated `?prop` is a property-
-///    bound variable; the call's purpose is *"is this row's source
-///    subject in the text-index hits, and what is its BM25 score?"*.
-/// 2. Look up the property-binding info (subject_variable name +
-///    property IRI) from the query-scoped
-///    [`retrieval::RetrievalContext`].
-/// 3. Find the active TextIndex Resource for that property; run
-///    (or fetch from the per-query cache) the index probe via
-///    [`crate::query::text::search::run_text_search`].
-/// 4. Resolve this row's subject IRI from the binding map.
-/// 5. For TEXT_MATCH: return true iff the subject appears in the
-///    hit set. For TEXT_SCORE: return the hit's BM25 score, or 0.0
-///    if the subject is not in the hit set.
-fn eval_text_retrieval(
-    fn_name: &str,
-    args: &[Expression],
-    binding: &Binding,
-    runtime: FiberRuntime<'_>,
-) -> Result<Value, QueryError> {
-    use super::retrieval::TextSearchOutcome;
-
-    let retrieval = runtime.retrieval.ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} requires a query-scoped retrieval context; \
-             the evaluator entry point did not build one"
-        ))
-    })?;
-
-    if args.len() != 2 {
-        return Err(QueryError::evaluation(format!(
-            "{fn_name} expects 2 arguments, got {}",
-            args.len()
-        )));
-    }
-    let var = match &args[0] {
-        Expression::Variable(v) => v,
-        _ => {
-            return Err(QueryError::evaluation(format!(
-                "{fn_name} first argument must be a property-bound variable"
-            )));
-        }
-    };
-    let query = match &args[1] {
-        Expression::Literal(Literal::String(s)) => s.as_str(),
-        _ => {
-            return Err(QueryError::evaluation(format!(
-                "{fn_name} second argument must be a literal query string"
-            )));
-        }
-    };
-
-    let binding_info = retrieval.binding_for(&var.name).ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} argument `?{}` is not bound by a MATCH property pattern",
-            var.name
-        ))
-    })?;
-    let active = retrieval
-        .active_index_for(&binding_info.property_iri)
-        .ok_or_else(|| {
-            QueryError::evaluation(format!(
-                "no active TextIndex for property `{}` at this head",
-                binding_info.property_iri.as_str()
-            ))
-        })?;
-
-    let outcome = retrieval.probe(active, query);
-    let hits = match outcome.as_ref() {
-        TextSearchOutcome::Ok(h) => h,
-        TextSearchOutcome::Err(e) => {
-            return Err(QueryError::evaluation(format!(
-                "TextIndex probe failed: {e:?}"
-            )));
-        }
-    };
-
-    let subject_value = binding.get(&binding_info.subject_variable).ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} cannot resolve source subject `?{}` for `?{}`",
-            binding_info.subject_variable, var.name
-        ))
-    })?;
-    let subject_iri = match subject_value {
-        Value::String(s) => Iri::parse(s).ok(),
-        Value::ResourceRef(iri) => Some(iri.clone()),
-        _ => None,
-    }
-    .ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} source subject `?{}` is not an IRI",
-            binding_info.subject_variable
-        ))
-    })?;
-
-    let hit = hits.iter().find(|h| h.subject == subject_iri);
-    match fn_name {
-        "TEXT_MATCH" => Ok(Value::Boolean(hit.is_some())),
-        "TEXT_SCORE" => Ok(Value::Float(hit.map(|h| h.score as f64).unwrap_or(0.0))),
-        _ => unreachable!("eval_text_retrieval dispatched on unknown name"),
-    }
-}
-
-/// D43 §3.5 — evaluate `EMBED("text", "<model_iri>")` → `Value::Vector`.
-///
-/// v1 signature is fully positional: `EMBED(text, model_iri)`. The
-/// keyword form (`EMBED("text", model: M)`) and typecheck-time
-/// model inference from the surrounding `VECTOR_NEAR` context
-/// (D43 §4.4) are deferred — both add parser/typecheck work without
-/// changing the dispatch shape.
-///
-/// Steps:
-/// 1. Validate argument shape (count + both literal strings).
-/// 2. Resolve the Embedder from [`FiberRuntime::embedders`].
-/// 3. Call [`crate::program::embedder::Embedder::embed`] and verify
-///    the returned length equals the declared dim — a length
-///    mismatch is an implementation bug worth surfacing as a query
-///    error rather than silently constructing a mis-sized vector.
-/// 4. Wrap into [`Value::Vector`] for downstream consumers
-///    (`VECTOR_NEAR` / `VECTOR_SIM`, M5).
-fn eval_embed(
-    args: &[Expression],
-    binding: &Binding,
-    layer: &Layer,
-    runtime: FiberRuntime<'_>,
-) -> Result<Value, QueryError> {
-    if args.len() != 2 {
-        return Err(QueryError::evaluation(format!(
-            "EMBED expects 2 arguments (text, model_iri), got {}",
-            args.len()
-        )));
-    }
-    let text_val = eval_expression(&args[0], binding, layer, runtime)?;
-    let text = text_val
-        .as_str()
-        .ok_or_else(|| QueryError::evaluation("EMBED first argument must evaluate to a string"))?;
-
-    let model_val = eval_expression(&args[1], binding, layer, runtime)?;
-    let model_str = model_val.as_iri_str().ok_or_else(|| {
-        QueryError::evaluation("EMBED second argument must evaluate to an IRI-shaped string")
-    })?;
-    let model_iri = Iri::parse(model_str)
-        .map_err(|e| QueryError::evaluation(format!("EMBED model_iri is not a valid IRI: {e}")))?;
-
-    // D43 §5.3 — consult the content-addressed cache before paying
-    // for an Embedder dispatch. A hit on `(content_hash, model_iri)`
-    // returns the cached vector directly; a miss falls through to
-    // dispatch and inserts the result.
-    if let Some(cache) = runtime.embedding_cache {
-        if let Some(cached) = cache.get(text, &model_iri) {
-            return Ok(Value::Vector {
-                model_iri,
-                data: (*cached).clone(),
-            });
-        }
-    }
-
-    let registry = runtime.embedders.ok_or_else(|| {
-        QueryError::evaluation(
-            "EMBED requires an EmbedderRegistry on the query runtime; \
-             none was supplied",
-        )
-    })?;
-    let embedder = registry.get(&model_iri).ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "EMBED model `{}` is not registered in the Embedder registry",
-            model_iri.as_str()
-        ))
-    })?;
-
-    let data = embedder
-        .embed(text)
-        .map_err(|e| QueryError::evaluation(format!("EMBED dispatch failed: {e}")))?;
-    let declared_dim = embedder.dim() as usize;
-    if data.len() != declared_dim {
-        return Err(QueryError::evaluation(format!(
-            "EMBED dispatch returned {} values but `{}` declares dim={}",
-            data.len(),
-            model_iri.as_str(),
-            declared_dim
-        )));
-    }
-
-    if let Some(cache) = runtime.embedding_cache {
-        cache.insert(text, &model_iri, std::sync::Arc::new(data.clone()));
-    }
-    Ok(Value::Vector { model_iri, data })
-}
-
-/// D43 §3.4 / §4.5 — evaluate `VECTOR_NEAR` (→ Boolean) or
-/// `VECTOR_SIM` (→ Float) for one row's binding.
-///
-/// v1 positional signatures (kwarg `k:` is the M5 follow-up):
-///
-/// ```text
-/// VECTOR_NEAR(?vec, query_vec, K) : Boolean
-/// VECTOR_SIM(?vec, query_vec)     : Float
-/// ```
-///
-/// Steps:
-///
-/// 1. Resolve the property-binding for `?vec` via the query-scoped
-///    [`super::retrieval::RetrievalContext`] — same plumbing the
-///    text retrieval primitives use to map a property-bound `?var`
-///    back to its source subject variable.
-/// 2. Find the active VectorIndex Resource for the bound property.
-/// 3. Evaluate `query_vec` — must produce a [`Value::Vector`] (the
-///    canonical producer is `EMBED(...)`) whose `model_iri` and
-///    dimensionality match the active VectorIndex's declarations.
-/// 4. For VECTOR_NEAR: run [`crate::query::vector::search::top_k_subjects`]
-///    and check whether the row's source subject IRI is in the
-///    top-K hit set. For VECTOR_SIM: run
-///    [`crate::query::vector::search::subject_similarity`] for the
-///    row's source subject directly.
-fn eval_vector_retrieval(
-    fn_name: &str,
-    args: &[Expression],
-    binding: &Binding,
-    layer: &Layer,
-    runtime: FiberRuntime<'_>,
-) -> Result<Value, QueryError> {
-    use crate::query::vector::distance::Metric;
-    use crate::query::vector::search::{subject_similarity, top_k_subjects};
-
-    let retrieval = runtime.retrieval.ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} requires a query-scoped retrieval context; \
-             the evaluator entry point did not build one"
-        ))
-    })?;
-
-    // VECTOR_NEAR: 3 args (?vec, q, k) or 4 (with optional ef);
-    // VECTOR_SIM: 2 args. Matches the typechecker's M6.5 rule.
-    let arity_ok = match fn_name {
-        "VECTOR_NEAR" => args.len() == 3 || args.len() == 4,
-        _ => args.len() == 2,
-    };
-    if !arity_ok {
-        return Err(QueryError::evaluation(format!(
-            "{fn_name} got {} arguments, but accepts {}",
-            args.len(),
-            if fn_name == "VECTOR_NEAR" {
-                "3 or 4 (?vec, query_vec, K, ef?)"
-            } else {
-                "2 (?vec, query_vec)"
-            }
-        )));
-    }
-
-    let var = match &args[0] {
-        Expression::Variable(v) => v,
-        _ => {
-            return Err(QueryError::evaluation(format!(
-                "{fn_name} first argument must be a property-bound variable"
-            )));
-        }
-    };
-    let binding_info = retrieval.binding_for(&var.name).ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} argument `?{}` is not bound by a MATCH property pattern",
-            var.name
-        ))
-    })?;
-    let active = retrieval
-        .active_vector_index_for(&binding_info.property_iri)
-        .ok_or_else(|| {
-            QueryError::evaluation(format!(
-                "no active VectorIndex for property `{}` at this head",
-                binding_info.property_iri.as_str()
-            ))
-        })?;
-
-    // Evaluate the query vector. Must produce a `Value::Vector`
-    // whose model + dim match the active VectorIndex's declared
-    // values (defence in depth — the typechecker is the primary
-    // gate; this catches programmatic mis-construction).
-    let qv = eval_expression(&args[1], binding, layer, runtime)?;
-    let (qv_model, qv_data) = match qv.as_vector() {
-        Some(pair) => pair,
-        None => {
-            return Err(QueryError::evaluation(format!(
-                "{fn_name} second argument must evaluate to a Vector (e.g. via EMBED(...))"
-            )));
-        }
-    };
-    if qv_model != &active.model {
-        return Err(QueryError::evaluation(format!(
-            "{fn_name} model mismatch: query vector is `{}` but active VectorIndex declares `{}`",
-            qv_model.as_str(),
-            active.model.as_str()
-        )));
-    }
-    if qv_data.len() != active.dim as usize {
-        return Err(QueryError::evaluation(format!(
-            "{fn_name} dim mismatch: query vector is dim={} but active VectorIndex declares dim={}",
-            qv_data.len(),
-            active.dim
-        )));
-    }
-
-    let metric = Metric::from_short_name(active.distance.as_str()).ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "active VectorIndex `{}` declares unknown distance `{}`",
-            active.iri.as_str(),
-            active.distance.as_str()
-        ))
-    })?;
-
-    let vector_index = retrieval.layer().storage().vector_index.as_ref();
-
-    // Resolve the row's source subject IRI from the binding map.
-    let subject_value = binding.get(&binding_info.subject_variable).ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} cannot resolve source subject `?{}` for `?{}`",
-            binding_info.subject_variable, var.name
-        ))
-    })?;
-    let subject_iri = match subject_value {
-        Value::String(s) => Iri::parse(s).ok(),
-        Value::ResourceRef(iri) => Some(iri.clone()),
-        _ => None,
-    }
-    .ok_or_else(|| {
-        QueryError::evaluation(format!(
-            "{fn_name} source subject `?{}` is not an IRI",
-            binding_info.subject_variable
-        ))
-    })?;
-
-    match fn_name {
-        "VECTOR_NEAR" => {
-            let k = match &args[2] {
-                Expression::Literal(Literal::Integer(n)) if *n > 0 => *n as usize,
-                _ => {
-                    return Err(QueryError::evaluation(
-                        "VECTOR_NEAR k must be a positive integer literal".to_string(),
-                    ));
-                }
-            };
-            // Optional 4th positional arg — `ef` exploration depth.
-            // None falls through to top_k_subjects's default
-            // `max(k*4, 64)` per D43 §3.4.
-            let ef = match args.get(3) {
-                None => None,
-                Some(Expression::Literal(Literal::Integer(n))) if *n > 0 => Some(*n as usize),
-                _ => {
-                    return Err(QueryError::evaluation(
-                        "VECTOR_NEAR ef must be a positive integer literal".to_string(),
-                    ));
-                }
-            };
-            let hits = top_k_subjects(
-                retrieval.layer(),
-                vector_index,
-                runtime.vector_segment_cache,
-                &active.iri,
-                qv_data,
-                k,
-                ef,
-                &active.model,
-                metric,
-            )
-            .map_err(|e| QueryError::evaluation(format!("VECTOR_NEAR probe failed: {e}")))?;
-            let in_topk = hits.iter().any(|h| h.subject == subject_iri);
-            Ok(Value::Boolean(in_topk))
-        }
-        "VECTOR_SIM" => {
-            let sim = subject_similarity(
-                retrieval.layer(),
-                vector_index,
-                runtime.vector_segment_cache,
-                &active.iri,
-                &subject_iri,
-                qv_data,
-                &active.model,
-                metric,
-            )
-            .map_err(|e| QueryError::evaluation(format!("VECTOR_SIM probe failed: {e}")))?;
-            Ok(Value::Float(sim.unwrap_or(0.0) as f64))
-        }
-        _ => unreachable!("eval_vector_retrieval dispatched on unknown name"),
-    }
 }
 
 /// Check if any return item uses an aggregate function.
@@ -1176,7 +814,7 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
-            retrieval: None,
+            similarity: None,
             embedders: None,
             embedding_cache: None,
             vector_segment_cache: None,
@@ -1232,7 +870,7 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
-            retrieval: None,
+            similarity: None,
             embedders: None,
             embedding_cache: None,
             vector_segment_cache: None,
@@ -1423,7 +1061,7 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
-            retrieval: None,
+            similarity: None,
             embedders: None,
             embedding_cache: None,
             vector_segment_cache: None,
@@ -1563,281 +1201,5 @@ mod tests {
             msg.contains("Verdict-typed operand"),
             "unexpected message: {msg}"
         );
-    }
-
-    // ─── D43 §3.5 — EMBED evaluator tests ─────────────────────────────
-
-    /// Trivial layer used by EMBED tests — `eval_embed` doesn't
-    /// actually consult the layer, but `eval_expression` needs one
-    /// for its signature.
-    fn empty_layer() -> Arc<crate::layer::Layer> {
-        Arc::new(
-            LayerBuilder::new("embed-test", None).build(crate::layer::LayerStorage::in_memory()),
-        )
-    }
-
-    #[test]
-    fn embed_dispatches_through_registry_and_returns_vector() {
-        use crate::program::embedder::registry_with_dummy;
-        let reg = registry_with_dummy();
-        let layer = empty_layer();
-        let runtime = FiberRuntime {
-            embedders: Some(&reg),
-            ..FiberRuntime::default()
-        };
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "EMBED".into(),
-            args: vec![
-                Expression::Literal(Literal::String("hello world".into())),
-                Expression::Literal(Literal::String("urn:eigenius:embed:dummy:v1".into())),
-            ],
-        };
-        let v = eval_expression(&expr, &binding, &layer, runtime).expect("EMBED dispatch");
-        let (model, data) = v.as_vector().expect("EMBED should produce Value::Vector");
-        assert_eq!(model.as_str(), "urn:eigenius:embed:dummy:v1");
-        assert_eq!(data.len(), 8);
-    }
-
-    #[test]
-    fn embed_is_deterministic_via_dummy() {
-        use crate::program::embedder::registry_with_dummy;
-        let reg = registry_with_dummy();
-        let layer = empty_layer();
-        let runtime = FiberRuntime {
-            embedders: Some(&reg),
-            ..FiberRuntime::default()
-        };
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "EMBED".into(),
-            args: vec![
-                Expression::Literal(Literal::String("identical input".into())),
-                Expression::Literal(Literal::String("urn:eigenius:embed:dummy:v1".into())),
-            ],
-        };
-        let a = eval_expression(&expr, &binding, &layer, runtime).expect("first EMBED");
-        let b = eval_expression(&expr, &binding, &layer, runtime).expect("second EMBED");
-        // The dummy embedder is deterministic, so two calls with the
-        // same input produce the same vector. Real embedders are
-        // NonDeterministic (D43 §5.2) and would not satisfy this.
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn embed_rejects_unknown_model_iri() {
-        use crate::program::embedder::registry_with_dummy;
-        let reg = registry_with_dummy();
-        let layer = empty_layer();
-        let runtime = FiberRuntime {
-            embedders: Some(&reg),
-            ..FiberRuntime::default()
-        };
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "EMBED".into(),
-            args: vec![
-                Expression::Literal(Literal::String("hello".into())),
-                Expression::Literal(Literal::String("urn:eigenius:embed:missing".into())),
-            ],
-        };
-        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
-        assert!(
-            format!("{err}").contains("not registered"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn embed_without_registry_errors_clearly() {
-        let layer = empty_layer();
-        let runtime = FiberRuntime::default(); // embedders: None
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "EMBED".into(),
-            args: vec![
-                Expression::Literal(Literal::String("hello".into())),
-                Expression::Literal(Literal::String("urn:eigenius:embed:dummy:v1".into())),
-            ],
-        };
-        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
-        assert!(
-            format!("{err}").contains("EmbedderRegistry"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn embed_wrong_arity_errors() {
-        use crate::program::embedder::registry_with_dummy;
-        let reg = registry_with_dummy();
-        let layer = empty_layer();
-        let runtime = FiberRuntime {
-            embedders: Some(&reg),
-            ..FiberRuntime::default()
-        };
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "EMBED".into(),
-            args: vec![Expression::Literal(Literal::String("hello".into()))],
-        };
-        let err = eval_expression(&expr, &binding, &layer, runtime).unwrap_err();
-        assert!(
-            format!("{err}").contains("EMBED expects 2 arguments"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn embed_caches_repeat_calls() {
-        // An Embedder that counts how many times `embed()` runs.
-        // Two identical EMBED calls through a runtime with a cache
-        // should hit dispatch exactly once.
-        use crate::program::embedder::{Embedder, EmbedderError, EmbedderRegistry};
-        use crate::program::embedding_cache::EmbeddingCache;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        struct CountingEmbedder {
-            iri: Iri,
-            dim: u32,
-            calls: AtomicUsize,
-        }
-        impl Embedder for CountingEmbedder {
-            fn model_iri(&self) -> &Iri {
-                &self.iri
-            }
-            fn dim(&self) -> u32 {
-                self.dim
-            }
-            fn embed(&self, _text: &str) -> Result<Vec<f32>, EmbedderError> {
-                self.calls.fetch_add(1, Ordering::SeqCst);
-                Ok(vec![1.0, 2.0, 3.0, 4.0])
-            }
-        }
-
-        let counter = Arc::new(CountingEmbedder {
-            iri: Iri::parse("urn:eigenius:embed:counting").unwrap(),
-            dim: 4,
-            calls: AtomicUsize::new(0),
-        });
-        let mut reg = EmbedderRegistry::new();
-        reg.register(Arc::clone(&counter) as Arc<dyn Embedder>);
-        let cache = EmbeddingCache::new(16);
-        let layer = empty_layer();
-        let runtime = FiberRuntime {
-            embedders: Some(&reg),
-            embedding_cache: Some(&cache),
-            ..FiberRuntime::default()
-        };
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-        let expr = Expression::FunctionCall {
-            name: "EMBED".into(),
-            args: vec![
-                Expression::Literal(Literal::String("same input".into())),
-                Expression::Literal(Literal::String("urn:eigenius:embed:counting".into())),
-            ],
-        };
-        let a = eval_expression(&expr, &binding, &layer, runtime).expect("first EMBED");
-        let b = eval_expression(&expr, &binding, &layer, runtime).expect("second EMBED");
-        assert_eq!(a, b, "cached EMBED must return the same vector");
-        assert_eq!(
-            counter.calls.load(Ordering::SeqCst),
-            1,
-            "second EMBED should be served from cache without dispatching"
-        );
-    }
-
-    #[test]
-    fn embed_cache_keys_by_text_and_model() {
-        // Two distinct inputs (or two distinct models) must each
-        // pay one dispatch — verifies the cache key is the union
-        // of (content, model_iri), not either alone.
-        use crate::program::embedder::{Embedder, EmbedderError, EmbedderRegistry};
-        use crate::program::embedding_cache::EmbeddingCache;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        struct CountingEmbedder {
-            iri: Iri,
-            dim: u32,
-            calls: Arc<AtomicUsize>,
-        }
-        impl Embedder for CountingEmbedder {
-            fn model_iri(&self) -> &Iri {
-                &self.iri
-            }
-            fn dim(&self) -> u32 {
-                self.dim
-            }
-            fn embed(&self, _text: &str) -> Result<Vec<f32>, EmbedderError> {
-                self.calls.fetch_add(1, Ordering::SeqCst);
-                Ok(vec![0.0; self.dim as usize])
-            }
-        }
-
-        let shared_counter = Arc::new(AtomicUsize::new(0));
-        let mut reg = EmbedderRegistry::new();
-        reg.register(Arc::new(CountingEmbedder {
-            iri: Iri::parse("urn:eigenius:embed:m1").unwrap(),
-            dim: 2,
-            calls: Arc::clone(&shared_counter),
-        }));
-        reg.register(Arc::new(CountingEmbedder {
-            iri: Iri::parse("urn:eigenius:embed:m2").unwrap(),
-            dim: 2,
-            calls: Arc::clone(&shared_counter),
-        }));
-        let cache = EmbeddingCache::new(16);
-        let layer = empty_layer();
-        let runtime = FiberRuntime {
-            embedders: Some(&reg),
-            embedding_cache: Some(&cache),
-            ..FiberRuntime::default()
-        };
-        let binding: BTreeMap<String, Value> = BTreeMap::new();
-
-        // Three distinct cache keys → three dispatches.
-        let call = |text: &str, model: &str| {
-            let expr = Expression::FunctionCall {
-                name: "EMBED".into(),
-                args: vec![
-                    Expression::Literal(Literal::String(text.into())),
-                    Expression::Literal(Literal::String(model.into())),
-                ],
-            };
-            eval_expression(&expr, &binding, &layer, runtime).expect("EMBED")
-        };
-        call("alpha", "urn:eigenius:embed:m1");
-        call("alpha", "urn:eigenius:embed:m2"); // different model
-        call("beta", "urn:eigenius:embed:m1"); // different content
-        assert_eq!(shared_counter.load(Ordering::SeqCst), 3);
-        // Repeats hit the cache.
-        call("alpha", "urn:eigenius:embed:m1");
-        call("beta", "urn:eigenius:embed:m1");
-        assert_eq!(shared_counter.load(Ordering::SeqCst), 3);
-    }
-
-    #[test]
-    fn embed_parses_through_full_pipeline() {
-        // The parser routes `EMBED(...)` to a `FunctionCall` with
-        // name "EMBED". Verify the AST shape end-to-end so a future
-        // refactor doesn't silently drop the routing.
-        use crate::query::lexer::tokenize;
-        use crate::query::parser;
-        let tokens = tokenize(
-            r#"
-            MATCH ?x {}
-            RETURN [] { v: EMBED("hi", "urn:eigenius:embed:dummy:v1") }
-            "#,
-        )
-        .expect("tokenize");
-        let program = parser::parse(tokens).expect("parse");
-        let ret_expr = &program.query.result[0].expression;
-        match ret_expr {
-            Expression::FunctionCall { name, args } => {
-                assert_eq!(name, "EMBED");
-                assert_eq!(args.len(), 2);
-            }
-            other => panic!("expected FunctionCall, got {other:?}"),
-        }
     }
 }

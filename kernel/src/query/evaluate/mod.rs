@@ -33,8 +33,8 @@
 mod expression;
 mod fiber;
 mod pattern;
-mod retrieval;
 mod return_shape;
+mod similarity;
 
 use crate::layer::Layer;
 use crate::ontology::resource::Resource;
@@ -64,14 +64,19 @@ pub fn evaluate(
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
 ) -> Result<(Vec<Resource>, Vec<Resource>), QueryError> {
-    // D43 §4.6 retrieval context: built once per query, threaded
-    // through every FiberRuntime so per-row `TEXT_MATCH` /
-    // `TEXT_SCORE` calls can resolve their property-bound `?var`
-    // back to a source subject + active TextIndex and memoise the
-    // index probe across rows.
-    let retrieval = retrieval::RetrievalContext::new(program, layer);
+    // D43 §6 — similarity-operator pre-pass: probe every active
+    // similarity index referenced by a `~` operator in the program,
+    // fuse the per-source rankings into a subject → score map, and
+    // hand the resulting context to per-row evaluation. The I/O
+    // cost is paid once per query, not once per row.
+    let similarity_ctx = similarity::SimilarityContext::new(
+        program,
+        layer,
+        runtime.embedders,
+        runtime.vector_segment_cache,
+    )?;
     let runtime = FiberRuntime {
-        retrieval: Some(&retrieval),
+        similarity: Some(&similarity_ctx),
         ..runtime
     };
 

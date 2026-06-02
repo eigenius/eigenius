@@ -117,81 +117,40 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // Check aggregate/GROUP BY consistency
     check_aggregate_consistency(program, &mut errors);
 
-    // D43 §4.6 — TEXT_MATCH / TEXT_SCORE typing rules.
-    //
-    // Builds a property-variable index from MATCH patterns (which
-    // `?var` was bound by which property of which class), then walks
-    // every expression that can contain a retrieval call (WHERE,
-    // RETURN, GROUP BY, ORDER BY, and rule bodies' WHERE) and rejects:
-    //   1. arg-count mismatches,
-    //   2. arg[0] not a Variable bound through a PropertyPattern,
-    //   3. property without an active TextIndex at this head,
-    //   4. property whose declared data_type is not `core:string`,
-    //   5. arg[1] not a literal string.
+    // D43 §4.3 / §4.4 — similarity operator typing rules. Walks
+    // every expression position that can contain a `~` (WHERE,
+    // RETURN, GROUP BY, ORDER BY, and rule bodies' WHERE) and
+    // checks the LHS is property-bound, the property has an active
+    // similarity index of the kind required by `via:` (or any kind
+    // by default), and the hint set is internally consistent.
     let prop_var_index = build_property_variable_index(program, layer);
     let text_indexes = resolve_active_text_indexes(layer);
-    for cond in &program.query.body.conditions {
-        check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
-    }
-    for item in &program.query.result {
-        check_text_retrieval(
-            &item.expression,
-            &prop_var_index,
-            &text_indexes,
-            layer,
-            &mut errors,
-        );
-    }
-    for expr in &program.query.group_by {
-        check_text_retrieval(expr, &prop_var_index, &text_indexes, layer, &mut errors);
-    }
-    for item in &program.query.order_by {
-        check_text_retrieval(
-            &item.expression,
-            &prop_var_index,
-            &text_indexes,
-            layer,
-            &mut errors,
-        );
-    }
-    for def in &program.definitions {
-        for cond in &def.body.conditions {
-            check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
-        }
-    }
-
-    // D43 §4.5 — VECTOR_NEAR / VECTOR_SIM typing rules. Same shape
-    // as the text-retrieval pass above, applied to all expression
-    // positions that can contain a retrieval call. v1 enforces the
-    // structural rules (arity, property-bound `?var`, active Index,
-    // K literal-integer); the cross-call model agreement and EMBED
-    // model inference (§4.4) are the M5 follow-up.
     let vector_indexes = resolve_active_vector_indexes(layer);
+    let check_in_expr = |expr: &Expression, errs: &mut Vec<QueryError>| {
+        check_similarity(
+            expr,
+            &prop_var_index,
+            &text_indexes,
+            &vector_indexes,
+            layer,
+            errs,
+        );
+    };
     for cond in &program.query.body.conditions {
-        check_vector_retrieval(cond, &prop_var_index, &vector_indexes, &mut errors);
+        check_in_expr(cond, &mut errors);
     }
     for item in &program.query.result {
-        check_vector_retrieval(
-            &item.expression,
-            &prop_var_index,
-            &vector_indexes,
-            &mut errors,
-        );
+        check_in_expr(&item.expression, &mut errors);
     }
     for expr in &program.query.group_by {
-        check_vector_retrieval(expr, &prop_var_index, &vector_indexes, &mut errors);
+        check_in_expr(expr, &mut errors);
     }
     for item in &program.query.order_by {
-        check_vector_retrieval(
-            &item.expression,
-            &prop_var_index,
-            &vector_indexes,
-            &mut errors,
-        );
+        check_in_expr(&item.expression, &mut errors);
     }
     for def in &program.definitions {
         for cond in &def.body.conditions {
-            check_vector_retrieval(cond, &prop_var_index, &vector_indexes, &mut errors);
+            check_in_expr(cond, &mut errors);
         }
     }
 
@@ -333,6 +292,20 @@ fn check_expression_variables(
             for (_, value) in pairs {
                 check_expression_variables(value, bound, errors);
             }
+        }
+        Expression::Similarity {
+            property, query, ..
+        } => {
+            if !bound.contains(&property.name) {
+                errors.push(QueryError::type_check(
+                    "unbound_variable",
+                    format!(
+                        "similarity LHS '?{}' is not bound in any MATCH pattern",
+                        property.name
+                    ),
+                ));
+            }
+            check_expression_variables(query, bound, errors);
         }
         Expression::Literal(_) => {}
     }
@@ -1030,26 +1003,19 @@ fn query_class_name_display(name: &Name) -> String {
     }
 }
 
-// ─── D43 §4.6 — TEXT_MATCH / TEXT_SCORE typing rules ─────────────
+// ─── D43 §4 — similarity-operator typing ─────────────────────────────
 
-/// Schema view a retrieval call needs: which property a `?var` was
-/// bound to, plus an optional class hint from the MATCH pattern.
-///
-/// Recorded per property-bound variable. The pattern
-/// `MATCH Document(?d) { description: ?desc }` produces an entry
-/// `?desc → PropertyBinding { property_iri: …:description,
-/// class_iri: Some(…:Document) }`. Variables bound directly as
-/// subjects (`?d` above) are not recorded — retrieval calls take a
-/// property-value variable, not a subject variable.
+/// Schema view a similarity call needs: which property a variable
+/// was bound to. Reused from the deleted D43 §4.6 retrieval-primitive
+/// pass — same shape, smaller surface.
 struct PropertyBinding {
-    /// IRI of the Property whose value bound the variable.
     property_iri: Iri,
 }
 
 /// Walk every MATCH pattern in the program and build the
-/// variable → PropertyBinding map. Used by TEXT_MATCH / TEXT_SCORE
-/// typing to recover the source property of a retrieval call's
-/// first argument.
+/// `variable → property_iri` map. Property variables bound by
+/// rule-derived patterns are included too — the rule's body is
+/// typed against the same schema view.
 fn build_property_variable_index(
     program: &Program,
     layer: &Layer,
@@ -1076,7 +1042,7 @@ fn build_property_variable_index(
 }
 
 /// Resolve a property `Name` to its IRI. `FullIri` returns the IRI
-/// directly; `ShortName` scans the layer chain for a Property
+/// directly; `ShortName` scans the chain-merged view for a Property
 /// Resource whose `short_name` matches.
 fn resolve_property_name(name: &Name, layer: &Layer) -> Option<Iri> {
     match name {
@@ -1100,142 +1066,11 @@ fn resolve_property_name(name: &Name, layer: &Layer) -> Option<Iri> {
     }
 }
 
-/// Recursively walk `expr`, checking every TEXT_MATCH / TEXT_SCORE
-/// call against the schema view per D43 §4.6.
-fn check_text_retrieval(
-    expr: &Expression,
-    prop_var_index: &BTreeMap<String, PropertyBinding>,
-    text_indexes: &[ActiveTextIndex],
-    layer: &Layer,
-    errors: &mut Vec<QueryError>,
-) {
-    match expr {
-        Expression::FunctionCall { name, args } => {
-            if name == "TEXT_MATCH" || name == "TEXT_SCORE" {
-                check_text_retrieval_call(name, args, prop_var_index, text_indexes, layer, errors);
-            }
-            for a in args {
-                check_text_retrieval(a, prop_var_index, text_indexes, layer, errors);
-            }
-        }
-        Expression::Binary { left, right, .. } => {
-            check_text_retrieval(left, prop_var_index, text_indexes, layer, errors);
-            check_text_retrieval(right, prop_var_index, text_indexes, layer, errors);
-        }
-        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
-            check_text_retrieval(operand, prop_var_index, text_indexes, layer, errors);
-        }
-        Expression::Aggregate { arg, .. } => {
-            check_text_retrieval(arg, prop_var_index, text_indexes, layer, errors);
-        }
-        Expression::Array(items) => {
-            for it in items {
-                check_text_retrieval(it, prop_var_index, text_indexes, layer, errors);
-            }
-        }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                check_text_retrieval(v, prop_var_index, text_indexes, layer, errors);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Enforce the per-call structural and schema-view requirements.
-fn check_text_retrieval_call(
-    fn_name: &str,
-    args: &[Expression],
-    prop_var_index: &BTreeMap<String, PropertyBinding>,
-    text_indexes: &[ActiveTextIndex],
-    layer: &Layer,
-    errors: &mut Vec<QueryError>,
-) {
-    if args.len() != 2 {
-        errors.push(QueryError::type_check(
-            "text_retrieval_arity",
-            format!(
-                "{fn_name} requires exactly 2 arguments: a property-bound variable and a query string \
-                 (got {} arguments)",
-                args.len()
-            ),
-        ));
-        return;
-    }
-
-    // Argument 0 — must be a `?var` bound by a property pattern.
-    let var = match &args[0] {
-        Expression::Variable(v) => v,
-        _ => {
-            errors.push(QueryError::type_check(
-                "text_retrieval_arg0_not_variable",
-                format!(
-                    "{fn_name} first argument must be a property-bound variable (e.g. `?desc` \
-                     from `MATCH Class(?c) {{ description: ?desc }}`)"
-                ),
-            ));
-            return;
-        }
-    };
-    let binding = match prop_var_index.get(&var.name) {
-        Some(b) => b,
-        None => {
-            errors.push(QueryError::type_check(
-                "text_retrieval_arg0_not_property_bound",
-                format!(
-                    "{fn_name} first argument `?{}` is not bound by a property pattern — \
-                     it must appear as the object of a `{{ prop: ?var }}` binding in MATCH",
-                    var.name
-                ),
-            ));
-            return;
-        }
-    };
-
-    // Argument 1 — must be a literal string.
-    if !matches!(&args[1], Expression::Literal(Literal::String(_))) {
-        errors.push(QueryError::type_check(
-            "text_retrieval_arg1_not_string_literal",
-            format!("{fn_name} second argument must be a literal query string"),
-        ));
-        // No early return — still validate the property side.
-    }
-
-    // Schema view: property must be string-typed and must have an
-    // active TextIndex at this head.
-    let property_iri = &binding.property_iri;
-    if !property_is_string_typed(property_iri, layer) {
-        errors.push(QueryError::type_check(
-            "text_retrieval_property_not_string",
-            format!(
-                "{fn_name} requires a String-typed property; `{}` has a non-string data_type",
-                property_iri.as_str()
-            ),
-        ));
-    }
-    if !text_indexes
-        .iter()
-        .any(|ti| ti.target_property == *property_iri)
-    {
-        errors.push(QueryError::type_check(
-            "text_retrieval_no_active_index",
-            format!(
-                "property `{}` has no active TextIndex at this head — declare a \
-                 `core:TextIndex` Resource targeting it before using {fn_name}",
-                property_iri.as_str()
-            ),
-        ));
-    }
-}
-
 /// Does the Property Resource at `property_iri` declare
-/// `data_type: core:string`?
-///
-/// Properties without a `data_type` slot are treated as
-/// non-string-typed — defensive: the typechecker should never
-/// silently pass a retrieval call against a property whose data
-/// shape is unspecified.
+/// `data_type: core:string`? Defensive: properties without a
+/// `data_type` slot are treated as non-string-typed.
 fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
+    use crate::ontology::resource::Value;
     let resource = match layer.resolve(property_iri) {
         Some(r) => r,
         None => return false,
@@ -1249,6 +1084,7 @@ fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
         Err(_) => return false,
     };
     match resource.get(&data_type_prop) {
+        Some(Value::ResourceRef(iri)) => *iri == string_iri,
         Some(v) => v
             .as_iri_str()
             .and_then(|s| Iri::parse(s).ok())
@@ -1258,170 +1094,265 @@ fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
     }
 }
 
-// ─── D43 §4.5 — VECTOR_NEAR / VECTOR_SIM typing rules ────────────
-
-/// Recursively walk `expr`, checking every `VECTOR_NEAR` /
-/// `VECTOR_SIM` call against the schema view per D43 §4.5.
-fn check_vector_retrieval(
+/// Recursively walk `expr`, checking every `Similarity` node against
+/// the schema view per D43 §4.3 / §4.4.
+fn check_similarity(
     expr: &Expression,
     prop_var_index: &BTreeMap<String, PropertyBinding>,
+    text_indexes: &[ActiveTextIndex],
     vector_indexes: &[ActiveVectorIndex],
+    layer: &Layer,
     errors: &mut Vec<QueryError>,
 ) {
     match expr {
-        Expression::FunctionCall { name, args } => {
-            if name == "VECTOR_NEAR" || name == "VECTOR_SIM" {
-                check_vector_retrieval_call(name, args, prop_var_index, vector_indexes, errors);
-            }
-            for a in args {
-                check_vector_retrieval(a, prop_var_index, vector_indexes, errors);
-            }
+        Expression::Similarity {
+            property,
+            query,
+            hints,
+        } => {
+            check_similarity_node(
+                property,
+                query,
+                hints,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+            check_similarity(
+                query,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
         }
         Expression::Binary { left, right, .. } => {
-            check_vector_retrieval(left, prop_var_index, vector_indexes, errors);
-            check_vector_retrieval(right, prop_var_index, vector_indexes, errors);
+            check_similarity(
+                left,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+            check_similarity(
+                right,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
         }
         Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
-            check_vector_retrieval(operand, prop_var_index, vector_indexes, errors);
+            check_similarity(
+                operand,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+        }
+        Expression::FunctionCall { args, .. } => {
+            for a in args {
+                check_similarity(
+                    a,
+                    prop_var_index,
+                    text_indexes,
+                    vector_indexes,
+                    layer,
+                    errors,
+                );
+            }
         }
         Expression::Aggregate { arg, .. } => {
-            check_vector_retrieval(arg, prop_var_index, vector_indexes, errors);
+            check_similarity(
+                arg,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
         }
-        Expression::Array(items) => {
-            for it in items {
-                check_vector_retrieval(it, prop_var_index, vector_indexes, errors);
+        Expression::Array(es) => {
+            for e in es {
+                check_similarity(
+                    e,
+                    prop_var_index,
+                    text_indexes,
+                    vector_indexes,
+                    layer,
+                    errors,
+                );
             }
         }
         Expression::Object(pairs) => {
             for (_, v) in pairs {
-                check_vector_retrieval(v, prop_var_index, vector_indexes, errors);
+                check_similarity(
+                    v,
+                    prop_var_index,
+                    text_indexes,
+                    vector_indexes,
+                    layer,
+                    errors,
+                );
             }
         }
-        _ => {}
+        Expression::Literal(_)
+        | Expression::Variable(_)
+        | Expression::NotExists(_)
+        | Expression::DotPath { .. } => {}
     }
 }
 
-/// v1 positional signatures:
-///   VECTOR_NEAR(?vec, query_vec, K)    — Boolean
-///   VECTOR_SIM(?vec, query_vec)        — Float
-///
-/// `?vec` must be a property-bound variable whose source property
-/// has an active VectorIndex at this head. `query_vec` is allowed
-/// to be any expression — full Vector-type tracking (so model and
-/// dim of `query_vec` match the active VectorIndex's declared
-/// values) is the M5 follow-up. `K` must be a positive integer
-/// literal — the planner needs it statically (D43 §4.5).
-fn check_vector_retrieval_call(
-    fn_name: &str,
-    args: &[Expression],
+#[allow(clippy::too_many_arguments)]
+fn check_similarity_node(
+    property: &Variable,
+    query: &Expression,
+    hints: &HintSet,
     prop_var_index: &BTreeMap<String, PropertyBinding>,
+    text_indexes: &[ActiveTextIndex],
     vector_indexes: &[ActiveVectorIndex],
+    layer: &Layer,
     errors: &mut Vec<QueryError>,
 ) {
-    // VECTOR_NEAR accepts 3 args (?vec, query_vec, K) or 4
-    // (?vec, query_vec, K, ef). VECTOR_SIM always takes 2.
-    let arity_ok = match fn_name {
-        "VECTOR_NEAR" => args.len() == 3 || args.len() == 4,
-        _ => args.len() == 2,
-    };
-    if !arity_ok {
-        errors.push(QueryError::type_check(
-            "vector_retrieval_arity",
-            format!(
-                "{fn_name} {arity_desc} (got {} arguments)",
-                args.len(),
-                arity_desc = if fn_name == "VECTOR_NEAR" {
-                    "requires 3 or 4 arguments (?vec, query_vec, K, ef?)"
-                } else {
-                    "requires exactly 2 arguments"
-                }
-            ),
-        ));
-        return;
-    }
-
-    // Argument 0 — must be a `?var` bound by a property pattern.
-    let var = match &args[0] {
-        Expression::Variable(v) => v,
-        _ => {
-            errors.push(QueryError::type_check(
-                "vector_retrieval_arg0_not_variable",
-                format!(
-                    "{fn_name} first argument must be a property-bound variable (e.g. `?vec` \
-                     from `MATCH Class(?c) {{ embedding: ?vec }}`)"
-                ),
-            ));
-            return;
-        }
-    };
-    let binding = match prop_var_index.get(&var.name) {
+    // §4.3.1 — LHS must be bound by a property pattern.
+    let binding = match prop_var_index.get(&property.name) {
         Some(b) => b,
         None => {
             errors.push(QueryError::type_check(
-                "vector_retrieval_arg0_not_property_bound",
+                "similarity_lhs_not_property_bound",
                 format!(
-                    "{fn_name} first argument `?{}` is not bound by a property pattern — \
-                     it must appear as the object of a `{{ prop: ?var }}` binding in MATCH",
-                    var.name
+                    "left-hand side of `~` must be a property-bound variable (got '?{}')",
+                    property.name
                 ),
             ));
             return;
         }
     };
-
     let property_iri = &binding.property_iri;
-    if !vector_indexes
-        .iter()
-        .any(|vi| vi.target_property == *property_iri)
-    {
+    let property_display = property_iri.as_str();
+
+    // §4.3.3 — property must be string-typed.
+    if !property_is_string_typed(property_iri, layer) {
         errors.push(QueryError::type_check(
-            "vector_retrieval_no_active_index",
+            "similarity_property_not_string",
             format!(
-                "property `{}` has no active VectorIndex at this head — declare a \
-                 `core:VectorIndex` Resource targeting it before using {fn_name}",
-                property_iri.as_str()
+                "property '{property_display}' is not String-typed; similarity requires String-shaped"
             ),
         ));
     }
 
-    // VECTOR_NEAR's K must be a positive integer literal.
-    if fn_name == "VECTOR_NEAR" {
-        match &args[2] {
-            Expression::Literal(Literal::Integer(k)) if *k > 0 => {}
-            Expression::Literal(Literal::Integer(_)) => {
-                errors.push(QueryError::type_check(
-                    "vector_retrieval_k_not_positive",
-                    "VECTOR_NEAR `k` argument must be a positive integer literal".to_string(),
-                ));
-            }
-            _ => {
-                errors.push(QueryError::type_check(
-                    "vector_retrieval_k_not_literal",
-                    "VECTOR_NEAR `k` argument must be a positive integer literal".to_string(),
-                ));
-            }
-        }
-        // Optional `ef` — same positive-integer-literal constraint
-        // (D43 §4.5: "K and (if present) E are positive integer
-        // literals — the planner requires statically-known values
-        // to push them into index probes").
-        if args.len() == 4 {
-            match &args[3] {
-                Expression::Literal(Literal::Integer(ef)) if *ef > 0 => {}
-                Expression::Literal(Literal::Integer(_)) => {
+    let text_active: Option<&ActiveTextIndex> = text_indexes
+        .iter()
+        .find(|i| i.target_property == *property_iri);
+    let vector_active: Option<&ActiveVectorIndex> = vector_indexes
+        .iter()
+        .find(|i| i.target_property == *property_iri);
+
+    // §4.3.2 — at least one active similarity index.
+    if text_active.is_none() && vector_active.is_none() {
+        errors.push(QueryError::type_check(
+            "similarity_no_active_index",
+            format!("property '{property_display}' has no active similarity index at this head"),
+        ));
+    }
+
+    // §4.3.4 — RHS must be a string literal in v1.
+    if !matches!(query, Expression::Literal(Literal::String(_))) {
+        errors.push(QueryError::type_check(
+            "similarity_rhs_not_string_literal",
+            "right-hand side of `~` must be a string literal".to_string(),
+        ));
+    }
+
+    // §4.4 — hint validation.
+    if let Some(via) = hints.via {
+        match via {
+            Via::Text => {
+                if text_active.is_none() {
                     errors.push(QueryError::type_check(
-                        "vector_retrieval_ef_not_positive",
-                        "VECTOR_NEAR `ef` argument must be a positive integer literal".to_string(),
+                        "similarity_hint_via_text_no_text_index",
+                        format!(
+                            "via: text requires an active TextIndex on property '{property_display}' (none declared at head)"
+                        ),
                     ));
                 }
-                _ => {
+                if hints.model.is_some() {
                     errors.push(QueryError::type_check(
-                        "vector_retrieval_ef_not_literal",
-                        "VECTOR_NEAR `ef` argument must be a positive integer literal".to_string(),
+                        "similarity_hint_model_with_via_text",
+                        "`model:` is incompatible with `via: text` — the model only applies to the vector path".to_string(),
+                    ));
+                }
+            }
+            Via::Vector => {
+                if vector_active.is_none() {
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_via_vector_no_vector_index",
+                        format!(
+                            "via: vector requires an active VectorIndex on property '{property_display}' (none declared at head)"
+                        ),
+                    ));
+                }
+            }
+            Via::Hybrid => {
+                if text_active.is_none() || vector_active.is_none() {
+                    let have = match (text_active.is_some(), vector_active.is_some()) {
+                        (true, false) => "only TextIndex",
+                        (false, true) => "only VectorIndex",
+                        _ => "neither",
+                    };
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_via_hybrid_missing_index",
+                        format!(
+                            "via: hybrid requires both a TextIndex and a VectorIndex on property '{property_display}' ({have} declared)"
+                        ),
                     ));
                 }
             }
         }
+    }
+    if let Some(model) = &hints.model {
+        // model: implicitly forces vector path; in v1 (at most one
+        // VectorIndex per property) we just check it matches.
+        match vector_active {
+            None => {
+                errors.push(QueryError::type_check(
+                    "similarity_hint_model_no_vector_index",
+                    format!(
+                        "`model:` requires an active VectorIndex on property '{property_display}' (none declared at head)"
+                    ),
+                ));
+            }
+            Some(vi) => {
+                if vi.model.as_str() != model {
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_model_mismatch",
+                        format!(
+                            "model '{model}' does not match the active VectorIndex on property '{property_display}' (which declares '{}')",
+                            vi.model.as_str()
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(0) = hints.k {
+        errors.push(QueryError::type_check(
+            "similarity_hint_k_not_positive",
+            "`k:` must be a positive integer".to_string(),
+        ));
+    }
+    if let Some(0) = hints.limit {
+        errors.push(QueryError::type_check(
+            "similarity_hint_limit_not_positive",
+            "`limit:` must be a positive integer".to_string(),
+        ));
     }
 }
 
@@ -1878,391 +1809,334 @@ mod tests {
         );
     }
 
-    // ─── D43 §4.6 — TEXT_MATCH / TEXT_SCORE typing tests ────────────────
+    // ─── D43 §4 — similarity operator typing tests ──────────────────────
 
-    /// Build a layer with three test-only Properties and a
-    /// `core:TextIndex` Resource targeting one of them, stacked on the
-    /// bootstrap chain so `core:string` / `core:Property` /
-    /// `core:TextIndex` resolve. Used by the §4.6 typing tests below.
-    ///
-    /// Short names are deliberately namespaced (`test_body`,
-    /// `test_count`, `test_title`) to avoid collision with the core
-    /// ontology's own `description` Property — the merged-view
-    /// short-name resolver returns the IRI-sort-order-first match,
-    /// so a colliding short name would silently route to the wrong
-    /// Property.
-    fn build_text_index_layer() -> Arc<Layer> {
-        use crate::ontology::iri::Iri;
-        use crate::ontology::resource::{Resource, Value};
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
-        let parent = Arc::clone(ctx.head());
-        let mut b = LayerBuilder::new("text-index-fixture", Some(parent));
+    use crate::ontology::resource::{Resource, Value};
 
-        // Property: urn:eigenius:test:body, data_type: string,
-        // short_name "test_body" — TextIndex targets this one.
-        let mut body_prop = Resource::new(Iri::parse("urn:eigenius:test:body").unwrap());
-        body_prop.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
-        );
-        body_prop.set(
-            Iri::parse(wk::SHORT_NAME).unwrap(),
-            Value::String("test_body".into()),
-        );
-        body_prop.set(
-            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
-        );
-        b.add_resource(body_prop).unwrap();
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).expect("valid iri")
+    }
 
-        // Integer-typed Property for the negative test
-        // (TEXT_MATCH on non-string property).
-        let mut count_prop = Resource::new(Iri::parse("urn:eigenius:test:count").unwrap());
-        count_prop.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+    fn make_resource(id: &str, class_iri: &str, props: Vec<(&str, Value)>) -> Resource {
+        let mut r = Resource::new(iri(id));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
         );
-        count_prop.set(
-            Iri::parse(wk::SHORT_NAME).unwrap(),
-            Value::String("test_count".into()),
-        );
-        count_prop.set(
-            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::INTEGER).unwrap()),
-        );
-        b.add_resource(count_prop).unwrap();
+        for (k, v) in props {
+            r.set(iri(k), v);
+        }
+        r
+    }
 
-        // Property without a TextIndex — for the no-active-index test.
-        let mut bare_prop = Resource::new(Iri::parse("urn:eigenius:test:title").unwrap());
-        bare_prop.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
-        );
-        bare_prop.set(
-            Iri::parse(wk::SHORT_NAME).unwrap(),
-            Value::String("test_title".into()),
-        );
-        bare_prop.set(
-            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
-        );
-        b.add_resource(bare_prop).unwrap();
+    /// Build a layer carrying a test Property with `data_type: string`
+    /// and (optionally) a TextIndex and/or VectorIndex targeting it.
+    /// Bootstrap loads the core ontology so `is_a` resolves correctly.
+    fn build_indexed_layer(text: bool, vector: bool) -> Arc<Layer> {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap should succeed");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let mut b = LayerBuilder::new("test-indexes", Some(head));
 
-        // The TextIndex targeting `test:body`.
-        let mut ti = Resource::new(Iri::parse("urn:eigenius:test:ti_body").unwrap());
-        ti.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(wk::TEXT_INDEX_CLASS).unwrap(),
-            )]),
-        );
-        ti.set(
-            Iri::parse(wk::TARGET_PROPERTY).unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:test:body").unwrap()),
-        );
-        ti.set(
-            Iri::parse(wk::TEXT_ANALYZER).unwrap(),
-            Value::String("en-stem-v1".into()),
-        );
-        b.add_resource(ti).unwrap();
+        // A test Property named "test_body" with data_type=string.
+        b.add_resource(make_resource(
+            "urn:ex:test_body",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_body".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:string")),
+                ),
+            ],
+        ))
+        .unwrap();
+        // Also an int-typed property to test the string-typed check.
+        b.add_resource(make_resource(
+            "urn:ex:test_count",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_count".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:integer")),
+                ),
+            ],
+        ))
+        .unwrap();
 
-        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+        if text {
+            b.add_resource(make_resource(
+                "urn:ex:ti_body",
+                "urn:eigenius:core:TextIndex",
+                vec![
+                    (
+                        "urn:eigenius:core:target_property",
+                        Value::ResourceRef(iri("urn:ex:test_body")),
+                    ),
+                    (
+                        "urn:eigenius:core:text_analyzer",
+                        Value::String("en-stem-v1".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+        }
+        if vector {
+            b.add_resource(make_resource(
+                "urn:ex:vi_body",
+                "urn:eigenius:core:VectorIndex",
+                vec![
+                    (
+                        "urn:eigenius:core:target_property",
+                        Value::ResourceRef(iri("urn:ex:test_body")),
+                    ),
+                    (
+                        "urn:eigenius:core:vec_model",
+                        Value::ResourceRef(iri("urn:eigenius:embed:m1")),
+                    ),
+                    ("urn:eigenius:core:vec_dim", Value::Integer(8)),
+                    (
+                        "urn:eigenius:core:vec_distance",
+                        Value::ResourceRef(iri("urn:eigenius:core:distances:cosine")),
+                    ),
+                ],
+            ))
+            .unwrap();
+        }
+        Arc::new(b.build(storage))
     }
 
     #[test]
-    fn text_match_well_formed_passes() {
-        let layer = build_text_index_layer();
+    fn similarity_well_formed_text_passes() {
+        let layer = build_indexed_layer(true, false);
         let errors = check(
             &layer,
             r#"
             MATCH ?d { test_body: ?desc }
-            WHERE TEXT_MATCH(?desc, "wal truncation")
-            RETURN [] { d: ?d }
+            WHERE ?desc ~ "WAL truncation"
             "#,
         );
-        let related: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule.starts_with("text_retrieval"))
-            .collect();
-        assert!(
-            related.is_empty(),
-            "expected no text_retrieval_* errors, got {related:?}"
-        );
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
-    fn text_score_well_formed_passes() {
-        let layer = build_text_index_layer();
+    fn similarity_well_formed_vector_passes() {
+        let layer = build_indexed_layer(false, true);
         let errors = check(
             &layer,
             r#"
             MATCH ?d { test_body: ?desc }
-            RETURN [] { d: ?d, s: TEXT_SCORE(?desc, "wal") }
+            WHERE ?desc ~ "kernel chain consolidation"
             "#,
         );
-        let related: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule.starts_with("text_retrieval"))
-            .collect();
-        assert!(
-            related.is_empty(),
-            "expected no text_retrieval_* errors, got {related:?}"
-        );
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     }
 
     #[test]
-    fn text_match_with_full_iri_property_passes() {
-        let layer = build_text_index_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?d { "urn:eigenius:test:body": ?desc }
-            WHERE TEXT_MATCH(?desc, "wal")
-            RETURN [] { d: ?d }
-            "#,
-        );
-        let related: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule.starts_with("text_retrieval"))
-            .collect();
-        assert!(
-            related.is_empty(),
-            "FullIri MATCH binding should typecheck; got {related:?}"
-        );
-    }
-
-    #[test]
-    fn text_match_wrong_arity_rejected() {
-        let layer = build_text_index_layer();
+    fn similarity_on_unbound_variable_rejected() {
+        let layer = build_indexed_layer(true, false);
         let errors = check(
             &layer,
             r#"
             MATCH ?d { test_body: ?desc }
-            WHERE TEXT_MATCH(?desc)
-            RETURN [] { d: ?d }
-            "#,
-        );
-        assert!(
-            errors.iter().any(|e| e.rule == "text_retrieval_arity"),
-            "expected text_retrieval_arity; got {errors:?}"
-        );
-    }
-
-    #[test]
-    fn text_match_on_unbound_variable_rejected() {
-        let layer = build_text_index_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?d {}
-            WHERE TEXT_MATCH(?d, "wal")
-            RETURN [] { d: ?d }
+            WHERE ?other ~ "anything"
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "text_retrieval_arg0_not_property_bound"),
-            "expected text_retrieval_arg0_not_property_bound; got {errors:?}"
+                .any(|e| e.rule == "similarity_lhs_not_property_bound"
+                    || e.rule == "unbound_variable"),
+            "expected lhs-not-property-bound, got: {errors:?}"
         );
     }
 
     #[test]
-    fn text_match_on_non_variable_rejected() {
-        let layer = build_text_index_layer();
+    fn similarity_on_non_string_property_rejected() {
+        let layer = build_indexed_layer(true, false);
+        // Need an active similarity index on test_count too to isolate
+        // the string-typed check from the no-index check.
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap should succeed");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let mut b = LayerBuilder::new("count-text", Some(head));
+        b.add_resource(make_resource(
+            "urn:ex:test_count",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_count".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:integer")),
+                ),
+            ],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:ti_count",
+            "urn:eigenius:core:TextIndex",
+            vec![
+                (
+                    "urn:eigenius:core:target_property",
+                    Value::ResourceRef(iri("urn:ex:test_count")),
+                ),
+                (
+                    "urn:eigenius:core:text_analyzer",
+                    Value::String("en-stem-v1".into()),
+                ),
+            ],
+        ))
+        .unwrap();
+        let layer_count = Arc::new(b.build(storage));
+        let errors = check(
+            &layer_count,
+            r#"
+            MATCH ?d { test_count: ?c }
+            WHERE ?c ~ "anything"
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_property_not_string"),
+            "expected similarity_property_not_string, got: {errors:?}"
+        );
+        let _ = layer; // unused but keeps the basic fixture in scope
+    }
+
+    #[test]
+    fn similarity_without_active_index_rejected() {
+        let layer = build_indexed_layer(false, false);
         let errors = check(
             &layer,
             r#"
             MATCH ?d { test_body: ?desc }
-            WHERE TEXT_MATCH("not a var", "wal")
-            RETURN [] { d: ?d }
+            WHERE ?desc ~ "query"
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "text_retrieval_arg0_not_variable"),
-            "expected text_retrieval_arg0_not_variable; got {errors:?}"
+                .any(|e| e.rule == "similarity_no_active_index"),
+            "expected similarity_no_active_index, got: {errors:?}"
         );
     }
 
     #[test]
-    fn text_match_non_string_query_rejected() {
-        let layer = build_text_index_layer();
+    fn similarity_rhs_must_be_string_literal() {
+        let layer = build_indexed_layer(true, false);
         let errors = check(
             &layer,
             r#"
             MATCH ?d { test_body: ?desc }
-            WHERE TEXT_MATCH(?desc, 42)
-            RETURN [] { d: ?d }
+            WHERE ?desc ~ 42
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "text_retrieval_arg1_not_string_literal"),
-            "expected text_retrieval_arg1_not_string_literal; got {errors:?}"
+                .any(|e| e.rule == "similarity_rhs_not_string_literal"),
+            "expected similarity_rhs_not_string_literal, got: {errors:?}"
         );
     }
 
     #[test]
-    fn text_match_on_non_string_property_rejected() {
-        let layer = build_text_index_layer();
+    fn similarity_via_text_without_text_index_rejected() {
+        let layer = build_indexed_layer(false, true);
         let errors = check(
             &layer,
             r#"
-            MATCH ?d { test_count: ?n }
-            WHERE TEXT_MATCH(?n, "wal")
-            RETURN [] { d: ?d }
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: text }
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "text_retrieval_property_not_string"),
-            "expected text_retrieval_property_not_string; got {errors:?}"
+                .any(|e| e.rule == "similarity_hint_via_text_no_text_index"),
+            "expected via-text-no-text-index, got: {errors:?}"
         );
     }
 
     #[test]
-    fn text_match_without_active_index_rejected() {
-        let layer = build_text_index_layer();
-        // `test_title` is a string Property but has no TextIndex
-        // targeting it.
+    fn similarity_via_vector_without_vector_index_rejected() {
+        let layer = build_indexed_layer(true, false);
         let errors = check(
             &layer,
             r#"
-            MATCH ?d { test_title: ?t }
-            WHERE TEXT_MATCH(?t, "wal")
-            RETURN [] { d: ?d }
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: vector }
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "text_retrieval_no_active_index"),
-            "expected text_retrieval_no_active_index; got {errors:?}"
-        );
-    }
-
-    // ─── D43 §4.5 — VECTOR_NEAR `ef` typing (M6.5) ──────────────
-
-    fn build_vector_index_layer() -> Arc<Layer> {
-        use crate::ontology::iri::Iri;
-        use crate::ontology::resource::{Resource, Value};
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
-        let parent = Arc::clone(ctx.head());
-        let mut b = LayerBuilder::new("vector-index-fixture", Some(parent));
-
-        let body_iri = "urn:eigenius:test:body";
-        let model = "urn:eigenius:embed:dummy:v1";
-
-        let mut body_prop = Resource::new(Iri::parse(body_iri).unwrap());
-        body_prop.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
-        );
-        body_prop.set(
-            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
-        );
-        b.add_resource(body_prop).unwrap();
-
-        let mut vi = Resource::new(Iri::parse("urn:eigenius:test:vi").unwrap());
-        vi.set(
-            Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(wk::VECTOR_INDEX_CLASS).unwrap(),
-            )]),
-        );
-        vi.set(
-            Iri::parse(wk::TARGET_PROPERTY).unwrap(),
-            Value::ResourceRef(Iri::parse(body_iri).unwrap()),
-        );
-        vi.set(
-            Iri::parse(wk::VEC_MODEL).unwrap(),
-            Value::ResourceRef(Iri::parse(model).unwrap()),
-        );
-        vi.set(Iri::parse(wk::VEC_DIM).unwrap(), Value::Integer(8));
-        b.add_resource(vi).unwrap();
-
-        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
-    }
-
-    #[test]
-    fn vector_near_with_ef_passes() {
-        let layer = build_vector_index_layer();
-        let errors = check(
-            &layer,
-            r#"
-            MATCH ?d { "urn:eigenius:test:body": ?vec }
-            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, 32)
-            RETURN [] { d: ?d }
-            "#,
-        );
-        let related: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule.starts_with("vector_retrieval"))
-            .collect();
-        assert!(
-            related.is_empty(),
-            "VECTOR_NEAR with ef should typecheck; got {related:?}"
+                .any(|e| e.rule == "similarity_hint_via_vector_no_vector_index"),
+            "expected via-vector-no-vector-index, got: {errors:?}"
         );
     }
 
     #[test]
-    fn vector_near_ef_must_be_positive() {
-        let layer = build_vector_index_layer();
+    fn similarity_via_hybrid_with_one_index_rejected() {
+        let layer = build_indexed_layer(true, false);
         let errors = check(
             &layer,
             r#"
-            MATCH ?d { "urn:eigenius:test:body": ?vec }
-            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, 0)
-            RETURN [] { d: ?d }
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: hybrid }
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "vector_retrieval_ef_not_positive"),
-            "expected vector_retrieval_ef_not_positive; got {errors:?}"
+                .any(|e| e.rule == "similarity_hint_via_hybrid_missing_index"),
+            "expected hybrid-missing-index, got: {errors:?}"
         );
     }
 
     #[test]
-    fn vector_near_ef_must_be_integer_literal() {
-        let layer = build_vector_index_layer();
+    fn similarity_model_with_via_text_rejected() {
+        let layer = build_indexed_layer(true, true);
         let errors = check(
             &layer,
             r#"
-            MATCH ?d { "urn:eigenius:test:body": ?vec }
-            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, "not a number")
-            RETURN [] { d: ?d }
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: text, model: "urn:eigenius:embed:m1" }
             "#,
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.rule == "vector_retrieval_ef_not_literal"),
-            "expected vector_retrieval_ef_not_literal; got {errors:?}"
+                .any(|e| e.rule == "similarity_hint_model_with_via_text"),
+            "expected model-with-via-text, got: {errors:?}"
         );
     }
 
     #[test]
-    fn vector_near_with_5_args_rejected() {
-        // 5 args is out of range. v1 supports only 3 or 4.
-        let layer = build_vector_index_layer();
+    fn similarity_model_mismatch_rejected() {
+        let layer = build_indexed_layer(false, true);
         let errors = check(
             &layer,
             r#"
-            MATCH ?d { "urn:eigenius:test:body": ?vec }
-            WHERE VECTOR_NEAR(?vec, EMBED("hello"), 5, 32, 100)
-            RETURN [] { d: ?d }
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { model: "urn:eigenius:embed:other" }
             "#,
         );
         assert!(
-            errors.iter().any(|e| e.rule == "vector_retrieval_arity"),
-            "expected vector_retrieval_arity for 5-arg VECTOR_NEAR; got {errors:?}"
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_hint_model_mismatch"),
+            "expected model-mismatch, got: {errors:?}"
         );
     }
 }

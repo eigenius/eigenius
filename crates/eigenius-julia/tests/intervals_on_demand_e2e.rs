@@ -750,7 +750,7 @@ RETURN [] {{
         components: None,
         overlay: None,
         ctx: Some(&exec_ctx),
-        retrieval: None,
+        similarity: None,
         embedders: None,
         embedding_cache: None,
         vector_segment_cache: None,

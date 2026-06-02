@@ -57,16 +57,18 @@ pub struct FiberRuntime<'a> {
     /// parts.
     pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
-    /// D43 §4.6 — retrieval context threaded into expression eval so
-    /// `TEXT_MATCH` / `TEXT_SCORE` can map a property-bound `?var`
-    /// back to the row's source subject and dispatch the
-    /// `run_text_search` probe against the layer's `TextIndex`. `None`
-    /// for callers that don't use retrieval primitives.
-    pub retrieval: Option<&'a super::retrieval::RetrievalContext<'a>>,
+    /// D43 §6 — similarity-operator pre-pass results, built once
+    /// per query and threaded through every per-row evaluation so
+    /// `Expression::Similarity` is an O(1) score-map lookup. `None`
+    /// for callers outside [`evaluate`] (e.g. AST-only test
+    /// harnesses); the operator then fails at evaluation with a
+    /// clear "similarity context unavailable" diagnostic.
+    pub similarity: Option<&'a super::similarity::SimilarityContext>,
     /// D43 §3.5 / §5.2 — registry of Embedder Components dispatched
-    /// by the `EMBED` primitive (M4). `None` when EMBED is not in
-    /// use; calls to EMBED then fail at evaluation with a clear
-    /// "no embedders registered" diagnostic.
+    /// by the `~` similarity operator when the active index is a
+    /// VectorIndex. `None` when no vector path is in use; the operator
+    /// then fails at evaluation with a clear "no embedders registered"
+    /// diagnostic.
     pub embedders: Option<&'a crate::program::embedder::EmbedderRegistry>,
     /// D43 §5.3 — content-addressed embedding cache shared between
     /// query-side `EMBED` calls (M4) and the indexing-side sweep

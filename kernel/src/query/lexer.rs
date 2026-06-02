@@ -73,22 +73,6 @@ pub enum TokenKind {
     MinFn,
     MaxFn,
 
-    // D43 §3 — text retrieval functions
-    /// `TEXT_MATCH(?prop, "query")` → Boolean filter (D43 §3.3).
-    TextMatchFn,
-    /// `TEXT_SCORE(?prop, "query")` → Float BM25 score (D43 §3.3).
-    TextScoreFn,
-
-    // D43 §3 — vector retrieval functions
-    /// `VECTOR_NEAR(?vec, query_vec, k: K, ef: E?)` → Boolean top-k constraint (D43 §3.4).
-    VectorNearFn,
-    /// `VECTOR_SIM(?vec, query_vec)` → Float similarity (D43 §3.4).
-    VectorSimFn,
-
-    // D43 §3.5 — inline Embedder Component invocation
-    /// `EMBED("text", model: M)` → Vector(model, dim) value (D43 §3.5).
-    EmbedFn,
-
     // D43 §3.7 — ranked-retrieval clause
     /// `TOP K BY ?score [DESC|ASC]` (D43 §3.7). Mutually exclusive
     /// with `ORDER BY` / `LIMIT` in the same query.
@@ -120,6 +104,7 @@ pub enum TokenKind {
     Percent,    // %
     DoubleStar, // **
     Pipe2,      // ||
+    Tilde,      // ~  (D43 §3.3 similarity operator)
 
     // Structural
     LParen,
@@ -430,6 +415,15 @@ impl<'a> Lexer<'a> {
             });
         }
 
+        // D43 §3.3 similarity operator `~`
+        if ch == b'~' {
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Tilde,
+                pos,
+            });
+        }
+
         // String literal
         if ch == b'"' {
             return self.lex_string(pos);
@@ -646,11 +640,6 @@ impl<'a> Lexer<'a> {
             "MIN" => TokenKind::MinFn,
             "MAX" => TokenKind::MaxFn,
             // D43 §3 — retrieval primitives.
-            "TEXT_MATCH" => TokenKind::TextMatchFn,
-            "TEXT_SCORE" => TokenKind::TextScoreFn,
-            "VECTOR_NEAR" => TokenKind::VectorNearFn,
-            "VECTOR_SIM" => TokenKind::VectorSimFn,
-            "EMBED" => TokenKind::EmbedFn,
             "TOP" => TokenKind::Top,
             // Booleans
             "true" => TokenKind::BooleanLit(true),
@@ -875,29 +864,34 @@ mod tests {
     /// M1's load-bearing invariant: the keywords are reserved (cannot
     /// be used as user identifiers) so the surface stays stable through
     /// to M3 / M5 / M7 implementation.
+    /// Only `TOP` remains as a reserved retrieval-clause keyword
+    /// after the D43 surface reset; the six function-shaped
+    /// primitives (TEXT_MATCH / TEXT_SCORE / VECTOR_NEAR / VECTOR_SIM
+    /// / EMBED / RRF) collapsed into the `~` operator added in
+    /// Phase 5.
     #[test]
     fn d43_retrieval_keywords_tokenize() {
-        // RRF removed from the user surface per the D43 reset; the
-        // remaining retrieval keywords (TEXT_MATCH / TEXT_SCORE /
-        // VECTOR_NEAR / VECTOR_SIM / EMBED) and TOP K will collapse
-        // into the `~` operator in subsequent reset phases.
+        assert_eq!(kinds("TOP"), vec![TokenKind::Top]);
+    }
+
+    /// D43 §3.3 — the similarity operator `~` tokenises to
+    /// `TokenKind::Tilde`. Standalone and adjacent to identifiers /
+    /// variables / strings, the lexer doesn't merge it into anything.
+    #[test]
+    fn d43_tilde_tokenizes() {
+        assert_eq!(kinds("~"), vec![TokenKind::Tilde]);
         assert_eq!(
-            kinds("TEXT_MATCH TEXT_SCORE VECTOR_NEAR VECTOR_SIM EMBED TOP"),
+            kinds("?desc ~ \"q\""),
             vec![
-                TokenKind::TextMatchFn,
-                TokenKind::TextScoreFn,
-                TokenKind::VectorNearFn,
-                TokenKind::VectorSimFn,
-                TokenKind::EmbedFn,
-                TokenKind::Top,
+                TokenKind::Variable("desc".into()),
+                TokenKind::Tilde,
+                TokenKind::StringLit("q".into()),
             ]
         );
     }
 
     /// EigenQL keywords are uppercase-only per D2 §2.2. Lowercase
-    /// versions of the D43 retrieval keywords stay as identifiers, so
-    /// existing user code that happened to use these names continues
-    /// to parse as identifiers without surprise.
+    /// `top` stays an identifier — keyword status is case-sensitive.
     #[test]
     fn d43_retrieval_keywords_are_case_sensitive() {
         assert_eq!(
@@ -908,22 +902,6 @@ mod tests {
                 TokenKind::Identifier("embed".into()),
                 TokenKind::Identifier("rrf".into()),
                 TokenKind::Identifier("top".into()),
-            ]
-        );
-    }
-
-    /// Mixed-case variants are also identifiers — only the exact
-    /// uppercase form is the keyword.
-    #[test]
-    fn d43_retrieval_mixed_case_stays_identifier() {
-        assert_eq!(
-            kinds("Text_Match Vector_Near Embed Rrf Top"),
-            vec![
-                TokenKind::Identifier("Text_Match".into()),
-                TokenKind::Identifier("Vector_Near".into()),
-                TokenKind::Identifier("Embed".into()),
-                TokenKind::Identifier("Rrf".into()),
-                TokenKind::Identifier("Top".into()),
             ]
         );
     }

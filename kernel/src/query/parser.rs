@@ -545,6 +545,14 @@ impl Parser {
 
     fn parse_relational_expr(&mut self) -> Result<Expression, QueryError> {
         let mut left = self.parse_additive_expr()?;
+        // D43 §3.3 — similarity operator `~`. Sits at relational
+        // precedence so `?a ~ "x" AND ?b ~ "y"` and
+        // `?a ~ "x" OR ?b ~ "y"` parse as expected; `~` itself does
+        // not chain on the left, so we handle it before the loop and
+        // do not re-enter it.
+        if matches!(self.peek(), TokenKind::Tilde) {
+            return self.parse_similarity_continuation(left);
+        }
         loop {
             let op = match self.peek() {
                 TokenKind::Lt => BinaryOp::Lt,
@@ -596,6 +604,125 @@ impl Parser {
             };
         }
         Ok(left)
+    }
+
+    /// D43 §3.3 — finish parsing the similarity operator after the
+    /// LHS has been consumed at relational precedence and `~` has
+    /// been peeked. Syntactic rules enforced here:
+    ///
+    /// 1. The LHS must be a bare property-bound variable
+    ///    (`Expression::Variable`). Anything else fails with a parse
+    ///    error pointing at the `~`. Semantic checks (was the var
+    ///    bound, is the property similarity-indexed) run at
+    ///    typecheck.
+    /// 2. The RHS is parsed at additive precedence so hint
+    ///    delimiters (`{`, `}`) and boolean combinators (`AND`,
+    ///    `OR`) terminate the operand cleanly without requiring
+    ///    parentheses.
+    /// 3. An optional trailing `{ hint, hint }` block is parsed
+    ///    via [`parse_hint_set`]; the trailing braces are
+    ///    distinguishable from a code-block context because the
+    ///    relational-expr parser doesn't expect `{` here.
+    fn parse_similarity_continuation(
+        &mut self,
+        left: Expression,
+    ) -> Result<Expression, QueryError> {
+        let tilde_pos = self.position();
+        let property = match left {
+            Expression::Variable(v) => v,
+            _ => {
+                return Err(QueryError::parser(
+                    tilde_pos,
+                    "similarity LHS must be a property-bound variable (`?var ~ \"query\"`)"
+                        .to_string(),
+                ));
+            }
+        };
+        self.advance(); // consume `~`
+        let query = self.parse_additive_expr()?;
+        let hints = if matches!(self.peek(), TokenKind::LBrace) {
+            self.parse_hint_set()?
+        } else {
+            HintSet::default()
+        };
+        Ok(Expression::Similarity {
+            property,
+            query: Box::new(query),
+            hints,
+        })
+    }
+
+    /// D43 §3.4 — parse `{ key: value, key: value, ... }` immediately
+    /// after a similarity RHS. Allowed keys: `via`, `model`, `k`,
+    /// `limit`. Repeated keys overwrite (the typechecker will catch
+    /// the more interesting semantic conflicts; the parser only
+    /// enforces shape).
+    ///
+    /// On `via`: the parser accepts the bare identifiers `text`,
+    /// `vector`, `hybrid`; anything else is a parse error. On
+    /// `model`: a string literal (an IRI in user space). On `k` /
+    /// `limit`: a positive integer literal — zero or negative is
+    /// rejected at typecheck so the parser stays a shape-only pass.
+    fn parse_hint_set(&mut self) -> Result<HintSet, QueryError> {
+        self.expect(&TokenKind::LBrace)?;
+        let mut hints = HintSet::default();
+        loop {
+            if matches!(self.peek(), TokenKind::RBrace) {
+                self.advance();
+                return Ok(hints);
+            }
+            let key_pos = self.position();
+            let key = self.parse_identifier()?;
+            self.expect(&TokenKind::Colon)?;
+            match key.as_str() {
+                "via" => {
+                    let v_pos = self.position();
+                    let v = self.parse_identifier()?;
+                    hints.via = Some(match v.as_str() {
+                        "text" => Via::Text,
+                        "vector" => Via::Vector,
+                        "hybrid" => Via::Hybrid,
+                        other => {
+                            return Err(QueryError::parser(
+                                v_pos,
+                                format!(
+                                    "hint `via` must be `text`, `vector`, or `hybrid` (got `{other}`)"
+                                ),
+                            ));
+                        }
+                    });
+                }
+                "model" => {
+                    hints.model = Some(self.parse_string_lit()?);
+                }
+                "k" => {
+                    hints.k = Some(self.parse_usize()?);
+                }
+                "limit" => {
+                    hints.limit = Some(self.parse_usize()?);
+                }
+                other => {
+                    return Err(QueryError::parser(
+                        key_pos,
+                        format!(
+                            "unknown similarity hint `{other}` (allowed: via, model, k, limit)"
+                        ),
+                    ));
+                }
+            }
+            match self.peek() {
+                TokenKind::Comma => {
+                    self.advance();
+                }
+                TokenKind::RBrace => {}
+                _ => {
+                    return Err(QueryError::parser(
+                        self.position(),
+                        "expected `,` or `}` in similarity hint set".to_string(),
+                    ));
+                }
+            }
+        }
     }
 
     fn parse_additive_expr(&mut self) -> Result<Expression, QueryError> {
@@ -738,12 +865,7 @@ impl Parser {
             | TokenKind::RegexFn
             | TokenKind::LengthFn
             | TokenKind::ContainsFn
-            | TokenKind::ConcatFn
-            | TokenKind::TextMatchFn
-            | TokenKind::TextScoreFn
-            | TokenKind::EmbedFn
-            | TokenKind::VectorNearFn
-            | TokenKind::VectorSimFn => {
+            | TokenKind::ConcatFn => {
                 let name = match self.advance().kind {
                     TokenKind::DateFn => "DATE",
                     TokenKind::TimestampFn => "TIMESTAMP",
@@ -751,11 +873,6 @@ impl Parser {
                     TokenKind::LengthFn => "LENGTH",
                     TokenKind::ContainsFn => "CONTAINS",
                     TokenKind::ConcatFn => "CONCAT",
-                    TokenKind::TextMatchFn => "TEXT_MATCH",
-                    TokenKind::TextScoreFn => "TEXT_SCORE",
-                    TokenKind::EmbedFn => "EMBED",
-                    TokenKind::VectorNearFn => "VECTOR_NEAR",
-                    TokenKind::VectorSimFn => "VECTOR_SIM",
                     _ => unreachable!(),
                 }
                 .to_string();
@@ -1623,5 +1740,141 @@ mod tests {
             LIMIT 5"#,
         )
         .unwrap();
+    }
+
+    // ─── D43 §3.3 — similarity operator parser tests ───────────────────
+
+    fn first_where(prog: &Program) -> &Expression {
+        prog.query
+            .body
+            .conditions
+            .first()
+            .expect("expected at least one WHERE condition")
+    }
+
+    #[test]
+    fn similarity_op_parses_bare() {
+        let prog = parse_str(
+            r#"
+            MATCH ?d { description: ?desc }
+            WHERE ?desc ~ "concurrent commit recovery"
+            "#,
+        )
+        .unwrap();
+        match first_where(&prog) {
+            Expression::Similarity {
+                property,
+                query,
+                hints,
+            } => {
+                assert_eq!(property.name, "desc");
+                assert!(matches!(
+                    **query,
+                    Expression::Literal(Literal::String(ref s)) if s == "concurrent commit recovery"
+                ));
+                assert_eq!(hints, &HintSet::default());
+            }
+            other => panic!("expected Similarity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn similarity_op_disjunction_composes_with_or() {
+        let prog = parse_str(
+            r#"
+            MATCH ?d { title: ?t, body: ?b }
+            WHERE ?t ~ "alpha" OR ?b ~ "beta"
+            "#,
+        )
+        .unwrap();
+        match first_where(&prog) {
+            Expression::Binary {
+                op: BinaryOp::Or,
+                left,
+                right,
+            } => {
+                assert!(matches!(**left, Expression::Similarity { .. }));
+                assert!(matches!(**right, Expression::Similarity { .. }));
+            }
+            other => panic!("expected OR, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn similarity_hint_via_text() {
+        let prog = parse_str(
+            r#"
+            MATCH ?s { name: ?n }
+            WHERE ?n ~ "Foo::bar" { via: text }
+            "#,
+        )
+        .unwrap();
+        let Expression::Similarity { hints, .. } = first_where(&prog) else {
+            panic!("expected Similarity");
+        };
+        assert_eq!(hints.via, Some(Via::Text));
+        assert!(hints.model.is_none());
+        assert!(hints.k.is_none());
+        assert!(hints.limit.is_none());
+    }
+
+    #[test]
+    fn similarity_hint_full_set() {
+        let prog = parse_str(
+            r#"
+            MATCH ?d { description: ?desc }
+            WHERE ?desc ~ "kernel chain" { via: hybrid, model: "urn:eigenius:embed:m1", k: 30, limit: 50 }
+            "#,
+        )
+        .unwrap();
+        let Expression::Similarity { hints, .. } = first_where(&prog) else {
+            panic!("expected Similarity");
+        };
+        assert_eq!(hints.via, Some(Via::Hybrid));
+        assert_eq!(hints.model.as_deref(), Some("urn:eigenius:embed:m1"));
+        assert_eq!(hints.k, Some(30));
+        assert_eq!(hints.limit, Some(50));
+    }
+
+    #[test]
+    fn similarity_lhs_must_be_variable() {
+        let err = parse_str(
+            r#"
+            MATCH ?d { description: ?desc }
+            WHERE ("foo" || ?desc) ~ "query"
+            "#,
+        )
+        .expect_err("non-variable LHS should fail at parse");
+        let msg = format!("{err}");
+        assert!(msg.contains("similarity LHS"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn similarity_unknown_hint_key_rejected() {
+        let err = parse_str(
+            r#"
+            MATCH ?d { description: ?desc }
+            WHERE ?desc ~ "query" { weights: 1 }
+            "#,
+        )
+        .expect_err("unknown hint key should fail at parse");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("unknown similarity hint"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[test]
+    fn similarity_bad_via_value_rejected() {
+        let err = parse_str(
+            r#"
+            MATCH ?d { description: ?desc }
+            WHERE ?desc ~ "query" { via: graph }
+            "#,
+        )
+        .expect_err("bad via value should fail at parse");
+        let msg = format!("{err}");
+        assert!(msg.contains("via"), "unexpected message: {msg}");
     }
 }
