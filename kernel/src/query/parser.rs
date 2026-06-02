@@ -167,22 +167,6 @@ impl Parser {
             None
         };
 
-        // D43 §3.7 — TOP K BY is mutually exclusive with ORDER BY
-        // and LIMIT. Parse it here so it slots into the same
-        // grammar position as ORDER BY / LIMIT; the mutual-exclusion
-        // check fires at parse time per the spec.
-        let top_k_by = if self.at(&TokenKind::Top) {
-            if !order_by.is_empty() || limit.is_some() {
-                return Err(QueryError::parser(
-                    self.position(),
-                    "TOP K BY is mutually exclusive with ORDER BY and LIMIT".to_string(),
-                ));
-            }
-            Some(self.parse_top_k_by()?)
-        } else {
-            None
-        };
-
         let offset = if self.at(&TokenKind::Offset) {
             self.advance();
             Some(self.parse_usize()?)
@@ -197,18 +181,6 @@ impl Parser {
             false
         };
 
-        // Catch the reverse mutual-exclusion case (ORDER BY / LIMIT
-        // appearing *after* TOP K BY would already have been caught
-        // by the ordinary grammar position; this guard is here for
-        // when a user typed both and the ORDER BY path got skipped
-        // because TOP K BY isn't None).
-        if top_k_by.is_some() && (!order_by.is_empty() || limit.is_some()) {
-            return Err(QueryError::parser(
-                self.position(),
-                "TOP K BY is mutually exclusive with ORDER BY and LIMIT".to_string(),
-            ));
-        }
-
         Ok(Query {
             body,
             group_by,
@@ -218,40 +190,6 @@ impl Parser {
             limit,
             offset,
             distinct,
-            top_k_by,
-        })
-    }
-
-    // --- TOP K BY (D43 §3.7) ---
-
-    fn parse_top_k_by(&mut self) -> Result<TopKBy, QueryError> {
-        self.expect(&TokenKind::Top)?;
-        let k = self.parse_usize()?;
-        if k == 0 {
-            return Err(QueryError::parser(
-                self.position(),
-                "TOP K BY: K must be a positive integer".to_string(),
-            ));
-        }
-        self.expect(&TokenKind::By)?;
-        let expression = self.parse_expression()?;
-        let direction = match self.peek() {
-            TokenKind::Asc => {
-                self.advance();
-                SortDirection::Asc
-            }
-            TokenKind::Desc => {
-                self.advance();
-                SortDirection::Desc
-            }
-            // D43 §3.7: default direction is DESC (retrieval scores
-            // are "higher = better" by convention).
-            _ => SortDirection::Desc,
-        };
-        Ok(TopKBy {
-            k,
-            expression,
-            direction,
         })
     }
 
@@ -827,7 +765,6 @@ impl Parser {
                 Ok(Expression::FunctionCall { name, args })
             }
 
-
             TokenKind::CountFn
             | TokenKind::SumFn
             | TokenKind::AvgFn
@@ -1321,228 +1258,6 @@ mod tests {
         assert_eq!(prog.query.group_by.len(), 1);
         assert_eq!(prog.query.result.len(), 2);
     }
-
-    /// D43 §3.7 / M7.1 — `TOP K BY ?score DESC` is the ranked-
-    /// retrieval clause. Parses into `Query.top_k_by` with the
-    /// integer K, the score expression, and DESC as default.
-    #[test]
-    fn top_k_by_parses_with_explicit_direction() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            TOP 20 BY ?n DESC
-            "#,
-        )
-        .unwrap();
-        let top = prog.query.top_k_by.as_ref().expect("TOP K BY parsed");
-        assert_eq!(top.k, 20);
-        assert_eq!(top.direction, SortDirection::Desc);
-        assert!(prog.query.order_by.is_empty());
-        assert!(prog.query.limit.is_none());
-    }
-
-    /// `TOP K BY` defaults to DESC because retrieval scores are
-    /// "higher is better" by convention (D43 §3.7).
-    #[test]
-    fn top_k_by_defaults_to_desc() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            TOP 5 BY ?n
-            "#,
-        )
-        .unwrap();
-        let top = prog.query.top_k_by.as_ref().expect("TOP K BY parsed");
-        assert_eq!(top.k, 5);
-        assert_eq!(top.direction, SortDirection::Desc);
-    }
-
-    /// `TOP K BY ?score ASC` is the ascending variant (D43 §3.7 —
-    /// useful for "lowest distance" / "smallest" style probes).
-    #[test]
-    fn top_k_by_accepts_asc() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            TOP 3 BY ?n ASC
-            "#,
-        )
-        .unwrap();
-        let top = prog.query.top_k_by.as_ref().expect("TOP K BY parsed");
-        assert_eq!(top.direction, SortDirection::Asc);
-    }
-
-    /// D43 §3.7 — `TOP K BY` and `ORDER BY` cannot coexist; the
-    /// parser fails with a deliberate error.
-    #[test]
-    fn top_k_by_with_order_by_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            ORDER BY ?n DESC
-            TOP 10 BY ?n DESC
-            "#,
-        )
-        .expect_err("TOP K BY + ORDER BY must fail");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("TOP K BY") && msg.contains("ORDER BY"),
-            "expected mutual-exclusion message, got: {msg}"
-        );
-    }
-
-    /// D43 §3.7 — `TOP K BY` and `LIMIT` cannot coexist.
-    #[test]
-    fn top_k_by_with_limit_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            LIMIT 10
-            TOP 5 BY ?n DESC
-            "#,
-        )
-        .expect_err("TOP K BY + LIMIT must fail");
-        assert!(err.to_string().contains("TOP K BY"));
-    }
-
-    /// `TOP 0 BY ...` is a parse error — K must be positive
-    /// (D43 §3.7).
-    #[test]
-    fn top_k_by_zero_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            TOP 0 BY ?n DESC
-            "#,
-        )
-        .expect_err("TOP 0 must fail");
-        assert!(err.to_string().contains("positive"));
-    }
-
-    /// `TOP K BY` cooperates with `OFFSET` and `DISTINCT` —
-    /// pagination over a top-k retrieval is a standard pattern.
-    #[test]
-    fn top_k_by_composes_with_offset_and_distinct() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { name: ?n }
-            TOP 10 BY ?n DESC
-            OFFSET 5
-            DISTINCT
-            "#,
-        )
-        .unwrap();
-        let top = prog.query.top_k_by.as_ref().expect("TOP K BY parsed");
-        assert_eq!(top.k, 10);
-        assert_eq!(prog.query.offset, Some(5));
-        assert!(prog.query.distinct);
-    }
-
-    /// D43 §3.6 / M7.2 — `RRF(?a, ?b)` parses to `Expression::Rrf`
-    /// with the two source expressions and default `k = 60`.
-    #[test]
-    fn rrf_basic_parses_to_dedicated_node() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { fused: RRF(?n, ?n) }
-            "#,
-        )
-        .unwrap();
-        let return_expr = &prog.query.result[0].expression;
-        match return_expr {
-            Expression::Rrf { sources, k } => {
-                assert_eq!(sources.len(), 2);
-                assert_eq!(*k, 60);
-            }
-            other => panic!("expected Expression::Rrf, got {other:?}"),
-        }
-    }
-
-    /// D43 §3.6 — `RRF(?a, ?b, k: 30)` parses with the custom `k`.
-    #[test]
-    fn rrf_with_k_named_argument() {
-        let prog = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { fused: RRF(?n, ?n, k: 30) }
-            "#,
-        )
-        .unwrap();
-        let return_expr = &prog.query.result[0].expression;
-        match return_expr {
-            Expression::Rrf { k, .. } => assert_eq!(*k, 30),
-            other => panic!("expected Expression::Rrf, got {other:?}"),
-        }
-    }
-
-    /// `RRF()` with no sources is a parse error per §3.6 (at least
-    /// 2 arguments required).
-    #[test]
-    fn rrf_empty_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { fused: RRF() }
-            "#,
-        )
-        .expect_err("RRF() must fail");
-        assert!(
-            err.to_string().contains("RRF") && err.to_string().contains("two"),
-            "expected at-least-two error, got: {err}"
-        );
-    }
-
-    /// `RRF(?a)` with one source is a parse error — needs ≥ 2.
-    #[test]
-    fn rrf_single_source_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { fused: RRF(?n) }
-            "#,
-        )
-        .expect_err("RRF(?n) must fail");
-        assert!(err.to_string().contains("RRF"));
-    }
-
-    /// Positional sources must precede the `k:` named argument.
-    #[test]
-    fn rrf_positional_after_k_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { fused: RRF(?n, k: 30, ?n) }
-            "#,
-        )
-        .expect_err("positional after k: must fail");
-        assert!(
-            err.to_string().contains("must precede"),
-            "expected ordering error, got: {err}"
-        );
-    }
-
-    /// `k:` may be supplied at most once.
-    #[test]
-    fn rrf_duplicate_k_is_parse_error() {
-        let err = parse_str(
-            r#"
-            MATCH ?x { name: ?n }
-            RETURN [] { fused: RRF(?n, ?n, k: 30, k: 60) }
-            "#,
-        )
-        .expect_err("duplicate k: must fail");
-        assert!(err.to_string().contains("more than once"));
-    }
-
-    // BIND parser tests deleted with D45 surface withdrawal.
 
     #[test]
     fn order_by_limit_offset_distinct() {

@@ -106,9 +106,6 @@ pub fn infer_embed_models(program: &mut Program, layer: &Layer) -> Vec<QueryErro
     for item in &mut program.query.order_by {
         infer_in_expr(&mut item.expression, None, &ctx, &mut errors);
     }
-    if let Some(top_k) = program.query.top_k_by.as_mut() {
-        infer_in_expr(&mut top_k.expression, None, &ctx, &mut errors);
-    }
     // Rule bodies' WHERE.
     for def in &mut program.definitions {
         for cond in &mut def.body.conditions {

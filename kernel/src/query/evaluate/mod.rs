@@ -38,7 +38,7 @@ mod return_shape;
 
 use crate::layer::Layer;
 use crate::ontology::resource::Resource;
-use crate::query::ast::{OrderItem, Program};
+use crate::query::ast::Program;
 use crate::query::document::QueryFingerprint;
 use crate::query::error::QueryError;
 use std::collections::BTreeMap;
@@ -178,17 +178,9 @@ pub fn evaluate(
         results = deduplicate(results);
     }
 
-    // 6. ORDER BY  (mutually exclusive with TOP K BY at parse time).
+    // 6. ORDER BY
     if !program.query.order_by.is_empty() {
         sort_results(&mut results, &program.query.order_by, fp);
-    } else if let Some(top_k) = &program.query.top_k_by {
-        // TOP K BY: semantically equivalent to ORDER BY ?score
-        // [DESC|ASC] LIMIT K for the non-similarity case.
-        let order_item = OrderItem {
-            expression: top_k.expression.clone(),
-            direction: top_k.direction,
-        };
-        sort_results(&mut results, std::slice::from_ref(&order_item), fp);
     }
 
     // 7. OFFSET
@@ -200,12 +192,9 @@ pub fn evaluate(
         }
     }
 
-    // 8. LIMIT / TOP K BY truncation. The two are mutually exclusive
-    //    at parse time.
+    // 8. LIMIT
     if let Some(limit) = program.query.limit {
         results.truncate(limit);
-    } else if let Some(top_k) = &program.query.top_k_by {
-        results.truncate(top_k.k);
     }
 
     Ok((results, into_collector))

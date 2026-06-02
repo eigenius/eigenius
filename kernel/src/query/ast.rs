@@ -134,13 +134,6 @@ pub enum ParamValue {
 }
 
 /// A complete query with all clauses.
-///
-/// D43 §3.7 / M7.1: `top_k_by` is mutually exclusive with the
-/// `order_by` + `limit` pair at parse time. The planner uses the
-/// distinct shape to push `K` into per-segment retrieval probes
-/// (M7.4); for v1 the evaluator's semantics are equivalent to
-/// `ORDER BY ?score (DESC|ASC) LIMIT K` after evaluation. `OFFSET`
-/// and `DISTINCT` still apply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub body: MatchPart,
@@ -151,19 +144,6 @@ pub struct Query {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub distinct: bool,
-    pub top_k_by: Option<TopKBy>,
-}
-
-/// `TOP K BY <expression> [DESC|ASC]` — D43 §3.7 ranked retrieval
-/// clause. `k` is a positive integer literal (no expressions; the
-/// planner needs it statically to push into index probes).
-/// `direction` defaults to `DESC` because retrieval scores are
-/// "higher = better" by convention.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TopKBy {
-    pub k: usize,
-    pub expression: Expression,
-    pub direction: SortDirection,
 }
 
 /// A MATCH pattern.

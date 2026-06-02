@@ -65,9 +65,6 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     for item in &program.query.order_by {
         check_qualified_calls(&item.expression, &index, &mut errors);
     }
-    if let Some(top_k) = &program.query.top_k_by {
-        check_qualified_calls(&top_k.expression, &index, &mut errors);
-    }
 
     // D2 v2 §5.9 — Verdict-typed expression rules. Verdicts only
     // arise from two doorways (Decidable QueryClass call; FIBER ?v
@@ -84,9 +81,6 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     }
     for item in &program.query.order_by {
         check_verdict_in_expression(&item.expression, &verdict_vars, &index, &mut errors);
-    }
-    if let Some(top_k) = &program.query.top_k_by {
-        check_verdict_in_expression(&top_k.expression, &verdict_vars, &index, &mut errors);
     }
 
     // Collect all bound variables from MATCH / FIBER / BIND across
@@ -118,14 +112,6 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // Check variables used in ORDER BY are bound
     for item in &program.query.order_by {
         check_expression_variables(&item.expression, &bound_vars, &mut errors);
-    }
-
-    // D43 §3.7 — TOP K BY's score expression participates in the
-    // same variable-binding contract as ORDER BY. The mutual
-    // exclusion with ORDER BY is enforced at parse time, so only
-    // one of these two branches has any items in practice.
-    if let Some(top_k) = &program.query.top_k_by {
-        check_expression_variables(&top_k.expression, &bound_vars, &mut errors);
     }
 
     // Check aggregate/GROUP BY consistency
@@ -168,15 +154,6 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
             &mut errors,
         );
     }
-    if let Some(top_k) = &program.query.top_k_by {
-        check_text_retrieval(
-            &top_k.expression,
-            &prop_var_index,
-            &text_indexes,
-            layer,
-            &mut errors,
-        );
-    }
     for def in &program.definitions {
         for cond in &def.body.conditions {
             check_text_retrieval(cond, &prop_var_index, &text_indexes, layer, &mut errors);
@@ -207,14 +184,6 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     for item in &program.query.order_by {
         check_vector_retrieval(
             &item.expression,
-            &prop_var_index,
-            &vector_indexes,
-            &mut errors,
-        );
-    }
-    if let Some(top_k) = &program.query.top_k_by {
-        check_vector_retrieval(
-            &top_k.expression,
             &prop_var_index,
             &vector_indexes,
             &mut errors,
