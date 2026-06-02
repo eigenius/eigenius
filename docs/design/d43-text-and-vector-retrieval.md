@@ -18,9 +18,11 @@ EigenQL today is a typed Datalog over the chain — pattern-matching against typ
 
 The proposal: text and vector retrieval enter EigenQL as **built-in primitives**, not as institution queries dispatched through `FIBER`. The architectural argument (D35 §7.4) is summarised here; the rest of the document is the spec.
 
-**Why built-in, not institution.** An institution's signature is a set of sentences with `Holds | Fails | Undecidable` verdicts. Retrieval is a *real-valued ranking over Resources*, not a verdict on a sentence. It does not typecheck as an institution query. The operational arguments — planner-level pushdown, top-k as an index property the planner must know about, hybrid scoring requiring score arithmetic — reinforce the conceptual one. Treating retrieval as built-in lets the planner push selective predicates into index probes and reorder joins; treating it as an institution would force every hybrid structural-plus-retrieval query across `FIBER` boundaries and defeat pushdown entirely.
+**Why built-in, not institution.** An institution's signature is a set of sentences with `Holds | Fails | Undecidable` verdicts. Retrieval is a *real-valued ranking over Resources*, not a verdict on a sentence. It does not typecheck as an institution query. The operational arguments — planner-level pushdown, top-k as an index property the planner must know about, hybrid retrieval requiring per-source rank fusion — reinforce the conceptual one. Treating retrieval as built-in lets the planner push selective predicates into index probes and reorder joins; treating it as an institution would force every hybrid structural-plus-retrieval query across `FIBER` boundaries and defeat pushdown entirely.
 
-**Scope of this document.** D43 specifies (a) the storage architecture for text and vector indexes, (b) the EigenQL surface additions, (c) the type-system extensions needed for ranked retrieval, (d) the embedding lifecycle, (e) the planner integration, and (f) the layer-awareness rules for scores and shadowing. It does not specify the choice of embedding model, the production HNSW algorithm, or the cross-language tokenisation defaults — those are downstream tunables.
+**One operator, hidden mechanism.** D43's user surface is deliberately small: a single similarity operator `~` between a property-bound variable and a text query (§3.3), with an optional hint block (§3.4) for the cases where defaults need overriding. Implementation details — which index (text, vector, both fused) produced each result, what embedding model was used, what the raw scores were — are all platform-internal. Schema owners declare TextIndex / VectorIndex Resources on properties to control retrieval strategy at schema time; query authors write intent and trust the platform. §3.2 develops the rationale.
+
+**Scope of this document.** D43 specifies (a) the storage architecture for text and vector indexes, (b) the single-operator EigenQL surface, (c) the type-system additions needed to validate the operator and its hints, (d) the embedding lifecycle, (e) the planner integration (probe pushdown, internal RRF fusion, parallel hybrid scheduling), and (f) the layer-awareness rules for scores and shadowing. It does not specify the choice of embedding model, the production HNSW algorithm, or the cross-language tokenisation defaults — those are downstream tunables.
 
 **Out of scope.** Full-text search over Resource *bodies* in the sense of "search the entire chain as a document corpus" is not what this provides. The unit of indexing is the **property value** on a specific Resource — indexability is declared by a separate `core:TextIndex` or `core:VectorIndex` Resource targeting a specific Property (§3.1), not as a chain-wide setting. Properties without an active Index Resource are not retrievable; queries against them fall back to the existing structural surface.
 
@@ -305,7 +307,9 @@ The atomicity story matches D25's existing invariant: consolidation is one `Writ
 
 ## 3. EigenQL surface additions
 
-D43 introduces two kinds of surface additions: *ESL index declarations* (top-level Resource declarations of class `core:TextIndex` or `core:VectorIndex`, separate from the Property definitions they target), and *EigenQL primitives* that query those indexes. The grammar deltas land in D2's next revision; D43 specifies the semantics and types.
+D43 introduces two kinds of surface additions: *ESL index declarations* (top-level Resource declarations of class `core:TextIndex` or `core:VectorIndex`, separate from the Property definitions they target — §3.1), and a single *EigenQL similarity operator* `~` that queries those indexes (§3.3) with an optional hint block (§3.4). The grammar deltas land in D2's next revision; D43 specifies the semantics and types.
+
+The design stance here matters: D43 deliberately keeps the user surface small. Retrieval implementations (BM25, vector cosine, RRF fusion), embedding models, and per-source scores are all platform-internal — not user-visible primitives. §3.2 explains why and what falls out.
 
 ### 3.1 ESL index declarations
 
@@ -347,7 +351,7 @@ vector_index "description_oai_v3" {
 - `target_property` (required, IRI). The Property to embed and index. Must resolve to a Property in the visible chain at Load time; the Property's value type must be string-shaped (v1 only embeds text content).
 - `model` (required, IRI). The embedder Component IRI (§5.2). Must reference a registered Embedder Component; the planner verifies registration at parse time.
 - `dimensionality` (required, integer). Declared statically so EigenQL can type vector expressions at parse time without runtime probes. Must match the Embedder Component's declared output dimensionality (verified at parse).
-- `distance` (optional, enum: `cosine | l2 | dot`, default `cosine`). The distance metric used by VECTOR_NEAR / VECTOR_SIM at query time and by the segment encoder at index time.
+- `distance` (optional, enum: `cosine | l2 | dot`, default `cosine`). The distance metric the platform uses when computing similarity against this VectorIndex's segments at query time, and by the segment encoder at index time.
 - `strategy` (optional, enum: `flat | hnsw | auto`, default `auto`). Drives §2.4's per-segment selection.
 - `hnsw_params` (optional, struct). HNSW build-time parameters; sensible defaults (M=16, ef_construction=200) apply when omitted. Required to be consistent across all segments of a given VectorIndex — the §5.7 atomic-reindex policy is the mechanism for changing them.
 - `embedding_policy` (optional, enum: `eager_on_load | lazy_on_query | manual`, default `eager_on_load`). v1 ships `eager_on_load` only; the other values reserve grammar slots for future revisions (§5.9).
@@ -367,374 +371,301 @@ vector_index "description_oai_v3" {
 
 **Removing or revising an Index.** Standard layer/shadow semantics. Add a new layer that supersedes the Index Resource — redefining it with new parameters, or marking it removed. Changes that affect segment contents (model, dimensionality, distance, analyzer for text; any HNSW parameter for vector) trigger the §5.7 atomic-reindex policy so segments rebuild in lockstep with the Index Resource update. Changes that don't affect segment contents (e.g., `embedding_policy` swaps once additional policies ship) are non-reindex-triggering.
 
-### 3.2 Reserved keywords
+### 3.2 Design stance: one operator, hidden mechanism
 
-D43 introduces seven new uppercase keywords:
+D43 surfaces retrieval as a *single user-visible operator* — the similarity test `~` between a property-bound variable and a text query — and hides everything else (which index produced the result, what model embedded the query, how multiple sources fuse, what the raw scores are). Users express intent ("find resources whose property value is most related to this query"); the platform commits to the implementation. The ranking that flows out of the operator drives the standard `TOP K` / `LIMIT` clauses; users never see scores, ranks, fusion algorithms, or embedding vectors.
+
+This stance differs from a SQL-shaped surface (separate primitives for text and vector retrieval; explicit score projection; user-visible fusion functions like RRF; embedding vectors as first-class properties). The rationale:
+
+- **Implementation is not the user's concern.** Whether a query uses BM25, vector cosine, or both fused isn't something the agent or human author wants to think about. Surfacing the choice forces every query author to learn two retrieval paradigms and a fusion algorithm, and creates compositional friction (separate primitives don't compose as naturally as one operator does).
+- **The schema is the policy.** Which indexes a property has determines retrieval behavior. Schema owners pick text-only, vector-only, or hybrid by declaring exactly those indexes — at schema time, where the choice is reviewable, rather than at every call site.
+- **Defaults serve the 95% case; hints serve the 5%.** A trailing braces block on the operator (§3.4) lets power users override fusion, force a specific index, or pin an embedder model — but the unhinted operator is the path most queries take.
+- **The platform owns scoring details.** RRF, k=60, the fusion algorithm, per-source weighting, query embedding — all platform-internal. Tuning surface emerges only when use cases demand it; the default is opinionated and out of the way.
+
+What that costs: queries that want to inspect raw scores (debugging; per-source attribution) need a diagnostic surface (`EXPLAIN`-equivalent, §3.7) rather than putting scores back in the language. That's a deliberate trade — the common path stays clean.
+
+### 3.3 The similarity operator
+
+A single binary operator `~` between a property-bound variable and a text query:
 
 ```
-TEXT_MATCH  TEXT_SCORE  VECTOR_NEAR  VECTOR_SIM  EMBED  RRF  TOP
+?property_var ~ "natural-language query"
 ```
 
-`BY`, `ASC`, `DESC` are reused from D2's existing `ORDER BY` / `GROUP BY`. No other existing keywords are affected. The new tokens follow D2 §2.2's case-sensitive uppercase convention.
+**Semantics.** In any position where it appears (`WHERE`, `RETURN`, `TOP K BY`), the operator denotes "rows where this property value is related to this query, ordered by relatedness." The platform consults every active similarity index on the property's source `Property`, dispatches probe(s), and produces a per-row relevance contribution that participates in the implicit ranking.
 
-### 3.3 Text retrieval
+The right-hand side is a string (literal in v1; an expression in future revisions). For vector-indexed properties, the platform embeds the RHS string using the property's declared embedder (§3.1's `vector_index { model }`); for text-indexed properties, it parses the RHS through the property's declared analyzer. The user never names the embedder, never sees the vector.
 
-Two functions cover text retrieval: `TEXT_MATCH` as a filter (boolean) and `TEXT_SCORE` as a value (float). Both take a typed reference to a text-indexed property and a query string, and share query parsing — a query that uses both with the same arguments runs the text-index probe once and surfaces the result through both functions.
+**Where it can appear:**
 
-**`TEXT_MATCH(?prop, "query")` → boolean.**
+- `WHERE` — filter + ranking contribution. The operator admits rows where the platform decides the property value is "related enough" (by a platform-chosen threshold), and the row's position in the result ordering is derived from its relatedness score.
+- `TOP K` — implicitly drives ranking. When the `WHERE` contains similarity operators, `TOP K` truncates by the relatedness-derived ordering. No `BY` clause needed in the pure-similarity case.
 
-- `?prop` is a property reference resolving to a text-indexed property — one that has an active `core:TextIndex` Resource targeting it at the query head (§3.1). The type system (§4) verifies the active TextIndex exists; a query against a property with no active TextIndex fails typecheck.
-- `"query"` is a literal string parsed by the v1 query grammar: whitespace-separated terms, implicit AND, no operators. (Phrase queries, OR / NOT operators, and fielded queries deferred per §2.3.)
-- Returns true iff at least one document matches the query under the property's analyzer (after analyzer-side tokenisation, all query terms appear in the document).
+Multiple `~` operators in the same query compose:
 
-Used in WHERE for filtering:
+- `?a ~ "x", ?b ~ "y"` (conjunction) — both contribute to the ranking; rows that satisfy both rank higher.
+- `?a ~ "x" OR ?b ~ "y"` (disjunction) — either contributes; rows satisfying both rank higher than rows satisfying one. (This is the hybrid retrieval shape from §6.5.)
+
+Fusion happens internally when multiple `~` operators are in scope, or when a single `~` operator's property has multiple active similarity indexes. The fusion algorithm and parameters are platform-determined (§3.5).
+
+**Reading the operator.** `~` is the user-facing surface for "*find related things*." Schema-side `core:TextIndex` and `core:VectorIndex` declarations (§3.1) are the schema-side surface for "*this property is similarity-retrievable.*" The two surfaces compose: declare what's retrievable, then query it with `~`.
+
+### 3.4 Hint surface
+
+An optional trailing braces block on the operator overrides individual platform defaults:
+
+```
+?property_var ~ "query" { via: text|vector|hybrid, model: <iri>, k: <int>, limit: <int> }
+```
+
+**Hint keys** (all optional; any subset):
+
+| Key | Type | Effect |
+|---|---|---|
+| `via` | `text` / `vector` / `hybrid` | Force the strategy. `text` uses only the TextIndex; `vector` uses only the VectorIndex; `hybrid` fuses (default when both indexes are active). Mutually exclusive with hints that imply a different strategy. |
+| `model` | IRI | Override the embedder. Implicitly forces `via: vector`. Useful when a property has multiple VectorIndexes declared (currently constrained to one per kind in v1 — see §3.1 — but the hint is forward-compatible). |
+| `k` | positive integer | Override the RRF fusion constant. Default 60 (Cormack et al.). Affects the relative weighting of rank 1 vs rank N in the fused output. |
+| `limit` | positive integer | Probe-side cap — bound the per-source candidate set the platform fetches before fusion / ranking. Tightens the over-fetch policy locally. |
+
+**Examples:**
 
 ```eigenql
-MATCH Document(?d) { description: ?desc }
-WHERE TEXT_MATCH(?desc, "WAL truncation")
-RETURN ?d
+?desc ~ "WAL truncation"                                  // default everything
+?desc ~ "WAL truncation" { via: text }                    // text-only override
+?desc ~ "WAL truncation" { via: vector, model: "..." }   // vector path with custom embedder
+?desc ~ "WAL truncation" { k: 30 }                        // tighter RRF (rank-1-dominant)
+?desc ~ "WAL truncation" { limit: 50 }                    // bound the probe candidate set
 ```
 
-**`TEXT_SCORE(?prop, "query")` → float.**
+**Validation** (at typecheck, per §4):
 
-- Same argument shape as TEXT_MATCH.
-- Returns the BM25 score (chain-aware IDF per §2.3); higher is better. Returns `0.0` for documents that don't match.
+- Hint keys are checked against the allowed set; unrecognised keys fail with a clear error.
+- `via: text` requires the property to have an active TextIndex; `via: vector` requires an active VectorIndex; `via: hybrid` requires at least one of each (or, more permissively, at least one similarity index of any kind).
+- `model: M` requires an active VectorIndex on the property declaring model `M`. (In v1, this is just a defence against typos since at most one VectorIndex per property is allowed.)
+- `model:` and `via: text` are mutually exclusive — the model only applies to the vector path.
+- `k:` is a positive integer literal.
+- `limit:` is a positive integer literal.
 
-Used in RETURN, ORDER BY, TOP K BY, and WHERE (e.g., score thresholds):
+**Defaults stay implicit.** A query without hints picks up the platform defaults (active-index set determines strategy; RRF k=60 for fusion; platform-chosen probe size for over-fetch). Hints exist for the cases where defaults are wrong; they're not part of the common-path surface.
 
-```eigenql
-MATCH Document(?d) { description: ?desc }
-WHERE TEXT_MATCH(?desc, "WAL truncation")
-RETURN ?d, TEXT_SCORE(?desc, "WAL truncation") AS score
-TOP 20 BY score DESC
-```
+**Forward-compatible extension.** New hint keys land additively without breaking existing queries. Reserved names for future revisions: `weights:` (per-source weighting), `threshold:` (minimum relevance floor), `analyzer:` (override text analyzer). None ship in v1.
 
-The planner deduplicates redundant text probes — the parsed query for TEXT_MATCH and TEXT_SCORE with identical arguments runs once and serves both.
+### 3.5 Default fusion behavior and active-index discovery
 
-### 3.4 Vector retrieval
+The operator's behavior is fully determined by the schema view at the query head, with no query-time heuristics:
 
-Two functions cover vector retrieval: `VECTOR_NEAR` as a top-k constraint (pushes k into the index probe), and `VECTOR_SIM` as a per-row similarity value (usable for thresholding and projection).
+1. **No active similarity index on the property.** `?p ~ q` fails at typecheck with "Property P has no active similarity index at head H." Same diagnostic shape as the pre-v1 "property has no active TextIndex" check, generalised across both kinds.
+2. **Exactly one active index** (TextIndex *or* VectorIndex). The platform probes that index; the result drives ranking. No fusion needed.
+3. **Both active** (TextIndex *and* VectorIndex). The platform runs both probes in parallel (§6.5 hybrid scheduling), produces per-source ranked candidate sets, fuses via Reciprocal Rank Fusion with `k=60` default (§6.4).
+4. **Multiple `~` operators in the same query.** Each operator contributes a ranked source. The platform fuses all sources via the same RRF mechanism. AND-joined operators contribute to all rows that pass both filters; OR-joined operators contribute to the union of their candidate sets.
 
-**`VECTOR_NEAR(?vec, query_vec, k: <int>, ef: <int>)` → boolean.**
-
-- `?vec` is a property reference resolving to a vector-indexed property.
-- `query_vec` is a typed vector expression — either a literal (rare; vectors are large), an `EMBED(...)` call (typical), or a bound variable from earlier in the query.
-- `k` (required, integer). The top-k cutoff; pushed into the per-segment index probe (HNSW or flat). The planner uses this to bound work.
-- `ef` (optional, integer). HNSW search-depth parameter (default `max(k * 4, 64)`). Ignored for flat segments. Higher `ef` increases recall at the cost of more compute; typical: ~95% recall@k at `ef=k*2`, ~99% at `ef=k*8`.
-- Returns true iff `?vec` is among the global top-k nearest neighbours of `query_vec` across all chain-visible segments of the indexed property.
-
-The model identities of `?vec` and `query_vec` must match (verified at typecheck per §4). The distance metric is the active VectorIndex Resource's `distance` configuration; the function doesn't accept per-call distance overrides.
-
-**`VECTOR_SIM(?vec, query_vec)` → float.**
-
-- Same argument shape (minus `k` / `ef`).
-- Returns a similarity value: for `distance: cosine`, the cosine similarity in [-1, 1] (higher is closer); for `distance: l2`, the negative L2 distance (higher is closer; negation makes "more similar" consistently mean "larger score"); for `distance: dot`, the dot product (higher is closer).
-- Defined per row independently of any top-k constraint. Returns `NULL` if the property's vec_seg for the row's defining layer hasn't been materialised yet (the embedding sweep is still in flight; §5.5).
-
-Usable in WHERE for thresholding, in RETURN for projection, and in ORDER BY / TOP K BY for ranking:
-
-```eigenql
-MATCH Document(?d) { embedding: ?e }
-WHERE VECTOR_SIM(?e, EMBED("rolling back a partial commit")) > 0.7
-RETURN ?d
-```
-
-VECTOR_NEAR and VECTOR_SIM compose: VECTOR_NEAR with k=200 over-fetches into a candidate pool, additional WHERE clauses filter structurally, and TOP K BY VECTOR_SIM(...) DESC ranks the survivors.
-
-### 3.5 EMBED — inline embedding
-
-**`EMBED("text", model: <iri>)` → `Vector(model: <iri>, dim: <int>)`.**
-
-`EMBED` is an inline Component invocation in EigenQL expression position. The kernel typechecks it at parse and dispatches it through the D6 IO-callback envelope at evaluation — same path any IO Component takes; no new RPC; same content-addressed cache as the indexing-side sweep (§5.4).
-
-- `"text"` is a string literal (or, in future revisions, an expression resolving to a string).
-- `model` (optional, IRI). Names the Embedder Component to dispatch. If omitted, the typechecker infers it from the corresponding VECTOR_NEAR / VECTOR_SIM context (the model_iri declared by the active VectorIndex Resource targeting the queried property). If the surrounding context is ambiguous (no vector property in scope, or multiple vector properties whose active VectorIndexes declare different models), the explicit `model:` argument is required.
-
-Type inference example — omitting `model`:
-
-```eigenql
-MATCH Document(?d) { embedding: ?e }
-WHERE VECTOR_NEAR(?e, EMBED("layer reconciliation"), k: 20)
-                       // ^^^ model inferred from the active VectorIndex targeting ?e
-```
-
-If the active VectorIndex targeting `?e` declares model `M1` (per §3.1), then `EMBED("layer reconciliation")` infers model `M1` and returns a vector of dimensionality matching `M1`'s declared dimensionality (per the Embedder Component registration). Mismatched-model queries — explicit `model:` differing from the inferred one, or two vector properties in scope whose active VectorIndexes declare different models — fail at typecheck.
-
-Cache semantics: identical `(text, model_iri)` arguments served from §5.3's content-addressed cache without re-dispatch. The first call within a query that the cache hasn't seen pays a Component-dispatch round trip; subsequent identical calls are free.
-
-Failure semantics: a query that requires EMBED and the embedder is unreachable fails at evaluation with the standard D6 IO-Component-failure error (§5.8). No partial results from already-resolved structural matches are returned.
-
-### 3.6 RRF — reciprocal rank fusion
-
-**`RRF(?score_a, ?score_b, ..., k: <int>)` → float.**
-
-`RRF` fuses two or more ranked score columns via Reciprocal Rank Fusion: `score(d) = sum_i 1 / (k + rank_i(d))` where `rank_i(d)` is the row's rank in the ordering of source `i` (1 for the best, 2 for the second-best, etc.).
-
-- Arguments are score expressions from D43's retrieval primitives — typically `TEXT_SCORE(...)` and `VECTOR_SIM(...)`. Each is interpreted as a ranking where higher values are better.
-- `k` (optional, integer, default 60). The RRF constant; values higher than ~60 dampen the influence of top-rank differences, values lower amplify them. 60 is the convention from Cormack et al.
-- Returns a per-row fused score (higher is better).
-
-RRF is *planner-recognised*: it is not a row-local function in the usual sense (it depends on the per-source rank of the row, which requires knowing the full ranked set). The planner identifies RRF in a RETURN or TOP K BY clause, materialises the per-source ranks during query execution, and computes the fused score per row.
-
-```eigenql
-MATCH Document(?d) { description: ?desc, embedding: ?e }
-WHERE TEXT_MATCH(?desc, "WAL truncation concurrent commit")
-   OR VECTOR_NEAR(?e, EMBED("rolling back a partially-written commit under concurrent load"), k: 50)
-RETURN ?d,
-       TEXT_SCORE(?desc, "WAL truncation concurrent commit") AS text_score,
-       VECTOR_SIM(?e, EMBED("rolling back a partially-written commit under concurrent load")) AS vec_score,
-       RRF(text_score, vec_score) AS fused
-TOP 20 BY fused DESC
-```
-
-The `OR` in WHERE is the canonical hybrid retrieval shape: rows that text-match contribute via text_score (vec_score may be 0 or NULL); rows that vector-near contribute via vec_score; rows that satisfy both have non-zero contributions in both rankings. RRF fuses them.
-
-v1 supports RRF with 2 or more arguments. Other rank-fusion functions (CombSUM, weighted variants) are deferred to a future revision.
-
-### 3.7 TOP K BY — ranked retrieval clause
-
-**`TOP <K> BY ?score [DESC | ASC]`.**
-
-`TOP K BY` is the canonical EigenQL clause for ranked retrieval. It replaces the `ORDER BY ?score (DESC|ASC) LIMIT K` pair when the intent is top-k retrieval rather than general sort-and-truncate.
-
-- `K` is a positive integer literal (no expressions; the planner needs to know K statically to push it into index probes).
-- `?score` is the ranking expression — typically a TEXT_SCORE, VECTOR_SIM, RRF, or arithmetic combination thereof.
-- `DESC` (default) sorts highest-first; `ASC` sorts lowest-first. The default is `DESC` because retrieval scores conventionally treat "higher = better".
-
-Semantics: the result set is the top-K rows by `?score` (with the chosen direction). Ties are broken by Resource IRI ordering for determinism.
-
-Position in the query grammar: `TOP K BY` slots in at the end of the query, in the same position as `ORDER BY ... LIMIT`. The two are mutually exclusive — a query that uses `TOP K BY` cannot also use `ORDER BY` or `LIMIT`; mixed usage fails at parse.
+**RRF formula** (platform-internal; users don't see it but documented here for traceability):
 
 ```
-Query ::= [USING] MATCH [WHERE] [GROUP BY] [RETURN] (ORDER_BY_LIMIT | TOP_K_BY)? [OFFSET] [DISTINCT]
-
-TOP_K_BY    ::= "TOP" INTEGER "BY" expression ("DESC" | "ASC")?
+fused_score(row) = sum over sources i of  1 / (k + rank_i(row))
 ```
 
-`OFFSET` and `DISTINCT` continue to apply after `TOP K BY`. (Pagination over a top-k retrieval is a standard pattern; the planner cooperates by over-fetching up to `K + OFFSET` and dropping the offset.)
+Where `rank_i(row)` is the row's 1-indexed position in source `i`'s ordering, or `∞` if the row didn't appear in source `i`'s candidate set. `k=60` is the default smoothing constant; the `k:` hint overrides it per query.
 
-### 3.8 Worked examples
+**Same chain, same query → same plan, always.** No query-shape heuristics. The schema owner controls strategy by declaring the indexes they want; the query author writes intent.
 
-**Pure text retrieval.** Find the top-20 documents whose description matches a query, ranked by BM25:
+### 3.6 Worked examples
+
+**Pure text retrieval** (property has only a TextIndex):
 
 ```eigenql
 USING "urn:eigenius:se:Doc"
 MATCH Doc(?d) { description: ?desc }
-WHERE TEXT_MATCH(?desc, "kernel layer chain consolidation")
-RETURN ?d, TEXT_SCORE(?desc, "kernel layer chain consolidation") AS score
-TOP 20 BY score DESC
+WHERE ?desc ~ "kernel layer chain consolidation"
+TOP 20
 ```
 
-**Pure vector retrieval.** Find the top-20 documents semantically closest to a query string:
+**Pure vector retrieval** (property has only a VectorIndex). The query string is the same shape; the platform embeds it using the declared model:
 
 ```eigenql
 USING "urn:eigenius:se:Doc"
-MATCH Doc(?d) { embedding: ?e }
-WHERE VECTOR_NEAR(?e, EMBED("collapsing a contiguous range of layers"), k: 20)
-RETURN ?d, VECTOR_SIM(?e, EMBED("collapsing a contiguous range of layers")) AS sim
-TOP 20 BY sim DESC
+MATCH Doc(?d) { description: ?desc }
+WHERE ?desc ~ "collapsing a contiguous range of layers"
+TOP 20
 ```
 
-**Hybrid retrieval with RRF.** Over-fetch on both text and vector independently, fuse via RRF, return the top 20:
+**Hybrid retrieval** (property has both indexes). The query is unchanged; the platform fuses internally:
 
 ```eigenql
 USING "urn:eigenius:se:Doc"
-MATCH Doc(?d) { description: ?desc, embedding: ?e }
-WHERE TEXT_MATCH(?desc, "kernel layer chain consolidation")
-   OR VECTOR_NEAR(?e, EMBED("collapsing a contiguous range of layers"), k: 100)
-RETURN ?d,
-       TEXT_SCORE(?desc, "kernel layer chain consolidation") AS text_score,
-       VECTOR_SIM(?e, EMBED("collapsing a contiguous range of layers")) AS vec_score,
-       RRF(text_score, vec_score) AS fused
-TOP 20 BY fused DESC
+MATCH Doc(?d) { description: ?desc }
+WHERE ?desc ~ "kernel layer chain consolidation"
+TOP 20
 ```
 
-**Threshold-based vector filter combined with structural constraint.** Find documents in a specific module whose embedding is within a similarity threshold:
+**Composition with structural filters.** The structural pattern filters; the similarity operator ranks the survivors:
 
 ```eigenql
 USING "urn:eigenius:se:RustFunction", "urn:eigenius:se:Module"
-MATCH RustFunction(?f) { declared_in: ?m, embedding: ?e },
+MATCH RustFunction(?f) { declared_in: ?m, description: ?desc },
       Module(?m) { short_name: "evaluate" }
-WHERE VECTOR_SIM(?e, EMBED("walk the chain and apply shadow filter")) > 0.7
-RETURN ?f, VECTOR_SIM(?e, EMBED("walk the chain and apply shadow filter")) AS sim
-TOP 50 BY sim DESC
+WHERE ?desc ~ "walk the chain and apply shadow filter"
+TOP 50
 ```
 
-The structural constraint (`declared_in` joins to a specific module) is applied alongside the vector threshold; the planner pushes the structural pattern down where possible.
-
-**Over-fetch then refine.** Use VECTOR_NEAR with k=200 to over-fetch candidates from the vector index, filter with additional structural constraints, then take the top-20 of survivors by similarity:
+**Disjunctive sources** (multi-property hybrid). The platform fuses contributions from both operators:
 
 ```eigenql
-USING "urn:eigenius:se:Doc", "urn:eigenius:se:Author"
-MATCH Doc(?d) { embedding: ?e, authored_by: ?a },
-      Author(?a) { kind: "human" }
-WHERE VECTOR_NEAR(?e, EMBED("query about chain semantics"), k: 200)
-RETURN ?d, VECTOR_SIM(?e, EMBED("query about chain semantics")) AS sim
-TOP 20 BY sim DESC
+USING "urn:eigenius:se:Doc"
+MATCH Doc(?d) { title: ?t, body: ?b }
+WHERE ?t ~ "WAL truncation"
+   OR ?b ~ "rolling back a partial commit"
+TOP 20
 ```
 
-The `k: 200` in VECTOR_NEAR controls the index-side cutoff (the planner over-fetches by 10× to ensure 20 survivors after structural filtering); TOP 20 BY enforces the final result set size.
+**Hint-driven override** (force text-only for an exact-match-heavy property):
 
-### 3.9 Surface affordances deferred
+```eigenql
+USING "urn:eigenius:se:Symbol"
+MATCH Symbol(?s) { name: ?n }
+WHERE ?n ~ "RocksStore::store_layer" { via: text }
+TOP 10
+```
 
-- **Phrase queries.** `TEXT_MATCH(?prop, "\"exact phrase\"")` is reserved syntax; v1 raises a parse error directing the user to a future revision. Implementation requires positional postings (§2.3).
-- **Multi-field text queries.** `TEXT_MATCH({title: 0.6, body: 0.4}, "query")` with per-field boosts is a §8-resolved-deferral. The §2.3 schema supports it without change; the surface is additive.
-- **Boolean operators in text queries.** v1 implicit-AND only; `OR`, `NOT`, parenthesisation are deferred.
-- **Custom scoring overrides per query.** `TEXT_SCORE(?prop, "query", scorer: "tfidf")` is reserved syntax but v1 ships only BM25.
-- **Other rank-fusion functions** (CombSUM, weighted variants). RRF only in v1.
-- **Vector-side `VECTOR_NEAR` distance overrides.** v1 reads the distance metric from the active VectorIndex Resource; per-call overrides are deferred.
+**Probe-side limit** (recall-vs-precision tuning):
+
+```eigenql
+MATCH Doc(?d) { description: ?desc }
+WHERE ?desc ~ "concurrent commit recovery" { limit: 50 }
+TOP 20
+```
+
+Compare to the pre-collapse spec form (kept here as a migration reference, *not* as supported syntax). The D35 §7.4 worked example was:
+
+```eigenql
+WHERE TEXT_MATCH(?desc, "WAL truncation concurrent commit")
+   OR VECTOR_NEAR(?vec, EMBED("rolling back a partial commit"), k: 50)
+RETURN ?d,
+       TEXT_SCORE(?desc, "WAL truncation concurrent commit") AS ts,
+       VECTOR_SIM(?vec, EMBED("rolling back a partial commit")) AS vs,
+       RRF(ts, vs) AS fused
+TOP 20 BY fused DESC
+```
+
+Under D43 v1, this reduces to:
+
+```eigenql
+WHERE ?desc ~ "WAL truncation concurrent commit"
+   OR ?desc ~ "rolling back a partial commit"
+TOP 20
+```
+
+(Assuming a single `description` property indexed by both TextIndex and VectorIndex, which is what real corpora look like — there's no separate `description_embedding` property; the vector lives in the index, not in the schema.)
+
+### 3.7 Surface affordances deferred
+
+- **Phrase queries.** Quoted exact phrases within the RHS string (`"exact phrase"`) are reserved syntax; v1's text analyzer treats the quotes as token characters. Phrase queries require positional postings (§2.3) and an extended query grammar; deferred.
+- **Boolean operators in the query string.** v1 implicit-AND across whitespace-separated terms. `OR`, `NOT`, parenthesisation inside the string are deferred; users compose multiple `~` operators at the EigenQL level instead.
+- **Per-source weighting.** `?p ~ "q" { weights: [0.7, 0.3] }` (or schema-side weighting on the index declaration) for non-uniform fusion. Deferred until a workload demonstrates uniform RRF is wrong.
+- **Relevance threshold.** `?p ~ "q" { threshold: 0.5 }` to set a minimum-relatedness floor. Today the platform picks an internal threshold; the hint surfaces tuning. Deferred.
+- **Diagnostic / `EXPLAIN` surface.** A query-level mode that reports the per-source candidate sets, ranks, and fused scores for debugging. Not in v1; it's the natural compensation for hiding the scores from the language, so it lands as soon as users need to debug rankings.
+- **Multi-field hybrid.** `?Doc ~ "q"` (no property variable; "find Docs by total relevance across all their similarity-indexed properties") is plausible v1.1 sugar over `?title ~ "q" OR ?body ~ "q"`. Deferred.
+- **Multiple indexes of the same kind per property** (e.g., two TextIndexes with different analyzers). §3.1's v1 multiplicity constraint stays; relaxing it is forward-compatible with the operator (the platform would fuse all active indexes of any kind).
 
 ## 4. Type system extensions
 
-D43's surface introduces three shapes the EigenQL type system must thread:
+D43's user-visible surface is small enough that the type system extensions are correspondingly small. The single `~` operator and its optional hint block are the only new shapes. The Vector type, EMBED type inference, and score-expression composition rules from earlier D43 drafts are *gone* — those constructs were collapsed in §3, so they no longer need typecheck rules.
 
-1. **Parametric `Vector` types** carrying a model IRI and a dimensionality.
-2. **Active Index Resource resolution at parse time** — the typechecker discovers the schema view at the query head and uses it to type retrieval expressions.
-3. **Float-valued score expressions** — Float scalars returned from `TEXT_SCORE`, `VECTOR_SIM`, and `RRF`, composable with the existing arithmetic and comparison surface.
+What remains: validating that the operator's left-hand side resolves to a similarity-indexed property, validating the right-hand side is a string-typed expression, and validating the hint block against the property's active index set.
 
-This section specifies the typing rules, the schema view the typechecker maintains, and the failure modes for invalid retrieval expressions. The type system additions are conservative — they add new type constructors and inference rules but do not modify EigenQL's existing semantics.
-
-### 4.1 Vector type
-
-A vector value's type identity is parametric over its model IRI and its dimensionality:
-
-```
-Vector(model: <Iri>, dim: <uint>)
-```
-
-Equality between Vector types requires both components to match: `Vector(M, D) = Vector(M', D')` iff `M = M'` and `D = D'`. Two vectors with different models are different types and cannot be compared, distance-computed, or substituted for one another in retrieval functions — the typechecker rejects mismatches before evaluation.
-
-Vector types appear:
-
-- As the return type of `EMBED(...)` — §4.4.
-- As the static type the typechecker uses for the `query_vec` argument of `VECTOR_NEAR` / `VECTOR_SIM` — §4.5.
-
-v1 does not have vector literals or vector arithmetic at the EigenQL surface; future revisions may add them as additional inference targets without disturbing the rules below.
-
-### 4.2 Schema view at typecheck
+### 4.1 Schema view at typecheck
 
 The typechecker operates against a *fixed schema view* derived from the query head H. The view aggregates all `Class`, `Property`, `core:TextIndex`, and `core:VectorIndex` Resources visible at H through the standard chain-walk.
 
 For retrieval typing, two derived lookups matter:
 
-- **`active_text_index(P, H)`** — the unique non-shadowed `TextIndex` Resource whose `target_property = P` at H, if one exists. Found via a structural query against the triple index: enumerate `TextIndex` Resources where `target_property = P`, apply the D23 §5.2 shadow filter relative to H, take the most-recent surviving match. The §3.1 v1 multiplicity constraint guarantees at most one such Resource per `(P, H)` pair.
+- **`active_text_index(P, H)`** — the set of non-shadowed `TextIndex` Resources whose `target_property = P` at H. In v1 the §3.1 multiplicity constraint allows at most one, so the lookup returns `Option<TextIndex>`.
 - **`active_vector_index(P, H)`** — same shape, for `VectorIndex`.
 
-Lookups are memoised per `(P, kind)` pair for the duration of a typecheck pass; the chain-walk cost is paid once per distinct property reference in the query.
+Combined into the operator's lookup:
 
-The schema view is *frozen* for the typecheck: even if H is the tip of a write-active branch, typecheck sees the snapshot at the moment the query was submitted. This matches D6's at-layer read semantics and is what makes typecheck deterministic across concurrent writers.
+- **`active_similarity_indexes(P, H)`** — the union of the two: returns the set of similarity-providing Index Resources active for property `P` at head `H`. Empty if neither TextIndex nor VectorIndex targets `P`; size 1 in the text-only or vector-only case; size 2 in the hybrid case. This is the lookup the `~` operator's typecheck consults.
 
-A consequence the user should expect: the same query against different heads can typecheck differently. An Index Resource that's active in branch A but shadowed in branch B affects typing in each respective branch. This is by design — typing reflects the schema the query actually runs against.
+Lookups are memoised for the duration of a typecheck pass; the chain-walk cost is paid once per distinct property reference in the query.
 
-### 4.3 Property reference typing
+The schema view is *frozen* for the typecheck — even if H is the tip of a write-active branch, typecheck sees the snapshot at submit time. Same query against different heads can typecheck differently (an Index Resource active in one branch but shadowed in another); this is by design.
 
-A property reference `?prop` bound through a `MATCH` pattern carries the value type declared by its source `Property`'s `class_types` (per D1's three-layer type system). Retrieval functions do not change this type — they use the active Index Resource as a *lens* through which retrieval semantics apply.
+### 4.2 Property reference typing
 
-For example, in `MATCH Document(?d) { embedding: ?e }`:
+Unchanged from D2: a property reference `?p` bound through a `MATCH` pattern carries the value type declared by its source `Property`'s `class_types`. The similarity operator does not change this type — it uses the active Index Resources as a *lens* through which retrieval semantics apply.
 
-- `?e` has value type `String` (the property's declared `class_types`).
-- For `VECTOR_NEAR(?e, q, k: K)` to typecheck, the typechecker additionally requires `active_vector_index(embedding, H)` to exist. The function uses that Index's `model_iri`, `dim`, `distance`, and `strategy` for retrieval; `?e`'s static type stays `String`.
+For example, in `MATCH Doc(?d) { description: ?desc }`:
 
-This separation — value type stays declared, retrieval lens comes from the active Index Resource — is what lets the same property carry both a `TextIndex` and a `VectorIndex` simultaneously without colliding type identities.
+- `?desc` has value type `String`.
+- For `?desc ~ "q"` to typecheck, the typechecker additionally requires `active_similarity_indexes(description, H)` to be non-empty.
+- The operator uses whichever indexes are active for retrieval; `?desc`'s static type stays `String`.
 
-### 4.4 EMBED typing and inference
+This separation — value type stays declared, retrieval lens comes from the active Index Resources — is what lets the same property carry both a `TextIndex` and a `VectorIndex` simultaneously without colliding type identities.
 
-The signature with an explicit model:
+### 4.3 Similarity operator typecheck
 
 ```
-EMBED("text", model: M) : Vector(model: M, dim: dim(M))
+?prop ~ <query> [ { <hints> } ] : Boolean
 ```
 
-`dim(M)` is the static output dimensionality declared by the Embedder Component with IRI `M`. The typechecker verifies at parse time that `M` references a registered Embedder Component (per §5.2); an unregistered model IRI fails typecheck.
+When evaluated as a boolean (e.g., as a WHERE filter), the operator returns true iff the property value is similarity-related to the query under the platform-chosen interpretation. When used as a ranking input (in WHERE alongside `TOP K`), it contributes to the implicit ordering. The operator is *not* a value-returning expression in v1 — there is no exposed Float score the user can bind to a variable. (Diagnostic surfaces that expose per-source scores live in §3.7's deferred `EXPLAIN`-equivalent surface, not in the operator itself.)
 
-**Model inference** (when `model:` is omitted). The typechecker collects all `VECTOR_NEAR` / `VECTOR_SIM` contexts in which the `EMBED(...)` value flows — directly as an argument, or transitively through let-bindings and arithmetic on Vector values (the latter not in v1, but the inference rule generalises). For each such context, the model IRI of the corresponding vector property's `active_vector_index` is a candidate. The inference rules:
+**Typing constraints:**
 
-| Candidate set | Result |
+1. **LHS** must be a property-bound variable. A `MATCH` pattern binds `?prop` to the value of some Property; `~` is only legal when `?prop` came from a property pattern. Errors with "left-hand side of `~` must be a property-bound variable" when the LHS is a literal, an unbound variable, or a variable bound by a different mechanism (e.g., a FIBER binding).
+2. **LHS property** must have at least one active similarity index — i.e., `active_similarity_indexes(P, H)` is non-empty where `P` is the property the LHS variable was bound by. Errors with "property `P` has no active similarity index at head `H`" otherwise. The error mentions both kinds so the schema owner knows what to declare.
+3. **LHS property** must have a string-shaped value type. Errors with "property `P` has value type `T`; similarity requires String-shaped" otherwise. (v1 only embeds and tokenises text content.)
+4. **RHS** must be a string-typed expression. v1 accepts only string literals; future revisions may accept expressions resolving to strings (e.g., a `?bound_var` carrying a runtime-determined query). Errors with "right-hand side of `~` must be a string expression" otherwise.
+
+### 4.4 Hint validation
+
+The trailing braces block on the operator is validated against the active index set:
+
+**Per-hint type checks:**
+
+| Hint | Check |
 |---|---|
-| Empty (EMBED appears in a context with no vector-property reference) | Typecheck fails: "EMBED requires explicit `model:` parameter" |
-| One unique IRI | Inferred to that IRI |
-| Multiple distinct IRIs (all candidates agree on the same IRI) | Inferred to that IRI |
-| Multiple distinct IRIs (candidates disagree) | Typecheck fails: "Ambiguous EMBED model; candidates: M1, M2, ..." |
+| `via` | Value is one of `text`, `vector`, `hybrid`. Other values error with "unknown via strategy: <value>". |
+| `model` | Value is a string parseable as an IRI. Errors otherwise. |
+| `k` | Value is a positive integer literal. Errors on zero, negative, or non-literal expressions. |
+| `limit` | Value is a positive integer literal. Same shape as `k`. |
+| Other keys | Reserved or unknown — error with "unrecognised hint key: <key>". |
 
-Inference is monomorphic — each `EMBED` call resolves to a single concrete model IRI at parse. There is no polymorphic `Vector(model: ?, dim: ?)` that propagates unsolved through the query.
-
-### 4.5 VECTOR_NEAR and VECTOR_SIM typing
-
-```
-VECTOR_NEAR(?vec, query_vec, k: K, ef: E?) : Boolean
-VECTOR_SIM(?vec, query_vec)                : Float
-```
-
-Where `?vec` is a property reference, `query_vec` is a Vector-typed expression, `K` is a positive integer literal, and `E` (optional, VECTOR_NEAR only) is a positive integer literal.
-
-Typing constraints:
-
-- The source property of `?vec` has an `active_vector_index(P, H) = I` with `model = M`, `dim = D`.
-- `query_vec` has type `Vector(model: M, dim: D)`. Both components must match exactly — mismatches fail with "Vector model mismatch: ?vec is Vector(M, D); query_vec is Vector(M', D')".
-- `K` and (if present) `E` are positive integer literals — the planner requires statically-known values to push them into index probes.
-
-The active VectorIndex Resource `I` provides the `distance` metric and the `strategy`; both are read from `I` at parse and used in the retrieval semantics. They do not appear in the function's call-site syntax.
-
-### 4.6 TEXT_MATCH and TEXT_SCORE typing
-
-```
-TEXT_MATCH(?prop, "query") : Boolean
-TEXT_SCORE(?prop, "query") : Float
-```
-
-Typing constraints:
-
-- The source property of `?prop` has value type String (or a String-shaped subtype per D1).
-- `active_text_index(P, H)` exists.
-- `"query"` is a literal string. The typechecker treats it as opaque; v1 query parsing happens at parse time using the active TextIndex's analyzer.
-
-If two calls in the same query use the same `(?prop, "query")` pair (`TEXT_MATCH` and `TEXT_SCORE` together, the common hybrid pattern), the typechecker records this for the planner — the analyzer-side parse and index probe will run once and feed both functions.
-
-### 4.7 Score expression composition
-
-All retrieval scoring functions return `Float`:
-
-```
-TEXT_SCORE(?prop, "query")           : Float
-VECTOR_SIM(?prop, query_vec)         : Float
-RRF(?s1, ?s2, ..., k: K)             : Float
-```
-
-`Float` composes with the existing EigenQL arithmetic surface (`+`, `-`, `*`, `/`, parenthesisation) and comparison operators (`<`, `>`, `<=`, `>=`, `=`, `!=`). Standard precedence applies. Score expressions may be bound to variables in `RETURN` (`... AS score`) and referenced in `ORDER BY`, `TOP K BY`, and `WHERE`.
-
-`RRF`'s typing is straightforward — all arguments must be `Float` — but the planner imposes an additional structural constraint: each argument must be a *recognisable per-row score expression* (a `TEXT_SCORE`, `VECTOR_SIM`, an arithmetic combination of such, or a variable bound to one of the above). Arbitrary `Float` expressions — e.g., `RRF(0.5, ?d.weight)` — fail at parse with "RRF argument N is not a recognised score expression". This is a planner concern bubbled into the typecheck so users see the error at parse rather than at evaluation; §6 develops the planner-side mechanics.
-
-`RRF` accepts two or more arguments (v1). `k` is an optional integer literal (default 60).
-
-### 4.8 Failure modes at typecheck — summary
-
-Consolidated table of errors the typechecker raises before evaluation begins:
+**Consistency checks against the property's active index set:**
 
 | Condition | Error |
 |---|---|
-| `TEXT_MATCH` / `TEXT_SCORE` on a property with no active TextIndex at H | "Property P has no active TextIndex at head H" |
-| `VECTOR_NEAR` / `VECTOR_SIM` on a property with no active VectorIndex at H | "Property P has no active VectorIndex at head H" |
-| `TEXT_MATCH` / `VECTOR_NEAR` on a non-string property | "Property P has value type T; retrieval requires String-shaped" |
-| Model mismatch in `VECTOR_NEAR` / `VECTOR_SIM` | "Vector model mismatch: ?vec is Vector(M, D); query_vec is Vector(M', D')" |
-| `EMBED` without `model:` and no inferrable context | "EMBED requires explicit `model:` parameter" |
-| `EMBED` without `model:` and ambiguous candidates | "Ambiguous EMBED model; candidates: M1, M2, ..." |
-| `EMBED`'s `model:` IRI not a registered Embedder Component | "Embedder Component M not registered" |
-| `RRF` argument not Float-typed | Standard EigenQL type error |
-| `RRF` argument not planner-recognisable as a ranked source | "RRF argument N is not a recognised score expression" |
-| `TOP K BY` mixed with `ORDER BY` or `LIMIT` in the same query | "TOP K BY is mutually exclusive with ORDER BY and LIMIT" |
-| Property reference's `MATCH` binding does not resolve | Standard EigenQL error |
+| `via: text` on a property without an active TextIndex | "via: text requires an active TextIndex on property P (none declared at H)" |
+| `via: vector` on a property without an active VectorIndex | "via: vector requires an active VectorIndex on property P (none declared at H)" |
+| `via: hybrid` on a property with only one active index kind | "via: hybrid requires both a TextIndex and a VectorIndex on property P (only X declared)" |
+| `model: M` and the active VectorIndex doesn't declare model M | "model: M doesn't match the active VectorIndex on property P (which declares M')" |
+| `model:` combined with `via: text` | "model: is incompatible with via: text — the model only applies to the vector path" |
 
-These all happen at parse / typecheck. Runtime sees only well-typed expressions plus the IO-level checks of §4.9.
+A query that fails any of these errors at parse, never at evaluation. The user sees their mistake before the kernel does any retrieval work.
 
-### 4.9 Runtime checks (recap)
+### 4.5 Failure modes at typecheck — summary
+
+| Condition | Error |
+|---|---|
+| `~` on a property with no active similarity index at H | "property P has no active similarity index at head H" |
+| `~` LHS not a property-bound variable | "left-hand side of `~` must be a property-bound variable" |
+| `~` on a non-string property | "property P has value type T; similarity requires String-shaped" |
+| `~` RHS not string-typed | "right-hand side of `~` must be a string expression" |
+| Hint with unknown key | "unrecognised hint key: <key>" |
+| Hint with wrong-typed value | "<hint>: expected <type>, got <actual>" |
+| Hint inconsistent with active index set | (per-hint error message from §4.4 table) |
+
+These all happen at parse / typecheck. Runtime sees only well-typed expressions plus the IO-level checks of §4.6.
+
+### 4.6 Runtime checks (recap)
 
 The typechecker catches schema-level and structural issues. A small number of conditions remain runtime-only:
 
-- **Embedder unreachable / Component failure** at `EMBED` evaluation — §5.8 IO-failure handling.
-- **Per-segment `model_iri` verification** at `VECTOR_NEAR` / `VECTOR_SIM` evaluation — §2.4 query path step 5. The segment's recorded `model_iri` is re-verified against the active VectorIndex's `model_iri` as defence-in-depth; a mismatch should never happen if the §5.7 reindex policy is honoured, but if one occurs the query fails with `SegmentModelMismatch` rather than silently returning garbage.
+- **Embedder unreachable / Component failure** during similarity evaluation against a vector-indexed property — §5.8 IO-failure handling. The query embeds the RHS string at evaluation time; if the embedder is unavailable, the query fails with the standard D6 IO-Component-failure error.
+- **Per-segment `model_iri` verification** at evaluation — §2.4 query path step 5. The segment's recorded `model_iri` is re-verified against the active VectorIndex's `model_iri` as defence-in-depth; a mismatch should never happen if the §5.7 reindex policy is honoured, but if one occurs the query fails with `SegmentModelMismatch` rather than silently returning garbage.
 - **Vector segment not yet materialised** — the sweep hasn't completed for some `(layer, VectorIndex)` pair (§5.5). That layer contributes nothing to the query; results are well-typed but partial. The result includes sweep-status visibility for callers that need to know.
 
-Runtime never sees a typing error — by the time evaluation begins, every expression's type is concrete and every Index Resource referenced is bound to a specific IRI in the schema view. The typecheck is the single point where schema-level retrieval correctness is enforced.
+Runtime never sees a typing error — by the time evaluation begins, every expression's type is concrete and every Index Resource referenced is bound to a specific IRI in the schema view.
 
 ## 5. Embedding lifecycle
 
@@ -869,7 +800,7 @@ A consequence: D43 §2.8's previous "refuse to consolidate across an embedding-m
 
 ## 6. Planner integration
 
-The EigenQL planner produces an execution plan from a typechecked query. D43's retrieval primitives are first-class to that planner: index probes replace full chain scans where applicable, `k` parameters from `TOP K BY` and `VECTOR_NEAR` push into per-segment work bounds, `EMBED` calls hoist into a parallel pre-pass, `RRF` triggers per-source rank materialisation, and the cost model exploits the bounded cardinality that ranked retrieval produces.
+The EigenQL planner produces an execution plan from a typechecked query. The user-visible retrieval surface is a single similarity operator (§3.3); the planner expands each `~` operator into the platform-internal probe + fusion machinery that this section specifies. Index probes replace full chain scans, the `TOP K` clause and the optional `limit:` hint push K-bounds into per-segment probes, similarity-operator RHS strings hoist into a parallel embedding pre-pass for vector-indexed properties, and rank fusion across multiple sources runs internally without a user-visible function call.
 
 This section specifies how the planner integrates with §§2–5. It does not redesign the existing EigenQL planner — D2's structural-query planning surface remains in place — but it specifies the additions and the cost-model adjustments retrieval requires.
 
@@ -877,128 +808,135 @@ This section specifies how the planner integrates with §§2–5. It does not re
 
 The planner inherits from §4's typecheck the following bindings per query:
 
-- The schema view at the query head, including `active_text_index(P, H)` and `active_vector_index(P, H)` for every property `P` referenced by a retrieval primitive.
-- The concrete Vector type `(model_iri, dim)` for every `EMBED(...)` call, with `model_iri` either explicit or inferred per §4.4.
-- For every retrieval primitive, the concrete Index Resource IRI it operates against.
-- For `RRF` calls, the recognised set of per-source score expressions per §4.7.
+- The schema view at the query head, including `active_similarity_indexes(P, H)` for every property `P` referenced by a `~` operator.
+- The concrete Index Resource IRIs in that lookup — one per active TextIndex / VectorIndex on `P` — bound at plan time and not re-resolved during execution.
+- The validated hint block (§4.4) per operator, with strategy / model / k / limit fields ready to consume.
+- Each `~` operator's source `Property` IRI (for probe dispatch) and its source `MATCH` pattern's subject variable (for chain-walk subject filtering).
 
 The plan is bound to these IRIs at planning time; execution does not re-resolve them. A schema change after planning but before execution has no effect on an in-flight query.
 
-### 6.2 Top-k pushdown
+### 6.2 Top-K pushdown
 
-D43's surface provides two `k`-bearing constructs that the planner pushes into per-segment probes.
+The `TOP K` clause and the optional `limit:` hint on a `~` operator both push K-bounds into per-segment probes. The planner combines them with the structural-selectivity heuristic (§6.6) to derive each probe's effective bound.
 
-**`TOP K BY ?score` pushdown.** The integer literal `K` from `TOP K BY` is propagated as a probe-side `top_k` parameter to whichever index probe produces the score being ranked. Three cases:
+**`TOP K` clause pushdown.** When `TOP K` is present and a `~` operator drives the ranking, K (or `K * over_fetch_factor`) is propagated as the per-segment probe bound:
 
-- `TOP K BY TEXT_SCORE(?prop, "q")`: the per-layer text probe (§2.3 query path step 7) is bounded to emit at most `K * over_fetch_factor` hits per layer; the top-k merge across layers (step 9) yields the final `K`. Over-fetch covers structural filters that may reduce the survivor count below `K`.
-- `TOP K BY VECTOR_SIM(?vec, q_vec)`: the per-segment vector probe (§2.4 query path step 6) is bounded to `K * over_fetch_factor`; HNSW dispatch uses `ef = max(K * 4, 64)` per the §3.4 default unless an explicit `ef` is supplied.
-- `TOP K BY RRF(...)`: the planner over-fetches each underlying source independently — see §6.4.
+- **Text probe**: the per-layer text probe (§2.3 query path step 7) is bounded to emit at most `K * over_fetch_factor` hits per layer; the top-k merge across layers (step 9) yields the final K. Over-fetch covers structural filters that may reduce the survivor count below K.
+- **Vector probe**: the per-segment vector probe (§2.4 query path step 6) is bounded to `K * over_fetch_factor`; HNSW dispatch uses `ef = max(K * 4, 64)` by default. Flat dispatch ignores `ef`.
+
+**Per-operator `limit:` hint.** When a `~` operator carries `{ limit: N }`, that N replaces the planner-chosen probe bound for *that operator's* probes. Useful for recall-vs-precision tuning at the call site. Multiple `~` operators in the same query may carry independent `limit:` values; each applies to its own probes.
 
 **Over-fetch factor.** Configurable per-query; default `4×`. Heuristic adjustment based on the estimated selectivity of structural filters in the same query (see §6.6): high structural selectivity → larger over-fetch; low selectivity → smaller.
 
-**`VECTOR_NEAR(?vec, q, k: K)` is independent of `TOP K BY`.** `VECTOR_NEAR`'s `k` is a *row-filter constraint* ("`?vec` is among the top-K nearest") — it bounds the index probe to exactly K hits per segment per the segment's strategy (flat or HNSW). When `VECTOR_NEAR(k: 100)` is combined with `TOP 20 BY VECTOR_SIM(...) DESC`, the planner uses VECTOR_NEAR's `k=100` as the index-probe bound and applies the outer `TOP 20` after structural filters. Setting `VECTOR_NEAR(k: K_inner)` below `TOP K_outer BY ...` is a parse-time warning ("VECTOR_NEAR k is smaller than the requested top-k; results will be at most k") rather than an error.
+**Interaction with multiple `~` operators.** When the query has both a `TOP K` clause and multiple similarity operators, K applies to the fused result; each contributing source is over-fetched independently (per §6.4) so fusion has enough candidates to produce a confident top-K.
 
-### 6.3 EMBED dispatch and pre-pass batching
+### 6.3 Query-string embedding (pre-pass for vector-indexed `~`)
 
-`EMBED("text", model: M)` is an IO Component call dispatched through the D6 envelope (§5.4). The planner has two relevant optimisations:
+When a `~` operator targets a property with an active VectorIndex (text-only properties skip this step), the RHS string must be embedded under the property's declared model before the vector probe runs. The planner hoists every such embedding into a parallel pre-pass:
 
-**Caching.** Identical `(text, model_iri)` calls are short-circuited by the embedding cache (§5.3). The first call within a query that the cache hasn't seen pays a Component-dispatch round trip; subsequent identical calls are local cache hits.
+1. **Collection.** Walk the typed AST; for each `~` operator whose property has an active VectorIndex, collect the `(rhs_string, model_iri)` tuple. The model IRI comes from the active VectorIndex's declared `model`, or from the operator's `model:` hint if supplied.
+2. **Cache probe.** For each distinct tuple, consult the §5.3 content-addressed embedding cache. Hits resolve immediately.
+3. **Batched dispatch.** Tuples missing from the cache are sent in one batched Component-invocation request to the orchestrator. The orchestrator dispatches them concurrently subject to its per-Embedder concurrency limits (§5.5).
+4. **Vector substitution.** Returned vectors are bound to their corresponding `~` operators internally — the user never sees them as bindings.
+5. **Failure semantics.** If pre-pass dispatch fails (embedder unreachable or Component error), the query fails at evaluation per §5.8 — *before* the structural query begins. No partial work is performed.
 
-**Pre-pass batching.** Multiple *distinct* `EMBED(...)` calls within one query (different strings, possibly different models) are hoisted by the planner into a single pre-pass that dispatches them in parallel to the orchestrator. The pre-pass runs before the structural query begins; substituted vector values then flow into the rest of the plan as ordinary literals.
+A query whose every `~` operator targets text-only properties skips this step entirely. The pre-pass is the platform-internal counterpart to the user-visible `EMBED` call that earlier D43 drafts exposed; the mechanism is the same, but it never crosses the user surface.
 
-Mechanically:
-1. The planner walks the typed AST and collects the set of distinct `EMBED(text, model_iri)` tuples referenced.
-2. For each tuple, it probes the cache; cache hits resolve immediately.
-3. Remaining tuples are sent in one batched Component-invocation request to the orchestrator. The orchestrator dispatches them concurrently (subject to its per-Embedder concurrency limits per §5.5).
-4. Returned vectors are substituted into the AST.
-5. The structural query plan begins execution with all `EMBED` values resolved to vector constants.
+### 6.4 Internal rank fusion (was: RRF rank materialisation)
 
-A query containing no `EMBED` calls skips the pre-pass entirely. A query containing only one `EMBED` call effectively pays a single round-trip — the same as if dispatch were inline.
-
-Failure semantics: if the pre-pass dispatch fails (embedder unreachable or Component error), the query fails at evaluation per §5.8 — *before* the structural query begins. No partial work is performed.
-
-### 6.4 RRF rank materialisation
-
-`RRF` is per-row-rank-based, not per-row-score-based: the score for row `r` is `sum_i 1 / (k + rank_i(r))` where `rank_i(r)` is `r`'s rank in source `i`'s ordering. To compute this, the planner cannot evaluate `RRF` row-locally; it must materialise per-source ranks first.
+When a query contains multiple `~` operators, or a single `~` operator whose property has multiple active similarity indexes (the hybrid case), the platform fuses per-source rankings via Reciprocal Rank Fusion. The fusion algorithm and parameters are platform-internal — no user-visible function call drives it — but the mechanics are the same as standard RRF.
 
 The execution shape:
 
-1. **Source identification.** From the typecheck (§4.7), the planner has the recognised set of underlying score expressions per `RRF` argument. Each argument resolves to either a `TEXT_SCORE(?prop, "q")` call, a `VECTOR_SIM(?prop, q_vec)` call, or an arithmetic combination of these (treated as a single ranked source under the combined ordering).
-2. **Per-source over-fetch.** For `TOP K BY RRF(...) DESC`, each source over-fetches by `K * over_fetch_factor` (default 4×) — large enough that the final top-K from the fused ranking is unlikely to depend on source rows beyond the over-fetched window.
-3. **Per-source rank materialisation.** Each source produces a ranked stream of `(row_iri, score)` pairs ordered by descending score. The planner assigns rank `j` to the `j`-th highest score per source (1-indexed; ties broken by row IRI for determinism).
-4. **Row union and rank join.** The planner unions the rows from all sources by row identity. For each row, it records its per-source rank (or "missing" if the row didn't appear in that source's over-fetched window).
-5. **Fused score computation.** For each row, compute `sum_i 1 / (k + rank_i)` treating missing-source rank as infinity (contributes 0). The default `k` is 60 unless overridden in the `RRF` call.
-6. **Final top-K.** Sort by fused score; emit top K per the outer `TOP K BY`.
+1. **Source identification.** Each `~` operator contributes one or more ranked sources. A text-only property contributes one (the TextIndex probe); a vector-only property contributes one (the VectorIndex probe); a hybrid property contributes two (text + vector). Multiple `~` operators on different properties contribute one per (operator, active-index) pair.
+2. **Per-source over-fetch.** Each source over-fetches by `K * over_fetch_factor` candidates (default 4×, or the operator's `limit:` hint if set) — large enough that the final top-K from the fused ranking is unlikely to depend on candidates beyond the over-fetched window.
+3. **Per-source rank materialisation.** Each source produces a ranked stream of `(row_iri, score)` pairs ordered by descending score. The platform assigns rank `j` to the `j`-th highest score per source (1-indexed; ties broken by row IRI for determinism).
+4. **Row union and rank join.** Union the rows from all sources by row identity. For each row, record its per-source rank (or "missing" if the row didn't appear in that source's over-fetched window).
+5. **Fused score computation.** For each row, compute `sum_i 1 / (k + rank_i)` treating missing-source rank as infinity (contributes 0). The default `k` is 60; the per-operator `k:` hint overrides it.
+6. **Final top-K.** Sort by fused score; emit top K per the outer `TOP K`.
 
-Rows that appear in *zero* sources are not in the result set (their fused score is 0). The result is therefore the union of the source result sets, with an importance ordering that depends on per-source ranks rather than per-source raw scores.
+Rows that appear in *zero* sources are not in the result set. The result is therefore the union of the source result sets, ordered by per-source-rank fusion rather than per-source raw scores.
+
+**Single-source short-circuit.** When a query has exactly one ranked source (one `~` operator on a single-index property, no `OR`-disjoined siblings), the platform skips fusion and ranks directly by the source's score. This is the common case.
 
 ### 6.5 Hybrid scheduling — text and vector probes in parallel
 
-A hybrid query like:
+The canonical hybrid query under D43 v1: a single `~` operator against a property that carries both an active TextIndex and an active VectorIndex.
 
 ```eigenql
-MATCH Doc(?d) { description: ?desc, embedding: ?e }
-WHERE TEXT_MATCH(?desc, "WAL truncation concurrent commit")
-   OR VECTOR_NEAR(?e, EMBED("rolling back a partial commit"), k: 100)
-RETURN ?d,
-       TEXT_SCORE(?desc, "WAL truncation concurrent commit") AS text_score,
-       VECTOR_SIM(?e, EMBED("rolling back a partial commit")) AS vec_score,
-       RRF(text_score, vec_score) AS fused
-TOP 20 BY fused DESC
+MATCH Doc(?d) { description: ?desc }
+WHERE ?desc ~ "WAL truncation under concurrent commit"
+TOP 20
 ```
 
-is planned as:
+One operator, one query string, two retrieval mechanisms running in parallel. The user expresses intent ("find Docs related to this"); the platform commits to running both probes and fusing them.
 
-1. **Pre-pass.** Dispatch `EMBED("rolling back a partial commit")` — single Component call, cached for subsequent rounds.
-2. **Parallel index probes.** Schedule the text probe (`TEXT_MATCH` / `TEXT_SCORE` against `?desc`) and the vector probe (`VECTOR_NEAR` against `?e`) concurrently. Each probe is bounded — text by `K * over_fetch_factor` (here `~80`), vector by `k = 100` from `VECTOR_NEAR`.
-3. **OR combination at row level.** Union the surviving rows: a row matches the WHERE if either probe returned it.
-4. **Structural filter** (when present — here, the `?d` must be a `Doc`, which is checked above the index probes via the existing structural pattern).
-5. **Per-source rank materialisation** (§6.4) for `text_score` and `vec_score`.
-6. **RRF computation** per row.
-7. **TOP 20 BY fused DESC**, ties broken by row IRI.
+Assuming `description` has both an active TextIndex and an active VectorIndex, this plans as:
+
+1. **Pre-pass.** Embed the RHS string `"WAL truncation under concurrent commit"` under the active VectorIndex's declared model (§6.3). One Component call; cached for subsequent identical queries. The text probe doesn't need a pre-pass — its analyzer-side tokenisation runs inline.
+2. **Parallel index probes.** Schedule the two probes against `?desc` concurrently:
+   - Text probe (BM25 over the tokenised RHS).
+   - Vector probe (HNSW or flat against the embedded RHS).
+   Each probe is bounded by `K * over_fetch_factor` (here `~80`) or the operator's `limit:` hint if supplied.
+3. **Structural filter** (when present — here, the `?d` must be a `Doc`, which is checked above the index probes via the existing structural pattern).
+4. **Per-source rank materialisation** (§6.4): each probe produces its own ranked candidate set.
+5. **RRF fusion** per row, k=60 default. A row appearing in both probes' top-K gets contributions from each; a row appearing only in one gets a single contribution.
+6. **Final TOP 20**, ties broken by row IRI.
 
 Cardinality at each step:
 
 | Step | Cardinality bound |
 |---|---|
-| Pre-pass | 1 EMBED call (cached after first use) |
-| Text probe | ≤ ~80 per visible layer; ~80 × #layers total before merge |
-| Vector probe | ≤ 100 per visible segment × #segments before merge |
-| Top-k merge per source | ≤ 80 (text) and ≤ 100 (vector) |
-| OR union | ≤ 180 |
-| Structural filter | ≤ 180 |
-| RRF | ≤ 180 |
+| Pre-pass | 1 embedding call (cached after first use) |
+| Text probe | ≤ ~80 per visible layer |
+| Vector probe | ≤ ~80 per visible segment |
+| Per-source top-k merge | ≤ 80 (text) and ≤ 80 (vector) |
+| Structural filter | ≤ ~160 |
+| RRF | ≤ ~160 |
 | Final TOP 20 | 20 |
 
 The pipeline runs in tens of milliseconds typical, vs. seconds-to-minutes if the planner had materialised the full Doc set and computed scores row-by-row.
 
+**Multi-operator hybrid.** When the user wants to retrieve against *multiple distinct queries* (the "find Docs related to either X or Y" shape), they compose with `OR`:
+
+```eigenql
+MATCH Doc(?d) { description: ?desc }
+WHERE ?desc ~ "WAL truncation concurrent commit"
+   OR ?desc ~ "rolling back a partial commit"
+TOP 20
+```
+
+Two operators, two distinct RHS strings, two embedding calls. Each operator's probes run concurrently with every other operator's probes; fusion happens across all contributing sources. Cardinality scales linearly with the number of operators — two operators on a hybrid-indexed property produces four ranked sources (2 operators × 2 indexes each), all fused via RRF.
+
+**The user-facing surface stays small in both cases.** Three lines for the single-operator case, four lines for the multi-operator OR. The planner's expansion handles probe scheduling, embedding pre-pass, fusion, and top-K truncation without forcing the user to write any of it by hand. That's the structural payoff of collapsing the surface to a single operator.
+
 ### 6.6 Structural-plus-retrieval scheduling
 
-Queries mixing retrieval predicates with structural patterns (joins, additional `WHERE` clauses, class constraints) require the planner to decide the order. The general rule: push the most selective predicate down to the index level first.
+Queries mixing `~` operators with structural patterns (joins, additional `WHERE` clauses, class constraints) require the planner to decide the order. The general rule: push the most selective predicate down to the index level first.
 
 Selectivity estimates:
 
 - **Structural patterns** carry Phase 14h-style cardinality estimates (per the triple index `idx_pos:` stats).
-- **TEXT_MATCH** selectivity is estimated from per-term document frequency: rare terms (low `df`) → high selectivity; common terms (high `df`) → low. The planner reads `df` values from the `text_term:<I>:<T>:<L>` value prefixes (§2.3) without deserialising the bitmaps.
-- **VECTOR_NEAR(k: K)** has exactly cardinality `K` after the index probe — it's a top-k constraint and its filter cardinality is statically known.
+- **`~` against a text index** has selectivity estimated from per-term document frequency: rare terms (low `df`) → high selectivity; common terms (high `df`) → low. The planner reads `df` values from the `text_term:<I>:<T>:<L>` value prefixes (§2.3) without deserialising the bitmaps.
+- **`~` against a vector index** has cardinality exactly equal to the per-segment probe bound (the operator's `limit:` hint or the planner-derived `K * over_fetch_factor`) — bounded by construction.
 
 Plan ordering heuristic: order predicates by ascending estimated cardinality, push the smallest to the index. Specifically:
 
-- If a structural filter binds the subject to a narrow set (e.g., `?d.author = "alice"` resolves to ~10 docs via the triple index), the planner pushes it ahead of any retrieval predicate and applies the index probe only to the resulting subject set.
-- If a retrieval predicate is highly selective (a rare-term `TEXT_MATCH` with `df = 100`), it goes first.
-- Otherwise, retrieval predicates with bounded `k` (VECTOR_NEAR, TEXT_SCORE under TOP K BY) provide bounded cardinality regardless of selectivity and run independently.
+- If a structural filter binds the subject to a narrow set (e.g., `?d.author = "alice"` resolves to ~10 docs via the triple index), the planner pushes it ahead of any `~` operator and applies the similarity probe only to the resulting subject set.
+- If a `~` operator is highly selective (a rare-term query with `df = 100` against the text path), it goes first.
+- Otherwise, `~` operators with bounded probe size (vector path always; text path under `TOP K`) provide bounded cardinality regardless of selectivity and run independently.
 
-Over-fetch adjustment: when a structural filter is expected to reduce the retrieval result by a factor of `f`, the planner over-fetches by an additional factor of `f` to compensate. So a query with `TEXT_MATCH(?desc, "x") AND ?d.author = "alice"` and `TOP 20 BY ts`, where the author filter is estimated to drop 80% of hits, plans the text probe to over-fetch `~20 / 0.2 = 100` rows.
+Over-fetch adjustment: when a structural filter is expected to reduce the retrieval result by a factor of `f`, the planner over-fetches by an additional factor of `f` to compensate. So a query with `?desc ~ "x"` AND `?d.author = "alice"` and `TOP 20`, where the author filter is estimated to drop 80% of similarity-passing rows, plans the similarity probes to over-fetch `~20 / 0.2 = 100` candidates per source.
 
 ### 6.7 D42 cost-model integration
 
 D43's ranked retrieval produces bounded result sets. The D42 spill-aware cost model (when it ships) exploits this for downstream operators:
 
-- After `TOP K BY`, the row count is at most `K`. Downstream `JOIN`, `ORDER BY`, `GROUP BY`, or aggregation operates on ≤ `K` rows — well within memory budgets for typical `K` (≤ 1000).
-- After `VECTOR_NEAR(k: K)` in a `WHERE` filter, the row count is at most `K` per outer binding. Joins from the constrained side stay bounded.
-- The cost model treats the output of retrieval primitives as having known small cardinality, so it does not insert spill-prep operations downstream of them by default.
+- After `TOP K`, the row count is at most `K`. Downstream `JOIN`, `ORDER BY`, `GROUP BY`, or aggregation operates on ≤ `K` rows — well within memory budgets for typical `K` (≤ 1000).
+- A `~` operator with a `limit:` hint produces at most `limit × #sources` candidates per outer binding before fusion; the planner uses this as the row-count estimate for downstream operators.
+- The cost model treats the output of similarity operators as having known bounded cardinality, so it does not insert spill-prep operations downstream of them by default.
 
-The D42 buffer pool isn't typically engaged by D43-style queries unless the user constructs a non-ranked pipeline (e.g., gathering all `TEXT_MATCH`-passing rows and joining against millions of structural rows). In those cases, D42's existing operator-spill machinery applies; D43 imposes no new requirements on it.
+The D42 buffer pool isn't typically engaged by D43-style queries unless the user constructs a non-ranked pipeline (e.g., gathering all `~`-passing rows without a `TOP K` clause and joining against millions of structural rows). In those cases, D42's existing operator-spill machinery applies; D43 imposes no new requirements on it.
 
 ### 6.8 Cost estimation stats
 
@@ -1035,9 +973,9 @@ For batched workloads (notebook-driven exploration, agent-driven query bursts), 
 
 The planner's failure surface is small:
 
-- **Typecheck failure** is already separated (§4.8) — the planner only receives well-typed plans.
-- **Pre-pass EMBED failure** (§5.8 query-side) — the planner returns a query-failure error before the structural query begins. No partial work is performed.
-- **Stats-fetch failure** (RocksDB read error during plan-time stats lookup) — the planner falls back to default selectivity estimates (treat all retrieval predicates as moderately selective). The query still executes; latency may be suboptimal but correctness is unaffected.
+- **Typecheck failure** is already separated (§4.5) — the planner only receives well-typed plans.
+- **Pre-pass embedding failure** (§5.8 query-side) — the platform-internal embedding of a `~` operator's RHS string for a vector-indexed property fails (embedder unreachable or Component error); the planner returns a query-failure error before the structural query begins. No partial work is performed.
+- **Stats-fetch failure** (RocksDB read error during plan-time stats lookup) — the planner falls back to default selectivity estimates (treat all `~` operators as moderately selective). The query still executes; latency may be suboptimal but correctness is unaffected.
 - **Plan-time Component registration changes** (an Embedder Component is deregistered between typecheck and execution) — D6's existing IO-Component-failure handling applies. Rare in practice.
 
 Runtime-only failure conditions (per-segment model_iri verification, vector segment not materialised) are handled in execution per §§2.4 and 5.5, not planning. The planner produces correct plans; correctness of the plan's *result* under all observable cache and materialisation states is the execution-layer's responsibility.
@@ -1094,13 +1032,13 @@ Within a single active Index Resource, scores from different layers are comparab
 
 In both cases, the top-k merge (§2.3 query path step 9; §2.4 query path step 8) treats each surviving hit independently. No score adjustment, normalisation, or recombination is applied across layers — chain-aware IDF (text) and uniform distance metric (vector) make the raw merge sound.
 
-### 7.5 Cross-Index scoring is not defined; use RRF
+### 7.5 Cross-Index scoring is platform-internal
 
-Scores from different Index Resources — e.g., a TextIndex and a VectorIndex targeting the same Property, or two TextIndexes targeting different Properties — are *not* commensurate. BM25 scores depend on the analyzer and the chain's document distribution; cosine similarity depends on the embedding model and is bounded differently from BM25. Direct arithmetic between them (`TEXT_SCORE(...) + VECTOR_SIM(...)`) is type-legal but semantically meaningless.
+Scores from different Index Resources — a TextIndex and a VectorIndex on the same Property, two TextIndexes targeting different Properties, or any combination — are *not* commensurate. BM25 scores depend on the analyzer and the chain's document distribution; cosine similarity depends on the embedding model and is bounded differently from BM25. Direct score arithmetic across them is structurally meaningless.
 
-RRF (§3.6) is the v1 mechanism for combining scores across Indexes. It does so via rank normalisation rather than score arithmetic — each source's scores are ranked independently, ranks are combined via the reciprocal-rank-fusion formula, and the result is a fused per-row score that no longer depends on the absolute score scales of the inputs.
+D43 v1 solves this by *not surfacing raw scores at all*. The `~` operator's output is a rank-derived ordering; the platform fuses across sources via Reciprocal Rank Fusion (§6.4) internally, with no user-visible score column or fusion call. Each source's ranking is computed independently; ranks are combined via the rank-fusion formula; the user gets a single ordering as the operator's output.
 
-The typechecker does not police cross-Index arithmetic — same as any other EigenQL Float arithmetic where the operands aren't unit-compatible. The user-facing documentation and the §3.8 worked examples should steer toward RRF for any hybrid retrieval; that's the only sound combination v1 offers.
+This eliminates a class of footguns the earlier D43 draft's score-projection surface could create: users summing BM25 and cosine scores, or building custom weighted combinations across mismatched scales. With scores hidden, those mistakes aren't expressible. The diagnostic surface deferred per §3.7 is where per-source attribution becomes inspectable when debugging is needed.
 
 ## 8. Open questions
 

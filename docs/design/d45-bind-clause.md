@@ -1,12 +1,29 @@
 # D45 — `BIND` Clause: Body-Scoped Variable Introduction
 
-*Status: draft proposal · June 2026*
+*Status: **withdrawn** · superseded by the D43 surface reset (June 2026).*
 
 *Companion documents: [D2 EigenQL specification](d2-eigenql-specification.md), [D43 text and vector retrieval](d43-text-and-vector-retrieval.md).*
 
 ---
 
+## Withdrawal note
+
+D45 was proposed to close a gap exposed by the D35 §7.4 / D43 §6.5 worked example: that example used SQL-style `AS` bindings (`RRF(text_score, vec_score)` referencing RETURN-renamed columns), which EigenQL doesn't support. BIND would have introduced SPARQL-style `BIND(expr AS ?var)` so per-row score variables (`?ts`, `?vs`) could be named and reused.
+
+That motivation was retrieval-specific, and it has been **eliminated by the D43 surface reset**. D43 now exposes retrieval through a single `~` operator (D43 §3.3) with hidden mechanism: per-row scores aren't user-visible, RRF isn't a user-visible function, fusion happens internally, and there is nothing left for a BIND-introduced variable to name. The §6.5 worked example reduces to two `~` operators in a `WHERE`-`OR` plus a plain `TOP K`; no intermediate score bindings are needed at any point.
+
+With its anchoring use case gone, BIND has no remaining justification in v1. The general "name an expression once for DRY" motivation is real but weak — none of EigenQL's current workloads benefit measurably, users can just repeat short expressions, and keeping an unused surface in the language taxes documentation, tests, and reader attention.
+
+**Status of the design.** Withdrawn. If a future workload reveals a strong need for query-body variable introduction (Datalog-style `LET`, SPARQL-style `BIND`, or another shape), the design can be revisited then — but the operational answers will likely differ from this document because the constraints will differ. The §1–§12 below remain as historical context only and should not be treated as a roadmap.
+
+**Implementation consequence.** If any BIND surface had been implemented (it briefly was, prior to the D43 reset), it is removed in the same pass that lands the `~` operator. See `d43-implementation-plan.md`'s M7 milestone for the consolidated language-surface delta.
+
+---
+
 ## 1. Motivation
+
+> *Historical — superseded by the D43 §3 surface reset. Retained for context only.*
+
 
 EigenQL today introduces query variables in exactly one place: MATCH patterns. RETURN renames an expression into a result column but does not produce a referenceable identifier; ORDER BY / TOP K BY consequently can reference *MATCH-bound* variables and (by a naming kludge) *RETURN-renamed-with-the-same-short-name* row columns, but not RETURN-introduced expression aliases.
 

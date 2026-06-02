@@ -315,43 +315,52 @@ M3 and M4 run in parallel after M2. M6 (HNSW) can start whenever M5 (vector flat
 
 ---
 
-## M7 — RRF + hybrid retrieval
+## M7 — Similarity operator + hybrid retrieval
 
-**Goal:** `RRF` planner recognition, per-source rank materialisation, `TOP K BY` clause, and the hybrid scheduling that runs text and vector probes in parallel and fuses results.
+**Goal:** D43's single user-visible retrieval surface — the `~` operator (D43 §3.3) with its optional hint block (D43 §3.4) — plus the platform-internal machinery it expands into: per-property active-index discovery, parallel probe scheduling for hybrid-indexed properties, internal RRF fusion across multiple sources, top-K pushdown.
 
 **Prerequisites:** M3, M5.
 
 **Duration:** ~1–2 weeks.
 
+**Surface-reset note.** An earlier draft of M7 (and a companion D45 BIND-clause proposal) modeled retrieval after the D35 §7.4 worked example: separate `TEXT_MATCH` / `TEXT_SCORE` / `VECTOR_NEAR` / `VECTOR_SIM` / `EMBED` / `RRF` primitives, a `TOP K BY <score>` clause, and a `BIND(expr AS ?var)` clause for naming per-row scores. That direction was abandoned after the D43 surface review (June 2026) — the seven primitives carried SQL-shaped imagination into a language that didn't need it, exposed implementation details (embedding vectors, raw scores, fusion algorithm) the user shouldn't care about, and forced workarounds (BIND) for surface gaps that disappear under a smaller language. The reset collapses all seven primitives + BIND into the single `~` operator. See D43 §3 for the user-visible surface and the D45 withdrawal note for the BIND rollback.
+
 **Deliverables:**
 
 | Item | Location | Notes |
 |---|---|---|
-| `TOP K BY` clause | Parser + evaluator | Mutually exclusive with `ORDER BY` / `LIMIT`; pushes `K` into the per-segment probe. |
-| Per-source rank materialisation | New: kernel/src/query/rank.rs | Each ranked source produces `(row, score)` pairs in descending order; ranks assigned 1, 2, 3, ...; ties broken by row IRI. |
-| `RRF` planner recognition | Typechecker + planner | Per §4.7: arguments must be planner-recognisable score expressions (TEXT_SCORE, VECTOR_SIM, or arithmetic). Fail at parse otherwise. |
-| `RRF` execution | Planner | Per §6.4: row union by identity; rank join; fused score = `sum_i 1/(k + rank_i)`; missing-source rank = infinity (contributes 0). |
-| Hybrid scheduling | Planner | Text and vector probes scheduled in parallel; OR combination at row level; structural filter; rank materialisation; RRF; TOP K. |
-| Over-fetch policy | Planner | Default 4× over-fetch; structural-selectivity-aware adjustment. |
+| `~` operator | Lexer, parser, AST | New `Tilde` token; binary operator with high precedence (below comparison, above logical). LHS must be a property-bound variable; RHS is a string expression. |
+| Hint block | Parser | Optional trailing `{ via:, model:, k:, limit: }` braces; validated keys; parsed alongside the operator. |
+| Typecheck | kernel/src/query/type_check.rs | Per D43 §4.3: LHS property-bound, RHS string, property has at least one active similarity index. Per §4.4: hint values are well-typed, consistent with active-index set. |
+| Active-similarity-index discovery | kernel/src/layer/index_discovery.rs (extension) | `active_similarity_indexes(P, H)` — union of `active_text_index(P, H)` + `active_vector_index(P, H)`. Memoised per query. |
+| Query-string embedding pre-pass | kernel/src/query/evaluate or new pre-pass module | Per D43 §6.3: collect every `~` operator whose property has an active VectorIndex; batch-dispatch embeddings to the orchestrator via the existing D6 envelope; substitute results before the structural query begins. |
+| Per-source probe scheduling | Planner (kernel/src/query/evaluate) | Per D43 §6.5: parallel text + vector probes per operator; each bounded by the operator's `limit:` hint or planner-derived `K * over_fetch_factor`. |
+| Internal RRF fusion | kernel/src/query/rank.rs + evaluator | Per D43 §6.4: rank materialisation across all contributing sources; fused score = `sum_i 1/(k + rank_i)` with default k=60 (overridable via the operator's `k:` hint); missing-source rank = ∞ (contributes 0). RRF is *not* user-visible. |
+| Top-K integration | Evaluator | `TOP K` clause (the existing D2 surface) consumes the implicit similarity-derived ranking when `~` operators appear in WHERE. No `BY <expr>` needed in the pure-similarity case. |
+| Over-fetch policy | Planner | Default 4× over-fetch per source; structural-selectivity-aware adjustment per D43 §6.6; operator's `limit:` hint overrides locally. |
 
 **Implementation guidance:**
 
-- `TOP K BY` semantically equivalent to `ORDER BY ... LIMIT K` but tells the planner *this is top-k retrieval*. The planner pushes K into the index probe rather than materialising the full ordered set.
-- RRF is per-row-rank-based, not score-based. The planner cannot evaluate RRF row-locally; it must materialise ranks first.
-- Hybrid OR semantics: rows that satisfy either probe enter the result; rows with hits in both sources have higher RRF scores (contributions from both).
-- Cost-model heuristic: order predicates by ascending estimated cardinality; push the most selective to the index.
+- The `~` operator's evaluator dispatches based on the active-index set: 1 active index → single probe → rank-by-score; 2 active indexes (hybrid) → parallel probes → internal RRF; multiple `~` operators in the same query → fuse all sources.
+- Fusion is *always* internal — RRF, scores, per-source ranks never enter the user-facing AST or RETURN projections. The pre-existing `Expression::Rrf` AST variant from the abandoned draft is removed.
+- Embedding-model selection comes from the active VectorIndex's declared `model`, with the operator's `model:` hint overriding. The user never names the embedder in the query body.
+- The user-visible `TOP K` truncates the WHERE-implied ranking. No `BY <expr>` clause for the similarity case; the existing `BY` keyword remains for non-similarity ORDER BY which is unchanged.
+- Diagnostic surface (`EXPLAIN`-equivalent for inspecting per-source scores and ranks) is deferred per D43 §3.7; without it, debuggability for unexpected rankings is reduced — flag this in user docs (M9.5).
 
 **Verification:**
 
-- `TOP K BY` test: verify equivalence with `ORDER BY ... LIMIT K` plus push-down (top-K pulled out of the index probe).
-- RRF unit test: known per-source rankings, expected fused scores; verify the per-row computation.
-- Hybrid integration test: D35-style query that combines TEXT_MATCH OR VECTOR_NEAR with RRF; verify the result set is the union of source results, ranked by fused scores.
+- Parser tests: `~` operator with and without hints; hint validation (unknown keys, wrong-typed values).
+- Typecheck tests: property without active similarity index; LHS not property-bound; RHS not string; per-hint consistency errors (`via: text` on a property with no TextIndex, `model:` with `via: text`, etc.).
+- Evaluator unit tests: single-index path (text-only, vector-only); hybrid path (RRF over text + vector on same property); multi-operator path (RRF over multiple `~` operators).
+- Integration test: rewritten D35 §7.4 worked example using `~` (replaces the earlier M9.1 integration test which used the abandoned surface).
+- Cache test: identical RHS strings across multiple `~` operators on different vector-indexed properties share the embedding cache.
 - Over-fetch test: a query with selective structural filter; verify the planner over-fetches enough to satisfy K after filtering.
 
 **Risk areas:**
 
-- The "planner-recognisable score expression" constraint surface is fuzzy; tighten with unit tests against a representative set of valid and invalid RRF argument shapes.
-- Top-k pushdown interaction with VECTOR_NEAR's own `k` parameter: verify the §6.2 semantics (VECTOR_NEAR's k is a row filter; outer TOP K applies after).
+- The `~` operator is high-precedence; conflicts with existing EigenQL operator-precedence rules need verification. Reserved-keyword test should cover this.
+- Multi-operator AND vs OR fusion semantics: AND requires the same row to satisfy all operators (intersection-of-candidate-sets); OR requires any operator to admit the row (union-of-candidate-sets). The fusion math is the same either way (RRF across contributing sources) but the candidate-set construction differs — needs care.
+- Hint validation must be strict — typos like `{ k: "60" }` (string, not int) should fail at parse with a clear error, not silently default.
 
 ---
 
