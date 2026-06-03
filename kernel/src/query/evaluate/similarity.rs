@@ -143,6 +143,35 @@ impl SimilarityContext {
     pub(super) fn probe_for(&self, expr: &Expression) -> Option<&SimilarityProbe> {
         self.probes.get(&(expr as *const _ as usize))
     }
+
+    /// Sum the fused similarity scores from every registered probe
+    /// for the binding's row. For each probe, project the binding's
+    /// `subject_var` to an IRI and add the probe's score if the IRI
+    /// is in its candidate set. Rows that none of the probes ranked
+    /// score 0.0; rows ranked by multiple probes accumulate (the
+    /// design's "rows satisfying both rank higher than rows
+    /// satisfying one" — §3.3).
+    pub(crate) fn aggregate_score(&self, binding: &super::pattern::Binding) -> f64 {
+        let mut sum = 0.0_f64;
+        for probe in self.probes.values() {
+            let v = match binding.get(&probe.subject_var) {
+                Some(v) => v,
+                None => continue,
+            };
+            let iri = match v {
+                Value::ResourceRef(i) => i.clone(),
+                Value::String(s) => match Iri::parse(s) {
+                    Ok(i) => i,
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            if let Some(score) = probe.scores.get(&iri) {
+                sum += *score;
+            }
+        }
+        sum
+    }
 }
 
 /// Schema view a similarity probe needs: which property a variable
@@ -861,5 +890,80 @@ mod tests {
         // probe returns no matches — `matched_subject_iris` is empty.
         let matched = matched_subject_iris(&rows, "d");
         assert!(matched.is_empty(), "expected no matches, got {matched:?}");
+    }
+
+    // ─── D43 §3.3 — TOP K end-to-end ──────────────────────────────────
+
+    #[test]
+    fn top_truncates_after_similarity_ranking() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING "urn:ex:Document"
+            MATCH Document(?d) { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "chain"
+            RETURN [] { d: ?d }
+            TOP 1
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        let matched = matched_subject_iris(&rows, "d");
+        // Both d1 and d2 contain "chain"; TOP 1 keeps the one with
+        // the higher BM25 score. Either is a valid winner under the
+        // tie-breaking rules, but the candidate set is bounded to 1.
+        assert_eq!(matched.len(), 1);
+        assert!(matched[0] == "urn:ex:d1" || matched[0] == "urn:ex:d2");
+    }
+
+    #[test]
+    fn top_keeps_only_ranked_subjects() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING "urn:ex:Document"
+            MATCH Document(?d) { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "chain"
+            RETURN [] { d: ?d }
+            TOP 5
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        let matched = matched_subject_iris(&rows, "d");
+        // Asking for TOP 5 when only 2 rows match returns 2 — TOP
+        // is a ceiling, not a floor, and only ranked subjects
+        // (those in any probe's score map) survive into RETURN.
+        assert_eq!(matched.len(), 2);
+        assert!(matched.iter().any(|s| s == "urn:ex:d1"));
+        assert!(matched.iter().any(|s| s == "urn:ex:d2"));
+    }
+
+    /// With two `~` operators in disjunction, rows that satisfy both
+    /// accumulate score and rank higher than rows that satisfy only
+    /// one (D43 §3.3 — "rows satisfying both rank higher").
+    #[test]
+    fn top_with_disjunctive_similarity_ranks_overlap_highest() {
+        let layer = build_text_corpus();
+        // d1: "kernel layer chain consolidation"  — matches "kernel" AND "chain"
+        // d2: "walk the chain and apply shadow filter" — matches "chain" only
+        // d3: "WAL truncation under concurrent commit" — matches neither
+        let rows = execute_with(
+            r#"
+            USING "urn:ex:Document"
+            MATCH Document(?d) { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "kernel" OR ?desc ~ "chain"
+            RETURN [] { d: ?d }
+            TOP 1
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        let matched = matched_subject_iris(&rows, "d");
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0], "urn:ex:d1");
     }
 }

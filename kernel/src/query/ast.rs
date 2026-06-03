@@ -144,6 +144,13 @@ pub struct Query {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub distinct: bool,
+    /// D43 §3.3 — ranked truncation. `TOP N` is the user-facing
+    /// surface for "give me the N most relevant rows." When the
+    /// query contains a similarity operator, ordering is the fused
+    /// similarity score; without `~`, `TOP N` is rejected at parse
+    /// (use `LIMIT` for un-ranked truncation). Mutually exclusive
+    /// with `LIMIT` and with `ORDER BY` in the same query.
+    pub top: Option<usize>,
 }
 
 /// A MATCH pattern.

@@ -167,6 +167,19 @@ impl Parser {
             None
         };
 
+        // D43 §3.3 — `TOP N` is the ranked-truncation surface. The
+        // grammar allows it anywhere in the trailing clause set so
+        // queries like `WHERE ?d ~ "x" TOP 20` and
+        // `WHERE ?d ~ "x" RETURN [] {...} TOP 20` both parse;
+        // typecheck enforces the structural constraints (no LIMIT,
+        // no ORDER BY, at least one `~` in WHERE).
+        let top = if self.at(&TokenKind::Top) {
+            self.advance();
+            Some(self.parse_usize()?)
+        } else {
+            None
+        };
+
         let offset = if self.at(&TokenKind::Offset) {
             self.advance();
             Some(self.parse_usize()?)
@@ -190,6 +203,7 @@ impl Parser {
             limit,
             offset,
             distinct,
+            top,
         })
     }
 
@@ -1876,5 +1890,19 @@ mod tests {
         .expect_err("bad via value should fail at parse");
         let msg = format!("{err}");
         assert!(msg.contains("via"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn top_n_parses_into_query_field() {
+        let prog = parse_str(
+            r#"
+            MATCH ?d { description: ?desc }
+            WHERE ?desc ~ "q"
+            TOP 20
+            "#,
+        )
+        .unwrap();
+        assert_eq!(prog.query.top, Some(20));
+        assert!(prog.query.limit.is_none());
     }
 }

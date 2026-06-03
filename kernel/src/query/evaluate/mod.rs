@@ -156,6 +156,21 @@ pub fn evaluate(
         )?;
     }
 
+    // D43 §3.3 — `TOP N` ranks the surviving bindings by their
+    // aggregate similarity score before RETURN shaping, then keeps
+    // the top N. Sorting before shaping is load-bearing: shaped
+    // resources project away the subject-IRI binding the score
+    // lookup needs. Stable sort + descending-score key keeps the
+    // ordering deterministic across runs.
+    if let Some(n) = program.query.top {
+        bindings.sort_by(|a, b| {
+            let sa = similarity_ctx.aggregate_score(a);
+            let sb = similarity_ctx.aggregate_score(b);
+            sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        bindings.truncate(n);
+    }
+
     // 4. RETURN shaping.
     let mut results: Vec<Resource> = if program.query.result.is_empty() {
         bindings

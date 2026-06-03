@@ -154,7 +154,71 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
         }
     }
 
+    // D43 §3.3 — TOP K structural rules.
+    //
+    //   1. TOP is mutually exclusive with LIMIT (different surfaces:
+    //      LIMIT is un-ranked truncation, TOP is similarity-ranked).
+    //   2. TOP is mutually exclusive with ORDER BY (ranking comes
+    //      from the similarity score, not a user expression).
+    //   3. TOP requires at least one similarity operator in WHERE —
+    //      without `~`, ranking has no source.
+    //   4. TOP N requires N > 0.
+    if let Some(n) = program.query.top {
+        if n == 0 {
+            errors.push(QueryError::type_check(
+                "top_must_be_positive",
+                "TOP N requires N to be a positive integer".to_string(),
+            ));
+        }
+        if program.query.limit.is_some() {
+            errors.push(QueryError::type_check(
+                "top_with_limit",
+                "TOP and LIMIT are mutually exclusive — use TOP for similarity-ranked truncation and LIMIT for un-ranked truncation".to_string(),
+            ));
+        }
+        if !program.query.order_by.is_empty() {
+            errors.push(QueryError::type_check(
+                "top_with_order_by",
+                "TOP and ORDER BY are mutually exclusive — TOP draws its ordering from the similarity score".to_string(),
+            ));
+        }
+        if !any_similarity_in_where(&program.query.body) {
+            errors.push(QueryError::type_check(
+                "top_without_similarity",
+                "TOP N requires at least one `~` similarity operator in WHERE (use LIMIT for un-ranked truncation)".to_string(),
+            ));
+        }
+    }
+
     errors
+}
+
+/// Walk a MatchPart's WHERE conditions looking for a `~` operator
+/// anywhere — including under boolean combinators and other nested
+/// expressions. Used by the TOP K structural check to ensure ranking
+/// has a source.
+fn any_similarity_in_where(part: &MatchPart) -> bool {
+    part.conditions.iter().any(expr_has_similarity)
+}
+
+fn expr_has_similarity(expr: &Expression) -> bool {
+    match expr {
+        Expression::Similarity { .. } => true,
+        Expression::Binary { left, right, .. } => {
+            expr_has_similarity(left) || expr_has_similarity(right)
+        }
+        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
+            expr_has_similarity(operand)
+        }
+        Expression::FunctionCall { args, .. } => args.iter().any(expr_has_similarity),
+        Expression::Aggregate { arg, .. } => expr_has_similarity(arg),
+        Expression::Array(es) => es.iter().any(expr_has_similarity),
+        Expression::Object(pairs) => pairs.iter().any(|(_, v)| expr_has_similarity(v)),
+        Expression::Literal(_)
+        | Expression::Variable(_)
+        | Expression::NotExists(_)
+        | Expression::DotPath { .. } => false,
+    }
 }
 
 /// Check a MatchPart: validate USING IRIs resolve to classes.
@@ -2137,6 +2201,91 @@ mod tests {
                 .iter()
                 .any(|e| e.rule == "similarity_hint_model_mismatch"),
             "expected model-mismatch, got: {errors:?}"
+        );
+    }
+
+    // ─── D43 §3.3 — TOP K structural typing tests ──────────────────────
+
+    #[test]
+    fn top_with_similarity_passes() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            TOP 20
+            "#,
+        );
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn top_zero_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            TOP 0
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_must_be_positive"),
+            "expected top_must_be_positive, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn top_with_limit_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            LIMIT 10
+            TOP 5
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_with_limit"),
+            "expected top_with_limit, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn top_with_order_by_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            ORDER BY ?desc
+            TOP 5
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_with_order_by"),
+            "expected top_with_order_by, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn top_without_similarity_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            TOP 5
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_without_similarity"),
+            "expected top_without_similarity, got: {errors:?}"
         );
     }
 }
