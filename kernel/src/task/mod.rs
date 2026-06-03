@@ -31,6 +31,7 @@
 //! In 9b-iii, every `session_id` is `Uuid::nil()` — the single
 //! hardwired session (D21 §3.7). Multi-session lands in Phase 14.
 
+pub mod reindex;
 pub mod sweep;
 pub mod sweep_registry;
 

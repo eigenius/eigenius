@@ -2572,4 +2572,179 @@ mod tests {
             .expect("hnsw_graph_bytes decode to wire format");
         assert_eq!(layout.count(), 4);
     }
+
+    /// D43 §2.8 / M8.6 — search-equivalence under at-head
+    /// consolidation for `top_k_subjects`. The vector analogue of
+    /// [`text_search_equivalence_under_at_head_consolidation`]:
+    /// after consolidating a range of layers that each contributed
+    /// vector segments, vector queries at the post-consolidation
+    /// head must return the same ranked subject list (modulo the
+    /// `defining_layer` label, which legitimately changes to the
+    /// consolidated layer's id) as queries at the pre-consolidation
+    /// head.
+    ///
+    /// Mechanism: [`consolidate_layer_vectors`] concatenates
+    /// surviving vectors from the collapsed range, relabels their
+    /// `defining_layer` to the consolidated layer's id, and writes
+    /// one segment per active VectorIndex. The collapsed layers'
+    /// segments become unreachable through head-rooted lookups; the
+    /// candidate set is the same modulo the relabel.
+    #[test]
+    fn vector_search_equivalence_under_at_head_consolidation() {
+        use crate::bootstrap::bootstrap;
+        use crate::ontology::well_known as wk;
+        use crate::program::embedder::{DummyEmbedder, Embedder, EmbedderRegistry};
+        use crate::query::vector::distance::Metric;
+        use crate::query::vector::indexing::sweep_layer_vectors;
+        use crate::query::vector::search::top_k_subjects;
+
+        let backend = MemoryPersistentBackend::new();
+        let storage = LayerStorage::in_memory();
+        let target_prop = "urn:eigenius:test:body";
+        let model_iri = "urn:eigenius:embed:dummy:v1";
+
+        let bootstrap_ctx = bootstrap().expect("bootstrap");
+        let bootstrap_head = Arc::clone(bootstrap_ctx.head());
+        let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
+        while let Some(layer) = cursor {
+            backend
+                .store_layer(&layer)
+                .expect("persist bootstrap layer");
+            cursor = layer.parent().cloned();
+        }
+
+        // VectorIndex declaration on `body`.
+        let mut vi_layer = LayerBuilder::new("vi", Some(Arc::clone(&bootstrap_head)));
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        vi_layer.add_resource(vi).unwrap();
+        let vi_layer = Arc::new(vi_layer.build(storage.clone()));
+        backend.store_layer(&vi_layer).unwrap();
+
+        // Four content layers each contributing one Resource. Each
+        // is swept post-build so its per-layer segment carries the
+        // (subject, vector) pair.
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_iri, 8)));
+        let bodies = [
+            ("doc1", "WAL truncation under concurrent commit"),
+            ("doc2", "wal segment rotation"),
+            ("doc3", "rollback handling unrelated to WAL"),
+            ("doc4", "truncation of orphan log files"),
+        ];
+        let mut content_layers: Vec<Arc<Layer>> = Vec::new();
+        let mut prev = Arc::clone(&vi_layer);
+        for (sid, body) in bodies {
+            let mut lb = LayerBuilder::new(&format!("L_{sid}"), Some(Arc::clone(&prev)));
+            let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            );
+            r.set(iri(target_prop), Value::String(body.to_string()));
+            lb.add_resource(r).unwrap();
+            let layer = Arc::new(lb.build(storage.clone()));
+            backend.store_layer(&layer).unwrap();
+            sweep_layer_vectors(&layer, &reg, None).expect("sweep");
+            content_layers.push(Arc::clone(&layer));
+            prev = layer;
+        }
+        let head_before = Arc::clone(&prev);
+        backend.put_branch("main", head_before.id()).unwrap();
+
+        // Embed a query string and capture the ranked subject list
+        // at the pre-consolidation head. The query vector is the
+        // DummyEmbedder applied to a deterministic input — its
+        // numerical value is irrelevant; what matters is that the
+        // same vector is fed to both pre- and post-consolidation
+        // probes.
+        let embedder = DummyEmbedder::new(model_iri, 8);
+        let query_vec = embedder.embed("wal truncation").expect("query embed");
+        let index_iri = iri("urn:eigenius:test:vi");
+        let model_iri_parsed = iri(model_iri);
+        let vector_index = Arc::clone(&head_before.storage().vector_index);
+        let hits_before = top_k_subjects(
+            &head_before,
+            vector_index.as_ref(),
+            None,
+            &index_iri,
+            &query_vec,
+            10,
+            None,
+            &model_iri_parsed,
+            Metric::Cosine,
+        )
+        .expect("pre-consolidation probe");
+        let subjects_before: Vec<String> = hits_before
+            .iter()
+            .map(|h| h.subject.as_str().to_string())
+            .collect();
+        assert!(
+            !subjects_before.is_empty(),
+            "pre-consolidation probe must return hits"
+        );
+
+        // Consolidate the full content range.
+        let from = content_layers[0].id().clone();
+        let to = head_before.id().clone();
+        let outcome = consolidate_chain(
+            "main",
+            from,
+            to,
+            ConsolidateOpts::default(),
+            storage.clone(),
+            &backend,
+        )
+        .expect("consolidation succeeds");
+        assert!(outcome.head_advanced);
+
+        // Rebuild the chain from the new head and re-probe with the
+        // same query vector. The consolidated segment carries every
+        // surviving subject under the new head's id; the ranked
+        // subject list (ignoring `defining_layer`, which moved to
+        // the consolidated layer) must be invariant.
+        let new_head_id = backend.get_branch("main").unwrap().unwrap();
+        let info = backend.load_chain_from(&new_head_id).unwrap().unwrap();
+        let head_after = crate::layer::build_chain(info, storage.clone());
+        let hits_after = top_k_subjects(
+            &head_after,
+            vector_index.as_ref(),
+            None,
+            &index_iri,
+            &query_vec,
+            10,
+            None,
+            &model_iri_parsed,
+            Metric::Cosine,
+        )
+        .expect("post-consolidation probe");
+        let subjects_after: Vec<String> = hits_after
+            .iter()
+            .map(|h| h.subject.as_str().to_string())
+            .collect();
+
+        assert_eq!(
+            subjects_before, subjects_after,
+            "vector-search ranked subject list must be invariant under at-head consolidation \
+             (D43 §2.8 atomicity)"
+        );
+        // Defining-layer for every post-consolidation hit must be
+        // the new consolidated layer — the collapsed range's per-
+        // layer segments are unreachable through head-rooted lookups.
+        for hit in &hits_after {
+            assert_eq!(
+                hit.defining_layer, new_head_id,
+                "post-consolidation hit must be labeled with the consolidated layer's id"
+            );
+        }
+    }
 }
