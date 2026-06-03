@@ -1,0 +1,18 @@
+[package]
+name = "eigenius-obograph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Import OBO-JSON ontology dumps (Gene Ontology, ChEBI, etc.) into Eigon-JSON Resources for D43-M9 life-science integration."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "obograph-import"
+path = "src/bin/obograph_import.rs"

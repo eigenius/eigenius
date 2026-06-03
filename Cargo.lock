@@ -965,6 +965,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-obograph"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "eigenius-runtime-substrate"
 version = "0.1.0"
 dependencies = [

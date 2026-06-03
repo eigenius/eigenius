@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "kernel",
     "crates/eigenius-config",
+    "crates/eigenius-obograph",
     "crates/runtime-substrate",
     "crates/eigenius-julia",
     "crates/eigenius-lean",

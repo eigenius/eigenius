@@ -18,6 +18,12 @@
     ]
   },
   {
+    "@id": "urn:eigenius:core:Resource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Catch-all class for entities whose more specific class isn't asserted. Used by importers and other tooling for instances that need to participate in pattern matching without a domain-specific Class declaration — OBO `INDIVIDUAL` nodes, anonymous edge targets that no `nodes[]` entry covered, etc. Resource sits at the top of the class lattice as the universal supertype.",
+    "urn:eigenius:core:short_name": "Resource"
+  },
+  {
     "@id": "urn:eigenius:core:Property",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:description": "A property defines a named attribute that resources may carry. Properties declare their data_type and optional constraints (format, pattern, content type, class types).",
@@ -368,6 +374,13 @@
     "urn:eigenius:core:short_name": "source_irl",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri"
+  },
+  {
+    "@id": "urn:eigenius:core:deprecated",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Boolean flag indicating the resource is deprecated by its source authority. Set by importers when the upstream record carried a deprecation marker (OBO `meta.deprecated`, OWL `owl:deprecated`); the resource itself stays in the document for back-reference but downstream consumers can filter it out via a `WHERE NOT ?x.deprecated = true` style guard.",
+    "urn:eigenius:core:short_name": "deprecated",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean"
   },
 
   {
