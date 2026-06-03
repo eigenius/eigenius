@@ -234,7 +234,7 @@ Evaluates each element and returns a `Value::Array`. Useful in `IN` predicates a
 WHERE ?country IN ["DE", "FR", "IT"]
 ```
 
-## 7.10a. Similarity operator (`~`)
+## 7.10. Similarity operator (`~`)
 
 ```rust
 Expression::Similarity { property: Variable, query: Box<Expression>, hints: HintSet }
@@ -255,9 +255,9 @@ WHERE ?desc ~ "WAL truncation" { k: 30, limit: 50 }
 
 The operator returns Boolean for filtering; the platform-internal similarity score it computed feeds `TOP N`'s implicit ranking (see [chapter 4 §4.10](04-program-structure.md#410-order-by-limit-top-offset-distinct)).
 
-Precedence: relational tier (§7.11). `~` is non-chaining on the left — `?a ~ "x" ~ "y"` is rejected by the parser. The full surface, the hint catalogue, the typecheck rules, and worked examples live in **[chapter 13](13-text-and-vector-retrieval.md)**.
+Precedence: relational tier (§7.12). `~` is non-chaining on the left — `?a ~ "x" ~ "y"` is rejected by the parser. The full surface, the hint catalogue, the typecheck rules, and worked examples live in **[chapter 6](06-text-and-vector-retrieval.md)**.
 
-## 7.10. Objects
+## 7.11. Objects
 
 ```rust
 Expression::Object(Vec<(Name, Expression)>)
@@ -267,7 +267,7 @@ Object literals in expression position are **not yet supported** by the evaluato
 
 `RETURN [] { ... }` uses a similar-looking object syntax but that's a distinct grammar production: a list of `ReturnItem`, not an expression.
 
-## 7.11. Precedence
+## 7.12. Precedence
 
 From tightest to loosest binding, implemented as the [`parse_*_expr`](../../../kernel/src/query/parser.rs) ladder:
 
