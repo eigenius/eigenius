@@ -81,11 +81,15 @@
 //! [`resolve_predicate_iri`]. After the node + edge pass,
 //! [`ensure_synthetic_property_declarations`] walks the accumulated
 //! Resources, finds every `urn:obo:*` slot that doesn't yet have a
-//! Property declaration, and synthesises one. Synonym slots get
-//! `data_type: core:string`; edge-derived slots get
-//! `data_type: core:resource`. The result is a self-contained Eigon
-//! document that the kernel validator can chase to a declaration
-//! for every property IRI it sees.
+//! Property declaration, and synthesises one — *unless* the IRI is
+//! listed in [`META_DECLARED_IRIS`], in which case it's covered by
+//! the shared `ontologies/obo/obo-meta-ontology.json` layer that the
+//! kernel loads at bootstrap and re-emitting would just shadow the
+//! authoritative declaration. Synonym scopes and `inverseOf` are
+//! all in the meta layer; ad-hoc `urn:obo:*` predicates the
+//! converter discovers in real data still get a per-document
+//! declaration. Synonym slots get `data_type: core:string`; edge-
+//! derived slots get `data_type: core:resource`.
 //!
 //! **Synonyms ingested in v1.** Each OBO node's `meta.synonyms` array
 //! collapses into per-scope arrays of strings on the Resource:
@@ -222,6 +226,23 @@ const SYN_EXACT: &str = "urn:obo:has_exact_synonym";
 const SYN_RELATED: &str = "urn:obo:has_related_synonym";
 const SYN_BROAD: &str = "urn:obo:has_broad_synonym";
 const SYN_NARROW: &str = "urn:obo:has_narrow_synonym";
+const OBO_INVERSE_OF: &str = "urn:obo:inverseOf";
+
+/// IRIs declared by the shared `ontologies/obo/obo-meta-ontology.json`
+/// layer loaded by the kernel at bootstrap. The post-pass skips
+/// synthesising declarations for these because the meta layer
+/// already covers them — re-emitting them per-imported-document
+/// would shadow the authoritative declarations with redundant
+/// copies. Adding a new declaration to the meta ontology requires
+/// adding its IRI here too (or rather, the omission silently lets
+/// the per-doc shadow win, which masks the meta version).
+const META_DECLARED_IRIS: &[&str] = &[
+    SYN_EXACT,
+    SYN_RELATED,
+    SYN_BROAD,
+    SYN_NARROW,
+    OBO_INVERSE_OF,
+];
 
 /// Map one OBO synonym `pred` slot to the Eigon-side synthetic IRI
 /// the converter stores its values under. Returns `None` for
@@ -421,6 +442,13 @@ fn ensure_synthetic_property_declarations(by_iri: &mut BTreeMap<String, Resource
             // `urn:obo:*` namespace, but possible if a future pass
             // hand-injects a Property under the same IRI; the
             // explicit declaration wins.
+            continue;
+        }
+        if META_DECLARED_IRIS.contains(&iri_str.as_str()) {
+            // Covered by the shared `obo-meta-ontology.json` layer
+            // (loaded by the kernel ahead of any imported document
+            // via `bootstrap`). Emitting an inline declaration here
+            // would shadow the authoritative one, so skip.
             continue;
         }
         let iri = Iri::parse(&iri_str).expect("converter-synthesised IRI");
@@ -1002,19 +1030,13 @@ mod tests {
         assert!(n.get(&unknown_iri).is_none());
     }
 
-    /// Post-pass synthesises a Property declaration for every
-    /// `urn:obo:*` slot referenced by any Resource. Verifies:
-    ///
-    /// 1. `urn:obo:has_exact_synonym` (string-typed slot from
-    ///    synonyms) gets `data_type: core:string`.
-    /// 2. `urn:obo:inverseOf` (resource-typed slot from an edge) gets
-    ///    `data_type: core:resource`.
-    /// 3. Both carry `is_a: [core:Property]` and a `short_name`
-    ///    derived from the trailing IRI fragment.
-    /// 4. The report's `counts_by_type` reflects the synthesised
-    ///    declarations under the `<synthetic-PROPERTY>` bucket.
+    /// Meta-declared `urn:obo:*` IRIs (the four synonym scopes plus
+    /// `inverseOf`) are skipped by the per-document synthesiser
+    /// because `ontologies/obo/obo-meta-ontology.json` (loaded by
+    /// the kernel at bootstrap) already declares them. The
+    /// converter must not emit shadow copies.
     #[test]
-    fn synthetic_property_declarations_emitted_for_used_urn_obo_slots() {
+    fn synthetic_property_declarations_skip_meta_layer_iris() {
         let doc: GraphDocument = serde_json::from_str(
             r#"{"graphs":[{
                 "nodes": [
@@ -1038,39 +1060,70 @@ mod tests {
             report.errors
         );
 
-        // Synthetic-Property bucket reflects two declarations:
-        // urn:obo:has_exact_synonym and urn:obo:inverseOf.
+        // Neither has_exact_synonym nor inverseOf gets re-declared
+        // — both are in META_DECLARED_IRIS.
+        assert!(
+            !report.counts_by_type.contains_key("<synthetic-PROPERTY>"),
+            "meta IRIs must not be re-synthesised; counts: {:?}",
+            report.counts_by_type
+        );
+        assert!(
+            report
+                .resources
+                .iter()
+                .all(|r| r.id().map(|i| i.as_str() != SYN_EXACT).unwrap_or(true)),
+            "obo:has_exact_synonym must not be re-declared by the converter"
+        );
+        assert!(
+            report
+                .resources
+                .iter()
+                .all(|r| r.id().map(|i| i.as_str() != OBO_INVERSE_OF).unwrap_or(true)),
+            "obo:inverseOf must not be re-declared by the converter"
+        );
+    }
+
+    /// Ad-hoc `urn:obo:*` predicates that aren't covered by the
+    /// meta layer still get a per-document declaration so the
+    /// kernel validator can resolve them. Synthesises one
+    /// declaration per distinct uncovered predicate, attributing it
+    /// to the converter.
+    #[test]
+    fn synthetic_property_declarations_emitted_for_ad_hoc_urn_obo_slots() {
+        let doc: GraphDocument = serde_json::from_str(
+            r#"{"graphs":[{
+                "nodes": [
+                    {"id": "http://example.org/N1", "type": "CLASS"},
+                    {"id": "http://example.org/N2", "type": "CLASS"}
+                ],
+                "edges": [
+                    {"sub": "http://example.org/N1", "pred": "hasAlternativeNamespace", "obj": "http://example.org/N2"}
+                ]
+            }]}"#,
+        )
+        .unwrap();
+        let report = convert_document(&doc);
+        assert!(
+            report.errors.is_empty(),
+            "no soft errors: {:?}",
+            report.errors
+        );
+        // `hasAlternativeNamespace` is not in META_DECLARED_IRIS;
+        // converter must synthesise a declaration for it.
         assert_eq!(
             report.counts_by_type.get("<synthetic-PROPERTY>"),
-            Some(&2),
+            Some(&1),
             "counts_by_type: {:?}",
             report.counts_by_type
         );
-
-        // urn:obo:has_exact_synonym → core:string data_type.
-        let syn_decl = find(&report, SYN_EXACT);
-        match syn_decl.get(&Iri::parse(DATA_TYPE).unwrap()) {
-            Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), STRING_DATA_TYPE),
-            other => panic!("expected data_type ResourceRef, got {other:?}"),
-        }
-        match syn_decl.get(&Iri::parse(IS_A).unwrap()) {
-            Some(Value::Array(arr)) => {
-                assert!(arr
-                    .iter()
-                    .any(|v| matches!(v, Value::ResourceRef(i) if i.as_str() == PROPERTY)));
-            }
-            other => panic!("expected is_a Array, got {other:?}"),
-        }
-        match syn_decl.get(&Iri::parse(SHORT_NAME).unwrap()) {
-            Some(Value::String(s)) => assert_eq!(s, "has_exact_synonym"),
-            other => panic!("expected short_name, got {other:?}"),
-        }
-
-        // urn:obo:inverseOf → core:resource data_type.
-        let inv_decl = find(&report, "urn:obo:inverseOf");
-        match inv_decl.get(&Iri::parse(DATA_TYPE).unwrap()) {
+        let decl = find(&report, "urn:obo:hasAlternativeNamespace");
+        match decl.get(&Iri::parse(DATA_TYPE).unwrap()) {
             Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
             other => panic!("expected data_type ResourceRef, got {other:?}"),
+        }
+        match decl.get(&Iri::parse(SHORT_NAME).unwrap()) {
+            Some(Value::String(s)) => assert_eq!(s, "hasAlternativeNamespace"),
+            other => panic!("expected short_name, got {other:?}"),
         }
     }
 
@@ -1217,27 +1270,33 @@ mod tests {
     /// importer, not declared by the curators.
     #[test]
     fn synthesised_property_attributes_to_converter() {
+        // Use an ad-hoc bare-string predicate (`adhocLink`) that
+        // isn't in META_DECLARED_IRIS — so the converter synthesises
+        // a per-document declaration. Meta-covered synonyms wouldn't
+        // produce a synthesised Resource to inspect.
         let doc: GraphDocument = serde_json::from_str(
             r#"{"graphs":[{
                 "id": "http://example.org/g1",
-                "nodes": [{
-                    "id": "http://example.org/N1",
-                    "type": "CLASS",
-                    "meta": {"synonyms": [{"pred": "hasExactSynonym", "val": "alias"}]}
-                }]
+                "nodes": [
+                    {"id": "http://example.org/A", "type": "CLASS"},
+                    {"id": "http://example.org/B", "type": "CLASS"}
+                ],
+                "edges": [
+                    {"sub": "http://example.org/A", "pred": "adhocLink", "obj": "http://example.org/B"}
+                ]
             }]}"#,
         )
         .unwrap();
         let report = convert_document(&doc);
-        let syn_decl = find(&report, SYN_EXACT);
-        match syn_decl.get(&Iri::parse(DECLARED_BY).unwrap()) {
+        let decl = find(&report, "urn:obo:adhocLink");
+        match decl.get(&Iri::parse(DECLARED_BY).unwrap()) {
             Some(Value::String(s)) => {
                 assert_eq!(s, CONVERTER_DECLARED_BY);
             }
             other => panic!("expected converter declared_by, got {other:?}"),
         }
         // is_a includes both Property and DeclaredResource.
-        let is_a_iris: Vec<String> = match syn_decl.get(&Iri::parse(IS_A).unwrap()).unwrap() {
+        let is_a_iris: Vec<String> = match decl.get(&Iri::parse(IS_A).unwrap()).unwrap() {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
