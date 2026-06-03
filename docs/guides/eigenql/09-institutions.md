@@ -4,7 +4,7 @@ Institutions are domain-specific reasoning systems registered with the kernel as
 
 This chapter focuses on what EigenQL sees of that surface: how qualified-name function calls dispatch to a `Decidable` `QueryClass`, how the resulting `Verdict` becomes a Boolean via a postfix predicate, how comorphisms enter only through `FIBER` parameter coercion, and how the classification table differs from the legacy D10 form.
 
-## 8.1. What lives in the chain
+## 9.1. What lives in the chain
 
 Five resource shapes carry an institution's declared surface (D14 §4):
 
@@ -18,29 +18,29 @@ Five resource shapes carry an institution's declared surface (D14 §4):
 
 EigenQL's parser, type checker, and evaluator consult two derived structures built from those declarations:
 
-- [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) — by-IRI lookups for the five shapes above. Built by `InstitutionIndex::from_layer` on the active layer chain. EigenQL's compile-time classifier (§8.5) uses it to decide what kind of call a qualified-name IRI is.
+- [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) — by-IRI lookups for the five shapes above. Built by `InstitutionIndex::from_layer` on the active layer chain. EigenQL's compile-time classifier (§9.5) uses it to decide what kind of call a qualified-name IRI is.
 - [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) — `BTreeMap<Iri, Box<dyn Institution>>` keyed by the institution's IRI. Used to dispatch `extract_typed` / `reify` / `query` calls (D14 §8) when an EigenQL evaluator step needs runtime-side reasoning.
 
 The runtime is rebuilt on every commit by the kernel's [`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs) — every `Institution` resource on the chain whose `runtime` is `wasm` produces a `WasmInstitution` registered against its IRI. **Substrate-hosted institutions** (`runtime: external`, where the worker lives in a sibling container managed by the orchestrator's substrate addon — Julia v1, Python and others tracked in [issue #41](https://github.com/eigenius/eigenius/issues/41)) are registered through a parallel mechanism that resolves `Institution.requires_environment` to a `RuntimeEnvironment` resource and dispatches via the substrate's `LanguageRuntime` trait. From EigenQL's perspective there's no difference: both kinds answer `Institution::query` against the same trait surface, with the same `extract_typed` / `reify` four-step pipeline. See [platform §10](../platform/10-wasm-institutions.md) for the WASM-hosted path and [platform §11](../platform/11-runtime-substrate.md) for the substrate path. **In-process** runtimes (`runtime: in_process`, kernel-embedded Rust) are caller-registered.
 
-## 8.2. The classification at parse time
+## 9.2. The classification at parse time
 
-When the EigenQL parser sees a `qualified_call` (`ns:local(args)`), the type checker resolves it to a full IRI and looks it up in the `InstitutionIndex`. Three institution-level kinds are recognised under D14 (D14 §9.5):
+When the EigenQL parser sees a `qualified_call` (`ns:local(args)`), the type checker resolves it to a full IRI and looks it up in the `InstitutionIndex`. Three institution-level kinds are recognised under D14 (D14 §10.5):
 
 | Index entry | EigenQL emits | Runtime call |
 |---|---|---|
 | `QueryClass` whose `dispatch_role` includes `Decidable` | `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)` (returns a `Verdict`) | `Institution::query(query_handler, synthetic_input, ctx)` |
 | `QueryClass` whose `dispatch_role` includes `OnDemand` | Reachable from `FIBER` clauses only — never from expression position | `Institution::query` (during `FIBER` evaluation) |
-| `Comorphism` | Reachable from `FIBER` parameter coercion only — never from expression position | `extract_typed → transformation → reify` four-step pipeline (D14 §9.3) |
+| `Comorphism` | Reachable from `FIBER` parameter coercion only — never from expression position | `extract_typed → transformation → reify` four-step pipeline (D14 §10.3) |
 
 Anything else falls through. Built-in functions (`LENGTH`, `CONTAINS`, …) are matched first as a closed set; aggregate functions are matched in `RETURN` only. A qualified name that doesn't resolve to any of these is reported as `unknown function: ns:local`.
 
 The two notable retirements compared with D10:
 
-- **No `DecidePredicate` returning Boolean.** A Decidable `QueryClass` returns a `Verdict`, not a Boolean. Use a postfix predicate (§8.4) to project it.
-- **No comorphism-as-expression.** D10 allowed `inst:translate(source)` in `RETURN`; D14 does not. Comorphism dispatch surfaces *only* in `FIBER` parameter coercion (§8.6).
+- **No `DecidePredicate` returning Boolean.** A Decidable `QueryClass` returns a `Verdict`, not a Boolean. Use a postfix predicate (§9.4) to project it.
+- **No comorphism-as-expression.** D10 allowed `inst:translate(source)` in `RETURN`; D14 does not. Comorphism dispatch surfaces *only* in `FIBER` parameter coercion (§9.6).
 
-## 8.3. Decidable QueryClass invocation
+## 9.3. Decidable QueryClass invocation
 
 Surface syntax:
 
@@ -48,7 +48,7 @@ Surface syntax:
 inst:predicate(arg1, arg2, ...)
 ```
 
-Result type: `Verdict` — an inductive value with three constructors: `Holds`, `Fails`, `Undecidable` (D14 §6.1).
+Result type: `Verdict` — an inductive value with three constructors: `Holds`, `Fails`, `Undecidable` (D14 §7.1).
 
 Evaluation, from [`eval_ctx`'s `NativeDecide` arm](../../../kernel/src/nbe/eval.rs):
 
@@ -59,7 +59,7 @@ Evaluation, from [`eval_ctx`'s `NativeDecide` arm](../../../kernel/src/nbe/eval.
 
 A bare Verdict-typed expression in Boolean position is a type error (`bare_verdict_in_boolean_position`, §5.9 of D2). The conversion to Boolean is always explicit.
 
-## 8.4. Postfix Verdict predicates: `HOLDS`, `FAILS`, `UNDECIDABLE`
+## 9.4. Postfix Verdict predicates: `HOLDS`, `FAILS`, `UNDECIDABLE`
 
 A postfix predicate projects a `Verdict` to a Boolean:
 
@@ -79,7 +79,7 @@ The operand must be a `Verdict`. The static type checker accepts only two source
 
 Other expressions — string columns, arithmetic, FIBER bindings whose result class isn't Verdict — are rejected as `verdict_predicate_non_verdict_operand`. This deliberate narrowness makes the surface language honest about where Verdicts come from; future revisions could generalise.
 
-## 8.5. FIBER clauses against an `OnDemand` QueryClass
+## 9.5. FIBER clauses against an `OnDemand` QueryClass
 
 ```eigenql
 USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
@@ -94,7 +94,7 @@ The clause names a `QueryClass` whose `dispatch_role` set includes `OnDemand`. T
 
 The `FIBER` form is the only path under D14 that returns a structured response resource — for example a multi-property answer to a domain query. Decidable QueryClasses (which return Verdict directly) and Comorphism coercions (which surface only inside FIBER param values) cover the other two roles.
 
-## 8.6. Comorphism coercion in `FIBER` params
+## 9.6. Comorphism coercion in `FIBER` params
 
 ```eigenql
 USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
@@ -106,7 +106,7 @@ FIBER assay:validate_prediction {
 WHERE ?check HOLDS
 ```
 
-`dock_to_assay(?d)` is a *comorphism coercion*: a parameter-position invocation of a declared `Comorphism`. The parser only accepts a `qualified_name(expression)` shape in this slot (D2 §3.5). At evaluation the kernel runs the four-step pipeline (D14 §9.3):
+`dock_to_assay(?d)` is a *comorphism coercion*: a parameter-position invocation of a declared `Comorphism`. The parser only accepts a `qualified_name(expression)` shape in this slot (D2 §3.5). At evaluation the kernel runs the four-step pipeline (D14 §10.3):
 
 1. Resolve the `Comorphism` resource — read `export_format`, `transformation`, `import_format`.
 2. Look up the source institution from `export_format.institution_ref`. Call `Institution::extract_typed(export_format.procedure, ?d, ctx)` → typed payload of the export's `payload_type`.
@@ -117,11 +117,11 @@ The coerced resource is set on the input as the property whose short name is `ca
 
 **v1 restriction** (D2 §3.5): the comorphism's `transformation` Component must have `capability_level` `Pure` or `Read`. A Component requiring `IO` is rejected at parse time with `comorphism_io_not_supported_in_v1`. This lets the EigenQL evaluator run the coercion inline without standing up an IO backing for the FIBER path.
 
-Comorphisms are not first-class in expression position inside an EigenQL query — there is no `RETURN [...] { x: cap:translate(?d) }`. EigenQL surfaces comorphisms only as FIBER param coercions, and (by way of `INTO`, see [§7.6](07-fiber-clauses.md#76-into--pinning-the-response-iri)) lets the caller pin the reified output at a named chain IRI. ESL programs *do* invoke comorphisms in expression position; see [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
+Comorphisms are not first-class in expression position inside an EigenQL query — there is no `RETURN [...] { x: cap:translate(?d) }`. EigenQL surfaces comorphisms only as FIBER param coercions, and (by way of `INTO`, see [§8.6](08-fiber-clauses.md#76-into--pinning-the-response-iri)) lets the caller pin the reified output at a named chain IRI. ESL programs *do* invoke comorphisms in expression position; see [ESL §10.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
 
-**Chain reinsertion (D14 §9.3).** Whichever surface invokes the comorphism, the reified output commits to the chain. With `FIBER ... AS ?var` (no `INTO`), the response lives in the transient overlay only — the v0 behaviour, kept for queries that don't want side effects. With `FIBER ... AS ?var INTO "<iri>"`, the response commits to the regular chain at the caller-named IRI. With ESL `comorphisms:foo(input)` from a program body, the response commits at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (kernel-minted). All three paths share the same `commit_with_validation` machinery — AutoOnLoad gates bound to the produced class fire on commit; the audit closure (Verdict + RuntimeInvocation) is the standard one.
+**Chain reinsertion (D14 §10.3).** Whichever surface invokes the comorphism, the reified output commits to the chain. With `FIBER ... AS ?var` (no `INTO`), the response lives in the transient overlay only — the v0 behaviour, kept for queries that don't want side effects. With `FIBER ... AS ?var INTO "<iri>"`, the response commits to the regular chain at the caller-named IRI. With ESL `comorphisms:foo(input)` from a program body, the response commits at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (kernel-minted). All three paths share the same `commit_with_validation` machinery — AutoOnLoad gates bound to the produced class fire on commit; the audit closure (Verdict + RuntimeInvocation) is the standard one.
 
-## 8.7. A complete worked example
+## 9.7. A complete worked example
 
 Drawn from [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs) (the M8 in-process demo): two institutions — `dock` (extracts ΔG from a `DockingResult`) and `assay` (reifies an `AssayPrediction` from an IC₅₀, plus three QueryClasses) — and one Comorphism (`dock_to_assay`, the Arrhenius approximation `IC₅₀ ≈ exp(-ΔG/RT)`).
 
@@ -172,7 +172,7 @@ let results = eigenius_kernel::query::execute_with(query_text, &layer, fiber_run
 
 When the kernel hosts the institutions as WASM (D14 §13), the wiring is even shorter — the `InstitutionRuntime` is auto-built by `build_wasm_institution_runtime` from the `runtime: wasm` declarations on the chain (see [platform §10](../platform/10-wasm-institutions.md) and [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)).
 
-## 8.8. Comparison with FIBER
+## 9.8. Comparison with FIBER
 
 | Dimension | Decidable QueryClass | FIBER (OnDemand QueryClass) | FIBER param comorphism |
 |---|---|---|---|
@@ -183,20 +183,20 @@ When the kernel hosts the institutions as WASM (D14 §13), the wiring is even sh
 
 Choose Decidable when the institution's answer is simply `Holds | Fails | Undecidable` over a finite arg list. Choose FIBER when you need a structured response. Use comorphism coercion inside FIBER when the FIBER's input has to be in a different institution's vocabulary than what you have in your binding.
 
-## 8.9. The classification table
+## 9.9. The classification table
 
-Quick reference — the same classifier ESL uses (see [ESL chapter 9](../esl/09-institutions.md)):
+Quick reference — the same classifier ESL uses (see [ESL chapter 10](../esl/09-institutions.md)):
 
 | Index lookup | ESL emits | EigenQL emits | Runtime call |
 |---|---|---|---|
 | `Decidable` QueryClass | `Exp::NativeDecide(Constraint::Institution { … }, Unit)` (Verdict-typed) | Same as ESL — and the postfix predicate projects to Boolean | `Institution::query(query_handler, synthetic_input, ctx)` |
 | `OnDemand` QueryClass | not exposed in ESL expression position | `FIBER` clause | `Institution::query(query_handler, input, ctx)` |
-| `Comorphism` | qualified-name function call in program body — `comorphisms:foo(input)` — lowers to `Exp::InstitutionInvoke` (D14 §9.3) | FIBER param value coercion (overlay-only); or `FIBER ... INTO "<iri>"` for chain reinsertion at a caller-named IRI | `extract_typed → transformation Component → reify` four-step pipeline; reify output commits to the chain |
+| `Comorphism` | qualified-name function call in program body — `comorphisms:foo(input)` — lowers to `Exp::InstitutionInvoke` (D14 §10.3) | FIBER param value coercion (overlay-only); or `FIBER ... INTO "<iri>"` for chain reinsertion at a caller-named IRI | `extract_typed → transformation Component → reify` four-step pipeline; reify output commits to the chain |
 | Class / property / built-in / aggregate | various | various | no institution call |
 
 Both surface languages share `InstitutionIndex` so the same IRI dispatches identically.
 
-## 8.10. When dispatch isn't available
+## 9.10. When dispatch isn't available
 
 If the kernel's `InstitutionIndex` is empty (no chain scan has happened, or no institutions are declared) and your query references a qualified-name IRI:
 
@@ -214,4 +214,4 @@ To debug:
 
 ---
 
-Next: **[9. Stratification →](09-stratification.md)**
+Next: **[9. Stratification →](10-stratification.md)**

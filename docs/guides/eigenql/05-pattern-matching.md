@@ -137,11 +137,11 @@ Implementation: [`apply_negated_pattern`](../../../kernel/src/query/evaluate.rs)
 
 ### The `NOT EXISTS` expression (distinct from pattern negation)
 
-`NOT EXISTS(?var)` is an **expression** (for use in `WHERE`), not a pattern. It tests whether `?var` is currently bound — returning `true` if the variable is not in the binding, `false` if it is. See [chapter 6 §6.5](06-expressions.md). This overlaps conceptually with negated patterns but is evaluated differently.
+`NOT EXISTS(?var)` is an **expression** (for use in `WHERE`), not a pattern. It tests whether `?var` is currently bound — returning `true` if the variable is not in the binding, `false` if it is. See [chapter 7 §7.5](07-expressions.md). This overlaps conceptually with negated patterns but is evaluated differently.
 
 ### Interaction with stratification
 
-If a `DEFINE` rule body contains a negated pattern on a derived relation, the stratifier ensures no negative cycles are introduced. See [chapter 9](09-stratification.md).
+If a `DEFINE` rule body contains a negated pattern on a derived relation, the stratifier ensures no negative cycles are introduced. See [chapter 10](10-stratification.md).
 
 ## 5.7. Where patterns can reference
 
@@ -194,4 +194,4 @@ After this chain, the surviving bindings have all five variables populated and c
 
 ---
 
-Next: **[6. Expressions →](06-expressions.md)**
+Next: **[6. Expressions →](07-expressions.md)**

@@ -13,6 +13,14 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 
+[dev-dependencies]
+# RocksDB-backed bootstrap + persistent backend for the M9.2
+# life-science integration test (`tests/d43_go_subset_integration.rs`).
+# A dev-dep keeps the production crate's release-binary footprint
+# clean — only test builds pull in the RocksDB toolchain.
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
+tempfile = "3"
+
 [[bin]]
 name = "obograph-import"
 path = "src/bin/obograph_import.rs"

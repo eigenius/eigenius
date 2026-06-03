@@ -59,7 +59,7 @@ These identifiers are reserved as keywords because the parser dispatches on them
 
 **Aggregate**: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`
 
-Behaviour details are in [chapter 6 §6.7](06-expressions.md) and [chapter 13](12-appendix.md).
+Behaviour details are in [chapter 7 §7.7](07-expressions.md) and [chapter 13](13-appendix.md).
 
 ## 3.3. Identifiers and qualified names
 
@@ -74,7 +74,7 @@ An identifier that is not a keyword tokenizes as `TokenKind::Identifier(String)`
 **Qualified names** like `cap:within_tolerance` are **not a single token** — the lexer produces three tokens: `Identifier("cap")`, `Colon`, `Identifier("within_tolerance")`. The parser reassembles them in two places:
 
 1. **Class references in `MATCH`**: `ShortName` / `FullIri` resolution via namespaces imported through `USING`.
-2. **Function calls** (Phase 11e.2): `ns:local(args)` in expression position. See [chapter 6 §6.7](06-expressions.md) for how `parse_primary_expr` reads the two identifiers around a colon and stitches them back into `"ns:local"`.
+2. **Function calls** (Phase 11e.2): `ns:local(args)` in expression position. See [chapter 7 §7.7](07-expressions.md) for how `parse_primary_expr` reads the two identifiers around a colon and stitches them back into `"ns:local"`.
 
 ## 3.4. Variables
 

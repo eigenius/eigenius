@@ -90,7 +90,7 @@ RETURN [] {}
 - Both rules together compute the transitive closure via a **seminaive fixpoint** in the evaluator.
 - The final `MATCH ?person {}` and `WHERE ?person = "urn:eigenius:test:alice"` is a guard query — no `RETURN` content, just checking Alice exists.
 
-**Stratification** (chapter 9) ensures recursion stays decidable: a rule may not depend *negatively* on a relation that transitively depends on itself. Here both rules are positive, so the fixpoint converges in at most O(relation-size) iterations.
+**Stratification** (chapter 10) ensures recursion stays decidable: a rule may not depend *negatively* on a relation that transitively depends on itself. Here both rules are positive, so the fixpoint converges in at most O(relation-size) iterations.
 
 This is [`recursive_define_ancestor`](../../../kernel/src/query/evaluate.rs).
 
@@ -112,7 +112,7 @@ RETURN [] {
 **What happens**:
 
 - Bindings are partitioned by the `GROUP BY` key (`?breed`). Each partition becomes one output row.
-- Non-aggregate `RETURN` items must appear in `GROUP BY` (validated by the type checker — see chapter 9).
+- Non-aggregate `RETURN` items must appear in `GROUP BY` (validated by the type checker — see chapter 10).
 - `COUNT(?d)` returns the count per partition as an `Integer`.
 - Supported aggregates: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`.
 
@@ -141,10 +141,10 @@ RETURN [] {
 
 - `USING INSTITUTION "urn:..." AS assay` aliases the assay institution within this `MatchPart`.
 - The FIBER param value `dock_to_assay(?d)` is a **comorphism coercion** — the kernel runs the four-step pipeline (extract ΔG via the dock institution → apply the Arrhenius transformation Component → reify an `AssayPrediction` via the assay institution) and uses the reified resource as the `candidate` property.
-- `FIBER assay:validate_prediction { … } AS ?check` builds the QueryClass's input resource, calls the assay institution's `query` handler, and binds the returned `Verdict` to `?check`. The response lives in a transient overlay (D2 §6.12) discarded when the query finishes.
+- `FIBER assay:validate_prediction { … } AS ?check` builds the QueryClass's input resource, calls the assay institution's `query` handler, and binds the returned `Verdict` to `?check`. The response lives in a transient overlay (D2 §7.12) discarded when the query finishes.
 - `WHERE ?check HOLDS` projects the bound Verdict to a Boolean — keeps rows where the assay institution accepted the prediction.
 
-This requires the `FiberRuntime` to carry an `InstitutionIndex` + `InstitutionRuntime` + `ComponentRegistry`; without them the FIBER clause errors at dispatch time. See [chapter 7](07-fiber-clauses.md) and the M8 worked example in [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs).
+This requires the `FiberRuntime` to carry an `InstitutionIndex` + `InstitutionRuntime` + `ComponentRegistry`; without them the FIBER clause errors at dispatch time. See [chapter 8](08-fiber-clauses.md) and the M8 worked example in [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs).
 
 ## 2.7. Decidable QueryClass in `WHERE`
 
@@ -171,7 +171,7 @@ RETURN [] {
 - The kernel marshals the positional args into a synthetic input resource (args attached as `urn:eigenius:institution:decide_args`), calls `Institution::query(query_handler, input, ctx)` on the assay institution, and reads the returned Verdict's `ctor_name`.
 - The postfix `HOLDS` projects the Verdict to a Boolean: `true` when `ctor_name == "Holds"`, `false` otherwise.
 
-A bare Verdict in Boolean position (`WHERE assay:within_tolerance(…)` with no postfix) is a static type error (`bare_verdict_in_boolean_position`) — the conversion is always explicit. See [chapter 8](08-institutions.md) for the full Verdict surface.
+A bare Verdict in Boolean position (`WHERE assay:within_tolerance(…)` with no postfix) is a static type error (`bare_verdict_in_boolean_position`) — the conversion is always explicit. See [chapter 9](09-institutions.md) for the full Verdict surface.
 
 ---
 
