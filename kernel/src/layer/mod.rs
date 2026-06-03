@@ -55,8 +55,9 @@ pub use index::{
     scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
 pub use index_discovery::{
-    resolve_active_text_indexes, resolve_active_vector_indexes, verify_text_index_multiplicity,
-    verify_vector_index_multiplicity, ActiveTextIndex, ActiveVectorIndex,
+    detect_reindex_targets, resolve_active_text_indexes, resolve_active_vector_indexes,
+    verify_text_index_multiplicity, verify_vector_index_multiplicity, ActiveTextIndex,
+    ActiveVectorIndex, ReindexTarget,
 };
 pub use redirect::{
     augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,

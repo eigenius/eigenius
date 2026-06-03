@@ -283,6 +283,107 @@ fn _collect_ancestors_reachable(head: &Layer) -> std::collections::BTreeSet<crat
     collect_ancestors(head)
 }
 
+/// D43 §5.7 / M8.4 — one active VectorIndex Resource whose declared
+/// `vec_model` no longer matches the model that produced its
+/// existing segments. Triggers a chain-wide reindex against the new
+/// model.
+///
+/// Emitted by [`detect_reindex_targets`] when the schema owner
+/// commits an upgraded model under the same Index IRI (the natural
+/// upgrade path: same stable IRI, fresh `vec_model` slot) — the
+/// existing per-layer segments still carry the old model's vectors,
+/// which the segment-model verification in the query path
+/// (`top_k_subjects`) would reject as `ModelMismatch`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReindexTarget {
+    /// IRI of the VectorIndex Resource that needs its segments
+    /// rewritten.
+    pub index_iri: Iri,
+    /// The new model declared on the VectorIndex Resource at head.
+    pub declared_model: Iri,
+    /// The model recorded on the existing segments. v1 returns the
+    /// model from the first segment found (segments under one Index
+    /// are model-consistent by §5.7 invariant — the reindex itself
+    /// is what introduces an intermediate inconsistency, but the
+    /// invariant holds at the pre-reindex steady state).
+    pub segment_model: Iri,
+}
+
+/// D43 §5.7 / M8.4 — find every active VectorIndex Resource at
+/// `head` whose declared `vec_model` no longer matches the model
+/// recorded on its existing segments. Each returned
+/// [`ReindexTarget`] is a chain-wide reindex unit; the caller
+/// (typically the commit hook) constructs a
+/// [`crate::task::reindex::ReindexDriver`] per target and either
+/// runs it inline or schedules it on the task executor.
+///
+/// Detection logic, per Index Resource:
+///
+/// 1. Resolve every active `core:VectorIndex` Resource at `head`
+///    via [`resolve_active_vector_indexes`].
+/// 2. For each, ask the VectorIndex backend for the layers under
+///    that Index (`scan_index`) and probe the first chain-visible
+///    segment's `model_iri`. Segments contributed by layers no
+///    longer reachable from `head` are skipped — a model mismatch
+///    against an orphan segment isn't actionable because the
+///    segment isn't queried anyway.
+/// 3. If the segment's model differs from the Index Resource's
+///    declared model, emit a [`ReindexTarget`].
+///
+/// **Fresh VectorIndex Resources** (no segments yet at any visible
+/// layer) are *not* targets — the regular post-Load sweep
+/// ([`crate::task::sweep::VectorSweepDriver`]) populates those.
+/// Only model upgrades against pre-existing segments need the
+/// chain-wide rewrite.
+///
+/// Errors from the storage backend during `scan_index` are
+/// propagated as `Err`; one target's failure aborts the whole
+/// detection pass rather than silently dropping it — partial
+/// detection would mislead the commit hook into thinking the
+/// upgrade was fully observed.
+pub fn detect_reindex_targets(
+    head: &Layer,
+) -> Result<Vec<ReindexTarget>, crate::storage::StorageError> {
+    use std::collections::BTreeSet;
+    let active = resolve_active_vector_indexes(head);
+    if active.is_empty() {
+        return Ok(Vec::new());
+    }
+    let reachable: BTreeSet<crate::layer::LayerId> = collect_ancestors(head);
+    let backend = head.storage().vector_index.clone();
+
+    let mut targets = Vec::new();
+    for index in &active {
+        // First chain-visible segment determines the recorded model.
+        // Segments from non-reachable layers are skipped; if no
+        // visible segment exists at all, this is a fresh Index — the
+        // sweep handles it, no reindex needed.
+        let mut visible_model: Option<Iri> = None;
+        for layer_id in backend.scan_index(&index.iri) {
+            let layer_id = layer_id?;
+            if !reachable.contains(&layer_id) {
+                continue;
+            }
+            if let Some(seg) = backend.get_segment(&index.iri, &layer_id)? {
+                visible_model = Some(seg.model_iri.clone());
+                break;
+            }
+        }
+        let segment_model = match visible_model {
+            Some(m) => m,
+            None => continue,
+        };
+        if segment_model != index.model {
+            targets.push(ReindexTarget {
+                index_iri: index.iri.clone(),
+                declared_model: index.model.clone(),
+                segment_model,
+            });
+        }
+    }
+    Ok(targets)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,5 +643,138 @@ mod tests {
         // is the v2 redefinition. Verify by checking the analyzer.
         assert_eq!(active[0].analyzer, "en-no-stem");
         assert_eq!(active[0].target_property.as_str(), "urn:ex:prop_v2");
+    }
+
+    // ─── D43 §5.7 / M8.4 reindex-target detection tests ────────────────
+
+    /// Build a Resource with the given class and properties under the
+    /// supplied LayerBuilder. Mirror of the local `make_resource`
+    /// helper above; restated here so the reindex tests don't need to
+    /// be threaded into the existing `discovers_text_indexes_in_chain`
+    /// flow.
+    fn add_vi(builder: &mut LayerBuilder, iri_str: &str, target_property: &str, model: &str) {
+        let mut vi = Resource::new(iri(iri_str));
+        vi.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_property)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        builder.add_resource(vi).unwrap();
+    }
+
+    fn add_doc(builder: &mut LayerBuilder, iri_str: &str, prop: &str, value: &str) {
+        let mut r = Resource::new(iri(iri_str));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri("urn:ex:Document"))]),
+        );
+        r.set(iri(prop), Value::String(value.into()));
+        builder.add_resource(r).unwrap();
+    }
+
+    /// Build a chain head (L0 bootstrap → L1 VI declared with model_a
+    /// → L2 documents swept under model_a → L3 VI re-declared at the
+    /// SAME IRI with model_b). At the L3 head the active VectorIndex
+    /// declares model_b but its segments at L2 still carry model_a —
+    /// the reindex-target detection must fire.
+    #[test]
+    fn detect_reindex_targets_fires_on_model_upgrade_at_same_iri() {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let (head, storage) = bootstrap_head();
+        let model_a = "urn:eigenius:embed:dummy:v1";
+        let model_b = "urn:eigenius:embed:dummy:v2";
+        let target_prop = "urn:ex:body";
+
+        // L1: VI declared with model_a under a stable IRI.
+        let mut l1 = LayerBuilder::new("l1", Some(head));
+        add_vi(&mut l1, "urn:ex:vi", target_prop, model_a);
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        // L2: documents whose body property gets swept under model_a.
+        let mut l2 = LayerBuilder::new("l2", Some(Arc::clone(&l1)));
+        add_doc(&mut l2, "urn:ex:d1", target_prop, "alpha beta");
+        let l2 = Arc::new(l2.build(storage.clone()));
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_a, 8)));
+        reg.register(Arc::new(DummyEmbedder::new(model_b, 8)));
+        sweep_layer_vectors(&l2, &reg, None).expect("sweep under model_a");
+
+        // L3: VI re-declared at the SAME IRI with model_b. The new
+        // Resource shadows the L1 one; the segment under L2 still
+        // carries model_a's vectors.
+        let mut l3 = LayerBuilder::new("l3", Some(Arc::clone(&l2)));
+        add_vi(&mut l3, "urn:ex:vi", target_prop, model_b);
+        let l3 = Arc::new(l3.build(storage.clone()));
+
+        let targets = detect_reindex_targets(&l3).expect("detect");
+        assert_eq!(targets.len(), 1, "expected one shadow, got {targets:?}");
+        assert_eq!(targets[0].index_iri.as_str(), "urn:ex:vi");
+        assert_eq!(targets[0].declared_model.as_str(), model_b);
+        assert_eq!(targets[0].segment_model.as_str(), model_a);
+    }
+
+    /// A freshly-declared VectorIndex with no segments yet is *not* a
+    /// reindex target — the post-Load sweep populates it from the
+    /// regular path. Detection must distinguish "first ever" from
+    /// "model upgrade against pre-existing segments."
+    #[test]
+    fn detect_reindex_targets_skips_fresh_vector_index() {
+        let (head, storage) = bootstrap_head();
+        let mut b = LayerBuilder::new("fresh-vi", Some(head));
+        add_vi(
+            &mut b,
+            "urn:ex:vi",
+            "urn:ex:body",
+            "urn:eigenius:embed:dummy:v1",
+        );
+        let layer = Arc::new(b.build(storage));
+        let targets = detect_reindex_targets(&layer).expect("detect");
+        assert!(
+            targets.is_empty(),
+            "fresh VectorIndex must not be a reindex target; got {targets:?}"
+        );
+    }
+
+    /// Same model on both the Resource declaration and the existing
+    /// segments — no upgrade in flight, no reindex needed. Catches the
+    /// case where someone re-issues the same declaration (idempotent
+    /// commit) and the detector would otherwise spam reindexes.
+    #[test]
+    fn detect_reindex_targets_skips_when_models_match() {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let (head, storage) = bootstrap_head();
+        let model = "urn:eigenius:embed:dummy:v1";
+        let target_prop = "urn:ex:body";
+
+        let mut l1 = LayerBuilder::new("l1", Some(head));
+        add_vi(&mut l1, "urn:ex:vi", target_prop, model);
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        let mut l2 = LayerBuilder::new("l2", Some(Arc::clone(&l1)));
+        add_doc(&mut l2, "urn:ex:d1", target_prop, "alpha beta");
+        let l2 = Arc::new(l2.build(storage.clone()));
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model, 8)));
+        sweep_layer_vectors(&l2, &reg, None).expect("sweep");
+
+        // L3: redeclare with the SAME model. Idempotent commit.
+        let mut l3 = LayerBuilder::new("l3", Some(Arc::clone(&l2)));
+        add_vi(&mut l3, "urn:ex:vi", target_prop, model);
+        let l3 = Arc::new(l3.build(storage.clone()));
+
+        let targets = detect_reindex_targets(&l3).expect("detect");
+        assert!(
+            targets.is_empty(),
+            "matching-model redeclaration must not trigger reindex; got {targets:?}"
+        );
     }
 }

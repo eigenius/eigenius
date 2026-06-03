@@ -41,7 +41,9 @@
 //!   only pass a layer to fire a sweep. The commit orchestrator's
 //!   `DidPersistHook` becomes a one-line dispatch.
 
-use crate::layer::{resolve_active_vector_indexes, ActiveVectorIndex, Layer, LayerId};
+use crate::layer::{
+    detect_reindex_targets, resolve_active_vector_indexes, ActiveVectorIndex, Layer, LayerId,
+};
 use crate::ontology::iri::Iri;
 use crate::program::embedder::EmbedderRegistry;
 use crate::program::embedding_cache::EmbeddingCache;
@@ -52,6 +54,7 @@ use crate::query::vector::indexing::{
     sweep_layer_vectors_async, AsyncSweepOptions, SweepError, SweepReport,
 };
 use crate::query::vector::segment::{admit_segment, strategy_from_iri};
+use crate::task::reindex::ReindexDriver;
 use crate::task::sweep::{VectorSweepDriver, DEFAULT_IN_FLIGHT_LIMIT};
 use crate::task::{TaskRecord, TaskStatus};
 use std::collections::BTreeMap;
@@ -100,9 +103,20 @@ impl SweepHandle {
 /// `register` / `lookup` / `cancel_by_layer` / `iter` operations.
 /// Wrapped in `Arc<RwLock<…>>` internally so the
 /// [`SweepCoordinator`] can be cloned cheaply across threads.
+///
+/// **Two maps**, one per task kind:
+///
+/// - `sweeps` is keyed by `LayerId` — a per-Load sweep covers every
+///   active VectorIndex at the layer in one driver call, so the
+///   layer's id is the natural unit.
+/// - `reindexes` is keyed by the VectorIndex Resource IRI — a
+///   reindex (D43 §5.7 model upgrade) walks the entire chain rather
+///   than one layer, and several reindexes against different target
+///   Indexes can be in flight concurrently against the same head.
 #[derive(Default)]
 pub struct SweepRegistry {
     sweeps: RwLock<BTreeMap<LayerId, Arc<SweepHandle>>>,
+    reindexes: RwLock<BTreeMap<Iri, Arc<SweepHandle>>>,
 }
 
 impl SweepRegistry {
@@ -163,6 +177,54 @@ impl SweepRegistry {
             .write()
             .expect("sweep registry poisoned")
             .insert(layer_id, handle);
+    }
+
+    /// D43 §5.7 — fetch the in-flight reindex handle for a target
+    /// VectorIndex Resource, if any.
+    pub fn get_reindex(&self, index_iri: &Iri) -> Option<Arc<SweepHandle>> {
+        self.reindexes
+            .read()
+            .expect("reindex registry poisoned")
+            .get(index_iri)
+            .map(Arc::clone)
+    }
+
+    /// All currently-registered reindexes as
+    /// `(index_iri, handle)` pairs.
+    pub fn list_reindexes(&self) -> Vec<(Iri, Arc<SweepHandle>)> {
+        self.reindexes
+            .read()
+            .expect("reindex registry poisoned")
+            .iter()
+            .map(|(k, v)| (k.clone(), Arc::clone(v)))
+            .collect()
+    }
+
+    /// Flip the cancellation flag for a reindex targeting
+    /// `index_iri`, if one is in flight. Returns `true` iff a
+    /// reindex was found and signalled.
+    pub fn cancel_reindex(&self, index_iri: &Iri) -> bool {
+        let guard = self.reindexes.read().expect("reindex registry poisoned");
+        if let Some(handle) = guard.get(index_iri) {
+            handle.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn register_reindex(&self, index_iri: Iri, handle: Arc<SweepHandle>) {
+        self.reindexes
+            .write()
+            .expect("reindex registry poisoned")
+            .insert(index_iri, handle);
+    }
+
+    fn unregister_reindex(&self, index_iri: &Iri) {
+        self.reindexes
+            .write()
+            .expect("reindex registry poisoned")
+            .remove(index_iri);
     }
 }
 
@@ -266,6 +328,89 @@ impl SweepCoordinator {
         self.registry.unregister(layer.id());
         outcome?;
         Ok(Some((*handle).clone()))
+    }
+
+    /// D43 §5.7 / M8.4 — synchronous reindex dispatch.
+    ///
+    /// Detects every reindex target visible at `head` via
+    /// [`detect_reindex_targets`], spawns a
+    /// [`ReindexDriver`] per target, registers each under the
+    /// target's IRI for observability + cancellation, runs the
+    /// driver synchronously, and returns one [`SweepHandle`] per
+    /// target with its terminal [`TaskStatus`] populated.
+    ///
+    /// The commit hook fires this *after* its regular
+    /// [`Self::trigger_blocking`] (or its async sibling): the
+    /// post-Load sweep handles fresh VectorIndex Resources at the
+    /// new layer; the reindex handles model upgrades at any
+    /// pre-existing VectorIndex Resource. Reindex targets are
+    /// processed independently — one target's failure does *not*
+    /// abort the remaining targets, but the failed target's handle
+    /// records its terminal `Failed` state for the caller to act on.
+    ///
+    /// Returns an empty `Vec` when no target needs reindex (fresh
+    /// chains, idempotent re-commits with no model change, etc.) —
+    /// the commit hook can call this unconditionally and pay nothing
+    /// when there's no work.
+    pub fn trigger_reindex_blocking(
+        &self,
+        head: &Arc<Layer>,
+    ) -> Result<Vec<SweepHandle>, SweepError> {
+        let targets = detect_reindex_targets(head).map_err(|source| SweepError::Storage {
+            index: "<reindex-target-detection>".to_string(),
+            source,
+        })?;
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::with_capacity(targets.len());
+        for target in targets {
+            let target_iri = target.index_iri.clone();
+            let record = TaskRecord::new_running(
+                Uuid::nil(),
+                Uuid::new_v4(),
+                "urn:eigenius:program:vector_reindex".into(),
+                target_iri.as_str().to_string(),
+                head.id().clone(),
+                now_millis(),
+            );
+            let mut driver = ReindexDriver::new(target_iri.clone()).with_record(record.clone());
+            let cancel = driver.cancel_handle();
+            let record_arc = Arc::new(RwLock::new(record));
+            let handle = Arc::new(SweepHandle {
+                cancel: Arc::clone(&cancel),
+                record: Arc::clone(&record_arc),
+                indexes: vec![target_iri.clone()],
+            });
+            self.registry
+                .register_reindex(target_iri.clone(), Arc::clone(&handle));
+
+            let cache_ref = self.cache.as_deref();
+            let outcome = driver.run(head, &self.embedders, cache_ref);
+            // Mirror the sweep epilogue: stamp the terminal status
+            // back onto the shared record so observers holding their
+            // own `Arc<SweepHandle>` clone after `unregister_reindex`
+            // see the right state.
+            let terminal_status = match &outcome {
+                Ok(_) => TaskStatus::Completed,
+                Err(SweepError::Cancelled) => TaskStatus::Cancelled,
+                Err(_) => TaskStatus::Failed,
+            };
+            record_arc.write().expect("reindex record poisoned").status = terminal_status;
+            // SegmentCache admission post-reindex — the new
+            // segments need the same strategy-dispatched build the
+            // sweep applies (`admit_swept_segments_to_cache`). We
+            // reuse it: the active VectorIndex at head is the new
+            // one (the reindex's target), so passing the head's
+            // active set names the just-rewritten segments.
+            if outcome.is_ok() {
+                let active = resolve_active_vector_indexes(head);
+                self.admit_swept_segments_to_cache(head, &active);
+            }
+            self.registry.unregister_reindex(&target_iri);
+            out.push((*handle).clone());
+        }
+        Ok(out)
     }
 
     /// Async sweep dispatch — runs the sweep on the current
@@ -944,5 +1089,241 @@ mod tests {
             .expect("sweep")
             .expect("handle");
         assert_eq!(handle.status(), TaskStatus::Completed);
+    }
+
+    // ─── D43 §5.7 / M8.4 reindex-trigger tests ──────────────────────────
+
+    /// Build a chain `bootstrap → L1 (VI model_a) → L2 (docs swept
+    /// under model_a) → L3 (VI redeclared with model_b)`. At L3 the
+    /// declared model and the segment's recorded model disagree;
+    /// the coordinator's reindex trigger should detect this, run the
+    /// driver, and surface a Completed handle.
+    fn build_chain_with_model_upgrade(
+        model_a: &str,
+        model_b: &str,
+    ) -> (Arc<Layer>, EmbedderRegistry) {
+        let ctx = bootstrap().expect("bootstrap");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let target_prop = "urn:eigenius:test:body";
+
+        let mut l1 = LayerBuilder::new("l1", Some(head));
+        let mut prop = Resource::new(iri(target_prop));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        l1.add_resource(prop).unwrap();
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_a)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        l1.add_resource(vi).unwrap();
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        let mut l2 = LayerBuilder::new("l2", Some(Arc::clone(&l1)));
+        let mut d = Resource::new(iri("urn:eigenius:test:d1"));
+        d.set(iri(target_prop), Value::String("alpha beta".into()));
+        l2.add_resource(d).unwrap();
+        let l2 = Arc::new(l2.build(storage.clone()));
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_a, 8)));
+        reg.register(Arc::new(DummyEmbedder::new(model_b, 8)));
+        crate::query::vector::indexing::sweep_layer_vectors(&l2, &reg, None).unwrap();
+
+        let mut l3 = LayerBuilder::new("l3", Some(Arc::clone(&l2)));
+        let mut vi2 = Resource::new(iri("urn:eigenius:test:vi"));
+        vi2.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi2.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi2.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_b)));
+        vi2.set(iri(wk::VEC_DIM), Value::Integer(8));
+        l3.add_resource(vi2).unwrap();
+        let l3 = Arc::new(l3.build(storage));
+        (l3, reg)
+    }
+
+    #[test]
+    fn trigger_reindex_blocking_runs_to_completion_and_unregisters() {
+        let model_a = "urn:eigenius:embed:dummy:v1";
+        let model_b = "urn:eigenius:embed:dummy:v2";
+        let (head, reg) = build_chain_with_model_upgrade(model_a, model_b);
+        let coord = SweepCoordinator::new(Arc::new(reg), None);
+
+        let handles = coord
+            .trigger_reindex_blocking(&head)
+            .expect("reindex trigger");
+        assert_eq!(handles.len(), 1, "expected one reindex target");
+        assert_eq!(handles[0].status(), TaskStatus::Completed);
+        assert_eq!(
+            handles[0].indexes[0].as_str(),
+            "urn:eigenius:test:vi",
+            "handle records the reindexed Index IRI"
+        );
+        // Registry is empty post-completion.
+        assert!(coord
+            .registry
+            .get_reindex(&iri("urn:eigenius:test:vi"))
+            .is_none());
+        assert!(coord.registry.list_reindexes().is_empty());
+
+        // Post-reindex, the segment at the head's reachable layer
+        // (the original L2) carries the new model.
+        let seg = head
+            .storage()
+            .vector_index
+            .get_segment(&iri("urn:eigenius:test:vi"), head.parent().unwrap().id())
+            .unwrap()
+            .expect("segment exists post-reindex");
+        assert_eq!(seg.model_iri.as_str(), model_b);
+    }
+
+    #[test]
+    fn trigger_reindex_blocking_returns_empty_when_no_target() {
+        // A fresh corpus — VectorIndex declared once, no shadow at
+        // upper layer. The trigger should detect zero targets and
+        // surface an empty Vec without touching the registry.
+        let layer = build_corpus(2);
+        let coord = make_coordinator();
+        let handles = coord
+            .trigger_reindex_blocking(&layer)
+            .expect("reindex trigger");
+        assert!(
+            handles.is_empty(),
+            "expected no reindex targets on fresh corpus"
+        );
+        assert!(coord.registry.list_reindexes().is_empty());
+    }
+
+    #[test]
+    fn cancel_reindex_returns_false_for_unregistered_index() {
+        let coord = make_coordinator();
+        let cancelled = coord
+            .registry
+            .cancel_reindex(&iri("urn:eigenius:test:nonexistent"));
+        assert!(!cancelled);
+    }
+
+    /// Spin a reindex on a separate thread with a gated embedder
+    /// driving the per-subject embed call. Once the embedder
+    /// signals `started`, cancel the reindex via the registry. The
+    /// driver returns `Cancelled` and the handle records the
+    /// terminal `Cancelled` status. End-to-end proof that the
+    /// reindex registry's cancellation surface composes with the
+    /// driver's cooperative-cancellation flag.
+    #[test]
+    fn cancel_reindex_in_flight_flips_status_to_cancelled() {
+        let model_a = "urn:eigenius:embed:dummy:v1";
+        let model_b = "urn:eigenius:embed:gated:v2";
+        // Build the upgrade chain with model_a docs swept; redeclare
+        // the VI at model_b so the reindex needs to call the gated
+        // embedder for every subject.
+        let ctx = bootstrap().expect("bootstrap");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let target_prop = "urn:eigenius:test:body";
+
+        let mut l1 = LayerBuilder::new("l1", Some(head));
+        let mut prop = Resource::new(iri(target_prop));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        l1.add_resource(prop).unwrap();
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_a)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        l1.add_resource(vi).unwrap();
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        let mut l2 = LayerBuilder::new("l2", Some(Arc::clone(&l1)));
+        let mut d = Resource::new(iri("urn:eigenius:test:d1"));
+        d.set(iri(target_prop), Value::String("alpha beta".into()));
+        l2.add_resource(d).unwrap();
+        let l2 = Arc::new(l2.build(storage.clone()));
+        // Sweep under model_a via the dummy embedder.
+        let mut sweep_reg = EmbedderRegistry::new();
+        sweep_reg.register(Arc::new(DummyEmbedder::new(model_a, 8)));
+        crate::query::vector::indexing::sweep_layer_vectors(&l2, &sweep_reg, None).unwrap();
+
+        let mut l3 = LayerBuilder::new("l3", Some(Arc::clone(&l2)));
+        let mut vi2 = Resource::new(iri("urn:eigenius:test:vi"));
+        vi2.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        );
+        vi2.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::ResourceRef(iri(target_prop)),
+        );
+        vi2.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_b)));
+        vi2.set(iri(wk::VEC_DIM), Value::Integer(8));
+        l3.add_resource(vi2).unwrap();
+        let head = Arc::new(l3.build(storage));
+
+        // Coordinator with the GATED embedder for model_b — every
+        // per-subject embed call blocks until `release` is flipped.
+        let started = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(GatedEmbedder {
+            iri: iri(model_b),
+            dim: 8,
+            started: Arc::clone(&started),
+            release: Arc::clone(&release),
+        }));
+        let coord = Arc::new(SweepCoordinator::new(Arc::new(reg), None));
+        let registry = coord.registry();
+        let head_for_reindex = Arc::clone(&head);
+        let coord_for_reindex = Arc::clone(&coord);
+
+        let join = std::thread::spawn(move || {
+            coord_for_reindex.trigger_reindex_blocking(&head_for_reindex)
+        });
+
+        // Wait for the gated embedder to signal it's running.
+        while !started.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // The reindex is registered under the target Index IRI.
+        let target_iri = iri("urn:eigenius:test:vi");
+        assert!(registry.get_reindex(&target_iri).is_some());
+
+        // Cancel via the registry, then release the gate.
+        let cancelled = registry.cancel_reindex(&target_iri);
+        assert!(cancelled, "registry should find the in-flight reindex");
+        release.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let outcome = join.join().expect("reindex thread");
+        let handles = outcome.expect("reindex trigger returns Ok");
+        // The reindex's terminal status is Cancelled — propagated
+        // through the driver's record onto the registered handle.
+        assert_eq!(handles.len(), 1);
+        assert_eq!(handles[0].status(), TaskStatus::Cancelled);
+        // Registry is empty post-completion.
+        assert!(registry.get_reindex(&target_iri).is_none());
     }
 }
