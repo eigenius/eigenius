@@ -175,7 +175,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads ten ontology layers: core → program → reflection → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
+/// Loads eleven ontology layers: core → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -213,10 +213,25 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // obo layer — shared OBO meta-vocabulary used by the obograph
+    // importer (M9.2). Declares the four synonym Properties
+    // (`has_exact_synonym`, `has_related_synonym`,
+    // `has_broad_synonym`, `has_narrow_synonym`) and the
+    // `inverseOf` RBox axiom so imported GO / ChEBI / etc. layers
+    // can reference them without re-declaring. Depends on
+    // reflection because the entries themselves carry
+    // `is_a: [DeclaredResource]` and `declared_by`.
+    let obo = load_layer(
+        "obo",
+        include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
+        Some(reflection),
+        storage.clone(),
+    )?;
+
     let institution = load_layer(
         "institution",
         include_str!("../../../ontologies/institution/institution-ontology.json"),
-        Some(reflection),
+        Some(obo),
         storage.clone(),
     )?;
 
@@ -491,7 +506,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 10] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 11] {
     [
         (
             "core",
@@ -504,6 +519,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 10] {
         (
             "reflection",
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        ),
+        (
+            "obo",
+            include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
         ),
         (
             "institution",
@@ -695,7 +714,9 @@ mod tests {
         assert!(!runtime.is_root());
         let institution = runtime.parent().unwrap();
         assert!(!institution.is_root());
-        let reflection = institution.parent().unwrap();
+        let obo = institution.parent().unwrap();
+        assert!(!obo.is_root());
+        let reflection = obo.parent().unwrap();
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());

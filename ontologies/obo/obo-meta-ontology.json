@@ -1,0 +1,58 @@
+[
+  {
+    "@id": "urn:obo:has_exact_synonym",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:description": "OBO synonym with scope `exact` — the value is interchangeable with the term's canonical label (e.g. `cell nucleus` for the GO class `nucleus`). Populated by the obograph importer from `meta.synonyms[*]` entries whose `pred` slot is `hasExactSynonym`. Multi-valued: a Resource may carry many exact synonyms. Indexed for text retrieval alongside `core:description` so `~` queries find Resources by any of their declared names.",
+    "urn:eigenius:core:short_name": "has_exact_synonym",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:reflection:declared_by": "urn:obo:obo-foundry"
+  },
+  {
+    "@id": "urn:obo:has_related_synonym",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:description": "OBO synonym with scope `related` — the value is associated with the term but neither a strict exact alias nor narrower/broader (e.g. a colloquial name with imprecise mapping). Populated from `meta.synonyms[*]` entries whose `pred` is `hasRelatedSynonym`.",
+    "urn:eigenius:core:short_name": "has_related_synonym",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:reflection:declared_by": "urn:obo:obo-foundry"
+  },
+  {
+    "@id": "urn:obo:has_broad_synonym",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:description": "OBO synonym with scope `broad` — the value names a category strictly more general than the term. Populated from `meta.synonyms[*]` entries whose `pred` is `hasBroadSynonym`. Useful for retrieval queries that want to surface broader-context matches alongside exact ones.",
+    "urn:eigenius:core:short_name": "has_broad_synonym",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:reflection:declared_by": "urn:obo:obo-foundry"
+  },
+  {
+    "@id": "urn:obo:has_narrow_synonym",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:description": "OBO synonym with scope `narrow` — the value names a more specific subtype or subclass of the term. Populated from `meta.synonyms[*]` entries whose `pred` is `hasNarrowSynonym`.",
+    "urn:eigenius:core:short_name": "has_narrow_synonym",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:reflection:declared_by": "urn:obo:obo-foundry"
+  },
+  {
+    "@id": "urn:obo:inverseOf",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:description": "OBO RBox axiom — asserts that the subject Property is the inverse of the object Property under OWL semantics (`P inverseOf Q` ⇔ `?x P ?y` iff `?y Q ?x`). The obograph importer maps the OBO bare-string `inverseOf` edge predicate to this Property. Eigenius does not currently derive the inverse triples automatically; the slot is recorded for downstream consumers that want to honour the axiom.",
+    "urn:eigenius:core:short_name": "inverseOf",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:reflection:declared_by": "urn:obo:obo-foundry"
+  }
+]
