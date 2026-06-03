@@ -2,7 +2,21 @@
 
 ## Status
 
-Planning. D43's design is complete (see [d43-text-and-vector-retrieval.md](d43-text-and-vector-retrieval.md)). This document sequences the implementation work into milestones with deliverables, prerequisites, and verification. The audit captured in the conversation that produced this plan confirmed that D43's integration points map cleanly onto the existing kernel; no design changes are required.
+In progress. M1–M7 shipped (June 2026); M8 and M9 remain.
+
+| Milestone | Status |
+|---|---|
+| M1 — Foundation | ✅ Shipped |
+| M2 — Storage substrate | ✅ Shipped |
+| M3 — Text retrieval | ✅ Shipped |
+| M4 — Embedder Component | ✅ Shipped |
+| M5 — Vector retrieval (flat) | ✅ Shipped |
+| M6 — HNSW addition | ✅ Shipped |
+| M7 — Similarity operator + hybrid retrieval | ✅ Shipped (post-surface-reset) |
+| M8 — Consolidation + atomic reindex | ⏳ Pending |
+| M9 — End-to-end validation | ⏳ Pending |
+
+M7's surface differs from the original M1 plan: the seven function-shaped primitives + BIND + `TOP K BY` were collapsed into a single `~` operator with a `{ via:, model:, k:, limit: }` hint block, ranked by `TOP N` against the platform-internal RRF fusion. See D43 §3.3 / §3.4 for the surface and the surface-reset note in M7 for the rationale.
 
 ## Scope
 

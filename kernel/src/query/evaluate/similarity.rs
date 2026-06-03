@@ -941,6 +941,210 @@ mod tests {
         assert!(matched.iter().any(|s| s == "urn:ex:d2"));
     }
 
+    /// Build a corpus with **both** a TextIndex and a VectorIndex
+    /// active on the same property, plus three Documents whose vector
+    /// segments are populated via the post-Load sweep. Used by the
+    /// hybrid-fusion integration tests.
+    fn build_hybrid_corpus() -> (Arc<Layer>, EmbedderRegistry) {
+        let ctx = bootstrap().expect("bootstrap should succeed");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let mut b = LayerBuilder::new("hybrid-corpus", Some(head));
+
+        b.add_resource(make_resource(
+            "urn:ex:description",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_description".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:string")),
+                ),
+            ],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:Document",
+            "urn:eigenius:core:Class",
+            vec![(
+                "urn:eigenius:core:short_name",
+                Value::String("Document".into()),
+            )],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:ti_desc",
+            "urn:eigenius:core:TextIndex",
+            vec![
+                (
+                    "urn:eigenius:core:target_property",
+                    Value::ResourceRef(iri("urn:ex:description")),
+                ),
+                (
+                    "urn:eigenius:core:text_analyzer",
+                    Value::String("en-stem-v1".into()),
+                ),
+            ],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:vi_desc",
+            "urn:eigenius:core:VectorIndex",
+            vec![
+                (
+                    "urn:eigenius:core:target_property",
+                    Value::ResourceRef(iri("urn:ex:description")),
+                ),
+                (
+                    "urn:eigenius:core:vec_model",
+                    Value::ResourceRef(iri("urn:eigenius:embed:dummy:v1")),
+                ),
+                ("urn:eigenius:core:vec_dim", Value::Integer(8)),
+                (
+                    "urn:eigenius:core:vec_distance",
+                    Value::ResourceRef(iri("urn:eigenius:core:distances:cosine")),
+                ),
+            ],
+        ))
+        .unwrap();
+
+        b.add_resource(make_resource(
+            "urn:ex:d1",
+            "urn:ex:Document",
+            vec![(
+                "urn:ex:description",
+                Value::String("kernel layer chain consolidation".into()),
+            )],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:d2",
+            "urn:ex:Document",
+            vec![(
+                "urn:ex:description",
+                Value::String("walk the chain and apply shadow filter".into()),
+            )],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:d3",
+            "urn:ex:Document",
+            vec![(
+                "urn:ex:description",
+                Value::String("WAL truncation under concurrent commit".into()),
+            )],
+        ))
+        .unwrap();
+
+        let layer = Arc::new(b.build(storage));
+        let embedders = registry_with_dummy();
+        // D43 §5.5 — post-Load sweep populates the VectorIndex
+        // segments. Without it the vector probe sees an empty
+        // candidate set and the hybrid path degenerates to text-only.
+        crate::query::vector::indexing::sweep_layer_vectors(&layer, &embedders, None)
+            .expect("vector sweep should succeed");
+        (layer, embedders)
+    }
+
+    /// Hybrid retrieval (TextIndex + VectorIndex on the same
+    /// property) fuses both probe contributions via RRF. The query
+    /// "chain" matches d1 and d2 textually; the vector probe under
+    /// the DummyEmbedder ranks all 3 documents (the corpus is below
+    /// the default per-source limit). The fused ranking is
+    /// dominated by the text contribution: d1 and d2 both receive
+    /// text + vector contributions and outrank d3, which receives
+    /// only the vector contribution. TOP 2 returns {d1, d2}.
+    #[test]
+    fn hybrid_text_plus_vector_ranks_text_matches_above_vector_only() {
+        let (layer, embedders) = build_hybrid_corpus();
+        let runtime = crate::query::evaluate::FiberRuntime {
+            embedders: Some(&embedders),
+            ..crate::query::evaluate::FiberRuntime::default()
+        };
+        let rows = execute_with(
+            r#"
+            USING "urn:ex:Document"
+            MATCH Document(?d) { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "chain"
+            RETURN [] { d: ?d }
+            TOP 2
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed");
+        let matched = matched_subject_iris(&rows, "d");
+        assert_eq!(
+            matched.len(),
+            2,
+            "expected TOP 2 to keep the two text-matching docs, got {matched:?}"
+        );
+        assert!(matched.iter().any(|s| s == "urn:ex:d1"));
+        assert!(matched.iter().any(|s| s == "urn:ex:d2"));
+        assert!(!matched.iter().any(|s| s == "urn:ex:d3"));
+    }
+
+    /// `via: hybrid` forces both probes even when defaults would
+    /// route differently. Same expected ranking as the default-
+    /// hybrid case above; the test asserts that the explicit hint
+    /// routes correctly and produces the same fused result.
+    #[test]
+    fn hybrid_explicit_via_hint_matches_default_path() {
+        let (layer, embedders) = build_hybrid_corpus();
+        let runtime = crate::query::evaluate::FiberRuntime {
+            embedders: Some(&embedders),
+            ..crate::query::evaluate::FiberRuntime::default()
+        };
+        let rows = execute_with(
+            r#"
+            USING "urn:ex:Document"
+            MATCH Document(?d) { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "chain" { via: hybrid }
+            RETURN [] { d: ?d }
+            TOP 2
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed");
+        let matched = matched_subject_iris(&rows, "d");
+        assert_eq!(matched.len(), 2);
+        assert!(matched.iter().any(|s| s == "urn:ex:d1"));
+        assert!(matched.iter().any(|s| s == "urn:ex:d2"));
+    }
+
+    /// `via: text` on a property that has both indexes skips the
+    /// vector probe entirely. The result must match the text-only
+    /// candidate set; d3 (which only the vector probe ranks under
+    /// the default-hybrid path) drops out.
+    #[test]
+    fn hybrid_corpus_with_via_text_skips_vector_probe() {
+        let (layer, embedders) = build_hybrid_corpus();
+        let runtime = crate::query::evaluate::FiberRuntime {
+            embedders: Some(&embedders),
+            ..crate::query::evaluate::FiberRuntime::default()
+        };
+        let rows = execute_with(
+            r#"
+            USING "urn:ex:Document"
+            MATCH Document(?d) { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "chain" { via: text }
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            runtime,
+        )
+        .expect("query should succeed");
+        let matched = matched_subject_iris(&rows, "d");
+        assert_eq!(matched.len(), 2);
+        assert!(matched.iter().any(|s| s == "urn:ex:d1"));
+        assert!(matched.iter().any(|s| s == "urn:ex:d2"));
+        assert!(!matched.iter().any(|s| s == "urn:ex:d3"));
+    }
+
     /// With two `~` operators in disjunction, rows that satisfy both
     /// accumulate score and rank higher than rows that satisfy only
     /// one (D43 §3.3 — "rows satisfying both rank higher").
